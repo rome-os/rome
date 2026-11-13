@@ -16,6 +16,12 @@ REPO_ROOT="$(git -C "$ENV_DIR" rev-parse --show-toplevel)"
 
 NAME=chief-of-staff
 STATE_DIR="${ROME_ENV_STATE_DIR:-$HOME/.rome-environments/$NAME}"
+# Secrets come from one 1Password item, read with a service account scoped to
+# the development vault. The secrets file is the fallback when the devbox has no
+# service account token.
+OP_VAULT="${COS_OP_VAULT:-Rome dev}"
+OP_ITEM="${COS_OP_ITEM:-Chief of staff test}"
+OP_TOKEN_FILE="${COS_OP_TOKEN_FILE:-$HOME/.config/op/service-account-token}"
 SECRETS_FILE="${COS_SECRETS_FILE:-$STATE_DIR/secrets.env}"
 RUN_DIR="$STATE_DIR/run"
 STATE_FILE="$RUN_DIR/state.json"
@@ -51,24 +57,59 @@ die() {
   exit 1
 }
 
-# Reads the secrets into the environment, and stops naming the first one
-# missing. The fourth member token is optional: it is the second account of
-# member1, and only `--as member1:2` needs it. Values are never echoed.
+# Runs the 1Password CLI from Nix, signed in as the service account whose
+# token sits in OP_TOKEN_FILE.
+op_cli() {
+  OP_SERVICE_ACCOUNT_TOKEN="${OP_SERVICE_ACCOUNT_TOKEN:-$(cat "$OP_TOKEN_FILE")}" NIXPKGS_ALLOW_UNFREE=1 \
+    nix shell --impure nixpkgs#_1password-cli -c op "$@"
+}
+
+# Exports each field of the 1Password item that names a secret variable. Values
+# pass from op to node to `export` without reaching argv or the terminal.
+load_from_1password() {
+  local name value item_json
+  item_json="$(op_cli item get "$OP_ITEM" --vault "$OP_VAULT" --format json 2>/dev/null)" ||
+    die "cannot read the 1Password item \"$OP_ITEM\" in the vault \"$OP_VAULT\". Check the service account token in $OP_TOKEN_FILE and its access to the vault."
+  while IFS= read -r -d '' name && IFS= read -r -d '' value; do
+    # A variable already set in the shell wins, so a run can override one value.
+    [ -n "${!name:-}" ] || export "$name=$value"
+  done < <(node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      for (const f of JSON.parse(s).fields ?? []) {
+        if (/^(COS_[A-Z0-9_]+|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)$/.test(f.label ?? "") && f.value)
+          process.stdout.write(`${f.label}\0${f.value}\0`);
+      }
+    });' <<<"$item_json")
+}
+
+# Reads the secrets into the environment from the 1Password vault when the
+# devbox holds a service account token, otherwise from the secrets file, and
+# stops naming the first one missing. The fourth member token is optional: it
+# is the second account of member1, and only `--as member1:2` needs it. Values
+# are never echoed.
 load_secrets() {
-  [ -f "$SECRETS_FILE" ] || die "no secrets file at $SECRETS_FILE. README.md lists what it holds."
-  set -a
-  # shellcheck disable=SC1090
-  . "$SECRETS_FILE"
-  set +a
+  local source
+  if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ -s "$OP_TOKEN_FILE" ]; then
+    source="the 1Password item \"$OP_ITEM\" in the vault \"$OP_VAULT\""
+    load_from_1password
+  elif [ -f "$SECRETS_FILE" ]; then
+    source="$SECRETS_FILE"
+    set -a
+    # shellcheck disable=SC1090
+    . "$SECRETS_FILE"
+    set +a
+  else
+    die "no secrets: put a 1Password service account token in $OP_TOKEN_FILE, or write $SECRETS_FILE. README.md lists what either holds."
+  fi
   local name
   for name in COS_DISCORD_SERVER_ID COS_AGENT_BOT_TOKEN COS_MEMBER_1_BOT_TOKEN COS_MEMBER_2_BOT_TOKEN COS_MEMBER_3_BOT_TOKEN; do
-    [ -n "${!name:-}" ] || die "$SECRETS_FILE does not set $name"
+    [ -n "${!name:-}" ] || die "$source does not set $name"
   done
   if [ -n "${ANTHROPIC_API_KEY:-}" ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-    die "$SECRETS_FILE sets both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN. Keep the one model login the run should use."
+    die "$source sets both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN. Keep the one model login the run should use."
   fi
   [ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] ||
-    die "$SECRETS_FILE sets no model login: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
+    die "$source sets no model login: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
 }
 
 # The bot token behind a member name. member1..3 are the three accounts;

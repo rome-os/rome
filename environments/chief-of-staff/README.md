@@ -20,7 +20,9 @@ A Rome container of its own, built from this checkout, connected to a test Disco
 
 ## Setup
 
-`up` needs a secrets file at `~/.rome-environments/chief-of-staff/secrets.env`, outside the repository. It is never committed or printed. It sets:
+The secrets live in the 1Password item `Chief of staff test` in the vault `Rome dev`, one field per variable below, each field named exactly like the variable. Every command reads them from there with a service account scoped to that vault. The devbox holds the service account's token at `~/.config/op/service-account-token`, and runs the 1Password CLI through Nix, so nothing else is installed. `COS_OP_VAULT`, `COS_OP_ITEM` and `COS_OP_TOKEN_FILE` point elsewhere.
+
+Without that token, the commands fall back to a secrets file at `~/.rome-environments/chief-of-staff/secrets.env`, outside the repository, with the same variables. Neither is ever committed or printed. A variable already set in the shell wins over both, so a run can override one value, such as `COS_MODEL`.
 
 ```
 COS_DISCORD_SERVER_ID=      # the test Discord server's id
@@ -34,7 +36,7 @@ CLAUDE_CODE_OAUTH_TOKEN=
 COS_MODEL=                  # optional: the model every tier runs on, claude-haiku-5-5 when unset
 ```
 
-`up` stops and names the first required value missing. That makes five bots in total, and the run works with the first four. The fourth member token is optional: only `cos-env post --as member1:2` needs it, so without it K3's two-account check reports as not checked.
+`up` stops and names the first required value missing, and where it looked. That makes five bots in total, and the run works with the first four. The fourth member token is optional: only `cos-env post --as member1:2` needs it, so without it K3's two-account check reports as not checked.
 
 The bots all join the test server with the permissions the Discord connect guide lists (View Channels, Send Messages, Read Message History), with Message Content Intent turned on in the Developer Portal. Each member bot also needs Change Nickname, for `cos-env rename`. member1's bot reads and clears the chats, so it also needs Manage Messages and Manage Threads. The test server needs these text chats, each named in `team.env`:
 
