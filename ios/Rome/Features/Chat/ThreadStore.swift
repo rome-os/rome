@@ -140,8 +140,7 @@ final class ThreadStore {
     /// and the chat's together, in order, so a card on one and its answer on
     /// the other still meet.
     func rows(chatMessages: [ChatMessage]) -> [TranscriptRow] {
-        let seen = Set(older.map(\.id))
-        let answers = TranscriptBuilder.answers(in: older + chatMessages.filter { !seen.contains($0.id) })
+        let answers = TranscriptBuilder.answers(in: Self.ordered(older + chatMessages))
         return TranscriptBuilder.rows(messages: messages, pending: pendingResends, answers: answers, options: .init())
     }
 }
