@@ -107,4 +107,43 @@ private func chatMessage(_ id: String, role: String, turn: String?, text: String
     @Test func theFallbackPollIsTheWebs() {
         #expect(TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: FakeBackend()).runningPollInterval == .seconds(30))
     }
+
+    /// A catch-up read (a return, a reconnect) never holds: what is there shows.
+    @Test func aCatchUpReadHoldsNothing() async {
+        let backend = FakeBackend()
+        let store = store(backend)
+        await store.reload()
+        writing(backend, .simulated, false)
+        backend.stored = [chatMessage("c1", role: "assistant", turn: "t1", at: 5)]
+        await store.reload()
+        #expect(store.held.isEmpty && store.rows.contains { $0.id == "c1:0" } && !dots(store))
+        store.stop()
+    }
+
+    /// Leaving the chat drops what waits and the turn's writing state, so a
+    /// return replays no dots.
+    @Test func leavingClearsTheDots() async {
+        let backend = FakeBackend()
+        let store = store(backend)
+        await store.reload()
+        writing(backend, .simulated, false)
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageInsert(chatMessage("d1", role: "assistant", turn: "t1", at: 5)))
+        #expect(dots(store))
+        store.stop()
+        #expect(!dots(store) && store.held.isEmpty && store.writing == nil)
+    }
+
+    /// A quiet turn's first message never waits; its later ones do.
+    @Test func aQuietTurnsFirstMessageDoesNotWait() async {
+        let backend = FakeBackend()
+        backend.turns = [ActiveTurn(turnId: "q", status: "running", quiet: true)]
+        let store = store(backend)
+        await store.reload()
+        writing(backend, turn: "q", .simulated, false)
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageInsert(chatMessage("q1", role: "assistant", turn: "q", at: 5)))
+        #expect(store.held.isEmpty && store.rows.contains { $0.id == "q1:0" })
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageInsert(chatMessage("q2", role: "assistant", turn: "q", at: 6)))
+        #expect(store.held.map(\.id) == ["q2"])
+        store.stop()
+    }
 }

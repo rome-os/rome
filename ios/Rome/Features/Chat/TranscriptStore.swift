@@ -150,15 +150,18 @@ final class TranscriptStore {
         return .milliseconds(min(1000, max(500, length * 5)))
     }
 
-    /// New messages of the `simulated` turn that arrived after every message
-    /// held so far wait behind the dots, one after the other.
-    private func hold(_ arrived: [ChatMessage], after newest: Date?) {
-        guard kind == .concierge, loaded, let writing, writing.mode == .simulated else { return }
-        for message in arrived where !message.isUser && !message.isTrace && message.turnId == writing.turnId {
-            if let newest, message.date < newest { continue }
-            guard TranscriptBuilder.isReply(message, parts: message.parts) else { continue }
-            held.append((message.id, Self.simulatedWait(message)))
-        }
+    /// A new message of the `simulated` turn, arriving live after every
+    /// message held, waits behind the dots, after any already waiting. A
+    /// quiet turn's first message never waits: it shows no dots until it
+    /// has said something.
+    private func hold(_ message: ChatMessage, after newest: Date?) {
+        guard kind == .concierge, loaded, let writing, writing.mode == .simulated,
+              !message.isUser, !message.isTrace, message.turnId == writing.turnId else { return }
+        if let newest, message.date < newest { return }
+        guard TranscriptBuilder.isReply(message, parts: message.parts) else { return }
+        let quiet = activeTurns.contains { ($0.turnId == writing.turnId || $0.agentTurnId == writing.turnId) && $0.quiet == true }
+        if quiet, !messages.contains(where: { $0.turnId == writing.turnId && !$0.isUser && !$0.isTrace }) { return }
+        held.append((message.id, Self.simulatedWait(message)))
         releaseHeld()
     }
 
@@ -226,9 +229,16 @@ final class TranscriptStore {
         runningPoll = nil
         resyncWork?.cancel()
         resyncWork = nil
+        // Off the screen, nothing waits and no turn is known to write: the
+        // next start reads where things stand, and replays no dots.
+        holdWork?.cancel()
+        holdWork = nil
+        held = []
+        writing = nil
     }
 
     func reload() async {
+        await readResends()
         do {
             let page = try await backend.messages(sessionId: sessionId, before: nil, limit: Self.pageSize)
             // A newest page that shares nothing with what is held leaves a gap
@@ -340,9 +350,6 @@ final class TranscriptStore {
     /// arrived in; the order never changes when the same rows arrive again.
     private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        let newest = messages.map(\.date).max()
-        let arrived = incoming.filter { byID[$0.id] == nil }
-        defer { hold(arrived, after: newest) }
         for var message in incoming {
             if message.knowsThreads {
                 instanceKnowsThreads = true
@@ -403,6 +410,10 @@ final class TranscriptStore {
             let isNew = held == nil
             // A live insert leaves the mark out: keep the one already known.
             if message.statusReaction == nil { message.statusReaction = held?.statusReaction }
+            let newest = messages.map(\.date).max()
+            // Only a message that arrives live may wait behind the dots: never
+            // history, a catch-up read on return, or an older page.
+            if isNew { hold(message, after: newest) }
             merge([message])
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
         case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
@@ -679,7 +690,7 @@ final class TranscriptStore {
     /// The stored messages drawn: a message sent again gives way to its new
     /// copy, both while the copy is on its way and once it is stored.
     var visibleMessages: [ChatMessage] {
-        let hidden = TranscriptBuilder.resent(in: messages).union(replaced.values).union(held.map(\.id))
+        let hidden = resentOriginals.union(held.map(\.id))
         return hidden.isEmpty ? messages : messages.filter { !hidden.contains($0.id) }
     }
 
@@ -807,20 +818,22 @@ final class TranscriptStore {
     /// Sends the guardian's text with any photos (JPEG). Photos alone are a
     /// message too. `fromComposer`: the composer's content, cleared as it goes.
     func send(_ text: String, images: [ComposerImage] = [], fromComposer: Bool = false, thread: ThreadTarget? = nil) -> Bool {
-        send(text, images: images, files: [], fromComposer: fromComposer, thread: thread) != nil
+        send(text, images: images, files: [], fromComposer: fromComposer, keepsDraft: true, thread: thread) != nil
     }
 
     /// The send's `inputId`, or nil when there is nothing to send. `files`:
-    /// anything other than photos, which only a resend carries.
-    private func send(_ text: String, images: [ComposerImage], files: [OutgoingFile], fromComposer: Bool = false, thread: ThreadTarget?) -> String? {
+    /// anything other than photos, which only a resend carries. A resend
+    /// keeps no draft: its original stays on the instance, and shows again
+    /// with its Retry if the copy is lost.
+    private func send(_ text: String, images: [ComposerImage], files: [OutgoingFile], fromComposer: Bool = false, keepsDraft: Bool, thread: ThreadTarget?) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty || !files.isEmpty else { return nil }
         let inputId = UUID().uuidString.lowercased()
-        pending.append(PendingSend(id: inputId, text: trimmed, images: images, files: files, createdAt: .now, state: .sending, thread: thread))
+        pending.append(PendingSend(id: inputId, text: trimmed, images: images, files: files, createdAt: .now, state: .sending, thread: thread, keepsDraft: keepsDraft))
         if kind == .concierge {
             markRunning()
         }
-        deliver(inputId: inputId, text: trimmed, images: images, files: files, fromComposer: fromComposer, thread: thread)
+        deliver(inputId: inputId, text: trimmed, images: images, files: files, fromComposer: fromComposer, keepsDraft: keepsDraft, thread: thread)
         return inputId
     }
 
@@ -828,17 +841,41 @@ final class TranscriptStore {
     /// stored message it was sent in place of shows again.
     func removePending(_ id: String) {
         pending.removeAll { $0.id == id }
-        replaced[id] = nil
+        if resends.values.contains(id) {
+            resends = resends.filter { $0.value != id }
+            if let drafts { drafts.store.saveResends(chat: drafts.chat, resends) }
+        }
         if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: id) }
     }
 
-    /// Stored messages a send the app still holds took the place of (a retry
-    /// of a message the instance did not take), by that send's id. Once the
-    /// new copy is stored, `TranscriptBuilder.resent` hides the old one, so
-    /// it stays hidden after a relaunch.
-    private(set) var replaced: [String: String] = [:]
+    /// Resends: a stored message the instance did not take, by its id, and
+    /// the `inputId` of the copy sent in its place. Recorded when the copy
+    /// goes and kept with the chat's drafts, so a relaunch knows the pair.
+    private(set) var resends: [String: String] = [:]
+    @ObservationIgnored private var resendsRead = false
     /// Stored messages whose files are being read back for a resend.
     private var resending: Set<String> = []
+
+    /// The originals a resend took the place of: hidden only while their
+    /// copy is still held or stored, so a copy that failed for good and was
+    /// dropped (here, or by a relaunch) brings its original back.
+    var resentOriginals: Set<String> {
+        guard !resends.isEmpty else { return [] }
+        let present = Set(pending.map(\.id)).union(messages.map(\.id))
+        return Set(resends.filter { present.contains($0.value) }.keys)
+    }
+
+    /// Reads the chat's resends once, before the first rows are drawn.
+    private func readResends() async {
+        guard !resendsRead else { return }
+        resendsRead = true
+        if let drafts { resends.merge(await drafts.store.resends(chat: drafts.chat)) { mine, _ in mine } }
+    }
+
+    private func recordResend(of original: String, as inputId: String) {
+        resends[original] = inputId
+        if let drafts { drafts.store.saveResends(chat: drafts.chat, resends) }
+    }
 
     /// Whether the row is a send the app still holds, which only it can drop.
     func isPending(_ rowId: String) -> Bool { pending.contains { $0.id == rowId } }
@@ -849,7 +886,7 @@ final class TranscriptStore {
     func retry(_ id: String) {
         if let index = pending.firstIndex(where: { $0.id == id }) {
             pending[index].state = .sending
-            deliver(inputId: id, text: pending[index].text, images: pending[index].images, files: pending[index].files, thread: pending[index].thread)
+            deliver(inputId: id, text: pending[index].text, images: pending[index].images, files: pending[index].files, keepsDraft: pending[index].keepsDraft, thread: pending[index].thread)
             return
         }
         // The instance keeps what it stored under its own `inputId` and drops a
@@ -862,7 +899,7 @@ final class TranscriptStore {
         guard !text.isEmpty || !uploads.isEmpty else { return }
         let target = Self.resendTarget(of: stored)
         guard !uploads.isEmpty else {
-            if let inputId = send(text, images: [], files: [], thread: target) { replaced[inputId] = messageId }
+            if let inputId = send(text, images: [], files: [], keepsDraft: false, thread: target) { recordResend(of: messageId, as: inputId) }
             return
         }
         // The instance takes files only as bytes, so its stored copies are
@@ -874,7 +911,7 @@ final class TranscriptStore {
                 say(String(localized: "Couldn't send. Try again"))
                 return
             }
-            if let inputId = send(text, images: images, files: files, thread: target) { replaced[inputId] = messageId }
+            if let inputId = send(text, images: images, files: files, keepsDraft: false, thread: target) { recordResend(of: messageId, as: inputId) }
         }
     }
 
@@ -914,10 +951,10 @@ final class TranscriptStore {
         return (images, files)
     }
 
-    private func deliver(inputId: String, text: String, images: [ComposerImage], files: [OutgoingFile] = [], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
+    private func deliver(inputId: String, text: String, images: [ComposerImage], files: [OutgoingFile] = [], fromComposer: Bool = false, keepsDraft: Bool = true, thread: ThreadTarget? = nil) {
         // Kept as the chat's draft until the server takes it.
         // Kept with the thread it was for, so a lost send comes back there.
-        if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
+        if keepsDraft, let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
         Task {
             do {
                 let turn = try await backend.send(

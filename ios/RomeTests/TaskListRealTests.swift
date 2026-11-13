@@ -46,7 +46,7 @@ private let realList = #"""
         #expect(store.endedItems.count == 39 && store.endedMore == 81)
         // The next page goes by the cursor the last one gave; a failed read says so.
         store.showMoreEnded()
-        for _ in 0..<100 where store.failures == 0 { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<100 where store.failure == nil { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(backend.endedReads == ["1794530852037_id-85", "c2"] && store.failure == "Failed to load tasks")
         // The list read again keeps the older pages.
         await store.load()
@@ -130,6 +130,51 @@ private let realList = #"""
         #expect(!store.loadFailed && !store.loaded)
         for _ in 0..<100 where store.groups.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(store.groups.count == 3 && !store.loadFailed)
+        store.stop()
+    }
+
+    /// A first Ended page that moves drops the older pages read before, and
+    /// a page still on its way for the old one is not added.
+    @MainActor @Test func aMovedFirstPageDropsOlderPages() async throws {
+        let backend = FakeBackend()
+        var list = try JSONDecoder().decode(TaskListResponse.self, from: Data(realList.utf8))
+        backend.taskLists["concierge"] = list
+        let older = TaskListResponse(chatId: "concierge", groups: [TaskListGroup(key: .ended, items: Array(list.groups[2].items.suffix(5)).map { item in
+            guard case .task(var row) = item else { return item }
+            row.task = ConciergeTask(id: "o-\(row.task.id)", title: "Older", state: .done, createdAt: 1, updatedAt: 1, status: "ended")
+            return .task(row)
+        }, total: 120, nextCursor: "c2")])
+        backend.endedPages["1794530852037_id-85"] = older
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        await store.load()
+        store.showMoreEnded()
+        for _ in 0..<100 where store.endedItems.count == 20 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.endedItems.count == 25)
+        // A task ended: the first page moves by one.
+        var ended = list.groups[2]
+        ended.items.insert(.task(.init(task: ConciergeTask(id: "new", title: "New", state: .done, createdAt: 2, updatedAt: 2, status: "ended"), schedule: nil, check: nil, cardMessageId: nil)), at: 0)
+        ended.items.removeLast()
+        ended.total = 121
+        list.groups[2] = ended
+        backend.taskLists["concierge"] = list
+        await store.load()
+        #expect(store.endedItems.count == 20 && store.endedItems.first?.id == "task:new" && store.endedMore == 101)
+    }
+
+    /// A failed press's notice clears itself, and opening the tab again
+    /// shows no old notice.
+    @MainActor @Test func aNoticeClearsItselfAndNeverReplays() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try JSONDecoder().decode(TaskListResponse.self, from: Data(realList.utf8))
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        store.noticeSpan = .milliseconds(50)
+        await store.load()
+        store.fail("Failed to stop the task")
+        #expect(store.failure == "Failed to stop the task")
+        for _ in 0..<50 where store.failure != nil { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.failure == nil)
+        store.open()
+        #expect(store.failure == nil && !store.loadFailed)
         store.stop()
     }
 }

@@ -9,12 +9,11 @@ enum WidgetApps {
         case gone
     }
 
-    /// The app from the list held, else from a fresh read of the list (an
-    /// app built since). A read that fails leaves the widget's own copy to
-    /// name it: the app may well be there, and its page says if not.
+    /// The app as a fresh read of the list has it: one deleted since the
+    /// list was kept is gone, one built since is there. A read that fails
+    /// leaves the list held, then the widget's own copy, to name it.
     @MainActor
     static func resolve(_ appId: String, in workspace: Workspace) async -> Resolution {
-        if let app = workspace.apps.first(where: { $0.id == appId }) { return .found(app) }
         let fetched: [InstalledApp]?
         do {
             let all = AppLinks.mine(try await workspace.backend.apps())
@@ -23,12 +22,14 @@ enum WidgetApps {
         } catch {
             fetched = nil
         }
-        return decide(appId, fetched: fetched, shelfName: AppShelfStore.shared?.read()?.apps.first { $0.id == appId }?.name)
+        return decide(appId, fetched: fetched, held: workspace.apps, shelfName: AppShelfStore.shared?.read()?.apps.first { $0.id == appId }?.name)
     }
 
     /// `fetched`: the list just read, or nil when it could not be read.
-    static func decide(_ appId: String, fetched: [InstalledApp]?, shelfName: String?) -> Resolution {
-        guard let fetched else { return .found(InstalledApp(id: appId, displayName: shelfName)) }
+    static func decide(_ appId: String, fetched: [InstalledApp]?, held: [InstalledApp] = [], shelfName: String?) -> Resolution {
+        guard let fetched else {
+            return .found(held.first { $0.id == appId } ?? InstalledApp(id: appId, displayName: shelfName))
+        }
         return fetched.first { $0.id == appId }.map(Resolution.found) ?? .gone
     }
 }
@@ -39,9 +40,28 @@ enum Presentations {
     /// Dismisses every sheet, cover and system sheet over the window, the
     /// screens' own included, and returns once they are gone.
     static func dismissAll() async {
-        guard let root = rootController(), root.presentedViewController != nil else { return }
+        guard let root = rootController(), let top = root.presentedViewController else { return }
+        // UIKit may skip a dismissal while another transition runs, and then
+        // never calls back: wait for it, but never longer than a moment.
+        if top.isBeingPresented || top.isBeingDismissed { try? await Task.sleep(for: .milliseconds(400)) }
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            root.dismiss(animated: true) { done.resume() }
+            let once = Once(done)
+            root.dismiss(animated: true) { once.resume() }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                once.resume()
+            }
+        }
+    }
+
+    /// Resumes its continuation the first time only.
+    @MainActor
+    private final class Once {
+        private var done: CheckedContinuation<Void, Never>?
+        init(_ done: CheckedContinuation<Void, Never>) { self.done = done }
+        func resume() {
+            done?.resume()
+            done = nil
         }
     }
 

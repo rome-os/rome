@@ -18,4 +18,11 @@ import Testing
         #expect(WidgetApps.decide("habits", fetched: nil, shelfName: "Habits") == .found(InstalledApp(id: "habits", displayName: "Habits")))
         #expect(WidgetApps.decide("habits", fetched: nil, shelfName: nil) == .found(InstalledApp(id: "habits", displayName: nil)))
     }
+
+    /// A fresh read decides over the list held: an app deleted since is gone.
+    /// With no read, the held list names it before the widget's copy.
+    @Test func aFreshReadWinsOverTheHeldList() {
+        #expect(WidgetApps.decide("habits", fetched: [], held: [habits], shelfName: "Habits") == .gone)
+        #expect(WidgetApps.decide("habits", fetched: nil, held: [habits], shelfName: "Old name") == .found(habits))
+    }
 }

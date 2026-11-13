@@ -128,7 +128,7 @@ private let listJSON = #"""
         let backend = FakeBackend()
         backend.taskLists["concierge"] = try decoded()
         let store = TaskListStore(chatId: "concierge", backend: backend)
-        store.start()
+        store.open()
         for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(store.groups.count == 4 && backend.taskListReads == 1)
         backend.bus.emit(LiveTopic.chatTasks("concierge"), .taskListChanged(chatId: "concierge"))
@@ -146,7 +146,7 @@ private let listJSON = #"""
         await store.load()
         store.stopTask("t1")
         #expect(store.stopping == ["t1"])
-        for _ in 0..<50 where store.failures == 0 { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<50 where store.failure == nil { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(store.stopping.isEmpty && store.failure == "Failed to stop the task" && backend.stoppedFromList == ["t1"])
     }
 

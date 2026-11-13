@@ -41,8 +41,9 @@ struct AgentPage: View {
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
     /// The stacking game, opened from the big mascot over this page.
     @State private var game: StackGameLaunch?
-    /// The chat's task list, listened to while the page is open.
-    @State private var taskList: TaskListStore?
+    /// The chat's task list, kept by the workspace: in the first frame, so
+    /// the tab never shows "No tasks yet" while it is looked up.
+    private var taskList: TaskListStore? { workspace.taskList(forChat: route.tasksChatId) }
 
     static let discSize: CGFloat = 96
 
@@ -69,9 +70,7 @@ struct AgentPage: View {
         }
         .task(id: route.tasksChatId) {
             // The list as it was last read shows at once, and is read again.
-            guard let store = workspace.taskList(forChat: route.tasksChatId) else { return }
-            taskList = store
-            store.open()
+            taskList?.open()
         }
         .onDisappear { taskList?.stop() }
         .readableColumn()

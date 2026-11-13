@@ -25,6 +25,8 @@ struct PendingSend: Identifiable, Hashable, Sendable {
     var state: State
     /// Sent from a chat thread: a retry goes to the same thread.
     var thread: ThreadTarget? = nil
+    /// Kept as a draft until the server takes it; a resend keeps none.
+    var keepsDraft = true
 }
 
 /// A photo in the guardian's bubble: the one being sent, or a stored upload.
@@ -305,7 +307,7 @@ enum TranscriptBuilder {
         for send in pending.sorted(by: { $0.createdAt < $1.createdAt }) where !storedIDs.contains(send.id) {
             entries.append(Entry(
                 id: send.id, date: send.createdAt, guardian: true,
-                rows: [.userText(id: send.id, text: send.text, images: send.images.map(UserImage.local), pending: send.state)],
+                rows: [.userText(id: send.id, text: send.text, images: send.images.map(UserImage.local) + Self.fileTiles(send), pending: send.state)],
                 bubbleIndexes: []
             ))
         }
@@ -475,28 +477,11 @@ enum TranscriptBuilder {
         message.isUser && message.sender?.kind == "automated"
     }
 
-    /// The guardian's stored messages the instance did not take (not
-    /// delivered or unconfirmed) that a later message of theirs repeats: the
-    /// same text, file count and thread. A retry sends a new copy, and the old
-    /// one gives way to it, so one message never shows twice. `messages` are
-    /// oldest first.
-    static func resent(in messages: [ChatMessage]) -> Set<String> {
-        struct Key: Hashable { let text: String; let files: Int; let thread: String? }
-        func key(_ message: ChatMessage) -> Key? {
-            guard message.isUser, let raw = message.parts.compactMap(\.textContent).first else { return nil }
-            let (text, uploads) = UploadLines.split(raw)
-            return Key(text: text.trimmingCharacters(in: .whitespacesAndNewlines), files: uploads.count, thread: message.chatThreadId)
+    /// A resend's documents, drawn as the tiles a stored message's files are.
+    static func fileTiles(_ send: PendingSend) -> [UserImage] {
+        send.files.enumerated().map { index, file in
+            .stored(UploadLines.Upload(name: file.name, linkPath: "pending:\(send.id):\(index)"))
         }
-        var later = Set<Key>()
-        var hidden = Set<String>()
-        for message in messages.reversed() {
-            guard let key = key(message) else { continue }
-            if PendingSend.State.stored(inputState: message.inputState) != nil, later.contains(key) {
-                hidden.insert(message.id)
-            }
-            later.insert(key)
-        }
-        return hidden
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

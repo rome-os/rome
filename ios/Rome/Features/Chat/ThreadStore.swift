@@ -41,7 +41,7 @@ final class ThreadStore {
         let extra = (older + [anchorCopy]).filter { !heldIDs.contains($0.id) }
         let all = Self.ordered(held + extra)
         // A message sent again shows once, as in the chat.
-        let hidden = TranscriptBuilder.resent(in: all).union(chat.map { Array($0.replaced.values) } ?? [])
+        let hidden = chat?.resentOriginals ?? []
         return hidden.isEmpty ? all : all.filter { !hidden.contains($0.id) }
     }
 

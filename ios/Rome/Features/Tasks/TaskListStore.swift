@@ -18,9 +18,12 @@ final class TaskListStore {
     private(set) var loadFailed = false
     /// Tasks whose Stop was pressed and has not shown its effect yet.
     private(set) var stopping: Set<String> = []
-    /// Goes up each time a press fails; the page shows a brief notice.
-    private(set) var failures = 0
+    /// A brief notice after a press or a page read failed; the store clears
+    /// it after a few seconds, so it never shows again when the tab reappears.
     private(set) var failure: String?
+    @ObservationIgnored private var failureClear: Task<Void, Never>?
+    /// The span a notice stays up.
+    @ObservationIgnored var noticeSpan: Duration = .seconds(3)
 
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private var tokens: [UUID] = []
@@ -35,6 +38,9 @@ final class TaskListStore {
     private(set) var olderEnded: [TaskListItem] = []
     /// Where the next older page starts once one was read; nil before any.
     @ObservationIgnored private var olderCursor: String??
+    /// Goes up when the first Ended page changes: older pages read before
+    /// no longer follow it, and one still on its way is dropped.
+    @ObservationIgnored private var endedGeneration = 0
     private(set) var loadingMore = false
 
     /// The Ended group as shown: its first page, then the older pages read
@@ -63,10 +69,12 @@ final class TaskListStore {
     func showMoreEnded() {
         guard let cursor = endedCursor, !loadingMore else { return }
         loadingMore = true
+        let generation = endedGeneration
         Task {
             defer { loadingMore = false }
             do {
                 let page = try await backend.endedTasks(chatId: chatId, endedBefore: cursor)
+                guard generation == endedGeneration else { return }
                 let ended = page.groups.first { $0.key == .ended }
                 olderEnded += ended?.items ?? []
                 olderCursor = .some(ended?.nextCursor)
@@ -96,13 +104,12 @@ final class TaskListStore {
         Task { await load() }
     }
 
-    /// Listens for changes, and reads the list the first time.
+    /// Listens for changes; `open` reads.
     func start() {
         guard tokens.isEmpty else { return }
         tokens.append(backend.events.subscribe(LiveTopic.chatTasks(chatId)) { [weak self] event in
             self?.handle(event)
         })
-        if !loaded { Task { await load() } }
     }
 
     func stop() {
@@ -119,7 +126,17 @@ final class TaskListStore {
             // A newer read already put its list up: this older one gives way.
             guard mine > applied else { return }
             applied = mine
-            groups = TaskListGroup.ordered(list.groups)
+            let newGroups = TaskListGroup.ordered(list.groups)
+            // A first Ended page that moved (a task ended, rows shifted)
+            // leaves the older pages read before with gaps or repeats: they go,
+            // and "Show more" reads on from the new first page.
+            let firstEnded = { (groups: [TaskListGroup]) in groups.first { $0.key == .ended }.map { $0.items.map(\.id) } ?? [] }
+            if firstEnded(newGroups) != firstEnded(groups) {
+                endedGeneration += 1
+                olderEnded = []
+                olderCursor = nil
+            }
+            groups = newGroups
             loadFailed = false
             loaded = true
             // A stop shows its effect once the task reads as ended.
@@ -173,7 +190,12 @@ final class TaskListStore {
     /// A brief notice on the list.
     func fail(_ text: String) {
         failure = text
-        failures += 1
+        failureClear?.cancel()
+        failureClear = Task { [weak self, span = noticeSpan] in
+            try? await Task.sleep(for: span)
+            guard !Task.isCancelled else { return }
+            self?.failure = nil
+        }
     }
 }
 

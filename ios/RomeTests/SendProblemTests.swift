@@ -53,21 +53,69 @@ import UIKit
         #expect(TranscriptStore.resendTarget(of: stored("b", inputState: "failed")) == nil)
     }
 
-    /// A stored copy that a later message repeats stays hidden on any load,
-    /// so a relaunch does not bring it back beside the delivered copy.
-    @Test func aResentMessageStaysHiddenAfterARelaunch() async {
+    /// A resend hides only its own original, by the pair recorded when it
+    /// went, and a relaunch keeps the pair. A later message that only repeats
+    /// the words, or an independent photo, hides nothing.
+    @Test func aResentMessageStaysHiddenAfterARelaunch() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "rome-resend-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let drafts = DraftStore(root: root, instance: "t")
         let backend = FakeBackend()
+        backend.sendSucceeds = true
         backend.stored = [
             stored("in-4", inputState: "failed"),
-            stored("in-5", inputState: nil, seconds: 5),
-            // The same words in another thread are another message.
-            stored("in-6", inputState: "unknown", thread: "root-2", seconds: 6),
+            // Never resent: the same words later, and an unrelated failure.
+            stored("in-5", inputState: "failed", text: "ok", seconds: 1),
+            stored("in-6", inputState: nil, text: "ok", seconds: 2),
         ]
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        store.drafts = ChatDrafts(store: drafts, chat: conciergeChatID)
         await store.reload()
-        let ids = store.rows.compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } }
-        #expect(ids == ["in-5:0", "in-6:0"])
-        #expect(TranscriptBuilder.resent(in: backend.stored) == ["in-4"])
+        store.retry("in-4:0")
+        for _ in 0..<100 where backend.sentInputIds.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        let copy = try #require(backend.sentInputIds.first)
+        #expect(store.resends == ["in-4": copy])
+
+        // A relaunch: a new store reads the pair, and the copy is stored.
+        await drafts.flush()
+        backend.stored.append(stored(copy, inputState: nil, seconds: 10))
+        let fresh = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        fresh.drafts = ChatDrafts(store: drafts, chat: conciergeChatID)
+        await fresh.reload()
+        let ids = fresh.rows.compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } }
+        #expect(ids == ["in-5:0", "in-6:0", "\(copy):0"])
+    }
+
+    /// A copy that never reached the instance and is gone (a relaunch drops
+    /// it) brings its original back, Retry and all.
+    @Test func aLostCopyBringsTheOriginalBack() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "rome-resend-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let drafts = DraftStore(root: root, instance: "t")
+        drafts.saveResends(chat: conciergeChatID, ["in-9": "lost-copy"])
+        await drafts.flush()
+        let backend = FakeBackend()
+        backend.stored = [stored("in-9", inputState: "failed")]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        store.drafts = ChatDrafts(store: drafts, chat: conciergeChatID)
+        await store.reload()
+        #expect(store.rows.contains { $0.id == "in-9:0" })
+    }
+
+    /// A resend of a document keeps it: sent as a file, and drawn as a tile
+    /// in the pending bubble, not an empty one.
+    @Test func aDocumentResendShowsItsFile() async {
+        let backend = FakeBackend()
+        let paper = "fedcba9876543210fedcba9876543210.pdf"
+        backend.apiFiles = ["/assets/\(paper)": Data("%PDF".utf8)]
+        backend.stored = [stored("in-10", inputState: "failed", text: "- File 1: [plan.pdf](</api/assets/\(paper)>)")]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        store.retry("in-10:0")
+        for _ in 0..<200 where store.pending.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        let tiles = store.rows.compactMap { row -> [UserImage]? in if case .userText(let id, _, let images, _) = row, id == store.pending.first?.id { return images } else { return nil } }.first
+        #expect(tiles?.count == 1)
+        if case .stored(let upload)? = tiles?.first { #expect(upload.name == "plan.pdf" && !upload.isImage) } else { Issue.record("no tile") }
     }
 
     /// A resend carries the message's files as files, read back from the
@@ -121,7 +169,7 @@ import UIKit
         // One bubble for the message: the stored one is not drawn beside the new one.
         let texts = store.rows.compactMap { row -> String? in if case .userText(_, let text, _, _) = row { return text } else { return nil } }
         #expect(texts == ["hello"])
-        #expect(Array(store.replaced.values) == ["in-1"])
+        #expect(Array(store.resends.keys) == ["in-1"])
     }
 
     /// A send the app still holds keeps its own id when retried: the instance's dedupe is right there.

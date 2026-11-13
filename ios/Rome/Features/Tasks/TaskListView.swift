@@ -13,7 +13,6 @@ struct TaskListView: View {
     let onOpenChat: (ConciergeTask.LinkedChat) -> Void
 
     @State private var endedOpen = false
-    @State private var notice: String?
 
     var body: some View {
         // Times count down by the minute.
@@ -21,21 +20,16 @@ struct TaskListView: View {
             content(now: context.date)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The store owns the notice and clears it: nothing replays it when
+        // the tab appears again.
         .overlay(alignment: .top) {
-            if let notice {
+            if let notice = store?.failure {
                 TopBanner(kind: .error, text: notice)
                     .padding(.horizontal, 16)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: notice)
-        .task(id: store?.failures) {
-            guard let store, store.failures > 0 else { return }
-            notice = store.failure
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            notice = nil
-        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store?.failure)
     }
 
     @ViewBuilder
