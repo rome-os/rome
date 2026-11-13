@@ -254,17 +254,28 @@ enum StatusMark: String, Hashable, Sendable {
     }
 }
 
-/// The mark's capsule, on the inner bottom corner of a bubble.
+/// The mark's round badge, a nod to a tapback on a bubble's corner: the emoji
+/// on a quiet surface, and one small dot trailing off down and out, as a
+/// thought bubble does. It is drawn about its own center, so the bubble's
+/// overlay sets where that center sits.
 struct StatusMarkBadge: View {
+    static let size: CGFloat = 30
     let mark: StatusMark
 
     var body: some View {
         Text(mark.emoji)
-            .romeFont(12)
-            .padding(.horizontal, 6)
-            .frame(height: 22)
-            .background(Palette.elevated, in: Capsule())
-            .overlay(Capsule().strokeBorder(Palette.hair, lineWidth: 0.5))
+            .romeFont(16)
+            .frame(width: Self.size, height: Self.size)
+            .background(Palette.elevated, in: Circle())
+            .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+            .overlay {
+                Circle()
+                    .fill(Palette.elevated)
+                    .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                    .frame(width: 6, height: 6)
+                    .offset(x: -Self.size * 0.48, y: Self.size * 0.48)
+            }
             .accessibilityElement()
             .accessibilityLabel(mark.label)
     }

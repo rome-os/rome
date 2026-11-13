@@ -80,9 +80,6 @@ struct UserBubble: View {
     var menu = BubbleMenu()
     /// Rome's mark on the message: being worked on, or failed.
     var mark: StatusMark? = nil
-    /// The bubble keeps room for a mark whether or not it has one, so a mark
-    /// coming or going never moves the rows around it.
-    var reservesMark = false
     /// What the message replies to, quoted at the top of the bubble.
     var quote: MessagePart.ReplyQuote? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
@@ -128,10 +125,13 @@ struct UserBubble: View {
                             .bubbleMenu(text: text, menu: menu)
                     }
                 }
-                // The mark hangs on the inner bottom corner of the bubble, or of the photos.
-                .overlay(alignment: .bottomLeading) {
+                // The mark sits on the top leading corner of the bubble, or of the
+                // photos, over the corner and clear of the first line's start.
+                .overlay(alignment: .topLeading) {
                     if let mark {
-                        StatusMarkBadge(mark: mark).offset(x: -6, y: 11)
+                        StatusMarkBadge(mark: mark)
+                            .offset(x: -StatusMarkBadge.size / 2, y: -StatusMarkBadge.size / 2)
+                            .transition(.opacity)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
@@ -163,8 +163,6 @@ struct UserBubble: View {
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 56)
-        // Room for the mark that hangs below the bubble.
-        .padding(.bottom, reservesMark || mark != nil ? 12 : 0)
         .animation(.easeOut(duration: 0.2), value: pending)
         .animation(.easeOut(duration: 0.15), value: mark)
     }
