@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# The only command the verifier calls. Its contract is in README.md, under
+# "cos-env". Keep it stable: a change here is a change to every verifier run.
+set -euo pipefail
+
+# shellcheck source=env.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env.sh"
+
+usage() {
+  die "usage:
+  cos-env post --as <member> --chat <name> [--thread <id>] [--mention-agent] <text>
+  cos-env dm --as <member> <text>
+  cos-env read --chat <name> [--thread <id>] [--since <message id>]
+  cos-env rename --as <member> <display name>
+  cos-env rome stop|start|restart
+  cos-env reset
+  cos-env version"
+}
+
+as="" chat="" thread="" since="" mention=0
+args=()
+command="${1:-}"
+[ -n "$command" ] || usage
+shift
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --as) as="${2:?--as needs a member}" && shift 2 ;;
+    --chat) chat="${2:?--chat needs a chat name}" && shift 2 ;;
+    --thread) thread="${2:?--thread needs a thread id}" && shift 2 ;;
+    --since) since="${2:?--since needs a message id}" && shift 2 ;;
+    --mention-agent) mention=1 && shift ;;
+    --) shift && args+=("$@") && break ;;
+    *) args+=("$1") && shift ;;
+  esac
+done
+
+# Runs a Discord command as a member's bot.
+as_member() {
+  [ -n "$as" ] || usage
+  local var
+  var="$(member_token_var "$as")"
+  COS_TOKEN="${!var}" discord "$@"
+}
+
+case "$command" in
+  post)
+    [ -n "$chat" ] && [ ${#args[@]} -gt 0 ] || usage
+    load_secrets
+    as_member post "$chat" "$thread" "$mention" "${args[*]}"
+    ;;
+  dm)
+    [ ${#args[@]} -gt 0 ] || usage
+    load_secrets
+    as_member dm "${args[*]}"
+    ;;
+  read)
+    [ -n "$chat" ] || usage
+    load_secrets
+    discord read "$chat" "$thread" "$since"
+    ;;
+  rename)
+    [ ${#args[@]} -gt 0 ] || usage
+    load_secrets
+    as_member rename "${args[*]}"
+    ;;
+  rome) cos_rome "${args[0]:-}" ;;
+  reset) cmd_reset ;;
+  version) cos_version ;;
+  *) usage ;;
+esac
