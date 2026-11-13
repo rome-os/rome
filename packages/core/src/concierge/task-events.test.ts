@@ -4,6 +4,7 @@ import {
   MIN_FLUSH_SPACING_MS,
   QUIET_DELAY_MS,
   RETRY_MS,
+  SILENCE_MS,
   TaskEventCoalescer,
   URGENT_DELAY_MS,
 } from "./task-events.js";
@@ -84,6 +85,21 @@ describe("TaskEventCoalescer", () => {
   });
   afterEach(() => {
     rs.useRealTimers();
+  });
+
+  it("drops a silenced row's held and new changes until the silence ends", async () => {
+    const s = setup();
+    s.coalescer.mark(quiet("t1"));
+    s.coalescer.mark(quiet("t2"));
+    s.coalescer.silence(["t1"]);
+    s.coalescer.mark(urgent("t1", "turn_end:interrupted by=system"));
+    expect(s.coalescer.pending).toEqual(["t2"]);
+    await rs.advanceTimersByTimeAsync(QUIET_DELAY_MS);
+    expect(s.flushes.map((flush) => flush.ids)).toEqual([["t2"]]);
+    // Once the silence ends, the row is heard again.
+    await rs.advanceTimersByTimeAsync(SILENCE_MS);
+    s.coalescer.mark(urgent("t1"));
+    expect(s.coalescer.pending).toEqual(["t1"]);
   });
 
   describe("awaitingReport", () => {

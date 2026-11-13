@@ -426,11 +426,13 @@ function ConciergeTopicEntry({
       >
         {items.length > 0 ? (
           <div className="grid gap-4">
-            <ul className="grid gap-1 text-ui text-foreground">
+            {/* Long titles keep to two lines, and the list scrolls on a short
+                screen, so the choice and the buttons stay in view. */}
+            <ul className="grid max-h-[30dvh] gap-1 overflow-y-auto text-ui text-foreground">
               {items.slice(0, DELETE_DIALOG_ITEMS).map((item) => (
                 <li key={item.key} className="flex gap-2">
                   <span aria-hidden>•</span>
-                  <span className="min-w-0 break-words">{item.text}</span>
+                  <span className="line-clamp-2 min-w-0 break-words">{item.text}</span>
                 </li>
               ))}
               {items.length > DELETE_DIALOG_ITEMS ? (

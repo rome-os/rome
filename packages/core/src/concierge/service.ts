@@ -607,10 +607,12 @@ export class ConciergeService {
   /**
    * Ends the follows and stops the open tasks of topic chat `chatId`, before
    * {@link retireChat} runs, so it finds nothing to move and posts no notice.
-   * A task with a task chat ends as archiving that chat ends it; one with
-   * none is stopped and its row archived. Either way no row lands on the main
-   * chat's panel. One that fails to end is logged and left for `retireChat`
-   * to move.
+   * A task with a task chat ends as archiving that chat ends it, once its
+   * running work is interrupted; one with none is stopped and its row
+   * archived. Either way no row lands on the main chat's panel, and no news
+   * of it reaches the main chat, which never knew it. One that fails to end,
+   * a turn that cannot be interrupted included, is logged and left open for
+   * `retireChat` to move.
    */
   async endChatWork(chatId: string): Promise<void> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
@@ -629,9 +631,18 @@ export class ConciergeService {
     }
     for (const task of openTasks) {
       try {
+        // Work that cannot be stopped keeps its task open, to move.
+        if (task.sessionId) {
+          for (const turnId of this.attached?.chats.activeTurns(task.sessionId) ?? []) {
+            await this.attached?.chats.interruptTurn(turnId);
+          }
+        }
+        this.taskEvents?.silence([task.id]);
         const ended = task.sessionId ? await this.endTaskChat(task.sessionId, "archived") : null;
         if (!ended) {
-          await this.stopTask(task.id, "guardian");
+          // Stopped as its owner's Stop does, without telling the Concierge.
+          await this.deps.tasks.repo.stop(task.id, "guardian");
+          await this.cancelChecks(task.id);
           await this.deps.tasks.repo.archive(task.id);
         }
       } catch (error) {

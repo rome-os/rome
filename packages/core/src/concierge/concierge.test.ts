@@ -33,7 +33,7 @@ import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
 import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { resultSummary, startConciergeEvents } from "./events.js";
-import { MIN_FLUSH_SPACING_MS, RETRY_MS } from "./task-events.js";
+import { MIN_FLUSH_SPACING_MS, RETRY_MS, TaskEventCoalescer } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import { mainChatIdOf } from "./main-chat.js";
 import { createConciergeOwners } from "./owners.js";
@@ -4991,6 +4991,50 @@ describe("Concierge chats", () => {
       expect(panel.find((row) => row.id === oldId)?.conciergeChat.main).toBe(true);
     });
 
+    it("sends the main chat no news of the tasks it ended, and keeps a task it could not end heard", async () => {
+      const { s, running } = await withWork();
+      const events = new TaskEventCoalescer({
+        now: () => Date.now(),
+        render: async () => [],
+        deliver: async () => "completed",
+        giveUp: () => {},
+      });
+      s.service.attachTaskEvents(events);
+      // News the running task held before the delete is dropped too.
+      events.mark({ taskId: running.taskId, kind: "turn_end:completed by=system", urgent: false });
+      await s.service.endChatWork(TOPIC_CHAT);
+      // The interrupted turn ends after the delete; its news is dropped.
+      events.mark({
+        taskId: running.taskId,
+        kind: "turn_end:interrupted by=system",
+        urgent: false,
+      });
+      // The task with no task chat is stopped without a stopped_by_owner report.
+      expect(events.pending).toEqual([]);
+
+      const failing = await withWork();
+      const heard = new TaskEventCoalescer({
+        now: () => Date.now(),
+        render: async () => [],
+        deliver: async () => "completed",
+        giveUp: () => {},
+      });
+      failing.s.service.attachTaskEvents(heard);
+      failing.s.chats.interruptTurn = async () => {
+        throw new Error("turn_not_interruptible");
+      };
+      await failing.s.service.endChatWork(TOPIC_CHAT);
+      // Work that kept running moves to the main chat, and its news still reaches it.
+      heard.mark({
+        taskId: failing.running.taskId,
+        kind: "turn_end:completed by=system",
+        urgent: false,
+      });
+      expect(heard.pending).toEqual([failing.running.taskId]);
+      events.stop();
+      heard.stop();
+    });
+
     it('leaves the main chat no "chat retired" notice once everything ended', async () => {
       const { s } = await withWork();
       await s.service.endChatWork(TOPIC_CHAT);
@@ -5003,9 +5047,9 @@ describe("Concierge chats", () => {
     });
 
     it("keeps moving what fails to end, and ends nothing for the main chat or a chat that is gone", async () => {
-      const { s, running, unfollowed } = await withWork();
+      const { s, running, looseId, unfollowed } = await withWork();
       s.chats.interruptTurn = async () => {
-        throw new Error("no such turn");
+        throw new Error("turn_not_interruptible");
       };
       s.service.attachFollowing({
         followsOfChat: async () => [{ source: "github", label: "GitHub", target: "acme/widgets" }],
@@ -5015,14 +5059,23 @@ describe("Concierge chats", () => {
         moveToMainChat: async () => 1,
       } as unknown as ConciergeFollowing);
       await s.service.endChatWork(TOPIC_CHAT);
-      // The failed follow is still there for retireChat to move and announce.
+      // A task whose turn could not be interrupted stays open, neither stopped nor archived.
+      expect(await s.taskRepo.get(running.taskId)).toMatchObject({
+        stoppedAt: null,
+        archivedAt: null,
+      });
+      // The failed follow and that task are still there for retireChat to move and announce.
       await s.service.retireChat(TOPIC_CHAT, "deleted");
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(s.backendTurns.at(-1)?.prompt).toContain(
-        '<concierge_chat_retired name="Calendar" how="deleted" follows="1"',
+        '<concierge_chat_retired name="Calendar" how="deleted" follows="1" tasks="1"/>',
       );
       expect(unfollowed).toEqual([]);
-      expect(await s.taskRepo.get(running.taskId)).toBeTruthy();
+      await s.storedChats.deleteSession(TOPIC_CHAT);
+      const panel = await s.tasks.listForPanel();
+      expect(panel.find((row) => row.id === running.taskId)?.conciergeChat.main).toBe(true);
+      // The task with no task chat had nothing to interrupt, and ended.
+      expect(panel.map((row) => row.id)).not.toContain(looseId);
       await s.service.endChatWork(CONCIERGE_CHAT);
       await s.service.endChatWork("gone");
     });
