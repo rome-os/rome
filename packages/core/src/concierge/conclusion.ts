@@ -88,6 +88,8 @@ export const CONCLUSION_INSTRUCTION = [
   CONCLUSION_CLOSE,
   "",
   `The conclusion is the outcome in one or two sentences, at most ${CONCLUSION_MAX_CHARS} characters, plus anything the guardian must decide or do, such as a question you need answered. The Concierge passes this section on to the guardian word for word and nothing else of your answer, so it must make sense alone. Never put a secret, code, password or token in it. Write it in every final answer, after a follow-up and when the guardian writes to you directly too.`,
+  "",
+  "Your answer here is how your result reaches the guardian: the Concierge forwards it. Never send a message into the guardian's Concierge chat yourself, with `system:send_message` or any other tool, and never set up a routine that does. Recurring work is the Concierge's scheduled task, not a routine of yours.",
 ].join("\n");
 
 /**
