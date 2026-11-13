@@ -561,6 +561,11 @@ device. It is online only while the app is in front: iOS suspends a background a
 unreadable while the phone is locked. When the app leaves the front, requests
 under way finish their replies, then the connection closes. Signing out
 disconnects. A device that is not connected answers `target_unavailable`.
+To read a phone that is not connected, the Rome asks the person to open the app,
+for example with a notification, and runs the action with `--wait 120`. The
+caller then asks again every 2 seconds until the phone connects, for at most
+900 seconds. Only `target_unavailable` is asked again, because the Gateway
+forwarded nothing.
 
 `system.info` returns `{name, platform: "ios", actions, usage, audit}`. `usage`
 holds each action's argument help, which is how an agent learns them from

@@ -19,6 +19,7 @@ import { copyRequest } from "./copy.js";
 import { CLI_AUDIT_HINT, cliAuditPath, runAudit } from "./audit.js";
 import type { ConnectUi } from "./connect-ui.js";
 import { loadConnectUi } from "./load-connect-ui.js";
+import { parseWait, untilConnected } from "./wait.js";
 
 const version = (): string | undefined => {
   try {
@@ -91,6 +92,7 @@ async function main(): Promise<void> {
       args: { type: "string" },
       input: { type: "string" },
       output: { type: "string" },
+      wait: { type: "string" },
       server: { type: "boolean" },
       "device-code": { type: "boolean" },
       db: { type: "string" },
@@ -122,6 +124,12 @@ async function main(): Promise<void> {
     !(positionals[0] === "device" && positionals[1] === "run")
   )
     throw new Error("--input and --output are only supported by rome-node device run.");
+  if (
+    values.wait !== undefined &&
+    !(positionals[0] === "device" && ["run", "describe"].includes(positionals[1]))
+  )
+    throw new Error("--wait is only supported by rome-node device run and device describe.");
+  const wait = parseWait(values.wait);
   const auditOptions = [
     "db",
     "json",
@@ -351,7 +359,11 @@ async function main(): Promise<void> {
     if (values.input !== undefined || values.output !== undefined) {
       const output = values.output ?? "-";
       const input = values.input === undefined ? undefined : await readInput(values.input);
-      const { response, body } = await client.runBinary(deviceId, action, args, input);
+      const { response, body } = await untilConnected(
+        () => client.runBinary(deviceId, action, args, input),
+        (result) => result.response,
+        wait,
+      );
       // A failed action leaves an existing output file unchanged.
       if (output === "-") await write(process.stdout, body);
       else if (response.ok) await writeFile(output, body);
@@ -362,10 +374,12 @@ async function main(): Promise<void> {
       if (failed(response)) process.exitCode = 1;
       return;
     }
-    const result =
-      command === "describe"
-        ? await client.describe(deviceId)
-        : await client.run(deviceId, action, args);
+    const result = await untilConnected(
+      () =>
+        command === "describe" ? client.describe(deviceId) : client.run(deviceId, action, args),
+      (response) => response,
+      wait,
+    );
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (failed(result)) process.exitCode = 1;
   } finally {

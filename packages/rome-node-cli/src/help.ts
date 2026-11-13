@@ -102,8 +102,8 @@ The token is never printed.
 `,
   device: `Usage:
   rome-node device
-  rome-node device describe <device-id>
-  rome-node device run <device-id> <action> [--args <json>] [--input <file|->] [--output <file|->]
+  rome-node device describe <device-id> [--wait <seconds>]
+  rome-node device run <device-id> <action> [--args <json>] [--input <file|->] [--output <file|->] [--wait <seconds>]
   rome-node device rename <device-id> <name>
   rome-node device remove <device-id>
 
@@ -118,7 +118,7 @@ Examples:
   rome-node device describe <device-id>
   rome-node help device run
 `,
-  "device describe": `Usage: rome-node device describe <device-id>
+  "device describe": `Usage: rome-node device describe <device-id> [--wait <seconds>]
 
 Invoke system.info on an online target. Use an ID from rome-node device.
 The result includes name, platform, and actions. Platform-specific commands and
@@ -129,6 +129,7 @@ Example result:
 
 Failures return {"type":"response","ok":false,"error":{"code":"...","message":"..."}}.
 The local exit status is 0 on success or 1 on failure.
+--wait waits for an offline device to connect, as in rome-node help device run.
 `,
   "device rename": `Usage: rome-node device rename <device-id> <name>
 
@@ -159,11 +160,18 @@ Prints {"type":"response","ok":true,"result":{}} on success. The local exit
 status is 0 on success or 1 on failure.
 `,
   "device run": `Usage:
-  rome-node device run <device-id> <action> [--args <json>]
-  rome-node device run <device-id> <action> [--args <json>] [--input <file|->] [--output <file|->]
+  rome-node device run <device-id> <action> [--args <json>] [--wait <seconds>]
+  rome-node device run <device-id> <action> [--args <json>] [--input <file|->] [--output <file|->] [--wait <seconds>]
 
 Use an ID from rome-node device. Run device describe first to discover actions.
 --args is a JSON object for the action (default: {}).
+
+A device that is not connected fails at once with target_unavailable.
+--wait <seconds> (1 to 900) instead asks again every 2 seconds until the device
+connects or the time is up. Nothing is sent to a device that is not connected,
+so only target_unavailable is asked again. An iPhone or iPad is connected only
+while the Rome app is open on it: ask the person to open it, for example with a
+notification, then run with --wait 120.
 
 Computer actions:
   system.info  No arguments. Returns name, platform, and actions.
