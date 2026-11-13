@@ -71,6 +71,10 @@ private func chatMessage(_ id: String, role: String, turn: String?, text: String
         #expect(!dots(store))
     }
 
+    @Test func theFallbackPollIsTheWebs() {
+        #expect(store(FakeBackend()).runningPollInterval == .seconds(30))
+    }
+
     @Test func aRunningChatAsksAgainAndStopsWhenTheTurnEnded() async {
         let backend = FakeBackend()
         backend.turns = [ActiveTurn(turnId: "backend:y", status: "running", quiet: false)]
@@ -84,5 +88,32 @@ private func chatMessage(_ id: String, role: String, turn: String?, text: String
         for _ in 0..<100 where store.running { try? await Task.sleep(for: .milliseconds(20)) }
         #expect(!store.running)
         #expect(!dots(store))
+    }
+
+    /// Coming back to the screen asks once, at once.
+    @Test func comingBackAsksOnce() async {
+        let backend = FakeBackend()
+        backend.turns = [ActiveTurn(turnId: "backend:z", status: "running", quiet: false)]
+        let store = store(backend)
+        store.runningPollInterval = .seconds(3600)
+        await store.reload()
+        #expect(dots(store))
+        backend.turns = []
+        store.recheckRunning()
+        for _ in 0..<100 where store.running { try? await Task.sleep(for: .milliseconds(20)) }
+        #expect(!store.running && !dots(store))
+    }
+
+    /// A chat that shows no dots (its turn took the guardian's message) is not polled.
+    @Test func noDotsNoPoll() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage("u1", role: "user", turn: "t1", at: 0)]
+        backend.turns = [ActiveTurn(turnId: "t1", status: "running", quiet: false)]
+        let store = store(backend)
+        store.runningPollInterval = .milliseconds(30)
+        await store.reload()
+        backend.turns = []
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(store.running)
     }
 }

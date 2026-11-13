@@ -30,9 +30,10 @@ final class TranscriptStore {
     private(set) var visibleTurn = false
     /// The turns the instance listed as running or queued at the last look.
     private(set) var activeTurns: [ActiveTurn] = []
-    /// How often a running chat asks the instance whether its turn is over, in
-    /// case the live event that says so never comes.
-    @ObservationIgnored var runningPollInterval: Duration = .seconds(10)
+    /// How often a chat showing its dots asks the instance whether its turn
+    /// is over, in case the live event that says so never comes. The web's
+    /// `TURN_POLL_FALLBACK_MS`.
+    @ObservationIgnored var runningPollInterval: Duration = .seconds(30)
     @ObservationIgnored private var runningPoll: Task<Void, Never>?
     private(set) var activeTurnId: String?
     private(set) var stopping = false
@@ -624,8 +625,15 @@ final class TranscriptStore {
         startRunningPoll()
     }
 
-    /// While the chat runs, asks the instance now and then whether it still
-    /// does, so a live event that never arrives cannot leave it busy.
+    /// The chat came back to the screen: asks once whether its turn still runs.
+    func recheckRunning() {
+        guard kind == .concierge, running else { return }
+        Task { await refreshRunning() }
+    }
+
+    /// While the dots show, asks the instance now and then whether the turn
+    /// still runs, so a live event that never arrives cannot leave them on.
+    /// The poll ends with the running state.
     private func startRunningPoll() {
         guard kind == .concierge, runningPoll == nil else { return }
         runningPoll = Task { [weak self] in
@@ -633,7 +641,7 @@ final class TranscriptStore {
                 guard let interval = self?.runningPollInterval else { return }
                 try? await Task.sleep(for: interval)
                 guard !Task.isCancelled, let self, self.running else { return }
-                await self.refreshRunning()
+                if self.showsTyping { await self.refreshRunning() }
             }
         }
     }

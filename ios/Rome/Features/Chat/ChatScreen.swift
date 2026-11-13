@@ -33,6 +33,7 @@ struct ChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { store.recheckRunning() }
         // Under an open thread, VoiceOver reads the thread, not what it covers.
         .accessibilityHidden(store.thread != nil)
         // The bar is clear: the transcript scrolls under its glass items.
