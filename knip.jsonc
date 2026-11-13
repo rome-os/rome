@@ -58,7 +58,14 @@
 
   "workspaces": {
     ".": {
-      "entry": ["scripts/**/*.{mjs,mts,ts,js}", "lint/**/*.ts", "infra/**/*.test.mjs"],
+      "entry": [
+        "scripts/**/*.{mjs,mts,ts,js}",
+        "lint/**/*.ts",
+        "infra/**/*.test.mjs",
+        // The chief of staff verifier's commands, run by path: the runner, its
+        // tests, the fake environment and judge the tests spawn, and the judge.
+        "environments/chief-of-staff/verifier/{verify.mjs,test/*.test.mjs,fake/*.mjs,lib/claude-judge.mjs}"
+      ],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.
       "ignoreDependencies": ["lint-staged", "@rstest/coverage-v8"]
