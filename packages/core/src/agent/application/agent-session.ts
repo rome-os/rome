@@ -2039,7 +2039,9 @@ class AgentSessionImpl implements AgentSession {
   }
 
   get currentTurnActorRef(): TurnActor | undefined {
-    return this.currentSink?.actor;
+    return this.currentSink?.lifecycleInterrupted || this.closing
+      ? undefined
+      : this.currentSink?.actor;
   }
 
   /** The next turn resumes what an earlier session of the chat started, so

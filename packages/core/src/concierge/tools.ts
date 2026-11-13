@@ -243,11 +243,11 @@ export async function buildConciergeTools(
   // Said as Concierge's account, so the task event reads who asked off the
   // message.
   const sendInput = async (chatId: string, text: string, skillName?: string) => {
-    const sent = await service.dashboard.send(
-      taskChatPlace(chatId),
-      { text, ...(skillName ? { skillName } : {}) },
-      CONCIERGE_ACCOUNT,
-    );
+    const body = { text, ...(skillName ? { skillName } : {}) };
+    const send = () => service.dashboard.send(taskChatPlace(chatId), body, CONCIERGE_ACCOUNT);
+    const sent = context.withTaskInput
+      ? await context.withTaskInput(chatId, body, send)
+      : await send();
     if (!sent.ok) throw new Error(refusal(sent));
   };
 

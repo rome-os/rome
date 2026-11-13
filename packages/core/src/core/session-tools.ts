@@ -20,6 +20,12 @@ export interface SessionToolContext {
   /** The id of the one Concierge task the running turn reports on, or
    *  undefined when it reports on none or on several. */
   getTurnReportedTask(): string | undefined;
+  /** A single private task input may inherit this live turn's verified actor. */
+  withTaskInput?<T>(
+    chatId: string,
+    body: { text: string; skillName?: string },
+    send: () => Promise<T>,
+  ): Promise<T>;
 }
 
 /**

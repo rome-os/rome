@@ -25,6 +25,8 @@ import {
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
+import { withTaskInputActor } from "../webchat/task-input-actor.js";
+import { sameActor } from "../agent/index.js";
 
 export interface RomeToolPortsDeps {
   actionRegistry: ActionRegistry;
@@ -183,6 +185,41 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             getThreadContext: turn.threadContext,
             getTurnPushLevel: turn.pushLevel,
             getTurnReportedTask: turn.reportedTask,
+            withTaskInput: (chatId, body, send) =>
+              turn.inTurn(() => {
+                const thread = turn.threadContext();
+                const turnId = turn.turnId();
+                const admitted = turn.actor() as SessionActor | undefined;
+                const actor = admitted ? Object.freeze({ ...admitted }) : undefined;
+                const sourceChatId = thread?.threadId;
+                const source =
+                  actor &&
+                  (actor.kind === "guardian" || actor.kind === "visitor") &&
+                  turn.agentName === "core:concierge" &&
+                  !turn.isSubagent &&
+                  turnId &&
+                  thread?.channel === "webchat" &&
+                  thread.threadType === "private" &&
+                  sourceChatId
+                    ? {
+                        agentName: turn.agentName,
+                        chatId: sourceChatId,
+                        turnId,
+                        actor,
+                        isCurrent: () => {
+                          const live = turn.threadContext();
+                          return (
+                            turn.turnId() === turnId &&
+                            sameActor(turn.actor(), actor) &&
+                            live?.channel === "webchat" &&
+                            live.threadType === "private" &&
+                            live.threadId === sourceChatId
+                          );
+                        },
+                      }
+                    : undefined;
+                return asTurnActor(turn, () => withTaskInputActor(source, chatId, body, send));
+              }),
           })) ?? [])
         : [];
       return [
