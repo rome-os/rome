@@ -1,8 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { ChatRow } from "./chat-view";
-import type { SystemInputSource, TraceSnapshot } from "@rome/api-types/trace-segments";
-import { buildConciergeItems, type ConciergeItem, showsTyping } from "./concierge-groups";
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
+import {
+  buildConciergeItems,
+  type ConciergeItem,
+  showsTyping,
+  simulatedTypingMs,
+} from "./concierge-groups";
 
 const MIN = 60_000;
 // Local noon, so a few hours either way stays on the same local day.
@@ -397,95 +402,58 @@ describe("buildConciergeItems reference stability", () => {
 });
 
 describe("showsTyping", () => {
-  const block = (ordinal: number, b: Record<string, unknown>) => ({
-    kind: "block" as const,
-    id: `b${ordinal}`,
-    block: b,
-    ordinal,
-  });
-  const trace = (...blocks: Record<string, unknown>[]) =>
-    ({
-      segments: blocks.map((b, i) => block(i, b)),
-      summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
-    }) as unknown as TraceSnapshot;
-  const use = (id: string, tool: string) => ({ type: "tool_use", id, tool, input: {} });
-  const result = (id: string, tool: string) => ({
-    type: "tool_result",
-    toolUseId: id,
-    tool,
-    output: "",
-  });
-  const thinking = { type: "thinking", content: "…" };
   // The owner's message the running turn took: it shows 👀, and the dots say a message is coming.
   const asked = [userRow({ ...guardian("g1", 0), turnId: "t1" } as ChatMessage)];
-  const live = (
-    snapshot: TraceSnapshot | null,
-    extra: { quiet?: boolean; writing?: string } = {},
-  ) => ({
+  const writing = (mode: "exact" | "simulated", on: boolean) => ({
+    sessionId: "s",
+    turnId: "t1",
+    mode,
+    writing: on,
+  });
+  const live = (extra: { quiet?: boolean; writing?: ReturnType<typeof writing> | null } = {}) => ({
     isStreaming: true,
     runningTurnId: "t1",
-    snapshot,
     ...extra,
   });
 
-  it("types while the provider says a message is being written, until its call lands", () => {
-    expect(showsTyping(asked, live(null, { writing: "s1" }))).toBe(true);
-    expect(showsTyping(asked, live(trace(thinking), { writing: "s1" }))).toBe(true);
-    expect(showsTyping(asked, live(trace(use("s1", "core:say")), { writing: "s1" }))).toBe(false);
+  it("types on an exact turn while the server says it writes a message", () => {
+    expect(showsTyping(asked, live({ writing: writing("exact", true) }))).toBe(true);
+    expect(showsTyping(asked, live({ writing: writing("exact", false) }))).toBe(false);
   });
 
-  it("shows none at the turn's start, which the owner's 👀 already covers", () => {
-    expect(showsTyping(asked, live(null))).toBe(false);
+  it("infers nothing: no word from the server, or a simulated turn, shows none of itself", () => {
+    expect(showsTyping(asked, live())).toBe(false);
+    expect(showsTyping(asked, live({ writing: writing("simulated", false) }))).toBe(false);
   });
 
-  it("infers writing after finished thinking or a work call's result, with no work call open", () => {
-    expect(showsTyping(asked, live(trace(thinking)))).toBe(true);
-    expect(showsTyping(asked, live(trace(use("w1", "WebSearch"))))).toBe(false);
-    expect(showsTyping(asked, live(trace(use("w1", "WebSearch"), result("w1", "WebSearch"))))).toBe(
-      true,
-    );
-    // A message's own result: it just landed.
-    expect(showsTyping(asked, live(trace(use("s1", "core:say"), result("s1", "core:say"))))).toBe(
-      false,
-    );
-  });
-
-  it("after a message, types only after a work call's result, so closing off shows none", () => {
-    const said = [...asked, agentRow(say("a1", MIN))];
-    const afterSay = [use("s1", "core:say"), result("s1", "core:say")];
-    expect(showsTyping(said, live(trace(...afterSay)))).toBe(false);
-    expect(showsTyping(said, live(trace(...afterSay, thinking)))).toBe(false);
-    expect(showsTyping(said, live(trace(...afterSay, use("w1", "WebSearch"))))).toBe(false);
-    expect(
-      showsTyping(
-        said,
-        live(trace(...afterSay, use("w1", "WebSearch"), result("w1", "WebSearch"))),
-      ),
-    ).toBe(true);
-    // A forward is a message too.
-    expect(
-      showsTyping(
-        said,
-        live(trace(use("f1", "mcp__rome__chat_forward"), result("f1", "chat_forward"))),
-      ),
-    ).toBe(false);
+  it("types while a simulated turn's message is held behind the dots", () => {
+    expect(showsTyping(asked, live({ writing: writing("simulated", false) }), true)).toBe(true);
   });
 
   it("keeps a quiet turn silent until it says something", () => {
-    expect(showsTyping(asked, live(trace(thinking), { quiet: true, writing: "s1" }))).toBe(false);
+    expect(showsTyping(asked, live({ quiet: true, writing: writing("exact", true) }))).toBe(false);
     const said = [...asked, agentRow(say("a1", MIN))];
-    expect(
-      showsTyping(
-        said,
-        live(trace(use("w1", "WebSearch"), result("w1", "WebSearch")), { quiet: true }),
-      ),
-    ).toBe(true);
+    expect(showsTyping(said, live({ quiet: true, writing: writing("exact", true) }))).toBe(true);
   });
 
   it("never types once the turn has ended", () => {
     expect(
-      showsTyping(asked, { ...live(trace(thinking), { writing: "s1" }), isStreaming: false }),
+      showsTyping(asked, { ...live({ writing: writing("exact", true) }), isStreaming: false }),
     ).toBe(false);
+  });
+});
+
+describe("simulatedTypingMs", () => {
+  const of = (length: number) =>
+    simulatedTypingMs({
+      ...say("a1", 0),
+      content: JSON.stringify([{ type: "text", content: "x".repeat(length) }]),
+    } as ChatMessage);
+
+  it("waits by the message's length, half a second to one second", () => {
+    expect(of(10)).toBe(500);
+    expect(of(150)).toBe(750);
+    expect(of(5000)).toBe(1000);
   });
 });
 

@@ -31,6 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { z } from "zod";
+import type { MessageWritingEvent } from "@rome/api-types/concierge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -268,6 +269,14 @@ const sessionNameSchema = z.object({
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
+/** How the running turn shows the typing dots (`message_writing`). */
+const messageWritingSchema: z.ZodType<MessageWritingEvent> = z.object({
+  sessionId: z.string(),
+  turnId: z.string(),
+  mode: z.enum(["exact", "simulated"]),
+  writing: z.boolean(),
+});
+
 const messageChatThreadSchema = z.object({
   sessionId: z.string(),
   messageId: z.string(),
@@ -294,6 +303,8 @@ interface ChatSessionEventsProps {
   onChatCardSettled?: (event: z.infer<typeof chatCardSettledSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
+  /** How the running turn shows the typing dots changed. */
+  onMessageWriting?: (event: MessageWritingEvent) => void;
   onReconnect: (sessionId: string) => void;
 }
 
@@ -306,6 +317,7 @@ function ChatSessionEvents({
   onChatCardSettled,
   onSessionName,
   onSessionRunning,
+  onMessageWriting,
   onReconnect,
 }: ChatSessionEventsProps) {
   useLiveEvents(
@@ -347,6 +359,12 @@ function ChatSessionEvents({
         schema: sessionRunningSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onSessionRunning(event);
+        },
+      },
+      message_writing: {
+        schema: messageWritingSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageWriting?.(event);
         },
       },
     },
@@ -536,7 +554,6 @@ export function Chat({
     start: startSessionStream,
     update: updateSessionSnapshot,
     updateText: updateSessionAssistantText,
-    writing: startSessionWriting,
     adoptAgentTurn: adoptSessionAgentTurn,
     end: endSessionStream,
   } = useStreamingSessions();
@@ -588,6 +605,15 @@ export function Chat({
   const handleMessageStatusReaction = useCallback(
     ({ messageId, statusReaction }: z.infer<typeof messageStatusReactionSchema>) =>
       setLiveReactions((prev) => new Map(prev).set(messageId, statusReaction)),
+    [],
+  );
+  // How each chat's running turn shows the typing dots, its latest word.
+  const [liveWriting, setLiveWriting] = useState<ReadonlyMap<string, MessageWritingEvent>>(
+    new Map(),
+  );
+  const handleMessageWriting = useCallback(
+    (event: MessageWritingEvent) =>
+      setLiveWriting((prev) => new Map(prev).set(event.sessionId, event)),
     [],
   );
   // Task cards' questions and approvals live events settled since the
@@ -1513,16 +1539,6 @@ export function Chat({
             }
             continue;
           }
-          if (evt.event === "message_writing") {
-            // The agent started writing a message: the typing dots' exact sign.
-            try {
-              const { toolUseId } = JSON.parse(evt.data) as { toolUseId?: string };
-              if (toolUseId) startSessionWriting(sessionId, turnId, toolUseId);
-            } catch {
-              // ignore parse errors
-            }
-            continue;
-          }
           if (evt.event === "input_status") {
             try {
               const status = JSON.parse(
@@ -1606,7 +1622,6 @@ export function Chat({
       streamingSessionsRef,
       updateSessionSnapshot,
       updateSessionAssistantText,
-      startSessionWriting,
       adoptSessionAgentTurn,
       isReadVisibleSession,
     ],
@@ -2585,6 +2600,7 @@ export function Chat({
           onChatCardSettled={handleChatCardSettled}
           onSessionName={handleSessionName}
           onSessionRunning={handleSessionRunning}
+          onMessageWriting={handleMessageWriting}
           onReconnect={handleSessionEventsReconnect}
         />
       ))}
@@ -2668,7 +2684,7 @@ export function Chat({
                           isStreaming: displayedStreaming,
                           runningTurnId,
                           quiet: activeSessionStream?.quiet,
-                          writing: activeSessionStream?.writing,
+                          writing: liveWriting.get(activeSessionId) ?? null,
                           snapshot: currentSnapshot,
                           textStore: liveTextStore,
                           blockIx: activeSessionStream?.assistantBlockIx,

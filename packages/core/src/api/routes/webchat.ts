@@ -6,6 +6,7 @@ import type {
   ChatPendingChecksResponse,
   ConciergeStatusReaction,
   MessageStatusReactionEvent,
+  MessageWritingEvent,
 } from "@rome/api-types/concierge";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -117,7 +118,7 @@ import {
 } from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
-import { messageWritingStart } from "./message-writing.js";
+import { MessageWriting, messageWritingModeOf } from "./message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
 import type {
@@ -317,8 +318,7 @@ type WebchatEventName =
   | "done"
   | "stream_error"
   | "keepalive"
-  | "turn_id"
-  | "message_writing";
+  | "turn_id";
 
 // Mirror the agent's propose_routine tool call into a first-class assistant
 // `routine_draft_card` message so the confirm card renders inline. The card
@@ -863,6 +863,8 @@ interface ActiveWebchatStream {
   interrupt?: (reason?: string) => Promise<void>;
   agentName: string;
   channelThreadKey: string | null;
+  /** How the turn shows the typing dots, from its first event on. */
+  writing?: MessageWriting;
 }
 
 interface IncomingWebchatUpload {
@@ -983,6 +985,45 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
+  /** Listeners told how a running turn shows the typing dots (`message_writing`). */
+  const writingListeners = new Set<(event: MessageWritingEvent) => void>();
+  const writingEventOf = (stream: ActiveWebchatStream): MessageWritingEvent | null =>
+    stream.writing
+      ? {
+          sessionId: stream.sessionId,
+          turnId: stream.agentTurnId ?? stream.turnId,
+          mode: stream.writing.mode,
+          // A quiet turn shows no dots until it has said something.
+          writing: !stream.finished && stream.writing.writing && !(stream.quiet && !stream.spoke),
+        }
+      : null;
+  const publishWriting = (stream: ActiveWebchatStream): void => {
+    const event = writingEventOf(stream);
+    if (!event) return;
+    for (const listener of writingListeners) listener(event);
+  };
+  /**
+   * Takes a stream's next agent event for its typing dots. Its first event
+   * settles the turn's mode, by its provider, and tells it.
+   */
+  const trackWriting = (
+    stream: ActiveWebchatStream,
+    msg: Parameters<MessageWriting["on"]>[0],
+  ): void => {
+    if (!stream.writing) {
+      const owner = stream.channelThreadKey
+        ? deps.agentSessionManager.find({
+            agentName: stream.agentName,
+            channelThreadKey: stream.channelThreadKey,
+          })
+        : undefined;
+      stream.writing = new MessageWriting(messageWritingModeOf(owner?.providerId));
+      stream.writing.on(msg);
+      publishWriting(stream);
+      return;
+    }
+    if (stream.writing.on(msg) !== null) publishWriting(stream);
+  };
   // Same definition as `GET /chat/sessions/:id/turns`: chat streams here plus
   // turns in the shared registry, such as a fork chat's first answer.
   const isSessionRunning = (sessionId: string): boolean =>
@@ -1014,6 +1055,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (!stream.finished && stream.quiet && !stream.spoke) {
         stream.spoke = true;
         changed = true;
+        // Its typing dots were held back until now.
+        if (stream.writing?.writing) publishWriting(stream);
       }
     }
     if (changed) notifyTurn(message.sessionId);
@@ -1046,6 +1089,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
     runningListeners.add(runningListener);
     if (runningSessions.has(sessionId)) runningListener({ sessionId, running: true });
+    // The typing dots: how the running turn shows them, its latest at once.
+    const writingListener = (event: MessageWritingEvent) => {
+      if (event.sessionId === sessionId) emit("message_writing", event);
+    };
+    writingListeners.add(writingListener);
+    for (const stream of activeStreams.get(sessionId) ?? []) {
+      const event = !stream.finished ? writingEventOf(stream) : null;
+      if (event) writingListener(event);
+    }
     const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
       if (message.sessionId !== sessionId) return;
       // A task card arrives with its card, as a page would hand it out.
@@ -1093,6 +1145,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     return () => {
       runningListeners.delete(runningListener);
+      writingListeners.delete(writingListener);
       unsubscribeThreadRetired?.();
       unsubscribeMessages();
       unsubscribeSessionName();
@@ -2275,6 +2328,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // already attached received it live; this only affects future replays.
     stream.events.delete("assistant_text");
     stream.resolveFinish();
+    publishWriting(stream);
     notifyRunning(stream.sessionId);
     if (stream.cleanupTimer) clearTimeout(stream.cleanupTimer);
     stream.cleanupTimer = setTimeout(() => {
@@ -3574,18 +3628,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         let assistantBlockIx = 0;
         let terminalError: Extract<StreamAgentEvent, { type: "error" }> | undefined;
         let interrupted = false;
-        const writingTold = new Set<string>();
         const write = (event: WebchatEventName, data: unknown) => {
           queue = queue.then(() => sse.writeSSE({ event, data: JSON.stringify(data) }));
         };
         const project = (message: StreamAgentEvent) => {
           if (message.type === "input_status") {
             write("input_status", message);
-            return;
-          }
-          const writing = messageWritingStart(message, writingTold);
-          if (writing) {
-            write("message_writing", { turnId, toolUseId: writing });
             return;
           }
           if (isTransientDelta(message) && message.type !== "text_delta") return;
@@ -4391,7 +4439,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
-            const writingTold = new Set<string>();
             const romeSession = {
               _romeSessionId: sessionId,
               _type: session.type as RomeSessionType,
@@ -4399,16 +4446,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             for await (const event of handle.events()) {
               const msg = withRomeSession(event, romeSession);
               if (msg.type === "input_status") continue;
-              const writing = messageWritingStart(msg, writingTold);
-              if (writing) {
-                emitToStream(
-                  stream,
-                  "message_writing",
-                  { turnId, toolUseId: writing },
-                  "message_writing",
-                );
-                continue;
-              }
+              trackWriting(stream, msg);
               // Other deltas than text have no webchat consumer.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
@@ -4893,7 +4931,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
     let recordedCardWrites: Promise<void> = Promise.resolve();
-    const writingTold = new Set<string>();
     // The same rule as a foreground turn: an agent whose text is private keeps
     // its narration in the trace.
     const deliversText =
@@ -4933,16 +4970,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           };
         }
       }
-      const writing = messageWritingStart(msg, writingTold);
-      if (writing) {
-        emitToStream(
-          stream,
-          "message_writing",
-          { turnId: recordedTurnId ?? stream.turnId, toolUseId: writing },
-          "message_writing",
-        );
-        return recordedCardWrites;
-      }
+      trackWriting(stream, msg);
       // Backend turns have no live bubble; drop the other delta events.
       if (isTransientDelta(msg) || msg.type === "input_status") return recordedCardWrites;
       if (recorded) {

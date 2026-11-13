@@ -35,6 +35,28 @@ export interface MessageStatusReactionEvent {
   statusReaction: ConciergeStatusReaction | null;
 }
 
+/**
+ * How a turn shows the typing dots (docs/domains/chats.md#status-reaction):
+ * `exact` where the provider says when it writes a message, so the dots show
+ * while `writing`; `simulated` where it cannot, so each message of the turn
+ * lands behind the dots for a moment, by its length, 0.5 to 1 s.
+ */
+export type MessageWritingMode = "exact" | "simulated";
+
+/**
+ * `message_writing` on a chat's session topic: how its running turn `turnId`
+ * shows the typing dots, sent when the turn starts, whenever `writing`
+ * changes, and once more with `writing` false when it ends. A subscriber gets
+ * the running turn's latest at once.
+ */
+export interface MessageWritingEvent {
+  sessionId: string;
+  turnId: string;
+  mode: MessageWritingMode;
+  /** Exact turns only: a message is being written now. Always false when simulated. */
+  writing: boolean;
+}
+
 /** The panel actions. Each one sends the Concierge a message, and never writes the row. */
 export type ConciergeTaskAction = "stop" | "archive" | "done";
 
