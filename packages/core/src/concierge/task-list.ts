@@ -64,6 +64,11 @@ export interface ChatTaskListDeps {
   routines: Pick<RoutinesRepository, "findByChat" | "listRoutines" | "findById">;
   routineRuns: Pick<RoutineRunsRepository, "findLatestByRoutineIds">;
   routineEngine: Pick<RoutineEngine, "onChange">;
+  /**
+   * Calls `listener` with a chat's id when a message holding a task chat part
+   * is said in it, which can move a task's Respond. Returns the unsubscribe.
+   */
+  onTaskCardMessage?: (listener: (chatId: string) => void) => () => void;
   /** The assistant messages of a chat that hold a task chat part, in the order said. */
   /** From `since` on, when given. */
   taskChatPartMessages: (
@@ -247,6 +252,10 @@ export class ChatTaskList {
           .catch(() => tell());
       }),
       this.deps.following?.()?.onChange?.(tell) ?? (() => {}),
+      // A new card may be the one a waiting task's Respond goes to now.
+      this.deps.onTaskCardMessage?.((cardChat) => {
+        if (cardChat === chatId) tell();
+      }) ?? (() => {}),
     ];
     return () => {
       closed = true;

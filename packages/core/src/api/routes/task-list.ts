@@ -44,6 +44,12 @@ export function chatTaskListOf(deps: TaskListApiDeps): ChatTaskList | null {
       routineRuns: deps.routineRunsRepo,
       routineEngine: deps.routineEngine,
       taskChatPartMessages: (chatId, since) => deps.webchatRepo.taskChatPartMessages(chatId, since),
+      onTaskCardMessage: (listener) =>
+        deps.webchatRepo.onMessageInserted((message) => {
+          if (message.role === "assistant" && message.content.includes('"task_chat"')) {
+            listener(message.sessionId);
+          }
+        }),
     });
     lists.set(concierge, list);
   }

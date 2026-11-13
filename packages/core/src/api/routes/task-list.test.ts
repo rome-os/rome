@@ -55,6 +55,10 @@ describe("/chats/:chatId/tasks", () => {
   let taskSource: ConciergeTasks | null;
   /** The `since` each read of the chat's task chat parts asked from. */
   let asked: Array<number | undefined>;
+  /** Who listens for messages said in a chat. */
+  const inserted = new Set<
+    (message: { sessionId: string; role: string; content: string }) => void
+  >();
 
   const app = () => {
     const concierge = {
@@ -93,6 +97,12 @@ describe("/chats/:chatId/tasks", () => {
           taskChatPartMessages: async (chatId: string, from?: Date) => {
             asked.push(from?.getTime());
             return cardMessages[chatId] ?? [];
+          },
+          onMessageInserted: (
+            listener: (message: { sessionId: string; role: string; content: string }) => void,
+          ) => {
+            inserted.add(listener);
+            return () => inserted.delete(listener);
           },
         } as unknown as ApiDeps["webchatRepo"],
       }),
@@ -377,6 +387,23 @@ describe("/chats/:chatId/tasks", () => {
       on_its_own: ["routine Morning nudge"],
     });
     expect(kindsIn(await read("concierge"))).toEqual({});
+  });
+
+  it("tells the chat's list to read again when a task card is said in it", async () => {
+    const stream = await app().request("/chats/concierge/tasks/events", guardian);
+    const reader = stream.body!.getReader();
+    const say = (sessionId: string, content: string) => {
+      for (const listener of inserted) listener({ sessionId, role: "assistant", content });
+    };
+    say("ann-main", '[{"type":"task_chat","chatId":"c1"}]');
+    say("concierge", '[{"type":"text","content":"hi"}]');
+    say("concierge", '[{"type":"task_chat","chatId":"c1"}]');
+    let text = "";
+    while (!text.includes("tasks_changed")) {
+      text += new TextDecoder().decode((await reader.read()).value);
+    }
+    expect(text).toContain('"chatId":"concierge"');
+    await reader.cancel();
   });
 
   it("opens the change stream for the chat's owner only", async () => {

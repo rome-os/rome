@@ -6317,6 +6317,34 @@ describe("scheduled tasks", () => {
     expect((await s.taskRepo.get(taskId))?.stoppedAt).toBeFalsy();
   });
 
+  it("keeps both of two stopped runs whose turn-downs fail at once", async () => {
+    const s = setup();
+    const stored = new Map<string, unknown>();
+    s.deps.settingsRepo = {
+      // A slow read, so two writes would overlap if they were not one after another.
+      get: async (key: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return stored.get(key) ?? null;
+      },
+      set: async (key: string, value: unknown) => void stored.set(key, value),
+    } as never;
+    const keep = (
+      s.service as unknown as {
+        keepStoppedRun(run: { chatId: string; stoppedAt: number }, keep: boolean): Promise<void>;
+      }
+    ).keepStoppedRun.bind(s.service);
+    await Promise.all([
+      keep({ chatId: "chat-a", stoppedAt: 1 }, true),
+      keep({ chatId: "chat-b", stoppedAt: 2 }, true),
+    ]);
+    expect(stored.get("conciergeStoppedRuns")).toEqual({
+      runs: [
+        { chatId: "chat-a", stoppedAt: 1 },
+        { chatId: "chat-b", stoppedAt: 2 },
+      ],
+    });
+  });
+
   it("turns down at start what a stopped run asked for by its stop, and no later", async () => {
     const s = setup();
     const stored = new Map<string, unknown>([

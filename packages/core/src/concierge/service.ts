@@ -307,6 +307,8 @@ export class ConciergeService {
   private attached: ConciergeDashboard | null = null;
   private failedStarts = new Map<string, { turnId: string; starts: Map<string, string> }>();
   private approvalExpiry: ((chatId: string, turnDown: TurnDown) => Promise<number>) | null = null;
+  /** The stopped-run backlog's writes, one after another. */
+  private stoppedRunWrites: Promise<void> = Promise.resolve();
   private taskEvents: TaskEventCoalescer | null = null;
   private readonly cardListeners = new Set<(event: ChatCardSettledEvent) => void>();
   private readonly inputListeners = new Set<(event: InputsSettledEvent) => void>();
@@ -1295,7 +1297,14 @@ export class ConciergeService {
    * Keeps or drops stopped run `run` for the start sweep. Written only while
    * its turn-down has failed, so a stop that turns down at once writes nothing.
    */
-  private async keepStoppedRun(run: StoppedRun, keep: boolean): Promise<void> {
+  private keepStoppedRun(run: StoppedRun, keep: boolean): Promise<void> {
+    // One change at a time: each reads what the one before it wrote.
+    const next = this.stoppedRunWrites.then(() => this.writeStoppedRun(run, keep));
+    this.stoppedRunWrites = next.catch(() => {});
+    return next;
+  }
+
+  private async writeStoppedRun(run: StoppedRun, keep: boolean): Promise<void> {
     const runs = await this.stoppedRuns();
     const same = (other: StoppedRun) =>
       other.chatId === run.chatId && other.stoppedAt === run.stoppedAt;
