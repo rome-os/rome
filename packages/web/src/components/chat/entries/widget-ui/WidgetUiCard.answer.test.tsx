@@ -180,6 +180,15 @@ describe("a question card described as data", () => {
     expect(screen.queryByText(/Could not read this card/)).toBeNull();
   });
 
+  it("says why core refused an event, when it says", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ error: "Log in to Composio first" }, { status: 409 }),
+    );
+    render(<WidgetUiCard widgetId="m1" toolUseId="q1" appId="core" ui={ui} text="" waiting={{}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    expect(await screen.findByText("Log in to Composio first")).toBeTruthy();
+  });
+
   it("tells the view what core said, so the view reads the chat again", async () => {
     captureEvents();
     const heard: number[] = [];

@@ -247,6 +247,18 @@ import Testing
         #expect(tries.value == 2)
     }
 
+    /// A refusal that says why shows why.
+    @Test func aRefusalSaysWhy() async throws {
+        let surface = WidgetSurface()
+        surface.show(try questionCard(), call: { _, _, _ in throw APIError.notFound }, press: { _, _ in
+            throw APIError.server(status: 409, message: "Log in to Composio first")
+        })
+        await surface.load()
+        find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where !surface.sendFailed { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(surface.refusal == "Log in to Composio first")
+    }
+
     @Test func anAnsweredCardShowsWhatWasSentAndTakesNoPress() async throws {
         let sent: JSONValue = .array([.object(["values": .array([.string("清淡一点")]), "text": .string("")]), .object(["values": .array([]), "text": .string("")])])
         let answers = Box<[JSONValue]>([])

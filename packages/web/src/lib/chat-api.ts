@@ -501,6 +501,8 @@ export interface WidgetEventOutcome {
   status: number;
   answered?: boolean;
   open?: string;
+  /** Why core or the widget's owner refused the event, to show the guardian. */
+  error?: string;
 }
 
 /** Sends an event a widget fired to core, which decides what it means. `turn`
@@ -515,11 +517,18 @@ export async function postWidgetEvent(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...body, turn: { inputId: randomUUID(), ...body.turn } }),
   });
-  if (!res.ok) return { ok: false, status: res.status };
   const reply = (await res.json().catch(() => null)) as {
     answered?: unknown;
     open?: unknown;
+    error?: unknown;
   } | null;
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      ...(typeof reply?.error === "string" ? { error: reply.error } : {}),
+    };
+  }
   return {
     ok: true,
     status: res.status,

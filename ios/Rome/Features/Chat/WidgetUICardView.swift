@@ -49,7 +49,12 @@ struct WidgetUICardView: View {
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
             }
-            if surface.sendFailed {
+            if surface.sendFailed, let why = surface.refusal {
+                Text(verbatim: why)
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if surface.sendFailed {
                 Text("Couldn't send your answer. Your choices are kept")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.destructive)
@@ -89,6 +94,8 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var failed = false
     /// Core did not take the last event the card sent.
     @Published private(set) var sendFailed = false
+    /// Why core or the card's owner refused the last event, when it said.
+    @Published private(set) var refusal: String?
     @Published private(set) var undrawable = false
     @Published private(set) var busy = false
     @Published private(set) var clears = WidgetClears()
@@ -231,11 +238,13 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             // sent, and any other card reads its data again, and that read
             // says whether the card's data failed.
             sendFailed = false
+            refusal = nil
             failed = false
             if let url = reply.open { open(url) }
             if waits && reply.answered { sent = true } else { await load() }
         } catch {
             sendFailed = true
+            if case APIError.server(_, let message?) = error, !message.isEmpty { refusal = message } else { refusal = nil }
         }
     }
 

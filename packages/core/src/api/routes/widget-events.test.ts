@@ -253,6 +253,59 @@ describe("an event on a widget", () => {
     });
   });
 
+  it("reads an app's answer that declines as a dismissal, and passes on why an app refused", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("dismiss", "connect-card/dismiss"),
+            button("connect", "connect-card/connect"),
+          ],
+        },
+      },
+    };
+    const declined = setup({ m7: { chatId: "c1", content: [connect] } }, "guardian", {
+      answer: { toolkit: "notion", dismissed: true },
+    });
+    await declined.fire("m7", { name: "connect-card/dismiss" });
+    expect(declined.forwarded[1]?.body).toMatchObject({
+      parts: [
+        {
+          output: {
+            dismissed: true,
+            from: "connector",
+            value: { toolkit: "notion", dismissed: true },
+          },
+        },
+      ],
+    });
+
+    const app = widgetEventRoutes({
+      webchatRepo: {
+        widgetMessage: async () => ({ chatId: "c1", content: JSON.stringify([connect]) }),
+        getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
+      },
+      callerOwner: async () => "guardian",
+      forward: async () =>
+        Response.json(
+          { error: "no_api_key", message: "Log in to Composio first" },
+          { status: 409 },
+        ),
+    });
+    const res = await app.request("/chat/widgets/m7/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "connect-card/connect" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "Log in to Composio first" });
+  });
+
   it("dismisses with the output every dismissal has", async () => {
     const { fire, forwarded } = setup({ m2: { chatId: "c1", content: [question] } });
     await fire("m2", { name: "rome:dismiss", context: { ignored: true } });
