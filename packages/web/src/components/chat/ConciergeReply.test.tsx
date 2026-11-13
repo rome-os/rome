@@ -231,4 +231,3 @@ it("draws no owner bubble for an on-behalf message from before, which its turn's
   expect(screen.queryByText("Sent by Concierge")).toBeNull();
   expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
 });
-
