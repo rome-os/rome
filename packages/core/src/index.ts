@@ -60,6 +60,7 @@ import {
 } from "./apps/actions/app-action-schema-cache.js";
 import {
   initTelemetry,
+  startEventLoopDelayMetric,
   getTracer,
   shutdown as shutdownTelemetry,
   withInboundSpans,
@@ -401,6 +402,7 @@ async function main() {
   ensureProfileExampleAppsSeeded();
 
   initTelemetry();
+  startEventLoopDelayMetric();
   const tracer = getTracer("rome");
 
   const db: DrizzleDb = getDb(config.database);
