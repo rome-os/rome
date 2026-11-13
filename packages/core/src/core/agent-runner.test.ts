@@ -8590,6 +8590,34 @@ describe("AgentRunner", () => {
       expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
     });
 
+    it("fails a turn that waits on a card described as data, as any suspended turn", async () => {
+      const payload = { decision: "REPLY", reason: "after the card" };
+      const provider = structuredProvider(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-card",
+          tool: "demo_action",
+          output: { showWidget: true, waits: true, appId: "connector", ui: { components: [] } },
+        };
+        yield { type: "result", content: JSON.stringify(payload), structuredOutput: payload };
+      });
+      const manager = createSessions(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
+      const session = await manager.open({
+        agentName: "test-structured",
+        channelThreadKey: "test:structured-card",
+      });
+
+      const events: AgentEvent[] = [];
+      for await (const msg of (await startAfter(session, { prompt: "Triage." })).events())
+        events.push(msg);
+
+      expect(events.find((event) => event.type === "error")).toMatchObject({
+        error: expect.stringContaining("cannot suspend"),
+      });
+    });
+
     it("does not configure provider-native output for an agent without outputSchema", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "ok" }]]);
       const runner = createRunner(provider);
