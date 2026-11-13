@@ -7,11 +7,10 @@
 import { CornerDownRight } from "lucide-react";
 import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage } from "@/lib/chat-types";
 import { useReplyDraft } from "./reply-draft";
-import { replyPreview } from "./reply-source";
 
 /** What the label under one message names: its task's thread, by the task's title. */
 export interface ThreadLabel {
@@ -25,6 +24,8 @@ export interface ChatThreads {
   labels: ReadonlyMap<string, ThreadLabel>;
   /** The task thread each message in one is in, by message id: the guardian's too. */
   taskThreads: ReadonlyMap<string, string>;
+  /** Each task thread's title, by the thread. */
+  titles: ReadonlyMap<string, string>;
 }
 
 const ChatThreadsContext = createContext<ChatThreads | null>(null);
@@ -130,10 +131,8 @@ export function useChatThreadsValue(
 ): ChatThreads {
   return useMemo(() => {
     const shown = placed(messages, rethreaded);
-    return {
-      labels: threadLabels(shown, liveTitles),
-      taskThreads: taskThreads(shown, liveTitles).threads,
-    };
+    const { threads, titles } = taskThreads(shown, liveTitles);
+    return { labels: threadLabels(shown, liveTitles), taskThreads: threads, titles };
   }, [messages, rethreaded, liveTitles]);
 }
 
@@ -178,14 +177,6 @@ function isTaskCard(message: ThreadTimelineMessage): boolean {
   );
 }
 
-function wordsOf(message: Pick<ChatMessage, "id" | "content">): string {
-  return parseMessageEntries(message)
-    .flatMap((part) => (part.type === "text" && part.content.trim() ? [part.content] : []))
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /**
  * The quiet look of a label under a message, as the iOS app draws it: about a
  * spacing step from its bubble, a small turn-down arrow then the text, faint,
@@ -228,13 +219,7 @@ export function ThreadLabelLine({
       type="button"
       data-thread-label={label.thread}
       title={name}
-      onClick={() =>
-        draft.openThread({
-          messageId: message.id,
-          author: "agent",
-          preview: replyPreview(wordsOf(message)),
-        })
-      }
+      onClick={() => draft.openThread({ thread: message.id, title: name })}
       // About 4px (a spacing step) from its own bubble and 12px before the next
       // message, so it reads as its bubble's. It keeps its look on hover; a
       // keyboard focus shows a ring. A long title is cut at a fixed width,
@@ -247,14 +232,13 @@ export function ThreadLabelLine({
   );
 }
 
-/** Where a message's turn came from, such as "Routine · Daily summary": text, not a control. */
+/** Where a message's turn came from, such as "Routine · Daily summary": text with no arrow, not a control. */
 function SourceLabel({ source }: { source: SystemInputSource }) {
   const { t } = useTranslation("chat");
   const kind = t(`automatedInput.kinds.${source.type}`);
   const name = source.name ? t("automatedInput.named", { kind, name: source.name }) : kind;
   return (
     <p data-source-label={source.type} title={name} className={LABEL_LINE}>
-      <LabelArrow />
       <span className="max-w-56 truncate">{name}</span>
     </p>
   );

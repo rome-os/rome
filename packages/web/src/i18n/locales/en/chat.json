@@ -177,7 +177,8 @@
     "action": "Reply",
     "dismiss": "Cancel reply",
     "jump": "Go to the original message",
-    "openThread": "Open the chat thread"
+    "openThread": "Open the chat thread",
+    "toThread": "Reply to {{title}}"
   },
   "senderGuardian": "Guardian",
   "inputState": {

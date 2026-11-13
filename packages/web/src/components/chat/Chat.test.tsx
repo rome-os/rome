@@ -203,9 +203,7 @@ function ReplyJump() {
       <button
         type="button"
         data-testid="open-thread"
-        onClick={() =>
-          reply?.openThread({ messageId: "u-1", author: "guardian", preview: "First" })
-        }
+        onClick={() => reply?.openThread({ thread: "u-1", title: "First" })}
       >
         open thread
       </button>

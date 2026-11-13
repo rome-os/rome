@@ -119,7 +119,8 @@ const AgentEntry = memo(function AgentEntry({
           copyText=""
           createdAt={message.createdAt}
           feedbackTurn={null}
-          reply={replyTo(`[Task chat] ${part.title} (chat ${part.chatId})`)}
+          // A card has no text to quote: only a message with text takes a Reply.
+          reply={null}
           anchorId={index === firstBubble ? message.id : undefined}
           partOf={message.id}
         >

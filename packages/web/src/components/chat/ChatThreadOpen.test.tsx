@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ChatMessage } from "@/lib/chat-types";
 import "@/i18n";
@@ -18,6 +19,7 @@ import {
   taskThreads,
   threadLabels,
 } from "./reply/chat-threads";
+import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
 
 // The thread label under the agent's messages in a Concierge chat's
@@ -313,8 +315,13 @@ function renderTranscript(shown: ChatMessage[] = messages) {
         <ReplyDraftProvider value={draft}>
           <ThemeProvider>
             <ChatThreadsProvider
-              value={{ labels: threadLabels(shown), taskThreads: taskThreads(shown).threads }}
+              value={{
+                labels: threadLabels(shown),
+                taskThreads: taskThreads(shown).threads,
+                titles: taskThreads(shown).titles,
+              }}
             >
+              <ReplyBar />
               <ConciergeTranscript
                 rows={rows}
                 live={idle}
@@ -327,7 +334,13 @@ function renderTranscript(shown: ChatMessage[] = messages) {
       </MemoryRouter>
     );
   }
-  render(<Chat />);
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <Chat />
+    </QueryClientProvider>,
+  );
   return () => box.thread;
 }
 
@@ -390,6 +403,29 @@ describe("the thread label in the transcript", () => {
     expect(classes).toContain("focus-visible:outline-solid");
   });
 
+  it("offers no Reply on a card, and its label opens the thread with a reply to it", () => {
+    const card = {
+      ...message("c1", "assistant", "", "m1", 4),
+      content: JSON.stringify([
+        { type: "task_chat", chatId: "task-1", title: "Kyoto trip", show: "ask" },
+      ]),
+    } as ChatMessage;
+    const thread = renderTranscript([...messages, card]);
+    // Each bubble's details hold its actions.
+    const actionsOf = (id: string) => {
+      const bubble = document.querySelector<HTMLElement>(`[data-timeline-anchor="${id}"]`)!;
+      fireEvent.click(within(bubble).getByRole("button", { name: "Message details" }));
+      return bubble;
+    };
+    expect(within(actionsOf("c1")).queryByRole("button", { name: "Reply" })).toBeNull();
+    // A message with text still takes one.
+    expect(within(actionsOf("a2")).getByRole("button", { name: "Reply" })).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Kyoto trip" }).at(-1)!);
+    expect(thread()).toBe("c1");
+    expect(document.querySelector("[data-reply-bar]")?.textContent).toBe("Reply to Kyoto trip");
+  });
+
   it("sits under none of the guardian's messages", () => {
     renderTranscript();
     const labelled = screen
@@ -440,10 +476,8 @@ describe("the source label in the transcript", () => {
     ]);
     const label = screen.getByText("Routine · Daily summary");
     expect(label.closest("button")).toBeNull();
-    // The same arrow as a thread label, before the text.
-    expect(
-      label.closest("[data-source-label]")?.querySelector("svg[aria-hidden='true']"),
-    ).not.toBeNull();
+    // Plain text: no arrow, unlike a thread label.
+    expect(label.closest("[data-source-label]")?.querySelector("svg")).toBeNull();
     expect(label.closest("[data-source-label]")?.getAttribute("data-source-label")).toBe("routine");
     expect(screen.queryByRole("note")).toBeNull();
   });
