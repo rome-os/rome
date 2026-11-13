@@ -50,6 +50,15 @@ export interface CreatedApproval {
   status: ApprovalStatus;
   description: string;
   payload: unknown;
+  /** The chat it was asked in, from its payload's `channelContext.threadId`, or null. */
+  threadId: string | null;
+}
+
+/** The chat an approval's payload says it was asked in, or null. */
+export function threadIdOf(payload: unknown): string | null {
+  const threadId = (payload as { channelContext?: { threadId?: unknown } } | null | undefined)
+    ?.channelContext?.threadId;
+  return typeof threadId === "string" ? threadId : null;
 }
 
 export type ApprovalCreatedListener = (approval: CreatedApproval) => void;
@@ -60,6 +69,18 @@ export class ApprovalsRepository {
   private resolvedListeners = new Set<ApprovalResolvedListener>();
 
   constructor(private db: DrizzleDb) {}
+
+  /** Chat `threadId`'s approvals of `status`, newest first, found by its index. */
+  async listInThread(threadId: string, status?: ApprovalStatus) {
+    return this.db
+      .select()
+      .from(approvals)
+      .where(
+        and(eq(approvals.threadId, threadId), status ? eq(approvals.status, status) : undefined),
+      )
+      .orderBy(desc(approvals.createdAt), desc(approvals.id))
+      .all();
+  }
 
   async list(status?: ApprovalStatus) {
     return this.db
@@ -89,6 +110,7 @@ export class ApprovalsRepository {
     const id = uuid();
     const now = new Date();
     const status = data.status ?? "pending";
+    const threadId = threadIdOf(data.payload);
     await this.db.insert(approvals).values({
       id,
       type: data.type,
@@ -96,6 +118,7 @@ export class ApprovalsRepository {
       requestedBy: data.requestedBy,
       description: data.description,
       payload: data.payload ?? null,
+      threadId,
       executionState: "idle",
       createdAt: now,
       resolvedAt: null,
@@ -109,6 +132,7 @@ export class ApprovalsRepository {
         status,
         description: data.description,
         payload: data.payload ?? null,
+        threadId,
       });
     }
     return id;

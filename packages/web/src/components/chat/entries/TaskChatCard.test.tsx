@@ -15,6 +15,7 @@ import { TaskChatCard } from "./TaskChatCard";
 import type { TaskCard } from "@rome/api-types/chat";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { cardKey, LiveTaskCardsProvider } from "./live-task-cards";
+import { waitingTaskCardMessages } from "../waiting-task-cards";
 
 rs.mock("@/hooks/use-live-events", () => ({
   chatStatusTopic: "chat-status",
@@ -249,13 +250,24 @@ function Served({
 }
 
 /** Blocks as Rome hands them out, each with its card, read again whenever the task list reloads. */
-function ServedBlocks({ blocks }: { blocks: (Record<string, unknown> & { type: "task_chat" })[] }) {
+function ServedBlocks({
+  blocks,
+  newest = true,
+}: {
+  blocks: (Record<string, unknown> & { type: "task_chat" })[];
+  /** Whether these blocks end with the chat's newest card; a later message holds it otherwise. */
+  newest?: boolean;
+}) {
   useConciergeTasks({ allDone: true });
   const card = cardNow();
   const served = blocks.map((block) => ({ ...block, card }) as never as ChatEntry);
   // The newest card for the chat is the last one, as the transcript tells it.
   return (
-    <LatestTaskChatsContext.Provider value={new Map([[chatId, served.at(-1)!]])}>
+    <LatestTaskChatsContext.Provider
+      value={
+        new Map([[chatId, newest ? served.at(-1)! : ({ type: "text", content: "" } as ChatEntry)]])
+      }
+    >
       {renderFlatEntries(served)}
     </LatestTaskChatsContext.Provider>
   );
@@ -598,7 +610,19 @@ describe("TaskChatCard shown as one card or the other", () => {
   });
 });
 
+/** A Concierge message holding `block`, as Rome hands it out with its card. */
+function served(id: string, block: Record<string, unknown>): ChatMessage {
+  return {
+    id,
+    sessionId: "concierge",
+    role: "assistant",
+    content: JSON.stringify([{ ...block, card: cardNow() }]),
+    createdAt: "2026-11-10T12:00:00Z",
+  } as ChatMessage;
+}
+
 function TaskJumpHarness() {
+  const { tasks } = useConciergeTasks({ allDone: true });
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLDivElement | null>(null);
   const [floor, setFloor] = useState<HTMLDivElement | null>(null);
@@ -610,7 +634,12 @@ function TaskJumpHarness() {
         <LatestTaskChatsContext.Provider value={new Map([[chatId, latest]])}>
           <div ref={setScroller} data-testid="task-scroller">
             <div ref={setContent}>
-              <ServedBlocks blocks={[older, latest]} />
+              <div data-timeline-anchor="m-older">
+                <ServedBlocks blocks={[older]} newest={false} />
+              </div>
+              <div data-timeline-anchor="m-latest">
+                <ServedBlocks blocks={[latest]} />
+              </div>
             </div>
             <div ref={setFloor} data-testid="task-floor">
               <ChatPendingCardJump
@@ -618,6 +647,10 @@ function TaskJumpHarness() {
                 content={content}
                 floor={floor}
                 currentReplyMessageIds={new Set(["unrelated-main-reply"])}
+                waitingTaskMessageIds={waitingTaskCardMessages(
+                  [{ ...served("m-older", older) }, { ...served("m-latest", latest) }],
+                  tasks,
+                )}
               />
             </div>
           </div>
@@ -750,7 +783,11 @@ describe("TaskChatCard", () => {
             : cardTop;
       return new DOMRect(0, top, 400, this.dataset.testid === "task-scroller" ? 600 : 100);
     });
-    render(<TaskJumpHarness />);
+    render(
+      <QueryClientProvider client={client}>
+        <TaskJumpHarness />
+      </QueryClientProvider>,
+    );
     const scroller = screen.getByTestId("task-scroller");
     const scrollTo = rs.fn(() => {
       cardTop = 0;
@@ -779,6 +816,11 @@ describe("TaskChatCard", () => {
       .at(-1)?.[1];
     act(() => {
       handlers?.session_running.fn({ sessionId: chatId, running: true });
+    });
+    // The task runs again, so its list says it waits on no one.
+    waiting = false;
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["concierge-tasks"] });
     });
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),

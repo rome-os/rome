@@ -1023,10 +1023,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       emit("session_running", event);
     runningListeners.add(listener);
     const unsubscribeName = deps.agentNameEvents?.subscribe(emit);
+    // A press's turn ended: the task panel stops waiting on it.
+    const unsubscribeInputs = deps.concierge?.onInputsSettled?.((event) =>
+      emit("inputs_settled", event),
+    );
     for (const sessionId of runningSessions) listener({ sessionId, running: true });
     return () => {
       runningListeners.delete(listener);
       unsubscribeName?.();
+      unsubscribeInputs?.();
     };
   };
   // `session_running` here is the open chat's cue to look up the turn to

@@ -407,6 +407,25 @@ export function startConciergeEvents(
           }),
         );
     }
+    // The owner's messages a turn took in are done with once it ends, unless
+    // a newer input took it over and carries them on: a task panel press
+    // reads from this that its turn ended, without paging the chat.
+    if (!event.handedOn) {
+      void webchatRepo
+        .getTurnChatMessages(chatId, event.turn.turnId)
+        .then((rows) =>
+          service.inputsSettled(
+            chatId,
+            rows.filter((row) => row.role === "user").map((row) => row.id),
+          ),
+        )
+        .catch((error: unknown) =>
+          log.warn("failed to tell a turn's messages are done with", {
+            chatId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
     // What this turn said settles no news: a report that carries it does,
     // once it runs to its end. Its record of what it said is done with.
     service.forgetTurn(event.turn.turnId);
@@ -499,12 +518,11 @@ export function startConciergeEvents(
     id?: string;
     status?: string;
     description?: string;
-    payload: unknown;
+    threadId: string | null;
     resolvedBy?: string | null;
   }) => {
-    const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
-      ?.channelContext;
-    if (typeof context?.threadId !== "string") return;
+    if (!approval.threadId) return;
+    const context = { threadId: approval.threadId };
     const byRome = approval.resolvedBy?.startsWith("rome:") === true;
     approvalAnswered.set(context.threadId, { at: Date.now(), byRome });
     // The decision is news of its own: the task's last turn may have ended
@@ -703,12 +721,10 @@ export function startConciergeEvents(
   const onApproval = async (approval: {
     status: string;
     description: string;
-    payload: unknown;
+    threadId: string | null;
   }) => {
-    if (approval.status !== "pending") return;
-    const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
-      ?.channelContext;
-    if (typeof context?.threadId !== "string") return;
+    if (approval.status !== "pending" || !approval.threadId) return;
+    const context = { threadId: approval.threadId };
     const taskId = await taskOf(context.threadId);
     if (!taskId) return;
     // A stopped task's work can still ask for one as it stops, as an
@@ -934,10 +950,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     void guard(tracker.sessionChanged(sessionId, change));
     if (!change.toolOnly) void guard(tasks.chatChanged(sessionId));
   };
-  const approvalChanged = (approval: { payload: unknown }) => {
-    const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
-      ?.channelContext?.threadId;
-    if (typeof threadId === "string") sessionChanged(threadId);
+  const approvalChanged = (approval: { threadId: string | null }) => {
+    if (approval.threadId) sessionChanged(approval.threadId);
   };
 
   // The rows about to be reported, so a row that stops being one moves its chat too.

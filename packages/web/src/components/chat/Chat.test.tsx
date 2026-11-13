@@ -486,6 +486,17 @@ function pane(children: ReactNode) {
   return <ToolTraceContext.Provider value={host}>{children}</ToolTraceContext.Provider>;
 }
 
+/** A query client as the app gives every chat: the Concierge chat reads its task list through it. */
+const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+/** Wraps what a test renders, and every rerender of it, in a query client of its own. */
+function withQueries() {
+  const client = queries();
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+}
+
 function renderChat(children: ReactNode, live?: LiveEventsClient) {
   const routed = <MemoryRouter>{pane(children)}</MemoryRouter>;
   return render(
@@ -494,6 +505,7 @@ function renderChat(children: ReactNode, live?: LiveEventsClient) {
     ) : (
       routed
     ),
+    { wrapper: withQueries() },
   );
 }
 
@@ -2227,7 +2239,7 @@ describe("Chat Concierge empty state", () => {
         </ToolTasksContext.Provider>
       </SlotProvider>
     );
-    const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>);
+    const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>, { wrapper: withQueries() });
     // Chat on screen: its floating header takes the shell's buttons.
     await waitFor(() => expect(seen.outlet).toBe(true));
 
@@ -2358,7 +2370,7 @@ describe("Chat Concierge empty state", () => {
         </SlotProvider>
       </MemoryRouter>
     );
-    const view = render(at(false, false));
+    const view = render(at(false, false), { wrapper: withQueries() });
     const hang = screen.getByTestId("hang");
     const bar = screen.getByTestId("bar");
     // The same badge, name tag and status as the floating header.

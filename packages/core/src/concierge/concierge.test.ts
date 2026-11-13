@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { threadIdOf } from "../apps/repositories/approvals.js";
 import { approvalWaits } from "../test/open-waits.js";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
@@ -539,11 +540,14 @@ function setup(
       fake = true;
       rs.useFakeTimers();
     },
+    // As the repository tells it: with the chat its payload names kept apart.
     createApproval: (approval: Record<string, unknown>) => {
-      for (const listener of approvalListeners) listener(approval);
+      for (const listener of approvalListeners)
+        listener({ ...approval, threadId: threadIdOf(approval.payload) });
     },
     resolveApproval: (approval: Record<string, unknown>) => {
-      for (const listener of resolvedListeners) listener(approval);
+      for (const listener of resolvedListeners)
+        listener({ ...approval, threadId: threadIdOf(approval.payload) });
     },
     chats,
     send,
@@ -5498,6 +5502,20 @@ describe("Concierge status reactions", () => {
         text: "ok",
         handedOn,
       });
+
+    it("says when the turn that took the owner's messages in ended, unless a newer one carries them on", async () => {
+      const s = setup({ said: false });
+      const settled: unknown[] = [];
+      s.service.onInputsSettled((event) => settled.push(event));
+      guardianSays(s, "press", "turn-a");
+      await conciergeEnds(s, "interrupted", "turn-a", true);
+      await s.settle();
+      expect(settled).toEqual([]);
+      guardianSays(s, "next", "turn-b");
+      await conciergeEnds(s, "completed", "turn-b");
+      await s.settle();
+      expect(settled).toEqual([{ sessionId: CONCIERGE_CHAT, inputIds: ["next"] }]);
+    });
 
     it("is working while a direct answer's turn runs, and goes away when it completes", async () => {
       const s = setup({ said: false });

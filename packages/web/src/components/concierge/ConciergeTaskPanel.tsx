@@ -34,7 +34,8 @@ import {
 import { useActiveSessionId } from "@/hooks/use-active-session-id";
 import { useConciergeName } from "@/hooks/use-concierge";
 import { cn } from "@/lib/utils";
-import { checkPresses } from "./check-presses";
+import { inputsSettledSchema, settlePresses } from "./check-presses";
+import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { requestConciergeJump } from "./concierge-jump";
 import { doneMessage, pressText, sendTaskAction, stopTask } from "./send-task-action";
 import { StopGlyph } from "./StopGlyph";
@@ -42,9 +43,6 @@ import { TaskGlyph } from "./TaskGlyph";
 import { formatTaskTime, groupTasks, taskTime, tasksOfChat, type TaskGroupKey } from "./tasks";
 import { type PendingAction, settlePending, usePendingActions } from "./task-pending";
 import { useConciergeTasks } from "./use-concierge-tasks";
-
-/** How often a pending press asks whether its turn has ended. */
-const CHECK_PRESSES_MS = 2_000;
 
 /** What a row's button does: a press the Concierge hears, or cancelling its checks. */
 type RowAction = ConciergeTaskAction | "cancelCheck";
@@ -257,12 +255,10 @@ export function ConciergeTaskPanel({
 
   // Rows the Concierge wrote settle their pending buttons, and a turn that took
   // a press in and ended without a write tells that button nothing changed.
-  const waiting = [...pending.values()].some((press) => press.phase === "pending");
-  useEffect(() => {
-    if (!waiting) return;
-    const timer = setInterval(() => void checkPresses().catch(() => {}), CHECK_PRESSES_MS);
-    return () => clearInterval(timer);
-  }, [waiting]);
+  // The server says when that turn ended; the panel pages no chat for it.
+  useLiveEvents(chatStatusTopic, {
+    inputs_settled: { schema: inputsSettledSchema, fn: settlePresses },
+  });
   useEffect(() => {
     for (const task of tasks) settlePending(task);
   }, [tasks]);

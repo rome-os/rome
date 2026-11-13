@@ -45,7 +45,7 @@ import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
-import type { ChatCardSettledEvent } from "@rome/api-types/chat";
+import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
 import { openQuestionCards, settledCard, type TaskCardSources } from "./task-cards.js";
 import {
   CONCIERGE_AGENT_ID,
@@ -257,6 +257,7 @@ export class ConciergeService {
   private approvalExpiry: ((chatId: string, turnDown: TurnDown) => Promise<number>) | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
   private readonly cardListeners = new Set<(event: ChatCardSettledEvent) => void>();
+  private readonly inputListeners = new Set<(event: InputsSettledEvent) => void>();
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
   /** Per Concierge chat, the guardian messages superseded turns handed on. */
@@ -893,6 +894,24 @@ export class ConciergeService {
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */
+  /**
+   * Calls `listener` with the owner's messages a Concierge turn took in once
+   * that turn ended and nothing carries them on. Returns the unsubscribe.
+   */
+  onInputsSettled(listener: (event: InputsSettledEvent) => void): () => void {
+    this.inputListeners.add(listener);
+    return () => {
+      this.inputListeners.delete(listener);
+    };
+  }
+
+  /** The turn that took messages `inputIds` of Concierge chat `chatId` in ended. */
+  inputsSettled(chatId: string, inputIds: readonly string[]): void {
+    if (inputIds.length === 0) return;
+    for (const listener of this.inputListeners)
+      listener({ sessionId: chatId, inputIds: [...inputIds] });
+  }
+
   /** Calls `listener` whenever a card a task card shows settles. Returns the unsubscribe. */
   onCardSettled(listener: (event: ChatCardSettledEvent) => void): () => void {
     this.cardListeners.add(listener);

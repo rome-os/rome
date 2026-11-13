@@ -371,22 +371,32 @@ export const sentinelLog = sqliteTable("sentinel_log", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const approvals = sqliteTable("approvals", {
-  id: text("id").primaryKey(),
-  type: text("type", { enum: APPROVAL_TYPES }).notNull(),
-  status: text("status", { enum: APPROVAL_STATUSES }).notNull(),
-  executionState: text("execution_state", { enum: APPROVAL_EXECUTION_STATES })
-    .notNull()
-    .default("idle"),
-  requestedBy: text("requested_by").notNull(),
-  description: text("description").notNull(),
-  payload: text("payload", { mode: "json" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
-  resolvedBy: text("resolved_by"),
-  executedAt: integer("executed_at", { mode: "timestamp" }),
-  executionError: text("execution_error"),
-});
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    id: text("id").primaryKey(),
+    type: text("type", { enum: APPROVAL_TYPES }).notNull(),
+    status: text("status", { enum: APPROVAL_STATUSES }).notNull(),
+    executionState: text("execution_state", { enum: APPROVAL_EXECUTION_STATES })
+      .notNull()
+      .default("idle"),
+    requestedBy: text("requested_by").notNull(),
+    description: text("description").notNull(),
+    payload: text("payload", { mode: "json" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+    resolvedBy: text("resolved_by"),
+    executedAt: integer("executed_at", { mode: "timestamp" }),
+    executionError: text("execution_error"),
+    /**
+     * The chat the approval was asked in, as its payload's
+     * `channelContext.threadId` names it: kept apart so a chat's approvals are
+     * found by an index. Null when it was asked in no chat.
+     */
+    threadId: text("thread_id"),
+  },
+  (table) => [index("idx_approvals_thread").on(table.threadId)],
+);
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),

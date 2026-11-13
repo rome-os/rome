@@ -85,7 +85,7 @@ import type {
 } from "@rome/api-types/trace-segments";
 import { useStableMap } from "@/hooks/use-stable-map";
 import { HOLD_STICK_EVENT, useStickToBottom } from "@/hooks/use-stick-to-bottom";
-import { ChatPendingCardJump } from "@/components/chat/ChatPendingCardJump";
+import { ChatPendingCardJump, ConciergeCardJump } from "@/components/chat/ChatPendingCardJump";
 import {
   CHAT_PAGE_TURNS,
   CONCIERGE_PAGE_TURNS,
@@ -986,6 +986,7 @@ export function Chat({
     () => new Set(currentReplyMessages(view, runningTurnId).map((message) => message.id)),
     [view, runningTurnId],
   );
+
   const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
   // The latest assistant text block. The live row follows it (and smooths it
   // into typing, see LiveTail); the chat does not render for it.
@@ -2662,12 +2663,23 @@ export function Chat({
                       centered jump to latest. */}
                   {mainSessionId && !threadOpen && (
                     <div className="pointer-events-none absolute right-0 bottom-full mb-2">
-                      <ChatPendingCardJump
-                        scroller={scrollerEl}
-                        content={contentEl}
-                        floor={floorEl}
-                        currentReplyMessageIds={currentReplyMessageIds}
-                      />
+                      {concierge ? (
+                        <ConciergeCardJump
+                          scroller={scrollerEl}
+                          content={contentEl}
+                          floor={floorEl}
+                          currentReplyMessageIds={currentReplyMessageIds}
+                          messages={view.displayMessages}
+                          liveCards={liveCards}
+                        />
+                      ) : (
+                        <ChatPendingCardJump
+                          scroller={scrollerEl}
+                          content={contentEl}
+                          floor={floorEl}
+                          currentReplyMessageIds={currentReplyMessageIds}
+                        />
+                      )}
                     </div>
                   )}
                   {shareMode && mainSessionId ? (

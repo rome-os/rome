@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
 import i18n from "@/i18n";
-import { LiveEventsClientContext } from "@/hooks/use-live-events";
+import { chatStatusTopic, LiveEventsClientContext } from "@/hooks/use-live-events";
 import {
   acceptLatestSocket,
   FakeWebSocket,
@@ -47,10 +47,12 @@ function row(state: ConciergeTaskState, extra: Partial<ConciergeTaskDto> = {}): 
 const server = {
   recent: [] as ConciergeTaskDto[],
   all: [] as ConciergeTaskDto[],
-  /** The Concierge chat's recent messages and running turns, for the press check. */
+  /** The Concierge chat's recent messages and running turns. */
   messages: [] as Array<Record<string, unknown>>,
   turns: [] as Array<Record<string, unknown>>,
   settings: {} as Record<string, unknown>,
+  /** How many message pages the panel read: a press reads none. */
+  pages: 0,
 };
 const posts: Array<Record<string, unknown>> = [];
 /** The tasks a Stop press stopped directly. */
@@ -93,6 +95,7 @@ function mockServer() {
       return json(server.turns);
     }
     if (url.startsWith("/api/chat/sessions/concierge/messages")) {
+      server.pages += 1;
       return json({ messages: server.messages, nextCursor: null });
     }
     if (url === "/api/chat/sessions/topic-1/turns" && init?.method === "POST") {
@@ -132,14 +135,11 @@ function renderPanel(
 
 const receive = (socket: FakeWebSocket, topic: string, event: string, data: unknown) =>
   act(() => socket.receive({ type: "event", topic, event, data }));
+/** The server says the turn that took these messages of `sessionId` in ended. */
+const settled = (socket: FakeWebSocket, inputIds: unknown[], sessionId = "concierge") =>
+  receive(socket, chatStatusTopic.topic, "inputs_settled", { sessionId, inputIds });
 const upsert = (socket: FakeWebSocket, task: ConciergeTaskDto) =>
   receive(socket, "concierge.tasks", "task_upsert", { task });
-/** The Concierge chat took the press with this input id into a turn that has ended. */
-const consumed = (inputId: unknown, turnId = "turn-1") => ({
-  id: inputId,
-  turnId,
-  inputState: "consumed",
-});
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -149,6 +149,7 @@ beforeEach(() => {
   server.recent = [];
   server.all = [];
   server.messages = [];
+  server.pages = 0;
   server.turns = [];
   server.settings = {};
   posts.length = 0;
@@ -265,12 +266,12 @@ describe("ConciergeTaskPanel", () => {
 
     server.recent = [row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY })];
     const user = userEvent.setup();
-    renderPanel();
+    const { socket } = renderPanel();
     await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     await user.click(await screen.findByRole("button", { name: "Archive" }));
     await screen.findByText("Archiving…");
-    server.messages = [consumed(posts[0].inputId)];
-    expect(await screen.findByText("Milo did not change it", {}, { timeout: 4_000 })).toBeTruthy();
+    settled(socket, [posts[0].inputId]);
+    expect(await screen.findByText("Milo did not change it")).toBeTruthy();
   });
 
   it("shows one quiet line under the title: why an ended task did not finish, then its summary", async () => {
@@ -749,15 +750,17 @@ describe("ConciergeTaskPanel", () => {
     server.recent = [task];
     mockServer();
     const user = userEvent.setup();
-    renderPanel();
+    const { socket } = renderPanel();
     await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     await user.click(await screen.findByRole("button", { name: "Archive" }));
     await screen.findByText("Archiving…");
     expect(typeof posts[0].inputId).toBe("string");
 
-    server.messages = [consumed(posts[0].inputId)];
+    // The server says the turn that took the press in ended; nothing pages the chat.
+    settled(socket, [posts[0].inputId]);
 
-    expect(await screen.findByText("Rome did not change it", {}, { timeout: 4_000 })).toBeTruthy();
+    expect(await screen.findByText("Rome did not change it")).toBeTruthy();
+    expect(server.pages).toBe(0);
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(posts).toHaveLength(2));
     expect(await screen.findByText("Archiving…")).toBeTruthy();
@@ -771,7 +774,7 @@ describe("ConciergeTaskPanel", () => {
     ];
     mockServer();
     const user = userEvent.setup();
-    renderPanel();
+    const { socket } = renderPanel();
     await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     const li = (title: string) => screen.getByText(title).closest("li")!;
     await screen.findByText("First task");
@@ -781,12 +784,9 @@ describe("ConciergeTaskPanel", () => {
 
     // Turn 1 took the first press in and ended; turn 2 is queued and has not
     // seen the second press.
-    server.messages = [consumed(posts[0].inputId), { id: posts[1].inputId, inputState: "queued" }];
-    server.turns = [{ turnId: "turn-2", status: "queued" }];
+    settled(socket, [posts[0].inputId]);
 
-    expect(
-      await within(li("First task")).findByText("Rome did not change it", {}, { timeout: 4_000 }),
-    ).toBeTruthy();
+    expect(await within(li("First task")).findByText("Rome did not change it")).toBeTruthy();
     expect(within(li("Second task")).queryByText("Rome did not change it")).toBeNull();
     expect(within(li("Second task")).getByText("Archiving…")).toBeTruthy();
   });

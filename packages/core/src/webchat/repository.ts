@@ -425,9 +425,8 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   ), 0)
   and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
 ) or "rome_sessions"."id" in (
-  select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
-  where a."status" = 'pending'
-  and json_extract(a."payload", '$.channelContext.threadId') is not null
+  select a."thread_id" from "approvals" a
+  where a."status" = 'pending' and a."thread_id" is not null
 ))`.mapWith(Boolean);
 // The session's open cards, as a JSON array of { id, messageId, render, at }:
 // the cards after its last prompt that `sessionAwaitingGuardian` counts open,
@@ -1351,7 +1350,7 @@ export class WebChatRepository {
     // `sessionAwaitingGuardian` does, rather than once per chat: the
     // approvals table keeps every resolved row and has no index to find a
     // chat's.
-    const threadId = sql<string>`json_extract(${approvals.payload}, '$.channelContext.threadId')`;
+    const threadId = approvals.threadId;
     const pending = await this.db
       .select({
         chatId: threadId,
@@ -1367,6 +1366,7 @@ export class WebChatRepository {
       for (const card of parseOpenCards(row.cards)) add(row.id, card);
     }
     for (const row of pending) {
+      if (!row.chatId) continue;
       add(row.chatId, { kind: "approval", id: row.id, since: Number(row.since) * 1000 });
     }
     for (const items of open.values()) items.sort((a, b) => a.since - b.since);
@@ -1391,7 +1391,7 @@ export class WebChatRepository {
       const chat = out.get(row.id) as TaskChatCards;
       chat.questions = questionsOf(row.parts);
     }
-    const threadId = sql<string>`json_extract(${approvals.payload}, '$.channelContext.threadId')`;
+    const threadId = approvals.threadId;
     const asked = await this.db
       .select({
         chatId: threadId,
@@ -1405,6 +1405,7 @@ export class WebChatRepository {
       .from(approvals)
       .where(inArray(threadId, ids));
     for (const row of asked) {
+      if (!row.chatId) continue;
       out.get(row.chatId)?.approvals.push({
         id: row.id,
         status: row.status,

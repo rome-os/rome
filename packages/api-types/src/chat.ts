@@ -205,3 +205,14 @@ export function prettyAgentName(name: string): string {
 export function mainAgentDisplayName(configuredName: unknown, fallback = "Rome"): string {
   return (typeof configuredName === "string" ? configuredName.trim() : "") || fallback;
 }
+
+/**
+ * Live event `inputs_settled`, on the chat status topic: the Concierge turn
+ * that took the owner's messages `inputIds` of chat `sessionId` in ended,
+ * and no newer turn carries them on. A task panel press reads from it that
+ * the turn it sent is over.
+ */
+export interface InputsSettledEvent {
+  sessionId: string;
+  inputIds: string[];
+}

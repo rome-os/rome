@@ -567,6 +567,7 @@ describe("ChatReadModel", () => {
         requestedBy: "main",
         description: "approve",
         payload: { channelContext: { threadId: "chat-1" } },
+        threadId: "chat-1",
         createdAt: new Date(0),
       });
 
@@ -624,6 +625,7 @@ describe("ChatReadModel", () => {
         requestedBy: "main",
         description: "approve",
         payload: { channelContext: { threadId: "chat-1" } },
+        threadId: "chat-1",
         createdAt: new Date(40_000),
       });
       expect(await repo.awaitingGuardianSince(["chat-1"])).toEqual(new Map([["chat-1", 40_000]]));
@@ -662,6 +664,7 @@ describe("ChatReadModel", () => {
         requestedBy: "main",
         description: "approve",
         payload: { channelContext: { threadId: "chat-1" } },
+        threadId: "chat-1",
         createdAt: new Date(25_000),
       });
       const render = { builtin: true, componentId: "question-card", props: { questions: [] } };
@@ -708,6 +711,7 @@ describe("ChatReadModel", () => {
         description: "approve",
         resolvedBy: "guardian",
         payload: { channelContext: { threadId: "chat-1" } },
+        threadId: "chat-1",
         createdAt: new Date(22_000),
       });
       const cards = (await repo.taskCardsOf(["chat-1"])).get("chat-1");
@@ -741,6 +745,7 @@ describe("ChatReadModel", () => {
           requestedBy: "main",
           description: "approve",
           payload: { channelContext: { threadId } },
+          threadId,
           createdAt: new Date(at),
         });
       // chat-1: its card is newer than its pending approval.
