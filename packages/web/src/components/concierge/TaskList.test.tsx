@@ -340,6 +340,37 @@ describe("TaskList", () => {
     );
   });
 
+  it("goes back to the first page when the list reads again, so no ended row is lost or shown twice", async () => {
+    parts.tasks = Array.from({ length: ENDED_PAGE + 1 }, (_, index) =>
+      taskItem(task(`Ended ${index}`, "ended", { completedAt: NOW - (index + 1) * 1000 })),
+    );
+    renderList();
+    const ended = await screen.findByRole("region", { name: "Ended" });
+    fireEvent.click(within(ended).getByRole("button", { name: `Ended ${ENDED_PAGE + 1}` }));
+    fireEvent.click(within(ended).getByRole("button", { name: "Show 1 more" }));
+    expect(await within(ended).findByText(`Ended ${ENDED_PAGE}`)).toBeTruthy();
+    // Another task ends: the old twentieth row leaves the first page.
+    parts.tasks.push(taskItem(task("Just ended", "ended", { completedAt: NOW })));
+    acceptLatestSocket().receive({
+      type: "event",
+      topic: chatTasksTopicName("concierge"),
+      event: "tasks_changed",
+      data: { chatId: "concierge" },
+    });
+    await within(ended).findByText("Just ended");
+    const titles = () =>
+      within(ended)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent ?? "");
+    await waitFor(() => expect(titles()).toHaveLength(ENDED_PAGE + 1));
+    expect(within(ended).queryByText(`Ended ${ENDED_PAGE}`)).toBeNull();
+    // Show more brings the rest back, each once.
+    fireEvent.click(within(ended).getByRole("button", { name: "Show 2 more" }));
+    expect(await within(ended).findByText(`Ended ${ENDED_PAGE}`)).toBeTruthy();
+    expect(within(ended).getAllByText(`Ended ${ENDED_PAGE - 1}`)).toHaveLength(1);
+    expect(within(ended).getAllByText(`Ended ${ENDED_PAGE}`)).toHaveLength(1);
+  });
+
   it("says nothing runs here when the chat has none", async () => {
     parts = { tasks: [], checks: [], follows: [], routines: [] };
     renderList();

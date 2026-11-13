@@ -27,6 +27,7 @@ import { MessageRepository as StoredMessages } from "../chats/storage/message-re
 import { placeIn } from "../chats/storage/place.js";
 import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
+import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
@@ -6317,30 +6318,31 @@ describe("scheduled tasks", () => {
     expect((await s.taskRepo.get(taskId))?.stoppedAt).toBeFalsy();
   });
 
-  it("keeps both of two stopped runs whose turn-downs fail at once", async () => {
+  it("keeps both of two stopped runs whose turn-downs fail at once, in the real settings", async () => {
     const s = setup();
-    const stored = new Map<string, unknown>();
-    s.deps.settingsRepo = {
-      // A slow read, so two writes would overlap if they were not one after another.
-      get: async (key: string) => {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        return stored.get(key) ?? null;
-      },
-      set: async (key: string, value: unknown) => void stored.set(key, value),
-    } as never;
-    const keep = (
+    const db = createTestDb();
+    opened.push(db);
+    const settings = new SettingsRepository(db.db);
+    s.deps.settingsRepo = settings as never;
+    s.service.attachApprovalExpiry(async () => {
+      throw new Error("database is locked");
+    });
+    const turnDown = (
       s.service as unknown as {
-        keepStoppedRun(run: { chatId: string; stoppedAt: number }, keep: boolean): Promise<void>;
+        turnDownForStop(chatId: string, at: number, failures: number, scope: "run"): Promise<void>;
       }
-    ).keepStoppedRun.bind(s.service);
+    ).turnDownForStop.bind(s.service);
+    s.fakeTimers();
     await Promise.all([
-      keep({ chatId: "chat-a", stoppedAt: 1 }, true),
-      keep({ chatId: "chat-b", stoppedAt: 2 }, true),
+      turnDown("chat-a", 1, 0, "run"),
+      turnDown("chat-b", 2, 0, "run"),
+      turnDown("chat-c", 3, 0, "run"),
     ]);
-    expect(stored.get("conciergeStoppedRuns")).toEqual({
+    expect(await settings.get("conciergeStoppedRuns")).toEqual({
       runs: [
         { chatId: "chat-a", stoppedAt: 1 },
         { chatId: "chat-b", stoppedAt: 2 },
+        { chatId: "chat-c", stoppedAt: 3 },
       ],
     });
   });

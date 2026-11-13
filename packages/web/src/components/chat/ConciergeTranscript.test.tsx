@@ -292,6 +292,20 @@ describe("ConciergeTranscript typing indicator", () => {
       expect(dots(container)).toBeNull();
     });
 
+    it("holds no replaced history, and no other turn's message, while a turn runs", () => {
+      const { container, rerender } = render(transcript(history, true, false, SIMULATED));
+      // A reconnect replaces the page with one that shares no message: history.
+      const newest = [user("u5", "t5"), agent("a5", "t5"), agent("a6", "t6")];
+      rerender(transcript(newest, true, false, SIMULATED));
+      expect(container.textContent).toContain("said a5");
+      expect(container.textContent).toContain("said a6");
+      expect(dots(container)).toBeNull();
+      // A message of another turn arrives live: it is not the running turn's.
+      rerender(transcript([...newest, agent("a7", "t7")], true, false, SIMULATED));
+      expect(container.textContent).toContain("said a7");
+      expect(dots(container)).toBeNull();
+    });
+
     it("holds no history, and no quiet turn's first message", () => {
       const loaded = render(transcript([...history, agent("a9", "t9")], true, false, SIMULATED));
       expect(loaded.container.textContent).toContain("said a9");

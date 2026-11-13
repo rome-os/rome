@@ -20,7 +20,7 @@ const agentMessages = (rows: readonly ChatRow[]): ChatMessage[] =>
  */
 export function useSimulatedTyping(
   rows: ChatRow[],
-  live: Pick<LivePreview, "isStreaming" | "quiet" | "writing">,
+  live: Pick<LivePreview, "isStreaming" | "runningTurnId" | "quiet" | "writing">,
 ): { rows: ChatRow[]; holding: boolean } {
   const seen = useRef<Set<string> | null>(null);
   const [held, setHeld] = useState<ReadonlyArray<{ id: string; ms: number }>>([]);
@@ -35,15 +35,20 @@ export function useSimulatedTyping(
     }
     const known = seen.current;
     const lastKnown = messages.findLastIndex((message) => known.has(message.id));
+    // Rows that share no message with the ones before replace them, as a
+    // reconnect's newest page does: history, which never waits.
+    const replaced = lastKnown < 0;
     const waiting: { id: string; ms: number }[] = [];
     messages.forEach((message, index) => {
       if (known.has(message.id)) return;
       known.add(message.id);
       // Only a message that arrives after every one seen: no older page.
-      if (index <= lastKnown) return;
+      if (replaced || index <= lastKnown) return;
       const writing = live.writing;
-      if (writing?.mode !== "simulated") return;
-      if (!live.isStreaming && message.turnId !== writing.turnId) return;
+      if (writing?.mode !== "simulated" || message.turnId == null) return;
+      // Only the running turn's own message, the one the server marked.
+      const running = live.isStreaming ? live.runningTurnId : null;
+      if (message.turnId !== writing.turnId && message.turnId !== running) return;
       // A quiet turn shows nothing until it has said something.
       const spokeBefore = messages
         .slice(0, index)
@@ -52,7 +57,7 @@ export function useSimulatedTyping(
       waiting.push({ id: message.id, ms: simulatedTypingMs(message) });
     });
     if (waiting.length > 0) setHeld((current) => [...current, ...waiting]);
-  }, [rows, live.isStreaming, live.quiet, live.writing]);
+  }, [rows, live.isStreaming, live.runningTurnId, live.quiet, live.writing]);
 
   // The first waiting message shows once its time is up, and the next starts.
   const head = held[0];

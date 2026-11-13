@@ -8,7 +8,7 @@ import {
   Square,
   Workflow,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -434,13 +434,20 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   const [older, setOlder] = useState<{ items: TaskListItem[]; cursor: string | null } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pending, setPending] = useState<ReadonlyMap<string, "stop" | "respond">>(new Map());
-  const { data, isError } = useQuery({
+  const { data, isError, dataUpdatedAt } = useQuery({
     queryKey: chatTaskListKey(chatId),
     queryFn: () =>
       fetchJson<TaskListResponse>(listUrl(chatId), {
         fallback: t("concierge.taskList.loadFailed"),
       }),
   });
+  // A re-read of the first page may move rows across the pages read before
+  // it: they go, and Show more reads on from the new first page.
+  const firstPageRead = useRef(dataUpdatedAt);
+  firstPageRead.current = dataUpdatedAt;
+  useEffect(() => {
+    if (dataUpdatedAt) setOlder(null);
+  }, [dataUpdatedAt]);
   const reread = () => queryClient.invalidateQueries({ queryKey: chatTaskListKey(chatId) });
   useLiveEvents(
     { topic: chatTasksTopicName(chatId), sseUrl: `${listUrl(chatId)}/events` },
@@ -519,11 +526,14 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   }
   const showMore = (cursor: string) => {
     setLoadingMore(true);
+    const readFrom = firstPageRead.current;
     fetchJson<TaskListResponse>(`${listUrl(chatId)}?endedBefore=${encodeURIComponent(cursor)}`, {
       fallback: t("concierge.taskList.loadFailed"),
     })
       .then(
         (page) => {
+          // The first page was read again meanwhile: this page may not follow it.
+          if (firstPageRead.current !== readFrom) return;
           const ended = page.groups.find((group) => group.key === "ended");
           setOlder((current) => ({
             items: [...(current?.items ?? []), ...(ended?.items ?? [])],
