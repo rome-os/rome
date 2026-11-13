@@ -629,9 +629,6 @@
   },
   "sessionRenewal": {
     "notice": "已整理上下文 · {{reason}}",
-    "showHandoff": "查看摘要",
-    "hideHandoff": "收起",
-    "handoffTitle": "带到新上下文的摘要",
     "reasons": {
       "context": "对话较长",
       "setup": "设定已更新",

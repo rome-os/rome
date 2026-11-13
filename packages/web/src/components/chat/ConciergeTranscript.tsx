@@ -97,14 +97,7 @@ export function ConciergeTranscript({
             if (item.kind === "separator")
               return <ConciergeTimeSeparator key={item.key} at={item.at} />;
             if (item.kind === "renewal")
-              return (
-                <SessionRenewalNotice
-                  key={item.key}
-                  reason={item.reason}
-                  renewal={{ chatId: item.chatId, sessionId: item.renewedSessionId }}
-                  className="mb-0"
-                />
-              );
+              return <SessionRenewalNotice key={item.key} reason={item.reason} className="mb-0" />;
             if (item.kind === "notice")
               return (
                 <ModelSwitchNotice
