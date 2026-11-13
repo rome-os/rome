@@ -443,13 +443,15 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   });
   // A re-read that changes the first page of ended rows may move rows across
   // the pages read before it: they go, and Show more reads on from the new
-  // first page. A re-read that changes nothing there keeps them: the query
-  // keeps the old group object when its rows are the same.
-  const endedFirstPage = data?.groups.find((group) => group.key === "ended");
+  // first page. A re-read with the same ended rows in the same order keeps them.
+  const endedGroup = data?.groups.find((group) => group.key === "ended");
+  const endedFirstPage = endedGroup
+    ? [...endedGroup.items.map(itemKey), endedGroup.nextCursor ?? ""].join("\n")
+    : null;
   const firstPageRead = useRef(endedFirstPage);
   firstPageRead.current = endedFirstPage;
   useEffect(() => {
-    if (endedFirstPage) setOlder(null);
+    if (endedFirstPage !== null) setOlder(null);
   }, [endedFirstPage]);
   const reread = () => queryClient.invalidateQueries({ queryKey: chatTaskListKey(chatId) });
   useLiveEvents(

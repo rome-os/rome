@@ -393,6 +393,29 @@ describe("TaskList", () => {
     expect(within(ended).getByText(`Ended ${ENDED_PAGE}`)).toBeTruthy();
   });
 
+  it("keeps the older ended rows it read when a re-read changes a row but moves none", async () => {
+    parts.tasks = Array.from({ length: ENDED_PAGE + 1 }, (_, index) =>
+      taskItem(task(`Ended ${index}`, "ended", { completedAt: NOW - (index + 1) * 1000 })),
+    );
+    renderList();
+    const ended = await screen.findByRole("region", { name: "Ended" });
+    fireEvent.click(within(ended).getByRole("button", { name: `Ended ${ENDED_PAGE + 1}` }));
+    fireEvent.click(within(ended).getByRole("button", { name: "Show 1 more" }));
+    expect(await within(ended).findByText(`Ended ${ENDED_PAGE}`)).toBeTruthy();
+    // The newest ended task is renamed: same row, same place.
+    const [first] = parts.tasks;
+    if (first?.kind === "task") first.task = { ...first.task, title: "Renamed" };
+    acceptLatestSocket().receive({
+      type: "event",
+      topic: chatTasksTopicName("concierge"),
+      event: "tasks_changed",
+      data: { chatId: "concierge" },
+    });
+    await within(ended).findByText("Renamed");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(within(ended).getByText(`Ended ${ENDED_PAGE}`)).toBeTruthy();
+  });
+
   it("says nothing runs here when the chat has none", async () => {
     parts = { tasks: [], checks: [], follows: [], routines: [] };
     renderList();
