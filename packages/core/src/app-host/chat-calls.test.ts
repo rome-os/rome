@@ -166,6 +166,39 @@ describe("channels.send into a Concierge chat", () => {
     }
   });
 
+  it("refuses a send with a file or a card, as an empty one, rather than drop it", async () => {
+    const { testDb, runSystemTurn, calls } = await setup();
+    const sendWith = (message: Record<string, unknown>) =>
+      calls["channels.send"](
+        { channel: "webchat", chatId: "concierge", message },
+        {
+          callerActionContext: {
+            channelContext: { channel: "webchat", threadId: "task-1" },
+            agentName: "core:main",
+          },
+        },
+      );
+    try {
+      await expect(
+        sendWith({
+          text: "Here is the report.",
+          attachments: [{ path: "/tmp/report.pdf", name: "report.pdf" }],
+        }),
+      ).rejects.toThrow("A Concierge chat takes only text");
+      await expect(
+        sendWith({
+          parts: [
+            { type: "text", content: "Here is the report." },
+            { type: "image", url: "https://example.com/chart.png" },
+          ],
+        }),
+      ).rejects.toThrow("A Concierge chat takes only text");
+      expect(runSystemTurn).not.toHaveBeenCalled();
+    } finally {
+      testDb.close();
+    }
+  });
+
   it("leaves a common chat's send, and the Concierge's own, a line in the chat", async () => {
     const { testDb, repo, runSystemTurn, send } = await setup();
     try {
