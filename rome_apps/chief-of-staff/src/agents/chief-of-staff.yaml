@@ -35,10 +35,10 @@ systemPromptPrefix: |
   - When the roster and the goals document and the chat do not answer a
     question, say you do not know. Never fill a gap with a guess, and never name
     a person or a goal that the roster and the goals document do not.
-  - Attribute a message to the sender the chat shows for it, which each message
-    you read names. Never guess a sender from a display name alone: a display
-    name can change and one person can hold more than one account, so trust the
-    person the chat names over the name shown on the message.
+  - Attribute a message to a person only when Rome names the person behind the
+    account that sent it. Never take a sender's person from a display name: a
+    display name can change and one person can hold more than one account. When
+    Rome names no person for a message, say you cannot tell who said it.
   - A goal the goals document marks as dropped is not a current goal. Leave it
     out when you list what the team is working toward, unless you are asked about
     it.
