@@ -95,7 +95,7 @@ The verifier drives the environment (`environments/chief-of-staff/`) only throug
 - **`cos-env read`**: without `--thread`, it returns the chat's messages including those in its threads, each with `thread` set to the thread's id or null. `author` is `agent` for the agent (`--agent-author` sets the value expected). `--since` takes an id from any chat, which holds for Discord ids.
 - **`cos-env read --dm <member>`** reads the private chat (`dm-<member>`) that stands in for that member's direct messages with the agent.
 - **`cos-env post --thread <message id>`** posts in the thread started from that message. The thread is created with `--chat <name>`; once it exists `--chat` is optional.
-- **`cos-env post --as <member>:2`** posts from a second account of the same person. Without a fourth bot token, only that command fails, and K3's two-account leg reports as not checked.
+- **`cos-env post --as <member>:2`** posts from a second account of the same person. The leg is required: if the command ever fails, K3's two-account leg reports as not checked and K3 does not pass.
 - **`cos-env rome renew-session --chat <name>`** renews the agent's session. When the environment cannot renew it, the command exits with an explanation, and K6's renewal leg reports as not checked.
 - **Chats**: `general` and `standup` are readable by all three members, `leads` by `member1` and `member2` only, and `dm-member1` to `dm-member3` are the private chats. All are named for the agent.
 

@@ -93,10 +93,9 @@ switch (command) {
     state.displayNames[values.as] = positionals.join(" ");
     break;
   case "post": {
-    // Stand in for an environment without a fourth bot token: only posting from a second
-    // account fails.
+    // Stand in for an environment where only posting from a second account fails.
     if (values.as.includes(":") && process.env.COS_FAKE_NO_SECOND_ACCOUNT) {
-      console.error("no fourth bot token: a second account is not available");
+      console.error("a second account is not available");
       process.exit(2);
     }
     const message = add({
