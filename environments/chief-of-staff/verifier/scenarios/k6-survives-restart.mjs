@@ -49,7 +49,9 @@ export default {
     // A renewed session and a Rome restart are both part of the rule. When cos-env cannot
     // renew the session, that half stays unchecked and K6 cannot pass.
     try {
-      await ctx.env.renewSession("general");
+      // Renewal is armed per chat, so renew the private chats the K1 and K2 questions use.
+      for (const q of QUESTIONS)
+        await ctx.env.renewSession(`dm-${ctx.team.members[q.member].account}`);
       ctx.log("agent session renewed");
       checks.push(...(await sameFactsAfter(ctx, before, "after the session is renewed")));
     } catch (error) {

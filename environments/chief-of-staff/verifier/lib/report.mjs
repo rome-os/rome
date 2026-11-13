@@ -23,7 +23,7 @@ export function renderMarkdown(report) {
     part("Agent (rome_apps/chief-of-staff)", underTest.agent),
     part("Environment", underTest.environment),
     part("Verifier", underTest.verifier),
-    `- Model: ${underTest.model ?? "unknown"}`,
+    `- Model: ${typeof underTest.model === "object" && underTest.model !== null ? `\`${JSON.stringify(underTest.model)}\`` : (underTest.model ?? "unknown")}`,
     `- Judge: ${report.judge}`,
     `- Waits: reply ${report.waits.replyMs / 1000} s, A1 ${report.waits.a1Ms / 1000} s, poll ${report.waits.pollMs / 1000} s`,
   ];

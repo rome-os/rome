@@ -78,7 +78,8 @@ switch (command) {
         rome: { commit: "fake-rome", dirty: false },
         agent: { commit: `fake-${agent}`, dirty: false },
         environment: { commit: "fake-environment", dirty: false },
-        model: "scripted stand-in",
+        verifier: { commit: "fake-verifier", dirty: false },
+        model: { login: "scripted stand-in", tierModelMappings: null },
       }),
     );
     break;
