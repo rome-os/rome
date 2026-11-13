@@ -48,7 +48,8 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  * the bubble the target of a jump from a quote of it. `partOf` names the
  * message every bubble of a message belongs to, so landing on the message
  * tints all of them. `arrival` marks a bubble
- * that enters while the chat is open.
+ * that enters while the chat is open. `className` adds to the outer box, as
+ * the room a guardian bubble keeps above it for its status reaction.
  */
 export const ConciergeBubble = memo(function ConciergeBubble({
   side,
@@ -59,6 +60,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   anchorId,
   partOf,
   arrival,
+  className,
   children,
 }: {
   side: "start" | "end";
@@ -69,6 +71,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   anchorId?: string;
   partOf?: string;
   arrival?: number;
+  className?: string;
   children: ReactNode;
 }) {
   const { t } = useTranslation("chat");
@@ -100,6 +103,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
         "flex min-w-0 flex-col",
         BUBBLE_MAX_WIDTH,
         side === "end" ? "items-end" : "items-start",
+        className,
       )}
     >
       <div

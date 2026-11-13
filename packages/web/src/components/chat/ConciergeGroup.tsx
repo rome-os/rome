@@ -19,6 +19,12 @@ import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
+// Room every guardian bubble keeps above it for its status reaction, which
+// hangs half out of the bubble's top-left corner (status-reaction.tsx). With
+// the group's 8px gap it clears the bubble above. It is there whether or not
+// a mark shows, so nothing moves when one comes or goes.
+const GUARDIAN_BUBBLE_GAP = "mt-2";
+
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
 const GuardianBubble = memo(
@@ -47,6 +53,7 @@ const GuardianBubble = memo(
         }
         anchorId={msg.id}
         arrival={arrival}
+        className={GUARDIAN_BUBBLE_GAP}
       >
         <UserMessageBubble
           msg={msg}

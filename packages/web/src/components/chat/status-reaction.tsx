@@ -40,12 +40,14 @@ const MARK_FADE_MS = 150;
 
 /**
  * Rome's status reaction on a guardian message in a Concierge chat
- * (docs/domains/chats.md#status-reaction): a small capsule at the
- * bubble's bottom-right corner, like a tapback, hanging mostly below the
- * bubble so it never covers its text. It is a child of the bubble, so it
- * stays on the bubble whatever the row around it holds. It takes no room:
- * it lies over the row below, so the timeline never moves when it comes or
- * goes. It fades in and out, and only shows; it does nothing.
+ * (docs/domains/chats.md#status-reaction), placed like an iMessage tapback:
+ * the emoji alone, centered on the bubble's top-left corner, so half of it
+ * hangs outside the bubble, clear of its text. It is a child of the bubble,
+ * so it stays on the bubble whatever the row around it holds. It takes no
+ * room: every guardian bubble in a Concierge chat keeps a fixed gap above it
+ * for the mark (GUARDIAN_BUBBLE_GAP in ConciergeGroup.tsx), mark or not, so
+ * the timeline never moves when it comes or goes. It grows in and fades out,
+ * and only shows; it does nothing.
  */
 export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusReaction | null }) {
   const { t } = useTranslation("chat");
@@ -80,9 +82,11 @@ export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusRea
       title={label}
       data-status-reaction={shown}
       data-leaving={leaving || undefined}
-      className="pointer-events-none absolute right-3 -bottom-1.5 z-10 flex h-5 origin-bottom-right scale-85 select-none items-center rounded-full bg-surface-muted px-1 text-aux"
+      // The emoji alone, 18px at full color, centered on the bubble's corner
+      // so half of it hangs outside.
+      className="pointer-events-none absolute -top-2.5 -left-2.5 flex size-5 select-none items-center justify-center text-title"
     >
-      <span className="opacity-75">{EMOJI[shown]}</span>
+      {EMOJI[shown]}
     </span>
   );
 }

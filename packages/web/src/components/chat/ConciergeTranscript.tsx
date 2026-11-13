@@ -88,8 +88,7 @@ export function ConciergeTranscript({
           ref={contentRef}
           data-chat-transcript
           data-concierge-transcript
-          // The bottom room clears a status mark hanging under the last bubble.
-          className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-6"
+          className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-4"
           role="log"
           aria-relevant="additions"
           aria-busy={typing || undefined}
