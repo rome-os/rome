@@ -14,9 +14,9 @@ final class ThreadStore {
     let anchor: ChatMessage
     /// The thread's first message, as the server names it; the anchor's own
     /// id while it is alone, so a reply placed under it is recognised.
-    private(set) var root: String
+    private(set) var root: String { didSet { rebuildRows() } }
     /// Messages of the thread the chat does not hold, from the read.
-    private(set) var older: [ChatMessage]
+    private(set) var older: [ChatMessage] { didSet { rebuildRows() } }
     private(set) var loaded = false
 
     @ObservationIgnored private weak var chat: TranscriptStore?
@@ -30,6 +30,7 @@ final class ThreadStore {
         self.backend = backend
         root = older.first?.chatThreadId ?? anchor.threadRoot
         self.older = older
+        rebuildRows()
     }
 
     /// The thread's messages, oldest first: the chat's own copies, then any
@@ -119,11 +120,13 @@ final class ThreadStore {
 
     /// Puts a settled card in place in the messages the read brought.
     func settle(_ card: JSONValue) {
-        for index in older.indices {
-            if let content = TaskAskCard.settling(content: older[index].content, with: card) {
-                older[index].content = content
+        var settled = older
+        for index in settled.indices {
+            if let content = TaskAskCard.settling(content: settled[index].content, with: card) {
+                settled[index].content = content
             }
         }
+        if settled != older { older = settled }
     }
 
     /// Oldest first; messages written in the same second keep the order they came in.
@@ -136,11 +139,16 @@ final class ThreadStore {
     }
 
     /// The rows the thread shows: the chat's bubbles and cards, without
-    /// thread labels. Answers come from the chat and from the thread's own
-    /// older messages, so a card answered before the chat's pages shows done.
-    func rows(answers: [String: JSONValue]) -> [TranscriptRow] {
+    /// thread labels. Built again when the thread's messages change, and by
+    /// the chat whenever its own do (`TranscriptStore.rebuildRows`).
+    private(set) var rows: [TranscriptRow] = []
+
+    /// Answers come from the chat and from the thread's own older messages,
+    /// so a card answered before the chat's pages shows done.
+    func rebuildRows(chatAnswers: [String: JSONValue]? = nil) {
         var all = TranscriptBuilder.answers(in: older)
-        all.merge(answers) { _, chat in chat }
-        return TranscriptBuilder.rows(messages: messages, pending: pendingResends, answers: all, options: .init())
+        all.merge(chatAnswers ?? chat?.answers ?? [:]) { _, chat in chat }
+        let built = TranscriptBuilder.rows(messages: messages, pending: pendingResends, answers: all, options: .init())
+        if built != rows { rows = built }
     }
 }

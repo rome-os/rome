@@ -149,7 +149,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         backend.threads["q"] = [card, answer]
         store.reopenThread(ThreadTarget(messageId: "q", instanceKnowsThreads: true))
         await settle { store.thread != nil }
-        let rows = store.thread?.rows(answers: store.answers) ?? []
+        let rows = store.thread?.rows ?? []
         guard case .question(_, _, _, let answered) = rows.first(where: { if case .question = $0 { return true } else { return false } }) else {
             Issue.record("no question row"); return
         }

@@ -19,7 +19,7 @@ struct ThreadOverlay: View {
     @State private var visibleHeight: CGFloat = 0
 
     var body: some View {
-        let rows = thread.rows(answers: chat.answers)
+        let rows = thread.rows
         ZStack {
             Rectangle()
                 .fill(.ultraThinMaterial)

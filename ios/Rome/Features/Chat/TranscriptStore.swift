@@ -14,8 +14,10 @@ final class TranscriptStore {
     let kind: Kind
     private let backend: RomeBackend
 
-    private(set) var messages: [ChatMessage] = []
-    private(set) var pending: [PendingSend] = []
+    // The properties with a `didSet` are what `rows` is built from: each
+    // change builds the rows again, once, so a read is a plain property read.
+    private(set) var messages: [ChatMessage] = [] { didSet { rebuildRows() } }
+    private(set) var pending: [PendingSend] = [] { didSet { rebuildRows() } }
     private(set) var loaded = false
     /// A read of the chat worked at least once (or it was made just now), so
     /// an empty transcript is a chat with nothing in it, not one that failed
@@ -111,22 +113,38 @@ final class TranscriptStore {
         TranscriptBuilder.answers(in: messages)
     }
 
-    var rows: [TranscriptRow] {
+    /// What the transcript draws, built again whenever one of its inputs
+    /// changes (`rebuildRows`), never on a read.
+    private(set) var rows: [TranscriptRow] = []
+    /// A merge changes the messages and the sends together: one rebuild after both.
+    @ObservationIgnored private var rowsHeld = false
+
+    private func rebuildRows() {
+        guard !rowsHeld else { return }
         let answers = answers
-        return TranscriptBuilder.rows(
+        let built = TranscriptBuilder.rows(
             messages: visibleMessages,
             pending: pending,
             answers: answers,
             options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping)
         )
+        // An equal list is not stored: no reader is told of a change that is none.
+        if built != rows { rows = built }
+        thread?.rebuildRows(chatAnswers: answers)
+    }
+
+    /// The dots are the only part of the rows that how the turn writes
+    /// decides: the rows change only when they come or go.
+    private func typingInputChanged() {
+        if showsTyping != (rows.last == .typing) { rebuildRows() }
     }
 
     /// How the running turn shows the typing dots, as the server last said
     /// (`message_writing`); nil when no turn runs.
-    private(set) var writing: (turnId: String, mode: WritingMode, writing: Bool)?
+    private(set) var writing: (turnId: String, mode: WritingMode, writing: Bool)? { didSet { typingInputChanged() } }
     /// New messages of a `simulated` turn waiting behind the dots, oldest
     /// first, each with how long it waits.
-    private(set) var held: [(id: String, wait: Duration)] = []
+    private(set) var held: [(id: String, wait: Duration)] = [] { didSet { rebuildRows() } }
     @ObservationIgnored private var holdWork: Task<Void, Never>?
 
     /// Whether the Chat shows its typing dots: the Concierge is writing a
@@ -345,6 +363,11 @@ final class TranscriptStore {
     /// rows and turns that tie within a second keep the order they first
     /// arrived in; the order never changes when the same rows arrive again.
     private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
+        rowsHeld = true
+        defer {
+            rowsHeld = false
+            rebuildRows()
+        }
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         for var message in incoming {
             if message.knowsThreads {
@@ -393,7 +416,7 @@ final class TranscriptStore {
             return seen[a.id]! < seen[b.id]!
         }
         let stored = Set(messages.map(\.id))
-        pending.removeAll { stored.contains($0.id) }
+        if pending.contains(where: { stored.contains($0.id) }) { pending.removeAll { stored.contains($0.id) } }
         if persist { cache?.save(chat: sessionId, messages: messages) }
     }
 
@@ -438,9 +461,11 @@ final class TranscriptStore {
             settle(card)
         case .threadRetired(let id, let root) where id == sessionId:
             // Its task left the chat: the thread's messages lose their label.
-            for index in messages.indices where messages[index].chatThreadId == root {
-                messages[index].chatThreadId = nil
-                messages[index].chatThreadTitle = nil
+            editMessages { messages in
+                for index in messages.indices where messages[index].chatThreadId == root {
+                    messages[index].chatThreadId = nil
+                    messages[index].chatThreadTitle = nil
+                }
             }
         case .reconnected:
             resync()
@@ -451,20 +476,31 @@ final class TranscriptStore {
 
     /// Puts a settled card in place of the card of every part that shows it.
     func settle(_ card: JSONValue) {
-        for index in messages.indices {
-            if let content = TaskAskCard.settling(content: messages[index].content, with: card) {
-                messages[index].content = content
+        editMessages { messages in
+            for index in messages.indices {
+                if let content = TaskAskCard.settling(content: messages[index].content, with: card) {
+                    messages[index].content = content
+                }
             }
         }
         thread?.settle(card)
     }
 
+    /// Changes several messages at once, so the rows are built once for all.
+    private func editMessages(_ edit: (inout [ChatMessage]) -> Void) {
+        var edited = messages
+        edit(&edited)
+        if edited != messages { messages = edited }
+    }
+
     /// Shows an answer or a decision the instance took before it announces
     /// it: the cards that show `id` take `outcome`.
     private func settle(kind: String, id: String, outcome: JSONValue) {
-        for index in messages.indices {
-            if let content = TaskAskCard.settling(content: messages[index].content, kind: kind, id: id, outcome: outcome) {
-                messages[index].content = content
+        editMessages { messages in
+            for index in messages.indices {
+                if let content = TaskAskCard.settling(content: messages[index].content, kind: kind, id: id, outcome: outcome) {
+                    messages[index].content = content
+                }
             }
         }
     }
@@ -847,7 +883,7 @@ final class TranscriptStore {
     /// Resends: a stored message the instance did not take, by its id, and
     /// the `inputId` of the copy sent in its place. Recorded when the copy
     /// goes and kept with the chat's drafts, so a relaunch knows the pair.
-    private(set) var resends: [String: String] = [:]
+    private(set) var resends: [String: String] = [:] { didSet { rebuildRows() } }
     @ObservationIgnored private var resendsRead = false
     /// Stored messages whose files are being read back for a resend.
     private var resending: Set<String> = []
