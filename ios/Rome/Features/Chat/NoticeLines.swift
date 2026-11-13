@@ -102,13 +102,15 @@ struct HandoffSheet: View {
                 SheetCloseButton { dismiss() }
             }
             ScrollView {
-                Text(verbatim: text)
-                    .romeFont(15)
-                    .lineSpacing(5)
+                MarkdownText(source: text)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        // The sheet is presented from the faint line, whose one line and quiet
+        // color it would inherit through the environment.
+        .lineLimit(nil)
+        .foregroundStyle(Palette.fg)
         .padding(20)
         .presentationDetents([.medium, .large])
         .presentationBackground(Palette.sheet)
