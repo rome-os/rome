@@ -29,10 +29,16 @@ import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
+import { handoffSections, type RenewalHandoffs } from "../domain/session-handoff.js";
+import { writeRenewalHandoff } from "./session-handoff.js";
 import { type PromptFacts, type PromptMessage } from "../domain/prompt-facts.js";
 import { type AgentLog } from "../domain/agent-log.js";
 import { type DeferTool } from "./ask-user-tools.js";
-import { type SessionTools, forkSessionTools } from "../domain/session-tools.js";
+import {
+  ROUTINE_PROPOSAL_TOOL,
+  type SessionTools,
+  forkSessionTools,
+} from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
 import { type TurnFacts, type PushLevel, type TurnActor } from "../domain/turn-facts.js";
 import {
@@ -45,6 +51,7 @@ import {
 import { Session, type SessionKind } from "../domain/session.js";
 import {
   type ModelSessionEvent,
+  type ModelContextCompactedEvent,
   type ModelTurnStartedEvent,
   type ModelPosition,
   type ModelProvider,
@@ -63,8 +70,10 @@ import {
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
+  type SentHeaders,
+  withoutRepeatedHeaders,
 } from "../domain/prompt.js";
-import { resolveAgentPolicy } from "../domain/agent-policy.js";
+import { type AgentPolicy, resolveAgentPolicy } from "../domain/agent-policy.js";
 import { createRomeTools } from "./rome-tools.js";
 import { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "../domain/widget-drawing.js";
 import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
@@ -272,6 +281,8 @@ export interface AgentSession {
   readonly status: AgentSessionStatus;
   /** The turn the session is running, until it ends. */
   readonly runningTurn?: Turn;
+  /** The provider its model session runs on. */
+  readonly providerId?: ProviderId;
   /**
    * Submits an input, by default `next`. The receipt says where it landed and
    * resolves with the turn it lands in once that turn has started. An `after`
@@ -360,6 +371,13 @@ interface ManagerDeps {
   turnMiddleware?: TurnMiddleware;
   /** What each chat set for its sessions. Absent, no saved model is restored. */
   sessionSettings?: SessionSettings;
+  /**
+   * What the conversation a session serves adds to its context: text for the
+   * end of its system prompt, or null. Every open and resume of a
+   * conversation session asks, so a cold continuation holds it too. Absent,
+   * nothing is added.
+   */
+  chatInstructions?: (thread: ThreadContext | undefined) => Promise<string | null>;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
   /** Where the session logs. */
@@ -371,6 +389,18 @@ interface ManagerDeps {
    * the hold ends. Absent, nothing holds a session.
    */
   heldMidTurn?: (sessionId: string) => Promise<boolean>;
+  /**
+   * The header blocks an input may open with, by element name, that a thread
+   * reads only when they changed since its last input. Absent, every input
+   * keeps its headers.
+   */
+  stickyHeaders?: readonly string[];
+  /**
+   * Writes a renewal's handoff when the retired session cannot, says the chat
+   * is tidying up while one is written, and reads what the successor's first
+   * turn shows beside it. Absent, no renewal writes a handoff.
+   */
+  handoffs?: RenewalHandoffs;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** Stamps the session id on the spans a session starts and binds it for logs. */
@@ -394,12 +424,23 @@ interface ManagerOptions {
   turns?: TurnsById;
 }
 
-async function waitUntilQuiescent(session: AgentSessionImpl): Promise<void> {
+/** How long a context renewal waits for the ending turn's own cleanup. */
+const CONTEXT_RENEWAL_SETTLE_MS = 5_000;
+
+async function waitUntilQuiescent(session: AgentSessionImpl, timeoutMs?: number): Promise<void> {
   if (session.status === "closed" || session.isQuiescentForRotation) return;
   await new Promise<void>((resolve) => {
     let unsubscribe = () => {};
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            unsubscribe();
+            resolve();
+          }, timeoutMs);
     const done = () => {
       if (session.status !== "closed" && !session.isQuiescentForRotation) return;
+      if (timer) clearTimeout(timer);
       unsubscribe();
       resolve();
     };
@@ -442,8 +483,62 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       ).unref?.() ?? null;
   }
 
+  // What each closed session's thread had read of the sticky headers, so a
+  // reopen that resumes the thread does not send them again. In memory: a
+  // restart sends them once more.
+  const sentHeaders = new Map<string, SentHeaders>();
+  const writtenHandoffs = new Map<string, string>();
   const onSessionClosed = (sess: AgentSessionImpl) => {
     sessions.delete(keyOf(sess.key));
+    // A thread that read none, such as one just compacted, must send them all
+    // on its reopen, so an earlier snapshot of the same session goes too.
+    if (sess.readHeaders.size === 0) {
+      sentHeaders.delete(sess.sessionId);
+      return;
+    }
+    if (sentHeaders.size >= 1_000) sentHeaders.clear();
+    sentHeaders.set(sess.sessionId, sess.readHeaders);
+  };
+
+  // A renewal for a full context, by key, from the close of the session it
+  // renews until its successor is written. An open of the same key waits for
+  // that, and opens the successor; nothing waits while the session is in use.
+  const contextRenewals = new Map<string, Promise<void>>();
+  const pendingFull = new Set<string>();
+  const onContextFull = (sess: AgentSessionImpl) => {
+    const k = keyOf(sess.key);
+    if (contextRenewals.has(k) || pendingFull.has(k) || shutDown) return;
+    pendingFull.add(k);
+    void (async () => {
+      try {
+        // Only the ending turn's own cleanup is waited for. A session still in
+        // use after it (a caller, a queued input, an approval) is left alone,
+        // and the next turn end past the limit tries again.
+        await waitUntilQuiescent(sess, CONTEXT_RENEWAL_SETTLE_MS);
+        if (sess.status === "closed" || sessions.get(k) !== sess) return;
+        if (!sess.isQuiescentForRotation) return;
+        if (await deps.heldMidTurn?.(sess.sessionId)) return;
+        if (!sess.isQuiescentForRotation || sessions.get(k) !== sess || sess.closing) return;
+        const run = (async () => {
+          await sess.close("idle");
+          await renewForContext(deps, sess);
+        })();
+        contextRenewals.set(k, run);
+        try {
+          await run;
+        } finally {
+          contextRenewals.delete(k);
+        }
+      } catch (err) {
+        log.warn("provider_session.context_renewal_failed", {
+          agentName: sess.key.agentName,
+          sessionId: sess.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        pendingFull.delete(k);
+      }
+    })();
   };
 
   const acquireInner = async (
@@ -452,6 +547,10 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     init?: OpenRequest,
   ): Promise<AgentSession> => {
     const k = keyOf(key);
+    // A renewal for a full context writes the successor this open is for.
+    const renewal = contextRenewals.get(k);
+    // A renewal that failed leaves the session current: this open finds it.
+    if (renewal) await renewal.catch(() => undefined);
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -548,6 +647,9 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       const sess = await openSession(deps, key, init ?? {}, {
         keepAlive,
         onClosed: onSessionClosed,
+        onContextFull,
+        sentHeaders,
+        writtenHandoffs,
         isSubagent,
         turns,
       });
@@ -655,6 +757,15 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
 interface OpenOptions {
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
+  /** A turn of the session ended with its context past the handoff limit. */
+  onContextFull?: (s: AgentSessionImpl) => void;
+  /** The header blocks each session's thread had read when it last closed, by session id. */
+  sentHeaders?: ReadonlyMap<string, SentHeaders>;
+  /**
+   * Handoffs written for a renewal whose fresh session has not opened yet, by
+   * the retired session's id, so a retry after a failed open reuses one.
+   */
+  writtenHandoffs?: Map<string, string>;
   isSubagent: boolean;
   turns: TurnsById;
 }
@@ -861,6 +972,7 @@ function sessionSetupOf(
       ? {
           schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
           finalText: policy.finalText,
+          taskChecks: policy.taskChecks,
         }
       : undefined;
   const romeTools: SessionSetupSource["romeTools"] = (turn, run, session) =>
@@ -930,7 +1042,7 @@ function sessionSetupOf(
         },
         {
           hasSpeaker: true,
-          sessionTools: await deps.sessionTools.forTurn(turn, true),
+          sessionTools: await sessionToolsOf(deps, policy)(turn, true),
           defers: true,
         },
       );
@@ -972,7 +1084,21 @@ async function prepareSetup(
   init: SessionOpening,
   isSubagent: boolean,
 ): Promise<PreparedSetup> {
-  const source = sessionSetupOf(deps, agent, init, isSubagent);
+  // The chat adds to the opener's context on every path that opens its
+  // session. The fingerprint leaves the context suffix out, so this renews
+  // no session.
+  const added =
+    init.kind === "conversation" && !isSubagent
+      ? await deps.chatInstructions?.(init.threadContext)
+      : null;
+  const source = sessionSetupOf(
+    deps,
+    agent,
+    added
+      ? { ...init, contextSuffix: [init.contextSuffix, added].filter(Boolean).join("\n\n") }
+      : init,
+    isSubagent,
+  );
   let prompt: string | undefined;
   return {
     source,
@@ -981,6 +1107,74 @@ async function prepareSetup(
       prompt ??= source.systemPrompt();
       return prompt;
     },
+  };
+}
+
+/**
+ * Renews the chat of a session just closed for a full context: the retired
+ * session writes its handoff, and its successor is written with it, on no
+ * thread yet, for the chat's next open to start (docs/concepts/sessions.md#handoff).
+ * Nothing is written when no handoff is, so the chat keeps its session until
+ * a later turn end tries again, or the provider's own compaction runs.
+ */
+async function renewForContext(deps: ManagerDeps, closed: AgentSessionImpl): Promise<void> {
+  const { log } = deps;
+  const { key } = closed;
+  if (!deps.handoffs || !key.channelThreadKey) return;
+  const retired = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
+  if (!retired || retired.id !== closed.sessionId) return;
+  const handoff = await writeRenewalHandoff(
+    {
+      retired,
+      agentName: key.agentName,
+      chatId: closed.chatId,
+      systemPrompt: closed.openedSystemPrompt,
+      workingDir: closed.workingDirectory,
+      env: {},
+    },
+    {
+      handoffs: deps.handoffs,
+      modelResolver: deps.modelResolver,
+      turnUsage: deps.turnUsage,
+      log,
+    },
+  );
+  if (!handoff) return;
+  // Something else renewed the chat meanwhile: its session stays.
+  const still = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
+  if (!still || still.id !== retired.id) return;
+  const successor = still.replace({
+    setup: still.setup ?? undefined,
+    reason: "context",
+    workingDir: still.workingDir ?? undefined,
+    handoff,
+  });
+  await deps.sessionRepository.replace(still, successor);
+  log.info("provider_session.rotated", {
+    chatId: closed.chatId,
+    agentName: key.agentName,
+    provider: still.provider ?? undefined,
+    oldSessionId: still.id,
+    newSessionId: successor.id,
+    resetReason: "context",
+    contextTokens: still.contextTokens ?? undefined,
+    result: "succeeded",
+  });
+}
+
+/**
+ * Where an agent's session tools come from: an agent that hands its work to
+ * other chats proposes no routine, so its sessions carry no `propose_routine`.
+ */
+function sessionToolsOf(
+  deps: ManagerDeps,
+  policy: Pick<AgentPolicy, "delegatesWork">,
+): SessionTools["forTurn"] {
+  return async (turn, hasSpeaker) => {
+    const tools = await deps.sessionTools.forTurn(turn, hasSpeaker);
+    return policy.delegatesWork
+      ? tools.filter((tool) => tool.name !== ROUTINE_PROPOSAL_TOOL)
+      : tools;
   };
 }
 
@@ -994,6 +1188,10 @@ async function openSession(
   const agent = requireAgent(deps.agentLoader, key.agentName);
   const config = agent.definition;
   const owningAppId = agent.ownerType === "app" ? agent.ownerId : undefined;
+  const sessionToolsFor = sessionToolsOf(
+    deps,
+    resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+  );
 
   // Try to resume an existing SDK session through the stable channelThreadKey.
   // Scoping by agentName is load-bearing: subagents reuse the parent's key, so
@@ -1061,7 +1259,21 @@ async function openSession(
   // approval holds it. A live session is never renewed; it takes the new
   // setup on its next cold open. A resume by id resumes what it names.
   let renewing: { retired: Session; successor: Session; reason: string } | undefined;
-  if (resumed && !init.resumeSessionId && !opts.isSubagent) {
+  if (
+    resumed &&
+    !init.resumeSessionId &&
+    !opts.isSubagent &&
+    resumed.handoff !== null &&
+    !resumed.modelThreadId &&
+    setupNow !== undefined &&
+    setupChanged(resumed.setup, setupNow)
+  ) {
+    // It started from a handoff and no turn ran on it yet, so there is no
+    // thread to hand off from: it takes the new setup in place, and keeps the
+    // handoff and the renewal it came from.
+    resumed.adoptSetup(setupNow);
+    await deps.sessionRepository.save(resumed);
+  } else if (resumed && !init.resumeSessionId && !opts.isSubagent) {
     let reason: string | undefined;
     if (setupNow !== undefined && setupChanged(resumed.setup, setupNow)) {
       reason = "setup";
@@ -1078,12 +1290,42 @@ async function openSession(
       reason = undefined;
     }
     if (reason) {
+      // Written at send time, before the fresh session opens, so the message
+      // that caused the cold open is answered by a session that has read it.
+      const written = opts.writtenHandoffs?.get(resumed.id);
+      const handoff =
+        written ??
+        (deps.handoffs &&
+        !config.codeBacked &&
+        resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+          ? await writeRenewalHandoff(
+              {
+                retired: resumed,
+                agentName: key.agentName,
+                chatId: init.threadContext?.romeSessionId,
+                systemPrompt: active.systemPrompt(),
+                workingDir,
+                env: { ...init.toolEnv },
+              },
+              {
+                handoffs: deps.handoffs,
+                modelResolver: deps.modelResolver,
+                turnUsage: deps.turnUsage,
+                log,
+              },
+            )
+          : null);
+      if (handoff && !written && opts.writtenHandoffs) {
+        if (opts.writtenHandoffs.size >= 100) opts.writtenHandoffs.clear();
+        opts.writtenHandoffs.set(resumed.id, handoff);
+      }
       // Only in memory until the fresh backend opens: a failed open writes
       // nothing, and the next cold open tries again.
       const successor = resumed.replace({
         setup: setupNow ?? resumed.setup ?? undefined,
         reason,
         workingDir,
+        handoff: handoff ?? undefined,
       });
       renewing = { retired: resumed, successor, reason };
       resumed = undefined;
@@ -1314,7 +1556,7 @@ async function openSession(
     resumeThreadId?: string,
     setup: PreparedSetup = active,
   ): Promise<ModelSession> => {
-    const sessionTools = await deps.sessionTools.forTurn(liveTurn, true);
+    const sessionTools = await sessionToolsFor(liveTurn, true);
     const params = buildSessionParams(
       setup,
       resolution,
@@ -1466,7 +1708,7 @@ async function openSession(
           hasSpeaker: false,
           sessionTools: forkSessionTools(
             sourceSessionTools,
-            await deps.sessionTools.forTurn(turnFacts(refs), false),
+            await sessionToolsFor(turnFacts(refs), false),
           ),
           // A continuable fork holds no scheduled wake-ups: its wake-up would
           // resume the fork session while delivering under the thread context
@@ -1543,7 +1785,7 @@ async function openSession(
           },
           model: "code-backed",
         },
-        liveRomeTools(await deps.sessionTools.forTurn(liveTurn, true)),
+        liveRomeTools(await sessionToolsFor(liveTurn, true)),
       ),
     });
   } else {
@@ -1563,6 +1805,7 @@ async function openSession(
       await modelSession.close().catch(() => undefined);
       throw err;
     }
+    opts.writtenHandoffs?.delete(renewing.retired.id);
     log.info("provider_session.rotated", {
       chatId: init.threadContext?.romeSessionId,
       agentName: key.agentName,
@@ -1609,6 +1852,8 @@ async function openSession(
     // now runs the chat, and its new thread has seen none of it.
     replacedThread: (!threadResumed && !!resumed?.modelThreadId) || continuesChat,
     renewal,
+    // Shown with the continuation notice until a turn of this session succeeds.
+    handoff: continuesChat ? (session.handoff ?? undefined) : undefined,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     modelProvider: initialResolution?.modelProvider,
@@ -1621,6 +1866,17 @@ async function openSession(
     subagentToolNames: active.source.subagentToolNames,
     keepAlive: opts.keepAlive,
     onClosed: () => opts.onClosed(impl),
+    // Past this size a turn's end renews the session with a handoff
+    // (docs/concepts/sessions.md#handoff).
+    contextLimitTokens:
+      !opts.isSubagent &&
+      !config.codeBacked &&
+      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+        ? deps.handoffs?.contextLimitTokens
+        : undefined,
+    onContextFull: opts.onContextFull ? () => opts.onContextFull?.(impl) : undefined,
+    // A thread this open resumes already read what it read before the close.
+    sentHeaders: threadResumed ? opts.sentHeaders?.get(sessionId) : undefined,
   });
 
   impl.startModelSessionEvents();
@@ -1673,6 +1929,8 @@ interface ImplArgs {
   /** Set when a reset replaced the chat's earlier session with this one and
    *  no turn of it has succeeded: the first turn_start announces it. */
   renewal?: SessionRenewal;
+  /** The handoff the session started from, while no turn of it has succeeded. */
+  handoff?: string;
   /** The model the row's thread ran on. */
   previousModel?: string;
   openModelSession: (
@@ -1685,6 +1943,11 @@ interface ImplArgs {
   subagentToolNames: Set<string>;
   keepAlive: boolean;
   onClosed: () => void;
+  /** The context size past which a turn's end calls `onContextFull`. */
+  contextLimitTokens?: number;
+  onContextFull?: () => void;
+  /** The header blocks the resumed thread already read. */
+  sentHeaders?: SentHeaders;
 }
 
 interface TurnSink {
@@ -1692,6 +1955,12 @@ interface TurnSink {
   /** The turn's prompt carries the `<continuation>` notice, which stays due
    *  until the turn returns a result. */
   carriesContinuation?: boolean;
+  /** The notice carries the session's handoff, which goes with it. */
+  carriesHandoff?: boolean;
+  /** The headers the thread has read once this turn returns a result. */
+  sentHeaders?: Map<string, string>;
+  /** The provider compacted the thread while the turn ran. */
+  contextCompacted?: boolean;
   /** Prompt that opened the turn; carried on the turn_start event. */
   userPrompt: string;
   /** Guards the one-turn_start-per-stream invariant across error paths. */
@@ -1788,7 +2057,9 @@ function toolResultSuspendsTurn(output: unknown): boolean {
  * Take the provider's facts off a model event. They stay in the run and never
  * reach the wire, the trace or app hooks.
  */
-function splitProviderFacts(event: Exclude<ModelSessionEvent, ModelTurnStartedEvent>): {
+function splitProviderFacts(
+  event: Exclude<ModelSessionEvent, ModelTurnStartedEvent | ModelContextCompactedEvent>,
+): {
   msg: AgentEvent;
   reasoningEffort?: string;
   position?: ModelPosition;
@@ -1932,6 +2203,12 @@ class AgentSessionImpl implements AgentSession {
   private continuationPending: boolean;
   /** Announced on the next turn_start, then cleared. */
   private renewalPending?: SessionRenewal;
+  /** The renewal's handoff, carried by the continuation notice until a turn succeeds. */
+  private handoff?: string;
+  /** The header blocks the current thread has read, by name (`stickyHeaders`). */
+  private sentHeaders: SentHeaders = new Map();
+  /** The context the last turn that reported one left the thread at. */
+  private lastContextTokens?: number;
   /** The model the chat ran on before the current thread started. */
   private previousModel?: string;
   private selectionId?: ModelSelectionId;
@@ -1951,7 +2228,7 @@ class AgentSessionImpl implements AgentSession {
   private readonly turnMutex = new Mutex();
   private readonly inputs = new AgentInputQueue(
     (input, options) => this.startTurn(input, options),
-    () => this.modelSession,
+    () => this.steering(),
     (error) =>
       this.log.warn("conversational input dispatch failed", {
         sessionId: this.sessionId,
@@ -1963,6 +2240,8 @@ class AgentSessionImpl implements AgentSession {
   );
   private keepAlive: boolean;
   private onClosed: () => void;
+  private contextLimitTokens?: number;
+  private onContextFull?: () => void;
   private closingPromise?: Promise<void>;
 
   constructor(args: ImplArgs) {
@@ -1991,12 +2270,50 @@ class AgentSessionImpl implements AgentSession {
     this.threadFresh = !args.threadResumed;
     this.continuationPending = args.replacedThread;
     this.renewalPending = args.renewal;
+    this.handoff = args.handoff;
     this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
     this.subagentToolNames = args.subagentToolNames;
     this.keepAlive = args.keepAlive;
     this.onClosed = args.onClosed;
+    this.contextLimitTokens = args.contextLimitTokens;
+    this.onContextFull = args.onContextFull;
+    if (args.sentHeaders) this.sentHeaders = args.sentHeaders;
+    // A resumed thread is where its row's last turn left it.
+    if (args.threadResumed) this.lastContextTokens = args.session.contextTokens ?? undefined;
+  }
+
+  /** The header blocks the current thread has read, by name. */
+  /**
+   * The model session as steering reaches it. A steered input goes to the
+   * provider whole, outside the turn's headers, and may yet be put back for
+   * a later turn, so the record of what the thread read goes as it leaves.
+   */
+  private steering(): Pick<ModelSession, "steerUserInput"> {
+    const session = this.modelSession;
+    if (!session.steerUserInput) return {};
+    return {
+      steerUserInput: (input) => {
+        this.sentHeaders = new Map();
+        if (this.currentSink) this.currentSink.sentHeaders = new Map();
+        return session.steerUserInput!(input);
+      },
+    };
+  }
+
+  get readHeaders(): SentHeaders {
+    return this.sentHeaders;
+  }
+
+  /** The chat the session serves, when it serves one. */
+  get chatId(): string | undefined {
+    return this.threadContext?.romeSessionId;
+  }
+
+  /** The system prompt the session opened with. */
+  get openedSystemPrompt(): string {
+    return this.systemPrompt;
   }
 
   /** Current per-turn OTel context, exposed for closures that need to bind
@@ -2025,6 +2342,7 @@ class AgentSessionImpl implements AgentSession {
    *  it carries the `<continuation>` notice. */
   continuesElsewhere(): void {
     this.continuationPending = true;
+    this.sentHeaders = new Map();
   }
 
   get currentTurnReportedTaskRef(): string | undefined {
@@ -2170,6 +2488,8 @@ class AgentSessionImpl implements AgentSession {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
         this.threadContextInjected = false;
+        this.sentHeaders = new Map();
+        this.lastContextTokens = undefined;
         this.lastPosition = undefined;
         if (previous.modelThreadId !== undefined) {
           this.continuationPending = true;
@@ -2188,6 +2508,7 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private async runEventsLoop(session: ModelSession): Promise<void> {
+    let failure: string | undefined;
     try {
       this.deps.sessionTracing.enterSession(this.sessionId);
       for await (const event of session.events) {
@@ -2203,6 +2524,10 @@ class AgentSessionImpl implements AgentSession {
         }
         if (event.type === "model_turn_started") {
           sink.modelTurnId = event.modelTurnId;
+          continue;
+        }
+        if (event.type === "model_context_compacted") {
+          sink.contextCompacted = true;
           continue;
         }
         const { msg, reasoningEffort, position } = splitProviderFacts(event);
@@ -2328,8 +2653,23 @@ class AgentSessionImpl implements AgentSession {
               sink.turnId,
               reasoningEffort,
               interrupted ? undefined : position,
+              outbound.accounting?.context?.usedTokens,
             );
             if (sink.carriesContinuation) this.continuationPending = false;
+            if (sink.carriesHandoff) this.handoff = undefined;
+            if (sink.sentHeaders) this.sentHeaders = sink.sentHeaders;
+            const used = outbound.accounting?.context?.usedTokens;
+            // A compaction, which the provider reports, or less context than
+            // the turn before, may have dropped the headers the thread read.
+            const shrank =
+              used !== undefined &&
+              this.lastContextTokens !== undefined &&
+              used < this.lastContextTokens;
+            if (sink.contextCompacted || shrank) this.sentHeaders = new Map();
+            if (used !== undefined) this.lastContextTokens = used;
+            if (this.contextLimitTokens && used !== undefined && used >= this.contextLimitTokens) {
+              this.onContextFull?.();
+            }
           }
           // Use `outbound` (not `msg`) so provider-output validation is
           // reflected in span status and the turn_end bracket. The turn_end
@@ -2339,22 +2679,53 @@ class AgentSessionImpl implements AgentSession {
         }
       }
     } catch (err) {
+      failure = err instanceof Error ? err.message : String(err);
       this.log.warn("agent session events loop ended", {
         sessionId: this.sessionId,
         provider: session.providerId,
-        error: err instanceof Error ? err.message : String(err),
+        error: failure,
       });
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
       const sink = this.currentSink;
       this.inputs.close();
+      // The loop died on an error while nobody is closing the session: the
+      // provider process would otherwise keep running with no owner.
+      if (failure !== undefined && !this.closing) {
+        session.close().catch((err) => {
+          this.log.warn("modelSession close after events loop failure threw", {
+            sessionId: this.sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
       if (sink && !sink.done) {
-        this.failTurn(sink, "session closed mid-turn");
+        this.failTurn(sink, failure ?? "session closed mid-turn");
       }
       this.status = "closed";
       this.emitStatus();
       this.onClosed();
     }
+  }
+
+  /**
+   * The handoff sections of the continuation notice, with the open tasks and
+   * recent messages read now. Undefined when the session carries no handoff,
+   * or the turn is in no chat. A failed read leaves out what it would add.
+   */
+  private async handoffSectionsFor(sink: TurnSink): Promise<string[] | undefined> {
+    const handoff = this.handoff;
+    const handoffs = this.deps.handoffs;
+    if (!handoff || !handoffs || !sink.romeSessionId) return undefined;
+    sink.carriesHandoff = true;
+    const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch((err) => {
+      this.log.warn("session_handoff.context_failed", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { openTasks: null, recent: [] };
+    });
+    return handoffSections(handoff, context);
   }
 
   /**
@@ -2545,9 +2916,21 @@ class AgentSessionImpl implements AgentSession {
     return this.deps.actions.permits(this.liveTurn, actionName);
   }
 
+  /**
+   * Records the session's activity. Best-effort: a failed write must not end
+   * the turn. The save throws before it marks the session saved, so the
+   * change stays queued for the next save.
+   */
   private async touchSession(): Promise<void> {
     this.session.touch();
-    await this.deps.sessionRepository.save(this.session);
+    try {
+      await this.deps.sessionRepository.save(this.session);
+    } catch (err) {
+      this.log.warn("failed to touch session", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /**
@@ -2562,6 +2945,7 @@ class AgentSessionImpl implements AgentSession {
     turnId: string,
     reasoningEffort: string | undefined,
     position: ModelPosition | undefined,
+    contextTokens?: number,
   ): Promise<void> {
     try {
       this.session.recordTurn({
@@ -2570,6 +2954,7 @@ class AgentSessionImpl implements AgentSession {
         model: session.model,
         reasoningEffort,
         checkpoint: position ? { turnId, checkpointId: position.checkpointId } : undefined,
+        ...(contextTokens !== undefined ? { contextTokens } : {}),
       });
       await this.deps.sessionRepository.save(this.session);
       // The pin becomes readable only once recorded: later turns of this live
@@ -2907,6 +3292,7 @@ class AgentSessionImpl implements AgentSession {
                 forkModelTurnId = event.modelTurnId;
                 continue;
               }
+              if (event.type === "model_context_compacted") continue;
               const { msg, reasoningEffort } = splitProviderFacts(event);
               if (msg.type === "result" || msg.type === "error") {
                 forkReasoningEffort = reasoningEffort;
@@ -3044,14 +3430,7 @@ class AgentSessionImpl implements AgentSession {
       this.activeForkSessionIds.delete(forkSessionId);
       this.lastActiveAt = Date.now();
       this.emitStatus();
-      try {
-        await this.touchSession();
-      } catch (err) {
-        this.log.warn("failed to touch source session after fork", {
-          sessionId: this.sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      await this.touchSession();
     }
   }
 
@@ -3331,6 +3710,16 @@ class AgentSessionImpl implements AgentSession {
       // short-circuits (e.g. the not-logged-in gate) we don't carry it forward;
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
+      // Headers the thread already read on an input of its own are left out.
+      const stickyHeaders = this.isSubagent ? undefined : this.deps.stickyHeaders;
+      if (stickyHeaders?.length) {
+        const kept = withoutRepeatedHeaders(userPrompt, stickyHeaders, this.sentHeaders);
+        userPrompt = kept.prompt;
+        sink.sentHeaders = kept.headers;
+        // Until the turn returns a result, the thread is known to have read
+        // none: a turn that fails or is cut off may or may not have read its input.
+        this.sentHeaders = new Map();
+      }
       let unseenMessageIds: number[] = [];
       // The agent catches up on the messages said where its session stands
       // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
@@ -3358,9 +3747,11 @@ class AgentSessionImpl implements AgentSession {
           this.previousModel && this.previousModel !== this.modelSession.model
             ? this.previousModel
             : undefined;
+        const handoff = await this.handoffSectionsFor(sink);
         const block = buildContinuationBlock({
           ...(previousModel ? { previousModel } : {}),
           canReadHistory: this.mayCall(FETCH_CHANNEL_HISTORY_ACTION),
+          ...(handoff ? { handoff } : {}),
         });
         userPrompt = `${block}\n\n${userPrompt}`;
       }

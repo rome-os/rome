@@ -32,7 +32,7 @@ struct WidgetUIPart: Hashable, Sendable {
     /// A card the agent waits on, described as data: a `pending_interaction`
     /// part whose `render.ui` is set.
     init?(interaction value: JSONValue) {
-        self.init(toolUseId: value["toolUseId"]?.string, appId: value["appId"]?.string, ui: value["render"]?["ui"], text: nil, bind: value["render"]?["bind"], waits: true)
+        self.init(toolUseId: value["toolUseId"]?.string, appId: value["appId"]?.string, ui: value["render"]?["ui"], text: value["text"]?.string, bind: value["render"]?["bind"], waits: true)
     }
 
     private init?(toolUseId: String?, appId: String?, ui: JSONValue?, text: String?, bind: JSONValue?, waits: Bool) {
@@ -71,10 +71,12 @@ struct WidgetEventReply: Sendable, Equatable {
         self.open = open
     }
 
-    /// Read from core's JSON reply. Only an `https:` link opens.
+    /// Read from core's JSON reply. Core vets the link; a web link opens as given.
     init(json: JSONValue) {
         answered = json["answered"]?.bool == true
-        open = json["open"]?.string.flatMap(WidgetPaths.httpsURL)
+        open = json["open"]?.string.flatMap(URL.init(string:)).flatMap { url in
+            ["https", "http"].contains(url.scheme?.lowercased() ?? "") ? url : nil
+        }
     }
 }
 

@@ -229,7 +229,7 @@ enum TaskTone: Sendable {
         switch self {
         case .needsYou: return String(localized: "Needs you")
         case .running: return String(localized: "Working")
-        case .failed: return String(localized: "Failed")
+        case .failed: return String(localized: "Didn't finish")
         case .done: return String(localized: "Done")
         case .neutral: return ""
         }
@@ -328,6 +328,8 @@ struct TopBanner: View {
     let kind: Kind
     let text: String
     var actionTitle: String? = nil
+    /// The action runs: its button shows a small spinner, at the same size.
+    var busy = false
     var action: (() -> Void)? = nil
 
     var body: some View {
@@ -342,13 +344,21 @@ struct TopBanner: View {
             }
             Text(text).romeFont(14, .medium)
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .romeFont(13, .semibold)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .frame(height: 28)
-                    .background(Palette.destructive, in: Capsule())
-                    .buttonStyle(PressScaleStyle())
+                Button(action: action) {
+                    Text(actionTitle)
+                        .opacity(busy ? 0 : 1)
+                        .overlay {
+                            if busy { Spinner(size: 13, lineWidth: 1.8, color: .white, trackOpacity: 0.3) }
+                        }
+                }
+                .romeFont(13, .semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(Palette.destructive, in: Capsule())
+                .buttonStyle(PressScaleStyle())
+                .disabled(busy)
+                .accessibilityValue(busy ? Text("Loading") : Text(verbatim: ""))
             }
         }
         .foregroundStyle(foreground)

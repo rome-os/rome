@@ -1629,6 +1629,9 @@ export type MessagePart =
          *  may answer or dismiss the interaction. */
         ui?: WidgetUi;
       };
+      /** For a card described as data: its plain-text line, for a reader
+       *  that cannot draw the card. */
+      text?: string;
     }
   | ({
       /**
@@ -2620,6 +2623,8 @@ export interface AppConnectionErrorBody {
     | "outcome_unknown"
     | "provider_error";
   message: string;
+  /** Optional stable provider reason. Human-readable messages are not machine codes. */
+  reason?: string;
   retryable: boolean;
 }
 

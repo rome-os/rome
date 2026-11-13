@@ -15,7 +15,7 @@ import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
 import { fetchJson } from "@/lib/fetch-json";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
-import { WidgetTurnFieldsContext } from "./turn-fields";
+import { WidgetHostContext } from "./turn-fields";
 import {
   ROME_WIDGET_CATALOG_ID,
   romeWidgetCatalog,
@@ -108,16 +108,20 @@ export function WidgetUiCard({
 }: WidgetUiCardProps) {
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
+  // A refused event, with why when core says.
+  const [sendFailed, setSendFailed] = useState<string | false>(false);
+  const [blockedLink, setBlockedLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const result = waiting?.result;
   const dismissed = result?.dismissed === true;
-  const locked = result !== undefined || sent;
+  const widgetHost = useContext(WidgetHostContext);
+  const widgetHostRef = useRef(widgetHost);
+  widgetHostRef.current = widgetHost;
+  // A view that only shows the chat sends nothing, so its cards stay locked.
+  const locked = result !== undefined || sent || widgetHost.readOnly === true;
   const waitingRef = useRef(waiting);
   waitingRef.current = waiting;
-  const turnFields = useContext(WidgetTurnFieldsContext);
-  const turnFieldsRef = useRef(turnFields);
-  turnFieldsRef.current = turnFields;
   // Buttons wait for the first read: a press before it would post a context
   // whose paths are not loaded yet.
   const [ready, setReady] = useState(false);
@@ -169,7 +173,7 @@ export function WidgetUiCard({
     const p = new MessageProcessor([romeWidgetCatalog], async (action) => {
       // Core decides what every event means; the card only sends it. A turn
       // the event starts reaches the chat through live events.
-      if (inFlight.current) return;
+      if (inFlight.current || widgetHostRef.current.readOnly) return;
       inFlight.current = true;
       setBusy(true);
       const host = waitingRef.current;
@@ -178,19 +182,31 @@ export function WidgetUiCard({
         outcome = await postWidgetEvent(widgetId, {
           name: action.name,
           context: action.context ?? {},
-          turn: turnFieldsRef.current(),
+          turn: widgetHostRef.current.turnFields(),
         });
         if (!outcome.ok) throw new Error(`The widget's event failed: ${outcome.status}`);
         // A link the reply names opens; a card core says is answered locks,
         // and any other card reads its data again.
-        if (outcome.open) window.open(outcome.open, "_blank", "noopener,noreferrer");
-        if (outcome.answered) setSent(true);
-        else await load(p);
-        setFailed(false);
+        setSendFailed(false);
+        if (outcome.open) {
+          // A browser lets a page open a tab only right after a click, and the
+          // reply may come later: a blocked tab shows as a link instead.
+          const tab = window.open(outcome.open, "_blank");
+          if (tab) tab.opener = null;
+          else setBlockedLink(outcome.open);
+        }
+        if (outcome.answered && host) setSent(true);
+        else {
+          await load(p);
+          setFailed(false);
+        }
       } catch {
-        setFailed(true);
+        // A refused event says the send failed; a read after it says the data did.
+        if (outcome.ok) setFailed(true);
+        else setSendFailed(outcome.error ?? "");
       } finally {
         host?.onSettled?.(outcome);
+        widgetHostRef.current.onSettled?.(outcome);
         inFlight.current = false;
         setBusy(false);
       }
@@ -228,7 +244,7 @@ export function WidgetUiCard({
   // An answered card shows what the guardian sent, which core keeps as `card`.
   // A dismissed card was never answered, so it shows nothing picked rather
   // than its defaults.
-  const answeredKey = JSON.stringify(result?.card ?? (dismissed ? [] : null));
+  const answeredKey = JSON.stringify(result?.card ?? sentCard(result) ?? (dismissed ? [] : null));
   useEffect(() => {
     const card = JSON.parse(answeredKey) as unknown;
     if (card === null) return;
@@ -285,7 +301,9 @@ export function WidgetUiCard({
       ) : drawable ? null : (
         undrawable
       )}
-      {waiting && locked ? (
+      {/* A view that only shows the chat locks an open card without sending
+          it, so it says how the card ended only when it did. */}
+      {waiting && (result !== undefined || sent) ? (
         <span className="text-aux text-muted-foreground">
           {t(
             result === undefined
@@ -296,11 +314,40 @@ export function WidgetUiCard({
           )}
         </span>
       ) : null}
-      {failed ? (
+      {blockedLink ? (
+        <a
+          href={blockedLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-aux text-primary underline underline-offset-2"
+          onClick={() => setBlockedLink(null)}
+        >
+          {t("appComponent.widgetOpenLink")}
+        </a>
+      ) : null}
+      {sendFailed !== false ? (
+        <span className="text-aux text-destructive">
+          {sendFailed || t("stream.errors.sendFallback")}
+        </span>
+      ) : failed ? (
         <span className="text-aux text-destructive">
           {t("appComponent.widgetUnavailable", { text })}
         </span>
       ) : null}
     </div>
   );
+}
+
+/**
+ * What the card sent, before core has stored it as `card`: answers in the
+ * card's own shape (`values` and `text`, no `questionId`), as a reader that
+ * has not heard back from core still holds them.
+ */
+function sentCard(result: Record<string, unknown> | undefined): unknown[] | null {
+  const answers = result?.answers;
+  if (!Array.isArray(answers) || answers.length === 0) return null;
+  const ownShape = answers.every(
+    (a) => !!a && typeof a === "object" && !("questionId" in a) && "values" in a,
+  );
+  return ownShape ? answers : null;
 }

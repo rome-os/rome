@@ -22,6 +22,19 @@
 	<string>Rome uses the camera for photos you send in a chat.</string>
 	<key>RomeAPNsEnvironment</key>
 	<string>$(ROME_APS_ENVIRONMENT)</string>
+	<key>RomeAppGroup</key>
+	<string>$(ROME_APP_GROUP)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(ROME_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(ROME_URL_SCHEME)</string>
+			</array>
+		</dict>
+	</array>
 	<key>RomeCloudOrigin</key>
 	<string>$(ROME_CLOUD_ORIGIN)</string>
 	<key>UILaunchScreen</key>

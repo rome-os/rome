@@ -51,8 +51,8 @@ function setup(
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
     webchatRepo: {
-      sessionIdOfMessage: async (id) => rows[id]?.chatId ?? null,
-      getMessageContent: async (id) => (rows[id] ? JSON.stringify(rows[id].content) : null),
+      widgetMessage: async (id) =>
+        rows[id] ? { chatId: rows[id].chatId, content: JSON.stringify(rows[id].content) } : null,
       getSession: (async (id: string) =>
         id === "private"
           ? { id, agentName: "core:concierge", ownerKey: "guardian", triggerKind: null }
@@ -73,10 +73,10 @@ function setup(
       );
     },
   });
-  const fire = (widgetId: string, body: unknown) =>
+  const fire = (widgetId: string, body: unknown, headers: Record<string, string> = {}) =>
     app.request(`/chat/widgets/${widgetId}/events`, {
       method: "POST",
-      headers: { "content-type": "application/json", cookie: "rome_session=x" },
+      headers: { "content-type": "application/json", cookie: "rome_session=x", ...headers },
       body: JSON.stringify(body),
     });
   return { fire, forwarded };
@@ -110,6 +110,7 @@ describe("an event on a widget", () => {
             {
               type: "interaction_result",
               toolUseId: "q1",
+              messageId: "m2",
               output: { answers: [{ values: ["Warm"], text: "" }] },
             },
           ],
@@ -135,11 +136,21 @@ describe("an event on a widget", () => {
           {
             type: "interaction_result",
             toolUseId: "q1",
+            messageId: "m3",
             output: { answers: [{ values: ["Warm"], text: "" }] },
           },
         ],
       },
-      { parts: [{ type: "interaction_result", toolUseId: "q1", output: { dismissed: true } }] },
+      {
+        parts: [
+          {
+            type: "interaction_result",
+            toolUseId: "q1",
+            messageId: "m3",
+            output: { dismissed: true },
+          },
+        ],
+      },
     ]);
   });
 
@@ -177,6 +188,7 @@ describe("an event on a widget", () => {
             {
               type: "interaction_result",
               toolUseId: "tu-connect",
+              messageId: "m4",
               output: { from: "connector", value: { toolkit: "gmail", status: "connected" } },
             },
           ],
@@ -208,11 +220,108 @@ describe("an event on a widget", () => {
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/connector/connect"]);
   });
 
+  it("writes what the client reads itself, never a field of the app's own", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("connect", "connect"),
+          ],
+        },
+      },
+    };
+    const said = async (reply: unknown) => {
+      const { fire, forwarded } = setup(
+        { m6: { chatId: "c1", content: [connect] } },
+        "guardian",
+        reply,
+      );
+      const res = await fire("m6", { name: "connect" });
+      return { body: await res.json(), forwarded: forwarded.map((f) => f.url) };
+    };
+    // The app says it answered, but gave no answer: the agent still waits.
+    expect(await said({ answered: true, extra: 1 })).toEqual({
+      body: {},
+      forwarded: ["/api/apps/connector/connect"],
+    });
+    // A link opens only when it is https or a page of this instance.
+    expect((await said({ open: "http://evil.example/x" })).body).toEqual({});
+    expect((await said({ open: "javascript:alert(1)" })).body).toEqual({});
+    expect((await said({ open: "/settings/connections" })).body).toEqual({
+      open: "http://localhost/settings/connections",
+    });
+  });
+
+  it("reads an app's answer that declines as a dismissal, and passes on why an app refused", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("dismiss", "connect-card/dismiss"),
+            button("connect", "connect-card/connect"),
+          ],
+        },
+      },
+    };
+    const declined = setup({ m7: { chatId: "c1", content: [connect] } }, "guardian", {
+      answer: { toolkit: "notion", dismissed: true },
+    });
+    await declined.fire("m7", { name: "connect-card/dismiss" });
+    expect(declined.forwarded[1]?.body).toMatchObject({
+      parts: [
+        {
+          output: {
+            dismissed: true,
+            from: "connector",
+            value: { toolkit: "notion", dismissed: true },
+          },
+        },
+      ],
+    });
+
+    const app = widgetEventRoutes({
+      webchatRepo: {
+        widgetMessage: async () => ({ chatId: "c1", content: JSON.stringify([connect]) }),
+        getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
+      },
+      callerOwner: async () => "guardian",
+      forward: async () =>
+        Response.json(
+          { error: "no_api_key", message: "Log in to Composio first" },
+          { status: 409 },
+        ),
+    });
+    const res = await app.request("/chat/widgets/m7/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "connect-card/connect" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "Log in to Composio first" });
+  });
+
   it("dismisses with the output every dismissal has", async () => {
     const { fire, forwarded } = setup({ m2: { chatId: "c1", content: [question] } });
     await fire("m2", { name: "rome:dismiss", context: { ignored: true } });
     expect(forwarded[0]?.body).toEqual({
-      parts: [{ type: "interaction_result", toolUseId: "q1", output: { dismissed: true } }],
+      parts: [
+        {
+          type: "interaction_result",
+          toolUseId: "q1",
+          messageId: "m2",
+          output: { dismissed: true },
+        },
+      ],
     });
   });
 
@@ -307,6 +416,47 @@ describe("an event on a widget, over the dashboard's own storage", () => {
       testDb.close();
     }
   });
+
+  it("finds no widget by a key two dashboard chats share, so no chat is checked for another's widget", async () => {
+    const { createTestDb } = await import("../../test/helpers.js");
+    const { TurnLinks } = await import("../../sessions/turn-links.js");
+    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
+      await repo.createSession("chat-1", "Mine");
+      await repo.createSession("chat-2", "Theirs");
+      const widget = JSON.stringify([mealWidget("item_0", "meals", "water")]);
+      await repo.addMessage("dup", "chat-1", "assistant", widget);
+      await repo.addMessage("dup", "chat-2", "assistant", widget);
+      expect(await repo.widgetMessage("dup")).toBeNull();
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("leaves a trace found by its own id when a dashboard line takes that id as its key", async () => {
+    const { createTestDb } = await import("../../test/helpers.js");
+    const { TurnLinks } = await import("../../sessions/turn-links.js");
+    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
+      await repo.createSession("private", "Private");
+      await repo.createSession("mine", "Mine");
+      await repo.addMessage("trace-1", "private", "trace", "[]");
+      // A client picks a user line's key, so it can pick a trace's id.
+      await repo.addMessage(
+        "trace-1",
+        "mine",
+        "user",
+        JSON.stringify([{ type: "text", content: "hi" }]),
+      );
+      expect(await repo.sessionIdOfMessage("trace-1")).toBe("private");
+    } finally {
+      testDb.close();
+    }
+  });
 });
 
 describe("an event on the connect card core owns", () => {
@@ -359,6 +509,21 @@ describe("an event on the connect card core owns", () => {
     expect(await res.json()).toEqual({ open: "http://localhost/settings/connections" });
   });
 
+  it("joins a dashboard page to the address the guardian reached Rome at, behind a proxy", async () => {
+    const { fire } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github(null, { url: "/settings/connections", available: true, unavailableReason: null }),
+    );
+    const res = await fire(
+      "m",
+      { name: "connect", context: { kind: "github" } },
+      { "x-forwarded-host": "rome.example.com", "x-forwarded-proto": "https" },
+    );
+    expect(await res.json()).toEqual({ open: "https://rome.example.com/settings/connections" });
+  });
+
   it("refuses Connect with the reason when the kind can't be connected here", async () => {
     const { fire } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
@@ -380,7 +545,7 @@ describe("an event on the connect card core owns", () => {
     );
     expect(
       await (await notYet.fire("m", { name: "check", context: { kind: "github" } })).json(),
-    ).toEqual({ ok: true });
+    ).toEqual({});
     expect(notYet.forwarded).toEqual([]);
 
     const working = setup(

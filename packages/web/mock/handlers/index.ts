@@ -1,3 +1,4 @@
+import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import { questionCardRender } from "../fixtures/question-card";
 import type { Question } from "@rome/api-types/question-card";
@@ -94,6 +95,7 @@ import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser"
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
+import { taskListHandlers } from "./task-list";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -107,6 +109,8 @@ import {
   CONCIERGE_MORNING_DIGEST,
   CONCIERGE_RELEASE_DIGEST,
   CONCIERGE_TRIP_PLAN,
+  TASK_CHAT_ANSWER_WITH_CONCLUSION,
+  TASK_CHAT_CONCLUSION,
 } from "../fixtures/concierge-messages";
 
 // Fixtures are typed against the same types the fetch sites parse into
@@ -279,7 +283,14 @@ function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
     ...(turnEnd?.type === "turn_end" && turnEnd.status === "interrupted"
       ? { stoppedByUser: true }
       : {}),
-    ...(failed && lastError?.type === "error" ? { terminalError: lastError.error } : {}),
+    ...(failed && lastError?.type === "error"
+      ? {
+          terminalError: lastError.error,
+          ...(lastError.code ? { terminalErrorCode: lastError.code } : {}),
+          ...(lastError.provider ? { terminalErrorProvider: lastError.provider } : {}),
+          ...(lastError.reason ? { terminalErrorReason: lastError.reason } : {}),
+        }
+      : {}),
     ...(model ? { model } : {}),
   };
 }
@@ -400,7 +411,64 @@ const transcripts: Record<string, ChatMessage[]> = {
       text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
       dinnerQuestion,
     ]),
+    // A finished task is reported by forwarding only its conclusion; the chip opens the task chat.
+    ...turn(CONCIERGE_CHAT_ID, 9, "2026-08-07T13:00:00.000Z", "How are the Lisbon flights going?", [
+      {
+        type: "text",
+        content: TASK_CHAT_CONCLUSION,
+        format: "long",
+        forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
+      } as TranscriptPart,
+    ]),
+    // A task's thread: the Concierge's reply in it carries the task's label.
+    {
+      id: `${CONCIERGE_CHAT_ID}-thread-1`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-thread-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("I found three tables for Friday at 7.")]),
+      createdAt: "2026-08-07T13:01:00.000Z",
+      chatThreadId: "mock-thread-table",
+      chatThreadTitle: "Book a table for Friday",
+    },
+    // A routine made the Concierge speak: its reply carries the routine's name.
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-trace`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "trace",
+      content: "[]",
+      createdAt: "2026-08-07T13:02:00.000Z",
+      traceSummary: {
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        automatedInput: { type: "routine", name: "Daily summary" },
+      },
+    },
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-reply`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
+      createdAt: "2026-08-07T13:02:01.000Z",
+    },
+    // The owner's latest message, which the Concierge is still working on: it
+    // carries the working status reaction, as a live turn sets it.
+    {
+      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T13:05:00.000Z", "Book the 9:40 one", [])[0]!,
+      statusReaction: "working",
+    },
   ],
+  // The task chat the conclusion above came from: the full answer, then its conclusion.
+  "mock-chat-lisbon": turn(
+    "mock-chat-lisbon",
+    1,
+    "2026-08-07T09:20:00.000Z",
+    "Compare round-trip fares to Lisbon for 1–7 March and tell me what to book.",
+    [text(TASK_CHAT_ANSWER_WITH_CONCLUSION)],
+  ),
   "mock-task-question": turn(
     "mock-task-question",
     1,
@@ -859,6 +927,7 @@ const chatSessions: ChatSession[] = [
     model: "gpt-5.6-sol",
     reasoningEffort: "xhigh",
   },
+  { ...session("mock-chat-lisbon", "Lisbon flights"), triggerKind: "concierge" },
   { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
   {
@@ -1200,6 +1269,7 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 });
 
 export const handlers = [
+  ...appDocumentAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
   // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
   // section shows the account row rather than a reconnect prompt.
@@ -1641,6 +1711,7 @@ export const handlers = [
   // orders its own routes internally, so they can be appended in any order —
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
+  ...taskListHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,

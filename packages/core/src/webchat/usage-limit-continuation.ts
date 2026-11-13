@@ -23,7 +23,7 @@ const EXCERPT_LIMIT = 1000;
 export function usageLimitContinuationPrompt(request: string, refused: boolean): string {
   return (
     USAGE_LIMIT_MARKER +
-    "The previous turn in this chat stopped because a model usage limit was reached, and the limit has since reset. " +
+    "The previous turn in this chat stopped because a model usage limit was reached, and the provider is available again. " +
     (refused
       ? "That request was refused before it reached a model, so none of it was done. Treat it as the request to act on. "
       : "") +

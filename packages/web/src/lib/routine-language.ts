@@ -126,6 +126,15 @@ function tzSuffix(tzid: string): string {
   return tzDiffersFromBrowser(tzid) ? ` (${tzid})` : "";
 }
 
+/**
+ * The zone a schedule's time is labelled with, " (America/Los_Angeles)", or
+ * "" when it runs in the browser's zone. Only a `fixed` schedule is pinned to
+ * its `tzid`; a floating one fires in the guardian's current zone.
+ */
+export function scheduleZoneSuffix(trigger: { tzid?: string; tzMode?: string }): string {
+  return trigger.tzMode === "fixed" && trigger.tzid ? tzSuffix(trigger.tzid) : "";
+}
+
 const RRULE_WEEKDAYS = ["MO", "TU", "WE", "TH", "FR"];
 
 function describeByDay(byday: string, time: string, suffix: string): string {
@@ -145,10 +154,7 @@ function describeByDay(byday: string, time: string, suffix: string): string {
 // "Every Monday at 9:00 AM", or one-off "On Mon, May 5 at 9:00 AM".
 export function describeSchedule(trigger: ScheduleTrigger): string {
   const time = formatLocalTime12h(trigger.localTime);
-  // Only a `fixed` schedule is pinned to `tzid`; a floating one fires in the
-  // guardian's current zone (≈ the browser's), so a zone suffix would lie about
-  // when it runs.
-  const suffix = trigger.tzMode === "fixed" ? tzSuffix(trigger.tzid) : "";
+  const suffix = scheduleZoneSuffix(trigger);
 
   if (trigger.date) {
     const d = new Date(`${trigger.date}T00:00:00`);

@@ -38,8 +38,17 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// The instance sent `chatThreadId`, null included: it has chat threads.
     /// An older instance leaves the field out.
     var knowsThreads = false
+    /// The title of the task whose chat thread the message is in. The server
+    /// sends a thread only when a task has it, so a message with a thread and
+    /// no title is from an instance before task threads.
+    var chatThreadTitle: String? = nil
     /// Who said a guardian-side message, when it was not simply the guardian.
     var sender: MessageSender? = nil
+    /// Where a guardian message stands with the agent: `failed` and `unknown`
+    /// mean it was not (or may not have been) handed over. Nil from older instances.
+    var inputState: String? = nil
+    /// Rome's mark on a guardian message in a Chat: `working` or `failed`.
+    var statusReaction: String? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -55,7 +64,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, sender
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, statusReaction
     }
 }
 
@@ -87,8 +96,11 @@ extension ChatMessage {
         traceSummary = try container.decodeIfPresent(TraceSummary.self, forKey: .traceSummary)
         chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
         knowsThreads = container.contains(.chatThreadId)
+        chatThreadTitle = try container.decodeIfPresent(String.self, forKey: .chatThreadTitle)
         // An unknown shape never costs the message itself.
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
+        inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
+        statusReaction = (try? container.decodeIfPresent(String.self, forKey: .statusReaction)) ?? nil
     }
 
     /// Writes `chatThreadId` as null when the instance sent it as null, so a
@@ -103,29 +115,44 @@ extension ChatMessage {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(traceSummary, forKey: .traceSummary)
         if knowsThreads { try container.encode(chatThreadId, forKey: .chatThreadId) }
+        try container.encodeIfPresent(chatThreadTitle, forKey: .chatThreadTitle)
         try container.encodeIfPresent(sender, forKey: .sender)
+        try container.encodeIfPresent(inputState, forKey: .inputState)
+        try container.encodeIfPresent(statusReaction, forKey: .statusReaction)
     }
 
     /// The chat thread it is in, by its first message: its own id when alone.
     var threadRoot: String { chatThreadId ?? id }
 }
 
-/// Where a message sent from a chat thread goes. An instance with chat
-/// threads takes `chatThread`; an older one places a reply by
-/// `replyToMessageId` (every supported release has it).
+/// What a message the guardian sends replies to: the quoted message, and
+/// the thread view it was sent from, if one was open. The server places the
+/// reply in a task's thread when either is in one
+/// (docs/domains/chats.md#chat-thread).
 struct ThreadTarget: Codable, Hashable, Sendable {
-    /// A message of the open thread.
+    /// The message replied to, quoted in the reply bar.
     let messageId: String
     let instanceKnowsThreads: Bool
-    /// A reply to a message in no chat thread, quoted above the composer
-    /// instead of opened: sent, it starts that message's thread. Absent from
-    /// drafts written before quotes.
+    /// Written by a build where Reply quoted; absent from drafts written
+    /// when Reply opened the thread view.
     var quote: Bool? = nil
+    /// A message of the thread view the reply was sent from.
+    var thread: String? = nil
+    /// Aimed at the thread only: opened from its label, with no message
+    /// replied to, so there is no reply bar and the send names no message.
+    var bare: Bool? = nil
 
     var isQuote: Bool { quote == true }
 
+    /// The message whose thread view the reply was written in. A draft from
+    /// before quotes was always written in one, at `messageId`.
+    var threadMessage: String? { isQuote ? thread : messageId }
+
     var body: [String: JSONValue] {
-        instanceKnowsThreads ? ["chatThread": .string(messageId)] : ["replyToMessageId": .string(messageId)]
+        var body: [String: JSONValue] = [:]
+        if bare != true { body["replyToMessageId"] = .string(messageId) }
+        if let thread { body["chatThread"] = .string(thread) }
+        return body
     }
 }
 
@@ -134,6 +161,60 @@ struct TraceSummary: Codable, Hashable, Sendable {
     var turnStatus: String?
     var stoppedByUser: Bool?
     var terminalError: String?
+    /// Why the turn failed, as structured fields; set only with `terminalError`,
+    /// and absent from instances before them.
+    var terminalErrorCode: String?
+    var terminalErrorProvider: String?
+    var terminalErrorReason: String?
+    /// The turn is the first of a session that replaced the chat's earlier one.
+    var sessionRenewal: SessionRenewal? = nil
+    /// The turn ran on what a routine, an app or another agent sent into a
+    /// Concierge chat, which shows a faint line naming it.
+    var automatedInput: InputSource? = nil
+
+    /// Why a chat's agent session was renewed (`setup`, `idle`, `daily`,
+    /// `working_dir`, `context`, or a newer one), and the session it started.
+    struct SessionRenewal: Codable, Hashable, Sendable {
+        var reason: String?
+        var sessionId: String?
+    }
+
+    /// Who sent the input a turn ran on (`SystemInputSource` on the wire).
+    struct InputSource: Codable, Hashable, Sendable {
+        /// `routine`, `app`, `agent` or `automation`.
+        var type: String?
+        var name: String?
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case totalSteps, turnStatus, stoppedByUser, terminalError, terminalErrorCode, terminalErrorProvider, terminalErrorReason, sessionRenewal, automatedInput
+    }
+
+    init(totalSteps: Int? = nil, turnStatus: String? = nil, stoppedByUser: Bool? = nil, terminalError: String? = nil, terminalErrorCode: String? = nil, terminalErrorProvider: String? = nil, terminalErrorReason: String? = nil, sessionRenewal: SessionRenewal? = nil, automatedInput: InputSource? = nil) {
+        self.totalSteps = totalSteps
+        self.turnStatus = turnStatus
+        self.stoppedByUser = stoppedByUser
+        self.terminalError = terminalError
+        self.terminalErrorCode = terminalErrorCode
+        self.terminalErrorProvider = terminalErrorProvider
+        self.terminalErrorReason = terminalErrorReason
+        self.sessionRenewal = sessionRenewal
+        self.automatedInput = automatedInput
+    }
+
+    /// A shape this build does not know drops only its own field, never the message.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        totalSteps = try? container.decodeIfPresent(Int.self, forKey: .totalSteps)
+        turnStatus = try? container.decodeIfPresent(String.self, forKey: .turnStatus)
+        stoppedByUser = try? container.decodeIfPresent(Bool.self, forKey: .stoppedByUser)
+        terminalError = try? container.decodeIfPresent(String.self, forKey: .terminalError)
+        terminalErrorCode = try? container.decodeIfPresent(String.self, forKey: .terminalErrorCode)
+        terminalErrorProvider = try? container.decodeIfPresent(String.self, forKey: .terminalErrorProvider)
+        terminalErrorReason = try? container.decodeIfPresent(String.self, forKey: .terminalErrorReason)
+        sessionRenewal = try? container.decodeIfPresent(SessionRenewal.self, forKey: .sessionRenewal)
+        automatedInput = try? container.decodeIfPresent(InputSource.self, forKey: .automatedInput)
+    }
 }
 
 /// `GET /system/upgrade/check`: the instance's release and the latest one,
@@ -185,6 +266,8 @@ struct ActiveTurn: Codable, Hashable, Sendable {
     var turnId: String
     var status: String?
     var quiet: Bool?
+    /// The agent's own id for a backend turn, which its saved messages carry.
+    var agentTurnId: String?
 }
 
 /// How a sent input treats a turn that is already running.
@@ -254,6 +337,8 @@ enum ConciergeActivity: Hashable, Sendable {
     enum Tool: String, Sendable, CaseIterable {
         case startingTask, messagingTask, readingChat, stoppingTask, updatingTasks
         case startingTopic, checkingFollows, searchingWeb, readingPage
+        /// A handoff is being written for the chat's next session.
+        case tidyingUp
     }
 
     /// Lenient, as the contract asks: an unknown kind is nil (no line), an
@@ -286,8 +371,7 @@ enum ConciergeActivity: Hashable, Sendable {
     var statusLine: String? {
         switch self {
         case .idle: return nil
-        // Its own key: the question card's "Waiting for your answer" reads
-        // differently in Chinese.
+        // Its own key, so its Chinese reads as the header's status.
         case .needsYou: return String(localized: "status.needsYou", defaultValue: "Waiting for your answer")
         case .working: return String(localized: "Working on it")
         case .tasks(let title, let more): return more > 0 ? "\(title) +\(more)" : title
@@ -302,6 +386,7 @@ enum ConciergeActivity: Hashable, Sendable {
             case .checkingFollows: return String(localized: "Checking what you follow")
             case .searchingWeb: return String(localized: "Searching the web")
             case .readingPage: return String(localized: "Reading a page")
+            case .tidyingUp: return String(localized: "Tidying up context…")
             }
         }
     }
@@ -350,6 +435,90 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     var completedAt: Double?
     var archivedAt: Double?
     var notSynced: Bool?
+    /// The first message of the task's chat thread in its Concierge chat.
+    var threadRoot: String?
+    /// How the task stands, derived by the server: `needs_you`, `active`,
+    /// `later` or `ended`.
+    var status: String?
+    /// Why an ended task ended: `done`, `failed`, `stopped` or `no_response`.
+    var endReason: String?
+    /// What the task chat waits on its owner for, as the server sends it:
+    /// a card (`{kind:"card", id, messageId, render, since}`) or an approval
+    /// (`{kind:"approval", id, since}`). Null when nothing waits.
+    var openWait: JSONValue?
+    /// While it needs its owner: since when, epoch ms.
+    var waitingSince: Double?
+    /// A later task with no check: when it is due, epoch ms.
+    var laterAt: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, state, summary, waitingOn, dueAt, rank, chat, conciergeChat, sourceMessageId
+        case createdAt, updatedAt, completedAt, archivedAt, notSynced, threadRoot, status, endReason, openWait
+        case waitingSince, laterAt
+    }
+
+    init(id: String, title: String, state: TaskState, summary: String? = nil, waitingOn: String? = nil, dueAt: Double? = nil, rank: Double? = nil, chat: LinkedChat? = nil, conciergeChat: ConciergeChat? = nil, sourceMessageId: String? = nil, createdAt: Double, updatedAt: Double, completedAt: Double? = nil, archivedAt: Double? = nil, notSynced: Bool? = nil, threadRoot: String? = nil, status: String? = nil, endReason: String? = nil, openWait: JSONValue? = nil) {
+        self.id = id
+        self.title = title
+        self.state = state
+        self.summary = summary
+        self.waitingOn = waitingOn
+        self.dueAt = dueAt
+        self.rank = rank
+        self.chat = chat
+        self.conciergeChat = conciergeChat
+        self.sourceMessageId = sourceMessageId
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
+        self.archivedAt = archivedAt
+        self.notSynced = notSynced
+        self.threadRoot = threadRoot
+        self.status = status
+        self.endReason = endReason
+        self.openWait = openWait
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        // A state this build does not know reads from the derived status.
+        let derived = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? nil
+        state = (try? c.decode(TaskState.self, forKey: .state)) ?? {
+            switch derived {
+            case "needs_you": return .needsUser
+            case "later": return .next
+            case "ended": return .done
+            default: return .doing
+            }
+        }()
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        waitingOn = try c.decodeIfPresent(String.self, forKey: .waitingOn)
+        dueAt = try c.decodeIfPresent(Double.self, forKey: .dueAt)
+        rank = try c.decodeIfPresent(Double.self, forKey: .rank)
+        chat = try c.decodeIfPresent(LinkedChat.self, forKey: .chat)
+        conciergeChat = try c.decodeIfPresent(ConciergeChat.self, forKey: .conciergeChat)
+        sourceMessageId = try c.decodeIfPresent(String.self, forKey: .sourceMessageId)
+        createdAt = try c.decode(Double.self, forKey: .createdAt)
+        updatedAt = try c.decode(Double.self, forKey: .updatedAt)
+        completedAt = try c.decodeIfPresent(Double.self, forKey: .completedAt)
+        archivedAt = try c.decodeIfPresent(Double.self, forKey: .archivedAt)
+        notSynced = try c.decodeIfPresent(Bool.self, forKey: .notSynced)
+        threadRoot = try c.decodeIfPresent(String.self, forKey: .threadRoot)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        endReason = try c.decodeIfPresent(String.self, forKey: .endReason)
+        // A shape this build cannot read drops only the wait, never the task.
+        openWait = (try? c.decodeIfPresent(JSONValue.self, forKey: .openWait)) ?? nil
+        waitingSince = try? c.decodeIfPresent(Double.self, forKey: .waitingSince)
+        laterAt = try? c.decodeIfPresent(Double.self, forKey: .laterAt)
+    }
+}
+
+extension ConciergeTask {
+    /// The id of the card or approval the task waits on: the card it shows
+    /// takes an answer only while this names it.
+    var waitId: String? { openWait?["id"]?.string }
 }
 
 struct ConciergeTasksResponse: Codable, Sendable {
@@ -370,6 +539,9 @@ struct ApprovalRecord: Codable, Hashable, Sendable {
     var executionError: String?
     var resolvedAt: String?
     var updatedAt: String?
+    /// Who decided it; `rome:task-ended` and `rome:task-stopped` are Rome
+    /// turning it down as its task's wait ran out or its task stopped.
+    var resolvedBy: String?
 }
 
 // MARK: - Routines

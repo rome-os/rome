@@ -5,6 +5,8 @@ import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { QuotedReply } from "@/components/chat/reply/QuotedReply";
+import { UploadFiles } from "@/components/chat/UploadFiles";
+import { splitUploadLines } from "@/lib/asset-links";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +35,7 @@ export function UserMessageBubble({
     msg.inputState === "failed" || msg.inputState === "unknown" || msg.inputState === "cancelled";
   const pending =
     msg.inputState === "queued" || msg.inputState === "submitted" || msg.inputState === "accepted";
+  const { text: body, uploads } = splitUploadLines(text);
   const quote = parseMessageEntries(msg).find((part) => part.type === "reply_to");
   const statusLabel =
     msg.inputState && msg.inputState !== "consumed" ? t(`inputState.${msg.inputState}`) : undefined;
@@ -68,9 +71,16 @@ export function UserMessageBubble({
         ) : null}
         <div className="min-w-0">
           {quote ? <QuotedReply part={quote} hostId={msg.id} /> : null}
-          <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
-            {text}
-          </Markdown>
+          {body ? (
+            <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
+              {body}
+            </Markdown>
+          ) : null}
+          {uploads.length > 0 ? (
+            <div className={body ? "mt-2" : undefined}>
+              <UploadFiles uploads={uploads} />
+            </div>
+          ) : null}
         </div>
         {badge}
       </ChatBubble>
