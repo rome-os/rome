@@ -46,8 +46,8 @@ function setup(rows: Record<string, Row>, caller: string | null = "guardian") {
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
     webchatRepo: {
-      sessionIdOfMessage: async (id) => rows[id]?.chatId ?? null,
-      getMessageContent: async (id) => (rows[id] ? JSON.stringify(rows[id].content) : null),
+      widgetMessage: async (id) =>
+        rows[id] ? { chatId: rows[id].chatId, content: JSON.stringify(rows[id].content) } : null,
       getSession: (async (id: string) =>
         id === "private"
           ? { id, agentName: "core:concierge", ownerKey: "guardian", triggerKind: null }
@@ -100,6 +100,7 @@ describe("an event on a widget", () => {
             {
               type: "interaction_result",
               toolUseId: "q1",
+              messageId: "m2",
               output: { answers: [{ values: ["Warm"], text: "" }] },
             },
           ],
@@ -125,11 +126,21 @@ describe("an event on a widget", () => {
           {
             type: "interaction_result",
             toolUseId: "q1",
+            messageId: "m3",
             output: { answers: [{ values: ["Warm"], text: "" }] },
           },
         ],
       },
-      { parts: [{ type: "interaction_result", toolUseId: "q1", output: { dismissed: true } }] },
+      {
+        parts: [
+          {
+            type: "interaction_result",
+            toolUseId: "q1",
+            messageId: "m3",
+            output: { dismissed: true },
+          },
+        ],
+      },
     ]);
   });
 
@@ -145,7 +156,14 @@ describe("an event on a widget", () => {
     const { fire, forwarded } = setup({ m2: { chatId: "c1", content: [question] } });
     await fire("m2", { name: "rome:dismiss", context: { ignored: true } });
     expect(forwarded[0]?.body).toEqual({
-      parts: [{ type: "interaction_result", toolUseId: "q1", output: { dismissed: true } }],
+      parts: [
+        {
+          type: "interaction_result",
+          toolUseId: "q1",
+          messageId: "m2",
+          output: { dismissed: true },
+        },
+      ],
     });
   });
 
@@ -236,6 +254,47 @@ describe("an event on a widget, over the dashboard's own storage", () => {
           { type: "text", content: "and words" } as never,
         ]),
       ).rejects.toThrow();
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("finds no widget by a key two dashboard chats share, so no chat is checked for another's widget", async () => {
+    const { createTestDb } = await import("../../test/helpers.js");
+    const { TurnLinks } = await import("../../sessions/turn-links.js");
+    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
+      await repo.createSession("chat-1", "Mine");
+      await repo.createSession("chat-2", "Theirs");
+      const widget = JSON.stringify([mealWidget("item_0", "meals", "water")]);
+      await repo.addMessage("dup", "chat-1", "assistant", widget);
+      await repo.addMessage("dup", "chat-2", "assistant", widget);
+      expect(await repo.widgetMessage("dup")).toBeNull();
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("leaves a trace found by its own id when a dashboard line takes that id as its key", async () => {
+    const { createTestDb } = await import("../../test/helpers.js");
+    const { TurnLinks } = await import("../../sessions/turn-links.js");
+    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
+      await repo.createSession("private", "Private");
+      await repo.createSession("mine", "Mine");
+      await repo.addMessage("trace-1", "private", "trace", "[]");
+      // A client picks a user line's key, so it can pick a trace's id.
+      await repo.addMessage(
+        "trace-1",
+        "mine",
+        "user",
+        JSON.stringify([{ type: "text", content: "hi" }]),
+      );
+      expect(await repo.sessionIdOfMessage("trace-1")).toBe("private");
     } finally {
       testDb.close();
     }

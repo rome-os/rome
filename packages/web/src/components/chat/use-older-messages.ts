@@ -50,6 +50,8 @@ interface UseOlderMessagesOptions {
   /** Whether the viewport follows the newest message. A pinned viewport needs no anchoring. */
   pinned: boolean;
   setMessages: Dispatch<SetStateAction<Map<string, ChatMessage[]>>>;
+  /** Called with the messages of each older page that loads, once it is merged in. */
+  onOlderPage?: (sessionId: string, messages: ChatMessage[]) => void;
 }
 
 export interface OlderMessages {
@@ -69,7 +71,7 @@ export interface OlderMessages {
  */
 export function useOlderMessages(
   sessionId: string | null,
-  { pageTurns, scroller, pinned, setMessages }: UseOlderMessagesOptions,
+  { pageTurns, scroller, pinned, setMessages, onOlderPage }: UseOlderMessagesOptions,
 ): OlderMessages {
   const [cursors, setCursors] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const cursorsRef = useRef(cursors);
@@ -126,6 +128,7 @@ export function useOlderMessages(
           return next;
         });
         setCursor(id, page.nextCursor);
+        onOlderPage?.(id, page.messages);
       } catch {
         setRetryBlocked(true);
       } finally {
@@ -133,7 +136,7 @@ export function useOlderMessages(
         setLoading(false);
       }
     },
-    [pageTurns, setCursor, setMessages],
+    [pageTurns, setCursor, setMessages, onOlderPage],
   );
 
   useEffect(() => {

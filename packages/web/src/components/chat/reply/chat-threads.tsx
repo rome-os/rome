@@ -5,6 +5,8 @@
 // transcript has no provider, so it shows none.
 
 import { createContext, useContext, useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
 import { useReplyDraft } from "./reply-draft";
@@ -68,7 +70,10 @@ export function taskThreads(
 
 /**
  * The labels of a loaded timeline: one under every agent message in a task's
- * thread, named by the task's title, and none under the guardian's.
+ * thread, named by the task's title, and none under the guardian's: a plain
+ * message, a forward and a question or approval card alike. A task card, the
+ * one shown when its task starts, needs none: it names its task itself. One
+ * label per message.
  */
 export function threadLabels(
   messages: readonly ThreadTimelineMessage[],
@@ -79,7 +84,7 @@ export function threadLabels(
   for (const message of messages) {
     const thread = threads.get(message.id);
     const title = thread ? titles.get(thread) : undefined;
-    if (message.role !== "assistant" || !thread || !title) continue;
+    if (message.role !== "assistant" || !thread || !title || isTaskCard(message)) continue;
     labels.set(message.id, { thread, title });
   }
   return labels;
@@ -146,6 +151,14 @@ export function placed(
   });
 }
 
+/** Whether the message shows a task's card: a task_chat part not shown as its question. */
+function isTaskCard(message: ThreadTimelineMessage): boolean {
+  if (message.content === undefined) return false;
+  return parseMessageEntries({ id: message.id, content: message.content }).some(
+    (part) => part.type === "task_chat" && part.show !== "ask",
+  );
+}
+
 function wordsOf(message: Pick<ChatMessage, "id" | "content">): string {
   return parseMessageEntries(message)
     .flatMap((part) => (part.type === "text" && part.content.trim() ? [part.content] : []))
@@ -154,16 +167,30 @@ function wordsOf(message: Pick<ChatMessage, "id" | "content">): string {
     .trim();
 }
 
+/** The quiet look of a label under a message: about a spacing step from its bubble, faint, cut short when long. */
+const LABEL_LINE = "-mt-1 mb-1 flex max-w-full min-w-0 px-1 text-aux text-subtle-foreground/70";
+
 /**
  * The subdued `↳ <task title>` label under an agent message in a task's chat
  * thread, which opens the thread. Renders nothing under the guardian's
- * messages and inside the thread view.
+ * messages and inside the thread view. A message in no thread whose turn the
+ * Concierge took on its own, from a routine, an app, another agent or what
+ * it follows, shows `source` instead, in the same place and look, as plain
+ * text: one label per message, and a thread's wins.
  */
-export function ThreadLabelLine({ message }: { message: ChatMessage }) {
+export function ThreadLabelLine({
+  message,
+  source,
+}: {
+  message: ChatMessage;
+  source?: SystemInputSource;
+}) {
   const threads = useChatThreads();
   const draft = useReplyDraft();
   const label = threads?.labels.get(message.id);
-  if (!label || !draft?.threads || draft.sessionId !== message.sessionId) return null;
+  if (!label || !draft?.threads || draft.sessionId !== message.sessionId) {
+    return source ? <SourceLabel source={source} /> : null;
+  }
   const name = label.title;
   return (
     <button
@@ -177,10 +204,28 @@ export function ThreadLabelLine({ message }: { message: ChatMessage }) {
           preview: replyPreview(wordsOf(message)),
         })
       }
-      className="-mt-2 max-w-full truncate rounded-4 px-1 text-left text-aux text-muted-foreground/60 outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
+      // About 4px (a spacing step) from its own bubble and 12px before the next message, so it
+      // reads as its bubble's. Regular weight and faint until hovered or
+      // focused; a long title is cut at a fixed width, whole in the tooltip
+      // and the accessible name.
+      className={`${LABEL_LINE} rounded-4 text-left outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none`}
     >
-      <span aria-hidden="true">↳ </span>
-      {name}
+      <span aria-hidden="true" className="shrink-0">
+        ↳&nbsp;
+      </span>
+      <span className="max-w-56 truncate">{name}</span>
     </button>
+  );
+}
+
+/** Where a message's turn came from, such as "Routine · Daily summary": text, not a control. */
+function SourceLabel({ source }: { source: SystemInputSource }) {
+  const { t } = useTranslation("chat");
+  const kind = t(`automatedInput.kinds.${source.type}`);
+  const name = source.name ? t("automatedInput.named", { kind, name: source.name }) : kind;
+  return (
+    <p data-source-label={source.type} title={name} className={LABEL_LINE}>
+      <span className="max-w-56 truncate">{name}</span>
+    </p>
   );
 }

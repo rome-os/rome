@@ -437,6 +437,26 @@ describe("ChatThreadView", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
   });
 
+  it("covers the chat behind with a near-opaque backdrop and keeps blend modes inside the list", async () => {
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    await screen.findByText("Which day?");
+    const view = screen.getByRole("dialog", { name: "Chat thread" });
+    const [backdrop, list] = view.querySelectorAll<HTMLElement>("[data-chat-thread-fade]");
+    // Readable without the blur: an avatar's blend ring once cut it off.
+    expect(backdrop?.className).toContain("bg-chat-canvas/95");
+    expect(backdrop?.className).not.toMatch(/supports-\[backdrop-filter\]/);
+    expect(list?.className.split(" ")).toContain("isolate");
+  });
+
   it("tints the message it opened from once it has faded in, then lets it go", async () => {
     render(
       host(
@@ -454,6 +474,46 @@ describe("ChatThreadView", () => {
     await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(false), {
       timeout: 2000,
     });
+  });
+
+  it("tints every bubble of the message it opened from, not only its first", async () => {
+    // Each bubble of a message after its first names the message as its own.
+    const bubbles = (messages: { id: string; content: string }[]) =>
+      messages.flatMap((m) =>
+        (JSON.parse(m.content) as { content: string }[]).map((part, index) => (
+          <p
+            key={`${m.id}:${index}`}
+            data-timeline-anchor={index === 0 ? m.id : undefined}
+            data-message-part={m.id}
+          >
+            {index === 0 ? part.content : `${part.content} (more)`}
+          </p>
+        )),
+      );
+    thread = [
+      message("m1", "user", "Move my 3pm"),
+      {
+        ...message("a1", "assistant", "Which day?"),
+        content: JSON.stringify([
+          { type: "text", content: "Which day?" },
+          { type: "text", content: "Which day?" },
+        ]),
+      },
+    ];
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          renderMessages={bubbles}
+        />,
+      ),
+    );
+    const first = (await screen.findByText("Which day?")).closest("[data-message-part]")!;
+    const later = screen.getByText("Which day? (more)");
+    await waitFor(() => expect(first.hasAttribute("data-timeline-landed")).toBe(true));
+    expect(later.hasAttribute("data-timeline-landed")).toBe(true);
   });
 
   it("tints the message again each time its thread opens, from the cache under StrictMode too", async () => {

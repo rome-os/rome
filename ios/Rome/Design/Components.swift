@@ -229,7 +229,7 @@ enum TaskTone: Sendable {
         switch self {
         case .needsYou: return String(localized: "Needs you")
         case .running: return String(localized: "Working")
-        case .failed: return String(localized: "Failed")
+        case .failed: return String(localized: "Didn't finish")
         case .done: return String(localized: "Done")
         case .neutral: return ""
         }

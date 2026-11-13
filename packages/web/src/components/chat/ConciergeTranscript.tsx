@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ConciergeGroup } from "@/components/chat/ConciergeGroup";
 import { ConciergeTimeSeparator } from "@/components/chat/ConciergeTimeSeparator";
+import { ConciergeUnreadDivider } from "@/components/chat/ConciergeUnreadDivider";
 import type { BlockActions, LivePreview, ShareSelection } from "@/components/chat/MessageList";
 import { LatestTaskChatsContext } from "@/components/chat/entries/render";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
@@ -46,6 +47,7 @@ export function ConciergeTranscript({
   actions,
   contentRef,
   feedback = false,
+  unreadFrom,
 }: {
   rows: ChatRow[];
   live: LivePreview;
@@ -55,10 +57,15 @@ export function ConciergeTranscript({
   contentRef: (node: HTMLElement | null) => void;
   /** Shows the feedback buttons under each settled turn. */
   feedback?: boolean;
+  /** The id of the first message that was unread when the chat opened; a divider goes above it. */
+  unreadFrom?: string | null;
 }) {
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const typing = showsTyping(rows, live);
-  const items = useMemo(() => buildConciergeItems(rows, { typing }), [rows, typing]);
+  const items = useMemo(
+    () => buildConciergeItems(rows, { typing, unreadFrom }),
+    [rows, typing, unreadFrom],
+  );
   const messageIds = useMemo(
     () =>
       items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
@@ -87,8 +94,7 @@ export function ConciergeTranscript({
           ref={contentRef}
           data-chat-transcript
           data-concierge-transcript
-          // The bottom room clears a status mark hanging under the last bubble.
-          className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-6"
+          className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-4"
           role="log"
           aria-relevant="additions"
           aria-busy={typing || undefined}
@@ -96,6 +102,7 @@ export function ConciergeTranscript({
           {items.map((item) => {
             if (item.kind === "separator")
               return <ConciergeTimeSeparator key={item.key} at={item.at} />;
+            if (item.kind === "unread") return <ConciergeUnreadDivider key={item.key} />;
             if (item.kind === "renewal")
               return <SessionRenewalNotice key={item.key} reason={item.reason} className="mb-0" />;
             if (item.kind === "notice")

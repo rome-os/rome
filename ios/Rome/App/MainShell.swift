@@ -60,6 +60,8 @@ struct MainShell: View {
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
+    /// "See usage" was pressed inside the Agent page: Settings opens as it closes.
+    @State private var openUsageAfterCover = false
     @State private var settingsPath: [SettingsRoute] = []
     /// A page of the instance, in a sheet over the main stack.
     @State private var page: URL?
@@ -126,6 +128,7 @@ struct MainShell: View {
                     }
                 }
                 .environment(\.chatLinkOpener, openChatLink)
+                .environment(\.openUsage, { settingsPath = []; showSettings = true })
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
@@ -137,7 +140,13 @@ struct MainShell: View {
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
             }
         }
-        .fullScreenCover(item: $agentPage) { route in
+        .fullScreenCover(item: $agentPage, onDismiss: {
+            // Settings is a sheet of this view, so it waits for the cover to be gone.
+            guard openUsageAfterCover else { return }
+            openUsageAfterCover = false
+            settingsPath = []
+            showSettings = true
+        }) { route in
             // Its own stack: a task opens inside the page, and back returns
             // to the Tasks as they were.
             NavigationStack(path: $agentPath) {
@@ -156,6 +165,11 @@ struct MainShell: View {
             }
             .environment(model)
             .environment(\.chatLinkOpener, openChatLink)
+            // Settings is a sheet of this view: the cover closes first.
+            .environment(\.openUsage, {
+                openUsageAfterCover = true
+                agentPage = nil
+            })
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
@@ -218,6 +232,33 @@ struct MainShell: View {
         .onChange(of: model.sessionExpired) { _, expired in if expired { agentPage = nil } }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
         .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
+        // A tap on the widget: its app, Apps or Chat in front, nothing over it.
+        // Taken on appear too: a link routed while this shell was being
+        // built (a sign-in, a switch) waits for it.
+        .onChange(of: model.widgetRequest, initial: true) {
+            guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
+            agentPage = nil
+            showSettings = false
+            page = nil
+            settingsPage = nil
+            closeDrawer()
+            switch link {
+            case .app(_, let appId):
+                show(.apps)
+                // The list as the app knows it; the widget's copy names one
+                // not read yet.
+                let app = workspace.apps.first { $0.id == appId }
+                    ?? InstalledApp(id: appId, displayName: AppShelfStore.shared?.read()?.apps.first { $0.id == appId }?.name)
+                path = [.app(app)]
+            case .apps:
+                show(.apps)
+                path = []
+            case .newApp:
+                show(.chat)
+                path = []
+                workspace.composerPrefills[conciergeChatID] = AppIdea.own.prompt
+            }
+        }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
             agentPage = nil

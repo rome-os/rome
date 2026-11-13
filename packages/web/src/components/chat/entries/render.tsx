@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useContext } from "react";
+import { useLiveTaskCard } from "./live-task-cards";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -36,11 +37,15 @@ export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntr
 
 function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat" }> }) {
   const latest = useContext(LatestTaskChatsContext);
+  // As a live event settled it since the message loaded.
+  const card = useLiveTaskCard(block.card);
   return (
     <TaskChatCard
       chatId={block.chatId}
       title={block.title}
       isLatestForChat={!latest || latest.get(block.chatId) === block}
+      show={block.show}
+      card={card}
     />
   );
 }

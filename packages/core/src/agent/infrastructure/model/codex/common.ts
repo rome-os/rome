@@ -1,7 +1,7 @@
 // Shared Codex helpers — model catalog, env/auth wiring, and OpenAI-shaped
 // accounting. Consumed by CodexAppServerProvider (the only Codex provider).
 
-import type { AgentStop } from "../../../../types.js";
+import type { AgentContextUsage, AgentStop } from "../../../../types.js";
 import { buildAgentAccounting, calculateImpliedCostUsd } from "../provider-accounting.js";
 import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 
@@ -35,6 +35,8 @@ interface BuildOpenAiAccountingArgs {
   stop?: AgentStop;
   stopReason?: string;
   durationMs?: number;
+  /** How full the context window was at the turn's last model request. */
+  context?: AgentContextUsage;
 }
 
 function normalizeOpenAiUsage(usage: Usage | undefined) {
@@ -68,6 +70,25 @@ function normalizeOpenAiUsage(usage: Usage | undefined) {
   };
 }
 
+/**
+ * The context window as the latest model request filled it: that request's
+ * input is the whole context it read. Undefined when the request read nothing.
+ */
+export function codexContextUsage(
+  lastInputTokens: number,
+  modelContextWindow: number | null,
+): AgentContextUsage | undefined {
+  if (!(lastInputTokens > 0)) return undefined;
+  const windowTokens =
+    modelContextWindow && modelContextWindow > 0 ? modelContextWindow : undefined;
+  return {
+    usedTokens: lastInputTokens,
+    ...(windowTokens !== undefined
+      ? { windowTokens, remainingTokens: Math.max(windowTokens - lastInputTokens, 0) }
+      : {}),
+  };
+}
+
 /** Price one Codex model request before turn-level usage is aggregated. */
 export function calculateOpenAiCostUsd(usage: Usage | undefined, model: string) {
   if (!usage) return undefined;
@@ -92,5 +113,6 @@ export function buildOpenAiAccounting(args: BuildOpenAiAccountingArgs) {
     stopReason: args.stopReason,
     durationMs: args.durationMs,
     rawUsage: normalized.rawUsage,
+    ...(args.context ? { context: args.context } : {}),
   });
 }

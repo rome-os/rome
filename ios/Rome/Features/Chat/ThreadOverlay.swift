@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// A chat thread over its chat: the chat stays behind it, blurred and
-/// dimmed, so the thread reads as part of the conversation. It covers the
-/// header and the transcript only: the chat's own composer stays below it
-/// and sends into the thread while it is open. A tap beside the messages,
-/// or the close button, closes it.
+/// A task's chat thread over its chat: the chat stays behind it, blurred
+/// and dimmed, so the thread reads as part of the conversation. It covers
+/// the header and the transcript only: the chat's own composer stays below
+/// it and sends into the thread while it is open. A tap beside the
+/// messages, or the close button, closes it.
 struct ThreadOverlay: View {
     let thread: ThreadStore
     let chat: TranscriptStore
@@ -32,7 +32,8 @@ struct ThreadOverlay: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: onOpenChat, inThread: true)
+                        ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: openFromRow, inThread: true)
+                            .tinted(chat.tinted != nil && row.ownMessageId == chat.tinted)
                             .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
                     }
                 }
@@ -70,6 +71,15 @@ struct ThreadOverlay: View {
         }
         .onAppear {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { shown = true }
+        }
+    }
+
+    /// A chat opened from a row inside the view: the view closes first, or the
+    /// chat would be pushed under it.
+    private var openFromRow: (String, String) -> Void {
+        { id, title in
+            chat.closeThread()
+            onOpenChat(id, title)
         }
     }
 
@@ -115,8 +125,8 @@ private struct StayAtBottom: ViewModifier {
     }
 }
 
-/// Above the composer while it replies to a message in no chat thread: a
-/// line of that message, and a cross that drops the reply.
+/// Above the composer while it replies to a message: a line of that
+/// message, and a cross that drops the reply, and an open thread view with it.
 struct QuoteBar: View {
     /// The quoted message; nil while it is not held.
     let message: ChatMessage?
@@ -158,27 +168,100 @@ struct QuoteBar: View {
     }
 }
 
-/// Under the root of a chat thread: how many replies it has. A tap opens
-/// the thread.
-struct ThreadRepliesLine: View {
-    let count: Int
-    let guardian: Bool
+/// Under a Concierge message in a task's chat thread: `↳ <task title>`,
+/// faint and on one line, cut with "…". A tap opens the thread view.
+struct ThreadLabelLine: View {
+    let title: String
     let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            Text("\(count) replies")
-                .romeFont(13, .medium)
-                .foregroundStyle(Palette.sub)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
+            HStack(spacing: 3) {
+                Text(verbatim: "↳").accessibilityHidden(true)
+                Text(verbatim: title).lineLimit(1).truncationMode(.tail)
+            }
+            .romeFont(12)
+            .foregroundStyle(Palette.sub.opacity(0.75))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // Tight under its bubble: the tap area keeps its height, the line
-        // takes only its text's.
+        // Tight under its bubble or card: the tap area keeps its height, the
+        // line takes only its text's.
         .padding(.vertical, -8)
-        .frame(maxWidth: .infinity, alignment: guardian ? .trailing : .leading)
-        .padding(.leading, guardian ? 0 : 8)
+        .frame(maxWidth: 260, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 6)
+        .accessibilityLabel(Text(verbatim: title))
+        .accessibilityHint(Text("Opens the chat thread"))
+    }
+}
+
+/// The quote a reply carries, at the top of its bubble: a pale edge, the
+/// reply arrow and the first two lines of what it quotes. A tap opens the
+/// task's thread view or goes to the original; without one it is plain.
+struct QuotedReply: View {
+    let quote: MessagePart.ReplyQuote
+    let onTap: (() -> Void)?
+
+    private var preview: String {
+        MarkdownParser.plain(quote.text).split(whereSeparator: \.isNewline).joined(separator: " ")
+    }
+
+    var body: some View {
+        let content = HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "arrowshape.turn.up.left").romeFont(11).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 1) {
+                if quote.author == "automated" {
+                    Text(verbatim: quote.name ?? String(localized: "Automation")).romeFont(12, .medium).lineLimit(1)
+                }
+                Text(verbatim: preview).romeFont(14).lineLimit(2).multilineTextAlignment(.leading)
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white.opacity(0.85))
+        .padding(.leading, 9)
+        .padding(.trailing, 8)
+        .padding(.vertical, 5)
+        .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(alignment: .leading) {
+            Capsule().fill(.white.opacity(0.6)).frame(width: 3).padding(.vertical, 5).padding(.leading, 3)
+        }
+        if let onTap {
+            Button(action: onTap) { content.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityHint(Text("Shows the message it replies to"))
+        } else {
+            content
+        }
+    }
+}
+
+extension TranscriptRow {
+    /// The stored message a row draws, a card's included: part rows are
+    /// `<message id>:<part index>`. A label is under its message, not of it,
+    /// so a tint leaves it out.
+    var ownMessageId: String? {
+        switch self {
+        case .separator, .typing, .tools, .threadLabel, .sourceLabel: return nil
+        default: return messageId ?? Self.message(ofPart: id)
+        }
+    }
+}
+
+extension View {
+    /// The tint of a message a thread view or a quote led to.
+    func tinted(_ on: Bool) -> some View {
+        background {
+            if on {
+                RoundedRectangle(cornerRadius: Metrics.bubbleRadius + 4, style: .continuous)
+                    .fill(Palette.primarySoft)
+                    .padding(.horizontal, -6)
+                    .padding(.vertical, -3)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.3), value: on)
     }
 }

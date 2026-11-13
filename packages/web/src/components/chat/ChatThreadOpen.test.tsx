@@ -93,6 +93,38 @@ describe("threadLabels", () => {
     ]);
   });
 
+  it("labels every agent message in a task's thread alike: plain text, a forward and a card", () => {
+    const withParts = (id: string, parts: unknown[]): ThreadTimelineMessage => ({
+      ...a(id, "q1"),
+      content: JSON.stringify(parts),
+    });
+    const messages = [
+      g("q1"),
+      withParts("forward", [
+        { type: "text", content: "Here it is" },
+        { type: "text", content: "# Report", forwardedFrom: { chatId: "c1", title: "Flights" } },
+      ]),
+      withParts("card", [{ type: "task_chat", chatId: "c1", title: "Flights", show: "ask" }]),
+      withParts("said", [{ type: "text", content: "Two options so far." }]),
+    ];
+    // One label per message, each opening the thread.
+    expect(where(threadLabels(messages, tasks))).toEqual([
+      ["forward", "q1"],
+      ["card", "q1"],
+      ["said", "q1"],
+    ]);
+  });
+
+  it("labels no task card, the one shown when its task starts: it names its task itself", () => {
+    const card = (id: string, show?: "task" | "ask"): ThreadTimelineMessage => ({
+      ...a(id, "q1"),
+      content: JSON.stringify([{ type: "task_chat", chatId: "c1", title: "Flights", show }]),
+    });
+    expect(
+      where(threadLabels([g("q1"), card("start", "task"), card("old"), card("ask", "ask")], tasks)),
+    ).toEqual([["ask", "q1"]]);
+  });
+
   it("names a task's thread by its title, from any of its messages", () => {
     const labels = threadLabels([{ ...g("q1"), chatThreadTitle: "Tokyo weather" }, a("a1", "q1")]);
     expect(labels.get("a1")).toEqual({ thread: "q1", title: "Tokyo weather" });
@@ -206,9 +238,9 @@ const idle = {
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
-function renderTranscript() {
+function renderTranscript(shown: ChatMessage[] = messages) {
   const box: { thread: string | null } = { thread: null };
-  const rows = buildRows(messages, new Map(), idle.identity, {
+  const rows = buildRows(shown, new Map(), idle.identity, {
     runningTurnId: null,
     isStreaming: false,
   });
@@ -216,7 +248,7 @@ function renderTranscript() {
     const draft = useReplyDraftState({
       chatId: "concierge",
       sessionId: "concierge",
-      messageIds: new Set(messages.map((m) => m.id)),
+      messageIds: new Set(shown.map((m) => m.id)),
       jump: () => {},
       focusComposer: () => {},
       threads: true,
@@ -226,7 +258,7 @@ function renderTranscript() {
       <MemoryRouter>
         <ReplyDraftProvider value={draft}>
           <ThemeProvider>
-            <ChatThreadsProvider value={{ labels: threadLabels(messages) }}>
+            <ChatThreadsProvider value={{ labels: threadLabels(shown) }}>
               <ConciergeTranscript
                 rows={rows}
                 live={idle}
@@ -254,6 +286,39 @@ describe("the thread label in the transcript", () => {
     expect(thread()).toBe("a2");
   });
 
+  it("sits under a forwarded result too, below its bubble, with no header inside it", () => {
+    const forward = {
+      ...message("a3", "assistant", "", "m1", 4),
+      content: JSON.stringify([
+        {
+          type: "text",
+          content: "Ryokan by the river, 3 nights.",
+          forwardedFrom: { chatId: "task-1", title: "Kyoto trip" },
+        },
+      ]),
+    } as ChatMessage;
+    renderTranscript([...messages, forward]);
+    const labels = screen.getAllByRole("button", { name: "Kyoto trip" });
+    expect(labels).toHaveLength(3);
+    const bubble = screen.getByText("Ryokan by the river, 3 nights.");
+    // No task header inside the bubble: the label below names the task.
+    expect(bubble.closest("[data-concierge-bubble-part]")?.querySelector("a")).toBeNull();
+    const last = labels.at(-1)!;
+    expect(last.previousElementSibling?.contains(bubble)).toBe(true);
+  });
+
+  it("cuts a long title at a fixed width, whole in its tooltip and accessible name", () => {
+    const title = "Compare every ryokan along the Kamo river for the April trip";
+    renderTranscript([{ ...messages[0]!, chatThreadTitle: title }, messages[1]!]);
+    const label = screen.getByRole("button", { name: title });
+    expect(label.getAttribute("title")).toBe(title);
+    expect(label.lastElementChild?.className).toContain("max-w-56");
+    expect(label.lastElementChild?.className).toContain("truncate");
+    // Regular weight, not the badge's.
+    expect(label.className).toContain("text-aux");
+    expect(label.className).not.toContain("text-badge");
+  });
+
   it("sits under none of the guardian's messages", () => {
     renderTranscript();
     const labelled = screen
@@ -267,5 +332,59 @@ describe("the thread label in the transcript", () => {
     const thread = renderTranscript();
     fireEvent.click(screen.getByText("Hotels first, then the days."));
     expect(thread()).toBeNull();
+  });
+});
+
+describe("the source label in the transcript", () => {
+  /** The trace of turn `turnId`, which ran on input from `source`. */
+  const trace = (
+    turnId: string,
+    minute: number,
+    source: { type: "routine" | "agent"; name: string },
+  ) =>
+    ({
+      id: `trace-${turnId}`,
+      sessionId: "concierge",
+      turnId,
+      role: "trace",
+      content: "[]",
+      createdAt: at(minute),
+      traceSummary: {
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        automatedInput: source,
+      },
+    }) as ChatMessage;
+  const reply = (id: string, minute: number, chatThreadId: string | null = null) =>
+    ({
+      ...message(id, "assistant", `said ${id}`, chatThreadId ?? "", minute),
+      chatThreadId,
+    }) as ChatMessage;
+
+  it("sits under the Concierge's reply to a routine, names it, and opens nothing", () => {
+    renderTranscript([
+      trace("t-r1", 10, { type: "routine", name: "Daily summary" }),
+      reply("r1", 10),
+    ]);
+    const label = screen.getByText("Routine · Daily summary");
+    expect(label.closest("button")).toBeNull();
+    expect(label.closest("[data-source-label]")?.getAttribute("data-source-label")).toBe("routine");
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("shows nothing for an agent's input the Concierge did not answer", () => {
+    renderTranscript([trace("t-x", 10, { type: "agent", name: "Flint" })]);
+    expect(screen.queryByText(/Flint/)).toBeNull();
+  });
+
+  it("gives a reply in a task's thread its thread label alone", () => {
+    renderTranscript([
+      ...messages,
+      trace("t-a3", 12, { type: "routine", name: "Check-in" }),
+      reply("a3", 12, "m1"),
+    ]);
+    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(3);
+    expect(screen.queryByText("Routine · Check-in")).toBeNull();
   });
 });

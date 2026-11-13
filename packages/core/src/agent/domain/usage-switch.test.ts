@@ -61,6 +61,18 @@ it("excludes Rome credits by reading raw unauthorized Codex, not resolver availa
   expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
 });
 
+it("does not automatically switch providers or models onto ChatGPT credits", () => {
+  const raw: ModelAccountReports = {
+    anthropic: atLimit(),
+    openai: { ...available(), requiresChatgptCredits: true },
+  };
+  expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
+  expect(usageSwitchTarget(raw, "anthropic", true)).toBeNull();
+  expect(sameProviderTarget(raw, "openai", "gpt-6.1-sol")).toBeNull();
+  raw.anthropic = available();
+  expect(usageSwitchTarget(raw, "openai", true)?.provider).toBe("anthropic");
+});
+
 it("switches on a failed turn before the limit is read, from a subscription only", () => {
   const raw: ModelAccountReports = { anthropic: available(), openai: available() };
   expect(usageSwitchTarget(raw, "anthropic")).toBeNull();

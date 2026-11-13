@@ -123,6 +123,39 @@ describe("Concierge status reaction", () => {
     }
   });
 
+  it("draws the emoji alone on the bubble's top-left corner, at full strength, and only shows", () => {
+    const { container } = render(transcript());
+    const badge = container.querySelector<HTMLElement>("[data-status-reaction]");
+    expect(badge).not.toBeNull();
+    const classes = badge?.className.split(/\s+/) ?? [];
+    // Centered on the top-left corner, so half of it hangs out.
+    expect(classes).toEqual(
+      expect.arrayContaining(["absolute", "-top-2.5", "-left-2.5", "size-5"]),
+    );
+    // No disc behind it: no fill, ring, or rounded box.
+    expect(classes.some((name) => /^(bg-|ring-|rounded-|shadow-)/.test(name))).toBe(false);
+    expect(classes.some((name) => /^(right|bottom|-right|-bottom)-/.test(name))).toBe(false);
+    // Neither shrunk nor dimmed: the emoji keeps its own colors.
+    expect(classes.some((name) => /^(scale-|opacity-)/.test(name))).toBe(false);
+    expect(badge?.querySelector("[class*='opacity-']")).toBeNull();
+    // It is an image with a name, and takes no pointer.
+    expect(badge?.getAttribute("role")).toBe("img");
+    expect(badge?.getAttribute("aria-label")).toBeTruthy();
+    expect(badge?.getAttribute("title")).toBe(badge?.getAttribute("aria-label"));
+    expect(classes).toContain("pointer-events-none");
+  });
+
+  it("keeps the same room above every guardian bubble, mark or not, and none above the agent's", () => {
+    const { container } = render(transcript());
+    const box = (id: string) =>
+      container.querySelector<HTMLElement>(`[data-timeline-anchor="${id}"]`)?.className ?? "";
+    const room = (className: string) => className.match(/\bmt-[\w.]+/g) ?? [];
+    // "weather" has a mark, "thanks" has none: the same room either way.
+    expect(room(box("weather"))).toEqual(["mt-2"]);
+    expect(room(box("thanks"))).toEqual(["mt-2"]);
+    expect(room(box("you're welcome"))).toEqual([]);
+  });
+
   it("follows the live reaction once one arrives", async () => {
     const { container, rerender } = render(transcript());
     rerender(transcript(new Map([["weather", "failed"]])));

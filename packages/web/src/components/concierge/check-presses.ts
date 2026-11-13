@@ -1,37 +1,25 @@
-import { listSessionMessagePage, listSessionTurns } from "@/lib/chat-api";
+import { z } from "zod";
 import { getPending, markUnchanged } from "./task-pending";
 
-/** How many recent turns of a Concierge chat to look for the pressed messages in. */
-const RECENT_TURNS = 10;
+/**
+ * An `inputs_settled` event: the Concierge turn that took these owner
+ * messages in ended, and no newer turn carries them on.
+ */
+export const inputsSettledSchema = z.object({
+  sessionId: z.string(),
+  inputIds: z.array(z.string()),
+});
 
 /**
- * Marks each pending press whose message a Concierge turn took in, and that
- * turn has ended, with the row still as it was. A turn that has not taken a
- * press in (it is queued behind, or still waiting) leaves it pending, so one
- * turn ending never speaks for the presses it did not handle. Each press is
- * looked for in the Concierge chat it went to.
+ * Marks each pending press whose message a turn that has now ended took in,
+ * with the row still as it was, as the server tells it. A press whose turn
+ * has not ended, or that is queued behind, stays pending, so one turn ending
+ * never speaks for a press it did not handle.
  */
-export async function checkPresses(): Promise<void> {
-  const waiting = [...getPending()].filter(([, press]) => press.phase === "pending");
-  if (waiting.length === 0) return;
-  const chats = [...new Set(waiting.map(([, press]) => press.chatId))];
-  await Promise.all(
-    chats.map(async (chatId) => {
-      const [turns, page] = await Promise.all([
-        listSessionTurns(chatId),
-        listSessionMessagePage(chatId, { limit: RECENT_TURNS }),
-      ]);
-      if (!turns || !page) return;
-      const running = new Set(
-        turns.flatMap((turn) => [turn.turnId, turn.agentTurnId ?? turn.turnId]),
-      );
-      for (const [taskId, press] of waiting) {
-        if (press.chatId !== chatId) continue;
-        const sent = page.messages.find((message) => message.id === press.inputId);
-        if (sent?.inputState === "consumed" && sent.turnId && !running.has(sent.turnId)) {
-          markUnchanged(taskId);
-        }
-      }
-    }),
-  );
+export function settlePresses({ sessionId, inputIds }: z.infer<typeof inputsSettledSchema>): void {
+  const settled = new Set(inputIds);
+  for (const [taskId, press] of getPending()) {
+    if (press.phase !== "pending" || press.chatId !== sessionId) continue;
+    if (settled.has(press.inputId)) markUnchanged(taskId);
+  }
 }

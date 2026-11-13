@@ -331,6 +331,7 @@ describe("CodexAppServerProvider", () => {
     "features.multi_agent": false,
     "features.image_generation": false,
     web_search: "disabled",
+    "features.apps": false,
   };
   const threadRequest = (method: string) =>
     requestMock.mock.calls.find((call) => call[0] === method)?.[1] as
@@ -347,7 +348,7 @@ describe("CodexAppServerProvider", () => {
       label: "Read, Glob, and Grep",
       builtinTools: ["Read", "Glob", "Grep"],
       sandbox: "danger-full-access",
-      off: ["features.multi_agent", "features.image_generation", "web_search"],
+      off: ["features.multi_agent", "features.image_generation", "web_search", "features.apps"],
     },
     {
       label: "Bash",
@@ -358,6 +359,7 @@ describe("CodexAppServerProvider", () => {
         "features.multi_agent",
         "features.image_generation",
         "web_search",
+        "features.apps",
       ],
     },
     {
@@ -374,9 +376,15 @@ describe("CodexAppServerProvider", () => {
     },
     {
       label: "every switch",
-      builtinTools: ["Read", "Write", "Bash", "WebSearch", "Task", "ImageGeneration"],
+      builtinTools: ["Read", "Write", "Bash", "WebSearch", "WebFetch", "Task", "ImageGeneration"],
       sandbox: "danger-full-access",
       off: [],
+    },
+    {
+      label: "WebSearch without WebFetch",
+      builtinTools: ["Read", "WebSearch"],
+      sandbox: "danger-full-access",
+      off: ["features.multi_agent", "features.image_generation", "features.apps"],
     },
   ])("limits Codex's own tools to the declared builtins: $label", async ({
     builtinTools,
@@ -585,6 +593,34 @@ describe("CodexAppServerProvider", () => {
     expect(closeMock).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a compaction of the thread partway through a turn", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thread-compact" } };
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        const at = { threadId: "thread-compact", turnId: "turn-compact" };
+        n("turn/started", { threadId: "thread-compact", turn: { id: "turn-compact" } });
+        n("item/started", { item: { type: "contextCompaction", id: "compact-1" }, ...at });
+        n("item/completed", { item: { type: "contextCompaction", id: "compact-1" }, ...at });
+        n("turn/completed", {
+          threadId: "thread-compact",
+          turn: { id: "turn-compact", status: "completed" },
+        });
+      }
+      return {};
+    });
+    const provider = new CodexAppServerProvider();
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "go on" });
+    const messages = await collected;
+
+    expect(messages.filter((message) => message.type === "model_context_compacted")).toHaveLength(
+      1,
+    );
+    await session.close();
+  });
+
   it("maps dynamic tool results into app-server responses and Rome tool traces", async () => {
     let dynamicResponse: unknown;
     requestMock.mockImplementation(async (method: string) => {
@@ -715,6 +751,54 @@ describe("CodexAppServerProvider", () => {
 
     await forkSession.close();
     await source.close();
+  });
+
+  it("refuses a tool a resumed thread opened with no tools calls, as a handoff turn does", async () => {
+    let dynamicResponse: unknown;
+    requestMock.mockImplementation(async (method: string, requestParams: unknown) => {
+      if (method === "thread/resume") {
+        return { thread: { id: "retired-thread", historyMode: "paginated" } };
+      }
+      if (method === "turn/start") {
+        const payload = requestParams as { threadId: string };
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: payload.threadId, turn: { id: "handoff-turn" } });
+        // The retired thread was opened with the Concierge's tools.
+        dynamicResponse = await captured.onServerRequest?.("item/tool/call", {
+          threadId: payload.threadId,
+          turnId: "handoff-turn",
+          callId: "call-say",
+          namespace: null,
+          tool: "say",
+          arguments: { text: "hello guardian" },
+        });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "- Agreed: x", phase: "final_answer" },
+          threadId: payload.threadId,
+          turnId: "handoff-turn",
+          completedAtMs: 0,
+        });
+        n("turn/completed", {
+          threadId: payload.threadId,
+          turn: { id: "handoff-turn", status: "completed" },
+        });
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const session = await provider.openSession({
+      ...buildParams(),
+      tools: NO_ROME_TOOLS,
+      thread: { kind: "resume", modelThreadId: "retired-thread" },
+    });
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "<handoff_request>" });
+    const result = (await collected).find((m) => m.type === "result");
+
+    expect(dynamicResponse).toMatchObject({ success: false });
+    expect(result).toMatchObject({ content: "- Agreed: x" });
+    await session.close();
   });
 
   it("fails closed when an isolated native fork calls a tool inherited from its source", async () => {
@@ -2314,6 +2398,55 @@ describe("CodexAppServerProvider", () => {
       (secondResult as { accounting?: { costUsd?: number } })?.accounting?.costUsd,
     ).toBeCloseTo(0.555);
 
+    await session.close();
+  });
+
+  it("reports the context window as the turn's last model request filled it", async () => {
+    const provider = new CodexAppServerProvider();
+
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        // Two requests: the turn's usage is their sum, its context the last one.
+        n("thread/tokenUsage/updated", {
+          threadId: "thr-1",
+          turnId: "turn-1",
+          tokenUsage: { ...usage({ inputTokens: 60_000 }), modelContextWindow: 258_000 },
+        });
+        n("thread/tokenUsage/updated", {
+          threadId: "thr-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            ...usage({ inputTokens: 62_000 }, { inputTokens: 122_000, totalTokens: 20 }),
+            modelContextWindow: 258_000,
+          },
+        });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "done", phase: "final_answer" },
+          threadId: "thr-1",
+          turnId: "turn-1",
+          completedAtMs: 0,
+        });
+        n("turn/completed", { threadId: "thr-1", turn: { id: "turn-1", status: "completed" } });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    const result = (await collected).find((m) => m.type === "result") as
+      | { accounting?: { context?: unknown; usage?: { inputTokens: number } } }
+      | undefined;
+    expect(result?.accounting?.context).toEqual({
+      usedTokens: 62_000,
+      windowTokens: 258_000,
+      remainingTokens: 196_000,
+    });
     await session.close();
   });
 
