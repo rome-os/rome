@@ -40,6 +40,7 @@ import { send } from "../chats/send.js";
 import { ownPlatforms } from "../webchat/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
+import { chatTaskListRoutes, ownsConciergeChat, subscribeChatTasks } from "./routes/task-list.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
 import { uptimeRoutes } from "./routes/uptime.js";
@@ -64,6 +65,7 @@ import { cloudLoginRoutes } from "./routes/cloud-login.js";
 import { visitorAuthRoutes } from "./routes/visitor-auth.js";
 import { oauthRoutes } from "./routes/oauth.js";
 import { integrationsRoutes } from "./routes/integrations.js";
+import { assetsRoutes } from "./routes/assets.js";
 import { memoryFilesRoutes } from "./routes/memory-files.js";
 import { projectsFilesRoutes } from "./routes/projects-files.js";
 import { syncRoutes } from "./routes/sync.js";
@@ -195,6 +197,7 @@ export function buildApp(
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
   api.route("/", conciergeRoutes(deps));
+  api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
@@ -208,6 +211,7 @@ export function buildApp(
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
   api.route("/", memoryFilesRoutes());
+  api.route("/", assetsRoutes());
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
@@ -383,6 +387,10 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
           subscribeConciergeActivity: (owner, emit) =>
             deps.concierge?.activity?.subscribe(owner, emit) ?? (() => {}),
+          hasChatTasks: async (chatId, owner) =>
+            deps.concierge ? ownsConciergeChat(deps.concierge, chatId, owner) : false,
+          subscribeChatTasks: (chatId, owner, emit) =>
+            subscribeChatTasks(deps, chatId, owner, emit),
         },
         deps.phoneWatching,
         deps.dashboardActivity,

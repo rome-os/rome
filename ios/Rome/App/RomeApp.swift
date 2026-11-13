@@ -15,6 +15,10 @@ struct RomeApp: App {
                 // handoff already follows the setting.
                 .onAppear { model.appearance.apply() }
                 .task { await model.launch() }
+                .onOpenURL { url in
+                    guard let link = WidgetLink(url: url) else { return }
+                    Task { await model.openFromWidget(link) }
+                }
         }
     }
 }

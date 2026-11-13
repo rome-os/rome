@@ -75,6 +75,14 @@ export interface ModelTurnStartedEvent {
   modelTurnId: ModelTurnId;
 }
 
+/**
+ * The provider compacted the thread while a turn ran: what the thread read
+ * before, such as an input's header blocks, may be gone from it.
+ */
+export interface ModelContextCompactedEvent {
+  type: "model_context_compacted";
+}
+
 /** A turn finished: how it ran, and where it left the thread. */
 export interface ModelTurnResultEvent extends TurnResultEvent {
   /**
@@ -93,6 +101,7 @@ export type ModelTurnActivityEvent = Exclude<AgentEvent, TurnResultEvent | TurnE
 /** The events a model session emits, normalized from the provider's own. */
 export type ModelSessionEvent =
   | ModelTurnStartedEvent
+  | ModelContextCompactedEvent
   | ModelTurnActivityEvent
   | ModelTurnResultEvent
   | TurnErrorEvent;

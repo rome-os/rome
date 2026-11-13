@@ -3,8 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { z } from "zod";
 import {
+  CONCIERGE_TASK_END_REASONS,
+  CONCIERGE_TASK_STATUSES,
+} from "@rome/api-types/concierge-task-status";
+import {
   CONCIERGE_DONE_DAYS,
   CONCIERGE_TASK_STATES,
+  type ConciergeOpenWait,
   type ConciergeTaskDto,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
@@ -27,11 +32,38 @@ const taskSchema = z.object({
   id: z.string(),
   title: z.string(),
   state: z.enum(CONCIERGE_TASK_STATES),
+  // Rome's derived status. A value this client does not know reads as none,
+  // so the row falls back to its state. A server from before it sends none.
+  status: z.enum(CONCIERGE_TASK_STATUSES).optional().catch(undefined),
+  endReason: z.enum(CONCIERGE_TASK_END_REASONS).nullable().optional().catch(null),
+  waitingSince: z.number().nullable().optional(),
+  // What the task waits on its owner for: the task card's waiting state
+  // reads it, so a live update must carry it as the list read did. A shape
+  // this client does not know reads as none.
+  openWait: z
+    .discriminatedUnion("kind", [
+      z
+        .object({
+          kind: z.literal("card"),
+          id: z.string(),
+          messageId: z.string(),
+          render: z.unknown(),
+          since: z.number(),
+        })
+        .passthrough(),
+      z.object({ kind: z.literal("approval"), id: z.string(), since: z.number() }).passthrough(),
+    ])
+    .nullable()
+    .optional()
+    .catch(null)
+    .transform((wait) => wait as ConciergeOpenWait | null | undefined),
+  laterAt: z.number().nullable().optional(),
   summary: z.string().nullable(),
   waitingOn: z.string().nullable(),
   dueAt: z.number().nullable(),
   rank: z.number().nullable(),
   chat: z.object({ id: z.string(), name: z.string() }).nullable(),
+  threadRoot: z.string().nullable().optional(),
   // A row that names no Concierge chat is the main chat's.
   conciergeChat: z
     .object({ id: z.string(), name: z.string(), main: z.boolean() })
@@ -83,6 +115,11 @@ export function useConciergeTasks(options: { enabled?: boolean; allDone?: boolea
     // Events missed while disconnected are gone, so read the list again.
     { enabled, onReconnect: () => void refetch() },
   );
+  // Every list read again, as after answering a card the task waits on.
+  const reload = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: CONCIERGE_TASKS_QUERY_KEY }),
+    [queryClient],
+  );
   // A failed refetch keeps the last list, which is still the one to show.
-  return { tasks: query.data ?? [], loaded: query.data !== undefined };
+  return { tasks: query.data ?? [], loaded: query.data !== undefined, reload };
 }

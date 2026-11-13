@@ -39,6 +39,7 @@ import {
   listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
+  markSessionRead,
   openTurnStream,
   postSessionTurn,
 } from "@/lib/chat-api";
@@ -101,8 +102,8 @@ rs.mock("@/components/concierge/use-concierge-activity", () => ({
   useConciergeActivity: mockConciergeActivity,
 }));
 const mockOpenTaskList = rs.hoisted(() => rs.fn());
-rs.mock("@/components/concierge/ConciergeTaskList", () => ({
-  useConciergeTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
+rs.mock("@/components/concierge/TaskListPane", () => ({
+  useTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -202,9 +203,7 @@ function ReplyJump() {
       <button
         type="button"
         data-testid="open-thread"
-        onClick={() =>
-          reply?.openThread({ messageId: "u-1", author: "guardian", preview: "First" })
-        }
+        onClick={() => reply?.openThread({ thread: "u-1", title: "First" })}
       >
         open thread
       </button>
@@ -224,7 +223,9 @@ rs.mock("@/components/chat/MessageList", () => ({
     live,
     rows,
     onOpenStoredTrace,
+    unreadFrom,
   }: {
+    unreadFrom?: string | null;
     onOpenStoredTrace: (target: unknown) => void;
     live: {
       identity: { name: string };
@@ -242,7 +243,9 @@ rs.mock("@/components/chat/MessageList", () => ({
     }[];
   }) => (
     <>
-      <div data-testid="message-list">{live.identity.name}</div>
+      <div data-testid="message-list" data-unread-from={unreadFrom ?? ""}>
+        {live.identity.name}
+      </div>
       {live.snapshot ? (
         <div
           data-testid="live-snapshot"
@@ -484,6 +487,17 @@ function pane(children: ReactNode) {
   return <ToolTraceContext.Provider value={host}>{children}</ToolTraceContext.Provider>;
 }
 
+/** A query client as the app gives every chat: the Concierge chat reads its task list through it. */
+const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+/** Wraps what a test renders, and every rerender of it, in a query client of its own. */
+function withQueries() {
+  const client = queries();
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+}
+
 function renderChat(children: ReactNode, live?: LiveEventsClient) {
   const routed = <MemoryRouter>{pane(children)}</MemoryRouter>;
   return render(
@@ -492,6 +506,7 @@ function renderChat(children: ReactNode, live?: LiveEventsClient) {
     ) : (
       routed
     ),
+    { wrapper: withQueries() },
   );
 }
 
@@ -687,6 +702,200 @@ describe("Chat read marking", () => {
     } finally {
       delete (document as { visibilityState?: unknown }).visibilityState;
     }
+  });
+});
+
+/** The chat's own event stream: a Concierge chat also listens to its task list. */
+const chatEvents = () =>
+  MockEventSource.instances.find((source) => String(source.url).includes("/chat/sessions/"));
+
+describe("Chat unread divider", () => {
+  const agentMessage = (id: string, minute: number) => ({
+    id,
+    sessionId: "concierge",
+    turnId: `turn-${id}`,
+    role: "assistant" as const,
+    content: JSON.stringify([{ type: "text", content: id }]),
+    createdAt: `2026-10-27T12:0${minute}:00.000Z`,
+  });
+  const transcript = [
+    agentMessage("a1", 0),
+    agentMessage("a2", 1),
+    agentMessage("a3", 2),
+    agentMessage("a4", 3),
+  ];
+  // Read through a2, so a3 and a4 are unread.
+  const MARK = "2026-10-27T12:01:30.000Z";
+  const unreadFrom = () => screen.getByTestId("message-list").getAttribute("data-unread-from");
+  const idle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  /** A read mark the test answers when it chooses. */
+  function deferredMark() {
+    let resolve!: (mark: string | null) => void;
+    const loadReadMark = rs.fn(() => new Promise<string | null>((r) => (resolve = r)));
+    return { loadReadMark, answer: (mark: string | null) => act(async () => resolve(mark)) };
+  }
+  beforeEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(markSessionRead).mockClear();
+    rs.mocked(listSessionMessages).mockResolvedValue(transcript);
+  });
+  afterEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.mocked(listSessionMessages).mockResolvedValue([]);
+  });
+
+  it("marks the chat read only after the read mark is in, and divides at the first unread message", async () => {
+    const { loadReadMark, answer } = deferredMark();
+    renderChat(<Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />);
+    await screen.findByTestId("message-list");
+    await act(idle);
+    expect(loadReadMark).toHaveBeenCalledWith("concierge");
+    expect(markSessionRead).not.toHaveBeenCalled();
+    expect(unreadFrom()).toBe("");
+
+    await answer(MARK);
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("concierge"));
+    expect(unreadFrom()).toBe("a3");
+  });
+
+  it("places the divider by the read mark when a message arrives while the mark is pending", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    const { loadReadMark, answer } = deferredMark();
+    renderChat(<Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />);
+    await screen.findByTestId("message-list");
+    await waitFor(() => expect(chatEvents()).toBeTruthy());
+
+    act(() => {
+      chatEvents()?.emit("message_insert", agentMessage("a5", 4));
+    });
+    await answer(MARK);
+    await waitFor(() => expect(unreadFrom()).toBe("a3"));
+  });
+
+  it("gives no divider to a message that arrives while the chat is open", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    renderChat(
+      <Chat
+        sessionId="concierge"
+        variant="concierge"
+        loadReadMark={() => Promise.resolve("2026-10-27T12:03:00.000Z")}
+      />,
+    );
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
+    await waitFor(() => expect(chatEvents()).toBeTruthy());
+    expect(unreadFrom()).toBe("");
+
+    act(() => {
+      chatEvents()?.emit("message_insert", agentMessage("a5", 4));
+    });
+    await act(idle);
+    expect(unreadFrom()).toBe("");
+  });
+
+  it("keeps the divider after the chat is read, and when a message arrives", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    renderChat(
+      <Chat sessionId="concierge" variant="concierge" loadReadMark={() => Promise.resolve(MARK)} />,
+    );
+    await waitFor(() => expect(unreadFrom()).toBe("a3"));
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
+    await waitFor(() => expect(chatEvents()).toBeTruthy());
+
+    act(() => {
+      chatEvents()?.emit("message_insert", agentMessage("a5", 4));
+    });
+    await act(idle);
+    expect(unreadFrom()).toBe("a3");
+  });
+
+  it("gives no divider to a live reply to a turn that an older page then loads", async () => {
+    const observers: Array<() => void> = [];
+    class FakeObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        observers.push(() =>
+          callback([{ isIntersecting: true } as IntersectionObserverEntry], this as never),
+        );
+      }
+      observe() {}
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+      disconnect() {}
+    }
+    rs.stubGlobal("IntersectionObserver", FakeObserver);
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    const inTurn = (id: string, minute: number, turnId: string) => ({
+      ...agentMessage(id, minute),
+      turnId,
+    });
+    // Everything is read at open. Turn A is on an older page and is still running.
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({
+        messages: [inTurn("b1", 5, "turn-b"), inTurn("c1", 6, "turn-c")],
+        nextCursor: "c1",
+      })
+      .mockResolvedValueOnce({
+        messages: [inTurn("a1", 0, "turn-a"), inTurn("a2", 9, "turn-a")],
+        nextCursor: null,
+      });
+    renderChat(
+      <Chat
+        sessionId="concierge"
+        variant="concierge"
+        loadReadMark={() => Promise.resolve("2026-10-27T12:07:30.000Z")}
+      />,
+    );
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
+    await waitFor(() => expect(chatEvents()).toBeTruthy());
+
+    act(() => {
+      chatEvents()?.emit("message_insert", inTurn("a2", 9, "turn-a"));
+    });
+    await act(async () => observers.at(-1)?.());
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+    await act(idle);
+    expect(unreadFrom()).toBe("");
+  });
+
+  it("does not mark the chat read when it closes while the read mark is pending", async () => {
+    const { loadReadMark, answer } = deferredMark();
+    const { unmount } = renderChat(
+      <Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />,
+    );
+    await screen.findByTestId("message-list");
+    await act(idle);
+    unmount();
+
+    await answer(MARK);
+    await act(idle);
+    expect(markSessionRead).not.toHaveBeenCalled();
+  });
+
+  it("does no pre-read work, and waits for nothing, without loadReadMark", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("session-1"));
+    expect(unreadFrom()).toBe("");
+  });
+
+  it("draws no divider for a chat that was never marked read", async () => {
+    renderChat(
+      <Chat sessionId="concierge" variant="concierge" loadReadMark={() => Promise.resolve(null)} />,
+    );
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("concierge"));
+    expect(unreadFrom()).toBe("");
+  });
+
+  it("asks for nothing for a draft that a first send turns into a chat", async () => {
+    const loadReadMark = rs.fn(() => Promise.resolve(MARK));
+    const { rerender } = renderChat(<Chat variant="concierge" loadReadMark={loadReadMark} />);
+    rerender(
+      <MemoryRouter>
+        {pane(<Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />)}
+      </MemoryRouter>,
+    );
+    await act(idle);
+    expect(loadReadMark).not.toHaveBeenCalled();
   });
 });
 
@@ -1241,6 +1450,21 @@ describe("Chat turn poll", () => {
     expect(turnLookups()).toBe(2);
     expect(rs.mocked(openTurnStream).mock.calls.map(([turnId]) => turnId)).toEqual(["turn-9"]);
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+
+  it("reads the chat again when its topic says it stopped running", async () => {
+    const socket = await renderIdle();
+    const reads = rs.mocked(listSessionMessages).mock.calls.length;
+    act(() =>
+      socket.receive({
+        type: "event",
+        topic: sessionTopic,
+        event: "session_running",
+        data: { sessionId: "session-1", running: false },
+      }),
+    );
+    await flush();
+    expect(rs.mocked(listSessionMessages).mock.calls.length).toBe(reads + 1);
   });
 
   it.each([
@@ -2225,7 +2449,7 @@ describe("Chat Concierge empty state", () => {
         </ToolTasksContext.Provider>
       </SlotProvider>
     );
-    const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>);
+    const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>, { wrapper: withQueries() });
     // Chat on screen: its floating header takes the shell's buttons.
     await waitFor(() => expect(seen.outlet).toBe(true));
 
@@ -2238,13 +2462,13 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(seen.outlet).toBe(true));
   });
 
-  it("leaves the mascot's badge out while the chat has no messages, which draws its own", async () => {
+  it("leaves the mascot's badge out while the main chat has no messages, which draws its own", async () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    renderChat(<Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />);
     await screen.findByRole("region", { name: "concierge.empty.title" });
     const header = document.querySelector<HTMLElement>("[data-concierge-header]")!;
     expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
@@ -2253,6 +2477,40 @@ describe("Chat Concierge empty state", () => {
     expect(name.className).toContain("row-start-1");
     expect(within(name).getByText("Rome")).toBeTruthy();
     expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
+  });
+
+  it("shows neither the mascot nor the name in a blank topic chat, and both once it has a message", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(
+      <Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    const header = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-concierge-header]");
+      if (!found) throw new Error("no header");
+      return found;
+    });
+    await waitFor(() => expect(rs.mocked(listSessionMessages)).toHaveBeenCalled());
+    expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
+    expect(header.querySelector("[data-concierge-header-name]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "concierge.taskList.open" })).toBeNull();
+    view.unmount();
+
+    rs.mocked(listSessionMessages).mockResolvedValueOnce([
+      {
+        id: "m-1",
+        sessionId: "topic-1",
+        role: "user" as const,
+        content: "hello",
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ]);
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await screen.findByTestId("user-row");
+    expect(await screen.findByRole("button", { name: "concierge.taskList.open" })).toBeTruthy();
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
@@ -2356,7 +2614,7 @@ describe("Chat Concierge empty state", () => {
         </SlotProvider>
       </MemoryRouter>
     );
-    const view = render(at(false, false));
+    const view = render(at(false, false), { wrapper: withQueries() });
     const hang = screen.getByTestId("hang");
     const bar = screen.getByTestId("bar");
     // The same badge, name tag and status as the floating header.
@@ -2415,19 +2673,34 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the task list from a plain Tasks item in a Concierge chat's menu", async () => {
+  it("opens the task list from the agent's logo in a Concierge chat's header, not its menu", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
       pinnedAgentMention: null,
       archivedAt: null,
     });
+    // A topic chat with a message: a blank one shows no header.
+    rs.mocked(listSessionMessages).mockResolvedValueOnce([
+      {
+        id: "m-1",
+        sessionId: "topic-1",
+        role: "user" as const,
+        content: "hello",
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
-    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
-    const item = screen.getByRole("menuitem", { name: "concierge.tasks.title" });
-    expect(item.textContent).toBe("concierge.tasks.title");
-    await user.click(item);
-    expect(mockOpenTaskList).toHaveBeenCalledTimes(1);
+    // The header settles once the chat loads; press the button it settles on.
+    await screen.findByRole("button", { name: "concierge.taskList.open" });
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole("button", { name: "concierge.taskList.open" }));
+      expect(mockOpenTaskList).toHaveBeenCalled();
+    });
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
+      "concierge.tasks.title",
+    );
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
@@ -2442,7 +2715,6 @@ describe("Chat Concierge empty state", () => {
     );
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      "concierge.tasks.title",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
@@ -2757,7 +3029,7 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
 
     expect(scrollTo).toHaveBeenCalledOnce();
     expect(anchor("m-2")?.hasAttribute("data-timeline-landed")).toBe(true);
@@ -2779,20 +3051,22 @@ describe("Chat Concierge jump to a message", () => {
     Object.defineProperty(scroller, "scrollTop", { value: 1000, configurable: true });
     anchor("m-2")!.getBoundingClientRect = () => ({ top: 500 }) as DOMRect;
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000 + 500 - 112 - 24, behavior: "auto" });
   });
 
-  it("pages older history in until the message renders, says so meanwhile, then jumps", async () => {
+  it("reads from the oldest loaded turn through the message in one page, says so meanwhile, then jumps", async () => {
     rs.mocked(listSessionMessagePage)
       .mockResolvedValueOnce({ messages: [message(5), message(6)], nextCursor: "c1" })
-      .mockResolvedValueOnce({ messages: [message(3), message(4)], nextCursor: "c2" })
-      .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+      .mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3), message(4)],
+        nextCursor: null,
+      });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-1"));
+    act(() => void requestConciergeJump("m-1"));
 
     await waitFor(() => expect(anchor("m-1")?.hasAttribute("data-timeline-landed")).toBe(true));
     expect(toast.loading).toHaveBeenCalledWith("concierge.tasks.findingMessage");
@@ -2800,8 +3074,7 @@ describe("Chat Concierge jump to a message", () => {
     expect(toast.error).not.toHaveBeenCalled();
     expect(rs.mocked(listSessionMessagePage).mock.calls.map((call) => call[1])).toEqual([
       { limit: expect.any(Number) },
-      { limit: expect.any(Number), before: "c1" },
-      { limit: expect.any(Number), before: "c2" },
+      { limit: expect.any(Number), before: "c1", through: "m-1" },
     ]);
     expect(scrollTo).toHaveBeenCalledOnce();
   });
@@ -2817,32 +3090,26 @@ describe("Chat Concierge jump to a message", () => {
     anchor("m-1")!.addEventListener(HOLD_STICK_EVENT, () => order.push("hold"));
     scrollTo.mockImplementation(() => order.push("scroll"));
 
-    act(() => requestConciergeJump("m-1"));
+    act(() => void requestConciergeJump("m-1"));
 
     expect(order).toEqual(["hold", "scroll"]);
   });
 
-  it("gives up after 20 older pages and says it can't find the message", async () => {
-    // The newest page and 20 older ones, each with a page behind it.
-    for (let page = 1; page <= 21; page++) {
-      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
-        messages: [message(1000 - page)],
-        nextCursor: `c${page}`,
-      });
-    }
+  it("says it can't find a message the one read does not bring", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [message(9)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [message(8)], nextCursor: "c2" });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(1));
 
-    act(() => requestConciergeJump("m-missing"));
+    act(() => void requestConciergeJump("m-missing"));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"), {
-      timeout: 10_000,
-    });
-    // The newest page, then 20 older ones.
-    expect(listSessionMessagePage).toHaveBeenCalledTimes(21);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
+    // The newest page, then one read through the message.
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
     expect(scrollTo).not.toHaveBeenCalled();
     expect(toast.dismiss).toHaveBeenCalledWith("finding");
-  }, 15_000);
+  });
 
   it("says it can't find a message when all the history is loaded and it is not there", async () => {
     rs.mocked(listSessionMessagePage)
@@ -2851,7 +3118,7 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-gone"));
+    act(() => void requestConciergeJump("m-gone"));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
     expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
@@ -2866,7 +3133,7 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(rows()).toBe(1));
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(scrollTo).not.toHaveBeenCalled();

@@ -75,7 +75,12 @@ function renderComposer(
   });
   const tree = (next: Partial<ConciergeComposerProps>) => (
     <QueryClientProvider client={client}>
-      <ReplyDraftHarness initial={reply} threads={threads}>
+      <ReplyDraftHarness
+        initial={reply}
+        {...(threads
+          ? { thread: { thread: reply?.messageId ?? "a1", title: "Lisbon flights" } }
+          : {})}
+      >
         <ConciergeComposer ref={ref} onSend={onSend} {...next} />
       </ReplyDraftHarness>
     </QueryClientProvider>
@@ -290,13 +295,15 @@ describe("ConciergeComposer reply", () => {
     await userEvent.type(screen.getByPlaceholderText("Message"), "and the hotel?{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
 
-    expect(onSend.mock.calls[0][0]).toMatchObject({ replyTo: reply, chatThread: "a1" });
+    // A send from the thread view goes to the thread, quoting no message.
+    expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "a1" });
+    expect(onSend.mock.calls[0][0].replyTo).toBeUndefined();
     expect(onSend.mock.calls[1][0].chatThread).toBeUndefined();
     expect(onSend.mock.calls[1][0].replyTo).toBeUndefined();
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
   });
 
-  it("keeps the chat thread open, with the reply, when a send from it fails", async () => {
+  it("keeps the chat thread open, with its reply to the thread, when a send from it fails", async () => {
     const { onSend } = renderComposer({}, reply, true, undefined, true);
     onSend.mockRejectedValueOnce(new Error("offline"));
 
@@ -305,7 +312,8 @@ describe("ConciergeComposer reply", () => {
     await userEvent.type(await screen.findByPlaceholderText("Reply"), "{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
 
-    expect(onSend.mock.calls[1][0]).toMatchObject({ replyTo: reply, chatThread: "a1" });
+    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "a1" });
+    expect(onSend.mock.calls[1][0].replyTo).toBeUndefined();
   });
 
   it("puts the reply back when the send fails", async () => {

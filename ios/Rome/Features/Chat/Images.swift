@@ -113,8 +113,10 @@ enum ImageFetch {
     /// The query of an instance asset URL with `w=width` added; any other URL, or
     /// one that already names a width, keeps its query.
     static func assetQuery(_ query: String?, path: String, width: Int?) -> String? {
+        // A stored upload's URL has no query: its thumbnail is just `w=width`.
+        if let width, query == nil || query == "", path.hasPrefix("/assets/") { return "w=\(width)" }
         guard let width, let query, !query.isEmpty,
-              path == "/projects/asset" || path.hasPrefix("/projects/asset/") || path == "/memory/asset" || path.hasPrefix("/memory/asset/"),
+              path == "/projects/asset" || path.hasPrefix("/projects/asset/") || path == "/memory/asset" || path.hasPrefix("/memory/asset/") || path.hasPrefix("/assets/"),
               !query.split(separator: "&").contains(where: { $0.hasPrefix("w=") })
         else { return query }
         return "\(query)&w=\(width)"
@@ -189,7 +191,7 @@ enum ViewerImage: Identifiable, Hashable {
     func data(assetLoader: (@MainActor (String, Int?) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
         switch self {
         case .local(let photo): return photo.jpeg
-        case .stored(let upload): return try await ImageFetch.data(.asset(path: upload.assetPath), assetLoader: assetLoader)
+        case .stored(let upload): return try await ImageFetch.data(upload.source, assetLoader: assetLoader, apiLoader: apiLoader)
         case .markdown(let source, _, _, _): return try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader)
         }
     }

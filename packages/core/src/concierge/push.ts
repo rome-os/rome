@@ -51,6 +51,11 @@ function plainOf(tokens: Token[]): string {
           case "br":
             return " ";
           case "code":
+            // A pictures block is one `![title](address) note` line per picture:
+            // its words are each picture's title and note, not its addresses.
+            return token.lang?.trim().split(/\s+/, 1)[0] === "pictures"
+              ? plainOf(marked.lexer(token.text))
+              : token.text;
           case "codespan":
             return token.text;
         }

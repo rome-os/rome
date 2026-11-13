@@ -133,7 +133,7 @@ interface GitMultiCommitTarget {
 export const MAX_UPLOAD_FILE_BYTES = 1024 * 1024 * 1024;
 const MAX_UPLOAD_FILE_LABEL = "1 GB";
 
-interface FileDescriptor {
+export interface FileDescriptor {
   editable: boolean;
   kind: "text" | "image" | "video" | "audio" | "pdf" | "docx" | "binary";
   mimeType: string;
@@ -460,7 +460,7 @@ function getRequestedWatchDirectories(
   );
 }
 
-function describeFile(path: string): FileDescriptor {
+export function describeFile(path: string): FileDescriptor {
   const extension = extname(path).toLowerCase();
   const imageMimeType = IMAGE_MIME_TYPES.get(extension);
   if (imageMimeType) {
@@ -897,7 +897,7 @@ function buildTree(scope: FileBrowserScope, dirPath: string, depth: number): Tre
   return nodes;
 }
 
-function parseRangeHeader(
+export function parseRangeHeader(
   rangeHeader: string,
   size: number,
 ): { end: number; start: number } | null {
@@ -925,7 +925,7 @@ function parseRangeHeader(
   return { start, end };
 }
 
-function createStreamResponse(
+export function createStreamResponse(
   filePath: string,
   status: number,
   headers: Record<string, string>,
@@ -1926,8 +1926,8 @@ export function createSearchHandler(scope: FileBrowserScope): Handler {
 
 // The widths a client may ask for with `?w=`: a reply picture and an upload
 // thumbnail. Any other value serves the original.
-const ASSET_IMAGE_WIDTHS = new Set(["600", "900"]);
-const RESIZABLE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+export const ASSET_IMAGE_WIDTHS = new Set(["600", "900"]);
+export const RESIZABLE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_RESIZE_INPUT_PIXELS = 64_000_000;
 
 /**
@@ -1935,7 +1935,7 @@ const MAX_RESIZE_INPUT_PIXELS = 64_000_000;
  * when it is animated or cannot be decoded. `sharp` loads on first use, so a
  * missing native binary only turns resizing off.
  */
-async function resizeAssetImage(filePath: string, width: number): Promise<Buffer | null> {
+export async function resizeAssetImage(filePath: string, width: number): Promise<Buffer | null> {
   try {
     const { default: sharp } = await import("sharp");
     const image = sharp(filePath, { limitInputPixels: MAX_RESIZE_INPUT_PIXELS });

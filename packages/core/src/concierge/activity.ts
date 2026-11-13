@@ -10,6 +10,7 @@ import {
   conciergeActivity,
   sameActivity,
 } from "@rome/api-types/concierge-activity";
+import type { ConciergeTaskStatus } from "@rome/api-types/concierge-task-status";
 import type { LiveEventEmit } from "../lib/live-event.js";
 import { createLogger } from "../logger.js";
 
@@ -44,6 +45,10 @@ export interface ActivityTaskRow {
   /** The task chat the row links, or null. */
   chatId: string | null;
   updatedAt: number;
+  /** The task's status, as the task list shows it (`taskStatus`). */
+  status: ConciergeTaskStatus;
+  /** When the wait that makes it need its owner began, epoch milliseconds. */
+  waitingSince: number | null;
 }
 
 /** What the activity reads its facts from. */
@@ -98,6 +103,8 @@ export class ConciergeActivityTracker {
   /** The Concierge chat each task row was last read in, so a move refreshes both chats. */
   private chatOfTask = new Map<string, string>();
   private subscribers = new Set<OwnerEmit>();
+  /** The chats whose session is being renewed, with how many renewals of each run. */
+  private tidyingChats = new Map<string, number>();
   private stopped = false;
   private recheck: ReturnType<typeof setInterval>;
 
@@ -118,9 +125,8 @@ export class ConciergeActivityTracker {
   private async compute(chatId: string): Promise<ConciergeActivity> {
     const rows = await this.sources.tasksOf(chatId);
     for (const row of rows) this.chatOfTask.set(row.id, chatId);
-    const taskChats = rows.flatMap((row) => (row.chatId ? [row.chatId] : []));
     const [since, spokeAt] = await Promise.all([
-      this.sources.awaitingGuardianSince([chatId, ...taskChats]),
+      this.sources.awaitingGuardianSince([chatId]),
       this.sources.ownerSpokeAt(chatId),
     ]);
     const pending = new Set(this.sources.reportPending());
@@ -128,22 +134,25 @@ export class ConciergeActivityTracker {
     // began after the owner last spoke in this chat: one they had seen by
     // then shows in the Tasks list only. Both times are whole seconds, so a
     // wait in the second they spoke counts.
-    const waits = (id: string) => {
-      const began = since.get(id);
-      return began !== undefined && (spokeAt === null || began >= spokeAt);
-    };
+    const began = (at: number | undefined | null) =>
+      at !== undefined && at !== null && (spokeAt === null || at >= spokeAt);
+    const waits = (id: string) => began(since.get(id));
     const running = this.sources.isBusy(chatId);
     return conciergeActivity({
+      tidying: this.tidyingChats.has(chatId),
       awaitingGuardian: waits(chatId),
       turn: { running, tool: running ? this.sources.openTool(chatId) : null },
       reportPending: rows.some((row) => pending.has(row.id)),
+      // A task reads as the task list shows it: running while active, and
+      // waiting on the owner while it needs them, which a wait older than a
+      // day no longer does.
       tasks: rows.flatMap((row) =>
         row.chatId
           ? [
               {
                 title: row.title,
-                running: this.sources.isRunning(row.chatId),
-                awaitingGuardian: waits(row.chatId),
+                running: row.status === "active" && this.sources.isRunning(row.chatId),
+                awaitingGuardian: row.status === "needs_you" && began(row.waitingSince),
                 updatedAt: row.updatedAt,
               },
             ]
@@ -172,6 +181,23 @@ export class ConciergeActivityTracker {
       again: false,
     });
     return shown;
+  }
+
+  /**
+   * Runs `work` while `chatId` shows it is tidying up its context: its session
+   * is being renewed, and the handoff for the new one written.
+   */
+  async tidying<T>(chatId: string, work: () => Promise<T>): Promise<T> {
+    this.tidyingChats.set(chatId, (this.tidyingChats.get(chatId) ?? 0) + 1);
+    void this.refresh(chatId);
+    try {
+      return await work();
+    } finally {
+      const left = (this.tidyingChats.get(chatId) ?? 1) - 1;
+      if (left > 0) this.tidyingChats.set(chatId, left);
+      else this.tidyingChats.delete(chatId);
+      void this.refresh(chatId);
+    }
   }
 
   /**
@@ -367,6 +393,7 @@ export class ConciergeActivityTracker {
     for (const state of this.chats.values()) this.clearTimer(state);
     this.chats.clear();
     this.chatOfTask.clear();
+    this.tidyingChats.clear();
     this.subscribers.clear();
   }
 }

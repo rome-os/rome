@@ -97,13 +97,31 @@ describe("ApprovalsRepository", () => {
         status: "pending",
         description: "Add new person: Alice",
         payload: { channelContext: { threadId: "chat-1" } },
+        threadId: "chat-1",
       },
     ]);
-    // The row is stored by the time the listener runs.
-    expect(await repo.findById(id)).not.toBeNull();
+    // The row is stored by the time the listener runs, its chat kept apart.
+    expect((await repo.findById(id))?.threadId).toBe("chat-1");
     unsubscribe();
     await repo.create({ type: "person_mapping", requestedBy: "x", description: "y" });
     expect(seen).toHaveLength(1);
+  });
+
+  it("lists one chat's approvals by its thread, and none asked in no chat", async () => {
+    const asked = (threadId?: string) =>
+      repo.create({
+        type: "person_mapping",
+        requestedBy: "x",
+        description: "y",
+        ...(threadId ? { payload: { channelContext: { threadId } } } : {}),
+      });
+    const mine = await asked("chat-1");
+    await asked("chat-2");
+    await asked();
+    expect((await repo.listInThread("chat-1", "pending")).map((row) => row.id)).toEqual([mine]);
+    await repo.resolvePending(mine, "reject", "guardian");
+    expect(await repo.listInThread("chat-1", "pending")).toEqual([]);
+    expect((await repo.listInThread("chat-1")).map((row) => row.id)).toEqual([mine]);
   });
 
   // An app compiled against an older SDK reaches create() with an unchecked
