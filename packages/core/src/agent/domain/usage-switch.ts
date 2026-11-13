@@ -1,7 +1,6 @@
 // Where a session moves when its provider reaches its usage limit: the other
 // provider when it can take the turn, else a different model of the same one.
-// Read off raw availability: the resolver's own view can include Rome credits,
-// which must not be spent on recovery.
+// Neither Rome credits nor ChatGPT credits may fund an automatic switch.
 
 import { CODEX_LUNA_MODEL } from "./model-selection.js";
 import type { ModelSelectionId } from "./model-selection.js";
@@ -56,7 +55,13 @@ export function usageSwitchTarget(
   if (!failed && !atUsageLimit(source)) return null;
   const provider: SwitchableProviderId = from === "openai" ? "anthropic" : "openai";
   const target = state[provider];
-  if (!target || target.state !== "available" || !subscription(target)) return null;
+  if (
+    !target ||
+    target.state !== "available" ||
+    !subscription(target) ||
+    target.requiresChatgptCredits
+  )
+    return null;
   if (provider === "anthropic") return { provider, selectionId: "claude-sonnet" };
   return { provider, selectionId: codexSmallSelection(target) };
 }
@@ -68,7 +73,13 @@ export function sameProviderTarget(
   model: string,
 ): UsageSwitchTarget | null {
   const source = state[from];
-  if (!source || source.state !== "available" || !subscription(source)) return null;
+  if (
+    !source ||
+    source.state !== "available" ||
+    !subscription(source) ||
+    source.requiresChatgptCredits
+  )
+    return null;
   let selectionId: ModelSelectionId;
   if (from === "anthropic") {
     if (/sonnet/.test(model)) selectionId = "claude-opus-5-5";

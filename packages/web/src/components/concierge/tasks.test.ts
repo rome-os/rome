@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
+import {
+  type ConciergeTaskEndReason,
+  type ConciergeTaskStatus,
+  legacyTaskState,
+} from "@rome/api-types/concierge-task-status";
 import { applyTaskUpsert, formatTaskTime, groupTasks, taskTime } from "./tasks";
 
 const NOW = Date.UTC(2026, 9, 29, 12);
@@ -28,64 +33,87 @@ function task(state: ConciergeTaskState, extra: Partial<ConciergeTaskDto> = {}):
   };
 }
 
+/** A row Rome sent with `status`, its old state mapped from it. */
+function withStatus(
+  status: ConciergeTaskStatus,
+  extra: Partial<ConciergeTaskDto> = {},
+  endReason: ConciergeTaskEndReason | null = status === "ended" ? "done" : null,
+): ConciergeTaskDto {
+  return task(legacyTaskState({ status, endReason }), { status, endReason, ...extra });
+}
+
 describe("groupTasks", () => {
-  it("shows the five groups in order and leaves empty ones out", () => {
+  it("shows the four groups in order and leaves empty ones out", () => {
     const groups = groupTasks(
       [
-        task("done", { completedAt: NOW - DAY }),
-        task("watching"),
-        task("next"),
-        task("doing"),
-        task("needs_user"),
+        withStatus("ended", { completedAt: NOW - DAY }),
+        withStatus("later"),
+        withStatus("active"),
+        withStatus("needs_you"),
       ],
       { now: NOW },
     );
-    expect(groups.map((group) => group.key)).toEqual([
-      "needsYou",
-      "doing",
-      "next",
-      "watching",
-      "done",
+    expect(groups.map((group) => group.key)).toEqual(["needsYou", "active", "later", "ended"]);
+    expect(groupTasks([withStatus("active")], { now: NOW }).map((group) => group.key)).toEqual([
+      "active",
     ]);
-    expect(groupTasks([task("doing")], { now: NOW }).map((group) => group.key)).toEqual(["doing"]);
     expect(groupTasks([], { now: NOW })).toEqual([]);
   });
 
-  it("orders Up next by the Concierge's rank and Watching by due time, unranked last", () => {
+  it("groups by the status Rome sent, not the state the row once had", () => {
+    const [group] = groupTasks([task("doing", { status: "ended", endReason: "failed" })], {
+      now: NOW,
+    });
+    expect(group.key).toBe("ended");
+  });
+
+  it("reads a row from a server before status by its state", () => {
+    const groups = groupTasks(
+      [task("needs_user"), task("doing"), task("next"), task("watching"), task("dropped")],
+      { now: NOW },
+    );
+    expect(groups.map((group) => [group.key, group.tasks.length])).toEqual([
+      ["needsYou", 1],
+      ["active", 1],
+      ["later", 2],
+      ["ended", 1],
+    ]);
+  });
+
+  it("orders Later by its check, the soonest first, and Waiting for you by the oldest wait", () => {
     const groups = groupTasks(
       [
-        task("next", { title: "unranked" }),
-        task("next", { title: "second", rank: 2 }),
-        task("next", { title: "first", rank: 1 }),
-        task("watching", { title: "later", dueAt: NOW + 2 * DAY }),
-        task("watching", { title: "undated" }),
-        task("watching", { title: "soon", dueAt: NOW + DAY }),
+        withStatus("later", { title: "far", laterAt: NOW + 2 * DAY }),
+        withStatus("later", { title: "undated" }),
+        withStatus("later", { title: "soon", laterAt: NOW + DAY }),
+        withStatus("needs_you", { title: "new", waitingSince: NOW - 1000 }),
+        withStatus("needs_you", { title: "old", waitingSince: NOW - DAY }),
       ],
       { now: NOW },
     );
     const titles = (key: string) =>
       groups.find((group) => group.key === key)?.tasks.map((item) => item.title);
-    expect(titles("next")).toEqual(["first", "second", "unranked"]);
-    expect(titles("watching")).toEqual(["soon", "later", "undated"]);
+    expect(titles("later")).toEqual(["soon", "far", "undated"]);
+    expect(titles("needsYou")).toEqual(["old", "new"]);
   });
 
-  it("puts done and dropped rows together, newest completion first", () => {
-    const [done] = groupTasks(
+  it("puts every ended row together, whatever its reason, newest first", () => {
+    const [ended] = groupTasks(
       [
-        task("done", { title: "older", completedAt: NOW - 3 * DAY }),
-        task("dropped", { title: "newer", completedAt: NOW - DAY }),
+        withStatus("ended", { title: "older", completedAt: NOW - 3 * DAY }),
+        withStatus("ended", { title: "newer", completedAt: NOW - DAY }, "failed"),
       ],
       { now: NOW },
     );
-    expect(done.tasks.map((item) => item.title)).toEqual(["newer", "older"]);
+    expect(ended.tasks.map((item) => item.title)).toEqual(["newer", "older"]);
   });
 
-  it("shows finished rows of the last 7 days by completion and holds older ones behind show more", () => {
+  it("shows ended rows of the last 7 days and holds older ones behind show more", () => {
     const rows = [
-      task("done", { title: "fresh", completedAt: NOW - 6 * DAY }),
-      task("dropped", { title: "stale", completedAt: NOW - 8 * DAY }),
+      withStatus("ended", { title: "fresh", completedAt: NOW - 6 * DAY }),
+      withStatus("ended", { title: "stale", completedAt: NOW - 8 * DAY }, "stopped"),
       // Updated long ago but completed recently: the completion decides.
-      task("done", { title: "recent", completedAt: NOW - DAY, updatedAt: NOW - 30 * DAY }),
+      withStatus("ended", { title: "recent", completedAt: NOW - DAY, updatedAt: NOW - 30 * DAY }),
     ];
     const [group] = groupTasks(rows, { now: NOW });
     expect(group.tasks.map((item) => item.title)).toEqual(["recent", "fresh"]);
@@ -96,9 +124,11 @@ describe("groupTasks", () => {
     expect(all.hidden).toBe(0);
   });
 
-  it("keeps a group of only old finished rows, for its show more", () => {
-    const [group] = groupTasks([task("done", { completedAt: NOW - 20 * DAY })], { now: NOW });
-    expect(group.key).toBe("done");
+  it("keeps a group of only old ended rows, for its show more", () => {
+    const [group] = groupTasks([withStatus("ended", { completedAt: NOW - 20 * DAY })], {
+      now: NOW,
+    });
+    expect(group.key).toBe("ended");
     expect(group.tasks).toEqual([]);
     expect(group.hidden).toBe(1);
   });
@@ -152,6 +182,10 @@ describe("taskTime", () => {
     expect(taskTime(task("watching"))).toBeNull();
     expect(taskTime(task("done", { completedAt: NOW - 9, updatedAt: NOW - 1 }))).toBe(NOW - 9);
     expect(taskTime(task("dropped", { completedAt: null, updatedAt: NOW - 1 }))).toBe(NOW - 1);
+    // A later row's check, once Rome sends it.
+    expect(taskTime(withStatus("later", { laterAt: NOW + 3, dueAt: NOW + 5 }))).toBe(NOW + 3);
+    // A row whose task chat has not started is later with no time, whatever it was due.
+    expect(taskTime(withStatus("later", { laterAt: null, dueAt: NOW - 5 }))).toBeNull();
   });
 
   it("is nothing for a row the guardian is needed on or the Concierge is working on", () => {

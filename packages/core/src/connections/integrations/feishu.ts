@@ -1,6 +1,7 @@
 // Feishu and Lark connection integration. Channel contract: docs/architecture/channels.md.
 //
-// Feishu is a Talker with a single `app` grant: the custom-app credentials
+// Feishu shares a single `app` grant between chat and Docx plain-text reads.
+// The grant holds the custom-app credentials
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
 // the SDK long connection, the inbound `ChannelMessage`, markdown send, and the
 // group-config card flow — is the existing
@@ -34,6 +35,11 @@ import {
   isFeishuAuthError,
 } from "../kinds/feishu/feishu.js";
 import { z } from "zod";
+import {
+  createFeishuDocumentActor,
+  FEISHU_DOCUMENT_OPERATIONS,
+  type FeishuDocumentRequest,
+} from "./feishu-documents.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
@@ -143,6 +149,7 @@ export interface FeishuDescriptorDeps {
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   createChannel?: CreateLarkChannel;
+  documentRequest?: FeishuDocumentRequest;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
   probeCredentials?: FeishuSetupDeps["probeCredentials"];
@@ -540,6 +547,15 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
     grant: "app",
     auth: appScheme,
     capabilities: {
+      actor: {
+        operations: FEISHU_DOCUMENT_OPERATIONS,
+        build(credential) {
+          return createFeishuDocumentActor(
+            credential.material as unknown as FeishuAppMaterial,
+            deps.documentRequest,
+          );
+        },
+      },
       talker: {
         build(cred, kit): Talker {
           // Inline material for the `app` grant (never an external resolver for

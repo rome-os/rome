@@ -552,6 +552,20 @@
     }
   },
   "aiTools": {
+    "codexCredits": {
+      "balanceLabel": "ChatGPT 额度",
+      "remaining": "剩余 {{balance}} 积分",
+      "unlimited": "不限额",
+      "empty": "暂无可用积分",
+      "balanceUnavailable": "余额暂不可用",
+      "confirmTitle": "启用额度使用？",
+      "enable": "启用",
+      "manageCredits": "查看 ChatGPT 使用情况",
+      "settingsButton": "设置",
+      "label": "允许使用额度",
+      "description": "订阅配额耗尽时，允许使用 ChatGPT / Codex 账户中的可用积分。开启后，Rome 会自动继续符合恢复条件、此前因配额耗尽而暂停的对话，可能立即消耗积分；不会自动购买积分。",
+      "saveFailed": "无法读取或保存积分设置，请重试。"
+    },
     "title": "AI 工具",
     "refresh": "刷新",
     "refreshing": "正在刷新…",
@@ -936,5 +950,31 @@
       "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
       "instructions": "安装与连接指南"
     }
+  },
+  "appDocuments": {
+    "title": "App 文档读取授权",
+    "scope": "允许已安装 App 使用所选飞书/Lark Bot 读取一份文档。这不会增加 Bot 在飞书侧的权限。",
+    "app": "选择 App",
+    "bot": "选择 Bot 连接",
+    "loadFailed": "无法加载文档读取授权。",
+    "saveFailed": "无法保存文档读取授权。",
+    "previous": "上一页连接",
+    "next": "更多连接",
+    "unsupported": "此 Core 尚不支持通过这个连接读取文档。",
+    "disconnected": "此连接需要修复，暂不能授予调用权限。",
+    "providerScope": "Bot 所需权限（尚未检查）：",
+    "feishuConsole": "飞书应用权限管理",
+    "larkConsole": "Lark 应用权限管理",
+    "providerGuidance": "请由应用管理员在对应控制台配置权限，完成必要的审批与发布，并按需向 Bot 分享文档。此页面不会提交或修改飞书侧权限。",
+    "document": "文档 ID（不是链接）",
+    "replaceWarning": "仅允许读取这份文档，有效期 24 小时。会替换所选 App 在这个 Bot 上已有的文档读取规则，不允许写入。",
+    "allow": "允许所选 App 读取这份文档",
+    "allDocuments": "未限制文档范围",
+    "active": "有效",
+    "inactive": "已过期或连接授权已变更",
+    "revoke": "撤销此 App 的调用权限",
+    "loading": "正在加载授权…",
+    "saved": "授权已更新",
+    "refresh": "刷新授权"
   }
 }

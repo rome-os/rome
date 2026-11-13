@@ -64,6 +64,7 @@ import { cloudLoginRoutes } from "./routes/cloud-login.js";
 import { visitorAuthRoutes } from "./routes/visitor-auth.js";
 import { oauthRoutes } from "./routes/oauth.js";
 import { integrationsRoutes } from "./routes/integrations.js";
+import { assetsRoutes } from "./routes/assets.js";
 import { memoryFilesRoutes } from "./routes/memory-files.js";
 import { projectsFilesRoutes } from "./routes/projects-files.js";
 import { syncRoutes } from "./routes/sync.js";
@@ -208,6 +209,7 @@ export function buildApp(
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
   api.route("/", memoryFilesRoutes());
+  api.route("/", assetsRoutes());
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));

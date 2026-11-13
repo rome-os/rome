@@ -21,6 +21,7 @@ struct TopicChatScreen: View {
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
+    @State private var startFailure: SendFailure = .unknown
     @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
     @State private var confirmDelete = false
@@ -73,15 +74,17 @@ struct TopicChatScreen: View {
             .shareModeHeader(store?.share)
             .accessibilityHidden(store?.thread != nil)
         }
+        .overlay(alignment: .top) {
+            if let store { TranscriptBanners(store: store).padding(.top, 70) }
+        }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {
                 ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
-        // Reply brings the keyboard up; the replies line opens it for reading.
-        .onChange(of: store?.thread != nil) { _, open in if open, store?.thread?.toReply == true { composerFocused = true } }
-        .onChange(of: store?.quote) { _, quote in if quote != nil { composerFocused = true } }
+        // Reply brings the keyboard up; a label opens the thread for reading.
+        .onChange(of: store?.replies) { composerFocused = true }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}
@@ -105,12 +108,12 @@ struct TopicChatScreen: View {
             VStack(spacing: 10) {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatePill(agentName: workspace.agentName)
-                if let store, store.quote != nil {
+                if let store, store.showsQuoteBar {
                     QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if startFailed && store == nil {
-                    Text("Could not start the chat")
+                    Text(startFailure.reason.map { String(localized: "Couldn't start the chat · \($0)") } ?? String(localized: "Couldn't start the chat"))
                         .romeFont(13, .medium)
                         .foregroundStyle(Palette.destructive)
                         .transition(.opacity)
@@ -153,6 +156,7 @@ struct TopicChatScreen: View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
                 ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
+                    .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }
@@ -164,7 +168,7 @@ struct TopicChatScreen: View {
             // The chat is being started: the message waits as a pending bubble.
             ScrollView {
                 VStack(spacing: 8) {
-                    UserBubble(text: starting, images: startingImages.map(UserImage.local), pending: startFailed ? .failed : .sending) {
+                    UserBubble(text: starting, images: startingImages.map(UserImage.local), pending: startFailed ? .failed(startFailure) : .sending) {
                         send(text: starting, images: startingImages)
                     }
                 }
@@ -228,6 +232,7 @@ struct TopicChatScreen: View {
                 // The message goes back into the composer, as the draft.
                 starting = nil
                 startFailed = true
+                startFailure = workspace.startFailure ?? .unknown
                 draft = text
                 attachments.restore(images)
             }

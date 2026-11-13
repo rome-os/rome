@@ -38,6 +38,7 @@ export function payloadSize(payload: Record<string, unknown>): Record<string, un
 export class RoutineEngine {
   private providers = new Map<string, TriggerProvider>();
   private retryTimers = new Set<ClockTimer>();
+  private changeListeners = new Set<(routineId: string) => void>();
   // rootExecutionIds we've asked the action engine to kill. dispatch's catch
   // consults this so a guardian-requested stop is recorded as "cancelled"
   // (not "error") and is never retried.
@@ -92,6 +93,31 @@ export class RoutineEngine {
     log.info("routine engine started", { routineCount: rows.length });
   }
 
+  /**
+   * Calls `listener` with a routine's id when it is activated, deactivated or
+   * fires, so a reader of pending routines (a task's next check) reads again.
+   * Returns the unsubscribe.
+   */
+  onChange(listener: (routineId: string) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private changed(routineId: string): void {
+    for (const listener of this.changeListeners) {
+      try {
+        listener(routineId);
+      } catch (error) {
+        log.warn("routine change listener failed", {
+          routineId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   async activate(routine: Routine): Promise<void> {
     const provider = this.providers.get(routine.trigger.type);
     if (!provider) {
@@ -101,11 +127,21 @@ export class RoutineEngine {
       });
       return;
     }
-    await provider.activate(routine, async (payload) => {
-      // A trigger fire ignores the dispatch outcome (it's surfaced via the run
-      // record); only the manual runNow() path reads the return value.
-      await this.dispatch(routine, payload);
-    });
+    await provider.activate(
+      routine,
+      async (payload) => {
+        // A trigger fire ignores the dispatch outcome (it's surfaced via the run
+        // record); only the manual runNow() path reads the return value.
+        try {
+          await this.dispatch(routine, payload);
+        } finally {
+          this.changed(routine.id);
+        }
+      },
+      // A schedule stores its next run after the fire: told again then.
+      () => this.changed(routine.id),
+    );
+    this.changed(routine.id);
   }
 
   /** Re-activate every enabled floating schedule so it picks up a new guardian
@@ -138,6 +174,7 @@ export class RoutineEngine {
     for (const provider of this.providers.values()) {
       provider.deactivate(routineId);
     }
+    this.changed(routineId);
   }
 
   /** Fire a routine's action immediately, out of band from its trigger — the
@@ -236,11 +273,26 @@ export class RoutineEngine {
     );
   }
 
+  /**
+   * Asked before a routine fires on its trigger: a fire it turns down does
+   * not run. A run someone asked for is not asked about.
+   */
+  private fireGate: ((routine: Routine) => Promise<boolean>) | null = null;
+
+  /** Sets the gate a trigger's fire passes first; null removes it. */
+  setFireGate(gate: ((routine: Routine) => Promise<boolean>) | null): void {
+    this.fireGate = gate;
+  }
+
   private async dispatchAsRoot(
     routine: Routine,
     payload: Record<string, unknown>,
     opts: { manual?: "person" | "background" },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
+    if (!opts.manual && this.fireGate && !(await this.fireGate(routine).catch(() => true))) {
+      log.info("routine fire turned down", { routineId: routine.id, name: routine.name });
+      return { runId: "", status: "cancelled" };
+    }
     const startTime = this.clock.now().getTime();
 
     // Pre-generate a rootExecutionId so the routine run links to the action

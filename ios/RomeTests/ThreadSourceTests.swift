@@ -49,7 +49,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         let store = await chat(backend, [message("a1", at: 0, thread: "a1")])
         #expect(store.composerThread == nil)
         store.openThread(at: "a1")
-        #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true))
+        #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1", bare: true))
         store.closeThread()
         #expect(store.composerThread == nil)
     }
@@ -60,7 +60,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
     @Test func aRestoredThreadDraftSurvivesAnEditAndARelaunch() async {
         let root = FileManager.default.temporaryDirectory.appending(path: "rome-thread-relaunch-\(UUID().uuidString)/Drafts", directoryHint: .isDirectory)
         defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
-        let target = ThreadTarget(messageId: "a1", instanceKnowsThreads: true)
+        let target = ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1")
         let first = DraftStore(root: root, instance: "me")
         first.sending(chat: "concierge", inputId: "in-1", text: "Will it rain?", photos: [], fromComposer: true, thread: target)
         await first.flush()
@@ -168,10 +168,10 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         // The same message again, without the field: its thread stays.
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("a1", at: 0, knows: false)))
         #expect(store.message("a1")?.chatThreadId == "r")
-        // A new message without the field opens a thread that sends `chatThread`.
+        // Opened by its id, a message without the field starts a thread that sends `chatThread`.
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("fresh", at: 20, knows: false)))
         store.openThread(at: "fresh")
-        #expect(store.thread?.target == ThreadTarget(messageId: "fresh", instanceKnowsThreads: true))
+        #expect(store.composerThread?.body["chatThread"] == .string("fresh"))
         store.closeThread()
     }
 }
@@ -227,3 +227,65 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         #expect(List.isLazy(rows: 12, locked: true, following: true, atRest: true))
     }
 }
+
+/// Thread labels through the store: placements, retirements, titles.
+@MainActor
+@Suite struct ThreadLabelStoreTests {
+    private func titled(_ id: String, at seconds: TimeInterval, thread: String, title: String?) -> ChatMessage {
+        var held = message(id, at: seconds, thread: thread)
+        held.chatThreadTitle = title
+        return held
+    }
+
+    @Test func aPlacementWithATitleLabelsTheMessage() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, [message("a1", at: 0), message("a2", at: 10)])
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageThread(sessionId: "concierge", messageId: "a2", chatThreadId: "r", title: "Book flights"))
+        #expect(store.message("a2")?.chatThreadId == "r")
+        #expect(store.message("a2")?.chatThreadTitle == "Book flights")
+        #expect(store.taskThreadTitle(of: store.message("a2")!) == "Book flights")
+    }
+
+    @Test func aRetiredThreadLosesItsLabels() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, [titled("a1", at: 0, thread: "r", title: "Book flights"), titled("a2", at: 10, thread: "r", title: "Book flights"), message("b", at: 20)])
+        backend.bus.emit(LiveTopic.chat("concierge"), .threadRetired(sessionId: "concierge", chatThreadId: "r"))
+        #expect(store.message("a1")?.chatThreadId == nil && store.message("a1")?.chatThreadTitle == nil)
+        #expect(store.message("a2")?.chatThreadId == nil)
+        // Another chat's retirement changes nothing.
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageThread(sessionId: "concierge", messageId: "b", chatThreadId: "s", title: "T"))
+        backend.bus.emit(LiveTopic.chat("concierge"), .threadRetired(sessionId: "other", chatThreadId: "s"))
+        #expect(store.message("b")?.chatThreadId == "s")
+    }
+
+    @Test func aPlacementBeforeItsMessageIsKeptForIt() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, [message("a1", at: 0)])
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageThread(sessionId: "concierge", messageId: "late", chatThreadId: "r", title: "Pay rent"))
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("late", at: 30, knows: false)))
+        #expect(store.message("late")?.chatThreadId == "r")
+        #expect(store.message("late")?.chatThreadTitle == "Pay rent")
+    }
+
+    @Test func aCopyWithoutTheTitleKeepsTheOneHeld() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, [titled("a1", at: 0, thread: "r", title: "Book flights")])
+        // The same message again, in its thread, with no title.
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("a1", at: 0, thread: "r")))
+        #expect(store.message("a1")?.chatThreadTitle == "Book flights")
+        // A new message placed in that thread takes the thread's title.
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("a2", at: 10, thread: "r")))
+        #expect(store.message("a2")?.chatThreadTitle == "Book flights")
+    }
+
+    @Test func aDraftFromBeforeQuotesIsAPlainReplyWhenNoTaskOwnsItsMessage() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, [message("plain", at: 0), titled("owned", at: 10, thread: "r", title: "Book flights"), message("root", at: 5, thread: "r")])
+        store.reopenThread(ThreadTarget(messageId: "plain", instanceKnowsThreads: true))
+        #expect(store.thread == nil)
+        #expect(store.quote?.messageId == "plain" && store.quote?.isQuote == true)
+        store.hideThread()
+        #expect(store.tinted == nil)
+    }
+}
+

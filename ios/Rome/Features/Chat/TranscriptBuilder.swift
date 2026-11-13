@@ -3,7 +3,17 @@ import Foundation
 /// A message the guardian sent that the server has not stored yet.
 struct PendingSend: Identifiable, Hashable, Sendable {
     /// `sent` means the server accepted it; the stored copy replaces it on the next load.
-    enum State: Hashable, Sendable { case sending, sent, failed }
+    enum State: Hashable, Sendable {
+        case sending, sent
+        case failed(SendFailure)
+        /// Stored, and the instance records it as never handed to an agent.
+        case notDelivered
+        /// Stored, and the instance cannot tell whether an agent took it.
+        case unconfirmed
+
+        /// The message is on the instance: its row is a stored message's.
+        var isStored: Bool { self == .notDelivered || self == .unconfirmed }
+    }
 
     let id: String
     let text: String
@@ -33,8 +43,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case userText(id: String, text: String, images: [UserImage] = [], pending: PendingSend.State?)
     case agentText(id: String, text: String, long: Bool, forwardedFrom: MessagePart.ForwardedFrom?, position: BubblePosition)
     /// `latest`: the newest card for that task chat, the only one that may
-    /// show what the task waits on.
-    case taskCard(id: String, chatId: String, title: String, latest: Bool = false)
+    /// show what the task waits on. `ask`: the question or approval a card
+    /// from before `show` carries inside it.
+    case taskCard(id: String, chatId: String, title: String, latest: Bool = false, ask: TaskAskCard? = nil)
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
     /// `done`: an interactive card the guardian already answered.
@@ -42,20 +53,38 @@ enum TranscriptRow: Identifiable, Hashable {
     case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     case widgetUI(id: String, part: WidgetUIPart, sessionId: String)
-    case error(id: String, text: String)
+    case error(id: String, error: TurnError)
+    /// A quiet line between messages, such as the chat moving to another model.
+    case notice(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
-    /// Under an Agent message that ends a stretch of a chat thread, where the
-    /// thread goes on beyond that stretch: how many replies it has.
-    /// `guardian`: the message is the guardian's, so the line sits right.
-    case threadReplies(id: String, messageId: String, count: Int, guardian: Bool)
+    /// A task's question or approval shown on its own (`show: "ask"`).
+    /// `latest`: the newest card for that task chat, the only one that may
+    /// take an answer. `card`: what the instance filled in for it.
+    case taskAsk(id: String, chatId: String, title: String, card: TaskAskCard?, latest: Bool = false)
+    /// Under a Concierge message in a task's chat thread: `↳ <task title>`,
+    /// which opens the thread view (docs/domains/chats.md#chat-thread).
+    case threadLabel(id: String, messageId: String, title: String)
+    /// Under a Concierge reply to nobody's message: where its turn came from
+    /// ("Routine · Daily summary"). Faint, not tappable.
+    case sourceLabel(id: String, text: String)
+    /// A faint centered line where the chat's agent session was renewed,
+    /// with why; `sessionId` is the new session, whose handoff a tap opens.
+    case sessionRenewal(id: String, reason: String, sessionId: String?)
     case typing
+
+    var isSeparatorOrError: Bool {
+        switch self {
+        case .separator, .error: return true
+        default: return false
+        }
+    }
 
     var id: String {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
-             .taskCard(let id, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _), .error(let id, _), .tools(let id, _, _),
-             .threadReplies(let id, _, _, _):
+             .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
+             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
+             .threadLabel(let id, _, _), .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
             return id
         case .typing:
             return "typing"
@@ -64,7 +93,6 @@ enum TranscriptRow: Identifiable, Hashable {
 
     var isGuardian: Bool {
         if case .userText = self { return true }
-        if case .threadReplies(_, _, _, let guardian) = self { return guardian }
         return false
     }
 
@@ -73,10 +101,10 @@ enum TranscriptRow: Identifiable, Hashable {
     var messageId: String? {
         switch self {
         case .userText(let id, _, _, let pending):
-            return pending == nil ? Self.message(ofPart: id) : nil
+            return pending == nil || pending?.isStored == true ? Self.message(ofPart: id) : nil
         case .agentText(let id, _, _, _, _):
             return Self.message(ofPart: id)
-        case .threadReplies(_, let messageId, _, _):
+        case .threadLabel(_, let messageId, _):
             return messageId
         default:
             return nil
@@ -100,8 +128,12 @@ enum TranscriptBuilder {
     struct Options {
         /// Task chats show their tool summaries; Concierge has none.
         var showTools = false
-        /// Concierge chats mark a chat thread's first message with its replies.
+        /// A Concierge chat's timeline labels each Concierge message in a
+        /// task's chat thread with the task; the thread view does not.
         var showThreads = false
+        /// Concierge chats show a line for automated input and for a renewed
+        /// session, where the turn they belong to starts.
+        var showNotices = false
         var typing = false
     }
 
@@ -119,40 +151,114 @@ enum TranscriptBuilder {
             let rows: [TranscriptRow]
             /// Rows that are text bubbles take part in the corner shapes.
             let bubbleIndexes: [Int]
+            /// A faint line of its own, which ends a run of bubbles.
+            var notice = false
         }
 
         var entries: [Entry] = []
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
-        let replies = options.showThreads ? threadLines(messages) : [:]
+        let labels = options.showThreads ? threadLabels(messages) : [:]
+        // Each message's parts, read once.
+        let parsed = messages.map(\.parts)
+        // The turns whose reply is an error part.
+        var storedErrors = Set<String>()
+        // The turns that answer a message the guardian wrote: one a routine,
+        // an app or an agent sent in does not make its turn the guardian's.
+        var guardianTurns = Set<String>()
+        for (message, parts) in zip(messages, parsed) {
+            guard let turn = message.turnId else { continue }
+            if message.isUser, !Self.isAutomated(message) { guardianTurns.insert(turn) }
+            if !message.isTrace, parts.contains(where: { if case .error = $0 { true } else { false } }) { storedErrors.insert(turn) }
+        }
+        // Whether an agent message of a later turn says something a guardian
+        // reads: the Chat recovered from the failure (a switch of model, a retry).
+        // What the failed turn said before it failed does not count.
+        var recovered = [Bool](repeating: false, count: messages.count)
+        var seenTurns: [String?] = []
+        for index in messages.indices.reversed() {
+            let turn = messages[index].turnId
+            recovered[index] = seenTurns.contains { $0 != turn }
+            if Self.isReply(messages[index], parts: parsed[index]), seenTurns.count < 2, !seenTurns.contains(where: { $0 == turn }) {
+                seenTurns.append(turn)
+            }
+        }
+
+        // A turn's lines stand before its first message; a turn that shows
+        // nothing else, as an automated input the Concierge answers with
+        // silence, gets them where its trace sits.
+        var summaries: [String: TraceSummary] = [:]
+        if options.showNotices {
+            for message in messages where message.isTrace {
+                if let turn = message.turnId, let summary = message.traceSummary { summaries[turn] = summary }
+            }
+        }
+        var noticed = Set<String>()
+        func notices(for message: ChatMessage) {
+            guard options.showNotices, let turn = message.turnId, let summary = summaries[turn], noticed.insert(turn).inserted else { return }
+            for row in Self.noticeRows(turn: turn, summary: summary) {
+                entries.append(Entry(id: row.id, date: message.date, guardian: false, rows: [row], bubbleIndexes: [], notice: true))
+            }
+        }
+
+        // The turns the Concierge began on its own, with where each came from:
+        // by the turn's trace, or, from before, by an automated message that began it.
+        // A turn that took one of the guardian's own messages is never one of them.
+        var unprompted: [String: TraceSummary.InputSource] = [:]
+        if options.showNotices {
+            for message in messages {
+                guard let turn = message.turnId, !guardianTurns.contains(turn) else { continue }
+                if message.isTrace, let source = message.traceSummary?.automatedInput { unprompted[turn] = source }
+            }
+            for message in messages where Self.isAutomated(message) {
+                guard let turn = message.turnId, !guardianTurns.contains(turn), unprompted[turn] == nil, let sender = message.sender else { continue }
+                unprompted[turn] = TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
+            }
+        }
 
         // Messages come in the store's order, which follows the server's turns.
-        for message in messages {
+        for (position, message) in messages.enumerated() {
+            notices(for: message)
+            // A Concierge chat holds no automated messages: one from before that
+            // rule, said on the owner's behalf or not, draws nothing. What the
+            // Concierge answers it with shows as it always did.
+            if options.showNotices, Self.isAutomated(message) { continue }
             if message.isTrace {
-                guard options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 else { continue }
-                entries.append(Entry(
-                    id: message.id, date: message.date, guardian: false,
-                    rows: [.tools(id: "tools-\(message.id)", traceMessageId: message.id, count: steps)],
-                    bubbleIndexes: []
-                ))
+                var rows: [TranscriptRow] = []
+                if options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 {
+                    rows.append(.tools(id: "tools-\(message.id)", traceMessageId: message.id, count: steps))
+                }
+                // A turn that failed mid-run leaves only its trace: the line says why.
+                // A turn that failed before it ran stored its error as a reply, which says it.
+                // In the Chat, only a turn that answers the guardian's own message gets
+                // one: a failed routine, digest or recovery turn is not theirs to read.
+                let theirs = options.showTools || (message.turnId.map(guardianTurns.contains) ?? false)
+                if theirs, !recovered[position], let error = failure(of: message, storedErrors: storedErrors) {
+                    rows.append(.error(id: "failed-\(message.id)", error: error))
+                }
+                if !rows.isEmpty {
+                    entries.append(Entry(id: message.id, date: message.date, guardian: false, rows: rows, bubbleIndexes: []))
+                }
                 continue
             }
             var rows: [TranscriptRow] = []
             var bubbles: [Int] = []
-            for (index, part) in message.parts.enumerated() {
+            for (index, part) in parsed[position].enumerated() {
                 let id = "\(message.id):\(index)"
                 switch part {
                 case .text(let text, let long, let forwarded):
                     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                     if message.isUser {
                         let (body, uploads) = UploadLines.split(text)
-                        rows.append(.userText(id: id, text: body, images: uploads.map(UserImage.stored), pending: nil))
+                        rows.append(.userText(id: id, text: body, images: uploads.map(UserImage.stored), pending: PendingSend.State.stored(inputState: message.inputState)))
                     } else {
                         bubbles.append(rows.count)
                         rows.append(.agentText(id: id, text: text, long: long, forwardedFrom: forwarded, position: .single))
                     }
-                case .taskChat(let chatId, let title):
-                    rows.append(.taskCard(id: id, chatId: chatId, title: title))
+                case .taskChat(let chatId, let title, .ask, let card):
+                    rows.append(.taskAsk(id: id, chatId: chatId, title: title, card: card))
+                case .taskChat(let chatId, let title, let show, let card):
+                    rows.append(.taskCard(id: id, chatId: chatId, title: title, ask: show == nil ? card : nil))
                 case .approval(let approval):
                     rows.append(.approval(id: id, part: approval, sessionId: message.sessionId))
                 case .question(let question):
@@ -169,14 +275,19 @@ enum TranscriptBuilder {
                     var card = card
                     card.widgetId = message.id
                     rows.append(.widgetUI(id: id, part: card, sessionId: message.sessionId))
-                case .error(let text):
-                    rows.append(.error(id: id, text: text.isEmpty ? String(localized: "This turn did not finish") : text))
-                case .interactionResult, .other:
+                case .error(let error):
+                    rows.append(.error(id: id, error: error))
+                case .notice(let text):
+                    rows.append(.notice(id: id, text: text))
+                case .interactionResult, .replyTo, .other:
                     continue
                 }
             }
-            if !rows.isEmpty, let count = replies[message.id] {
-                rows.append(.threadReplies(id: "replies-\(message.id)", messageId: message.id, count: count, guardian: message.isUser))
+            if !rows.isEmpty, let title = labels[message.id] {
+                rows.append(.threadLabel(id: "label-\(message.id)", messageId: message.id, title: title))
+            } else if !rows.isEmpty, !message.isUser, let turn = message.turnId, let source = unprompted[turn] {
+                // One label a message; a task's thread shows only its own.
+                rows.append(.sourceLabel(id: "source-\(message.id)", text: SourceCopy.label(source)))
             }
             if !rows.isEmpty {
                 entries.append(Entry(id: message.id, date: message.date, guardian: message.isUser, rows: rows, bubbleIndexes: bubbles))
@@ -221,7 +332,7 @@ enum TranscriptBuilder {
             if previous == nil || gap >= separatorGap || newDay {
                 closeRun()
                 output.append(.separator(id: "sep-\(entry.id)", date: entry.date))
-            } else if entry.guardian != previous?.guardian || gap >= groupGap {
+            } else if entry.guardian != previous?.guardian || gap >= groupGap || entry.notice || previous?.notice == true {
                 closeRun()
             }
             for (index, row) in entry.rows.enumerated() {
@@ -235,47 +346,101 @@ enum TranscriptBuilder {
             previous = entry
         }
         closeRun()
-        // Only the newest card for each task chat expands.
+        // Only the newest card for each task chat expands, a task card or
+        // its question shown alone.
         var marked = Set<String>()
         for index in output.indices.reversed() {
-            if case .taskCard(let id, let chatId, let title, _) = output[index], marked.insert(chatId).inserted {
-                output[index] = .taskCard(id: id, chatId: chatId, title: title, latest: true)
+            switch output[index] {
+            case .taskCard(let id, let chatId, let title, _, let ask) where marked.insert(chatId).inserted:
+                output[index] = .taskCard(id: id, chatId: chatId, title: title, latest: true, ask: ask)
+            case .taskAsk(let id, let chatId, let title, let card, _) where marked.insert(chatId).inserted:
+                output[index] = .taskAsk(id: id, chatId: chatId, title: title, card: card, latest: true)
+            default:
+                break
             }
         }
+        output = Self.withoutResolvedErrors(output)
         if options.typing { output.append(.typing) }
         return output
     }
 
-    /// Where the "N replies" line goes, by message id, and its count
-    /// (rome-os/rome#1976). A thread gets at most two: one under its root,
-    /// and one under its newest message when something outside the thread
-    /// lies between the two. With its root not loaded, only the newest
-    /// gets one. Both count every loaded message of the thread but the root.
-    static func threadLines(_ messages: [ChatMessage]) -> [String: Int] {
-        let shown = messages.filter { !$0.isTrace && $0.parts.contains(where: \.isVisible) }
-        let position = Dictionary(shown.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var replies: [String: [Int]] = [:]
-        for (index, message) in shown.enumerated() {
-            guard let root = message.chatThreadId, root != message.id else { continue }
-            replies[root, default: []].append(index)
-        }
-        var lines: [String: Int] = [:]
-        for (root, indexes) in replies {
-            guard let newest = indexes.last else { continue }
-            let count = indexes.count
-            guard let rootIndex = position[root] else {
-                lines[shown[newest].id] = count
-                continue
+    /// An agent message with something to read: text or a card. An error, a
+    /// model switch and what no transcript shows do not count.
+    static func isReply(_ message: ChatMessage, parts: [MessagePart]) -> Bool {
+        guard !message.isUser, !message.isTrace else { return false }
+        return parts.contains { part in
+            switch part {
+            case .error, .notice, .replyTo, .other, .interactionResult: return false
+            default: return part.isVisible
             }
-            lines[root] = count
-            // Between the two, whichever comes first: a reply can sort
-            // before its root when they were written in the same second.
-            let first = min(rootIndex, newest), last = max(rootIndex, newest)
-            guard last > first + 1 else { continue }
-            let interrupted = shown[(first + 1)..<last].contains { $0.chatThreadId != root && $0.id != root }
-            if interrupted { lines[shown[newest].id] = count }
         }
-        return lines
+    }
+
+    /// A stored error card that a model switch follows is not drawn: the
+    /// switch line says what happened. With no switch after it, it stays.
+    /// A failed turn's own line (`failed-…`) is never dropped here.
+    static func withoutResolvedErrors(_ rows: [TranscriptRow]) -> [TranscriptRow] {
+        var drop = Set<Int>()
+        for (index, row) in rows.enumerated() {
+            guard case .error(let id, _) = row, !id.hasPrefix("failed-") else { continue }
+            var next = index + 1
+            while next < rows.count, rows[next].isSeparatorOrError { next += 1 }
+            if next < rows.count, case .notice = rows[next] { drop.insert(index) }
+        }
+        return drop.isEmpty ? rows : rows.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
+    }
+
+    /// What a failed turn's trace says went wrong; nil for a turn that did not fail,
+    /// or one whose error is already a stored reply.
+    static func failure(of trace: ChatMessage, storedErrors: Set<String>) -> TurnError? {
+        guard trace.traceSummary?.turnStatus == "error" else { return nil }
+        if let turn = trace.turnId, storedErrors.contains(turn) { return nil }
+        let text = trace.traceSummary?.terminalError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // With a code, provider and reason the line takes the guided copy of a
+        // stored error; an instance before them, or a code not known here, gives
+        // "Didn't finish: <text>".
+        let summary = trace.traceSummary
+        return TurnError(text: text, code: summary?.terminalErrorCode, provider: summary?.terminalErrorProvider, reason: summary?.terminalErrorReason, didntFinish: true)
+    }
+
+    /// The label under each Concierge message in a task's chat thread, by
+    /// message id: the task's title. A thread is a task's when a message of
+    /// it carries the title; the server sends none for a thread no task has.
+    /// The guardian's messages get none, and neither does a message showing
+    /// a task card, which names its task itself. A task's question or
+    /// approval shown alone does get one (docs/domains/chats.md#chat-thread).
+    static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
+        var titles: [String: String] = [:]
+        for message in messages {
+            if let root = message.chatThreadId, let title = message.chatThreadTitle, !title.isEmpty {
+                titles[root] = title
+            }
+        }
+        var labels: [String: String] = [:]
+        for message in messages where !message.isUser && !message.isTrace {
+            guard let root = message.chatThreadId, let title = titles[root] else { continue }
+            let showsTaskCard = message.parts.contains {
+                if case .taskChat(_, _, let show, _) = $0 { return show != .ask }
+                return false
+            }
+            if !showsTaskCard { labels[message.id] = title }
+        }
+        return labels
+    }
+
+    /// The lines a turn's trace summary asks for: the session it renewed.
+    static func noticeRows(turn: String, summary: TraceSummary) -> [TranscriptRow] {
+        var rows: [TranscriptRow] = []
+        if let renewal = summary.sessionRenewal, let reason = renewal.reason, !reason.isEmpty {
+            rows.append(.sessionRenewal(id: "renewal-\(turn)", reason: reason, sessionId: renewal.sessionId))
+        }
+        return rows
+    }
+
+    /// A message a routine, an app or an agent sent in, in the guardian's
+    /// name or its own.
+    static func isAutomated(_ message: ChatMessage) -> Bool {
+        message.isUser && message.sender?.kind == "automated"
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

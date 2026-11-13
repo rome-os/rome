@@ -1,4 +1,6 @@
-import { lazy, Suspense } from "react";
+import { lazy, type ReactNode, Suspense } from "react";
+import { useTranslation } from "react-i18next";
+import { answerOutcome, SettledCard } from "./SettledCard";
 import { CardBoundary } from "./widget-ui/CardBoundary";
 import { isDrawableCard } from "./widget-ui/drawable";
 
@@ -24,6 +26,28 @@ export interface QuestionCardProps {
     name: string,
     context: Record<string, unknown>,
   ) => void;
+  /** Shown at the top inside the card, such as the task it is for. */
+  header?: ReactNode;
+  /**
+   * How it shows once answered or dismissed: folded to what it asked and how
+   * it ended, opening to the whole card read-only (the default), or whole.
+   */
+  settled?: "fold" | "full";
+}
+
+export function QuestionCard({ settled = "fold", ...card }: QuestionCardProps) {
+  const { t } = useTranslation("chat");
+  if (settled === "fold" && card.result !== undefined) {
+    const title = questionsOf(card.props).join(" · ");
+    return (
+      <SettledCard
+        title={title || null}
+        outcome={answerOutcome(t, card.result)}
+        full={<WholeQuestionCard {...card} />}
+      />
+    );
+  }
+  return <WholeQuestionCard {...card} />;
 }
 
 /**
@@ -32,7 +56,7 @@ export interface QuestionCardProps {
  * described, or one whose description cannot be drawn, shows its questions
  * as a line.
  */
-export function QuestionCard({
+function WholeQuestionCard({
   widgetId,
   toolUseId,
   appId,
@@ -40,12 +64,14 @@ export function QuestionCard({
   props,
   result,
   onAnswer,
-}: QuestionCardProps) {
+  header,
+}: Omit<QuestionCardProps, "settled">) {
   const line = <QuestionLine props={props} />;
   if (!ui || !isDrawableCard(appId, ui, {}, true)) return line;
   return (
     <CardBoundary fallback={line}>
       <Suspense fallback={null}>
+        {header ? <div className="flex min-w-0 flex-col pb-2">{header}</div> : null}
         <WidgetUiCard
           widgetId={widgetId}
           toolUseId={toolUseId}
@@ -59,15 +85,19 @@ export function QuestionCard({
   );
 }
 
-function QuestionLine({ props }: { props?: Record<string, unknown> }) {
+function questionsOf(props?: Record<string, unknown>): string[] {
   const raw = props?.questions;
-  const questions = Array.isArray(raw)
+  return Array.isArray(raw)
     ? raw.flatMap((q) =>
         q && typeof q === "object" && typeof (q as { question?: unknown }).question === "string"
           ? [(q as { question: string }).question]
           : [],
       )
     : [];
+}
+
+function QuestionLine({ props }: { props?: Record<string, unknown> }) {
+  const questions = questionsOf(props);
   return (
     <p className="whitespace-pre-line text-ui text-muted-foreground" data-question-line>
       {questions.join("\n")}

@@ -35,6 +35,18 @@ Projects are working directories where the agent does its work — writing code,
 
 - **[App](apps.md#rome-apps)** — an app is an installed extension package. A project is a working directory the agent operates in.
 
+## Chat files
+
+A file shown in a dashboard chat is a copy in the profile's `assets` folder under a new random name, so it never overwrites or replaces another file. Two things put files there: a file the guardian attaches, and the `core:show_file` action, which an agent calls with a local path to show a picture, video or file.
+
+**Contracts:**
+
+- The copy is read-only and never changes. The dashboard serves it at `/api/assets/<id>.<ext>` behind the same session check as the rest of `/api`, and the browser may cache it for a year. If the agent later overwrites the original file and shows it again, the earlier message keeps the earlier bytes.
+- An attached file's message links to that URL. The agent's copy of the turn also names the file's local path, so it can read the file.
+- `core:show_file` takes an absolute path to a regular file of at most 100 MB under the projects, memory or assets folder, with links resolved first. It refuses keys, credentials, `.env` files, databases and the insides of `.git`, `.ssh` and similar folders. It returns the URL and the Markdown that shows the file.
+- Only images, audio, video, and PDFs open in the browser. Every other type downloads.
+- In chat, pictures show as thumbnails that zoom, video and audio play in place (a file the browser cannot play becomes a chip), and other files appear as a chip that saves the file under its own name. The server sends no file name, so the name the chat asks for is the one used.
+
 ## Routines
 
 A routine is a durable binding from a trigger to an [action](actions.md): when the trigger fires, Rome runs the named action with the routine's stored arguments. Trigger kinds are schedule, event-bus, and manual ("run now" only). Agents create routines when the guardian asks to automate or schedule something.
