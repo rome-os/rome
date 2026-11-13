@@ -20,6 +20,26 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
   },
 };
 
+/** Set on the env of a turn the widget route starts, which a client cannot
+ *  set: only this route answers an app's widget the agent waits on. */
+const WIDGET_EVENT = Symbol.for("rome.widget-event");
+
+/** Whether a request came through the widget route, from `c.env`. */
+export function cameThroughWidgetEvent(env: unknown): boolean {
+  return isObject(env) && (env as Record<symbol, unknown>)[WIDGET_EVENT] === true;
+}
+
+/** A link a client may open: https, or a page of this instance. */
+function vetLink(link: unknown, origin: string): string | undefined {
+  if (typeof link !== "string") return undefined;
+  try {
+    const url = new URL(link, origin);
+    return url.protocol === "https:" || url.origin === origin ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The names a question card stored before its events were its own. */
 const STORED_EVENT_NAMES: Record<string, string> = {
   "rome:answer": "send",
@@ -97,7 +117,7 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
           headers,
           body: JSON.stringify(json),
         }),
-        c.env,
+        { ...(isObject(c.env) ? c.env : {}), [WIDGET_EVENT]: true },
       );
 
     if (widget.appId === "core") {
@@ -108,15 +128,20 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     }
     if (!isWidgetAppPath(name)) return c.json({ error: "The event is not a path in the app" }, 400);
     const reply = await to(`/api/apps/${encodeURIComponent(widget.appId)}/${name}`, context);
+    if (!reply.ok) return reply;
+    const said = (await reply.json().catch(() => null)) as {
+      answer?: unknown;
+      open?: unknown;
+    } | null;
     // An app's widget the agent waits on answers it when the app's reply says
     // so; the answer is labelled as the app's, never as the guardian's words.
-    if (!widget.waits || !reply.ok) return reply;
-    const said = (await reply
-      .clone()
-      .json()
-      .catch(() => null)) as { answer?: unknown } | null;
-    if (said?.answer === undefined) return reply;
-    return answer(to, widget, widgetId, { from: widget.appId, value: said.answer }, body?.turn);
+    if (widget.waits && said?.answer !== undefined) {
+      return answer(to, widget, widgetId, { from: widget.appId, value: said.answer }, body?.turn);
+    }
+    // Core writes what the client reads: whether the agent was answered and a
+    // link to open, never a field of the app's own.
+    const open = vetLink(said?.open, new URL(c.req.url).origin);
+    return c.json(open ? { open } : {});
   });
 
   /**

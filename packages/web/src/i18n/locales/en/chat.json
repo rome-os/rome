@@ -450,6 +450,7 @@
   "appComponent": {
     "dismiss": "Dismiss",
     "widgetUnavailable": "Could not read this card's data. {{text}}",
+    "widgetOpenLink": "Open the page to continue",
     "widgetUndrawable": "Could not show this card. {{text}}"
   },
   "aiToolsCard": {

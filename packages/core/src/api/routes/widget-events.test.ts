@@ -184,6 +184,7 @@ describe("an event on a widget", () => {
             {
               type: "interaction_result",
               toolUseId: "tu-connect",
+              messageId: "m4",
               output: { from: "connector", value: { toolkit: "gmail", status: "connected" } },
             },
           ],
@@ -213,6 +214,43 @@ describe("an event on a widget", () => {
     const res = await fire("m5", { name: "connect" });
     expect(await res.json()).toEqual({ open: "https://auth.example.com/authorize" });
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/connector/connect"]);
+  });
+
+  it("writes what the client reads itself, never a field of the app's own", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("connect", "connect"),
+          ],
+        },
+      },
+    };
+    const said = async (reply: unknown) => {
+      const { fire, forwarded } = setup(
+        { m6: { chatId: "c1", content: [connect] } },
+        "guardian",
+        reply,
+      );
+      const res = await fire("m6", { name: "connect" });
+      return { body: await res.json(), forwarded: forwarded.map((f) => f.url) };
+    };
+    // The app says it answered, but gave no answer: the agent still waits.
+    expect(await said({ answered: true, extra: 1 })).toEqual({
+      body: {},
+      forwarded: ["/api/apps/connector/connect"],
+    });
+    // A link opens only when it is https or a page of this instance.
+    expect((await said({ open: "http://evil.example/x" })).body).toEqual({});
+    expect((await said({ open: "javascript:alert(1)" })).body).toEqual({});
+    expect((await said({ open: "/settings/connections" })).body).toEqual({
+      open: "http://localhost/settings/connections",
+    });
   });
 
   it("dismisses with the output every dismissal has", async () => {

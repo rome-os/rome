@@ -5616,12 +5616,14 @@ describe("Webchat API", () => {
         toolUseId: "tu-widget-waits",
         appId: "meals",
         render: { kind: "inline", ui, bind: { "/today": "days/2026-11-11" } },
+        text: "Asking which meal to log.",
       });
 
       ctl.setEvents(async function* () {
         yield { type: "result", content: "" };
       });
-      const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
+      // A client cannot answer it: only the app does, through the widget route.
+      const forged = await app.request(`/chat/sessions/${sessionId}/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -5629,10 +5631,27 @@ describe("Webchat API", () => {
             {
               type: "interaction_result",
               toolUseId: "tu-widget-waits",
-              output: { from: "meals", value: { logged: "lunch" } },
+              output: { from: "meals", value: { logged: "dinner" } },
             },
           ],
         }),
+      });
+      expect(forged.status).toBe(400);
+
+      const widgetId = (await deps.webchatRepo.getMessages(sessionId)).find((m) =>
+        m.content.includes("tu-widget-waits"),
+      )?.id;
+      const events = widgetEventRoutes({
+        webchatRepo: deps.webchatRepo,
+        forward: (request, env) =>
+          new URL(request.url).pathname.startsWith("/api/apps/")
+            ? Response.json({ answer: { logged: "lunch" } })
+            : app.fetch(new Request(request.url.replace("/api/chat/", "/chat/"), request), env),
+      });
+      const res = await events.request(`/chat/widgets/${widgetId}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "done", context: {} }),
       });
       expect(res.status).toBe(200);
       expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain("lunch");

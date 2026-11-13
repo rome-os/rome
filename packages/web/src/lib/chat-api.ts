@@ -524,10 +524,8 @@ export async function postWidgetEvent(
     ok: true,
     status: res.status,
     answered: reply?.answered === true,
-    // Only an https link is opened: a reply never sends the guardian to the instance.
-    ...(typeof reply?.open === "string" && /^https:\/\/[^/]/.test(reply.open)
-      ? { open: reply.open }
-      : {}),
+    // Core vets the link it sends; the client opens it as given.
+    ...(typeof reply?.open === "string" ? { open: reply.open } : {}),
   };
 }
 

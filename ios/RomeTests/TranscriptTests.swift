@@ -130,6 +130,18 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         let answers = TranscriptBuilder.answers(in: [answer])
         #expect(answers["q1"]?["answers"]?.array?.first?["value"]?.string == "A")
     }
+
+    /// A provider reuses tool-use ids across turns: an answer belongs to the
+    /// card before it, and a later card with the same id stays open.
+    @Test func anAnswerBelongsToTheCardBeforeIt() {
+        let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "appId": "connector", "render": ["kind": "inline", "ui": ["components": [["id": "root", "component": "Text", "text": "Connect"]]]]]
+        let first = message("c1", role: "assistant", [card], at: 0)
+        let result = message("r1", role: "user", [["type": "interaction_result", "toolUseId": "item_0", "output": ["from": "connector", "value": "ok"]]], at: 1)
+        let second = message("c2", role: "assistant", [card], at: 2)
+        let answers = TranscriptBuilder.answers(in: [first, result, second])
+        #expect(answers["c1"] != nil)
+        #expect(answers["c2"] == nil)
+    }
 }
 
 @Suite struct RelativeTimeTests {

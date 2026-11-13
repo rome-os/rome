@@ -276,9 +276,9 @@ enum TranscriptBuilder {
                 case .question(let question):
                     var question = question
                     question.ui?.widgetId = message.id
-                    rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[question.toolUseId]))
+                    rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[message.id]))
                 case .webOnly(let kind, let toolUseId):
-                    rows.append(.webOnly(id: id, kind: kind, done: toolUseId.map { answers[$0] != nil } ?? false))
+                    rows.append(.webOnly(id: id, kind: kind, done: toolUseId != nil && answers[message.id] != nil))
                 case .routineDraft(let draft):
                     rows.append(.routineDraft(id: id, part: draft))
                 case .connectCard(let card):
@@ -489,12 +489,26 @@ enum TranscriptBuilder {
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.
+    /// Answers given to cards, by the id of the message that holds each card.
+    /// A provider reuses tool-use ids (`item_0`) across turns, so a result
+    /// answers the newest card before it with its id, never a later one.
+    /// A result whose card is not among `messages` is kept by its tool-use id.
     static func answers(in messages: [ChatMessage]) -> [String: JSONValue] {
+        var open: [String: String] = [:]
         var answers: [String: JSONValue] = [:]
-        for message in messages where message.isUser {
+        for message in messages {
             for part in message.parts {
-                if case .interactionResult(let toolUseId, let output) = part {
-                    answers[toolUseId] = output
+                switch part {
+                case .question(let question) where !message.isUser:
+                    open[question.toolUseId] = message.id
+                case .widgetUI(let card) where card.waits && !message.isUser:
+                    open[card.toolUseId] = message.id
+                case .webOnly(_, let toolUseId?) where !message.isUser:
+                    open[toolUseId] = message.id
+                case .interactionResult(let toolUseId, let output) where message.isUser:
+                    answers[open.removeValue(forKey: toolUseId) ?? toolUseId] = output
+                default:
+                    break
                 }
             }
         }

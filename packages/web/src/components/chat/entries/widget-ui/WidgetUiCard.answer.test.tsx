@@ -142,13 +142,11 @@ describe("a question card described as data", () => {
       />,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
-    await waitFor(() =>
-      expect(open).toHaveBeenCalledWith(
-        "https://auth.example.com/go",
-        "_blank",
-        "noopener,noreferrer",
-      ),
-    );
+    await waitFor(() => expect(open).toHaveBeenCalledWith("https://auth.example.com/go", "_blank"));
+    // The browser blocked the tab (the reply came after the click): the link
+    // shows on the card instead.
+    const link = await screen.findByRole("link", { name: "Open the page to continue" });
+    expect(link.getAttribute("href")).toBe("https://auth.example.com/go");
     // Not answered: the card stays usable.
     expect(screen.queryByText("Sent")).toBeNull();
     expect((screen.getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(

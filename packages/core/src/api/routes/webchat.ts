@@ -136,6 +136,7 @@ import {
   questionCardUi,
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
+import { cameThroughWidgetEvent } from "./widget-events.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
@@ -572,6 +573,8 @@ function trustedWidget(
       toolUseId: msg.toolUseId,
       appId: widget.appId,
       render: { kind: "inline", ui: widget.ui, ...(widget.bind ? { bind: widget.bind } : {}) },
+      // The card's line, for a reader that cannot draw it.
+      text: widget.text,
     };
   }
   const { waits: _waits, ...shown } = widget;
@@ -759,6 +762,9 @@ interface OpenSuspensionCard {
   questions?: Question[];
   /** The message that holds the card. */
   messageId: string;
+  /** An app's card described as data: only the app answers it, through the
+   *  widget route. */
+  answeredByApp: boolean;
 }
 
 /** The message an `interaction_result` part says holds its card, when it says. */
@@ -797,7 +803,13 @@ async function findOpenSuspensions(
       const part = p as {
         type?: unknown;
         toolUseId?: unknown;
-        render?: { builtin?: unknown; componentId?: unknown; props?: { questions?: unknown } };
+        appId?: unknown;
+        render?: {
+          builtin?: unknown;
+          componentId?: unknown;
+          props?: { questions?: unknown };
+          ui?: unknown;
+        };
       };
       if (part.type === "pending_interaction" && typeof part.toolUseId === "string") {
         const builtin = part.render?.builtin === true;
@@ -810,6 +822,10 @@ async function findOpenSuspensions(
             builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
           ...(questions?.ok ? { questions: questions.questions } : {}),
           messageId: msg.id,
+          answeredByApp:
+            part.appId !== "core" &&
+            part.render?.ui !== undefined &&
+            part.render?.componentId === undefined,
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -3873,7 +3889,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
-    said: { saidBy?: Account } = {},
+    said: { saidBy?: Account; fromWidgetEvent?: boolean } = {},
   ): Promise<RouteAnswer> => {
     const actor = await currentSessionActor();
     const sourceId =
@@ -4007,6 +4023,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     if (resolution && !openSuspensions.has(resolution.toolUseId)) {
       return answer({ error: "No open interaction matches this toolUseId" }, 400);
+    }
+    // An app's card described as data is answered only by its app, whose
+    // reply the widget route turns into this turn.
+    if (
+      resolution &&
+      openSuspensions.get(resolution.toolUseId)?.answeredByApp &&
+      !said.fromWidgetEvent
+    ) {
+      return answer({ error: "Only the card's app answers it" }, 400);
     }
     // A widget's event names the message that holds the card. A later card can
     // reuse the tool-use id, so the answer goes only to the card pressed.
@@ -4956,7 +4981,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.post("/chat/sessions/:id/turns", async (c) => {
     const body = await parseChatSendBody(c);
-    const sent = await handleChatSend(c.req.param("id"), body);
+    const sent = await handleChatSend(c.req.param("id"), body, {
+      fromWidgetEvent: cameThroughWidgetEvent(c.env),
+    });
     return c.json(sent.body, sent.status);
   });
 
