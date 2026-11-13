@@ -54,6 +54,9 @@ export class AppApiDispatcher {
     request: RomeAppApiRequest,
     context: RomeAppApiDispatchContext = {},
   ): Promise<Response> {
+    // Started before the import and createApiHandler: both run on the main
+    // loop for every request, and slow app code there counts too.
+    const startedAt = performance.now();
     const view = this.catalog.get(appId);
     if (!isResolvedWithApi(view)) {
       throw new Error(`App "${appId}" has no API entrypoint`);
@@ -92,7 +95,6 @@ export class AppApiDispatcher {
     // every other request (#2144). Record how long each took, and warn on a
     // slow one so a single query names it. A streamed response counts until
     // its Response is returned, not until the stream ends.
-    const startedAt = performance.now();
     let status: number | "threw" = "threw";
     try {
       const response = await runWithRomeAppApiRequestContext({ viewer: context.viewer }, () =>
