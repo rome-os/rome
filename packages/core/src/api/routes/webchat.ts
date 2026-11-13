@@ -136,6 +136,7 @@ import {
   questionCardUi,
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
+import { cameThroughWidgetEvent } from "./widget-events.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
@@ -470,7 +471,10 @@ function toolOutputObject(output: unknown): Record<string, unknown> | null {
 }
 
 type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-type ShownWidgetPart = OmitEach<Extract<MessagePart, { type: "widget" }>, "type" | "toolUseId">;
+type ShownWidgetPart = OmitEach<Extract<MessagePart, { type: "widget" }>, "type" | "toolUseId"> & {
+  /** The agent waits on the card until one of its events answers it. */
+  waits?: boolean;
+};
 
 /** A widget that does not wait, pulled from an action's tool_result
  * (`showWidget: true`, written by `actionToolOutput`), or null for any other
@@ -488,6 +492,7 @@ function readWidgetFromOutput(output: unknown): ShownWidgetPart | null {
       text: o.text,
       ui: o.ui as WidgetUi,
       ...(o.bind ? { bind: o.bind as Record<string, string> } : {}),
+      ...(o.waits === true ? { waits: true } : {}),
     };
   }
   if (typeof o.componentId !== "string") return null;
@@ -531,7 +536,7 @@ function trustedWidget(
   actionName: string | undefined,
   deps: Pick<ApiDeps, "appCatalog" | "actionRegistry">,
   sessionId: string,
-): WidgetPart | null {
+): WidgetPart | PendingInteractionPart | null {
   const widget = readWidgetFromOutput(msg.output);
   if (!widget) return null;
   const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
@@ -560,7 +565,20 @@ function trustedWidget(
     });
     return null;
   }
-  return { type: "widget", toolUseId: msg.toolUseId, ...widget };
+  if ("ui" in widget && widget.waits) {
+    // A described card the agent waits on is the same card as a pending
+    // interaction, so the chat waits on it and its answer resumes the agent.
+    return {
+      type: "pending_interaction",
+      toolUseId: msg.toolUseId,
+      appId: widget.appId,
+      render: { kind: "inline", ui: widget.ui, ...(widget.bind ? { bind: widget.bind } : {}) },
+      // The card's line, for a reader that cannot draw it.
+      text: widget.text,
+    };
+  }
+  const { waits: _waits, ...shown } = widget;
+  return { type: "widget", toolUseId: msg.toolUseId, ...shown };
 }
 
 /** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
@@ -744,6 +762,9 @@ interface OpenSuspensionCard {
   questions?: Question[];
   /** The message that holds the card. */
   messageId: string;
+  /** An app's card described as data: only the app answers it, through the
+   *  widget route. */
+  answeredByApp: boolean;
 }
 
 /** The message an `interaction_result` part says holds its card, when it says. */
@@ -782,9 +803,20 @@ async function findOpenSuspensions(
       const part = p as {
         type?: unknown;
         toolUseId?: unknown;
-        render?: { builtin?: unknown; componentId?: unknown; props?: { questions?: unknown } };
+        appId?: unknown;
+        render?: {
+          builtin?: unknown;
+          componentId?: unknown;
+          props?: { questions?: unknown };
+          ui?: unknown;
+        };
       };
-      if (part.type === "pending_interaction" && typeof part.toolUseId === "string") {
+      // Only a card the agent said opens a wait; a turn cannot carry one.
+      if (
+        part.type === "pending_interaction" &&
+        typeof part.toolUseId === "string" &&
+        msg.role === "assistant"
+      ) {
         const builtin = part.render?.builtin === true;
         const questions =
           builtin && part.render?.componentId === "question-card"
@@ -795,6 +827,10 @@ async function findOpenSuspensions(
             builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
           ...(questions?.ok ? { questions: questions.questions } : {}),
           messageId: msg.id,
+          answeredByApp:
+            part.appId !== "core" &&
+            part.render?.ui !== undefined &&
+            part.render?.componentId === undefined,
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -3863,7 +3899,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
-    said: { saidBy?: Account } = {},
+    said: { saidBy?: Account; fromWidgetEvent?: boolean } = {},
   ): Promise<RouteAnswer> => {
     const actor = await currentSessionActor();
     const sourceId =
@@ -3890,6 +3926,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A resolution from an app interaction surface is a valid turn trigger even
     // with no typed text: it re-drives the calling agent with the artifact.
     const resolution = interpretInteractionResult(body.parts);
+    // A card is Rome's to show: a turn that carries one is refused.
+    if (
+      Array.isArray(body.parts) &&
+      body.parts.some(
+        (p) =>
+          !!p &&
+          typeof p === "object" &&
+          ["widget", "pending_interaction"].includes(String((p as { type?: unknown }).type)),
+      )
+    ) {
+      return answer({ error: "A turn cannot carry a card" }, 400);
+    }
+    // A turn answers one card. More than one result would let a valid answer
+    // carry another past the checks below, which look only at the first.
+    if (
+      Array.isArray(body.parts) &&
+      body.parts.filter(
+        (p) =>
+          !!p && typeof p === "object" && (p as { type?: unknown }).type === "interaction_result",
+      ).length > 1
+    ) {
+      return answer({ error: "A turn answers one card" }, 400);
+    }
 
     // A structured skill selection. Resolved against the catalog up
     // front — an unknown name (e.g. the skill was uninstalled between pick and
@@ -3997,6 +4056,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     if (resolution && !openSuspensions.has(resolution.toolUseId)) {
       return answer({ error: "No open interaction matches this toolUseId" }, 400);
+    }
+    // An app's card described as data is answered only by its app, whose
+    // reply the widget route turns into this turn.
+    if (
+      resolution &&
+      openSuspensions.get(resolution.toolUseId)?.answeredByApp &&
+      !said.fromWidgetEvent
+    ) {
+      return answer({ error: "Only the card's app answers it" }, 400);
     }
     // A widget's event names the message that holds the card. A later card can
     // reuse the tool-use id, so the answer goes only to the card pressed.
@@ -4946,7 +5014,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.post("/chat/sessions/:id/turns", async (c) => {
     const body = await parseChatSendBody(c);
-    const sent = await handleChatSend(c.req.param("id"), body);
+    const sent = await handleChatSend(c.req.param("id"), body, {
+      fromWidgetEvent: cameThroughWidgetEvent(c.env),
+    });
     return c.json(sent.body, sent.status);
   });
 

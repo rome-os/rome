@@ -17,7 +17,8 @@ function captureEvents() {
   const events: { url: string; body: { name: string; context: unknown } }[] = [];
   rs.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     events.push({ url: String(url), body: JSON.parse(String(init?.body)) });
-    return new Response("{}", { status: 200 });
+    // Core answered the agent waiting on the card.
+    return Response.json({ answered: true });
   });
   return events;
 }
@@ -109,6 +110,48 @@ describe("a question card described as data", () => {
     expect(events[0]?.body.context).toEqual({ answers: [{ values: ["Plain"], text: "" }] });
     // Core took it: the card waits for the stored answer, read-only.
     expect(await screen.findByText("Sent")).toBeTruthy();
+  });
+
+  it("follows the reply to an event that does not answer: opens its link and reads the data again", async () => {
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+      String(url).endsWith("/events")
+        ? Response.json({ open: "https://auth.example.com/go" })
+        : Response.json({}),
+    );
+    const connect = {
+      components: [
+        { id: "root", component: "Column", children: ["go"] },
+        {
+          id: "go",
+          component: "Button",
+          child: "go-label",
+          action: { event: { name: "connect" } },
+        },
+        { id: "go-label", component: "Text", text: "Connect" },
+      ],
+    };
+    render(
+      <WidgetUiCard
+        widgetId="m9"
+        toolUseId="t9"
+        appId="connector"
+        ui={connect as never}
+        text=""
+        waiting={{}}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith("https://auth.example.com/go", "_blank"));
+    // The browser blocked the tab (the reply came after the click): the link
+    // shows on the card instead.
+    const link = await screen.findByRole("link", { name: "Open the page to continue" });
+    expect(link.getAttribute("href")).toBe("https://auth.example.com/go");
+    // Not answered: the card stays usable.
+    expect(screen.queryByText("Sent")).toBeNull();
+    expect((screen.getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   it("stays usable when core does not take the event", async () => {

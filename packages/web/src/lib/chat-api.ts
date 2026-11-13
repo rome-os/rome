@@ -501,10 +501,14 @@ export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | 
 export const widgetEventPath = (widgetId: string) =>
   `/api/chat/widgets/${encodeURIComponent(widgetId)}/events`;
 
-/** What core said to an event: whether it took it, and its status when not. */
+/** What core said to an event: whether it took it, its status when not,
+ *  whether the event answered the agent waiting on the widget, and a link the
+ *  reply asks the client to open. */
 export interface WidgetEventOutcome {
   ok: boolean;
   status: number;
+  answered?: boolean;
+  open?: string;
 }
 
 /** Sends an event a widget fired to core, which decides what it means. `turn`
@@ -519,7 +523,18 @@ export async function postWidgetEvent(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...body, turn: { inputId: randomUUID(), ...body.turn } }),
   });
-  return { ok: res.ok, status: res.status };
+  if (!res.ok) return { ok: false, status: res.status };
+  const reply = (await res.json().catch(() => null)) as {
+    answered?: unknown;
+    open?: unknown;
+  } | null;
+  return {
+    ok: true,
+    status: res.status,
+    answered: reply?.answered === true,
+    // Core vets the link it sends; the client opens it as given.
+    ...(typeof reply?.open === "string" ? { open: reply.open } : {}),
+  };
 }
 
 export async function postSessionTurnJson(

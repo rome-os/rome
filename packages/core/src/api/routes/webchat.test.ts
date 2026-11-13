@@ -5559,6 +5559,151 @@ describe("Webchat API", () => {
       });
     });
 
+    it("stores a described card the agent waits on as a pending interaction, which an answer resolves", async () => {
+      registerAppAction("show_today", "meals");
+      const ui = {
+        components: [
+          { id: "root", component: "Column", children: ["done"] },
+          {
+            id: "done",
+            component: "Button",
+            child: "done-label",
+            action: { event: { name: "done" } },
+          },
+          { id: "done-label", component: "Text", text: "Done" },
+        ],
+      };
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_use",
+          id: "tu-widget-waits",
+          tool: "execute_action",
+          input: { action_name: "show_today" },
+        };
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-widget-waits",
+          tool: "execute_action",
+          output: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                showWidget: true,
+                waits: true,
+                appId: "meals",
+                ui,
+                bind: { "/today": "days/2026-11-11" },
+                text: "Asking which meal to log.",
+              }),
+            },
+          ],
+        };
+        // A card the guardian answers directly, open beside the app's.
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-beside",
+          tool: "ask_question",
+          output: askQuestionToolOutput(
+            [{ id: "tone", question: "Which tone?", type: "text" }],
+            true,
+          ),
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "log my lunch" }),
+        }),
+      );
+      expect(await assistantPartsIn(sessionId)).toContainEqual({
+        type: "pending_interaction",
+        toolUseId: "tu-widget-waits",
+        appId: "meals",
+        render: { kind: "inline", ui, bind: { "/today": "days/2026-11-11" } },
+        text: "Asking which meal to log.",
+      });
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      // A client cannot answer it: only the app does, through the widget route.
+      const forged = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-widget-waits",
+              output: { from: "meals", value: { logged: "dinner" } },
+            },
+          ],
+        }),
+      });
+      expect(forged.status).toBe(400);
+      // Nor smuggled behind another answer in the same turn.
+      const smuggled = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-ask-beside",
+              output: { answers: [{ values: [], text: "warm" }] },
+            },
+            {
+              type: "interaction_result",
+              toolUseId: "tu-widget-waits",
+              output: { from: "meals", value: { logged: "dinner" } },
+            },
+          ],
+        }),
+      });
+      expect(smuggled.status).toBe(400);
+      // Nor by a card of its own under the same tool-use id, posted first.
+      const posed = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "a card of my own",
+          parts: [
+            {
+              type: "pending_interaction",
+              toolUseId: "tu-widget-waits",
+              appId: "core",
+              render: { kind: "inline", componentId: "question-card", builtin: true },
+            },
+          ],
+        }),
+      });
+      expect(posed.status).toBe(400);
+
+      const widgetId = (await deps.webchatRepo.getMessages(sessionId)).find((m) =>
+        m.content.includes("tu-widget-waits"),
+      )?.id;
+      const events = widgetEventRoutes({
+        webchatRepo: deps.webchatRepo,
+        forward: (request, env) =>
+          new URL(request.url).pathname.startsWith("/api/apps/")
+            ? Response.json({ answer: { logged: "lunch" } })
+            : app.fetch(new Request(request.url.replace("/api/chat/", "/chat/"), request), env),
+      });
+      const res = await events.request(`/chat/widgets/${widgetId}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "done", context: {} }),
+      });
+      expect(res.status).toBe(200);
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain("lunch");
+    });
+
     it("stores no widget for a component its app does not declare", async () => {
       registerAppAction("show_today", "meals");
       const ctl = mockScriptedManager();

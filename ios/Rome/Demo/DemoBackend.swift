@@ -292,7 +292,7 @@ final class DemoBackend: RomeBackend {
 
     /// Core's routing of a widget's event: an app's widget calls its app, and
     /// the question card core owns answers the agent with Send or Dismiss.
-    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply {
         // A widget is a message of its own: its id finds its chat and its card.
         guard let (sessionId, held) = messages.lazy.compactMap({ entry in
             entry.value.first(where: { $0.id == widgetId }).map { (entry.key, $0) }
@@ -303,7 +303,7 @@ final class DemoBackend: RomeBackend {
         else { throw APIError.notFound }
         guard appId == "core" else {
             _ = try await appCall(appId: appId, method: "POST", path: name, body: context)
-            return
+            return WidgetEventReply()
         }
         try await pause(0.4)
         let output: JSONValue = name == "dismiss" || name == "rome:dismiss" ? .object(["dismissed": .bool(true)]) : context
@@ -324,6 +324,7 @@ final class DemoBackend: RomeBackend {
             insert(sessionId, agent(reply, at: .now, session: sessionId))
             setRunning(sessionId, nil)
         }
+        return WidgetEventReply(answered: true)
     }
 
     func markRead(sessionId: String) async {}

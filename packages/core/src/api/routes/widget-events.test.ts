@@ -42,12 +42,28 @@ interface Row {
 }
 
 /** The route with its messages, its chats (`private` = the guardian's own), and a caller. */
-function setup(rows: Record<string, Row>, caller: string | null = "guardian") {
+function setup(
+  rows: Record<string, Row>,
+  caller: string | null = "guardian",
+  appReply: unknown = { ok: true },
+) {
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
     webchatRepo: {
       widgetMessage: async (id) =>
         rows[id] ? { chatId: rows[id].chatId, content: JSON.stringify(rows[id].content) } : null,
+      getMessages: (async (chatId: string) =>
+        Object.entries(rows)
+          .filter(([, row]) => row.chatId === chatId)
+          .map(([id, row]) => ({
+            id,
+            role: row.content.some(
+              (part) => (part as { type?: string }).type === "interaction_result",
+            )
+              ? "user"
+              : "assistant",
+            content: JSON.stringify(row.content),
+          }))) as never,
       getSession: (async (id: string) =>
         id === "private"
           ? { id, agentName: "core:concierge", ownerKey: "guardian", triggerKind: null }
@@ -60,7 +76,9 @@ function setup(rows: Record<string, Row>, caller: string | null = "guardian") {
         body: await request.json(),
         cookie: request.headers.get("cookie"),
       });
-      return Response.json({ ok: true });
+      return Response.json(
+        new URL(request.url).pathname.startsWith("/api/apps/") ? appReply : { ok: true },
+      );
     },
   });
   const fire = (widgetId: string, body: unknown) =>
@@ -150,6 +168,130 @@ describe("an event on a widget", () => {
     });
     await fire("m1", { name: "send", context: { to: "team" } });
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/notes/send"]);
+  });
+
+  it("answers the agent waiting on an app's widget with the app's reply, labelled as the app's", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [{ id: "root", component: "Column", children: [] }, button("check", "check")],
+        },
+      },
+    };
+    const { fire, forwarded } = setup({ m4: { chatId: "c1", content: [connect] } }, "guardian", {
+      answer: { toolkit: "gmail", status: "connected" },
+    });
+    const res = await fire("m4", { name: "check", context: { toolkit: "gmail" } });
+    expect(await res.json()).toMatchObject({ answered: true });
+    expect(forwarded.map((f) => [f.url, f.body])).toEqual([
+      ["/api/apps/connector/check", { toolkit: "gmail" }],
+      [
+        "/api/chat/sessions/c1/turns",
+        {
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-connect",
+              messageId: "m4",
+              output: { from: "connector", value: { toolkit: "gmail", status: "connected" } },
+            },
+          ],
+        },
+      ],
+    ]);
+  });
+
+  it("leaves the agent waiting when the app's reply does not answer", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("connect", "connect"),
+          ],
+        },
+      },
+    };
+    const { fire, forwarded } = setup({ m5: { chatId: "c1", content: [connect] } }, "guardian", {
+      open: "https://auth.example.com/authorize",
+    });
+    const res = await fire("m5", { name: "connect" });
+    expect(await res.json()).toEqual({ open: "https://auth.example.com/authorize" });
+    expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/connector/connect"]);
+  });
+
+  it("writes what the client reads itself, never a field of the app's own", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("connect", "connect"),
+          ],
+        },
+      },
+    };
+    const said = async (reply: unknown) => {
+      const { fire, forwarded } = setup(
+        { m6: { chatId: "c1", content: [connect] } },
+        "guardian",
+        reply,
+      );
+      const res = await fire("m6", { name: "connect" });
+      return { body: await res.json(), forwarded: forwarded.map((f) => f.url) };
+    };
+    // The app says it answered, but gave no answer: the agent still waits.
+    expect(await said({ answered: true, extra: 1 })).toEqual({
+      body: {},
+      forwarded: ["/api/apps/connector/connect"],
+    });
+    // A link opens only when it is https or a page of this instance.
+    expect((await said({ open: "http://evil.example/x" })).body).toEqual({});
+    expect((await said({ open: "javascript:alert(1)" })).body).toEqual({});
+    expect((await said({ open: "/settings/connections" })).body).toEqual({
+      open: "http://localhost/settings/connections",
+    });
+  });
+
+  it("refuses an event on a card that was already answered, without calling its app", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("connect", "connect"),
+          ],
+        },
+      },
+    };
+    const { fire, forwarded } = setup({
+      m9: { chatId: "c1", content: [connect] },
+      r9: {
+        chatId: "c1",
+        content: [
+          { type: "interaction_result", toolUseId: "tu-connect", messageId: "m9", output: {} },
+        ],
+      },
+    });
+    const res = await fire("m9", { name: "connect" });
+    expect(res.status).toBe(400);
+    expect(forwarded).toEqual([]);
   });
 
   it("dismisses with the output every dismissal has", async () => {

@@ -28,7 +28,10 @@ export const mealPlannerHandlers = [
   // (mock mode has no agent to start a turn for it).
   http.post("/api/chat/widgets/:widgetId/events", async ({ request }) => {
     const { name } = (await request.json()) as { name?: unknown };
-    if (name !== "water") return HttpResponse.json({});
+    // Any other event stands for core answering the agent waiting on its widget.
+    if (name !== "water") {
+      return HttpResponse.json({ answered: true });
+    }
     glasses += 1;
     return HttpResponse.json({ water: glasses });
   }),

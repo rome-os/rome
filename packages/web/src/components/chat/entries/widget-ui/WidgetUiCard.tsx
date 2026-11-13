@@ -109,6 +109,7 @@ export function WidgetUiCard({
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
+  const [blockedLink, setBlockedLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const result = waiting?.result;
@@ -183,10 +184,17 @@ export function WidgetUiCard({
           turn: widgetHostRef.current.turnFields(),
         });
         if (!outcome.ok) throw new Error(`The widget's event failed: ${outcome.status}`);
-        // A card the agent waits on is answered once core takes the event; any
-        // other card reads its data again.
+        // A link the reply names opens; a card core says is answered locks,
+        // and any other card reads its data again.
         setSendFailed(false);
-        if (host) setSent(true);
+        if (outcome.open) {
+          // A browser lets a page open a tab only right after a click, and the
+          // reply may come later: a blocked tab shows as a link instead.
+          const tab = window.open(outcome.open, "_blank");
+          if (tab) tab.opener = null;
+          else setBlockedLink(outcome.open);
+        }
+        if (outcome.answered && host) setSent(true);
         else {
           await load(p);
           setFailed(false);
@@ -304,6 +312,17 @@ export function WidgetUiCard({
                 : "questionCard.answered",
           )}
         </span>
+      ) : null}
+      {blockedLink ? (
+        <a
+          href={blockedLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-aux text-primary underline underline-offset-2"
+          onClick={() => setBlockedLink(null)}
+        >
+          {t("appComponent.widgetOpenLink")}
+        </a>
       ) : null}
       {sendFailed ? (
         <span className="text-aux text-destructive">{t("stream.errors.sendFallback")}</span>

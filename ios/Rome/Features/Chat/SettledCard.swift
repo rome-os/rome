@@ -147,7 +147,7 @@ struct TaskAskView: View {
         case .settled:
             if let outcome = question.outcome, let part {
                 SettledCard(title: title, outcome: SettledOutcome.answer(outcome.output)) {
-                    QuestionCardView(part: part, answered: outcome.output) { _, _ in }
+                    QuestionCardView(part: part, answered: outcome.output) { _, _ in WidgetEventReply() }
                 }
             } else {
                 SettledCard(title: title, outcome: question.outcome.map { SettledOutcome.answer($0.output) } ?? String(localized: "Answered"))
