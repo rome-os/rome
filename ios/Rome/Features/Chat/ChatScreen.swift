@@ -51,12 +51,11 @@ struct ChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
-        // Reply brings the keyboard up; the replies line opens it for reading.
-        .onChange(of: store.thread != nil) { _, open in if open, store.thread?.toReply == true { composerFocused = true } }
-        .onChange(of: store.quote) { _, quote in if quote != nil { composerFocused = true } }
+        // Reply brings the keyboard up; a label opens the thread for reading.
+        .onChange(of: store.replies) { composerFocused = true }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
@@ -197,6 +196,7 @@ struct ChatScreen: View {
             } else {
                 TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
                     ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
+                        .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
@@ -213,19 +213,28 @@ struct ConciergeRow: View {
     let store: TranscriptStore
     let tasks: TasksStore
     let onOpenChat: (String, String) -> Void
-    /// Drawn in an open chat thread: no menus or thread links, text selectable.
+    /// Drawn in an open thread view: no thread labels, no share mode, and a
+    /// tap on a message never closes the view.
     var inThread = false
     @Environment(AppModel.self) private var model
 
-    /// The message's time, and Reply on the Agent's messages outside a thread.
+    /// The message's time, and Reply on the Agent's messages: the reply bar,
+    /// with an open thread view kept open.
     private func menu(reply: Bool) -> BubbleMenu {
-        let message = row.messageId.flatMap(store.message)
-        let onReply: (() -> Void)? = reply && !inThread
+        let message = row.messageId.flatMap { store.message($0) ?? store.thread?.messages.first { [id = $0] in $0.id == id } }
+        let onReply: (() -> Void)? = reply
             ? row.messageId.map { id in { store.reply(to: id) } }
             : nil
         // Share opens share mode on the message's turn; a pending send has none.
-        let onShare: (() -> Void)? = message?.turnId == nil ? nil : { [row] in store.share.begin(fromRow: row.id) }
+        let onShare: (() -> Void)? = inThread || message?.turnId == nil ? nil : { [row] in store.share.begin(fromRow: row.id) }
         return BubbleMenu(date: message?.date, onReply: onReply, onShare: onShare, inThread: inThread)
+    }
+
+    /// The quote a reply carries, on the first bubble of its message.
+    private func quote(_ id: String) -> MessagePart.ReplyQuote? {
+        guard let messageId = row.messageId, let message = store.message(messageId) ?? store.thread?.messages.first(where: { $0.id == messageId }) else { return nil }
+        guard let first = message.parts.firstIndex(where: { $0.textContent != nil }), id == "\(messageId):\(first)" else { return nil }
+        return message.parts.lazy.compactMap(\.replyQuote).first
     }
 
     var body: some View {
@@ -233,27 +242,41 @@ struct ConciergeRow: View {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(reply: false), mark: store.statusMark(ofRow: row), reservesMark: true)
+            let quote = quote(id)
+            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(reply: false),
+                       mark: store.statusMark(ofRow: row), reservesMark: true,
+                       quote: quote, onQuote: quote.flatMap { inThread ? nil : store.quoteAction(reply: row.messageId ?? "", original: $0.messageId) })
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: true))
-        case .threadReplies(_, let messageId, let count, let guardian):
+        case .threadLabel(_, let messageId, let title):
             if !inThread {
-                ThreadRepliesLine(count: count, guardian: guardian) { store.openThread(at: messageId, toReply: false) }
+                ThreadLabelLine(title: title) { store.openThread(at: messageId) }
             }
-        case .taskCard(_, let chatId, _, _) where tasks.isGone(chat: chatId):
+        case .taskCard(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             // Archived or deleted from this app.
             EmptyView()
-        case .taskCard(_, let chatId, let title, let latest):
+        case .taskCard(_, let chatId, let title, let latest, let embedsWait):
             let name = tasks.title(forChat: chatId, fallback: title)
             VStack(alignment: .leading, spacing: 8) {
                 TaskCard(title: name) {
                     onOpenChat(chatId, name)
                 }
-                // The newest card of a task that waits on the guardian shows
-                // what it asks, answered right here (rome-os/rome#1949).
-                if latest, !inThread, TaskWaitView.waits(tasks.chats[chatId]), let workspace = model.workspace {
-                    TaskWaitView(store: workspace.taskWait(chatId), session: tasks.chats[chatId])
+                // The newest card from before `show` of a task that waits on
+                // the guardian shows what it asks, answered right here
+                // (rome-os/rome#1949).
+                if latest, embedsWait, !inThread, TaskWaitView.waits(tasks.chats[chatId]), let workspace = model.workspace {
+                    TaskWaitView(store: workspace.taskWait(chatId), session: tasks.chats[chatId], onOpenChat: { onOpenChat(chatId, name) },
+                                 note: tasks.task(forChat: chatId).map { $0.status == "ended" && $0.endReason == "no_response" } == true ? "Expired — answer to continue" : nil)
                 }
+            }
+        case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
+            EmptyView()
+        case .taskAsk(_, let chatId, let title, let latest, let shownAt):
+            if let workspace = model.workspace {
+                TaskAskView(chatId: chatId, latest: latest, shownAt: shownAt, tasks: tasks, wait: workspace.taskWait(chatId)) {
+                    onOpenChat(chatId, tasks.title(forChat: chatId, fallback: title))
+                }
+                .keepsTaps(inThread)
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
@@ -836,6 +859,13 @@ struct TranscriptList<Row: View>: View {
                 catchUp(proxy)
             }
             .onChange(of: latestRequest) { catchUp(proxy) }
+            // A quote led to its original: it comes into view, mid-screen.
+            .onChange(of: store.jumps) {
+                guard let target = store.jumpTarget, let row = rows.first(where: { $0.ownMessageId == target }) else { return }
+                _ = scrollHandle.stop()
+                following = false
+                withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo(row.id, anchor: .center) }
+            }
             .onChange(of: store.pending.count) { old, new in
                 if new > old { scrollToBottom(proxy) }
             }

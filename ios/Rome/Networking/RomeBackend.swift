@@ -58,6 +58,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
     func interrupt(turnId: String) async throws
     func tasks() async throws -> [ConciergeTask]
+    /// The panel with the tasks that ended in the last `doneDays` days.
+    func tasks(doneDays: Int) async throws -> [ConciergeTask]
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
@@ -214,9 +216,13 @@ final class LiveBackend: RomeBackend {
     }
 
     func tasks() async throws -> [ConciergeTask] {
+        try await tasks(doneDays: 30)
+    }
+
+    func tasks(doneDays: Int) async throws -> [ConciergeTask] {
         let response: ConciergeTasksResponse = try await client.get(
             "/concierge/tasks",
-            query: [URLQueryItem(name: "doneDays", value: "30")]
+            query: [URLQueryItem(name: "doneDays", value: String(doneDays))]
         )
         return response.tasks
     }
@@ -392,6 +398,8 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
+    /// Demo data and test doubles keep no history of ended tasks.
+    func tasks(doneDays: Int) async throws -> [ConciergeTask] { try await tasks() }
     /// Demo data and test doubles hold the file as it is.
     func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
     /// Demo data and test doubles belong to no account.

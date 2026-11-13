@@ -43,8 +43,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case userText(id: String, text: String, images: [UserImage] = [], pending: PendingSend.State?)
     case agentText(id: String, text: String, long: Bool, forwardedFrom: MessagePart.ForwardedFrom?, position: BubblePosition)
     /// `latest`: the newest card for that task chat, the only one that may
-    /// show what the task waits on.
-    case taskCard(id: String, chatId: String, title: String, latest: Bool = false)
+    /// show what the task waits on. `embedsWait`: a card from before
+    /// `show`, which carries the task's question or approval inside.
+    case taskCard(id: String, chatId: String, title: String, latest: Bool = false, embedsWait: Bool = true)
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
     /// `done`: an interactive card the guardian already answered.
@@ -56,18 +57,22 @@ enum TranscriptRow: Identifiable, Hashable {
     /// A quiet line between messages, such as the chat moving to another model.
     case notice(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
-    /// Under an Agent message that ends a stretch of a chat thread, where the
-    /// thread goes on beyond that stretch: how many replies it has.
-    /// `guardian`: the message is the guardian's, so the line sits right.
-    case threadReplies(id: String, messageId: String, count: Int, guardian: Bool)
+    /// A task's question or approval shown on its own (`show: "ask"`).
+    /// `latest`: the newest card for that task chat, the only one that may
+    /// take an answer; `shownAt`: when it was said, so a folded one tells the
+    /// wait that was open then.
+    case taskAsk(id: String, chatId: String, title: String, latest: Bool = false, shownAt: Date)
+    /// Under a Concierge message in a task's chat thread: `↳ <task title>`,
+    /// which opens the thread view (docs/domains/chats.md#chat-thread).
+    case threadLabel(id: String, messageId: String, title: String)
     case typing
 
     var id: String {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
-             .taskCard(let id, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
+             .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
              .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
-             .threadReplies(let id, _, _, _):
+             .threadLabel(let id, _, _):
             return id
         case .typing:
             return "typing"
@@ -76,7 +81,6 @@ enum TranscriptRow: Identifiable, Hashable {
 
     var isGuardian: Bool {
         if case .userText = self { return true }
-        if case .threadReplies(_, _, _, let guardian) = self { return guardian }
         return false
     }
 
@@ -88,7 +92,7 @@ enum TranscriptRow: Identifiable, Hashable {
             return pending == nil || pending?.isStored == true ? Self.message(ofPart: id) : nil
         case .agentText(let id, _, _, _, _):
             return Self.message(ofPart: id)
-        case .threadReplies(_, let messageId, _, _):
+        case .threadLabel(_, let messageId, _):
             return messageId
         default:
             return nil
@@ -112,7 +116,8 @@ enum TranscriptBuilder {
     struct Options {
         /// Task chats show their tool summaries; Concierge has none.
         var showTools = false
-        /// Concierge chats mark a chat thread's first message with its replies.
+        /// A Concierge chat's timeline labels each Concierge message in a
+        /// task's chat thread with the task; the thread view does not.
         var showThreads = false
         var typing = false
     }
@@ -136,7 +141,7 @@ enum TranscriptBuilder {
         var entries: [Entry] = []
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
-        let replies = options.showThreads ? threadLines(messages) : [:]
+        let labels = options.showThreads ? threadLabels(messages) : [:]
         // Each message's parts, read once.
         let parsed = messages.map(\.parts)
         // The turns whose reply is an error part.
@@ -195,8 +200,10 @@ enum TranscriptBuilder {
                         bubbles.append(rows.count)
                         rows.append(.agentText(id: id, text: text, long: long, forwardedFrom: forwarded, position: .single))
                     }
-                case .taskChat(let chatId, let title):
-                    rows.append(.taskCard(id: id, chatId: chatId, title: title))
+                case .taskChat(let chatId, let title, .ask):
+                    rows.append(.taskAsk(id: id, chatId: chatId, title: title, shownAt: message.date))
+                case .taskChat(let chatId, let title, let show):
+                    rows.append(.taskCard(id: id, chatId: chatId, title: title, embedsWait: show == nil))
                 case .approval(let approval):
                     rows.append(.approval(id: id, part: approval, sessionId: message.sessionId))
                 case .question(let question):
@@ -213,12 +220,12 @@ enum TranscriptBuilder {
                     rows.append(.error(id: id, error: error))
                 case .notice(let text):
                     rows.append(.notice(id: id, text: text))
-                case .interactionResult, .other:
+                case .interactionResult, .replyTo, .other:
                     continue
                 }
             }
-            if !rows.isEmpty, let count = replies[message.id] {
-                rows.append(.threadReplies(id: "replies-\(message.id)", messageId: message.id, count: count, guardian: message.isUser))
+            if !rows.isEmpty, let title = labels[message.id] {
+                rows.append(.threadLabel(id: "label-\(message.id)", messageId: message.id, title: title))
             }
             if !rows.isEmpty {
                 entries.append(Entry(id: message.id, date: message.date, guardian: message.isUser, rows: rows, bubbleIndexes: bubbles))
@@ -277,11 +284,17 @@ enum TranscriptBuilder {
             previous = entry
         }
         closeRun()
-        // Only the newest card for each task chat expands.
+        // Only the newest card for each task chat expands, a task card or
+        // its question shown alone.
         var marked = Set<String>()
         for index in output.indices.reversed() {
-            if case .taskCard(let id, let chatId, let title, _) = output[index], marked.insert(chatId).inserted {
-                output[index] = .taskCard(id: id, chatId: chatId, title: title, latest: true)
+            switch output[index] {
+            case .taskCard(let id, let chatId, let title, _, let embeds) where marked.insert(chatId).inserted:
+                output[index] = .taskCard(id: id, chatId: chatId, title: title, latest: true, embedsWait: embeds)
+            case .taskAsk(let id, let chatId, let title, _, let shownAt) where marked.insert(chatId).inserted:
+                output[index] = .taskAsk(id: id, chatId: chatId, title: title, latest: true, shownAt: shownAt)
+            default:
+                break
             }
         }
         if options.typing { output.append(.typing) }
@@ -294,7 +307,7 @@ enum TranscriptBuilder {
         guard !message.isUser, !message.isTrace else { return false }
         return parts.contains { part in
             switch part {
-            case .error, .notice, .other, .interactionResult: return false
+            case .error, .notice, .replyTo, .other, .interactionResult: return false
             default: return part.isVisible
             }
         }
@@ -306,41 +319,36 @@ enum TranscriptBuilder {
         guard trace.traceSummary?.turnStatus == "error" else { return nil }
         if let turn = trace.turnId, storedErrors.contains(turn) { return nil }
         let text = trace.traceSummary?.terminalError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // The trace has the text only. When it carries a code, provider and reason,
-        // pass them here and the line takes the guided copy of a stored error.
-        return TurnError(text: text, didntFinish: true)
+        // With a code, provider and reason the line takes the guided copy of a
+        // stored error; an instance before them, or a code not known here, gives
+        // "Didn't finish: <text>".
+        let summary = trace.traceSummary
+        return TurnError(text: text, code: summary?.terminalErrorCode, provider: summary?.terminalErrorProvider, reason: summary?.terminalErrorReason, didntFinish: true)
     }
 
-    /// Where the "N replies" line goes, by message id, and its count
-    /// (rome-os/rome#1976). A thread gets at most two: one under its root,
-    /// and one under its newest message when something outside the thread
-    /// lies between the two. With its root not loaded, only the newest
-    /// gets one. Both count every loaded message of the thread but the root.
-    static func threadLines(_ messages: [ChatMessage]) -> [String: Int] {
-        let shown = messages.filter { !$0.isTrace && $0.parts.contains(where: \.isVisible) }
-        let position = Dictionary(shown.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var replies: [String: [Int]] = [:]
-        for (index, message) in shown.enumerated() {
-            guard let root = message.chatThreadId, root != message.id else { continue }
-            replies[root, default: []].append(index)
-        }
-        var lines: [String: Int] = [:]
-        for (root, indexes) in replies {
-            guard let newest = indexes.last else { continue }
-            let count = indexes.count
-            guard let rootIndex = position[root] else {
-                lines[shown[newest].id] = count
-                continue
+    /// The label under each Concierge message in a task's chat thread, by
+    /// message id: the task's title. A thread is a task's when a message of
+    /// it carries the title; the server sends none for a thread no task has.
+    /// The guardian's messages get none, and neither does a message showing
+    /// a task card, which names its task itself. A task's question or
+    /// approval shown alone does get one (docs/domains/chats.md#chat-thread).
+    static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
+        var titles: [String: String] = [:]
+        for message in messages {
+            if let root = message.chatThreadId, let title = message.chatThreadTitle, !title.isEmpty {
+                titles[root] = title
             }
-            lines[root] = count
-            // Between the two, whichever comes first: a reply can sort
-            // before its root when they were written in the same second.
-            let first = min(rootIndex, newest), last = max(rootIndex, newest)
-            guard last > first + 1 else { continue }
-            let interrupted = shown[(first + 1)..<last].contains { $0.chatThreadId != root && $0.id != root }
-            if interrupted { lines[shown[newest].id] = count }
         }
-        return lines
+        var labels: [String: String] = [:]
+        for message in messages where !message.isUser && !message.isTrace {
+            guard let root = message.chatThreadId, let title = titles[root] else { continue }
+            let showsTaskCard = message.parts.contains {
+                if case .taskChat(_, _, let show) = $0 { return show != .ask }
+                return false
+            }
+            if !showsTaskCard { labels[message.id] = title }
+        }
+        return labels
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

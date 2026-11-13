@@ -18,17 +18,14 @@ final class ThreadStore {
     /// Messages of the thread the chat does not hold, from the read.
     private(set) var older: [ChatMessage]
     private(set) var loaded = false
-    /// Opened to reply (the keyboard comes up) or to read (it stays down).
-    let toReply: Bool
 
     @ObservationIgnored private weak var chat: TranscriptStore?
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private var tokens: [UUID] = []
     @ObservationIgnored private var loads = 0
 
-    init(anchor: ChatMessage, chat: TranscriptStore, backend: RomeBackend, toReply: Bool = true, older: [ChatMessage] = []) {
+    init(anchor: ChatMessage, chat: TranscriptStore, backend: RomeBackend, older: [ChatMessage] = []) {
         self.anchor = anchor
-        self.toReply = toReply
         self.chat = chat
         self.backend = backend
         root = older.first?.chatThreadId ?? anchor.threadRoot
@@ -45,8 +42,11 @@ final class ThreadStore {
         return Self.ordered(held + extra)
     }
 
-    /// Where a send from this thread goes.
-    var target: ThreadTarget { ThreadTarget(messageId: anchor.id, instanceKnowsThreads: knowsThreads) }
+    /// The title of the task the thread is, as its messages carry it.
+    var title: String? {
+        (chat?.message(anchor.id) ?? anchor).chatThreadTitle
+            ?? messages.lazy.compactMap(\.chatThreadTitle).first
+    }
 
     private var knowsThreads: Bool { (chat?.instanceKnowsThreads ?? false) || anchor.knowsThreads }
 
@@ -87,7 +87,7 @@ final class ThreadStore {
 
     func handle(_ event: LiveEvent) {
         switch event {
-        case .messageThread(let id, let messageId, let thread) where id == sessionId:
+        case .messageThread(let id, let messageId, let thread, _) where id == sessionId:
             if thread == root {
                 // Placed here, and neither the chat nor the read holds it: read again.
                 if chat?.message(messageId) == nil, !older.contains(where: { $0.id == messageId }) {
@@ -114,7 +114,7 @@ final class ThreadStore {
     }
 
     /// The rows the thread shows: the chat's bubbles and cards, without
-    /// replies counts. Answers come from the chat and from the thread's own
+    /// thread labels. Answers come from the chat and from the thread's own
     /// older messages, so a card answered before the chat's pages shows done.
     func rows(answers: [String: JSONValue]) -> [TranscriptRow] {
         var all = TranscriptBuilder.answers(in: older)

@@ -192,13 +192,15 @@ struct ApprovalCardView: View {
     let resolvedAt: Date?
     /// A visitor sees the card but cannot answer it.
     var canResolve = true
+    /// Drawn whole and read only, as a folded card opens: what it asked, no controls.
+    var settled = false
     let onResolve: (Bool) -> Void
 
     private var title: String { part.title.flatMap { $0.isEmpty ? nil : $0 } ?? displayActionName(part.actionName) }
 
     var body: some View {
         Group {
-            switch status {
+            switch settled ? .pending : status {
             case nil:
                 HStack(spacing: 10) {
                     Spinner(size: 16, color: Palette.sub)
@@ -235,7 +237,7 @@ struct ApprovalCardView: View {
                     .frame(width: CardScale.iconBox, height: CardScale.iconBox)
                     .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Needs approval")
+                    (settled ? Text("Approval") : Text("Needs approval"))
                         .romeFont(CardScale.label)
                         .foregroundStyle(Palette.sub)
                     Text(title)
@@ -285,7 +287,9 @@ struct ApprovalCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            if canResolve {
+            if settled {
+                EmptyView()
+            } else if canResolve {
                 // Sized to their words at the card's foot: Approve the one
                 // accent button, Reject a quiet one beside it.
                 HStack(spacing: 6) {
@@ -419,13 +423,11 @@ struct QuestionCardView: View {
 
     private var single: Bool { part.questions.count == 1 && !(part.questions.first?.multi ?? true) }
 
+    /// Compact: the question is the title, with no line above it.
     private var pendingCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Waiting for your answer")
-                .romeFont(CardScale.label)
-                .foregroundStyle(Palette.sub)
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(part.questions, id: \.id) { question in
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(question.text)
                         .romeFont(CardScale.title, .semibold)
                         .tracking(-0.4)
@@ -549,7 +551,7 @@ struct QuestionCardView: View {
 
     private var answeredCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Answered")
+            (answered?["dismissed"]?.bool == true ? Text("Dismissed") : Text("Answered"))
                 .romeFont(CardScale.label)
                 .foregroundStyle(Palette.sub)
             ForEach(part.questions, id: \.id) { question in

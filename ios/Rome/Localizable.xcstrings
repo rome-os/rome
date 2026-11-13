@@ -501,6 +501,16 @@
         }
       }
     },
+    "Answered: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已回答：%@"
+          }
+        }
+      }
+    },
     "Appearance" : {
       "localizations" : {
         "zh-Hans" : {
@@ -531,6 +541,16 @@
         }
       }
     },
+    "Approval" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "审批"
+          }
+        }
+      }
+    },
     "Approve" : {
       "localizations" : {
         "zh-Hans" : {
@@ -557,6 +577,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已批准 · 正在执行"
+          }
+        }
+      }
+    },
+    "Approved, but did not finish" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已批准，但没有完成"
           }
         }
       }
@@ -627,6 +657,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自动"
+          }
+        }
+      }
+    },
+    "Automation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动化"
           }
         }
       }
@@ -1401,6 +1441,16 @@
         }
       }
     },
+    "Dismissed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已忽略"
+          }
+        }
+      }
+    },
     "Done" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1447,6 +1497,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "锻炼分钟数"
+          }
+        }
+      }
+    },
+    "Expired · answer to continue" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已过期 · 回答后继续"
+          }
+        }
+      }
+    },
+    "Expired — answer to continue" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已过期，回答后继续"
           }
         }
       }
@@ -2089,6 +2159,16 @@
         }
       }
     },
+    "No longer waiting" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不再等待"
+          }
+        }
+      }
+    },
     "No matching messages" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2419,6 +2499,26 @@
         }
       }
     },
+    "Open task chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开任务对话"
+          }
+        }
+      }
+    },
+    "Open the task chat to answer" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开任务对话来回答"
+          }
+        }
+      }
+    },
     "Opening your Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2435,6 +2535,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开设置"
+          }
+        }
+      }
+    },
+    "Opens the chat thread" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开对话串"
           }
         }
       }
@@ -3261,6 +3371,16 @@
         }
       }
     },
+    "Shows the message it replies to" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示它回复的消息"
+          }
+        }
+      }
+    },
     "Sign in again" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4011,6 +4131,26 @@
         }
       }
     },
+    "Turned down: no answer within a day" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已自动拒绝：一天内没有回应"
+          }
+        }
+      }
+    },
+    "Turned down: task stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已自动拒绝：任务已停止"
+          }
+        }
+      }
+    },
     "Type your answer…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4225,6 +4365,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等你回复"
+          }
+        }
+      }
+    },
+    "Waiting: answer the card below" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待回答：见下方卡片"
           }
         }
       }

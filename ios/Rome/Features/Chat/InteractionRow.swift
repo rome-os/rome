@@ -37,6 +37,11 @@ struct InteractionRow: View {
         switch row {
         case .tools(_, let traceID, let count):
             ToolSummary(count: count, calls: store.toolCalls[traceID]) { store.loadToolCalls(traceID) }
+        case .approval(_, let part, _) where store.approvals[part.approvalId] != nil && SettledOutcome.folds(store.approvalStatus(part)):
+            // Decided: folded to what it asked and how it ended, opening read only.
+            SettledCard(title: SettledOutcome.title(part), outcome: SettledOutcome.approval(store.approvalStatus(part), resolvedBy: store.approvals[part.approvalId]?.resolvedBy)) {
+                ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true) { _ in }
+            }
         case .approval(_, let part, _):
             ApprovalCardView(
                 part: part,
@@ -50,6 +55,10 @@ struct InteractionRow: View {
             }
             // The record is the guardian's to read: a visitor would only get 403s.
             .onAppear { if !isVisitor { store.watchApproval(part.approvalId) } }
+        case .question(_, let part, _, let answered?):
+            SettledCard(title: SettledOutcome.title(part), outcome: SettledOutcome.answer(answered)) {
+                QuestionCardView(part: part, answered: answered, sending: false) { _ in }
+            }
         case .question(_, let part, let sessionId, let answered):
             QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { answers in
                 store.answer(part, answers: answers, sessionId: sessionId)

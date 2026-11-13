@@ -182,13 +182,13 @@ struct TaskChatScreen: View {
             ErrorLine(error: error)
         case .notice(_, let text):
             NoticeLine(text: text)
-        case .taskCard(_, let id, let title, _):
+        case .taskCard(_, let id, let title, _, _):
             TaskCard(title: title) {}
+        case .taskAsk, .threadLabel:
+            // Only a Concierge chat shows a task's question alone, or thread labels.
+            EmptyView()
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .threadReplies:
-            // Task chats have no chat threads.
-            EmptyView()
         }
     }
 

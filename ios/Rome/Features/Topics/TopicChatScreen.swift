@@ -80,12 +80,11 @@ struct TopicChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
-        // Reply brings the keyboard up; the replies line opens it for reading.
-        .onChange(of: store?.thread != nil) { _, open in if open, store?.thread?.toReply == true { composerFocused = true } }
-        .onChange(of: store?.quote) { _, quote in if quote != nil { composerFocused = true } }
+        // Reply brings the keyboard up; a label opens the thread for reading.
+        .onChange(of: store?.replies) { composerFocused = true }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}
@@ -157,6 +156,7 @@ struct TopicChatScreen: View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
                 ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
+                    .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }

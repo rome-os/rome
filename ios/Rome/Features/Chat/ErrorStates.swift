@@ -104,6 +104,7 @@ struct TurnError: Hashable, Sendable {
 
     var kind: Kind {
         if reason == "not_logged_in" { return .notSignedIn }
+        if code == "usage_limit" { return .limit }
         if reason == "quota_exhausted" { return provider == nil ? .allAtLimit : .limit }
         if reason == "model_access_denied" { return .modelDenied }
         if reason == "no_available_provider" || ["model_unavailable", "model_provider_unavailable", "no_model_provider_available"].contains(code) { return .noProvider }

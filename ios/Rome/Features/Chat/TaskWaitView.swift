@@ -6,6 +6,10 @@ import SwiftUI
 struct TaskWaitView: View {
     let store: TaskWaitStore
     let session: ChatSession?
+    /// Opens the task chat, for a card answered only there.
+    var onOpenChat: () -> Void = {}
+    /// A line above the card: an expired question says it still takes an answer.
+    var note: LocalizedStringKey? = nil
     @Environment(\.isVisitor) private var isVisitor
 
     /// Only a task that waits on the guardian and is not running shows a card.
@@ -17,6 +21,11 @@ struct TaskWaitView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let error = store.error {
                 Text(verbatim: error)
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
+            }
+            if let note, store.card != nil {
+                Text(note)
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
             }
@@ -38,6 +47,9 @@ struct TaskWaitView: View {
                     Task { await store.resolve(approve: approve) }
                 }
                 .id(approval.id)
+            case .elsewhere:
+                // An app's own card, such as a sign-in, is answered in its task chat.
+                SettledCard(title: nil, outcome: String(localized: "Open the task chat to answer"), chevron: true, onOpen: onOpenChat)
             case nil:
                 EmptyView()
             }

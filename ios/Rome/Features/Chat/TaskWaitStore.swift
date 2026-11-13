@@ -13,6 +13,8 @@ final class TaskWaitStore {
         /// Its latest open question, by the message part's key.
         case question(MessagePart.QuestionPart, key: String)
         case approval(PendingApproval)
+        /// An app's own card, answered only in the task chat.
+        case elsewhere
     }
 
     let chatId: String
@@ -77,7 +79,7 @@ final class TaskWaitStore {
     /// The task's open card: its latest open question, or a pending approval
     /// asked after it. A result closes only the cards before it, since a
     /// later turn can reuse a tool-call id. A latest open card of another
-    /// kind (an app's own) shows none: the task chat's Open link reaches it.
+    /// kind (an app's own) is answered in the task chat.
     nonisolated static func card(messages: [ChatMessage], approvals: [PendingApproval], chatId: String) -> Card? {
         var open: [(key: String, part: JSONValue, date: Date)] = []
         for message in messages where message.role == "assistant" || message.role == "user" {
@@ -97,14 +99,91 @@ final class TaskWaitStore {
         if let approval, latest.map({ approval.createdAt > $0.date }) ?? true {
             return .approval(approval)
         }
-        guard let latest, latest.part["render"]?["componentId"]?.string == "question-card",
+        guard let latest else { return nil }
+        guard latest.part["render"]?["componentId"]?.string == "question-card",
               case .question(let question) = MessagePart.parse(Self.json([latest.part])).first
-        else { return nil }
+        else { return .elsewhere }
         return .question(question, key: latest.key)
     }
 
     private nonisolated static func json(_ parts: [JSONValue]) -> String {
         (try? String(data: JSONEncoder().encode(JSONValue.array(parts)), encoding: .utf8)) ?? "[]"
+    }
+
+    // MARK: Settled
+
+    /// What the task asked by a card's time, and how it ended, by that time.
+    private(set) var settled: [Date: SettledAsk] = [:]
+    /// Times whose read finished, with or without a card found.
+    private(set) var settledRead: Set<Date> = []
+    /// Times whose read could not reach the task chat. They are not read
+    /// again until the card asks again.
+    private(set) var settledFailed: Set<Date> = []
+
+    /// Reads the task chat back to `until` and a page before, so the
+    /// question or approval open then, and every answer since, are held;
+    /// then an approval's record, which alone knows how it ended.
+    func loadSettled(until: Date) async {
+        var held: [ChatMessage] = []
+        var before: String?
+        var crossed = false
+        var reached = false
+        for _ in 0..<Self.pagesBack {
+            guard let page = try? await backend.messages(sessionId: chatId, before: before, limit: 2) else { break }
+            reached = true
+            held.insert(contentsOf: page.messages, at: 0)
+            // One page past the card's time holds the question it showed.
+            guard !crossed, let cursor = page.nextCursor, let oldest = page.messages.first else { break }
+            crossed = oldest.date <= until
+            before = cursor
+        }
+        // A read that never reached the chat says nothing about the card.
+        guard reached else {
+            settledFailed.insert(until)
+            return
+        }
+        settledFailed.remove(until)
+        defer { settledRead.insert(until) }
+        guard var ask = Self.asked(messages: held, until: until) else { return }
+        if case .approval(let part, _) = ask.kind {
+            ask.kind = .approval(part, record: try? await backend.approval(id: part.approvalId))
+        }
+        settled[until] = ask
+    }
+
+    /// Pages of a task chat read at most, going back to a card's time.
+    nonisolated static let pagesBack = 5
+
+    /// The newest question or approval the task asked by `until`, with the
+    /// answer given to it since. Results close only cards before them, as
+    /// a later turn can reuse a tool-call id.
+    nonisolated static func asked(messages: [ChatMessage], until: Date) -> SettledAsk? {
+        var asked: (kind: SettledAsk.Kind, date: Date)?
+        var answers: [String: (output: JSONValue, date: Date)] = [:]
+        for message in messages where message.role == "assistant" || message.role == "user" {
+            for part in message.parts {
+                switch part {
+                case .interactionResult(let toolUseId, let output):
+                    answers[toolUseId] = (output, message.date)
+                case .question(let question) where message.date <= until:
+                    if asked.map({ message.date >= $0.date }) ?? true {
+                        asked = (.question(question, answer: nil), message.date)
+                    }
+                case .approval(let approval) where message.date <= until:
+                    if asked.map({ message.date >= $0.date }) ?? true {
+                        asked = (.approval(approval, record: nil), message.date)
+                    }
+                default:
+                    break
+                }
+            }
+        }
+        guard let asked else { return nil }
+        if case .question(let question, _) = asked.kind,
+           let answer = answers[question.toolUseId], answer.date >= asked.date {
+            return SettledAsk(kind: .question(question, answer: answer.output))
+        }
+        return SettledAsk(kind: asked.kind)
     }
 
     /// Sends the answer to the task chat. One the server already has
@@ -139,5 +218,87 @@ final class TaskWaitStore {
         }
         resolving = nil
         await load()
+    }
+}
+
+/// A task's question or approval that no longer waits, as its folded card
+/// shows it: what it asked, then how it ended.
+struct SettledAsk: Equatable {
+    enum Kind: Equatable {
+        /// `answer`: nil while it is open, which a newer copy below shows.
+        case question(MessagePart.QuestionPart, answer: JSONValue?)
+        /// `record`: nil until read, or when it cannot be.
+        case approval(MessagePart.ApprovalPart, record: ApprovalRecord?)
+    }
+
+    var kind: Kind
+
+    var title: String {
+        switch kind {
+        case .question(let part, _): return SettledOutcome.title(part)
+        case .approval(let part, _): return SettledOutcome.title(part)
+        }
+    }
+
+    /// "Answered: Tea", "Approved", or "Waiting: answer the card below"
+    /// while it is still open.
+    var outcome: String {
+        switch kind {
+        case .question(_, let answer?):
+            return SettledOutcome.answer(answer)
+        case .approval(_, let record?) where ApprovalStatus.derive(stored: nil, record: record) != .pending:
+            return SettledOutcome.approval(ApprovalStatus.derive(stored: nil, record: record), resolvedBy: record.resolvedBy)
+        case .approval(let part, nil):
+            // The record cannot be read (a visitor, an error): say what it
+            // asked and nothing about how it ended.
+            return SettledOutcome.title(part)
+        default:
+            return String(localized: "Waiting: answer the card below")
+        }
+    }
+}
+
+/// The words of a folded question or approval card (docs/domains/chats.md).
+enum SettledOutcome {
+    /// An answer this long or shorter is repeated on the fold.
+    static let shortAnswer = 24
+
+    /// What a question card asked, its questions on one line.
+    static func title(_ part: MessagePart.QuestionPart) -> String {
+        part.questions.map(\.text).joined(separator: " · ")
+    }
+
+    static func title(_ part: MessagePart.ApprovalPart) -> String {
+        part.title.flatMap { $0.isEmpty ? nil : $0 } ?? displayActionName(part.actionName)
+    }
+
+    /// "Answered: Tea" for a short answer, "Answered" for a long one, or
+    /// "Dismissed".
+    static func answer(_ output: JSONValue) -> String {
+        if output["dismissed"]?.bool == true { return String(localized: "Dismissed") }
+        let values = (output["answers"]?.array ?? [])
+            .compactMap { $0["value"]?.string }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let text = values.joined(separator: ", ")
+        guard !text.isEmpty, text.count <= shortAnswer else { return String(localized: "Answered") }
+        return String(localized: "Answered: \(text)")
+    }
+
+    /// Whether an approval with this status folds: decided, and not failed,
+    /// which keeps its own card.
+    static func folds(_ status: ApprovalStatus) -> Bool {
+        status != .pending && status != .failed
+    }
+
+    /// How a decided approval ended: approved, rejected by the guardian, or
+    /// turned down by Rome as its task's wait ran out or its task stopped.
+    static func approval(_ status: ApprovalStatus, resolvedBy: String?) -> String {
+        if resolvedBy == "rome:task-ended" { return String(localized: "Turned down: no answer within a day") }
+        if resolvedBy == "rome:task-stopped" { return String(localized: "Turned down: task stopped") }
+        switch status {
+        case .rejected: return String(localized: "Rejected")
+        case .failed: return String(localized: "Approved, but did not finish")
+        default: return String(localized: "Approved")
+        }
     }
 }

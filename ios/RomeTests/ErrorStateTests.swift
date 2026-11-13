@@ -143,6 +143,18 @@ private func message(
     private var user: ChatMessage { message("u", role: "user", turn: "t1", [["type": "text", "content": "hi"]], at: 0) }
     private var failed: ChatMessage { message("tr", role: "trace", turn: "t1", at: 1, trace: limit) }
 
+    @Test func aFailedTurnWithStructuredFieldsGetsTheGuidedLine() {
+        let trace = TraceSummary(totalSteps: 0, turnStatus: "error", terminalError: "You've hit your limit", terminalErrorCode: "usage_limit", terminalErrorProvider: "anthropic", terminalErrorReason: nil)
+        let guided = errors(rows([user, message("tr", role: "trace", turn: "t1", at: 1, trace: trace)]))
+        #expect(guided.first?.title == "Claude usage limit reached")
+        #expect(guided.first?.offersUsage == true)
+        // An unknown code stays a plain line with the instance's words.
+        let odd = TraceSummary(totalSteps: 0, turnStatus: "error", terminalError: "Disk full", terminalErrorCode: "disk_full", terminalErrorProvider: "openai", terminalErrorReason: nil)
+        let plain = errors(rows([user, message("tr2", role: "trace", turn: "t1", at: 1, trace: odd)]))
+        #expect(plain.first?.title == "Didn't finish: Disk full")
+        #expect(plain.first?.offersUsage == false)
+    }
+
     @Test func outputTheFailedTurnSentDoesNotHideItsFailure() {
         let partial = message("p", turn: "t1", [["type": "text", "content": "Working…"]], at: 0.5)
         #expect(errors(rows([user, partial, failed])).count == 1)

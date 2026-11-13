@@ -95,7 +95,7 @@ private let twoTurns = [
     @Test func shareModeClosesAnOpenThread() async {
         let backend = FakeBackend()
         let store = await chat(backend, twoTurns)
-        store.openThread(at: "a1", toReply: false)
+        store.openThread(at: "a1")
         store.share.begin(fromRow: "a1:0")
         #expect(store.thread == nil)
     }

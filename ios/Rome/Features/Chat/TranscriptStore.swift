@@ -56,6 +56,8 @@ final class TranscriptStore {
     /// Tool calls fetched for an expanded tool summary, by trace message id.
     private(set) var toolCalls: [String: [ToolCall]] = [:]
 
+    /// Thread placements (`message_chat_thread`) of messages not held yet, by message id.
+    private var parkedPlacements: [String: (root: String?, title: String?)] = [:]
     private var cursor: String?
     /// The order each message id was first received in.
     private var seen: [String: Int] = [:]
@@ -264,6 +266,22 @@ final class TranscriptStore {
             } else if let held = byID[message.id], held.knowsThreads {
                 // A live insert leaves the thread out: keep the one already known.
                 message.chatThreadId = held.chatThreadId
+                message.chatThreadTitle = held.chatThreadTitle
+                message.knowsThreads = true
+            }
+            // A copy that leaves the title out keeps the one already known, and a
+            // message of a thread takes its title from the thread.
+            if message.chatThreadTitle == nil, let root = message.chatThreadId {
+                if let held = byID[message.id], held.chatThreadId == root, let title = held.chatThreadTitle {
+                    message.chatThreadTitle = title
+                } else {
+                    message.chatThreadTitle = byID.values.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
+                }
+            }
+            // A placement that came before its message lands with it.
+            if let placed = parkedPlacements.removeValue(forKey: message.id) {
+                message.chatThreadId = placed.root
+                message.chatThreadTitle = placed.title
                 message.knowsThreads = true
             }
             byID[message.id] = message
@@ -316,10 +334,19 @@ final class TranscriptStore {
             if let index = messages.firstIndex(where: { $0.id == messageId }) {
                 messages[index].statusReaction = reaction
             }
-        case .messageThread(let id, let messageId, let root) where id == sessionId:
+        case .messageThread(let id, let messageId, let root, let title) where id == sessionId:
             if let index = messages.firstIndex(where: { $0.id == messageId }) {
                 messages[index].chatThreadId = root
+                messages[index].chatThreadTitle = title
                 messages[index].knowsThreads = true
+            } else {
+                parkedPlacements[messageId] = (root, title)
+            }
+        case .threadRetired(let id, let root) where id == sessionId:
+            // Its task left the chat: the thread's messages lose their label.
+            for index in messages.indices where messages[index].chatThreadId == root {
+                messages[index].chatThreadId = nil
+                messages[index].chatThreadTitle = nil
             }
         case .reconnected:
             resync()
@@ -339,91 +366,137 @@ final class TranscriptStore {
     /// message is not in the pages held.
     private(set) var reopening: ThreadTarget?
 
-    /// A message in no chat thread the guardian replies to, quoted above the
-    /// composer while the chat stays in view (rome-os/rome#1976).
+    /// The message the guardian replies to, quoted in the reply bar above
+    /// the composer. Reply opens only the bar; inside an open thread view
+    /// the view stays open (docs/domains/chats.md#chat-thread).
     private(set) var quote: ThreadTarget?
+    /// A message shown tinted: the one a thread view opened from, or the
+    /// original a quote led to.
+    private(set) var tinted: String?
+    /// Goes up when the transcript should bring `jumpTarget` into view.
+    private(set) var jumps = 0
+    private(set) var jumpTarget: String?
+    @ObservationIgnored private var untint: Task<Void, Never>?
 
-    /// Where the composer sends, and what its draft keeps: the open thread,
-    /// one still being looked up, or the quoted message.
-    var composerThread: ThreadTarget? { thread?.target ?? reopening ?? quote }
+    /// Where the composer sends, and what its draft keeps: the reply, or a
+    /// thread still being looked up.
+    var composerThread: ThreadTarget? { quote ?? reopening }
 
     /// The quoted message, when it is held.
-    var quotedMessage: ChatMessage? { quote.flatMap { message($0.messageId) } }
+    var quotedMessage: ChatMessage? {
+        quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
+    }
 
-    /// Reply on a message. One already in a chat thread, as its root or
-    /// inside it, opens that thread. One in no thread is quoted above the
-    /// composer; the send starts its thread. An instance from before chat
-    /// threads cannot tell, so there Reply opens the thread as before.
+    /// The title of the task whose chat thread `message` is in, or nil when
+    /// it is in no task's thread.
+    func taskThreadTitle(of message: ChatMessage) -> String? {
+        guard let root = message.chatThreadId else { return nil }
+        if let title = message.chatThreadTitle { return title }
+        return messages.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
+    }
+
+    /// Reply on a message: the reply bar quotes it. An open thread view
+    /// stays open, and the send goes into its thread.
     func reply(to messageId: String) {
-        guard kind == .concierge, let message = message(messageId) else { return }
-        if Self.quotes(message, among: messages, instanceKnowsThreads: instanceKnowsThreads) {
-            closeThread()
-            quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true)
-        } else {
-            openThread(at: messageId)
+        guard kind == .concierge, message(messageId) != nil || thread != nil else { return }
+        quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true, thread: thread?.anchor.id)
+        replies += 1
+    }
+
+    /// Goes up on each Reply: the composer takes the keyboard.
+    private(set) var replies = 0
+
+    /// The reply bar's ✕: the reply goes, and an open thread view with it.
+    func cancelQuote() {
+        closeThread()
+    }
+
+    /// Opens the thread view of the task thread `messageId` is in, from its
+    /// label: the message is tinted, and a send replies to it.
+    func openThread(at messageId: String) {
+        guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
+        open(anchor: anchor, older: [], replyTo: messageId)
+    }
+
+    /// The quote in a reply was tapped. A reply in a task's thread opens
+    /// that thread's view, replying to the original; any other goes to the
+    /// original in the chat and tints it. Nil when the quote leads nowhere.
+    func quoteAction(reply replyId: String, original: String) -> (() -> Void)? {
+        guard kind == .concierge else { return nil }
+        if let host = message(replyId), taskThreadTitle(of: host) != nil {
+            return { [weak self] in self?.open(anchor: host, older: [], replyTo: original, tint: original) }
+        }
+        guard message(original) != nil else { return nil }
+        return { [weak self] in self?.jump(to: original) }
+    }
+
+    /// Brings a held message into view and tints it for a moment.
+    func jump(to messageId: String) {
+        jumpTarget = messageId
+        jumps += 1
+        tint(messageId, for: .seconds(2))
+    }
+
+    private func tint(_ messageId: String?, for duration: Duration? = nil) {
+        untint?.cancel()
+        tinted = messageId
+        guard let duration, messageId != nil else { return }
+        untint = Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled else { return }
+            self?.tinted = nil
         }
     }
 
-    /// Whether Reply on `message` quotes it rather than opening a thread.
-    /// A live insert leaves `chatThreadId` out, so whether the instance has
-    /// chat threads is the chat's to say, not the one message's.
-    nonisolated static func quotes(_ message: ChatMessage, among messages: [ChatMessage], instanceKnowsThreads: Bool = false) -> Bool {
-        (instanceKnowsThreads || message.knowsThreads) && message.chatThreadId == nil && !messages.contains { $0.chatThreadId == message.id }
-    }
-
-    func cancelQuote() {
-        quote = nil
-    }
-
-    /// Opens the chat thread a stored message is in, over the chat.
-    /// `toReply`: Reply was chosen, so the composer takes the keyboard; the
-    /// replies line opens it for reading, keyboard down.
-    func openThread(at messageId: String, toReply: Bool = true) {
-        guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
-        open(anchor: anchor, older: [], toReply: toReply)
-    }
-
-    private func open(anchor: ChatMessage, older: [ChatMessage], toReply: Bool) {
+    private func open(anchor: ChatMessage, older: [ChatMessage], replyTo: String? = nil, tint target: String? = nil) {
         thread?.stop()
         reopening = nil
-        quote = nil
-        let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, toReply: toReply, older: older)
+        let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, older: older)
         thread = opened
+        quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: anchor.id)
+        tint(target ?? anchor.id)
         opened.start()
     }
 
-    /// Takes the open thread off the screen and nothing else: a quote or a
+    /// Takes the open thread off the screen and nothing else: a reply or a
     /// thread being looked up stays, for share mode to hand back.
     func hideThread() {
         thread?.stop()
         thread = nil
+        untint?.cancel()
+        tinted = nil
     }
 
-    /// Closes the open thread, and drops a quote: both end with a send.
+    /// Closes the open thread view and the reply bar: both end with a send.
+    /// The tint stays a moment, so the guardian sees where they were.
     func closeThread() {
         thread?.stop()
         thread = nil
         reopening = nil
         quote = nil
+        if tinted != nil { tint(tinted, for: .seconds(1.5)) }
     }
 
-    /// A restored draft was written in a chat thread: it opens again. Its
-    /// message may be older than the pages held, so an instance with chat
-    /// threads is asked for it, and only a thread the server no longer has
-    /// leaves the text to the chat. An older instance cannot be asked: there
-    /// the text goes to the chat when the message is not held.
+    /// A restored draft was written as a reply: the reply bar comes back,
+    /// and so does the thread view it was written in. A thread view whose
+    /// message is older than the pages held is looked up; only one the
+    /// server no longer has leaves the text to the chat.
     func reopenThread(_ target: ThreadTarget) {
         guard kind == .concierge, thread == nil else { return }
-        // A quote comes back as a quote, the chat in view.
-        if target.isQuote {
+        // A draft from before quotes was written in a thread view. With no task's
+        // thread under its message there is none to open: it is a plain reply.
+        if target.quote == nil, let held = message(target.messageId), taskThreadTitle(of: held) == nil {
+            quote = ThreadTarget(messageId: target.messageId, instanceKnowsThreads: true, quote: true)
+            return
+        }
+        guard let root = target.threadMessage else {
             quote = target
             return
         }
-        if message(target.messageId) != nil {
-            openThread(at: target.messageId)
+        if let anchor = message(root) {
+            open(anchor: anchor, older: [], replyTo: target.messageId)
             return
         }
-        guard target.instanceKnowsThreads || instanceKnowsThreads else { return }
         reopening = target
         Task { await resolveReopening() }
     }
@@ -433,13 +506,14 @@ final class TranscriptStore {
     func resolveReopening() async {
         guard let target = reopening, thread == nil else { return }
         do {
-            let found = try await backend.thread(sessionId: sessionId, messageId: target.messageId)
+            let root = target.threadMessage ?? target.messageId
+            let found = try await backend.thread(sessionId: sessionId, messageId: root)
             guard reopening == target, thread == nil else { return }
-            guard let anchor = found.first(where: { $0.id == target.messageId }) ?? found.last else {
+            guard let anchor = found.first(where: { $0.id == root }) ?? found.last else {
                 reopening = nil
                 return
             }
-            open(anchor: anchor, older: found, toReply: true)
+            open(anchor: anchor, older: found, replyTo: target.messageId)
         } catch APIError.notFound {
             if reopening == target { reopening = nil }
         } catch {}
@@ -573,6 +647,13 @@ final class TranscriptStore {
                 if kind == .concierge { await refreshRunning(onFailure: false) }
             }
         }
+    }
+
+    /// The task a chat thread is, when it ended long ago: the task list
+    /// holds a month of ended tasks, so this asks for them all.
+    func endedTask(ofThread root: String) async -> ConciergeTask? {
+        let all = try? await backend.tasks(doneDays: 3650)
+        return all?.first { $0.threadRoot == root }
     }
 
     /// Shows `text` for a few seconds.

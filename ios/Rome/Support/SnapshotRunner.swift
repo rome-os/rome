@@ -72,15 +72,32 @@ enum SnapshotRunner {
                     workspace.topics.setActivity(.working, for: main)
                 }
                 workspace.debugSetAgentName("Milo")
-                // A chat thread open over a busy chat: its header carries the status too.
+                // A task's thread view over a busy chat: its header names the task.
                 await capture("57e-header-thread-open", style: styleName, in: directory, wait: 1.5) {
                     workspace.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: main)
-                    if let id = workspace.concierge.messages.last(where: { !$0.isUser })?.id { workspace.concierge.openThread(at: id) }
+                    workspace.concierge.openThread(at: "c-price")
                 }
                 workspace.concierge.closeThread()
                 workspace.topics.setActivity(nil, for: main)
             }
-            // Reply on an Agent message in no chat thread: quoted above the composer.
+            // A task's thread view, opened from a label: the task's title,
+            // "Open task chat", and the message it opened from tinted.
+            await capture("04c-chat-thread-open", style: styleName, in: directory, wait: 1.5) {
+                guard let chat = model.workspace?.concierge,
+                      let said = chat.messages.last(where: { !$0.isUser && $0.chatThreadId == "c-site" && $0.parts.contains { $0.textContent != nil } })
+                else { return }
+                chat.openThread(at: said.id)
+            }
+            model.workspace?.concierge.closeThread()
+            // The settled login task: its question and approval folded, labelled.
+            await capture("04d-chat-settled-cards", style: styleName, in: directory, wait: 2) {
+                model.workspace?.concierge.jump(to: "c-login")
+            }
+            // An expired question folded to one line, above the price approval that waits.
+            await capture("04e-chat-expired-ask", style: styleName, in: directory, wait: 2) {
+                model.workspace?.concierge.jump(to: "c-research")
+            }
+            // Reply on an Agent message: quoted above the composer.
             await capture("04b-chat-quote", style: styleName, in: directory, wait: 1) {
                 guard let chat = model.workspace?.concierge,
                       let said = chat.messages.last(where: { message in
@@ -172,7 +189,7 @@ enum SnapshotRunner {
             await capture("43-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail")) }
             TranscriptStore.previewPhases = [:]
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
-            // Chat threads: the replies lines, then one thread open over its chat.
+            // A task's chat thread: its labels, and a reply's quote.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
             // Share mode on the last two turns, then the chat's links.
             await capture("61-share-select", style: styleName, in: directory, wait: 2) {
@@ -211,7 +228,7 @@ enum SnapshotRunner {
                 workspace.topicStore("topic-trip").share.showsLinks = false
                 workspace.concierge.share.showsLinks = false
             }
-            // A long chat thread: its root carries the replies line.
+            // A long chat thread: every answer carries its label.
             await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
             // A long topic name: cut at the end inside the header's pill.
             await capture("52-topic-long-name", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
