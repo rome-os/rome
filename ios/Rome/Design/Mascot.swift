@@ -21,6 +21,7 @@ struct Mascot: View {
     static let blinkEvery: Duration = .seconds(4.5)
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.offScreen) private var offScreen
     @State private var eyesClosed = false
     @State private var reaction: MascotPose = .rest
     @State private var squash: CGFloat = 1
@@ -38,7 +39,7 @@ struct Mascot: View {
         Group {
             if alive && canMove {
                 // While something loads: frames at a modest rate, the paths parsed once.
-                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: offScreen)) { context in
                     figure(MascotPose(time: context.date.timeIntervalSinceReferenceDate))
                 }
             } else {

@@ -431,6 +431,7 @@ struct MainShell: View {
                 visible: visibleChat == conciergeChatID
             )
             .opacity(section == .chat ? 1 : 0)
+            .environment(\.offScreen, section != .chat || covered)
             .allowsHitTesting(section == .chat)
             .accessibilityHidden(section != .chat)
             switch section {
@@ -464,6 +465,9 @@ struct MainShell: View {
         }
     }
 
+    /// A pushed page or the Agent page's cover hides the stack's root.
+    private var covered: Bool { !path.isEmpty || agentPage != nil }
+
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
             workspace: workspace,
@@ -483,6 +487,7 @@ struct MainShell: View {
                 withTransaction(instant) { section = .topic(id) }
             }
         )
+        .environment(\.offScreen, covered)
     }
 
     /// Swaps the stack's root with no motion of its own; the drawer's slide is

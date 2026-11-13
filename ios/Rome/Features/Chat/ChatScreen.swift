@@ -552,6 +552,7 @@ private struct HeaderCapsule: ViewModifier {
 private struct StatusLine: View {
     let text: String
     let shimmers: Bool
+    @Environment(\.offScreen) private var offScreen
 
     var body: some View {
         let line = Text(verbatim: text)
@@ -559,7 +560,7 @@ private struct StatusLine: View {
             .foregroundStyle(Palette.sub)
         if shimmers {
             line.overlay {
-                TimelineView(.animation) { context in
+                TimelineView(.animation(paused: offScreen)) { context in
                     // One pass every two seconds, left to right.
                     let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2) / 2
                     GeometryReader { geometry in
