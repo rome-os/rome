@@ -268,11 +268,26 @@ export class RoutineEngine {
     );
   }
 
+  /**
+   * Asked before a routine fires on its trigger: a fire it turns down does
+   * not run. A run someone asked for is not asked about.
+   */
+  private fireGate: ((routine: Routine) => Promise<boolean>) | null = null;
+
+  /** Sets the gate a trigger's fire passes first; null removes it. */
+  setFireGate(gate: ((routine: Routine) => Promise<boolean>) | null): void {
+    this.fireGate = gate;
+  }
+
   private async dispatchAsRoot(
     routine: Routine,
     payload: Record<string, unknown>,
     opts: { manual?: "person" | "background" },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
+    if (!opts.manual && this.fireGate && !(await this.fireGate(routine).catch(() => true))) {
+      log.info("routine fire turned down", { routineId: routine.id, name: routine.name });
+      return { runId: "", status: "cancelled" };
+    }
     const startTime = this.clock.now().getTime();
 
     // Pre-generate a rootExecutionId so the routine run links to the action

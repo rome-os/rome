@@ -34,10 +34,15 @@ export interface PendingCheck {
   recurring?: true;
 }
 
-/** A pending wake-up of a chat, or null for a routine that is none. */
+/**
+ * A pending wake-up of a chat, or null for a routine that is none. A timed
+ * one whose time passed is pending no more, unless `overdue` asks for it too,
+ * as cancelling does: one still enabled fires as soon as Rome starts.
+ */
 function pendingCheckOf(
   routine: Routine,
   now: number,
+  overdue = false,
 ): (PendingCheck & { chatId: string; owner: string }) | null {
   if (!routine.enabled || routine.actionName !== RESUME_SESSION_ACTION) return null;
   const args = (routine.args ?? {}) as Record<string, unknown>;
@@ -51,7 +56,9 @@ function pendingCheckOf(
         : deadline
       : (routine.nextRunAt?.getTime() ?? Number.NaN);
   // A timed wake-up is pending until its time; one that fired is not.
-  if (Number.isNaN(at) || (routine.trigger.type !== "event-bus" && at <= now)) return null;
+  if (Number.isNaN(at) || (!overdue && routine.trigger.type !== "event-bus" && at <= now)) {
+    return null;
+  }
   return {
     id: routine.id,
     name: routine.name,
@@ -97,7 +104,7 @@ function scheduledRunOf(
 
 export interface TaskChecksDeps {
   routines: Pick<RoutinesRepository, "listRoutines" | "deleteIfNoActiveRuns" | "update">;
-  routineEngine: Pick<RoutineEngine, "deactivate" | "onChange">;
+  routineEngine: Pick<RoutineEngine, "deactivate" | "onChange" | "setFireGate">;
   /** Skips a schedule's next run when its check is cancelled. */
   schedules?: Pick<TaskSchedules, "skipNext" | "remove">;
   /** Where each task stands, from its row; null for a task that is gone. */
@@ -126,7 +133,9 @@ export class TaskChecks {
     return this.routines;
   }
 
-  private async pending(): Promise<Array<PendingCheck & { chatId: string; owner: string }>> {
+  private async pending(
+    overdue = false,
+  ): Promise<Array<PendingCheck & { chatId: string; owner: string }>> {
     const now = this.now();
     const checks: Array<PendingCheck & { chatId: string; owner: string }> = [];
     for (const routine of await this.readRoutines()) {
@@ -139,10 +148,25 @@ export class TaskChecks {
         if (check) checks.push(check);
         continue;
       }
-      const check = pendingCheckOf(routine, now);
+      const check = pendingCheckOf(routine, now, overdue);
       if (check) checks.push(check);
     }
     return checks;
+  }
+
+  /**
+   * A check of a task that `ended` says is stopped or archived never wakes
+   * its chat: when it fires, it is cancelled instead. Returns the release.
+   */
+  guardFires(ended: (taskId: string) => Promise<boolean>): () => void {
+    this.deps.routineEngine.setFireGate(async (routine) => {
+      if (routine.actionName !== RESUME_SESSION_ACTION) return true;
+      const taskId = (routine.args as Record<string, unknown> | null)?.taskId;
+      if (typeof taskId !== "string" || !(await ended(taskId))) return true;
+      await this.remove(routine.id);
+      return false;
+    });
+    return () => this.deps.routineEngine.setFireGate(null);
   }
 
   /** When each task's soonest pending check is due. */
@@ -170,10 +194,12 @@ export class TaskChecks {
     return counts;
   }
 
-  /** The tasks with a check pending. */
+  /** The tasks with a check that can still fire, one whose time passed included. */
   async pendingTaskIds(): Promise<string[]> {
     return [
-      ...new Set((await this.pending()).flatMap((check) => (check.taskId ? [check.taskId] : []))),
+      ...new Set(
+        (await this.pending(true)).flatMap((check) => (check.taskId ? [check.taskId] : [])),
+      ),
     ];
   }
 
@@ -220,7 +246,8 @@ export class TaskChecks {
     owner: string,
     options: { keepSchedule?: boolean } = {},
   ): Promise<number> {
-    const checks = (await this.pending()).filter(
+    // One whose time passed is cancelled too: still enabled, it would fire.
+    const checks = (await this.pending(true)).filter(
       (check) => check.taskId === taskId && check.owner === owner,
     );
     for (const check of checks) {

@@ -281,7 +281,8 @@ export function OpenThreadTaskChat({
 }) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
-  const { tasks } = useConciergeTasks();
+  // The whole list: a card or thread outlives the panel's window of recent ended tasks.
+  const { tasks } = useConciergeTasks({ allDone: true });
   const chat = tasks.find((task) => task.threadRoot === threadRoot)?.chat;
   if (!chat) return null;
   return (

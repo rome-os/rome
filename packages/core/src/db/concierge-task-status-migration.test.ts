@@ -57,13 +57,14 @@ describe("the Concierge task status migration", () => {
         stop_reason: null,
         last_outcome: null,
       },
+      // A doing row with no task chat links none, and ended done.
       {
         id: "planned",
         linked_at: null,
         archived_with_chat: 0,
         stopped_at: null,
         stop_reason: null,
-        last_outcome: null,
+        last_outcome: "succeeded",
       },
     ]);
     sqlite.close();
@@ -91,8 +92,9 @@ describe("the Concierge task status migration", () => {
         )
         .all(),
     ).toEqual([
-      { id: "asks", last_outcome: null, stopped_at: null, stop_reason: null, note: null },
-      { id: "doing", last_outcome: null, stopped_at: null, stop_reason: null, note: null },
+      // A doing or asking row with no task chat ended done too: its chat is gone.
+      { id: "asks", last_outcome: "succeeded", stopped_at: null, stop_reason: null, note: null },
+      { id: "doing", last_outcome: "succeeded", stopped_at: null, stop_reason: null, note: null },
       { id: "done", last_outcome: "succeeded", stopped_at: null, stop_reason: null, note: null },
       { id: "dropped", last_outcome: null, stopped_at: 60, stop_reason: "concierge", note: null },
       // A planned row with no time ended done when it was last written.
@@ -118,6 +120,14 @@ describe("the Concierge task status migration", () => {
         note: null,
       },
     ]);
+    // None of them is left open, so no digest asks about a row from before.
+    expect(
+      sqlite
+        .prepare(
+          "SELECT id FROM concierge_tasks WHERE ended_at IS NULL AND id IN ('asks', 'doing', 'next-bare', 'watching-bare')",
+        )
+        .all(),
+    ).toEqual([]);
     sqlite.close();
   });
 

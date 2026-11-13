@@ -17,7 +17,7 @@ import {
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { ConciergeActivityTracker } from "./activity.js";
-import type { TaskStatusView } from "./tasks.js";
+import { stopHolds, type TaskStatusView } from "./tasks.js";
 import { WaitExpiry } from "./wait-expiry.js";
 import { isConciergeChat } from "../webchat/privacy.js";
 import { openQuestion } from "./transcript.js";
@@ -219,7 +219,7 @@ export async function renderTaskEvents(
     if (changes.includes("chat_deleted")) lines.push("The task chat was deleted.");
     if (changes.includes("stopped_by_owner")) lines.push("The guardian stopped this task.");
     if (changes.includes("checks_cancelled_by_owner")) {
-      lines.push("The guardian cancelled this task's checks: none will wake you for it.");
+      lines.push("The guardian cancelled checks of this task. Read task_list for any left.");
     }
     if (changes.includes("no_response")) {
       lines.push(
@@ -271,8 +271,15 @@ export function startConciergeEvents(
       return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
     },
     carried: (taskId) => service.carriesReport(taskId),
+    // A report that ran to its end: its results are said, and the guardian
+    // messages they held working settle.
+    reported: (taskIds) =>
+      void tasks.repo.markReported(taskIds).catch((error: unknown) =>
+        log.warn("failed to settle reported results", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
     giveUp: (taskId) => {
-      coalescer.forget(taskId);
       tasks.markNotSynced(taskId);
       // Its result will not be said: it waits for no report any more, and its
       // messages show that their owner was never told.
@@ -287,6 +294,12 @@ export function startConciergeEvents(
   service.attachTaskEvents(coalescer);
 
   const activity = startActivity(service, coalescer);
+  // A stopped or archived task's check never wakes its chat, whatever a
+  // crash or a failed cancel left: it is turned down when it fires.
+  const releaseFires = service.deps.checks?.guardFires(async (taskId) => {
+    const row = await tasks.repo.get(taskId);
+    return row !== null && (row.stoppedAt !== null || row.archivedAt !== null);
+  });
   // A stopped or archived task keeps no check, whatever a crash left.
   void service.cancelChecksOfEndedTasks().catch((error: unknown) =>
     log.warn("failed to cancel ended tasks' checks", {
@@ -354,18 +367,9 @@ export function startConciergeEvents(
           }),
         );
     }
-    // The tasks whose result this turn said have been reported: their news
-    // waits for no other turn.
-    const relayed = service.takeRelayed(event.turn.turnId);
-    for (const taskId of relayed) coalescer.forget(taskId);
-    if (relayed.length > 0) {
-      void tasks.repo.markReported(relayed).catch((error: unknown) =>
-        log.warn("failed to settle reported results", {
-          chatId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
+    // What this turn said settles no news: a report that carries it does,
+    // once it runs to its end. Its record of what it said is done with.
+    service.takeRelayed(event.turn.turnId);
     // Finish callbacks run before the backend promise settles. Capture them
     // synchronously so a recovery cannot start a second chain or a reminder.
     const active = recoveriesRunning.get(chatId);
@@ -626,6 +630,15 @@ export function startConciergeEvents(
     if (typeof context?.threadId !== "string") return;
     const taskId = await taskOf(context.threadId);
     if (!taskId) return;
+    // A stopped task's work can still ask for one as it stops, as an
+    // interrupt is accepted before the turn has ended: it is turned down at
+    // once, whatever the runtime's interrupt does. A chat in use again, after
+    // an unarchive or with only its row archived, keeps its approvals.
+    const row = await tasks.repo.get(taskId);
+    if (row && stopHolds(row)) {
+      await service.turnDownWhileStopped(context.threadId);
+      return;
+    }
     coalescer.mark({
       taskId,
       kind: "approval",
@@ -701,8 +714,8 @@ export function startConciergeEvents(
       },
     }),
     tasks.repo.onChange(({ row }, change) => {
+      // A write settles no news: only a report that carried it does.
       if (change !== "write") return;
-      coalescer.settle(row.id);
       // The Concierge wrote the task after its result: its line stands.
       heldSummaries.delete(row.id);
     }),
@@ -715,6 +728,7 @@ export function startConciergeEvents(
     for (const unsubscribe of unsubscribers) unsubscribe();
     activity();
     stopWaitExpiry();
+    releaseFires?.();
     coalescer.stop();
     service.attachTaskEvents(null);
     service.attachFailedBeforeStart(null);
