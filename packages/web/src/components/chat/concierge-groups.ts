@@ -36,7 +36,7 @@ export type ConciergeItem =
   /** Line above the first message that was unread when the chat opened. */
   | { kind: "unread"; key: string }
   /** Faint line where the chat's agent session was renewed, for `reason`. */
-  | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
+  | { kind: "renewal"; key: string; reason: string }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -225,7 +225,7 @@ export function buildConciergeItems(
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
-    | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
+    | { kind: "renewal"; key: string; reason: string }
     | { kind: "unread" }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
@@ -295,8 +295,6 @@ export function buildConciergeItems(
         kind: "renewal",
         key: row.key,
         reason: row.reason,
-        chatId: row.chatId,
-        renewedSessionId: row.renewedSessionId,
       });
       group = null;
     } else if (row.kind === "automated_input") {

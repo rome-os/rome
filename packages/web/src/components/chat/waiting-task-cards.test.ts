@@ -34,7 +34,7 @@ describe("waitingTaskCardMessages", () => {
       message("other", "c2", question("q2")),
     ];
     const tasks = [
-      task("c1", "needs_you", { kind: "card", id: "q1", since: 1 }),
+      task("c1", "needs_you", { kind: "card", id: "q1", messageId: "m-q1", since: 1 }),
       task("c2", "active", null),
     ];
     expect([...waitingTaskCardMessages(messages, tasks)]).toEqual(["new"]);
@@ -43,12 +43,22 @@ describe("waitingTaskCardMessages", () => {
   it("counts a card whose body has not drawn yet, and none once a live event settled it", () => {
     const card = question("q1");
     const messages = [message("new", "c1", card)];
-    const tasks = [task("c1", "needs_you", { kind: "card", id: "q1", since: 1 })];
+    const tasks = [
+      task("c1", "needs_you", { kind: "card", id: "q1", messageId: "m-q1", since: 1 }),
+    ];
     expect([...waitingTaskCardMessages(messages, tasks)]).toEqual(["new"]);
     const settled = new Map([
       [cardKey(card), { ...card, outcome: { kind: "dismissed" as const } }],
     ]);
     expect([...waitingTaskCardMessages(messages, tasks, settled)]).toEqual([]);
+  });
+
+  it("counts no older card that shares the waited-on question's tool use id", () => {
+    const older: TaskCard = { ...question("q1"), messageId: "m-older" };
+    const tasks = [
+      task("c1", "needs_you", { kind: "card", id: "q1", messageId: "m-newer", since: 1 }),
+    ];
+    expect([...waitingTaskCardMessages([message("old", "c1", older)], tasks)]).toEqual([]);
   });
 
   it("counts no card the task does not wait on, and none without a card", () => {

@@ -2,7 +2,7 @@ import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { TaskCard } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
-import { cardKey } from "./entries/live-task-cards";
+import { cardKey, isOpenWait } from "./entries/live-task-cards";
 
 /**
  * The messages of a Concierge chat whose task card holds what its task waits
@@ -32,7 +32,7 @@ export function waitingTaskCardMessages(
     if (now.kind === "unavailable" || now.outcome) continue;
     const task = tasks.find((candidate) => candidate.chat?.id === chatId);
     const wait = task?.openWait;
-    if (task?.status !== "needs_you" || !wait || wait.id !== now.id) continue;
+    if (task?.status !== "needs_you" || !isOpenWait(wait, now)) continue;
     waiting.add(messageId);
   }
   return waiting;

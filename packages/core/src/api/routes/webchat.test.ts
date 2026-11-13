@@ -263,6 +263,116 @@ describe("Webchat API", () => {
     expect(await status(visitor, "/chat/sessions/task-branch")).toBe(404);
   });
 
+  it("fills a task card only in its owner's own Concierge chat, never in a chat others read", async () => {
+    // The guardian's task chat asked a question; its card names that chat.
+    deps.concierge = {
+      taskCardSources: () => ({
+        taskCardsOf: async () =>
+          new Map([
+            [
+              "guardian-task",
+              {
+                questions: [
+                  { id: "tu-1", messageId: "m-1", render: null, since: Date.now() - 1_000 },
+                ],
+                approvals: [],
+              },
+            ],
+          ]),
+        findBySessions: async () => [
+          { sessionId: "guardian-task", ownerKey: "guardian", expiredWaitAt: null },
+        ],
+        waitExpiry: 60_000,
+      }),
+      onCardSettled: () => () => {},
+      deps: {
+        tasks: {
+          repo: {
+            threadTitles: async () => new Map(),
+            onThreadRetired: () => () => {},
+          },
+          reactionsOf: async () => new Map(),
+          onReaction: () => () => {},
+        },
+      },
+    } as never;
+    const app = createWebchatRuntime(deps).routes;
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    await deps.webchatRepo.createSession(
+      "concierge",
+      "Concierge",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: null },
+    );
+    // A common chat the guardian owns, which every dashboard user may read.
+    await deps.webchatRepo.createSession(
+      "shared",
+      "Shared",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    const part = JSON.stringify([
+      {
+        type: "task_chat",
+        chatId: "guardian-task",
+        title: "Task",
+        show: "ask",
+        waitedOn: { kind: "question", id: "tu-1", messageId: "m-1" },
+      },
+    ]);
+    const cardIn = async (chatId: string, actor?: typeof visitor) => {
+      const read = () => app.request(`/chat/sessions/${chatId}/messages`);
+      const response = actor ? await runWithSessionActor(actor, read) : await read();
+      const messages = (await response.json()) as { content: string }[];
+      return JSON.parse(messages.at(-1)!.content)[0].card;
+    };
+    await deps.webchatRepo.addMessage("in-concierge", "concierge", "assistant", part);
+    await deps.webchatRepo.addMessage("in-shared", "shared", "assistant", part);
+    expect(await cardIn("concierge")).toMatchObject({ kind: "question", id: "tu-1" });
+    expect(await cardIn("shared", visitor)).toEqual({ kind: "unavailable" });
+
+    // Live, too: a card inserted into the common chat reaches its readers empty.
+    const res = await runWithSessionActor(visitor, () =>
+      app.request("/chat/sessions/shared/events"),
+    );
+    const reader = res.body!.getReader();
+    const pendingRead = readSseUntil(reader, "event: message_insert");
+    await deps.webchatRepo.addSentMessage("in-shared-live", "shared", JSON.parse(part), null);
+    const text = await pendingRead;
+    const data = text
+      .split("\n")
+      .find((line) => line.startsWith("data: ") && line.includes("in-shared-live"));
+    const inserted = JSON.parse(data!.slice("data: ".length)) as { content: string };
+    expect(JSON.parse(inserted.content)[0].card).toEqual({ kind: "unavailable" });
+    await reader.cancel();
+  });
+
+  it("serves no renewal handoff: the renewal line is plain text", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    await deps.webchatRepo.createSession("renewed-chat", "Chat");
+    const retired = Session.create("core:concierge", {
+      continuityKey: webchatSessionKey("renewed-chat"),
+    });
+    await deps.sessionRepository.add(retired);
+    const renewed = retired.replace({ reason: "setup", handoff: "- Agreed: Friday at 7." });
+    await deps.sessionRepository.replace(retired, renewed);
+    expect((await app.request(`/chat/sessions/renewed-chat/renewals/${renewed.id}`)).status).toBe(
+      404,
+    );
+  });
+
   it("finds no chat, turn or message it cannot place in a chat that exists", async () => {
     const app = createWebchatRuntime(deps).routes;
     const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
@@ -622,46 +732,6 @@ describe("Webchat API", () => {
       // guardian's.
       unattributed: { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
     });
-  });
-
-  it("shows a renewal's handoff to the chat's owner only, and only for a session of that chat", async () => {
-    const app = createWebchatRuntime(deps).routes;
-    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
-    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
-    await deps.webchatRepo.createSession(
-      "visitor-main",
-      "Concierge",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "core:concierge",
-      "webchat",
-      null,
-      { ownerKey: "visitor:a" },
-    );
-    await deps.webchatRepo.createSession("other", "Other");
-    const retired = Session.create("core:concierge", {
-      continuityKey: webchatSessionKey("visitor-main"),
-    });
-    await deps.sessionRepository.add(retired);
-    const renewed = retired.replace({ reason: "setup", handoff: "- Agreed: Friday at 7." });
-    await deps.sessionRepository.replace(retired, renewed);
-    const read = async (actor: typeof guardian | typeof visitor, chatId: string) => {
-      const res = await runWithSessionActor(actor, () =>
-        app.request(`/chat/sessions/${chatId}/renewals/${renewed.id}`),
-      );
-      return { status: res.status, body: await res.json() };
-    };
-
-    expect(await read(visitor, "visitor-main")).toEqual({
-      status: 200,
-      body: { handoff: "- Agreed: Friday at 7." },
-    });
-    // Anyone else, the guardian included, finds no such chat.
-    expect((await read(guardian, "visitor-main")).status).toBe(404);
-    // A chat the caller may open does not reach another chat's session.
-    expect((await read(guardian, "other")).status).toBe(404);
   });
 
   it("persists appended inputs once and keeps one stream owner", async () => {

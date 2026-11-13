@@ -53,6 +53,12 @@ export interface TaskChatPart {
    */
   show?: "task" | "ask";
   /**
+   * The question or approval an `ask` card shows: what its task waited on
+   * when the card was said. An `ask` card from before has none, and shows
+   * the newest one its task chat had asked by then.
+   */
+  waitedOn?: TaskChatWaitedOn;
+  /**
    * The question or approval the card shows and how it ended, filled in by
    * Rome when it hands the message out: never stored, so it is always
    * current. Absent from a stored part, from a `task` card, and from servers
@@ -60,6 +66,11 @@ export interface TaskChatPart {
    */
   card?: TaskCard;
 }
+
+/** A question by its tool use id and the message that holds it, or an approval by its id. */
+export type TaskChatWaitedOn =
+  | { kind: "question"; id: string; messageId: string }
+  | { kind: "approval"; id: string };
 
 /** How a card is drawn: the component a pending interaction names, with its props. */
 export interface TaskCardRender {

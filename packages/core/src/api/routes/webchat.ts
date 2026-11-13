@@ -1533,10 +1533,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!deps.concierge || !messages.some((message) => message.content.includes('"task_chat"'))) {
       return messages;
     }
-    // A card shows only the reader's own task chats: the chat's owner's.
+    // A card shows only the reader's own task chats. A Concierge chat opens
+    // only for its owner, so its owner is the reader; any other chat may be
+    // read by others, so its cards show nothing.
     const chat = await deps.webchatRepo.getSession(sessionId);
     if (!chat) return messages;
-    return withTaskCards(deps.concierge.taskCardSources(), messages, ownerOf(chat));
+    const owner = isConciergeChat(chat) ? ownerOf(chat) : null;
+    return withTaskCards(deps.concierge.taskCardSources(), messages, owner);
   };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachChatThreadTitles(
@@ -3191,20 +3194,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return respondWithSessionMessages(c, sessionId, {
       withLayout: lookup.session.type === "webchat",
     });
-  });
-
-  // The handoff a renewal started one of the chat's sessions from, for the
-  // chat's renewal line (docs/concepts/sessions.md#handoff). Null when none
-  // was written.
-  app.get("/chat/sessions/:id/renewals/:sessionId", async (c) => {
-    const chatId = c.req.param("id");
-    const lookup = await getStoredWebchatSession(c, chatId);
-    if ("response" in lookup) return lookup.response;
-    const renewed = await deps.sessionRepository.session(c.req.param("sessionId"));
-    if (!renewed || renewed.continuityKey !== webchatSessionKey(chatId)) {
-      return c.json({ error: "Session not found" }, 404);
-    }
-    return c.json({ handoff: renewed.handoff });
   });
 
   app.get("/chat/sessions/:id/events", async (c) => {
