@@ -19,10 +19,14 @@ struct PendingSend: Identifiable, Hashable, Sendable {
     let text: String
     /// Photos sent with it.
     var images: [ComposerImage] = []
+    /// Other files: only a resend of a stored message has them.
+    var files: [OutgoingFile] = []
     let createdAt: Date
     var state: State
     /// Sent from a chat thread: a retry goes to the same thread.
     var thread: ThreadTarget? = nil
+    /// Kept as a draft until the server takes it; a resend keeps none.
+    var keepsDraft = true
 }
 
 /// A photo in the guardian's bubble: the one being sent, or a stored upload.
@@ -159,6 +163,7 @@ enum TranscriptBuilder {
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
         let labels = options.showThreads ? threadLabels(messages) : [:]
+        let taskThreads = options.showThreads ? taskThreadTitles(messages) : [:]
         // Each message's parts, read once.
         let parsed = messages.map(\.parts)
         // The turns whose reply is an error part.
@@ -201,18 +206,25 @@ enum TranscriptBuilder {
             }
         }
 
-        // The turns the Concierge began on its own, with where each came from:
-        // by the turn's trace, or, from before, by an automated message that began it.
-        // A turn that took one of the guardian's own messages is never one of them.
+        // The turns someone else made the Concierge speak in, with who: by the
+        // turn's trace, or, from before, by an automated message that began it.
+        // A turn that took one of the guardian's own messages is never one of
+        // them, and the Concierge's own wake-ups (a check, what it follows, its
+        // digest) label nothing.
         var unprompted: [String: TraceSummary.InputSource] = [:]
+        var seen: Set<String> = []
         if options.showNotices {
             for message in messages {
                 guard let turn = message.turnId, !guardianTurns.contains(turn) else { continue }
-                if message.isTrace, let source = message.traceSummary?.automatedInput { unprompted[turn] = source }
+                if message.isTrace, let source = message.traceSummary?.automatedInput {
+                    seen.insert(turn)
+                    if SourceCopy.labels(source) { unprompted[turn] = source }
+                }
             }
             for message in messages where Self.isAutomated(message) {
-                guard let turn = message.turnId, !guardianTurns.contains(turn), unprompted[turn] == nil, let sender = message.sender else { continue }
-                unprompted[turn] = TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
+                guard let turn = message.turnId, !guardianTurns.contains(turn), !seen.contains(turn), unprompted[turn] == nil, let sender = message.sender else { continue }
+                let source = TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
+                if SourceCopy.labels(source) { unprompted[turn] = source }
             }
         }
 
@@ -285,8 +297,10 @@ enum TranscriptBuilder {
             }
             if !rows.isEmpty, let title = labels[message.id] {
                 rows.append(.threadLabel(id: "label-\(message.id)", messageId: message.id, title: title))
-            } else if !rows.isEmpty, !message.isUser, let turn = message.turnId, let source = unprompted[turn] {
-                // One label a message; a task's thread shows only its own.
+            } else if !rows.isEmpty, !message.isUser, message.chatThreadId.flatMap({ taskThreads[$0] }) == nil,
+                      let turn = message.turnId, let source = unprompted[turn] {
+                // One label a message at most: a message in a task's thread
+                // shows only its thread's label, or none in the middle of a run.
                 rows.append(.sourceLabel(id: "source-\(message.id)", text: SourceCopy.label(source)))
             }
             if !rows.isEmpty {
@@ -297,7 +311,7 @@ enum TranscriptBuilder {
         for send in pending.sorted(by: { $0.createdAt < $1.createdAt }) where !storedIDs.contains(send.id) {
             entries.append(Entry(
                 id: send.id, date: send.createdAt, guardian: true,
-                rows: [.userText(id: send.id, text: send.text, images: send.images.map(UserImage.local), pending: send.state)],
+                rows: [.userText(id: send.id, text: send.text, images: send.images.map(UserImage.local) + Self.fileTiles(send), pending: send.state)],
                 bubbleIndexes: []
             ))
         }
@@ -403,27 +417,51 @@ enum TranscriptBuilder {
         return TurnError(text: text, code: summary?.terminalErrorCode, provider: summary?.terminalErrorProvider, reason: summary?.terminalErrorReason, didntFinish: true)
     }
 
-    /// The label under each Concierge message in a task's chat thread, by
-    /// message id: the task's title. A thread is a task's when a message of
-    /// it carries the title; the server sends none for a thread no task has.
-    /// The guardian's messages get none, and neither does a message showing
-    /// a task card, which names its task itself. A task's question or
-    /// approval shown alone does get one (docs/domains/chats.md#chat-thread).
-    static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
+    /// The task title of each chat thread a task has, by the thread's first
+    /// message. The server sends a title only for a thread a task has.
+    static func taskThreadTitles(_ messages: [ChatMessage]) -> [String: String] {
         var titles: [String: String] = [:]
         for message in messages {
             if let root = message.chatThreadId, let title = message.chatThreadTitle, !title.isEmpty {
                 titles[root] = title
             }
         }
-        var labels: [String: String] = [:]
-        for message in messages where !message.isUser && !message.isTrace {
-            guard let root = message.chatThreadId, let title = titles[root] else { continue }
+        return titles
+    }
+
+    /// The label under Concierge messages in a task's chat thread, by message
+    /// id: the task's title. The guardian's messages get none, and neither
+    /// does a message showing a task card, which names its task itself. A
+    /// task's question or approval shown alone does get one. Of a run of one
+    /// thread's messages with nothing else between them, only the first and
+    /// the last show it, so a run of one or two shows it on each. An Agent
+    /// message from another thread or none, or a task card, ends the run;
+    /// the guardian's messages are skipped (docs/domains/chats.md#chat-thread).
+    static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
+        let titles = taskThreadTitles(messages)
+        var runs: [(title: String, root: String, ids: [String])] = []
+        var open = false
+        // The owner's messages neither join a run nor end it.
+        for message in messages where !message.isTrace && !message.isUser {
             let showsTaskCard = message.parts.contains {
                 if case .taskChat(_, _, let show, _) = $0 { return show != .ask }
                 return false
             }
-            if !showsTaskCard { labels[message.id] = title }
+            guard !showsTaskCard, let root = message.chatThreadId, let title = titles[root] else {
+                open = false
+                continue
+            }
+            if open, let last = runs.last, last.root == root {
+                runs[runs.count - 1].ids.append(message.id)
+            } else {
+                runs.append((title, root, [message.id]))
+            }
+            open = true
+        }
+        var labels: [String: String] = [:]
+        for run in runs {
+            if let first = run.ids.first { labels[first] = run.title }
+            if let last = run.ids.last { labels[last] = run.title }
         }
         return labels
     }
@@ -441,6 +479,13 @@ enum TranscriptBuilder {
     /// name or its own.
     static func isAutomated(_ message: ChatMessage) -> Bool {
         message.isUser && message.sender?.kind == "automated"
+    }
+
+    /// A resend's documents, drawn as the tiles a stored message's files are.
+    static func fileTiles(_ send: PendingSend) -> [UserImage] {
+        send.files.enumerated().map { index, file in
+            .stored(UploadLines.Upload(name: file.name, linkPath: "pending:\(send.id):\(index)"))
+        }
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

@@ -17,9 +17,19 @@ final class TranscriptStore {
     private(set) var messages: [ChatMessage] = []
     private(set) var pending: [PendingSend] = []
     private(set) var loaded = false
+    /// A read of the chat worked at least once (or it was made just now), so
+    /// an empty transcript is a chat with nothing in it, not one that failed
+    /// to load: only then do its empty-chat prompts show.
+    private(set) var readOnce = false
     private(set) var loadError: APIError?
-    /// A load the guardian started (Retry, or coming back to the chat) is on its way.
+    /// A load the guardian started (Retry, or coming back to the chat) is on
+    /// its way: the bar's Retry shows a spinner.
     private(set) var retrying = false
+    /// Goes up each time a retry ends in failure: the bar shakes once.
+    private(set) var retryFailures = 0
+    /// The least time a retry's spinner shows, so an attempt that fails at
+    /// once is still seen.
+    @ObservationIgnored var retryHold: Duration = .seconds(1)
     private(set) var loadingOlder = false
     /// An older page fetched and waiting for the list to place it.
     private(set) var olderPage: MessagePage?
@@ -104,28 +114,61 @@ final class TranscriptStore {
     var rows: [TranscriptRow] {
         let answers = answers
         return TranscriptBuilder.rows(
-            messages: replaced.isEmpty ? messages : messages.filter { !replaced.contains($0.id) },
+            messages: visibleMessages,
             pending: pending,
             answers: answers,
             options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping)
         )
     }
 
-    /// Whether the Chat shows its typing dots, by the web's rule: a turn that
-    /// took the guardian's message shows none (its status mark says it is on
-    /// it), and any other visible turn shows them only until it has said
-    /// something.
+    /// How the running turn shows the typing dots, as the server last said
+    /// (`message_writing`); nil when no turn runs.
+    private(set) var writing: (turnId: String, mode: WritingMode, writing: Bool)?
+    /// New messages of a `simulated` turn waiting behind the dots, oldest
+    /// first, each with how long it waits.
+    private(set) var held: [(id: String, wait: Duration)] = []
+    @ObservationIgnored private var holdWork: Task<Void, Never>?
+
+    /// Whether the Chat shows its typing dots: the Concierge is writing a
+    /// message (docs/domains/chats.md#status-reaction). The server alone says
+    /// so: while an `exact` turn writes, or while a `simulated` turn's new
+    /// message waits behind them. 👀 on the guardian's message says it started.
     var showsTyping: Bool {
-        guard kind == .concierge, running, visibleTurn else { return false }
-        // A send the instance has not stored yet is the input of the turn.
-        if pending.contains(where: { if case .failed = $0.state { return false } else { return true } }) { return false }
-        let visible = activeTurns.filter { $0.quiet != true }
-        guard let turn = visible.first(where: { $0.status == "running" }) ?? visible.first else { return false }
-        let ids = Set([turn.turnId, turn.agentTurnId].compactMap { $0 })
-        if messages.contains(where: { $0.isUser && $0.turnId.map(ids.contains) == true }) { return false }
-        return !messages.contains { message in
-            guard let id = message.turnId, ids.contains(id) else { return false }
-            return TranscriptBuilder.isReply(message, parts: message.parts)
+        guard kind == .concierge else { return false }
+        if !held.isEmpty { return true }
+        guard let writing else { return false }
+        return writing.mode == .exact && writing.writing
+    }
+
+    /// How long a `simulated` turn's message waits: 5 ms a character, 0.5 to 1 s.
+    nonisolated static func simulatedWait(_ message: ChatMessage) -> Duration {
+        let length = message.parts.compactMap(\.textContent).reduce(0) { $0 + $1.count }
+        return .milliseconds(min(1000, max(500, length * 5)))
+    }
+
+    /// A new message of the `simulated` turn, arriving live after every
+    /// message held, waits behind the dots, after any already waiting. A
+    /// quiet turn's first message never waits: it shows no dots until it
+    /// has said something.
+    private func hold(_ message: ChatMessage, after newest: Date?) {
+        guard kind == .concierge, loaded, let writing, writing.mode == .simulated,
+              !message.isUser, !message.isTrace, message.turnId == writing.turnId else { return }
+        if let newest, message.date < newest { return }
+        guard TranscriptBuilder.isReply(message, parts: message.parts) else { return }
+        let quiet = activeTurns.contains { ($0.turnId == writing.turnId || $0.agentTurnId == writing.turnId) && $0.quiet == true }
+        if quiet, !messages.contains(where: { $0.turnId == writing.turnId && !$0.isUser && !$0.isTrace }) { return }
+        held.append((message.id, Self.simulatedWait(message)))
+        releaseHeld()
+    }
+
+    private func releaseHeld() {
+        guard holdWork == nil, let head = held.first else { return }
+        holdWork = Task { [weak self] in
+            try? await Task.sleep(for: head.wait)
+            guard let self else { return }
+            self.holdWork = nil
+            if self.held.first?.id == head.id { self.held.removeFirst() }
+            self.releaseHeld()
         }
     }
 
@@ -147,7 +190,9 @@ final class TranscriptStore {
         tokens.append(backend.events.subscribe(LiveTopic.chatStatus) { [weak self] event in
             self?.handle(event)
         })
-        Task { await reload() }
+        // Entering a chat whose load failed tries again where it shows: the
+        // bar's spinner runs at once, never a Retry left from before.
+        if loadFailed { retryLoad() } else { Task { await reload() } }
     }
 
     /// A chat made just now holds nothing yet: it counts as loaded at once,
@@ -156,6 +201,7 @@ final class TranscriptStore {
     func beginEmpty() {
         guard !loaded else { return }
         loaded = true
+        readOnce = true
         hasOlder = false
     }
 
@@ -179,9 +225,16 @@ final class TranscriptStore {
         runningPoll = nil
         resyncWork?.cancel()
         resyncWork = nil
+        // Off the screen nothing waits, so a return replays no dots. The
+        // turn's writing state stays: the server says it once, and a return
+        // mid-turn shows the dots it still means; the turn's end clears it.
+        holdWork?.cancel()
+        holdWork = nil
+        held = []
     }
 
     func reload() async {
+        await readResends()
         do {
             let page = try await backend.messages(sessionId: sessionId, before: nil, limit: Self.pageSize)
             // A newest page that shares nothing with what is held leaves a gap
@@ -209,6 +262,7 @@ final class TranscriptStore {
                 fromCache = false
             }
             loaded = true
+            readOnce = true
             loadError = nil
             if reopening != nil { await resolveReopening() }
             await refreshRunning()
@@ -237,6 +291,7 @@ final class TranscriptStore {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
         merge(page.messages)
         loadError = nil
+        readOnce = true
         return true
     }
 
@@ -351,8 +406,14 @@ final class TranscriptStore {
             let isNew = held == nil
             // A live insert leaves the mark out: keep the one already known.
             if message.statusReaction == nil { message.statusReaction = held?.statusReaction }
+            let newest = messages.map(\.date).max()
+            // Only a message that arrives live may wait behind the dots: never
+            // history, a catch-up read on return, or an older page.
+            if isNew { hold(message, after: newest) }
             merge([message])
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
+        case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
+            writing = (turnId, mode, isWriting)
         case .sessionRunning(let id, let isRunning) where id == sessionId:
             if isRunning != running || isRunning {
                 Task { await refreshRunning(hint: isRunning) }
@@ -435,12 +496,24 @@ final class TranscriptStore {
     /// thread still being looked up.
     var composerThread: ThreadTarget? { quote ?? reopening }
 
-    /// The reply bar shows for a reply to a message, not for a thread opened from its label.
-    var showsQuoteBar: Bool { quote != nil && quote?.bare != true }
+    /// The reply bar shows for a reply to a message, and for Reply inside a
+    /// thread view; not for a thread view opened from its label.
+    var showsQuoteBar: Bool { quote != nil && (quote?.bare != true || repliesToThread) }
+
+    /// Reply was pressed inside a thread view: the bar names the task, and
+    /// the send goes to the thread, quoting no message.
+    private(set) var repliesToThread = false
+
+    /// The task the reply bar names for a reply inside a thread view.
+    var threadReplyTitle: String? {
+        guard repliesToThread, let thread else { return nil }
+        return thread.title ?? taskThreadTitle(of: thread.anchor)
+    }
 
     /// The quoted message, when it is held.
     var quotedMessage: ChatMessage? {
-        quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
+        if repliesToThread { return nil }
+        return quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
     }
 
     /// The title of the task whose chat thread `message` is in, or nil when
@@ -455,7 +528,13 @@ final class TranscriptStore {
     /// stays open, and the send goes into its thread.
     func reply(to messageId: String) {
         guard kind == .concierge, message(messageId) != nil || thread != nil else { return }
-        quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true, thread: thread?.anchor.id)
+        if let thread {
+            // Inside a thread view a reply goes to the thread, not to a message.
+            quote = ThreadTarget(messageId: thread.anchor.id, instanceKnowsThreads: true, quote: true, thread: thread.anchor.id, bare: true)
+            repliesToThread = true
+        } else {
+            quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true)
+        }
         replies += 1
     }
 
@@ -480,10 +559,31 @@ final class TranscriptStore {
     func quoteAction(reply replyId: String, original: String) -> (() -> Void)? {
         guard kind == .concierge else { return nil }
         if let host = message(replyId), taskThreadTitle(of: host) != nil {
-            return { [weak self] in self?.open(anchor: host, older: [], replyTo: original, tint: original) }
+            // A reply in the thread view goes to the thread, quoting nothing.
+            return { [weak self] in self?.open(anchor: host, older: [], tint: original, bare: true) }
         }
         guard message(original) != nil else { return nil }
         return { [weak self] in self?.jump(to: original) }
+    }
+
+    /// Brings the message with a task's card into view and tints it. One not
+    /// held yet comes in one read that reaches down to it; one not found
+    /// says so briefly.
+    func revealCard(_ messageId: String) async {
+        if message(messageId) == nil,
+           let page = try? await backend.messages(sessionId: sessionId, through: messageId, limit: Self.pageSize) {
+            // From the newest down past the card, so no gap opens above what is held.
+            merge(page.messages)
+            if message(messageId) != nil {
+                cursor = page.nextCursor
+                hasOlder = page.nextCursor != nil
+            }
+        }
+        guard message(messageId) != nil else {
+            say(String(localized: "Could not find the card"))
+            return
+        }
+        jump(to: messageId)
     }
 
     /// Brings a held message into view and tints it for a moment.
@@ -510,6 +610,7 @@ final class TranscriptStore {
         let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, older: older)
         thread = opened
         quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: anchor.id, bare: bare ? true : nil)
+        repliesToThread = false
         tint(target ?? anchor.id)
         opened.start()
     }
@@ -526,6 +627,7 @@ final class TranscriptStore {
     /// Closes the open thread view and the reply bar: both end with a send.
     /// The tint stays a moment, so the guardian sees where they were.
     func closeThread() {
+        repliesToThread = false
         thread?.stop()
         thread = nil
         reopening = nil
@@ -581,9 +683,27 @@ final class TranscriptStore {
     }
 
 
+    /// The stored messages drawn: a message sent again gives way to its new
+    /// copy, both while the copy is on its way and once it is stored.
+    var visibleMessages: [ChatMessage] {
+        let hidden = resentOriginals.union(held.map(\.id))
+        return hidden.isEmpty ? messages : messages.filter { !hidden.contains($0.id) }
+    }
+
     /// A stored message, by id.
     func message(_ id: String) -> ChatMessage? {
         messages.first { $0.id == id }
+    }
+
+    /// Card states a re-read was asked for already (`TaskAskView`).
+    @ObservationIgnored private var recoveredCards: Set<String> = []
+
+    /// A card stopped waiting with no outcome held: `chat_card_settled` may
+    /// have been missed, so the page is read again, once per card state, however
+    /// often the card scrolls back into view.
+    func recoverCard(_ key: String) {
+        guard recoveredCards.insert(key).inserted else { return }
+        resync()
     }
 
     /// Reloads after events may have been missed. A burst of requests (one per
@@ -631,15 +751,20 @@ final class TranscriptStore {
         startRunningPoll()
     }
 
-    /// Tries the failed load again, visibly: the banner goes, "Retrying…"
-    /// shows, and the banner returns only if this attempt fails too.
+    /// Tries the failed load again, visibly: the bar stays and its Retry
+    /// turns into a spinner for at least `retryHold`. The bar then goes, or
+    /// shows Retry again and shakes.
     func retryLoad() {
-        loadError = nil
+        guard !retrying else { return }
         retrying = true
         Task {
+            let started = ContinuousClock.now
             resync()
             await resyncWork?.value
+            let left = retryHold - (ContinuousClock.now - started)
+            if left > .zero { try? await Task.sleep(for: left) }
             retrying = false
+            if loadFailed { retryFailures += 1 }
         }
     }
 
@@ -655,9 +780,9 @@ final class TranscriptStore {
         Task { await refreshRunning() }
     }
 
-    /// While the dots show, asks the instance now and then whether the turn
-    /// still runs, so a live event that never arrives cannot leave them on.
-    /// The poll ends with the running state.
+    /// While a turn runs, asks the instance now and then whether it still
+    /// does, so a live event that never arrives cannot leave Stop up. The
+    /// dots go by `message_writing` alone. The poll ends with the running state.
     private func startRunningPoll() {
         guard kind == .concierge, !closed, runningPoll == nil else { return }
         runningPoll = Task { [weak self] in
@@ -665,13 +790,15 @@ final class TranscriptStore {
                 guard let interval = self?.runningPollInterval else { return }
                 try? await Task.sleep(for: interval)
                 guard !Task.isCancelled, let self, self.running else { return }
-                if self.showsTyping { await self.refreshRunning() }
+                await self.refreshRunning()
             }
         }
     }
 
     private func markIdle() {
         if stopping { stopped = true }
+        // The turn is over: no message is being written.
+        if writing?.writing == true { writing?.writing = false }
         running = false
         visibleTurn = false
         activeTurns = []
@@ -687,59 +814,160 @@ final class TranscriptStore {
     /// Sends the guardian's text with any photos (JPEG). Photos alone are a
     /// message too. `fromComposer`: the composer's content, cleared as it goes.
     func send(_ text: String, images: [ComposerImage] = [], fromComposer: Bool = false, thread: ThreadTarget? = nil) -> Bool {
+        send(text, images: images, files: [], fromComposer: fromComposer, keepsDraft: true, thread: thread) != nil
+    }
+
+    /// The send's `inputId`, or nil when there is nothing to send. `files`:
+    /// anything other than photos, which only a resend carries. A resend
+    /// keeps no draft: its original stays on the instance, and shows again
+    /// with its Retry if the copy is lost.
+    private func send(_ text: String, images: [ComposerImage], files: [OutgoingFile], fromComposer: Bool = false, keepsDraft: Bool, thread: ThreadTarget?) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !images.isEmpty else { return false }
+        guard !trimmed.isEmpty || !images.isEmpty || !files.isEmpty else { return nil }
         let inputId = UUID().uuidString.lowercased()
-        pending.append(PendingSend(id: inputId, text: trimmed, images: images, createdAt: .now, state: .sending, thread: thread))
+        pending.append(PendingSend(id: inputId, text: trimmed, images: images, files: files, createdAt: .now, state: .sending, thread: thread, keepsDraft: keepsDraft))
         if kind == .concierge {
             markRunning()
         }
-        deliver(inputId: inputId, text: trimmed, images: images, fromComposer: fromComposer, thread: thread)
-        return true
+        deliver(inputId: inputId, text: trimmed, images: images, files: files, fromComposer: fromComposer, keepsDraft: keepsDraft, thread: thread)
+        return inputId
     }
 
-    /// Removes a send that failed for good, and the draft kept for it.
+    /// Removes a send that failed for good, and the draft kept for it. A
+    /// stored message it was sent in place of shows again.
     func removePending(_ id: String) {
         pending.removeAll { $0.id == id }
+        if resends.values.contains(id) {
+            resends = resends.filter { $0.value != id }
+            if let drafts { drafts.store.forgetResend(chat: drafts.chat, copy: id) }
+        }
         if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: id) }
     }
 
-    /// Stored messages a new send took the place of (a retry of a message the
-    /// instance did not take): not drawn.
-    private(set) var replaced: Set<String> = []
+    /// Resends: a stored message the instance did not take, by its id, and
+    /// the `inputId` of the copy sent in its place. Recorded when the copy
+    /// goes and kept with the chat's drafts, so a relaunch knows the pair.
+    private(set) var resends: [String: String] = [:]
+    @ObservationIgnored private var resendsRead = false
+    /// Stored messages whose files are being read back for a resend.
+    private var resending: Set<String> = []
+
+    /// The originals a resend took the place of: hidden only while their
+    /// copy is still held or stored, so a copy that failed for good and was
+    /// dropped (here, or by a relaunch) brings its original back.
+    var resentOriginals: Set<String> { resentOriginals(alsoHeld: []) }
+
+    /// The same, counting copies held elsewhere too: a thread view's own read
+    /// can hold a copy the chat's pages do not.
+    func resentOriginals(alsoHeld extra: Set<String>) -> Set<String> {
+        guard !resends.isEmpty else { return [] }
+        let present = Set(pending.map(\.id)).union(messages.map(\.id)).union(extra)
+        return Set(resends.filter { present.contains($0.value) }.keys)
+    }
+
+    /// The resend copies still on their way for these originals, for a
+    /// thread view that shows the originals' place.
+    func pendingResends(of originals: Set<String>) -> [PendingSend] {
+        let copies = Set(resends.filter { originals.contains($0.key) }.values)
+        return pending.filter { copies.contains($0.id) }
+    }
+
+    /// Reads the chat's resends once, before the first rows are drawn.
+    private func readResends() async {
+        guard !resendsRead else { return }
+        resendsRead = true
+        if let drafts { resends.merge(await drafts.store.resends(chat: drafts.chat)) { mine, _ in mine } }
+    }
+
+    private func recordResend(of original: String, as inputId: String) {
+        resends[original] = inputId
+        if let drafts { drafts.store.recordResend(chat: drafts.chat, original: original, copy: inputId) }
+    }
 
     /// Whether the row is a send the app still holds, which only it can drop.
     func isPending(_ rowId: String) -> Bool { pending.contains { $0.id == rowId } }
 
-    /// Tries a message again. One the app still holds is sent again; one the
-    /// instance stored as not delivered or unconfirmed is handed over again
-    /// under the id it already has.
+    /// Tries a message again. One the app still holds is sent again. One the
+    /// instance stored as not delivered or unconfirmed goes as a new message,
+    /// to the same thread and reply, with its files, and takes its place.
     func retry(_ id: String) {
         if let index = pending.firstIndex(where: { $0.id == id }) {
             pending[index].state = .sending
-            deliver(inputId: id, text: pending[index].text, images: pending[index].images, thread: pending[index].thread)
+            deliver(inputId: id, text: pending[index].text, images: pending[index].images, files: pending[index].files, keepsDraft: pending[index].keepsDraft, thread: pending[index].thread)
             return
         }
         // The instance keeps what it stored under its own `inputId` and drops a
-        // second send of it as a duplicate, so this goes as a new message, and
-        // the stored one gives way to it: no two bubbles for one message.
-        guard let messageId = id.split(separator: ":").first.map(String.init), let stored = message(messageId),
-              let text = stored.parts.compactMap(\.textContent).first, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // second send of it as a duplicate, so this goes as a new message.
+        guard let messageId = id.split(separator: ":").first.map(String.init), !resending.contains(messageId),
+              let stored = message(messageId) ?? thread?.messages.first(where: { $0.id == messageId }),
+              let raw = stored.parts.compactMap(\.textContent).first
         else { return }
-        replaced.insert(messageId)
-        send(text)
+        let (text, uploads) = UploadLines.split(raw)
+        guard !text.isEmpty || !uploads.isEmpty else { return }
+        let target = Self.resendTarget(of: stored)
+        guard !uploads.isEmpty else {
+            if let inputId = send(text, images: [], files: [], keepsDraft: false, thread: target) { recordResend(of: messageId, as: inputId) }
+            return
+        }
+        // The instance takes files only as bytes, so its stored copies are
+        // read back and sent again as attachments, not as their link lines.
+        resending.insert(messageId)
+        Task {
+            defer { resending.remove(messageId) }
+            guard let (images, files) = await readBack(uploads) else {
+                say(String(localized: "Couldn't send. Try again"))
+                return
+            }
+            if let inputId = send(text, images: images, files: files, keepsDraft: false, thread: target) { recordResend(of: messageId, as: inputId) }
+        }
     }
 
-    private func deliver(inputId: String, text: String, images: [ComposerImage], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
+    /// Where a stored message went: its task thread, and the message it replied to.
+    static func resendTarget(of message: ChatMessage) -> ThreadTarget? {
+        let replyTo = message.parts.lazy.compactMap(\.replyQuote).first?.messageId
+        guard replyTo != nil || message.chatThreadId != nil else { return nil }
+        return ThreadTarget(
+            messageId: replyTo ?? message.chatThreadId ?? message.id,
+            instanceKnowsThreads: true,
+            quote: true,
+            thread: message.chatThreadId,
+            bare: replyTo == nil ? true : nil
+        )
+    }
+
+    /// A stored message's files: pictures as photos, anything else as the
+    /// file it was. Nil when one cannot be read.
+    private func readBack(_ uploads: [UploadLines.Upload]) async -> ([ComposerImage], [OutgoingFile])? {
+        var images: [ComposerImage] = []
+        var files: [OutgoingFile] = []
+        let backend = backend
+        for upload in uploads {
+            guard let data = try? await ImageFetch.data(
+                upload.source,
+                assetLoader: { path, width in try await backend.asset(path: path, width: width) },
+                apiLoader: { path, query in try await backend.apiFile(path: path, query: query) }
+            ) else { return nil }
+            if upload.isImage {
+                let photo = await Task.detached { ImageCompressor.jpeg(from: data).map { ComposerImage(jpeg: $0) } }.value
+                guard let photo else { return nil }
+                images.append(photo)
+            } else {
+                files.append(OutgoingFile(name: upload.name, mimeType: OutgoingFile.mimeType(of: upload.name), dataBase64: data.base64EncodedString()))
+            }
+        }
+        return (images, files)
+    }
+
+    private func deliver(inputId: String, text: String, images: [ComposerImage], files: [OutgoingFile] = [], fromComposer: Bool = false, keepsDraft: Bool = true, thread: ThreadTarget? = nil) {
         // Kept as the chat's draft until the server takes it.
         // Kept with the thread it was for, so a lost send comes back there.
-        if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
+        if keepsDraft, let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
         Task {
             do {
                 let turn = try await backend.send(
                     sessionId: sessionId,
                     text: text,
-                    files: OutgoingFile.photos(images),
+                    files: OutgoingFile.photos(images) + files,
                     inputId: inputId,
                     priority: kind == .concierge ? .now : .next,
                     thread: thread
@@ -795,9 +1023,14 @@ final class TranscriptStore {
         return message(id)?.statusReaction.flatMap(StatusMark.init(rawValue:))
     }
 
+    /// What the load-error bar shows: nil for no bar.
+    var loadBar: LoadBar? {
+        if retrying { return loadFailed || loadError == nil ? .retrying : nil }
+        return loadFailed ? .failed : nil
+    }
+
     /// The chat's newest page could not be read, and nothing offline explains it.
     var loadFailed: Bool {
-        if retrying { return false }
         switch loadError {
         case nil, .offline?, .unauthorized?, .conciergeOff?: return false
         default: return true

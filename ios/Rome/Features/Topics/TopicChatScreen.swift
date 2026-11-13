@@ -33,7 +33,7 @@ struct TopicChatScreen: View {
 
     /// A blank chat, or one whose transcript loaded empty.
     private var showsStarters: Bool {
-        if let store { return ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) }
+        if let store { return ConciergeStarters.visible(loaded: store.readOnce, rows: store.rows) }
         return starting == nil
     }
 
@@ -109,7 +109,7 @@ struct TopicChatScreen: View {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatePill(agentName: workspace.agentName)
                 if let store, store.showsQuoteBar {
-                    QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                    QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if startFailed && store == nil {

@@ -1,47 +1,8 @@
 import Foundation
 import Observation
 
-/// The groups of the Tasks sheet, in the order it shows them. Progress is
-/// not reported accurately enough to show finer states, so there are two.
-enum TaskGroupKey: String, CaseIterable, Identifiable, Sendable {
-    case inProgress, done
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .inProgress: return String(localized: "In progress")
-        case .done: return String(localized: "Done")
-        }
-    }
-
-    static func of(_ state: TaskState) -> TaskGroupKey {
-        switch state {
-        case .needsUser, .doing, .next, .watching: return .inProgress
-        case .done, .dropped: return .done
-        }
-    }
-}
-
-/// What a task row says about itself, beyond its title.
-enum TaskRowStatus: Equatable, Sendable {
-    /// Waiting on an approval or an answer from the guardian.
-    case waiting
-    /// Its chat's last turn failed and nothing runs now.
-    case failed
-    case plain
-}
-
-struct TaskGroup: Identifiable, Sendable {
-    let key: TaskGroupKey
-    let tasks: [ConciergeTask]
-    let hidden: Int
-
-    var id: String { key.rawValue }
-}
-
 /// The Concierge's task list and the statuses of the chats it started. It feeds
-/// the header badge, the Tasks sheet, and the task cards in the chat.
+/// the header badge and the task cards in the chat.
 @MainActor
 @Observable
 final class TasksStore {
@@ -49,6 +10,9 @@ final class TasksStore {
     private(set) var tasks: [ConciergeTask] = []
     private(set) var chats: [String: ChatSession] = [:]
     private(set) var loaded = false
+    /// The task list arrived at least once: a task missing from it is gone,
+    /// not just unread yet.
+    private(set) var listed = false
     private var tokens: [UUID] = []
     private var refreshingChats = false
     private var resyncWork: Task<Void, Never>?
@@ -59,13 +23,6 @@ final class TasksStore {
 
     init(backend: RomeBackend) {
         self.backend = backend
-    }
-
-    /// Whether a row came from Concierge chat `chatId`. A row from an older
-    /// server names no chat; it belongs to the main one.
-    nonisolated static func belongs(_ task: ConciergeTask, toChat chatId: String) -> Bool {
-        let source = task.conciergeChat.map { $0.main ? conciergeChatID : $0.id } ?? conciergeChatID
-        return source == chatId
     }
 
     func start() {
@@ -87,7 +44,10 @@ final class TasksStore {
     func refresh() async {
         async let taskList = try? backend.tasks()
         async let sessionList = try? backend.sessions()
-        if let list = await taskList { tasks = list.filter { !isGone($0) } }
+        if let list = await taskList {
+            tasks = list.filter { !isGone($0) }
+            listed = true
+        }
         if let list = await sessionList {
             chats = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         }
@@ -158,70 +118,6 @@ final class TasksStore {
 
     private func isGone(_ task: ConciergeTask) -> Bool {
         task.chat.map { goneChats.contains($0.id) } ?? false
-    }
-
-    /// The groups, in order, without empty ones. Finished rows older than seven
-    /// days are counted in `hidden` unless `showAllDone`.
-    func groups(inChat chatId: String, showAllDone: Bool, now: Date = .now) -> [TaskGroup] {
-        TasksStore.group(tasks.filter { Self.belongs($0, toChat: chatId) }, showAllDone: showAllDone, now: now)
-    }
-
-    nonisolated static func group(_ tasks: [ConciergeTask], showAllDone: Bool, now: Date) -> [TaskGroup] {
-        let since = now.timeIntervalSince1970 * 1000 - 7 * 86_400_000
-        var byKey: [TaskGroupKey: [ConciergeTask]] = [:]
-        for task in tasks where task.archivedAt == nil {
-            byKey[TaskGroupKey.of(task.state), default: []].append(task)
-        }
-        return TaskGroupKey.allCases.compactMap { key in
-            guard var list = byKey[key], !list.isEmpty else { return nil }
-            list.sort(by: sorter(key))
-            if key == .done, !showAllDone {
-                let recent = list.filter { ($0.completedAt ?? $0.updatedAt) >= since }
-                return TaskGroup(key: key, tasks: recent, hidden: list.count - recent.count)
-            }
-            return TaskGroup(key: key, tasks: list, hidden: 0)
-        }
-    }
-
-    nonisolated private static func sorter(_ key: TaskGroupKey) -> (ConciergeTask, ConciergeTask) -> Bool {
-        switch key {
-        case .inProgress:
-            // What waits on the guardian comes first, then the latest update.
-            return { a, b in
-                let waitingA = a.state == .needsUser, waitingB = b.state == .needsUser
-                if waitingA != waitingB { return waitingA }
-                return a.updatedAt > b.updatedAt
-            }
-        case .done:
-            return { ($0.completedAt ?? $0.updatedAt) > ($1.completedAt ?? $1.updatedAt) }
-        }
-    }
-
-    // MARK: Rows
-
-    func rowStatus(_ task: ConciergeTask) -> TaskRowStatus {
-        Self.rowStatus(task, chat: task.chat.flatMap { chats[$0.id] })
-    }
-
-    nonisolated static func rowStatus(_ task: ConciergeTask, chat: ChatSession?) -> TaskRowStatus {
-        switch task.state {
-        case .needsUser: return .waiting
-        case .doing, .next, .watching:
-            return chat?.lastTurnFailed == true && chat?.running != true ? .failed : .plain
-        case .done, .dropped: return .plain
-        }
-    }
-
-    /// The one muted line under a row's title: "Waiting on you", "Didn't
-    /// finish", or when it last changed.
-    nonisolated static func rowLine(_ task: ConciergeTask, status: TaskRowStatus, now: Date) -> String {
-        switch status {
-        case .waiting: return String(localized: "Waiting on you")
-        case .failed: return String(localized: "Didn't finish")
-        case .plain:
-            let changed = TaskGroupKey.of(task.state) == .done ? (task.completedAt ?? task.updatedAt) : task.updatedAt
-            return RomeDate.fromMillis(changed).map { RelativeTime.ago($0, now: now) } ?? ""
-        }
     }
 
     // MARK: Task chat status

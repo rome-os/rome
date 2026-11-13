@@ -75,10 +75,10 @@ struct ChatScreen: View {
                     // Inside the composer's inset, so the last message rests above it too.
                     UpdatePill(agentName: workspace.agentName)
                     if store.showsQuoteBar {
-                        QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                        QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
+                    if ConciergeStarters.visible(loaded: store.readOnce, rows: store.rows) {
                         ConciergeStarters { store.send($0.text) }
                     }
                     // While a chat thread is open, the composer sends into it.
@@ -176,7 +176,7 @@ struct ChatScreen: View {
                 actionTitle: "Try again"
             ) { Task { await workspace.openConcierge() } }
         case .ready:
-            if store.loaded && store.rows.isEmpty {
+            if store.readOnce && store.rows.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Spacer()
                     Text("What needs doing?")
@@ -218,6 +218,13 @@ struct ConciergeRow: View {
     var inThread = false
     @Environment(AppModel.self) private var model
 
+    /// Only the Agent's text can be replied to: never a card of any kind
+    /// (task, question, approval, open or folded), nor the guardian's own.
+    static func offersReply(_ row: TranscriptRow) -> Bool {
+        if case .agentText = row { return true }
+        return false
+    }
+
     /// The message's time, and Reply on the Agent's messages: the reply bar,
     /// with an open thread view kept open.
     private func menu(reply: Bool) -> BubbleMenu {
@@ -243,11 +250,11 @@ struct ConciergeRow: View {
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
             let quote = quote(id)
-            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(reply: false),
+            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(reply: Self.offersReply(row)),
                        mark: store.statusMark(ofRow: row),
                        quote: quote, onQuote: quote.flatMap { inThread ? nil : store.quoteAction(reply: row.messageId ?? "", original: $0.messageId) })
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: true))
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: Self.offersReply(row)))
         case .threadLabel(_, let messageId, let title):
             if !inThread {
                 ThreadLabelLine(title: title) { store.openThread(at: messageId) }
@@ -271,7 +278,7 @@ struct ConciergeRow: View {
                 }
                 // The newest card from before `show` of a task that waits on
                 // the guardian shows what it asks, answered right here.
-                if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId)) != .settled {
+                if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId), tasksListed: tasks.listed) != .settled {
                     TaskAskView(chatId: chatId, card: ask, latest: true, tasks: tasks, store: store) { onOpenChat(chatId, name) }
                 }
             }

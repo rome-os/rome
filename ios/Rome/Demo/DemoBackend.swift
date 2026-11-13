@@ -172,8 +172,12 @@ final class DemoBackend: RomeBackend {
         try await archiveChat(id)
     }
 
+    /// Chats whose messages cannot be read, for the load-error bar's snapshots.
+    var unreadableChats: Set<String> = []
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         try await pause(0.3)
+        if unreadableChats.contains(sessionId) { throw APIError.server(status: 503, message: nil) }
         // Pages from the newest back, as the server does; the cursor is the
         // oldest message of the page before.
         let all = messages[sessionId] ?? []
@@ -343,6 +347,60 @@ final class DemoBackend: RomeBackend {
     func tasks() async throws -> [ConciergeTask] {
         try await pause(0.2)
         return tasks
+    }
+
+    /// The demo's task list: its tasks in the groups their status gives
+    /// them, with a schedule, a lone check, a follow and a routine.
+    func taskList(chatId: String) async throws -> TaskListResponse {
+        try await pause(0.2)
+        let nowMs = Date.now.timeIntervalSince1970 * 1000
+        let chat = chatId == conciergeChatID ? nil : chatId
+        var groups: [TaskListGroup.Key: [TaskListItem]] = [:]
+        for task in tasks where task.archivedAt == nil && task.conciergeChat?.id == chat {
+            let status = TaskListWords.status(task)
+            // Where Respond goes: the message of this chat with the card it waits on.
+            let card = task.waitId.flatMap { wait in
+                messages[chatId]?.first { message in
+                    message.parts.contains { if case .taskChat(_, _, _, let card) = $0 { return card?.id == wait } else { return false } }
+                }?.id
+            }
+            var task = task
+            if status == "needs_you" { task.waitingSince = task.updatedAt }
+            let item = TaskListItem.Task(
+                task: task,
+                schedule: task.id == "t7" ? .init(at: "09:00", days: nil) : nil,
+                check: task.dueAt.map { .init(id: "check-\(task.id)", at: $0, recurring: task.id == "t7") },
+                cardMessageId: status == "needs_you" ? card : nil
+            )
+            let key: TaskListGroup.Key = switch status {
+            case "needs_you": .needsYou
+            case "later": .later
+            case "ended": .ended
+            default: .active
+            }
+            groups[key, default: []].append(.task(item))
+        }
+        if chat == nil {
+            groups[.later, default: []].append(.check(.init(check: .init(id: "check-flight", name: "看看机票有没有降价", at: nowMs + 3 * 3_600_000, waitingFor: nil))))
+            groups[.onItsOwn, default: []] += [
+                .follow(.init(source: "github", label: "GitHub", target: "rome-os/rome", state: "active", digestTimes: ["09:00", "18:00"])),
+                .routine(.init(id: "r-summary", name: "每日总结", trigger: .init(type: "schedule", localTime: "21:00", rrule: "FREQ=DAILY"), enabled: true, nextRunAt: nowMs + 5 * 3_600_000, lastRun: nil)),
+            ]
+        }
+        let order: [TaskListGroup.Key] = [.needsYou, .active, .later, .onItsOwn, .ended]
+        return TaskListResponse(chatId: chatId, groups: order.compactMap { key in groups[key].map { TaskListGroup(key: key, items: $0) } })
+    }
+
+    /// Stops a demo task: it ends as stopped, and its list reads again.
+    func stopListedTask(chatId: String, taskId: String) async throws {
+        try await pause(0.4)
+        guard let index = tasks.firstIndex(where: { $0.id == taskId }) else { throw APIError.notFound }
+        tasks[index].status = "ended"
+        tasks[index].endReason = "stopped"
+        tasks[index].state = .dropped
+        tasks[index].completedAt = Date.now.timeIntervalSince1970 * 1000
+        tasks[index].updatedAt = tasks[index].completedAt!
+        bus.emit(LiveTopic.chatTasks(chatId), .taskListChanged(chatId: chatId))
     }
 
     func approval(id: String) async throws -> ApprovalRecord {
@@ -545,10 +603,10 @@ final class DemoBackend: RomeBackend {
 
     // MARK: Updates
 
-    static let releasedVersion = "1.1.192"
+    static let releasedVersion = "1.1.195"
     /// Below the app's minimum, and between it and the latest.
     static let tooOldVersion = "1.1.120"
-    static let offeredFromVersion = "1.1.191"
+    static let offeredFromVersion = "1.1.194"
     private lazy var runningVersion = switch variant {
     case .updateRequired: Self.tooOldVersion
     case .updateOffered: Self.offeredFromVersion
@@ -603,7 +661,13 @@ final class DemoBackend: RomeBackend {
         let event = LiveEvent.sessionRunning(sessionId: sessionId, running: turnId != nil)
         bus.emit(LiveTopic.chatStatus, event)
         bus.emit(LiveTopic.chat(sessionId), event)
+        // As a Claude turn does: it writes while it runs.
+        if let turn = turnId ?? writingTurn[sessionId] {
+            writingTurn[sessionId] = turnId
+            bus.emit(LiveTopic.chat(sessionId), .messageWriting(sessionId: sessionId, turnId: turn, mode: .exact, writing: turnId != nil))
+        }
     }
+    private var writingTurn: [String: String] = [:]
 
     private func json(_ parts: [JSONValue]) -> String {
         String(data: (try? JSONEncoder().encode(parts)) ?? Data(), encoding: .utf8) ?? "[]"
