@@ -127,9 +127,12 @@ private struct StayAtBottom: ViewModifier {
 
 /// Above the composer while it replies to a message: a line of that
 /// message, and a cross that drops the reply, and an open thread view with it.
+/// A reply inside a thread view names the task instead, quoting nothing.
 struct QuoteBar: View {
     /// The quoted message; nil while it is not held.
     let message: ChatMessage?
+    /// Reply inside a thread view: the task's title.
+    var threadTitle: String? = nil
     let onCancel: () -> Void
 
     private var preview: String {
@@ -145,7 +148,7 @@ struct QuoteBar: View {
             Image(systemName: "arrowshape.turn.up.left")
                 .romeFont(12)
                 .foregroundStyle(Palette.sub)
-            Text(verbatim: preview.isEmpty ? String(localized: "Reply") : preview)
+            Text(verbatim: threadTitle.map { String(localized: "Reply to \($0)") } ?? (preview.isEmpty ? String(localized: "Reply") : preview))
                 .romeFont(13)
                 .foregroundStyle(Palette.sub)
                 .lineLimit(1)

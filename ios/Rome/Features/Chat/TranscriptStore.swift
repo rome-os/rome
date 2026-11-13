@@ -17,6 +17,10 @@ final class TranscriptStore {
     private(set) var messages: [ChatMessage] = []
     private(set) var pending: [PendingSend] = []
     private(set) var loaded = false
+    /// A read of the chat worked at least once (or it was made just now), so
+    /// an empty transcript is a chat with nothing in it, not one that failed
+    /// to load: only then do its empty-chat prompts show.
+    private(set) var readOnce = false
     private(set) var loadError: APIError?
     /// A load the guardian started (Retry, or coming back to the chat) is on
     /// its way: the bar's Retry shows a spinner.
@@ -168,6 +172,7 @@ final class TranscriptStore {
     func beginEmpty() {
         guard !loaded else { return }
         loaded = true
+        readOnce = true
         hasOlder = false
     }
 
@@ -221,6 +226,7 @@ final class TranscriptStore {
                 fromCache = false
             }
             loaded = true
+            readOnce = true
             loadError = nil
             if reopening != nil { await resolveReopening() }
             await refreshRunning()
@@ -249,6 +255,7 @@ final class TranscriptStore {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
         merge(page.messages)
         loadError = nil
+        readOnce = true
         return true
     }
 
@@ -447,12 +454,24 @@ final class TranscriptStore {
     /// thread still being looked up.
     var composerThread: ThreadTarget? { quote ?? reopening }
 
-    /// The reply bar shows for a reply to a message, not for a thread opened from its label.
-    var showsQuoteBar: Bool { quote != nil && quote?.bare != true }
+    /// The reply bar shows for a reply to a message, and for Reply inside a
+    /// thread view; not for a thread view opened from its label.
+    var showsQuoteBar: Bool { quote != nil && (quote?.bare != true || repliesToThread) }
+
+    /// Reply was pressed inside a thread view: the bar names the task, and
+    /// the send goes to the thread, quoting no message.
+    private(set) var repliesToThread = false
+
+    /// The task the reply bar names for a reply inside a thread view.
+    var threadReplyTitle: String? {
+        guard repliesToThread, let thread else { return nil }
+        return thread.title ?? taskThreadTitle(of: thread.anchor)
+    }
 
     /// The quoted message, when it is held.
     var quotedMessage: ChatMessage? {
-        quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
+        if repliesToThread { return nil }
+        return quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
     }
 
     /// The title of the task whose chat thread `message` is in, or nil when
@@ -467,7 +486,13 @@ final class TranscriptStore {
     /// stays open, and the send goes into its thread.
     func reply(to messageId: String) {
         guard kind == .concierge, message(messageId) != nil || thread != nil else { return }
-        quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true, thread: thread?.anchor.id)
+        if let thread {
+            // Inside a thread view a reply goes to the thread, not to a message.
+            quote = ThreadTarget(messageId: thread.anchor.id, instanceKnowsThreads: true, quote: true, thread: thread.anchor.id, bare: true)
+            repliesToThread = true
+        } else {
+            quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true)
+        }
         replies += 1
     }
 
@@ -492,7 +517,8 @@ final class TranscriptStore {
     func quoteAction(reply replyId: String, original: String) -> (() -> Void)? {
         guard kind == .concierge else { return nil }
         if let host = message(replyId), taskThreadTitle(of: host) != nil {
-            return { [weak self] in self?.open(anchor: host, older: [], replyTo: original, tint: original) }
+            // A reply in the thread view goes to the thread, quoting nothing.
+            return { [weak self] in self?.open(anchor: host, older: [], tint: original, bare: true) }
         }
         guard message(original) != nil else { return nil }
         return { [weak self] in self?.jump(to: original) }
@@ -542,6 +568,7 @@ final class TranscriptStore {
         let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, older: older)
         thread = opened
         quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: anchor.id, bare: bare ? true : nil)
+        repliesToThread = false
         tint(target ?? anchor.id)
         opened.start()
     }
@@ -558,6 +585,7 @@ final class TranscriptStore {
     /// Closes the open thread view and the reply bar: both end with a send.
     /// The tint stays a moment, so the guardian sees where they were.
     func closeThread() {
+        repliesToThread = false
         thread?.stop()
         thread = nil
         reopening = nil

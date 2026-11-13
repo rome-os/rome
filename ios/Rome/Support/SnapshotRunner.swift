@@ -237,6 +237,12 @@ enum SnapshotRunner {
             await capture("51-thread-open", style: styleName, in: directory, wait: 1.5) {
                 model.workspace?.topicStore("topic-trip").openThread(at: "k1")
             }
+            // Reply inside the thread view: the bar names the task, quoting nothing.
+            await capture("51b-thread-reply", style: styleName, in: directory, wait: 1.5) {
+                let store = model.workspace?.topicStore("topic-trip")
+                if store?.thread == nil { store?.openThread(at: "k1") }
+                store?.reply(to: "k5")
+            }
             model.workspace?.topicStore("topic-trip").closeThread()
             try? await Task.sleep(for: .seconds(0.4))
             // A thread taller than the screen, opened near its foot: the

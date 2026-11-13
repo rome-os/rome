@@ -225,6 +225,18 @@ import UIKit
         #expect(!store.retrying)
     }
 
+    /// A chat whose first read failed is not known to be empty: no starter
+    /// prompts under the bar until a read works.
+    @Test func aFailedFirstLoadShowsNoStarters() async {
+        let backend = FakeBackend()
+        let store = await failedStore(backend)
+        #expect(store.loaded && !store.readOnce)
+        #expect(!ConciergeStarters.visible(loaded: store.readOnce, rows: store.rows))
+        backend.messagesError = nil
+        await store.reload()
+        #expect(ConciergeStarters.visible(loaded: store.readOnce, rows: store.rows))
+    }
+
     /// Entering a task chat again after its load failed shows the spinner
     /// at once, then Retry with a shake when that fails too.
     @Test func reenteringAFailedTaskChatRetriesAtOnce() async {

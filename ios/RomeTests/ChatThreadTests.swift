@@ -269,11 +269,15 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let store = await chat(backend, [message("u", role: "user", at: 0, thread: "u", title: "T"), message("a1", "sure", at: 10, thread: "u", title: "T"), message("a2", "more", at: 20, thread: "u", title: "T")])
         store.openThread(at: "a2")
         #expect(store.thread != nil && store.tinted == "a2" && store.replies == 0)
+        // Opened from its label: no reply bar.
+        #expect(!store.showsQuoteBar)
         store.reply(to: "a1")
         #expect(store.thread != nil && store.replies == 1)
-        #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a2"))
+        // Reply inside goes to the thread, quoting no message, and its bar names the task.
+        #expect(store.composerThread?.body == ["chatThread": .string("a2")])
+        #expect(store.showsQuoteBar && store.threadReplyTitle == "T" && store.quotedMessage == nil)
         store.cancelQuote()
-        #expect(store.thread == nil && store.quote == nil)
+        #expect(store.thread == nil && store.quote == nil && !store.showsQuoteBar && store.threadReplyTitle == nil)
     }
 
     /// Task chats have no chat threads.
@@ -371,6 +375,15 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(store.composerThread == nil)
     }
 
+    /// Only the Agent's text offers Reply: no card of any kind, open or folded.
+    @Test func cardsOfferNoReply() {
+        #expect(ConciergeRow.offersReply(.agentText(id: "a:0", text: "x", long: false, forwardedFrom: nil, position: .single)))
+        #expect(!ConciergeRow.offersReply(.userText(id: "u:0", text: "x", pending: nil)))
+        #expect(!ConciergeRow.offersReply(.taskCard(id: "c:0", chatId: "c", title: "T")))
+        #expect(!ConciergeRow.offersReply(.taskAsk(id: "k:0", chatId: "c", title: "T", card: nil)))
+        #expect(!ConciergeRow.offersReply(.webOnly(id: "w:0", kind: .unknown)))
+    }
+
     /// The quote is read from its part, and shows nothing of its own.
     @Test func aReplyCarriesItsQuote() {
         let parts = reply("r", to: "a", at: 0).parts
@@ -379,7 +392,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(built.map(\.id) == ["sep-r", "r:1"])
     }
 
-    /// A reply in a task's thread opens the thread view, replying to the
+    /// A reply in a task's thread opens the thread view, tinting the
     /// original; any other jumps to the original and tints it.
     @Test func theQuoteLeadsToTheThreadOrTheOriginal() async {
         let store = await chat([
@@ -390,8 +403,9 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         store.quoteAction(reply: "r1", original: "a")?()
         #expect(store.thread == nil && store.jumpTarget == "a" && store.jumps == 1 && store.tinted == "a")
         store.quoteAction(reply: "r2", original: "a")?()
-        #expect(store.thread?.anchor.id == "r2")
-        #expect(store.composerThread == ThreadTarget(messageId: "a", instanceKnowsThreads: true, quote: true, thread: "r2"))
+        #expect(store.thread?.anchor.id == "r2" && store.tinted == "a")
+        // A send from the thread view goes to the thread, quoting nothing.
+        #expect(store.composerThread?.body == ["chatThread": .string("r2")] && !store.showsQuoteBar)
         store.closeThread()
         // An original not held leads nowhere.
         #expect(store.quoteAction(reply: "r1", original: "gone") == nil)

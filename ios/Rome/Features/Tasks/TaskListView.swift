@@ -270,16 +270,19 @@ struct TaskListRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if status == "needs_you", !stopping {
+                    // An icon, as on the web: goes to the card in Chat.
                     Button(action: onRespond) {
-                        Text("Respond")
-                            .romeFont(14, .semibold)
+                        Image(systemName: "arrow.up.forward")
+                            .romeFont(18, .medium)
                             .foregroundStyle(Palette.fg)
-                            .padding(.horizontal, 12)
-                            .frame(minHeight: 30)
-                            .background(Palette.fillStrong, in: Capsule())
-                            .contentShape(Capsule())
+                            .frame(width: 34, height: 34)
+                            .background(Palette.fillStrong, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressScaleStyle())
+                    .padding(.vertical, -6)
+                    .accessibilityLabel(Text("Respond"))
                 }
             }
         }

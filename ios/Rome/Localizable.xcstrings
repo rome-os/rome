@@ -3079,6 +3079,16 @@
         }
       }
     },
+    "Reply to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回复：%@"
+          }
+        }
+      }
+    },
     "Reply to this task" : {
       "localizations" : {
         "zh-Hans" : {
