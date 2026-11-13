@@ -58,6 +58,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
     func interrupt(turnId: String) async throws
     func tasks() async throws -> [ConciergeTask]
+    /// Stops a task now, as its owner asked from its card.
+    func stopTask(id: String) async throws
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
@@ -151,6 +153,7 @@ final class LiveBackend: RomeBackend {
         return page.messages
     }
 
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]
         if let before { query.append(URLQueryItem(name: "before", value: before)) }
@@ -211,6 +214,10 @@ final class LiveBackend: RomeBackend {
 
     func interrupt(turnId: String) async throws {
         try await client.post("/chat/turns/\(escape(turnId))/interrupt")
+    }
+
+    func stopTask(id: String) async throws {
+        try await client.post("/concierge/tasks/\(escape(id))/stop")
     }
 
     func tasks() async throws -> [ConciergeTask] {
@@ -392,6 +399,8 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
+    /// Demo data and test doubles stop nothing.
+    func stopTask(id: String) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.
     func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
     /// Demo data and test doubles belong to no account.

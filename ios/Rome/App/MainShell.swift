@@ -60,6 +60,8 @@ struct MainShell: View {
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
+    /// "See usage" was pressed inside the Agent page: Settings opens as it closes.
+    @State private var openUsageAfterCover = false
     @State private var settingsPath: [SettingsRoute] = []
     /// A page of the instance, in a sheet over the main stack.
     @State private var page: URL?
@@ -126,6 +128,7 @@ struct MainShell: View {
                     }
                 }
                 .environment(\.chatLinkOpener, openChatLink)
+                .environment(\.openUsage, { settingsPath = []; showSettings = true })
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
@@ -137,7 +140,13 @@ struct MainShell: View {
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
             }
         }
-        .fullScreenCover(item: $agentPage) { route in
+        .fullScreenCover(item: $agentPage, onDismiss: {
+            // Settings is a sheet of this view, so it waits for the cover to be gone.
+            guard openUsageAfterCover else { return }
+            openUsageAfterCover = false
+            settingsPath = []
+            showSettings = true
+        }) { route in
             // Its own stack: a task opens inside the page, and back returns
             // to the Tasks as they were.
             NavigationStack(path: $agentPath) {
@@ -156,6 +165,11 @@ struct MainShell: View {
             }
             .environment(model)
             .environment(\.chatLinkOpener, openChatLink)
+            // Settings is a sheet of this view: the cover closes first.
+            .environment(\.openUsage, {
+                openUsageAfterCover = true
+                agentPage = nil
+            })
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))

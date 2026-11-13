@@ -27,12 +27,14 @@ extension EnvironmentValues {
 struct BubbleMenu {
     /// When the message was written; nil leaves the title out.
     var date: Date? = nil
-    /// Opens the message's chat thread; nil where there are none.
+    /// Quotes the message in the reply bar; nil where there are no replies.
     var onReply: (() -> Void)? = nil
     /// Opens share mode on the message's turn; nil shares the text.
     var onShare: (() -> Void)? = nil
-    /// Inside a thread: the text is selectable instead, and there is no menu.
+    /// Inside a thread view: a tap on the bubble stays on it.
     var inThread = false
+    /// A message that did not go through: its reason and what to do come first.
+    var problem: SendProblem? = nil
 }
 
 /// The menu's items, shared by both bubbles.
@@ -41,6 +43,10 @@ private struct BubbleMenuItems: View {
     let menu: BubbleMenu
 
     var body: some View {
+        if let problem = menu.problem {
+            // Not sent, so there is nothing to reply to or share yet.
+            SendProblemItems(problem: problem, text: text)
+        } else {
         Section {
             if let onReply = menu.onReply {
                 Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
@@ -54,17 +60,17 @@ private struct BubbleMenuItems: View {
         } header: {
             if let date = menu.date { Text(verbatim: RelativeTime.separator(date)) }
         }
+        }
     }
 }
 
 private extension View {
-    /// The bubble lifts under the finger with the system's menu; inside a
-    /// thread its text is selected the system's way instead.
+    /// The bubble lifts under the finger with the system's menu. Inside a
+    /// thread view it keeps its own tap, so one on the message never closes it.
     @ViewBuilder
     func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
         if menu.inThread {
-            // Its own tap, so one on the message never closes the thread.
-            self.textSelection(.enabled).onTapGesture {}
+            self.onTapGesture {}.contextMenu { BubbleMenuItems(text: text, menu: menu) }
         } else {
             self.contextMenu { BubbleMenuItems(text: text, menu: menu) }
         }
@@ -76,43 +82,72 @@ struct UserBubble: View {
     var images: [UserImage] = []
     let pending: PendingSend.State?
     var onRetry: () -> Void = {}
+    /// Removes a send that cannot go through; nil leaves it out.
+    var onDelete: (() -> Void)? = nil
     var menu = BubbleMenu()
+    /// Rome's mark on the message: being worked on, or failed.
+    var mark: StatusMark? = nil
+    /// What the message replies to, quoted at the top of the bubble.
+    var quote: MessagePart.ReplyQuote? = nil
+    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    var onQuote: (() -> Void)? = nil
+
+    private var problem: SendProblem? {
+        SendProblem(pending, onRetry: onRetry, onDelete: onDelete)
+    }
+
+    /// The long-press menu, with the problem first when the message has one.
+    private var bubbleMenu: BubbleMenu {
+        var menu = menu
+        menu.problem = problem
+        return menu
+    }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
             HStack(alignment: .center, spacing: 8) {
-                if pending == .failed {
-                    Button(action: onRetry) { AlertGlyph(size: 18) }
-                        .frame(width: 28, height: 28)
-                        .accessibilityLabel("Not sent. Tap to retry.")
+                if let problem {
+                    SendProblemIcon(problem: problem, text: text)
                 }
                 VStack(alignment: .trailing, spacing: 6) {
                     if !images.isEmpty {
                         UserImageGrid(images: images)
                     }
-                    if !text.isEmpty {
-                        Text(text)
-                            .romeFont(16)
-                            .lineSpacing(5)
-                            .foregroundStyle(.white)
+                    if !text.isEmpty || quote != nil {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let quote {
+                                QuotedReply(quote: quote, onTap: onQuote)
+                            }
+                            if !text.isEmpty {
+                                Text(text)
+                                    .romeFont(16)
+                                    .lineSpacing(5)
+                                    .foregroundStyle(.white)
+                            }
+                        }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .bubbleMenu(text: text, menu: menu)
+                            .bubbleMenu(text: text, menu: bubbleMenu)
+                    }
+                }
+                // The mark sits on the top leading corner of the bubble, or of the
+                // photos, over the corner and clear of the first line's start.
+                .overlay(alignment: .topLeading) {
+                    if let mark {
+                        StatusMarkBadge(mark: mark)
+                            .offset(x: -StatusMarkBadge.size / 2, y: -StatusMarkBadge.size / 2)
+                            .transition(.opacity)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
-            }
-            if pending == .failed {
-                Button("Not sent · Tap to retry", action: onRetry)
-                    .romeFont(12, .medium)
-                    .foregroundStyle(Palette.destructive)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 56)
         .animation(.easeOut(duration: 0.2), value: pending)
+        .animation(.easeOut(duration: 0.15), value: mark)
     }
 }
 
@@ -339,19 +374,7 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let forwardedFrom {
-                Button {
-                    onOpenChat(forwardedFrom.chatId, forwardedFrom.title)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrowshape.turn.up.right").romeFont(11, .semibold)
-                        Text("From “\(forwardedFrom.title)”").lineLimit(1)
-                    }
-                    .romeFont(12, .semibold)
-                    .foregroundStyle(Palette.sub)
-                }
-                .buttonStyle(.plain)
-            }
+            // A forwarded result is a plain bubble: the label under it names its task.
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
@@ -368,15 +391,9 @@ struct AgentBubble: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
-        .overlay(alignment: .leading) {
-            if forwardedFrom != nil {
-                Capsule().fill(Palette.sub.opacity(0.55)).frame(width: 3).padding(.vertical, 10).padding(.leading, 5)
-            }
-        }
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, forwardedFrom == nil ? 64 : 32)
+        .bubbleWidth()
     }
 
     /// A small grey chevron, centred. Folded, its backdrop is the fade into
@@ -457,35 +474,60 @@ struct CopyButton: View {
 /// title. Its status is left out, since progress is not reported accurately.
 struct TaskCard: View {
     let title: String
+    /// How the task stands, as "Task chat · <word>"; nil keeps the bare "Task".
+    var state: TaskCardState? = nil
+    var stopping = false
+    var onStop: (() -> Void)? = nil
     let action: () -> Void
+
+    /// The line above the title.
+    private var label: String {
+        state.map { String(localized: "Task chat · \($0.word)") } ?? String(localized: "Task")
+    }
 
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Task")
+                Text(verbatim: label)
                     .romeFont(CardScale.label)
                     .foregroundStyle(Palette.sub)
+
                 HStack(spacing: 8) {
                     Text(title)
-                        .romeFont(CardScale.title, .semibold)
-                        .tracking(-0.3)
+                        .romeFont(CardScale.body, .semibold)
                         .foregroundStyle(Palette.fg)
                         .multilineTextAlignment(.leading)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .romeFont(12, .bold)
-                        .foregroundStyle(Palette.sub)
                 }
             }
+            // Room for Stop on the right.
+            .padding(.trailing, state?.stoppable == true ? 58 : 0)
+            // One width whatever the state line says, so a state change never moves the card's edge.
+            .fillsBubbleWidth()
             .cardPadding()
             .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .softElevation(radius: Metrics.cardRadius)
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .containerRelativeFrame(.horizontal) { width, _ in (Metrics.column(width) - 32) * 0.82 }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("Task, \(title)")
+        .overlay(alignment: .trailing) {
+            // On the right of the card, beside its own tap, so a press on Stop
+            // never opens the chat. A quiet button, not a row of its own.
+            if state?.stoppable == true, let onStop {
+                Button(action: onStop) {
+                    Text(stopping ? "Stopping…" : "Stop")
+                        .romeFont(12, .semibold)
+                        .foregroundStyle(Palette.sub)
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .background(Palette.fill, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(stopping)
+                .padding(.trailing, 12)
+            }
+        }
+        .bubbleWidth()
+        .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
     }
 }
 
@@ -509,13 +551,23 @@ enum TranscriptSpacing {
         if case .separator = row { return 20 }
         if case .separator = previous { return 14 }
         if case .typing = row { return 14 }
-        // Right under the message whose thread it counts.
-        if case .threadReplies = row { return 4 }
+        if case .notice = row { return 14 }
+        // A faint line stands apart, like a time separator.
+        switch (row, previous) {
+        case (.sessionRenewal, _), (_, .sessionRenewal): return 14
+        default: break
+        }
+        // Tight under its own message, and apart from the next one.
+        if case .threadLabel = row { return 3 }
+        if case .sourceLabel = row { return 3 }
+        if case .threadLabel = previous { return row.isGuardian ? 18 : 14 }
+        if case .sourceLabel = previous { return row.isGuardian ? 18 : 14 }
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
         switch (row, previous) {
         case (.agentText, .agentText): return 3
         case (.taskCard, .agentText), (.agentText, .taskCard), (.taskCard, .taskCard): return 6
+        case (.taskAsk, .agentText), (.agentText, .taskAsk): return 6
         default: return 12
         }
     }
