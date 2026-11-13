@@ -2,6 +2,18 @@
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// A chat entry is a shared chat's name, or `{ dm, label }` for a stand-in direct message.
+const readArgs = (chat) => (typeof chat === "string" ? { chat } : { dm: chat.dm });
+const label = (chat) => (typeof chat === "string" ? chat : chat.label);
+
+async function agentMessagesIn(env, chat, since) {
+  const found = [];
+  for (const message of await env.read({ ...readArgs(chat), since })) {
+    if (message.author === env.agentAuthor) found.push({ ...message, chat: label(chat) });
+  }
+  return found;
+}
+
 /**
  * Polls `chats` until the agent posts after message `since`, and returns that message with
  * its `chat` added, or null once `timeoutMs` passes. `since` is compared across chats, which
@@ -11,11 +23,7 @@ export async function waitForAgent(env, { chats, since, timeoutMs, pollMs }) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const found = [];
-    for (const chat of chats) {
-      for (const message of await env.read({ chat, since })) {
-        if (message.author === env.agentAuthor) found.push({ ...message, chat });
-      }
-    }
+    for (const chat of chats) found.push(...(await agentMessagesIn(env, chat, since)));
     if (found.length > 0) {
       found.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
       return found[0];
@@ -28,11 +36,7 @@ export async function waitForAgent(env, { chats, since, timeoutMs, pollMs }) {
 /** Every message the agent posted in `chats` after `since`, each with its `chat` added. */
 export async function agentMessagesSince(env, { chats, since }) {
   const all = [];
-  for (const chat of chats) {
-    for (const message of await env.read({ chat, since })) {
-      if (message.author === env.agentAuthor) all.push({ ...message, chat });
-    }
-  }
+  for (const chat of chats) all.push(...(await agentMessagesIn(env, chat, since)));
   return all;
 }
 

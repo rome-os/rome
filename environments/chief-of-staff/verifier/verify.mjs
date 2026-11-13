@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { cosEnv } from "./lib/cos-env.mjs";
-import { makeJudge } from "./lib/judge.mjs";
+import { JUDGE_PROMPT_VERSION, makeJudge } from "./lib/judge.mjs";
 import { verify } from "./lib/runner.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,9 +29,10 @@ const { values } = parseArgs({
 
 const words = (s) => s.split(" ").filter(Boolean);
 const seconds = (s) => Math.round(Number(s) * 1000);
-const judgeName = values.judge.includes("claude-judge.mjs")
+const judgeCommand = values.judge.includes("claude-judge.mjs")
   ? `claude-judge (${process.env.COS_JUDGE_MODEL ?? "claude-sonnet-5-5"})`
   : values.judge;
+const judgeName = `${judgeCommand}, prompt ${JUDGE_PROMPT_VERSION}`;
 
 try {
   const { report, outDir } = await verify({

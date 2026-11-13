@@ -14,10 +14,16 @@ const here = fileURLToPath(new URL("..", import.meta.url));
 const PHASE_1 = ["K1", "K2", "K3", "K5", "K6", "K7", "A1", "A5"];
 
 async function runAgainst(agent, options = {}) {
+  const { fakeEnv = {}, ...verifyOptions } = options;
   const dir = mkdtempSync(join(tmpdir(), `cos-verify-${agent}-`));
   const env = cosEnv({
     command: ["node", join(here, "fake/cos-env.mjs")],
-    env: { ...process.env, COS_FAKE_STATE: join(dir, "state.json"), COS_FAKE_AGENT: agent },
+    env: {
+      ...process.env,
+      COS_FAKE_STATE: join(dir, "state.json"),
+      COS_FAKE_AGENT: agent,
+      ...fakeEnv,
+    },
   });
   return verify({
     env,
@@ -27,7 +33,7 @@ async function runAgainst(agent, options = {}) {
     allowDirty: true,
     outDir: join(dir, "run"),
     log: () => {},
-    ...options,
+    ...verifyOptions,
   });
 }
 
@@ -57,6 +63,22 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
   it("runs only the rules asked for, and reports an unknown rule as not checked", async () => {
     const { report } = await runAgainst("good", { rules: ["A5", "P1"] });
     assert.deepEqual(statuses(report), { A5: "pass", P1: "not_checked" });
+  });
+
+  it("holds K3 and K6 at not checked when a required leg cannot run", async () => {
+    const { report } = await runAgainst("good", {
+      rules: ["K3", "K6"],
+      fakeEnv: { COS_FAKE_NO_SECOND_ACCOUNT: "1", COS_FAKE_NO_RENEW: "1" },
+    });
+    // Both have legs that pass, so a rule that only reported those would count as passed.
+    // The unavailable leg is required, so neither rule passes.
+    assert.deepEqual(statuses(report), { K3: "not_checked", K6: "not_checked" });
+    const k3 = report.results.find((r) => r.rule === "K3");
+    assert.match(k3.reason, /second account/);
+    assert.ok(
+      k3.checks.some((c) => c.name.startsWith("Marisol") && c.status === "pass"),
+      "the single-account attribution still passed",
+    );
   });
 
   it("refuses a dirty tree unless allowed", async () => {

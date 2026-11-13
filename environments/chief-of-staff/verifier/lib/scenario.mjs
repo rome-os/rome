@@ -29,26 +29,25 @@ export function check(name, status, detail, evidence = []) {
 
 /**
  * Folds a rule's checks into one result. Any failed check fails the rule. A rule whose
- * checks all pass except some not checked passes with `partial` set, and the report names
- * the parts not checked.
+ * checks all pass except some optional ones not checked passes with `partial` set, and the
+ * report names the parts not checked. A check made with `required: true` that comes back not
+ * checked holds the whole rule at not checked: the rule does not count as passed while a part
+ * the rules require was not run.
  */
 export function ruleResult(checks) {
   const failed = checks.filter((c) => c.status === "fail");
   const passed = checks.filter((c) => c.status === "pass");
   const unchecked = checks.filter((c) => c.status === "not_checked");
+  const requiredUnchecked = unchecked.filter((c) => c.required);
   const evidence = [...new Set(checks.flatMap((c) => c.evidence))];
+  const name = (list) => list.map((c) => `${c.name}: ${c.detail}`).join("; ");
   if (failed.length > 0) {
-    return {
-      status: "fail",
-      reason: failed.map((c) => `${c.name}: ${c.detail}`).join("; "),
-      evidence,
-      checks,
-    };
+    return { status: "fail", reason: name(failed), evidence, checks };
   }
-  if (passed.length === 0) {
+  if (passed.length === 0 || requiredUnchecked.length > 0) {
     return {
       status: "not_checked",
-      reason: unchecked.map((c) => `${c.name}: ${c.detail}`).join("; "),
+      reason: name(requiredUnchecked.length > 0 ? requiredUnchecked : unchecked),
       evidence,
       checks,
     };
@@ -56,13 +55,15 @@ export function ruleResult(checks) {
   return {
     status: "pass",
     partial: unchecked.length > 0,
-    reason:
-      unchecked.length > 0
-        ? `not checked: ${unchecked.map((c) => `${c.name}: ${c.detail}`).join("; ")}`
-        : "all checks passed",
+    reason: unchecked.length > 0 ? `not checked: ${name(unchecked)}` : "all checks passed",
     evidence,
     checks,
   };
+}
+
+/** A check the rules require: when it comes back not checked, the rule cannot pass. */
+export function required(check) {
+  return { ...check, required: true };
 }
 
 /** Maps a judge's verdict to a check, keeping the verdict and its reasons as evidence. */

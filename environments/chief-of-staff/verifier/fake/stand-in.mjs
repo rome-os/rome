@@ -12,10 +12,12 @@ function who(state, message, breaks) {
   const team = state.team;
   if (breaks === "K3") {
     // Attributes by the display name the message was posted under, so a renamed member's
-    // message lands on the first member.
+    // message, and a message from a second account, land on the wrong person or nobody.
     return team.members.find((m) => m.name === message.displayName) ?? team.members[0];
   }
-  return team.members.find((m) => m.account === message.author);
+  // A person's accounts share a base name before the colon: "member1" and "member1:2".
+  const base = message.author.split(":")[0];
+  return team.members.find((m) => m.account === base);
 }
 
 function roster(state, breaks) {

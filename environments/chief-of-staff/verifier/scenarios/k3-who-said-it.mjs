@@ -1,8 +1,9 @@
 import { tokensIn } from "../lib/checks.mjs";
-import { ask, check, ruleResult } from "../lib/scenario.mjs";
+import { ask, check, required, ruleResult } from "../lib/scenario.mjs";
 
 const CHAT = "standup";
 const RENAMED_TO = "Teo (on call)";
+const SECOND_ACCOUNT_NAME = "Mari (laptop)";
 
 /**
  * Each commitment carries words no other commitment uses, so an answer that repeats them
@@ -33,6 +34,13 @@ const COMMITMENTS = [
   },
 ];
 
+// A commitment the member at index 0 posts from a second Discord account of the same person.
+const SECOND_ACCOUNT_COMMITMENT = {
+  member: 0,
+  text: "From my spare account: I'm also writing the Kelpie-7 flashing runbook for the field team.",
+  tokens: ["flashing runbook"],
+};
+
 export default {
   rule: "K3",
   title: "Who said it",
@@ -53,6 +61,28 @@ export default {
       posted.push({ ...commitment, id });
     }
 
+    // One person, two accounts. When cos-env cannot post from a second account, the
+    // two-account part of the rule stays unchecked and K3 cannot pass.
+    const secondAccount = `${team.members[0].account}:2`;
+    let twoAccountCheck;
+    try {
+      await env.rename({ as: secondAccount, displayName: SECOND_ACCOUNT_NAME });
+      const id = await env.post({
+        as: secondAccount,
+        chat: CHAT,
+        text: SECOND_ACCOUNT_COMMITMENT.text,
+      });
+      posted.push({ ...SECOND_ACCOUNT_COMMITMENT, id, secondAccount: true });
+    } catch (error) {
+      twoAccountCheck = required(
+        check(
+          "a person with two accounts",
+          "not_checked",
+          `cos-env could not post from a second account: ${error.message}`,
+        ),
+      );
+    }
+
     const checks = [];
     for (const [index, member] of team.members.entries()) {
       const asker = team.members[(index + 1) % team.members.length].account;
@@ -71,7 +101,10 @@ export default {
       const missing = own.filter((p) => tokensIn(reply.text, p.tokens).length === 0);
       const misattributed = others.filter((p) => tokensIn(reply.text, p.tokens).length > 0);
       const problems = [
-        ...missing.map((p) => `missed ${p.id}${p.afterRename ? " (posted after the rename)" : ""}`),
+        ...missing.map(
+          (p) =>
+            `missed ${p.id}${p.afterRename ? " (posted after the rename)" : ""}${p.secondAccount ? " (posted from the second account)" : ""}`,
+        ),
         ...misattributed.map((p) => `attributed ${p.id} by ${team.members[p.member].name} to them`),
       ];
       checks.push(
@@ -88,13 +121,7 @@ export default {
             },
       );
     }
-    checks.push(
-      check(
-        "a person with two accounts",
-        "not_checked",
-        "the environment gives each member one account, so no person has two",
-      ),
-    );
+    if (twoAccountCheck) checks.push(twoAccountCheck);
     await env.rename({ as: renamed.account, displayName: renamed.name });
     return ruleResult(checks);
   },

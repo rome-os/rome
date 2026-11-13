@@ -37,9 +37,13 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
     async dm({ as, text }) {
       return call(["dm", "--as", as, text]);
     },
-    /** Messages oldest first, each `{ id, author, text, thread, time, reactions }`. */
-    async read({ chat, thread, since }) {
-      const args = ["read", "--chat", chat];
+    /**
+     * Messages oldest first, each `{ id, author, text, thread, time, reactions }`. Pass
+     * `{ chat }` for a shared chat or `{ dm: member }` for the private chat that stands in
+     * for a direct message (`cos-env read --dm <member>`).
+     */
+    async read({ chat, dm, thread, since }) {
+      const args = dm ? ["read", "--dm", dm] : ["read", "--chat", chat];
       if (thread) args.push("--thread", thread);
       if (since) args.push("--since", since);
       const out = await call(args);
@@ -47,6 +51,10 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
     },
     async rome(action) {
       await call(["rome", action]);
+    },
+    /** Renews the agent's session in `chat`, as `cos-env rome renew-session --chat <name>`. */
+    async renewSession(chat) {
+      await call(["rome", "renew-session", "--chat", chat]);
     },
     async rename({ as, displayName }) {
       await call(["rename", "--as", as, displayName]);
@@ -64,7 +72,11 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
   };
 }
 
-/** The chat name `read` takes for a member's direct messages with the agent. */
-export function dmChat(account) {
-  return `dm:${account}`;
+/**
+ * The private chat that stands in for a member's direct messages with the agent, as a chat
+ * entry the check helpers and `read` understand. Bots cannot send each other direct
+ * messages, so the scripted run uses a chat only the agent and that member can read.
+ */
+export function dmChat(member) {
+  return { dm: member, label: `dm-${member}` };
 }

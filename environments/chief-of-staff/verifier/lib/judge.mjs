@@ -7,6 +7,10 @@ import { readFileSync } from "node:fs";
 
 const template = readFileSync(new URL("judge-prompt.md", import.meta.url), "utf8");
 
+// The judge prompt's version. A change to judge-prompt.md bumps it, so a report always names
+// the prompt its verdicts came from. A judge change is a verifier change.
+export const JUDGE_PROMPT_VERSION = "J1";
+
 const TASKS = ["matches-sheet", "answers-question", "says-unknown", "same-facts"];
 
 function judgePrompt(input) {

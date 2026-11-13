@@ -64,6 +64,7 @@ const { values, positionals } = parseArgs({
   options: {
     as: { type: "string" },
     chat: { type: "string" },
+    dm: { type: "string" },
     thread: { type: "string" },
     since: { type: "string" },
     "mention-agent": { type: "boolean", default: false },
@@ -91,6 +92,12 @@ switch (command) {
     state.displayNames[values.as] = positionals.join(" ");
     break;
   case "post": {
+    // Stand in for an environment without a fourth bot token: only posting from a second
+    // account fails.
+    if (values.as.includes(":") && process.env.COS_FAKE_NO_SECOND_ACCOUNT) {
+      console.error("no fourth bot token: a second account is not available");
+      process.exit(2);
+    }
     const message = add({
       chat: values.chat,
       thread: values.thread ?? null,
@@ -104,7 +111,7 @@ switch (command) {
   }
   case "dm": {
     const message = add({
-      chat: `dm:${values.as}`,
+      chat: `dm-${values.as}`,
       author: values.as,
       text: positionals.join(" "),
     });
@@ -113,9 +120,10 @@ switch (command) {
     break;
   }
   case "read": {
+    const chat = values.dm ? `dm-${values.dm}` : values.chat;
     const since = values.since ? Number(values.since) : -1;
     const found = state.messages
-      .filter((m) => m.chat === values.chat && Number(m.id) > since)
+      .filter((m) => m.chat === chat && Number(m.id) > since)
       .filter((m) => !values.thread || m.thread === values.thread)
       .map(({ id, author, text, thread, time }) => ({
         id,
@@ -129,6 +137,11 @@ switch (command) {
     break;
   }
   case "rome":
+    // renew-session keeps the agent's knowledge; only a restart or a cold start re-wakes it.
+    if (positionals[0] === "renew-session" && process.env.COS_FAKE_NO_RENEW) {
+      console.error("renewing the session needs a core change");
+      process.exit(2);
+    }
     if (positionals[0] === "restart" || positionals[0] === "start") state.restarts += 1;
     break;
   default:

@@ -121,6 +121,9 @@ export async function verify({
     dirty,
     judge: judgeName,
     waits,
+    notes: [
+      "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. The real direct-message path is checked by hand in the live trial.",
+    ],
     selection: rules ? { rules } : { phase: phase ?? 1 },
     summary: {
       pass: results.filter((r) => r.status === "pass").length,

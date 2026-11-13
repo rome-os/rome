@@ -30,6 +30,7 @@ export function renderMarkdown(report) {
   if (report.dirty.length > 0) {
     lines.push("", `Run with --dirty: uncommitted changes in ${report.dirty.join(", ")}.`);
   }
+  for (const note of report.notes ?? []) lines.push("", note);
   lines.push(
     "",
     "## Results",
