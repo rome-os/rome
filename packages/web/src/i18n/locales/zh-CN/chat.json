@@ -631,16 +631,6 @@
     "loadFailed": "无法加载这个对话串。",
     "replyPlaceholder": "回复"
   },
-  "sessionRenewal": {
-    "notice": "已整理上下文 · {{reason}}",
-    "reasons": {
-      "context": "对话较长",
-      "setup": "设定已更新",
-      "idle": "闲置后",
-      "daily": "每日重置",
-      "working_dir": "工作目录不存在"
-    }
-  },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
     "kinds": {

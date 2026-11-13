@@ -35,8 +35,6 @@ export type ConciergeItem =
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
   /** Line above the first message that was unread when the chat opened. */
   | { kind: "unread"; key: string }
-  /** Faint line where the chat's agent session was renewed, for `reason`. */
-  | { kind: "renewal"; key: string; reason: string }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -179,7 +177,6 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
-  if (a.kind === "renewal") return b.kind === "renewal" && a.key === b.key && a.reason === b.reason;
   if (a.kind === "unread") return b.kind === "unread";
   if (a.kind === "notice")
     return (
@@ -225,7 +222,6 @@ export function buildConciergeItems(
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
-    | { kind: "renewal"; key: string; reason: string }
     | { kind: "unread" }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
@@ -290,13 +286,6 @@ export function buildConciergeItems(
           group = null;
         } else if (isRenderable(message)) add(message, "agent");
       }
-    } else if (row.kind === "session_renewal") {
-      slots.push({
-        kind: "renewal",
-        key: row.key,
-        reason: row.reason,
-      });
-      group = null;
     } else if (row.kind === "automated_input") {
       sources.set(row.turnId, row.source);
     } else if (row.kind === "model_switch") {
@@ -326,7 +315,7 @@ export function buildConciergeItems(
       items.push(UNREAD_DIVIDER);
     } else if (slot.kind === "separator") {
       items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
-    } else if (slot.kind === "notice" || slot.kind === "renewal") {
+    } else if (slot.kind === "notice") {
       items.push(slot);
     } else {
       const entries = slot.messages.map((message) =>

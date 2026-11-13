@@ -9,7 +9,6 @@ import { LatestTaskChatsContext } from "@/components/chat/entries/render";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatEntry } from "@/lib/chat-types";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
-import { SessionRenewalNotice } from "./SessionRenewalNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
 import { buildConciergeItems, showsTyping } from "@/components/chat/concierge-groups";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
@@ -103,8 +102,6 @@ export function ConciergeTranscript({
             if (item.kind === "separator")
               return <ConciergeTimeSeparator key={item.key} at={item.at} />;
             if (item.kind === "unread") return <ConciergeUnreadDivider key={item.key} />;
-            if (item.kind === "renewal")
-              return <SessionRenewalNotice key={item.key} reason={item.reason} className="mb-0" />;
             if (item.kind === "notice")
               return (
                 <ModelSwitchNotice
