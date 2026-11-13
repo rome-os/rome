@@ -1209,7 +1209,7 @@ export class ConciergeService {
     if (schedule.report === "when_it_matters") this.quietRuns.add(chatId);
     const sent = await this.dashboard.send(
       taskChatPlace(chatId),
-      { text: schedule.brief },
+      { text: schedule.brief, ...(schedule.skill ? { skillName: schedule.skill } : {}) },
       CONCIERGE_ACCOUNT,
     );
     if (!sent.ok) {

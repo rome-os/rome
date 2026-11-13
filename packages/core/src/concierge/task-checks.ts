@@ -10,11 +10,7 @@ import type { RoutineEngine } from "../routines/engine.js";
 import type { Routine } from "../routines/types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { createLogger } from "../logger.js";
-import {
-  CONCIERGE_TASK_RUN_ACTION,
-  nextScheduledRun,
-  type TaskSchedules,
-} from "./task-schedule.js";
+import { CONCIERGE_TASK_RUN_ACTION, type TaskSchedules } from "./task-schedule.js";
 
 const log = createLogger("concierge-task-checks");
 
@@ -83,13 +79,11 @@ export interface TaskPlace {
  */
 function scheduledRunOf(
   routine: Routine,
-  now: number,
+  at: number | null,
   place: TaskPlace | null,
 ): (PendingCheck & { chatId: string; owner: string }) | null {
   const taskId = (routine.args as Record<string, unknown> | null)?.taskId;
-  if (typeof taskId !== "string" || !place) return null;
-  const at = nextScheduledRun(routine, now);
-  if (at === null) return null;
+  if (typeof taskId !== "string" || !place || at === null) return null;
   return {
     id: routine.id,
     name: routine.name,
@@ -105,8 +99,8 @@ function scheduledRunOf(
 export interface TaskChecksDeps {
   routines: Pick<RoutinesRepository, "listRoutines" | "deleteIfNoActiveRuns" | "update">;
   routineEngine: Pick<RoutineEngine, "deactivate" | "onChange" | "setFireGate">;
-  /** Skips a schedule's next run when its check is cancelled. */
-  schedules?: Pick<TaskSchedules, "skipNext" | "remove">;
+  /** A schedule's next run, and its skip when its check is cancelled. */
+  schedules?: Pick<TaskSchedules, "skipNext" | "remove" | "nextRunOf">;
   /** Where each task stands, from its row; null for a task that is gone. */
   placeOf?: (taskId: string) => Promise<TaskPlace | null>;
   now?: () => number;
@@ -144,7 +138,8 @@ export class TaskChecks {
         const taskId = (routine.args as Record<string, unknown> | null)?.taskId;
         const place =
           typeof taskId === "string" ? ((await this.deps.placeOf?.(taskId)) ?? null) : null;
-        const check = scheduledRunOf(routine, now, place);
+        const at = (await this.deps.schedules?.nextRunOf(routine)) ?? null;
+        const check = scheduledRunOf(routine, at, place);
         if (check) checks.push(check);
         continue;
       }

@@ -106,11 +106,12 @@ import {
   automatedMessageNotice,
 } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { automatedSenderId } from "../../webchat/automated-source.js";
+import { automatedSenderId, automatedSource } from "../../webchat/automated-source.js";
 import {
   automatedInputLabel,
   automatedInputPrompt,
   automatedInputSource,
+  fromOwner,
 } from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
@@ -3789,6 +3790,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // with a quiet system turn instead: the text stays in the turn's trace and
     // the chat shows a faint line naming who sent it.
     if (automated && isConciergeChat(session)) {
+      // An action's loopback send stands for the person its turn ran for,
+      // known here only by kind. That person must be able to open the chat,
+      // as on any send into a dashboard chat: a visitor's, of no known
+      // account, opens no one's. A send no person made is Rome's own work.
+      const actorKind = sourceId ? body.automatedActorKind : undefined;
+      if (
+        actorKind === "visitor" ||
+        (actorKind === "guardian" &&
+          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian")))
+      ) {
+        return answer({ error: "Session not found" }, 404);
+      }
       const concierge = deps.concierge;
       const text = body.text?.trim() ?? "";
       if (!concierge || !text) {
@@ -3796,12 +3809,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       const source = automatedInputSource(automated);
       void concierge
-        .runSystemTurn(sessionId, automatedInputPrompt(source, text), {
-          quiet: true,
-          inputLabel: automatedInputLabel(source),
-          inputSource: source,
-          pushLevel: "active",
-        })
+        .runSystemTurn(
+          sessionId,
+          automatedInputPrompt(
+            source,
+            text,
+            fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
+          ),
+          {
+            quiet: true,
+            inputLabel: automatedInputLabel(source),
+            inputSource: source,
+            pushLevel: "active",
+          },
+        )
         .catch((error: unknown) =>
           log.warn("automated input into a Concierge chat did not run", {
             sessionId,

@@ -27,7 +27,6 @@ import {
   type TestRome,
 } from "../../test/kit/index.js";
 import { createActionEngineRepos } from "../../test/db.js";
-import { CONCIERGE_TASK_RUN_ACTION, registerTaskRunAction } from "../../concierge/task-schedule.js";
 
 // ActionEngine tests through the real wiring (testkit): the production engine
 // over real repositories on an in-memory DB. Assertions read execution rows,
@@ -436,27 +435,6 @@ describe("ActionEngine", () => {
           data: "ran-in-main",
         });
         expect(actionWorkerFork).not.toHaveBeenCalled();
-      });
-
-      it("runs a task's scheduled run in main, and lets the turn it starts call actions", async () => {
-        const registry = { register: (action: Action) => void actions.push(action) };
-        const actions: Action[] = [];
-        const runs: unknown[] = [];
-        // The run starts the task chat's turn, whose agent calls actions of its own.
-        registerTaskRunAction(registry, {
-          runScheduledTask: async (taskId) => {
-            runs.push(taskId, await engine.run("system:send_message", {}));
-            return "sent";
-          },
-        });
-        actions.push(buildAction("system:send_message", { type: "system", execute: inMain }));
-        const { engine } = engineWith(actions, (name) => name.startsWith("core:"));
-
-        await expect(engine.run(CONCIERGE_TASK_RUN_ACTION, { taskId: "task-1" })).resolves.toEqual({
-          status: "ok",
-          data: { run: "sent" },
-        });
-        expect(runs).toEqual(["task-1", { status: "ok", data: "system:send_message" }]);
       });
 
       it("still runs a coordination root when every worker slot is taken", async () => {

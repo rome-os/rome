@@ -76,7 +76,10 @@ export async function readerOwner(
  * own routes allow: another person's Concierge or task chat is not found. A
  * send no person's or chat's turn made is Rome's own work, and goes through.
  */
-async function refuseAnotherOwnersChat(webchatRepo: WebChatRepository, chatId: string) {
+export async function refuseAnotherOwnersChat(
+  webchatRepo: WebChatRepository,
+  chatId: string,
+): Promise<void> {
   const caller = dashboardCaller();
   const person = caller.actor && caller.actor.kind !== "anonymous";
   if (!person && !caller.chatId) return;

@@ -1,6 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/db.js";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import { ActionEngine } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
+import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
+import type { Routine } from "../routines/types.js";
 import { TaskChecks } from "./task-checks.js";
 import {
   CONCIERGE_TASK_RUN_ACTION,
@@ -53,14 +57,29 @@ describe("TaskSchedules", () => {
   let schedules: TaskSchedules;
   let checks: TaskChecks;
   let active: Set<string>;
+  // The zone the guardian's floating schedules fire in now.
+  let zone: string;
+  let provider: ScheduleTriggerProvider;
 
   beforeEach(() => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    rs.setSystemTime(new Date(NOW));
     testDb = createTestDb();
     routines = new RoutinesRepository(testDb.db);
     active = new Set();
+    zone = "Asia/Shanghai";
+    // The real schedule trigger, so each schedule's next run is stored as
+    // the engine stores it; no fire happens while the clock stands still.
+    provider = new ScheduleTriggerProvider(routines, async () => zone);
     const routineEngine = {
-      activate: async (routine: { id: string }) => void active.add(routine.id),
-      deactivate: async (id: string) => void active.delete(id),
+      activate: async (routine: Routine) => {
+        active.add(routine.id);
+        await provider.activate(routine, async () => {});
+      },
+      deactivate: async (id: string) => {
+        active.delete(id);
+        provider.deactivate(id);
+      },
       onChange: () => () => {},
       setFireGate: () => {},
     };
@@ -68,7 +87,7 @@ describe("TaskSchedules", () => {
       routines,
       routineEngine,
       timezoneOf: async (owner) => (owner === "guardian" ? "Asia/Shanghai" : "UTC"),
-      now: () => NOW,
+      floatingZone: async () => zone,
     });
     checks = new TaskChecks({
       routines,
@@ -80,9 +99,20 @@ describe("TaskSchedules", () => {
       now: () => NOW,
     });
   });
-  afterEach(() => testDb.close());
+  afterEach(() => {
+    for (const id of active) provider.deactivate(id);
+    rs.useRealTimers();
+    testDb.close();
+  });
 
   const task = { id: "task-1", title: "Daily summary", owner: "guardian" };
+  /** The engine re-activating floating schedules after the guardian's zone changed. */
+  const moveTo = async (newZone: string) => {
+    zone = newZone;
+    for (const routine of await routines.listRoutines()) {
+      await provider.activate(routine, async () => {});
+    }
+  };
 
   it("keeps one routine per task, in the owner's zone, and reads it back", async () => {
     await schedules.set(task, { at: "12:25", report: "every_run", brief: "Sum up my day" });
@@ -146,6 +176,68 @@ describe("TaskSchedules", () => {
     expect(await schedules.of("task-1")).toMatchObject({ nextRunAt: at(13, 4, 25) });
   });
 
+  it("follows the guardian's zone as the engine does, and skips the run that really fires", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+    await moveTo("Europe/London");
+
+    // 12:25 in London today, not in the zone the schedule was set in.
+    expect(await schedules.of("task-1")).toMatchObject({ nextRunAt: at(12, 12, 25) });
+    const [check] = await checks.inChat("concierge");
+    expect(check).toMatchObject({ at: at(12, 12, 25) });
+    expect(await checks.cancel("concierge", check!.id)).toBe(true);
+    expect(await checks.inChat("concierge")).toMatchObject([{ at: at(13, 12, 25) }]);
+    expect(await schedules.takeSkip("task-1", at(12, 12, 25))).toBe(true);
+  });
+
+  it("keeps the check and its skip on the engine's fire when the zone moves from UTC to Los Angeles", async () => {
+    zone = "UTC";
+    await schedules.set(task, { at: "08:00", report: "every_run", brief: "b" });
+    await moveTo("America/Los_Angeles");
+    const engineNext = async () =>
+      (await routines.findByKey(taskScheduleKey("task-1")))?.nextRunAt?.getTime();
+
+    // 08:00 in Los Angeles is 16:00 UTC, still to come today.
+    expect(await engineNext()).toBe(at(12, 16));
+    const [check] = await checks.inChat("concierge");
+    expect(check?.at).toBe(await engineNext());
+    await checks.cancel("concierge", check!.id);
+    expect((await routines.findByKey(taskScheduleKey("task-1")))?.args).toMatchObject({
+      skips: [new Date(at(12, 16)).toISOString()],
+    });
+    expect(await checks.inChat("concierge")).toMatchObject([{ at: at(13, 16) }]);
+    expect(await schedules.takeSkip("task-1", at(12, 16))).toBe(true);
+  });
+
+  it("skips every run cancelled before the first of them fires", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+    const cancelNext = async () => {
+      const [check] = await checks.inChat("concierge");
+      expect(await checks.cancel("concierge", check!.id)).toBe(true);
+    };
+    await cancelNext();
+    await cancelNext();
+    expect(await checks.inChat("concierge")).toMatchObject([{ at: at(15, 4, 25) }]);
+
+    // The engine fires each day in turn, moving its next run on after each.
+    const id = (await routines.findByKey(taskScheduleKey("task-1")))!.id;
+    expect(await schedules.takeSkip("task-1", at(13, 4, 25))).toBe(true);
+    await routines.updateNextRun(id, new Date(at(14, 4, 25)));
+    expect(await schedules.takeSkip("task-1", at(14, 4, 25))).toBe(true);
+    await routines.updateNextRun(id, new Date(at(15, 4, 25)));
+    expect(await schedules.takeSkip("task-1", at(15, 4, 25))).toBe(false);
+  });
+
+  it("honours a skip when its fire comes late, and keeps it through a run by hand", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+    const [check] = await checks.inChat("concierge");
+    await checks.cancel("concierge", check!.id);
+
+    // A run started by hand before its time is no scheduled fire.
+    expect(await schedules.takeSkip("task-1", NOW)).toBe(false);
+    // The host slept, and the 12:25 fire came five minutes late.
+    expect(await schedules.takeSkip("task-1", at(13, 4, 30))).toBe(true);
+  });
+
   it("removes the schedule when the task's checks are cancelled, as a stop does", async () => {
     await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
 
@@ -174,6 +266,14 @@ describe("TaskSchedules", () => {
       },
     );
     expect(await checks.laterOf(["gone"])).toEqual(new Map());
+  });
+
+  it("stores a schedule's skill, and reads it back for each run", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b", skill: "s:x" });
+    expect((await routines.findByKey(taskScheduleKey("task-1")))?.args).toMatchObject({
+      skill: "s:x",
+    });
+    expect(await schedules.of("task-1")).toMatchObject({ brief: "b", skill: "s:x" });
   });
 
   it("fixes a visitor's schedule to their own zone", async () => {
@@ -214,5 +314,43 @@ describe("registerTaskRunAction", () => {
     });
     expect(runs).toEqual([["task-1", NOW]]);
     expect(await action!.execute({}, {} as never)).toMatchObject({ status: "error" });
+  });
+});
+
+describe("a task's scheduled run on the action engine", () => {
+  it("runs in main, where the Concierge is, and lets the turn it starts call actions", async () => {
+    const registry = new ActionRegistryImpl();
+    const runs: unknown[] = [];
+    // The run starts the task chat's turn, whose agent calls actions of its own.
+    registerTaskRunAction(registry, {
+      runScheduledTask: async (taskId) => {
+        runs.push(taskId, await engine.run("system:send_message", {}));
+        return "sent";
+      },
+    });
+    registry.register({
+      config: {
+        name: "system:send_message",
+        type: "system",
+        description: "Sends a message.",
+        complexity: "simple",
+        speed: "fast",
+        reliability: "high",
+        sideEffects: "write",
+      },
+      execute: async () => ({ status: "ok", data: "sent-in-main" }),
+    });
+    // No worker to fork: a root that left main would fail.
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 0,
+      isFirstPartyAction: () => true,
+    });
+
+    await expect(engine.run(CONCIERGE_TASK_RUN_ACTION, { taskId: "task-1" })).resolves.toEqual({
+      status: "ok",
+      data: { run: "sent" },
+    });
+    expect(runs).toEqual(["task-1", { status: "ok", data: "sent-in-main" }]);
   });
 });
