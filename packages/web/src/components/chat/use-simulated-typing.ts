@@ -36,8 +36,9 @@ export function useSimulatedTyping(
     const known = seen.current;
     const lastKnown = messages.findLastIndex((message) => known.has(message.id));
     // Rows that share no message with the ones before replace them, as a
-    // reconnect's newest page does: history, which never waits.
-    const replaced = lastKnown < 0;
+    // reconnect's newest page does: history, which never waits. Before any
+    // was seen, as in a new chat, the first reply is new, not a replacement.
+    const replaced = known.size > 0 && lastKnown < 0;
     const waiting: { id: string; ms: number }[] = [];
     messages.forEach((message, index) => {
       if (known.has(message.id)) return;

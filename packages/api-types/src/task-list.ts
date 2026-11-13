@@ -73,6 +73,13 @@ export type TaskListTrigger =
       rrule: string | null;
       /** A one-off's date, `YYYY-MM-DD`; null for a repeating one. */
       date: string | null;
+      /** The IANA zone `localTime` is in. */
+      tzid?: string;
+      /**
+       * `fixed` runs in `tzid`; `floating` runs in the owner's current zone,
+       * so its `tzid` is only the zone it was made in.
+       */
+      tzMode?: "fixed" | "floating";
     }
   | { type: "event-bus"; eventName: string }
   | { type: "manual" };
