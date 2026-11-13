@@ -10,6 +10,9 @@ import { TASK_CHAT_TRIGGER_KIND } from "../webchat/privacy.js";
 /** The longest conclusion the Concierge forwards, in characters. */
 export const CONCLUSION_MAX_CHARS = 600;
 
+/** The conclusion of an answer that has nothing new for the guardian. */
+export const NOTHING_TO_REPORT = "Nothing to report.";
+
 export const CONCLUSION_OPEN = "<!-- rome:conclusion -->";
 export const CONCLUSION_CLOSE = "<!-- /rome:conclusion -->";
 
@@ -88,6 +91,8 @@ export const CONCLUSION_INSTRUCTION = [
   CONCLUSION_CLOSE,
   "",
   `The conclusion is the outcome in one or two sentences, at most ${CONCLUSION_MAX_CHARS} characters, plus anything the guardian must decide or do, such as a question you need answered. The Concierge passes this section on to the guardian word for word and nothing else of your answer, so it must make sense alone. Never put a secret, code, password or token in it. Write it in every final answer, after a follow-up and when the guardian writes to you directly too.`,
+  "",
+  `The conclusion is news for the guardian, not a receipt. What they chose on a card, an approval they gave or turned down, and work done exactly as they asked with nothing else to tell are already in front of them: then the conclusion is only "${NOTHING_TO_REPORT}", in the language of their request, and the Concierge sends nothing. Report a result, a finding, a failure, or a question for them.`,
   "",
   "Your answer here is how your result reaches the guardian: the Concierge forwards it. Never send a message into the guardian's Concierge chat yourself, with `system:send_message` or any other tool, and never set up a routine that does. Recurring work is the Concierge's scheduled task, not a routine of yours.",
 ].join("\n");

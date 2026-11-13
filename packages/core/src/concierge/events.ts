@@ -248,7 +248,7 @@ export async function renderTaskEvents(
     }
     if (changes.includes("no_response")) {
       lines.push(
-        "Nobody answered its question or approval in time, so it ended for no response. Do not ask again; the card stays answerable.",
+        "Nobody answered its question or approval in time, so it ended for no response. Its card shows that and stays answerable. Say nothing now and do not ask again: the next digest lists it once.",
       );
     }
     const attrs = [

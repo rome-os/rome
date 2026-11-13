@@ -57,7 +57,12 @@ import {
   RESTRICTED_PLAN,
 } from "../test/kit/model-accounts.js";
 import type { ModelAccountReports } from "../agent/index.js";
-import { CONCLUSION_CLOSE, CONCLUSION_MAX_CHARS, CONCLUSION_OPEN } from "./conclusion.js";
+import {
+  CONCLUSION_CLOSE,
+  CONCLUSION_MAX_CHARS,
+  CONCLUSION_OPEN,
+  NOTHING_TO_REPORT,
+} from "./conclusion.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
 /** A topic chat: another Concierge chat. */
@@ -2101,6 +2106,14 @@ describe("Concierge tools", () => {
       expect(result.content[0].text).toContain("no conclusion section");
       expect(result.content[0].text).toContain("Nothing was sent");
       expect(result.content[0].text).toContain("at most two sentences");
+      expect(stored(s)).toEqual([]);
+    });
+
+    it("refuses a conclusion with nothing to report, and sends nothing", async () => {
+      const s = await withAnswer(concluded(NOTHING_TO_REPORT, DETAILS));
+      const result = await s.tool("chat_forward", { chatId: "task-1" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Send nothing about it");
       expect(stored(s)).toEqual([]);
     });
 
