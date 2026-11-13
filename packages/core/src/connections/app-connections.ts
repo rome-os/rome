@@ -85,8 +85,9 @@ function failure(
   code: AppConnectionErrorBody["code"],
   message: string,
   retryable = false,
+  reason?: string,
 ): AppConnectionBrokerResult<never> {
-  return { ok: false, error: { code, message, retryable } };
+  return { ok: false, error: { code, message, retryable, ...(reason ? { reason } : {}) } };
 }
 
 function brokerUnavailable(): AppConnectionBrokerResult<never> {
@@ -698,6 +699,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           "provider_error",
           error.retryable,
           executionApproval,
+          messageFor("provider_error"),
           error.reason,
         );
       }
@@ -711,10 +713,11 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     retryable = false,
     approval: "not_required" | "approved" = "not_required",
     message = messageFor(code),
+    reason?: string,
   ): Promise<AppConnectionBrokerResult<never>> {
     await this.access.updateInvocation(invocation.id, "failed", code, true);
     await this.audit(invocation, approval, code);
-    return failure(code, message, retryable);
+    return failure(code, message, retryable, reason);
   }
 
   private async failUnclaimedInvocation(

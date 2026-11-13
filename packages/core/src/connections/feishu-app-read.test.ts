@@ -178,7 +178,12 @@ describe("Feishu document access through the App gateway", () => {
           input: { documentId: "DocumentA" },
         }),
       ).rejects.toMatchObject({
-        detail: { code: "provider_error", message: "provider_scope_required", retryable: false },
+        detail: {
+          code: "provider_error",
+          reason: "provider_scope_required",
+          message: "The connection provider rejected the operation.",
+          retryable: false,
+        },
       });
     } finally {
       await h.registry.stopAll();

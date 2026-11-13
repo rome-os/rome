@@ -210,7 +210,8 @@ The gateway compares the canonical ID against the app's resource constraint.
 Read results are discarded when app access expires or is revoked during provider
 I/O, or when the provider grant changes. Provider failures expose only fixed
 reasons such as `provider_scope_required`, `provider_resource_denied` and
-`provider_not_found`, with the SDK error code `provider_error`. Provider messages,
+`provider_not_found` in the optional SDK error `reason`, with code `provider_error`.
+Apps branch on `reason`, not the human-readable `message`. Provider messages,
 headers and credentials are not forwarded. The audit keeps no document content.
 
 This does not add user OAuth, managed writes, a raw HTTP broker, or automatic
