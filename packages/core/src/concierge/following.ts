@@ -316,6 +316,11 @@ export interface ConciergeFollowing {
   followsIn?(chatId: string, owner: ConciergeOwner): Promise<TaskListFollowItem[]>;
   /** Calls `listener` whenever a follow or the rules are written. Returns the unsubscribe. */
   onChange?(listener: () => void): () => void;
+  /** What `owner` follows that reports to Concierge chat `chatId`, with each source's label. */
+  followsOfChat(
+    chatId: string,
+    owner: ConciergeOwner,
+  ): Promise<{ source: string; label: string; target: string }[]>;
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -1350,6 +1355,18 @@ export function startConciergeFollowing(
       await deps.timezoneMoved?.(owner, timezone);
     },
 
+    async followsOfChat(chatId, owner) {
+      const follows = followsOf(await readStored(), owner).filter((f) => f.chat === chatId);
+      if (follows.length === 0) return [];
+      // A source that cannot be read now is named by its id.
+      const sources = await readSources().catch(() => [] as WatchSource[]);
+      return follows.map(({ source, target }) => ({
+        source,
+        label: sources.find((s) => s.source === source)?.label ?? source,
+        target,
+      }));
+    },
+
     async moveToMainChat(chatId, to = null) {
       const stored = await readStored();
       const moved = stored.follows.filter((f) => f.chat === chatId).length;
@@ -1418,6 +1435,7 @@ export function startConciergeFollowing(
       exclusive(() => unserialized.unfollow(source, target, owner)),
     setRules: (change, owner) => exclusive(() => unserialized.setRules(change, owner)),
     setTimezone: (owner, timezone) => exclusive(() => unserialized.setTimezone(owner, timezone)),
+    followsOfChat: (chatId, owner) => exclusive(() => unserialized.followsOfChat(chatId, owner)),
     moveToMainChat: (chatId, to) => exclusive(() => unserialized.moveToMainChat(chatId, to)),
   };
   service.attachFollowing(following);

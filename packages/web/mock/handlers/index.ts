@@ -21,6 +21,7 @@ import { http, HttpResponse } from "msw";
 import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
+  type ConciergeChatWorkResponse,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
@@ -1333,6 +1334,10 @@ export const handlers = [
       },
     );
   }),
+  // Mock mode runs no turns and follows nothing, so a topic chat has nothing to move or stop.
+  http.get("/api/concierge/chats/:chatId/follows-and-tasks", () =>
+    HttpResponse.json({ follows: [], openTasks: [] } satisfies ConciergeChatWorkResponse),
+  ),
   http.get("/api/concierge/tasks", () =>
     HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
   ),

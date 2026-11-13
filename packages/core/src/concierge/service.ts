@@ -582,6 +582,61 @@ export class ConciergeService {
   }
 
   /**
+   * What deleting topic chat `chatId` of `owner` moves to the main chat: the
+   * follows that report to it, and its open tasks, counted as
+   * {@link retireChat} counts them (status is not `ended`).
+   */
+  async followsAndTasksOf(
+    chatId: string,
+    owner: ConciergeOwner,
+  ): Promise<{
+    follows: { source: string; label: string; target: string }[];
+    openTasks: { id: string; title: string; sessionId: string | null }[];
+  }> {
+    const follows = (await this.attachedFollowing?.followsOfChat(chatId, owner)) ?? [];
+    const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, new Date())).map(
+      (task) => task.row,
+    );
+    const status = await this.deps.tasks.statusOf(rows);
+    const openTasks = rows
+      .filter((row) => status.get(row.id)?.status !== "ended")
+      .map(({ id, title, sessionId }) => ({ id, title, sessionId }));
+    return { follows, openTasks };
+  }
+
+  /**
+   * Ends the follows and stops the open tasks of topic chat `chatId`, before
+   * {@link retireChat} runs, so it finds nothing to move and posts no notice.
+   * A task with a task chat ends as archiving that chat ends it, so its row
+   * does not land on the main chat's panel. One that fails to end is logged
+   * and left for `retireChat` to move.
+   */
+  async endChatWork(chatId: string): Promise<void> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat || !isConciergeChat(chat) || this.isMainChat(chat)) return;
+    const owner = ownerOf(chat);
+    const { follows, openTasks } = await this.followsAndTasksOf(chatId, owner);
+    const failed = (what: string, error: unknown) =>
+      log.warn(`failed to end a deleted chat's ${what}`, {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    for (const { source, target } of follows) {
+      await this.attachedFollowing
+        ?.unfollow(source, target, owner)
+        .catch((e) => failed("follow", e));
+    }
+    for (const task of openTasks) {
+      try {
+        const ended = task.sessionId ? await this.endTaskChat(task.sessionId, "archived") : null;
+        if (!ended) await this.stopTask(task.id, "guardian");
+      } catch (error) {
+        failed("task", error);
+      }
+    }
+  }
+
+  /**
    * A Concierge chat is being archived or deleted. Its follows, its unfinished
    * tasks and the events owed to it move to its owner's main chat, and the
    * Concierge says so there. A main chat is never retired: this throws for one.

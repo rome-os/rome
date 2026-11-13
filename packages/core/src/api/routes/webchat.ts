@@ -3006,7 +3006,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (isMainConciergeChat(session)) {
       return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
     }
-    const retiredTo = isConciergeChat(session)
+    // `followsAndTasks=stop` ends them first, so retireChat has nothing to move.
+    const isTopic = isConciergeChat(session);
+    if (isTopic && c.req.query("followsAndTasks") === "stop") {
+      await deps.concierge?.endChatWork(sessionId);
+    }
+    const retiredTo = isTopic
       ? ((await deps.concierge?.retireChat(sessionId, "deleted")) ?? null)
       : null;
     // Closing the chat session also closes the live AgentSession

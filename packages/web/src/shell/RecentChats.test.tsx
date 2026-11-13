@@ -364,6 +364,13 @@ describe("RecentChats", () => {
 
   describe("Concierge topic chats", () => {
     const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    // What `follows-and-tasks` answers for a topic chat; null makes the read fail.
+    const work = {
+      answer: { follows: [], openTasks: [] } as {
+        follows: { source: string; label: string; target: string }[];
+        openTasks: { id: string; title: string }[];
+      } | null,
+    };
     const mockTopics = () =>
       rs.spyOn(globalThis, "fetch").mockImplementation((async (
         input: RequestInfo | URL,
@@ -373,6 +380,11 @@ describe("RecentChats", () => {
         const method = init?.method ?? "GET";
         if (method !== "GET") {
           requests.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+        }
+        if (url === "/api/concierge/chats/topic-1/follows-and-tasks") {
+          return work.answer
+            ? Response.json(work.answer)
+            : new Response("unavailable", { status: 500 });
         }
         const body =
           url === "/api/concierge/chats" && method === "POST"
@@ -395,6 +407,7 @@ describe("RecentChats", () => {
 
     beforeEach(() => {
       requests.length = 0;
+      work.answer = { follows: [], openTasks: [] };
       concierge.chatId = "concierge";
       concierge.chats = [
         { id: "concierge", name: "Concierge", main: true, unread: 0 },
@@ -437,6 +450,134 @@ describe("RecentChats", () => {
         }),
       );
       await waitFor(() => expect(screen.getByTestId("location-path").textContent).toBe("/message"));
+    });
+  });
+
+  describe("deleting a Concierge topic chat", () => {
+    const requests: Array<{ url: string; method: string }> = [];
+    const work = {
+      answer: null as {
+        follows: { source: string; label: string; target: string }[];
+        openTasks: { id: string; title: string }[];
+      } | null,
+    };
+    const mockDelete = () =>
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (method !== "GET") requests.push({ url, method });
+        if (url === "/api/concierge/chats/topic-1/follows-and-tasks") {
+          return work.answer
+            ? Response.json(work.answer)
+            : new Response("unavailable", { status: 500 });
+        }
+        if (method !== "GET") return Response.json({ ok: true });
+        if (url.startsWith("/api/chat/sessions")) return Response.json([]);
+        if (url === "/api/concierge/session") return Response.json({ id: "concierge", unread: 0 });
+        if (url.startsWith("/api/concierge/tasks")) return Response.json({ tasks: [] });
+        return new Response("not found", { status: 404 });
+      }) as typeof fetch);
+    const openDialog = async (user: ReturnType<typeof userEvent.setup>) => {
+      renderRecentChats();
+      await user.click(await screen.findByRole("button", { name: "Actions for Calendar" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+      return screen.findByRole("dialog", { name: 'Delete "Calendar"?' });
+    };
+
+    beforeEach(() => {
+      requests.length = 0;
+      concierge.chatId = "concierge";
+      concierge.chats = [
+        { id: "concierge", name: "Concierge", main: true, unread: 0 },
+        { id: "topic-1", name: "Calendar", main: false, unread: 0 },
+      ];
+    });
+
+    it("lists the follows and open tasks, moves them by default, and stops them only when asked", async () => {
+      work.answer = {
+        follows: [{ source: "github", label: "GitHub", target: "rome-os/rome" }],
+        openTasks: [
+          { id: "t-1", title: "Fix login redirect" },
+          { id: "t-2", title: "Draft release notes" },
+        ],
+      };
+      mockDelete();
+      const user = userEvent.setup();
+      const dialog = await openDialog(user);
+      await within(dialog).findByText("This chat is deleted permanently. It has:");
+      expect(within(dialog).getByText("Following GitHub · rome-os/rome")).toBeTruthy();
+      expect(within(dialog).getByText("Open task: Fix login redirect")).toBeTruthy();
+      expect(within(dialog).getByText("Open task: Draft release notes")).toBeTruthy();
+      const move = within(dialog).getByRole("radio", { name: /Move to the main chat/ });
+      const stop = within(dialog).getByRole("radio", { name: /Stop them/ });
+      expect(move.getAttribute("aria-checked")).toBe("true");
+      expect(stop.getAttribute("aria-checked")).toBe("false");
+
+      // Left on the default, the delete asks for nothing more than before.
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+      await waitFor(() =>
+        expect(requests).toContainEqual({ url: "/api/chat/sessions/topic-1", method: "DELETE" }),
+      );
+      expect(requests.map((request) => request.url)).not.toContain(
+        "/api/chat/sessions/topic-1?followsAndTasks=stop",
+      );
+
+      requests.length = 0;
+      cleanup();
+      const again = await openDialog(user);
+      await within(again).findByText("This chat is deleted permanently. It has:");
+      await user.click(within(again).getByRole("radio", { name: /Stop them/ }));
+      await user.click(within(again).getByRole("button", { name: "Delete" }));
+      await waitFor(() =>
+        expect(requests).toContainEqual({
+          url: "/api/chat/sessions/topic-1?followsAndTasks=stop",
+          method: "DELETE",
+        }),
+      );
+    });
+
+    it("lists five items and counts the rest", async () => {
+      work.answer = {
+        follows: [{ source: "github", label: "GitHub", target: "rome-os/rome" }],
+        openTasks: [1, 2, 3, 4, 5, 6].map((n) => ({ id: `t-${n}`, title: `Task ${n}` })),
+      };
+      mockDelete();
+      const dialog = await openDialog(userEvent.setup());
+      await within(dialog).findByText("and 2 more");
+      expect(within(dialog).getAllByRole("listitem")).toHaveLength(6);
+      expect(within(dialog).queryByText("Open task: Task 5")).toBeNull();
+      expect(within(dialog).getByText("Open task: Task 4")).toBeTruthy();
+    });
+
+    it("shows no choice and no move sentence for a chat with nothing to move", async () => {
+      work.answer = { follows: [], openTasks: [] };
+      mockDelete();
+      const user = userEvent.setup();
+      const dialog = await openDialog(user);
+      await within(dialog).findByText("This chat is deleted permanently.");
+      expect(within(dialog).queryByRole("radio")).toBeNull();
+      expect(within(dialog).queryByText(/move to the main/i)).toBeNull();
+      expect(within(dialog).queryByText(/What happens to them/)).toBeNull();
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+      await waitFor(() =>
+        expect(requests).toContainEqual({ url: "/api/chat/sessions/topic-1", method: "DELETE" }),
+      );
+    });
+
+    it("falls back to the move sentence, and a plain delete, when the list cannot be read", async () => {
+      work.answer = null;
+      mockDelete();
+      const user = userEvent.setup();
+      const dialog = await openDialog(user);
+      await within(dialog).findByText(/Its follows and open tasks move to the main Rome chat\./);
+      expect(within(dialog).queryByRole("radio")).toBeNull();
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+      await waitFor(() =>
+        expect(requests).toContainEqual({ url: "/api/chat/sessions/topic-1", method: "DELETE" }),
+      );
     });
   });
 
