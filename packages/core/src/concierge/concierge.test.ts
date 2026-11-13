@@ -6025,6 +6025,38 @@ describe("scheduled tasks", () => {
     expect(s.backendTurns[0]?.prompt).toContain(taskId);
   });
 
+  it("keeps a scheduled task's skill and sends it with every run's brief", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = JSON.parse(
+      (
+        await s.tool("chat_start", {
+          title: "Daily summary",
+          brief: "Sum up my last day",
+          skill: "coding:app_creation",
+          schedule: { at: "12:25" },
+        })
+      ).content[0].text,
+    );
+    expect(schedules.set).toHaveBeenCalledWith(expect.objectContaining({ id: taskId }), {
+      at: "12:25",
+      report: "every_run",
+      brief: "Sum up my last day",
+      skill: "coding:app_creation",
+    });
+    schedules.of.mockImplementation(async () => ({
+      ...view("every_run"),
+      skill: "coding:app_creation",
+    }));
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+    expect(s.send).toHaveBeenLastCalledWith(
+      expect.anything(),
+      { text: "Sum up my last day", skillName: "coding:app_creation" },
+      CONCIERGE_ACCOUNT,
+    );
+  });
+
   it("lets a quiet run with nothing to ask go to the digest, not a report", async () => {
     const s = setup();
     withSchedules(s, "when_it_matters");

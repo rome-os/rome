@@ -1028,7 +1028,10 @@ export async function buildConciergeTools(
               }
               if (!service.deps.schedules) throw new Error("Rome cannot schedule tasks here");
               const kept = raw === null ? null : await service.deps.schedules.of(taskId);
-              return { row, schedule: parseTaskSchedule(raw, kept?.brief) };
+              const schedule = parseTaskSchedule(raw, kept?.brief);
+              // A changed schedule keeps the skill its runs were started with.
+              if (schedule && kept?.skill) schedule.skill = kept.skill;
+              return { row, schedule };
             }),
           );
           const rows = await tasks.repo.upsertMany(writes);
@@ -1173,6 +1176,8 @@ export async function buildConciergeTools(
             args.schedule === undefined || args.schedule === null
               ? null
               : parseTaskSchedule(args.schedule, brief);
+          // Each run sends the brief with the skill the first send would have.
+          if (schedule && skill) schedule.skill = skill.name;
           if (schedule && !service.deps.schedules)
             throw new Error("Rome cannot schedule tasks here");
           if (taskId) {
