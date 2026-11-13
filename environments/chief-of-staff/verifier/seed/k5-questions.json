@@ -1,0 +1,42 @@
+[
+  {
+    "known": true,
+    "q": "What is Marisol Okonkwo-Vance's role?",
+    "a": "Tidal sensor firmware lead"
+  },
+  {
+    "known": true,
+    "q": "What is Teodor Halvorsen-Abara working on now?",
+    "a": "Rebuilding the brine-salinity ingest job, codenamed Saltmarsh"
+  },
+  {
+    "known": true,
+    "q": "What is Priya Lindqvist-Mbeki's role?",
+    "a": "Field operations coordinator"
+  },
+  {
+    "known": true,
+    "q": "Who owns the goal to ship Kelpie-7 firmware 3.0?",
+    "a": "Marisol Okonkwo-Vance"
+  },
+  { "known": true, "q": "When is the salinity ingest lag goal due?", "a": "2026-12-11" },
+  { "known": true, "q": "How many buoys does the Kelpie-7 firmware goal cover?", "a": "40" },
+  { "known": true, "q": "How many sensors are to be installed on the Orkney piers?", "a": "12" },
+  { "known": true, "q": "Who owns the Orkney pier install goal?", "a": "Priya Lindqvist-Mbeki" },
+  { "known": true, "q": "What is the target for salinity ingest lag?", "a": "Below 90 seconds" },
+  {
+    "known": true,
+    "q": "What is Priya Lindqvist-Mbeki working on now?",
+    "a": "Scheduling the Orkney pier sensor installs for week 49"
+  },
+  { "known": true, "q": "Which RTOS is the Kelpie-7 firmware being ported to?", "a": "Zephyr" },
+  { "known": true, "q": "When is the Orkney pier install goal due?", "a": "2027-02-05" },
+  { "known": true, "q": "Who owns the salinity ingest lag goal?", "a": "Teodor Halvorsen-Abara" },
+  { "known": true, "q": "What is Teodor Halvorsen-Abara's role?", "a": "Data pipeline engineer" },
+  { "known": true, "q": "When is the Kelpie-7 firmware 3.0 goal due?", "a": "2027-01-22" },
+  { "known": false, "q": "What is Teodor Halvorsen-Abara's favourite programming language?" },
+  { "known": false, "q": "What budget does the Orkney pier install goal have?" },
+  { "known": false, "q": "What did the team decide about opening an office in Bergen?" },
+  { "known": false, "q": "When is Marisol Okonkwo-Vance's next holiday?" },
+  { "known": false, "q": "Which vendor supplies the Kelpie-7 buoy batteries?" }
+]
