@@ -35,6 +35,8 @@ final class TranscriptStore {
     /// `TURN_POLL_FALLBACK_MS`.
     @ObservationIgnored var runningPollInterval: Duration = .seconds(30)
     @ObservationIgnored private var runningPoll: Task<Void, Never>?
+    /// `stop()` ran and `start()` has not since: no poll starts.
+    @ObservationIgnored private var closed = false
     private(set) var activeTurnId: String?
     private(set) var stopping = false
     /// The guardian stopped the last turn. Cleared when a new turn starts.
@@ -140,6 +142,7 @@ final class TranscriptStore {
 
     func start() {
         guard tokens.isEmpty else { return }
+        closed = false
         tokens.append(backend.events.subscribe(LiveTopic.chat(sessionId)) { [weak self] event in
             self?.handle(event)
         })
@@ -173,6 +176,11 @@ final class TranscriptStore {
         tokens = []
         for poll in approvalPolls.values { poll.cancel() }
         approvalPolls = [:]
+        closed = true
+        runningPoll?.cancel()
+        runningPoll = nil
+        resyncWork?.cancel()
+        resyncWork = nil
     }
 
     func reload() async {
@@ -544,7 +552,7 @@ final class TranscriptStore {
             return
         }
         if let anchor = message(root) {
-            open(anchor: anchor, older: [], replyTo: target.messageId)
+            open(anchor: anchor, older: [], replyTo: target.messageId, bare: target.bare == true)
             return
         }
         reopening = target
@@ -563,7 +571,7 @@ final class TranscriptStore {
                 reopening = nil
                 return
             }
-            open(anchor: anchor, older: found, replyTo: target.messageId)
+            open(anchor: anchor, older: found, replyTo: target.messageId, bare: target.bare == true)
         } catch APIError.notFound {
             if reopening == target { reopening = nil }
         } catch {}
@@ -635,7 +643,7 @@ final class TranscriptStore {
     /// still runs, so a live event that never arrives cannot leave them on.
     /// The poll ends with the running state.
     private func startRunningPoll() {
-        guard kind == .concierge, runningPoll == nil else { return }
+        guard kind == .concierge, !closed, runningPoll == nil else { return }
         runningPoll = Task { [weak self] in
             while !Task.isCancelled {
                 guard let interval = self?.runningPollInterval else { return }
@@ -732,6 +740,9 @@ final class TranscriptStore {
     }
 
     /// Shows `text` for a few seconds.
+    /// A Stop on a task card did not go through.
+    func stopTaskFailed() { say(String(localized: "Couldn't stop. Try again")) }
+
     private func say(_ text: String) {
         notice = text
         noticeWork?.cancel()
@@ -838,7 +849,9 @@ final class TranscriptStore {
         }
     }
 
-    func resolve(_ id: String, approve: Bool) {
+    /// `watch`: an approval of the chat's own keeps its record polled; a task
+    /// card's outcome comes from its `card` instead.
+    func resolve(_ id: String, approve: Bool, watch: Bool = true) {
         guard resolvingApproval[id] == nil else { return }
         resolvingApproval[id] = approve
         approvalErrors[id] = nil
@@ -846,10 +859,12 @@ final class TranscriptStore {
             do {
                 try await backend.resolveApproval(id: id, approve: approve)
                 settle(kind: "approval", id: id, outcome: .object(["kind": .string(approve ? "approved" : "rejected")]))
-                if let record = try? await backend.approval(id: id) { approvals[id] = record }
-                approvalPolls[id]?.cancel()
-                approvalPolls[id] = nil
-                watchApproval(id)
+                if watch {
+                    if let record = try? await backend.approval(id: id) { approvals[id] = record }
+                    approvalPolls[id]?.cancel()
+                    approvalPolls[id] = nil
+                    watchApproval(id)
+                }
             } catch {
                 approvalErrors[id] = String(localized: "Could not submit")
             }

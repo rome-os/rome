@@ -218,7 +218,12 @@ final class FakeBackend: RomeBackend {
         taskFetches += 1
         return taskRows
     }
-    func stopTask(id: String) async throws { stoppedTasks.append(id) }
+    /// What a stop on a task fails with; nil lets it through.
+    var stopError: APIError?
+    func stopTask(id: String) async throws {
+        if let stopError { throw stopError }
+        stoppedTasks.append(id)
+    }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
     /// What a decision on an approval fails with; nil lets it through.
     var resolveError: APIError? = .network

@@ -33,7 +33,6 @@ struct ChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { store.recheckRunning() }
         // Under an open thread, VoiceOver reads the thread, not what it covers.
         .accessibilityHidden(store.thread != nil)
         // The bar is clear: the transcript scrolls under its glass items.
@@ -266,7 +265,7 @@ struct ConciergeRow: View {
                     title: name,
                     state: state,
                     stopping: state.taskId.map { tasks.stopping.contains($0) } ?? false,
-                    onStop: state.taskId.map { id in { tasks.stopTask(id: id) } }
+                    onStop: state.taskId.map { id in { tasks.stopTask(id: id) { store.stopTaskFailed() } } }
                 ) {
                     onOpenChat(chatId, name)
                 }

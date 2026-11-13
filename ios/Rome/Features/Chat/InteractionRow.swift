@@ -43,6 +43,8 @@ struct InteractionRow: View {
             SettledCard(title: SettledOutcome.title(part), outcome: outcome) {
                 ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true, settledLabel: outcome) { _ in }
             }
+            // Decided is not done: an approved one may still fail and unfold, so its record stays watched.
+            .onAppear { if !isVisitor { store.watchApproval(part.approvalId) } }
         case .approval(_, let part, _):
             ApprovalCardView(
                 part: part,

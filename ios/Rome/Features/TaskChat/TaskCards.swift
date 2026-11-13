@@ -262,6 +262,7 @@ struct ApprovalCardView: View {
                 }
             }
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)

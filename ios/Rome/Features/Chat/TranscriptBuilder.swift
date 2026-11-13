@@ -156,11 +156,12 @@ enum TranscriptBuilder {
         let parsed = messages.map(\.parts)
         // The turns whose reply is an error part.
         var storedErrors = Set<String>()
-        // The turns that answer a message the guardian wrote.
+        // The turns that answer a message the guardian wrote: one a routine,
+        // an app or an agent sent in does not make its turn the guardian's.
         var guardianTurns = Set<String>()
         for (message, parts) in zip(messages, parsed) {
             guard let turn = message.turnId else { continue }
-            if message.isUser { guardianTurns.insert(turn) }
+            if message.isUser, !Self.isAutomated(message) { guardianTurns.insert(turn) }
             if !message.isTrace, parts.contains(where: { if case .error = $0 { true } else { false } }) { storedErrors.insert(turn) }
         }
         // Whether an agent message of a later turn says something a guardian
@@ -195,14 +196,15 @@ enum TranscriptBuilder {
 
         // The turns the Concierge began on its own, with where each came from:
         // by the turn's trace, or, from before, by an automated message that began it.
+        // A turn that took one of the guardian's own messages is never one of them.
         var unprompted: [String: TraceSummary.InputSource] = [:]
         if options.showNotices {
             for message in messages {
-                guard let turn = message.turnId else { continue }
+                guard let turn = message.turnId, !guardianTurns.contains(turn) else { continue }
                 if message.isTrace, let source = message.traceSummary?.automatedInput { unprompted[turn] = source }
             }
             for message in messages where Self.isAutomated(message) {
-                guard let turn = message.turnId, unprompted[turn] == nil, let sender = message.sender else { continue }
+                guard let turn = message.turnId, !guardianTurns.contains(turn), unprompted[turn] == nil, let sender = message.sender else { continue }
                 unprompted[turn] = TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
             }
         }

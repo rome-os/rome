@@ -518,6 +518,8 @@ struct TaskCard: View {
             }
             // Room for Stop on the right.
             .padding(.trailing, state?.stoppable == true ? 58 : 0)
+            // One width whatever the state line says, so a state change never moves the card's edge.
+            .fillsBubbleWidth()
             .cardPadding()
             .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .softElevation(radius: Metrics.cardRadius)

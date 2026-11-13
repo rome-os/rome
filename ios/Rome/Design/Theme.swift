@@ -7,6 +7,8 @@ enum Palette {
     static let bg = dynamic(0xF4F3EF, 0x0B0907)
     static let sheet = dynamic(0xF4F3EF, 0x120F0D)
     static let elevated = dynamic(0xFFFFFF, 0x191513)
+    /// The status mark's badge: lighter than the page in dark mode, so the emoji reads.
+    static let markFill = dynamic(0xFFFFFF, 0x4B433C)
     static let bubble = dynamic(0xEBE4DA, 0x1C1916)
     static let fill = dynamic(0xEFE9E1, 0x272320)
     static let fillStrong = dynamic(0xE8E1D7, 0x2A2523)

@@ -50,6 +50,8 @@ struct SettledCard<Full: View>: View {
                         }
                     }
                 }
+                // The bubble's full width, so answering or settling never changes it.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, CardScale.paddingH)
                 .padding(.vertical, 9)
                 .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
@@ -66,7 +68,7 @@ struct SettledCard<Full: View>: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        // Hugs its words, left, never wider than a bubble.
+        // Left, and as wide as a bubble can be.
         .bubbleWidth()
     }
 }
@@ -180,7 +182,7 @@ struct TaskAskView: View {
                     resolvedAt: nil,
                     canResolve: !isVisitor
                 ) { approve in
-                    store.resolve(approval.id, approve: approve)
+                    store.resolve(approval.id, approve: approve, watch: false)
                 }
                 .id(approval.id)
                 .bubbleWidth()
@@ -208,8 +210,10 @@ enum TaskAskMode: Equatable {
     static func of(card: TaskAskCard?, latest: Bool, task: ConciergeTask?) -> TaskAskMode {
         guard let card, let id = card.id else { return .settled }
         if card.settled { return .settled }
+        // An older copy is never answerable, expired or not.
+        guard latest else { return .open }
         if card.expired { return .expired }
-        guard latest, task?.status == "needs_you", task?.waitId == id else { return .open }
+        guard task?.status == "needs_you", task?.waitId == id else { return .open }
         return .waiting
     }
 }

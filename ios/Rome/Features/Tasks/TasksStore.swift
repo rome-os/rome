@@ -289,11 +289,12 @@ final class TasksStore {
     }
 
     /// Stops the task of a card. The task's next row from the instance settles the card.
-    func stopTask(id: String) {
+    /// `onFailure` runs when the instance did not take the stop.
+    func stopTask(id: String, onFailure: @escaping () -> Void = {}) {
         guard !stopping.contains(id) else { return }
         stopping.insert(id)
         Task {
-            try? await backend.stopTask(id: id)
+            do { try await backend.stopTask(id: id) } catch { onFailure() }
             stopping.remove(id)
         }
     }
