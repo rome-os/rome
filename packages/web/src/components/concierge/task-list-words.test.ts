@@ -43,6 +43,22 @@ describe("describeRoutineTrigger", () => {
     expect(describeRoutineTrigger({ type: "manual" }, t, "en")).toBe("manual");
   });
 
+  it("names the zone of a fixed-zone time unlike the browser's, as the Routines page does", () => {
+    const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const other = browser === "Pacific/Auckland" ? "America/Los_Angeles" : "Pacific/Auckland";
+    const zoned = (tzid: string, tzMode: "fixed" | "floating") =>
+      ({ ...schedule("FREQ=DAILY"), tzid, tzMode }) as const;
+    expect(describeRoutineTrigger(zoned(other, "fixed"), t, "en-GB")).toBe(
+      `daily {"time":"9:00 (${other})"}`,
+    );
+    expect(describeRoutineTrigger(zoned(other, "floating"), t, "en-GB")).toBe(
+      'daily {"time":"9:00"}',
+    );
+    expect(describeRoutineTrigger(zoned(browser, "fixed"), t, "en-GB")).toBe(
+      'daily {"time":"9:00"}',
+    );
+  });
+
   it("says only that it runs on a schedule for a rule it does not read", () => {
     expect(describeRoutineTrigger(schedule("FREQ=HOURLY;INTERVAL=2"), t, "en")).toBe("other");
   });

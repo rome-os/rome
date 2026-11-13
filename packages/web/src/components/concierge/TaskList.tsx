@@ -434,20 +434,23 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   const [older, setOlder] = useState<{ items: TaskListItem[]; cursor: string | null } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pending, setPending] = useState<ReadonlyMap<string, "stop" | "respond">>(new Map());
-  const { data, isError, dataUpdatedAt } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: chatTaskListKey(chatId),
     queryFn: () =>
       fetchJson<TaskListResponse>(listUrl(chatId), {
         fallback: t("concierge.taskList.loadFailed"),
       }),
   });
-  // A re-read of the first page may move rows across the pages read before
-  // it: they go, and Show more reads on from the new first page.
-  const firstPageRead = useRef(dataUpdatedAt);
-  firstPageRead.current = dataUpdatedAt;
+  // A re-read that changes the first page of ended rows may move rows across
+  // the pages read before it: they go, and Show more reads on from the new
+  // first page. A re-read that changes nothing there keeps them: the query
+  // keeps the old group object when its rows are the same.
+  const endedFirstPage = data?.groups.find((group) => group.key === "ended");
+  const firstPageRead = useRef(endedFirstPage);
+  firstPageRead.current = endedFirstPage;
   useEffect(() => {
-    if (dataUpdatedAt) setOlder(null);
-  }, [dataUpdatedAt]);
+    if (endedFirstPage) setOlder(null);
+  }, [endedFirstPage]);
   const reread = () => queryClient.invalidateQueries({ queryKey: chatTaskListKey(chatId) });
   useLiveEvents(
     { topic: chatTasksTopicName(chatId), sseUrl: `${listUrl(chatId)}/events` },
