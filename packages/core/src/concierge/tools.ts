@@ -634,8 +634,9 @@ export async function buildConciergeTools(
     const { chatId } = currentTurn();
     const found = await tasks.repo.getWithChat(taskId);
     if (!found || found.conciergeChat.id !== chatId || !found.row.threadRoot) return null;
-    // A row whose Concierge chat is gone reads as the main chat's, and keeps
-    // its root, which names a message only that gone chat had.
+    // A row whose Concierge chat is archived reads as the main chat's, and
+    // keeps its root, which names a message only that chat has. A deleted
+    // chat's rows keep none.
     return (await webchatRepo.getReplyTarget(chatId, found.row.threadRoot))
       ? found.row.threadRoot
       : null;

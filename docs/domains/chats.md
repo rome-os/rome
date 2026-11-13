@@ -165,7 +165,7 @@ One piece of work the Concierge keeps on its owner's task list, with a title, a 
 - The Concierge **writes** a task: it creates it and names it. Starting a task chat for one makes it active.
 - Rome tells the Concierge what a task's chat does, and marks a task not synced when the Concierge never takes in what it was told.
 - A task has at most one [chat thread](#chat-thread), and its root is kept for good.
-- A task reports to its owner's main chat while its Concierge chat is archived or deleted. Nothing moves it: it reads as the main chat's, and as its own chat's again once that chat is unarchived. An open task's thread stays behind and is a task's no more, so its label goes and the task starts a new thread in the main chat. An ended task keeps its thread.
+- A task reports to its owner's main chat while its Concierge chat is archived or deleted. Nothing moves it: it reads as the main chat's, and as its own chat's again once that chat is unarchived. An open task's thread stays behind and is a task's no more, so its label goes and the task starts a new thread in the main chat. An ended task keeps its thread while its chat is archived. Once the chat is deleted, its messages are gone, so its next message in the main chat starts a new thread too.
 - A task links one task chat in its life. A task whose task chat could not be started leaves no chat behind, and stays on the list as failed.
 - A message a task works for shows a [status reaction](#status-reaction) while the task is open, and until the Concierge reports its result.
 

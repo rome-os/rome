@@ -210,7 +210,12 @@ export interface ConciergeDeps {
 }
 
 /** A backend turn where it runs, with the message it answers when it reports on a task. */
-export type ResolvedTurn = BackendTurnParams & { reportedTask?: string };
+/**
+ * A backend turn as Rome asks for it: `taskIds`, the tasks whose news it
+ * carries, as a task event's batch names them.
+ */
+export type TurnParams = BackendTurnParams & { taskIds?: readonly string[] };
+export type ResolvedTurn = TurnParams & { reportedTask?: string };
 
 export interface SystemTurnOptions {
   quiet?: boolean;
@@ -218,18 +223,19 @@ export interface SystemTurnOptions {
   /** Each message the Concierge says in the turn goes to the phone of the
    *  person the chat serves at this level. A reminder, a recovery or a notice has none. */
   pushLevel?: NotifyLevel;
+  /** The tasks whose news the turn carries, as a task event's batch names them. */
+  taskIds?: readonly string[];
 }
 
 /**
- * The task ids a turn's prompt names: `<task id="…">` lines, the `task_id` of
- * a `defer` wake-up's note, and `task:<id>` names from before it.
+ * The task a `defer` wake-up is for, from the `task_id` of the `<defer_note>`
+ * line Rome writes ahead of the note (routines/defer.ts). Only the first such
+ * line counts: what the note itself says names nothing.
  */
-function namedTaskIds(prompt: string): Set<string> {
-  return new Set(
-    [...prompt.matchAll(/<task id="([^"]+)"|\btask_id="([^"]+)"|\btask:([\w-]+)/g)]
-      .map((match) => match[1] ?? match[2] ?? match[3])
-      .filter((id): id is string => Boolean(id)),
-  );
+function deferTaskIds(prompt: string): string[] {
+  const header = prompt.match(/^<defer_note [^\n]*$/m)?.[0];
+  const id = header?.match(/\btask_id="([^"]+)"/)?.[1];
+  return id ? [id.replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&amp;", "&")] : [];
 }
 
 export class ConciergeService {
@@ -526,12 +532,16 @@ export class ConciergeService {
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     // Its rows are its owner's main chat's from now on, as rows are read:
     // none is moved. Open ones start a new thread there.
-    const tasks = await this.deps.tasks.repo.leaveChat(chatId, async (rows) => {
-      const status = await this.deps.tasks.statusOf(rows);
-      return new Set(
-        rows.filter((row) => status.get(row.id)?.status !== "ended").map((row) => row.id),
-      );
-    });
+    const tasks = await this.deps.tasks.repo.leaveChat(
+      chatId,
+      async (rows) => {
+        const status = await this.deps.tasks.statusOf(rows);
+        return new Set(
+          rows.filter((row) => status.get(row.id)?.status !== "ended").map((row) => row.id),
+        );
+      },
+      { deleted: how === "deleted" },
+    );
     log.info("concierge chat retired", { chatId, how, follows, tasks });
     // A deleted chat is still there now: its caller tells the activity once
     // it is gone, so finished rows read as the main chat's by then.
@@ -684,7 +694,7 @@ export class ConciergeService {
    * passes here (alerts, digests, task events, recoveries and the wake-ups of
    * `defer`), so a turn never lands in a chat the guardian closed.
    */
-  async resolveTurn(params: BackendTurnParams): Promise<ResolvedTurn> {
+  async resolveTurn(params: TurnParams): Promise<ResolvedTurn> {
     if (params.channel !== "webchat" || !isConciergeAgent(params.agentName)) return params;
     // The owner a wake-up recorded when it was scheduled, else its chat's.
     // With neither, its chat is gone and nothing says whose it was: it is
@@ -708,7 +718,7 @@ export class ConciergeService {
       chat ? await this.stoppedRequestLines(chatId) : "",
     ].filter(Boolean);
     const prompt = opening.length > 0 ? `${opening.join("\n")}\n\n${params.prompt}` : params.prompt;
-    const reportedTask = await this.reportedTaskOf(params.prompt, chatId);
+    const reportedTask = await this.reportedTaskOf(this.taskIdsOf(params), chatId);
     return {
       ...params,
       threadId: chatId,
@@ -718,10 +728,19 @@ export class ConciergeService {
     };
   }
 
-  /** Every task row of `chatId` a turn's prompt names, as {@link reportedTaskOf} reads them. */
-  private async reportedTasksOf(prompt: string, chatId: string): Promise<string[]> {
+  /**
+   * The tasks a turn is about, from what it was started with: a task event's
+   * batch, or a `defer` wake-up's task. Never read from the text it carries,
+   * where a stray name could stand for another task.
+   */
+  private taskIdsOf(params: TurnParams): readonly string[] {
+    return params.taskIds ?? deferTaskIds(params.prompt);
+  }
+
+  /** The tasks of `taskIds` that are `chatId`'s rows. */
+  private async ownTasks(taskIds: readonly string[], chatId: string): Promise<string[]> {
     const own: string[] = [];
-    for (const id of namedTaskIds(prompt)) {
+    for (const id of taskIds) {
       const found = await this.deps.tasks.repo.getWithChat(id);
       if (found && found.conciergeChat.id === chatId) own.push(found.row.id);
     }
@@ -729,16 +748,17 @@ export class ConciergeService {
   }
 
   /**
-   * The one task row a turn reports on: the row its prompt names, when it is
-   * `chatId`'s. A turn naming several rows reports on none that a line can be
-   * filed under. A task event names a row as `<task id="…">`, and a wake-up
-   * of `defer` names it in its name as `task:<id>`, as the Concierge's
-   * instructions ask.
+   * The one task row a turn reports on: the row it was started about, when
+   * it is `chatId`'s. A turn about several rows reports on none that a line
+   * can be filed under.
    */
-  private async reportedTaskOf(prompt: string, chatId: string): Promise<string | undefined> {
+  private async reportedTaskOf(
+    taskIds: readonly string[],
+    chatId: string,
+  ): Promise<string | undefined> {
     // Which of several tasks a line reports on is not ours to guess.
-    if (namedTaskIds(prompt).size !== 1) return undefined;
-    const [own] = await this.reportedTasksOf(prompt, chatId);
+    if (new Set(taskIds).size !== 1) return undefined;
+    const [own] = await this.ownTasks(taskIds, chatId);
     return own;
   }
 
@@ -780,6 +800,7 @@ export class ConciergeService {
       channel: "webchat",
       threadId: chatId,
       prompt,
+      ...(options.taskIds ? { taskIds: options.taskIds } : {}),
     });
     if (!params.sessionId) return "failed";
     const outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
@@ -787,7 +808,7 @@ export class ConciergeService {
     // turn that took over also carries every task's news it held, one task's
     // or a batch's.
     if (outcome === "interrupted") {
-      const carried = await this.reportedTasksOf(prompt, params.threadId);
+      const carried = await this.ownTasks(this.taskIdsOf(params), params.threadId);
       if (carried.length > 0) this.carriedReports.set(params.threadId, carried);
     }
     // The tasks it reported on settle with the flush that carried them: the

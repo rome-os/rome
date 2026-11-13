@@ -91,6 +91,8 @@ export class ConciergeTasks {
   /** The status each task was last told with, so a fact that changes none tells nothing. */
   private told = new Map<string, string>();
   private statusListeners = new Set<(taskId: string, status: TaskStatusView) => void>();
+  /** Per task, the keeping of when it ended that runs now (`keepEndedOf`). */
+  private keeping = new Map<string, Promise<void>>();
   /** Task chats whose turn ended and whose outcome is not written yet. */
   private settling = new Map<string, number>();
 
@@ -102,6 +104,14 @@ export class ConciergeTasks {
     // and the event the write sends already reads "synced".
     repo.onChange(({ row }, change) => {
       if (change === "write") this.notSynced.delete(row.id);
+      // A fact on the row changed: when the task ended is kept from it. The
+      // write told its listeners already.
+      void this.keepEndedOf(row).catch((error: unknown) =>
+        log.warn("failed to read a changed task's status", {
+          taskId: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     });
   }
 
@@ -193,24 +203,61 @@ export class ConciergeTasks {
     );
     // As the task is now, not as a report would leave it.
     if (!options.asReported) {
-      const ended = rows.filter((row) => read.get(row.id)?.status === "ended");
-      const open = rows.filter((row) => read.get(row.id)?.status !== "ended");
-      await this.repo
-        .keepEnded(
-          ended.filter((row) => !row.endedAt).map((row) => row.id),
-          open.filter((row) => row.endedAt).map((row) => row.id),
-          new Date(now),
-        )
-        .catch((error: unknown) =>
-          log.warn("failed to keep when tasks ended", {
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
       for (const [taskId, status] of read) {
         for (const listener of this.statusListeners) listener(taskId, status);
       }
     }
     return read;
+  }
+
+  /**
+   * Keeps on each row when its status ended, as read now, so the panel and
+   * the Concierge's list age it from when it ended. Run where a fact
+   * changes, never by a read: a read writes nothing.
+   */
+  private async keepEnded(
+    rows: readonly ConciergeTaskRow[],
+    read: Map<string, TaskStatusView>,
+  ): Promise<void> {
+    const ended = rows.filter((row) => read.get(row.id)?.status === "ended");
+    const open = rows.filter((row) => read.get(row.id)?.status !== "ended");
+    await this.repo
+      .keepEnded(
+        ended.filter((row) => !row.endedAt).map((row) => row.id),
+        open.filter((row) => row.endedAt).map((row) => row.id),
+        new Date(this.now()),
+      )
+      .catch((error: unknown) =>
+        log.warn("failed to keep when tasks ended", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+  }
+
+  /**
+   * Keeps when task `row` ended, as its status reads now. One task's are kept
+   * in the order its writes came, so an older read never overwrites a newer.
+   */
+  private keepEndedOf(row: ConciergeTaskRow): Promise<void> {
+    const kept = (this.keeping.get(row.id) ?? Promise.resolve())
+      .then(async () => {
+        const now = (await this.repo.get(row.id)) ?? row;
+        await this.keepEnded([now], await this.statusOf([now]));
+      })
+      .finally(() => {
+        if (this.keeping.get(row.id) === kept) this.keeping.delete(row.id);
+      });
+    this.keeping.set(row.id, kept);
+    return kept;
+  }
+
+  /**
+   * Keeps when every task not archived ended, as at a start: facts held in
+   * memory, such as a running turn, did not outlive the restart.
+   */
+  async keepEndedAll(): Promise<void> {
+    const rows = (await this.repo.listForAgent(true)).map((task) => task.row);
+    await this.keepEnded(rows, await this.statusOf(rows));
   }
 
   /**
@@ -328,7 +375,9 @@ export class ConciergeTasks {
   }
 
   private async recheck(row: ConciergeTaskRow): Promise<void> {
-    const of = (await this.statusOf([row])).get(row.id) as TaskStatusView;
+    const read = await this.statusOf([row]);
+    await this.keepEnded([row], read);
+    const of = read.get(row.id) as TaskStatusView;
     if (this.told.get(row.id) === keyOf(of)) return;
     this.told.set(row.id, keyOf(of));
     await this.repo.reannounce(row.id);
@@ -345,9 +394,7 @@ export class ConciergeTasks {
   ): Promise<Map<string, ConciergeStatusReaction>> {
     const marks = await this.repo.messageMarks(chatId, messageKeys);
     const taskIds = [...new Set([...marks.values()].flatMap((mark) => mark.taskIds))];
-    const rows = (await Promise.all(taskIds.map((id) => this.repo.get(id)))).filter(
-      (row): row is ConciergeTaskRow => row !== null,
-    );
+    const rows = await this.repo.getMany(taskIds);
     const status = await this.statusOf(rows);
     const out = new Map<string, ConciergeStatusReaction>();
     for (const [key, mark] of marks) {

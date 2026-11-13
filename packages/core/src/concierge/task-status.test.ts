@@ -213,13 +213,21 @@ describe("ConciergeTasks status", () => {
     expect((await tasks.statusOf([row!])).get(row!.id)?.status).toBe("ended");
   });
 
-  it("keeps when a task ended, and forgets it when the task opens again", async () => {
+  it("writes nothing when it reads a status, so when a task ended never depends on when it was read", async () => {
     const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
-    await tasks.statusOf([row!]);
+    await flush();
+    await repo.keepEnded([], [row!.id]);
+    await tasks.statusOf([(await repo.get(row!.id))!]);
+    expect((await repo.get(row!.id))?.endedAt).toBeNull();
+  });
+
+  it("keeps when a task ended as its facts change, and forgets it when the task opens again", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await tasks.chatChanged("task-chat");
     expect((await repo.get(row!.id))?.endedAt).toEqual(new Date(NOW));
     await repo.markWaitExpired(row!.id, new Date(NOW - HOUR));
     running.add("task-chat");
-    await tasks.statusOf([(await repo.get(row!.id))!]);
+    await tasks.chatChanged("task-chat");
     // Open for a while, as while Rome's own turn after a turned-down approval
     // runs: its no-response note stays for the next digest.
     expect(await repo.get(row!.id)).toMatchObject({ endedAt: null, noResponseUnlisted: true });

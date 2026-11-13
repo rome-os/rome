@@ -261,14 +261,18 @@ export function startConciergeEvents(
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
     render: (dirty) => renderTaskEvents(service, dirty),
-    deliver: async ({ chatId: from, owner, prompt, quiet }) => {
+    deliver: async ({ chatId: from, owner, prompt, quiet, taskIds }) => {
       // A row whose chat is gone or archived reports to the main chat.
       const chatId = await service.deliveryChat(from, owner);
       if (!chatId) return "failed";
       // A visitor dropped from the dashboard allow-list is told nothing; their
       // rows wait, and reach them once they are back.
       if (!(await service.isServed(owner))) return "failed";
-      return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
+      return await service.systemTurnOutcome(chatId, prompt, {
+        quiet,
+        pushLevel: "active",
+        taskIds,
+      });
     },
     carried: (taskId) => service.carriesReport(taskId),
     // A report that ran to its end: its results are said, and the guardian
@@ -570,6 +574,19 @@ export function startConciergeEvents(
             error: error instanceof Error ? error.message : String(error),
           }),
         );
+      // Its owner's Stop in the task chat stops the task as any Stop does:
+      // its checks are cancelled and its approvals turned down.
+      if (outcomeOf(event.status) === "stopped") {
+        const row = await tasks.repo.get(taskId);
+        if (row && !row.stoppedAt && !row.archivedAt) {
+          await service.stopTask(taskId, "guardian").catch((error: unknown) =>
+            log.warn("failed to stop a task its chat's Stop ended", {
+              taskId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+      }
     }
     // The result's first sentence, for the row's line once the task ended.
     // Work still running in the chat, such as the stream an approved action's
@@ -833,6 +850,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     reportPending: () => coalescer.awaitingReport,
     laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
   });
+  // What a restart lost from memory, such as a running turn, may have ended a task.
+  void guard(tasks.keepEndedAll());
   const sessionChanged = (sessionId: string, change: { toolOnly?: boolean } = {}) => {
     void guard(tracker.sessionChanged(sessionId, change));
     if (!change.toolOnly) void guard(tasks.chatChanged(sessionId));
