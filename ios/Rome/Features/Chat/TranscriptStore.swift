@@ -18,8 +18,14 @@ final class TranscriptStore {
     private(set) var pending: [PendingSend] = []
     private(set) var loaded = false
     private(set) var loadError: APIError?
-    /// A load the guardian started (Retry, or coming back to the chat) is on its way.
+    /// A load the guardian started (Retry, or coming back to the chat) is on
+    /// its way: the bar's Retry shows a spinner.
     private(set) var retrying = false
+    /// Goes up each time a retry ends in failure: the bar shakes once.
+    private(set) var retryFailures = 0
+    /// The least time a retry's spinner shows, so an attempt that fails at
+    /// once is still seen.
+    @ObservationIgnored var retryHold: Duration = .seconds(1)
     private(set) var loadingOlder = false
     /// An older page fetched and waiting for the list to place it.
     private(set) var olderPage: MessagePage?
@@ -151,7 +157,9 @@ final class TranscriptStore {
         tokens.append(backend.events.subscribe(LiveTopic.chatStatus) { [weak self] event in
             self?.handle(event)
         })
-        Task { await reload() }
+        // Entering a chat whose load failed tries again where it shows: the
+        // bar's spinner runs at once, never a Retry left from before.
+        if loadFailed { retryLoad() } else { Task { await reload() } }
     }
 
     /// A chat made just now holds nothing yet: it counts as loaded at once,
@@ -673,15 +681,20 @@ final class TranscriptStore {
         startRunningPoll()
     }
 
-    /// Tries the failed load again, visibly: the banner goes, "Retrying…"
-    /// shows, and the banner returns only if this attempt fails too.
+    /// Tries the failed load again, visibly: the bar stays and its Retry
+    /// turns into a spinner for at least `retryHold`. The bar then goes, or
+    /// shows Retry again and shakes.
     func retryLoad() {
-        loadError = nil
+        guard !retrying else { return }
         retrying = true
         Task {
+            let started = ContinuousClock.now
             resync()
             await resyncWork?.value
+            let left = retryHold - (ContinuousClock.now - started)
+            if left > .zero { try? await Task.sleep(for: left) }
             retrying = false
+            if loadFailed { retryFailures += 1 }
         }
     }
 
@@ -901,9 +914,14 @@ final class TranscriptStore {
         return message(id)?.statusReaction.flatMap(StatusMark.init(rawValue:))
     }
 
+    /// What the load-error bar shows: nil for no bar.
+    var loadBar: LoadBar? {
+        if retrying { return loadFailed || loadError == nil ? .retrying : nil }
+        return loadFailed ? .failed : nil
+    }
+
     /// The chat's newest page could not be read, and nothing offline explains it.
     var loadFailed: Bool {
-        if retrying { return false }
         switch loadError {
         case nil, .offline?, .unauthorized?, .conciergeOff?: return false
         default: return true

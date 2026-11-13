@@ -172,8 +172,12 @@ final class DemoBackend: RomeBackend {
         try await archiveChat(id)
     }
 
+    /// Chats whose messages cannot be read, for the load-error bar's snapshots.
+    var unreadableChats: Set<String> = []
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         try await pause(0.3)
+        if unreadableChats.contains(sessionId) { throw APIError.server(status: 503, message: nil) }
         // Pages from the newest back, as the server does; the cursor is the
         // oldest message of the page before.
         let all = messages[sessionId] ?? []

@@ -261,6 +261,18 @@ enum SnapshotRunner {
             // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.
             await capture("56-markdown-tables", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-table")) }
             await capture("58-error-states", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-errors")) }
+            // The load-error bar: Retry, then its spinner while an attempt runs.
+            if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),
+               let demo = model.workspace?.backend as? DemoBackend, let store = model.workspace?.topicStore("topic-errors") {
+                demo.unreadableChats.insert("topic-errors")
+                await store.reload()
+                await capture("58b-load-failed", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-errors")) }
+                store.retryHold = .seconds(4)
+                await capture("58c-load-retrying", style: styleName, in: directory, wait: 0.8) { store.retryLoad() }
+                demo.unreadableChats.remove("topic-errors")
+                try? await Task.sleep(for: .seconds(4))
+                store.retryHold = .seconds(1)
+            }
             await capture("57-widget-ui-card", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-meals")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }

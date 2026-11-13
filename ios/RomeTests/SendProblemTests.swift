@@ -166,35 +166,78 @@ import UIKit
         return store
     }
 
-    /// Retry hides the banner, shows the attempt, and the banner returns only when it fails again.
-    @Test func retryShowsTheAttemptAndTheBannerComesBackOnlyOnFailure() async {
+    /// One bar: a retry turns its Retry into a spinner, and a failed one
+    /// shows Retry again and shakes; a good one takes the bar away.
+    @Test func retryKeepsOneBarAndShakesOnFailure() async {
         let backend = FakeBackend()
         let store = await failedStore(backend)
-        backend.duringNewestFetch = { }
+        store.retryHold = .milliseconds(50)
+        #expect(store.loadBar == .failed && store.retryFailures == 0)
         store.retryLoad()
-        #expect(store.retrying && !store.loadFailed && TranscriptBanners.shows(store))
+        #expect(store.loadBar == .retrying && TranscriptBanners.shows(store))
         for _ in 0..<100 where store.retrying { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(!store.retrying && store.loadFailed)
+        #expect(store.loadBar == .failed && store.retryFailures == 1)
 
-        // The next attempt works: no banner at all.
+        // The next attempt works: the bar goes, with no shake.
         backend.messagesError = nil
         store.retryLoad()
         for _ in 0..<100 where store.retrying { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(!store.retrying && !store.loadFailed && !TranscriptBanners.shows(store))
+        #expect(store.loadBar == nil && !TranscriptBanners.shows(store) && store.retryFailures == 1)
     }
 
-    /// Coming back to a chat clears an old banner and tries at once.
+    /// An attempt that fails at once still shows its spinner for the hold,
+    /// and one that works keeps the spinner until then too.
+    @Test func theSpinnerShowsForAtLeastTheHold() async {
+        let backend = FakeBackend()
+        let store = await failedStore(backend)
+        store.retryHold = .milliseconds(400)
+        let started = ContinuousClock.now
+        store.retryLoad()
+        // The read fails at once; the spinner stays.
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(store.loadBar == .retrying)
+        for _ in 0..<100 where store.retrying { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(ContinuousClock.now - started >= .milliseconds(400))
+        #expect(store.loadBar == .failed)
+        // A second press while one runs starts nothing more.
+        store.retryHold = .milliseconds(50)
+        store.retryLoad()
+        let reads = backend.newestFetches
+        store.retryLoad()
+        for _ in 0..<100 where store.retrying { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.newestFetches <= reads + 1)
+    }
+
+    /// Entering a chat whose load failed starts the reload at once: the bar
+    /// shows the spinner, not a Retry left from before.
     @Test func comingBackTriesAFailedLoadAtOnce() async {
         let backend = FakeBackend()
         let store = await failedStore(backend)
+        store.retryHold = .milliseconds(50)
         backend.messagesError = nil
         store.chatShown()
-        #expect(!store.loadFailed)
+        #expect(store.loadBar == .retrying)
         for _ in 0..<100 where store.retrying { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(!store.loadFailed && store.loaded)
+        #expect(store.loadBar == nil && store.loaded)
 
         // A chat that loaded fine only looks at its running turn.
         store.chatShown()
         #expect(!store.retrying)
+    }
+
+    /// Entering a task chat again after its load failed shows the spinner
+    /// at once, then Retry with a shake when that fails too.
+    @Test func reenteringAFailedTaskChatRetriesAtOnce() async {
+        let backend = FakeBackend()
+        backend.messagesError = .server(status: 503, message: nil)
+        let store = TranscriptStore(sessionId: "task-1", kind: .task, backend: backend)
+        store.retryHold = .milliseconds(50)
+        await store.reload()
+        #expect(store.loadBar == .failed)
+        store.start()
+        #expect(store.loadBar == .retrying)
+        for _ in 0..<100 where store.retrying { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.loadBar == .failed && store.retryFailures == 1)
+        store.stop()
     }
 }

@@ -2029,6 +2029,16 @@
         }
       }
     },
+    "Loading" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载中"
+          }
+        }
+      }
+    },
     "Loading approval…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3249,16 +3259,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重试"
-          }
-        }
-      }
-    },
-    "Retrying…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在重试…"
           }
         }
       }
