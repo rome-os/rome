@@ -115,6 +115,8 @@ import {
   messageStatusReactionSchema,
 } from "@/components/chat/status-reaction";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
+import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
+import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-unread";
 import {
   ChatThreadsProvider,
   placeLive,
@@ -376,6 +378,13 @@ export interface ChatProps {
    * once more.
    */
   recoverMissingSession?: (sessionId: string) => Promise<boolean>;
+  /**
+   * Resolves with the chat's read mark, as the server holds it before this chat
+   * marks itself read, or null when it has none. Only a Concierge chat needs
+   * it: the chat waits for the answer before its read mark, and draws a divider
+   * where the unread messages start. Without it the chat does neither.
+   */
+  loadReadMark?: (chatId: string) => Promise<string | null>;
   onSessionMessage?: (message: SessionMessage) => void;
   /**
    * Called with a session's saved workspace layout (`null` when none) when its
@@ -442,6 +451,7 @@ export function Chat({
   onSessionsChanged,
   onSessionNotFound,
   recoverMissingSession,
+  loadReadMark,
   onSessionMessage,
   onSessionLayout,
   onSessionCreated,
@@ -678,6 +688,22 @@ export function Chat({
     [stickContentRef],
   );
 
+  // What was unread when this Concierge chat opened. It stays put while the
+  // chat is open, so the divider outlives the read mark and ignores arrivals.
+  const {
+    unread: unreadAtOpen,
+    noteOpened,
+    noteOlder,
+    noteLive,
+    pendingMark,
+  } = useUnreadAtOpen({ chatId: sessionId, loadReadMark });
+  const onOlderPage = useCallback(
+    (id: string, page: ChatMessage[]) => {
+      if (id === mainSessionIdRef.current) noteOlder(page);
+    },
+    [noteOlder],
+  );
+
   // The main session loads its newest turns first and pages older ones in as
   // the transcript scrolls toward the top.
   const {
@@ -690,6 +716,7 @@ export function Chat({
     scroller: scrollerEl,
     pinned: isAtBottom,
     setMessages,
+    onOlderPage,
   });
 
   // The view derivation lives in the pure `buildChatView`; here we just memoize
@@ -711,6 +738,11 @@ export function Chat({
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, identityBySession, interactionResults } = view;
+  const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
+  const unread = useMemo(
+    () => (unreadAtOpen ? summarizeUnread(displayMessages, unreadAtOpen, olderRemains) : null),
+    [displayMessages, unreadAtOpen, olderRemains],
+  );
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
   const activeSessionId = mainSessionId ?? "";
@@ -752,6 +784,32 @@ export function Chat({
     }, LANDING_MS);
   }, []);
 
+  // Scrolls `anchor` to the top of the transcript.
+  const scrollToAnchor = useCallback((scroller: HTMLElement, anchor: HTMLElement) => {
+    const top =
+      anchor.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop;
+    // A jump that follows loading older pages comes long after the click, so
+    // the pin would read it as drift and snap back to the bottom.
+    anchor.dispatchEvent(new Event(HOLD_STICK_EVENT, { bubbles: true }));
+    // `auto`, not `smooth`, and deliberately so. use-stick-to-bottom treats a
+    // scroll outside its 300ms user-gesture window as accidental drift and
+    // snaps back to the bottom while pinned; an instant scroll emits its one
+    // event on the frame right after this click's pointerdown, safely inside
+    // that window, so the hook releases the pin for us. A smooth scroll's
+    // later frames fall outside it. Instant also reads better here: you land
+    // and start reading rather than watching half a second of blur.
+    // The scroller's own scroll padding keeps it clear of what floats over
+    // the messages, such as a Concierge chat's header; a manual scroll does
+    // not apply it, so it is added here.
+    const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+    scroller.scrollTo({
+      top: Math.max(top - clear - TIMELINE_JUMP_OFFSET_PX, 0),
+      behavior: "auto",
+    });
+  }, []);
+
   // Scrolls to a message and tints it. An anchor names one message id, or
   // every id of an agent turn separated by spaces.
   const jumpToMessage = useCallback(
@@ -760,34 +818,13 @@ export function Chat({
       if (!scroller) return;
       const anchor = findMessageAnchor(scroller, messageId);
       if (!anchor) return;
-      const top =
-        anchor.getBoundingClientRect().top -
-        scroller.getBoundingClientRect().top +
-        scroller.scrollTop;
-      // A jump that follows loading older pages comes long after the click, so
-      // the pin would read it as drift and snap back to the bottom.
-      anchor.dispatchEvent(new Event(HOLD_STICK_EVENT, { bubbles: true }));
-      // `auto`, not `smooth`, and deliberately so. use-stick-to-bottom treats a
-      // scroll outside its 300ms user-gesture window as accidental drift and
-      // snaps back to the bottom while pinned; an instant scroll emits its one
-      // event on the frame right after this click's pointerdown, safely inside
-      // that window, so the hook releases the pin for us. A smooth scroll's
-      // later frames fall outside it. Instant also reads better here: you land
-      // and start reading rather than watching half a second of blur.
-      // The scroller's own scroll padding keeps it clear of what floats over
-      // the messages, such as a Concierge chat's header; a manual scroll does
-      // not apply it, so it is added here.
-      const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
-      scroller.scrollTo({
-        top: Math.max(top - clear - TIMELINE_JUMP_OFFSET_PX, 0),
-        behavior: "auto",
-      });
+      scrollToAnchor(scroller, anchor);
 
       // Every user bubble is the same tint, so without this you cannot tell
       // whether the jump landed on the question you picked.
       landOn(scroller, anchor);
     },
-    [scrollerEl, landOn],
+    [scrollerEl, landOn, scrollToAnchor],
   );
 
   // Brings a message back into view after the thread view opened from it
@@ -821,12 +858,14 @@ export function Chat({
     shownCountRef.current = displayMessages.length;
   }, [displayMessages]);
   const findingMessageRef = useRef(false);
-  const showSourceMessage = useCallback(
-    async (messageId: string) => {
-      const scroller = scrollerEl;
-      if (!scroller || !mainSessionId || findingMessageRef.current) return;
-      if (findMessageAnchor(scroller, messageId)) {
-        jumpToMessage(messageId);
+  // Pages older history in until `find` returns an element, then hands it to
+  // `reveal`, or says `missing` when the search runs out. Only one search runs
+  // at a time.
+  const revealWhenLoaded = useCallback(
+    async (find: () => HTMLElement | null, reveal: () => void, missing: string) => {
+      if (!mainSessionId || findingMessageRef.current) return;
+      if (find()) {
+        reveal();
         return;
       }
       findingMessageRef.current = true;
@@ -841,22 +880,49 @@ export function Chat({
           for (let wait = 0; wait < 40 && shownCountRef.current === before; wait++) {
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
-          if (findMessageAnchor(scroller, messageId)) {
-            jumpToMessage(messageId);
+          if (find()) {
+            reveal();
             return;
           }
           // A page that fails to load changes nothing; two in a row end the search.
           stalled = shownCountRef.current === before ? stalled + 1 : 0;
           if (stalled >= 2) break;
         }
-        toast.error(t("concierge.tasks.sourceMissing"));
+        toast.error(missing);
       } finally {
         toast.dismiss(loading);
         findingMessageRef.current = false;
       }
     },
-    [scrollerEl, mainSessionId, jumpToMessage, t],
+    [mainSessionId, t],
   );
+  const showSourceMessage = useCallback(
+    (messageId: string) => {
+      const scroller = scrollerEl;
+      if (!scroller) return Promise.resolve();
+      return revealWhenLoaded(
+        () => findMessageAnchor(scroller, messageId),
+        () => jumpToMessage(messageId),
+        t("concierge.tasks.sourceMissing"),
+      );
+    },
+    [scrollerEl, revealWhenLoaded, jumpToMessage, t],
+  );
+  // The unread divider's pill: scrolls to the divider, paging in older
+  // messages first when it is still on one.
+  const showUnreadDivider = useCallback(() => {
+    const scroller = scrollerEl;
+    if (!scroller) return;
+    const find = () => scroller.querySelector<HTMLElement>("[data-concierge-unread-divider]");
+    void revealWhenLoaded(
+      find,
+      () => {
+        const divider = find();
+        if (divider) scrollToAnchor(scroller, divider);
+      },
+      t("concierge.newMessagesMissing"),
+    );
+  }, [scrollerEl, revealWhenLoaded, scrollToAnchor, t]);
   useEffect(() => {
     if (!concierge) return;
     return onConciergeJump((messageId) => void showSourceMessage(messageId));
@@ -1036,6 +1102,14 @@ export function Chat({
   const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
+      // Marking the chat read first would erase the read mark the divider needs.
+      const waiting = pendingMark();
+      if (waiting) {
+        await waiting;
+        // The chat may have closed, or moved on, while it waited. A read mark
+        // then would clear messages the guardian never saw.
+        if (!isMountedRef.current || id !== mainSessionIdRef.current) return;
+      }
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
         hiddenReadsRef.current.add(id);
         return;
@@ -1047,7 +1121,7 @@ export function Chat({
         // Best effort. The next successful active-session load can retry.
       }
     },
-    [notifySessionsChanged],
+    [notifySessionsChanged, pendingMark],
   );
   useEffect(() => {
     const flush = () => {
@@ -1168,6 +1242,9 @@ export function Chat({
           for (const messageId of localBeforeFetch) local?.delete(messageId);
           if (local?.size === 0) localOptimisticMessageIdsRef.current.delete(id);
         }
+        if (!loadedSessionsRef.current.has(id) && isReadVisibleSession(id)) {
+          noteOpened(fetchedMessages);
+        }
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {
           void markSessionRead(id);
@@ -1177,7 +1254,7 @@ export function Chat({
         // refresh) can retry on the next trigger.
       }
     },
-    [isReadVisibleSession, markSessionRead, pageTurns, setOlderCursor],
+    [isReadVisibleSession, markSessionRead, noteOpened, pageTurns, setOlderCursor],
   );
 
   // A new message reactivates every turn's steps. Fetch server truth once,
@@ -1201,6 +1278,7 @@ export function Chat({
   const handleMessageInsert = useCallback(
     (sid: string, message: ChatMessage) => {
       if (message.sessionId !== sid) return;
+      noteLive(message.id);
       setMessages((prev) => {
         const next = new Map(prev);
         const existing = next.get(sid) ?? [];
@@ -1211,7 +1289,7 @@ export function Chat({
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead, refreshArchivedSession],
+    [markSessionRead, noteLive, refreshArchivedSession],
   );
   const handleSessionName = useCallback(
     (sid: string, event: z.infer<typeof sessionNameSchema>) => {
@@ -2568,6 +2646,7 @@ export function Chat({
                         feedback
                         fork={forkable}
                         variant={variant}
+                        unreadFrom={unread?.firstId ?? null}
                       />
                     </TaskChatContext.Provider>
                   </ChatThreadsProvider>
@@ -2738,6 +2817,26 @@ export function Chat({
                 <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
               ) : null}
             </div>
+            {concierge && unread && mainSessionId ? (
+              // Under the floating header, on the transcript's top-right corner.
+              // Kept mounted under a thread view: the pill's state is the
+              // guardian's progress through the unread messages.
+              <div
+                className={cn(
+                  "pointer-events-none absolute top-[calc(var(--rome-concierge-header-offset)+0.5rem)] right-3 z-10 md:right-6",
+                  threadOpen && "invisible",
+                )}
+              >
+                <ConciergeUnreadPill
+                  scroller={scrollerEl}
+                  content={contentEl}
+                  count={unread.count}
+                  more={unread.more}
+                  anchored={unread.firstId !== null}
+                  onJump={showUnreadDivider}
+                />
+              </div>
+            ) : null}
             {concierge ? null : (
               <ChatTimelineRail
                 scroller={scrollerEl}

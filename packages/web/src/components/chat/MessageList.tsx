@@ -97,6 +97,8 @@ export interface MessageListProps {
   fork?: boolean;
   /** `concierge` shows a texting transcript (see ConciergeTranscript). Defaults to `default`. */
   variant?: ChatVariant;
+  /** In a `concierge` transcript, the id of the first message that was unread when the chat opened. */
+  unreadFrom?: string | null;
 }
 
 /** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
@@ -412,6 +414,7 @@ export function MessageList({
   feedback,
   fork,
   variant = "default",
+  unreadFrom,
 }: MessageListProps) {
   if (variant === "concierge") {
     return (
@@ -422,6 +425,7 @@ export function MessageList({
         actions={actions}
         contentRef={contentRef}
         feedback={feedback}
+        unreadFrom={unreadFrom}
       />
     );
   }
@@ -456,7 +460,7 @@ function TranscriptMessageList({
   actions,
   feedback,
   fork,
-}: Omit<MessageListProps, "variant">) {
+}: Omit<MessageListProps, "variant" | "unreadFrom">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
