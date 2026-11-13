@@ -54,6 +54,8 @@ export interface TaskDto {
   chat?: { id: string } | null;
 }
 
+class TransientError extends Error {}
+
 export class Api {
   private readonly cookie: string;
 
@@ -65,7 +67,23 @@ export class Api {
     this.cookie = sessionCookie(userId, secret);
   }
 
+  /**
+   * A read retries a gateway error or a dropped connection a few times: the
+   * dev proxy answers 504 now and then while the backend is busy.
+   */
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.once<T>(method, path, body);
+      } catch (error) {
+        const transient = error instanceof TransientError || error instanceof TypeError;
+        if (method !== "GET" || !transient || attempt >= 6) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+      }
+    }
+  }
+
+  private async once<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: {
@@ -78,7 +96,10 @@ export class Api {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
-    if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${text.slice(0, 300)}`);
+    if (!res.ok) {
+      const message = `${method} ${path}: ${res.status} ${text.slice(0, 300)}`;
+      throw res.status >= 502 ? new TransientError(message) : new Error(message);
+    }
     return (text ? JSON.parse(text) : null) as T;
   }
 

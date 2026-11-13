@@ -232,6 +232,11 @@ function checksFor(
   return checks;
 }
 
+function withFailure(checks: Checks, failure: string | null): Checks {
+  if (failure) checks.notes.push(`the driver failed: ${failure}`);
+  return checks;
+}
+
 async function runScenario(
   api: Api,
   label: string,
@@ -242,11 +247,17 @@ async function runScenario(
   const chat = await api.createTopicChat(`eval ${label} r${round} ${scenario.id}`);
   const log = (line: string) => console.log(`[r${round} ${scenario.id}] ${line}`);
   log(`chat ${chat.id}`);
+  let failure: string | null = null;
   const result = await drive(api, chat.id, scenario, {
     settleMs: Number(args.settle) * 1000,
     timeoutMs: Number(args.timeout) * 60_000,
     pollMs: 3000,
     log,
+  }).catch((error: unknown) => {
+    // One scenario's failure never ends the round: its checks fail instead.
+    failure = error instanceof Error ? error.message : String(error);
+    log(`failed: ${failure}`);
+    return { outcomes: [], tasks: [], timedOut: true };
   });
   const rows = readChat(chat.id);
   const metrics = chatMetrics({
@@ -260,7 +271,7 @@ async function runScenario(
     id: scenario.id,
     chatId: chat.id,
     metrics,
-    checks: checksFor(scenario, rows, result.tasks, result.timedOut),
+    checks: withFailure(checksFor(scenario, rows, result.tasks, result.timedOut), failure),
     tasks: result.tasks.map((t) => ({ title: t.title, status: t.status, endReason: t.endReason })),
     seconds: Math.round((Date.now() - started) / 1000),
   };

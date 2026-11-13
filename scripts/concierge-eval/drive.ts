@@ -86,7 +86,9 @@ export async function drive(
               at: now(),
               words: [scenario.approvals === "approve" ? "approved" : "rejected"],
             });
-            options.log(`${scenario.approvals}d approval ${card.id}`);
+            options.log(
+              `${scenario.approvals === "approve" ? "approved" : "rejected"} approval ${card.id}`,
+            );
           }
         } else if (part.type === "pending_interaction") {
           const id = String(part.toolUseId);
