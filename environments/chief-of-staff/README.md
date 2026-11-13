@@ -14,7 +14,7 @@ A Rome container of its own, built from this checkout, connected to a test Disco
 - **The team members are bots, not people.** Each member is a Discord bot whose account is linked to a person. A real teammate is a human Discord account, so nothing a real account does differently from a bot is tested here.
 - **A private chat stands in for a direct message.** Discord refuses a direct message between two bots, so a chat readable only by the agent and one member (`dm-<member>`) stands in for that member's direct message with the agent. The real direct message path is checked by hand once in the live trial, not here.
 - **The member bots share the test server with the agent bot.** All the bots join one server. Production has one Rome bot per server, among human members.
-- **The model is whichever login the secrets file carries.** `cos-env version` prints which login and the instance's tier-to-model mapping. Production runs on the guardian's own model account.
+- **Every model tier runs on one cheap model.** `up` sends the large, medium and small tiers all to `claude-haiku-5-5`, to keep the bill down, through the same setting the dashboard's model picker writes. Production runs each tier on its own model, on the guardian's own model account, so a rule that only a stronger model meets can fail here. Set `COS_MODEL` to run on another model. `cos-env version` prints the model and the login.
 - **No telemetry, mail, relay or push, and no Rome Cloud.** The container runs with only the two instance secrets and the model login, so anything that needs those services is not tested.
 - **Rome reaches nobody from outside.** The container publishes no port. Every command reaches Rome through `docker exec`, the way a test harness on the same host does, not the way a browser reaches a hosted Rome.
 
@@ -31,6 +31,7 @@ COS_MEMBER_3_BOT_TOKEN=     # member3's bot token
 COS_MEMBER_4_BOT_TOKEN=     # optional: member1's second account, for `--as member1:2`
 ANTHROPIC_API_KEY=          # the model login: this, or the line below, not both
 CLAUDE_CODE_OAUTH_TOKEN=
+COS_MODEL=                  # optional: the model every tier runs on, claude-haiku-5-5 when unset
 ```
 
 `up` stops and names the first required value missing. That makes five bots in total, and the run works with the first four. The fourth member token is optional: only `cos-env post --as member1:2` needs it, so without it K3's two-account check reports as not checked.

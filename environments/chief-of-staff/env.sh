@@ -34,6 +34,9 @@ BUILD_TREE="$RUN_DIR/agent-tree"
 # The agent under test. It lives on its own branch, not on this one. The default
 # is the head of the chief of staff agent's pull request.
 AGENT_REF="${COS_AGENT_REF:-origin/claude/project-thread-ys37d4}"
+# The one model every tier runs on, cheapest first to keep the bill down. A run
+# that needs a stronger model sets COS_MODEL, in the shell or the secrets file.
+DEFAULT_MODEL=claude-haiku-5-5
 # Rome's API inside the container, behind Caddy's sign-in check.
 API="http://127.0.0.1:4141/api"
 
@@ -298,6 +301,15 @@ let_chats_hear_bots() {
   done < <(all_chat_names)
 }
 
+# Sends every model tier to one model, through the same setting the dashboard's
+# model picker writes.
+set_model() {
+  local model="${COS_MODEL:-$DEFAULT_MODEL}"
+  log "running the agent on $model ..."
+  printf '{"tierModelMappings":{"anthropic":{"large":"%s","medium":"%s","small":"%s"}}}' \
+    "$model" "$model" "$model" | api PUT /settings >/dev/null
+}
+
 cmd_up() {
   local build=1
   [ "${1:-}" = "--no-build" ] && build=0
@@ -318,6 +330,7 @@ cmd_up() {
     link_agent
     let_chats_hear_bots
   fi
+  set_model
   log "ready. Drive it with environments/chief-of-staff/cos-env. Hand it the team with: cos-env seed <dir>"
 }
 
@@ -459,7 +472,11 @@ cos_version() {
       agent: b.agent,
       environment: b.environment,
       verifier: JSON.parse(verifier),
-      model: { login, tierModelMappings: model ? JSON.parse(model) : null },
+      model: {
+        login,
+        name: model ? (JSON.parse(model).anthropic?.large ?? null) : null,
+        tierModelMappings: model ? JSON.parse(model) : null,
+      },
       builtAt: b.builtAt,
     }, null, 2));' \
     "$(cat "$BUILD_FILE")" "$(tree_json environments/chief-of-staff/verifier)" "$login" "$model"
