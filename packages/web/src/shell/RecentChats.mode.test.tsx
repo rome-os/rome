@@ -5,12 +5,10 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import type { InitialEntry } from "react-router-dom";
+import { MODE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import i18n from "@/i18n";
 import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
 import { RecentChats } from "./RecentChats";
-
-const MODE_KEY = "rome-chat-list-mode";
-const LAST_CHAT_KEY = "rome-last-ordinary-chat";
 
 const concierge = rs.hoisted(() => ({
   chatId: "concierge" as string | null,
@@ -29,6 +27,7 @@ beforeAll(async () => {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  seedChatListMode();
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
   concierge.chatId = "concierge";
@@ -153,7 +152,7 @@ describe("the Chat / Concierge switch", () => {
     });
 
     it("uses the stored mode over the chats it has", async () => {
-      localStorage.setItem(MODE_KEY, "concierge");
+      seedChatListMode({ mode: "concierge" });
       serve([mainChat(), chat("mine", "My chat")]);
       open("/chat/unlisted");
       await screen.findByRole("link", { name: "Main chat" });
@@ -161,7 +160,7 @@ describe("the Chat / Concierge switch", () => {
     });
 
     it("follows a click on the other segment, and keeps it", async () => {
-      localStorage.setItem(MODE_KEY, "chat");
+      seedChatListMode({ mode: "chat" });
       serve([mainChat(), chat("mine", "My chat")]);
       const user = userEvent.setup();
       open("/chat/mine");
@@ -175,64 +174,67 @@ describe("the Chat / Concierge switch", () => {
     });
   });
 
-  describe("the open chat moves the mode", () => {
-    const rows = () => [
-      mainChat(),
-      topic("topic-1", "Calendar"),
-      task("task-1", "Find flights"),
-      chat("mine", "My chat"),
-      chat("fork-1", "A fork", { parentSessionId: "mine" }),
-    ];
-    const cases: Array<[string, InitialEntry, string]> = [
-      ["the main chat", "/message", "concierge"],
-      ["the main chat by its id", "/chat/concierge", "concierge"],
-      ["a topic chat", "/chat/topic-1", "concierge"],
-      ["a task chat", "/chat/task-1", "concierge"],
-      ["a common chat", "/chat/mine", "chat"],
-      ["a fork chat", "/chat/fork-1", "chat"],
-      ["a blank topic chat", { pathname: "/chat", state: { conciergeTopic: true } }, "concierge"],
-      ["a blank chat", "/chat", "chat"],
-    ];
-    it.each(cases)("%s", async (_, entry, expected) => {
-      // The other mode, so the route has to move it.
-      localStorage.setItem(MODE_KEY, expected === "chat" ? "concierge" : "chat");
-      concierge.chats = [
-        { id: "concierge", name: "Concierge", main: true, unread: 0 },
-        { id: "topic-1", name: "Calendar", main: false, unread: 0 },
-      ];
-      serve(rows());
-      open(entry);
-      await waitFor(() => expect(stored()).toBe(expected));
-      await waitFor(() =>
-        expect(radio(expected === "chat" ? "Chat" : "Concierge").getAttribute("aria-checked")).toBe(
-          "true",
-        ),
-      );
+  describe("the guardian's own switch", () => {
+    it("holds when the list mounts again on the same page, as the collapse toggle, the peek and the phone list do", async () => {
+      seedChatListMode({ mode: "chat" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      const first = open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Concierge"));
+      await screen.findByRole("link", { name: "Main chat" });
+      first.unmount();
+
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "Main chat" });
+      expect(radio("Concierge").getAttribute("aria-checked")).toBe("true");
+      expect(screen.queryByRole("link", { name: "My chat" })).toBeNull();
     });
 
-    it("remembers the last ordinary chat, and not a Concierge one", async () => {
-      serve(rows());
+    it("does not follow the page itself: the shell owns that", async () => {
+      seedChatListMode({ mode: "concierge" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "Main chat" });
+      expect(stored()).toBe("concierge");
+    });
+
+    it("stays on this tab's mode when another tab changes the stored one", async () => {
+      seedChatListMode({ mode: "chat" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+
+      localStorage.setItem(MODE_KEY, "concierge");
+      act(() => {
+        window.dispatchEvent(new StorageEvent("storage", { key: MODE_KEY, newValue: "concierge" }));
+      });
+      await act(async () => {});
+      expect(radio("Chat").getAttribute("aria-checked")).toBe("true");
+      expect(screen.getByRole("link", { name: "My chat" })).toBeTruthy();
+    });
+
+    it("starts a new tab from the last stored mode", async () => {
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      seedChatListMode({ mode: "chat" });
       const view = open("/chat/mine");
-      await waitFor(() => expect(localStorage.getItem(LAST_CHAT_KEY)).toBe("mine"));
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Concierge"));
+      expect(stored()).toBe("concierge");
       view.unmount();
-      open("/chat/task-1");
-      await waitFor(() => expect(stored()).toBe("concierge"));
-      expect(localStorage.getItem(LAST_CHAT_KEY)).toBe("mine");
-    });
 
-    it("waits for the list when the open chat is not known yet", async () => {
-      localStorage.setItem(MODE_KEY, "chat");
-      serve(rows());
-      open("/chat/task-1");
-      expect(stored()).toBe("chat");
-      await waitFor(() => expect(stored()).toBe("concierge"));
+      // A page load reads the device's store again.
+      seedChatListMode({ mode: localStorage.getItem(MODE_KEY) ?? undefined });
+      open("/chat/unlisted");
+      await screen.findByRole("link", { name: "Main chat" });
     });
   });
 });
 
 describe("Chat mode", () => {
   it("leads with a New chat row that opens a blank ordinary chat, then lists only common and fork chats", async () => {
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     serve([
       mainChat(),
       topic("topic-1", "Calendar"),
@@ -259,14 +261,14 @@ describe("Chat mode", () => {
   });
 
   it("titles the list Chats", async () => {
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     serve([chat("mine", "My chat")]);
     open("/chat/mine");
     expect(await screen.findByText("Chats")).toBeTruthy();
   });
 
   it("shows the shortcut hint where there is a wide window and a fine pointer, and not on touch", async () => {
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     serve([chat("mine", "My chat")]);
     const stub = (...matching: string[]) =>
       rs.stubGlobal("matchMedia", (query: string) => ({
@@ -297,7 +299,7 @@ describe("Concierge mode", () => {
   ];
 
   it("leads with a New topic row that opens a blank topic chat, then the main chat and the topic chats", async () => {
-    localStorage.setItem(MODE_KEY, "concierge");
+    seedChatListMode({ mode: "concierge" });
     concierge.chats = topics;
     serve([mainChat(), topic("topic-1", "Calendar"), chat("mine", "My chat")]);
     const user = userEvent.setup();
@@ -321,7 +323,7 @@ describe("Concierge mode", () => {
   });
 
   it("titles the list Concierge, not the name the guardian gave their agent", async () => {
-    localStorage.setItem(MODE_KEY, "concierge");
+    seedChatListMode({ mode: "concierge" });
     serve([mainChat()], { agentName: "Milo" });
     open("/chat/unlisted");
     await screen.findByRole("link", { name: "Main chat" });
@@ -333,7 +335,7 @@ describe("Concierge mode", () => {
     const at = (day: number) => new Date(Date.UTC(2026, 6, day)).toISOString();
 
     it("lists the task chats latest first, five of them and a More row for the rest", async () => {
-      localStorage.setItem(MODE_KEY, "concierge");
+      seedChatListMode({ mode: "concierge" });
       concierge.chats = topics;
       serve([
         mainChat(),
@@ -356,7 +358,7 @@ describe("Concierge mode", () => {
     });
 
     it("gives a task row the chat row's menu, and a status mark while it runs", async () => {
-      localStorage.setItem(MODE_KEY, "concierge");
+      seedChatListMode({ mode: "concierge" });
       concierge.chats = topics;
       serve([mainChat(), task("t1", "Find flights", { running: true })]);
       const user = userEvent.setup();
@@ -373,7 +375,7 @@ describe("Concierge mode", () => {
     });
 
     it("keeps the open task chat in view, even past the first five", async () => {
-      localStorage.setItem(MODE_KEY, "concierge");
+      seedChatListMode({ mode: "concierge" });
       concierge.chats = topics;
       serve([
         mainChat(),
@@ -388,7 +390,7 @@ describe("Concierge mode", () => {
     });
 
     it("has no Tasks section, nor its separator, when there are no task chats", async () => {
-      localStorage.setItem(MODE_KEY, "concierge");
+      seedChatListMode({ mode: "concierge" });
       concierge.chats = topics;
       serve([mainChat(), chat("mine", "My chat")]);
       open("/chat/unlisted");
@@ -398,7 +400,7 @@ describe("Concierge mode", () => {
     });
 
     it("counts the running tasks beside the heading", async () => {
-      localStorage.setItem(MODE_KEY, "concierge");
+      seedChatListMode({ mode: "concierge" });
       concierge.chats = topics;
       serve([
         mainChat(),
@@ -420,7 +422,7 @@ describe("the dots on the switch", () => {
   ];
 
   it("puts a red dot on Concierge in Chat mode while a Concierge chat has unread messages", async () => {
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     for (const [main, topicUnread] of [
       [2, 0],
       [0, 3],
@@ -438,7 +440,7 @@ describe("the dots on the switch", () => {
   });
 
   it("shows no dot when nothing is unread, nor on the Chat segment", async () => {
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     concierge.chats = unreadChats(0, 0);
     serve([chat("mine", "My chat", { running: true })]);
     open("/chat/mine");
@@ -447,7 +449,7 @@ describe("the dots on the switch", () => {
   });
 
   it("puts a primary dot on Chat in Concierge mode while an ordinary chat is replying", async () => {
-    localStorage.setItem(MODE_KEY, "concierge");
+    seedChatListMode({ mode: "concierge" });
     concierge.chats = unreadChats(0, 0);
     serve([mainChat(), chat("mine", "My chat", { running: true })]);
     open("/chat/unlisted");
@@ -459,7 +461,7 @@ describe("the dots on the switch", () => {
   });
 
   it("ignores a task chat or a topic chat that is replying", async () => {
-    localStorage.setItem(MODE_KEY, "concierge");
+    seedChatListMode({ mode: "concierge" });
     concierge.chats = unreadChats(0, 0);
     serve([
       mainChat(),

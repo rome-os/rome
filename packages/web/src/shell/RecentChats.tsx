@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -57,10 +58,11 @@ import {
   readChatListMode,
   writeChatListMode,
 } from "@/lib/chat-list-mode";
-import { useChatListFollowsRoute, useStoredChatListMode } from "@/hooks/use-chat-list-mode";
+import { useStoredChatListMode } from "@/hooks/use-chat-list-mode";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
+  CONCIERGE_CHATS_QUERY_KEY,
   useConciergeChatId,
   useConciergeChats,
   useConciergeName,
@@ -496,11 +498,6 @@ export function RecentChats({
     [cachedSessions, conciergeChatId],
   );
   const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
-  useChatListFollowsRoute(conciergeChatId, (id) => {
-    const session = cachedSessions?.find((s) => s.id === id);
-    if (session) return chatKind(session, conciergeChatId);
-    return conciergeChats.some((chat) => chat.id === id) ? "topic" : null;
-  });
   const storedMode = useStoredChatListMode();
   const hasOrdinaryChat = (cachedSessions ?? []).some((s) =>
     isProjectChat(chatKind(s, conciergeChatId)),
@@ -522,11 +519,16 @@ export function RecentChats({
   useEffect(() => setOpeningSessionId(null), [routeSessionId]);
   const activeSessionId = openingSessionId ?? routeSessionId;
   // The Concierge entry recounts unread on a new main chat message while it
-  // shows. In Chat mode it does not, and the switch's dot needs the same count.
+  // shows. In Chat mode it does not, and the switch's dot needs the same count
+  // from the Concierge's chats alone.
+  const queryClient = useQueryClient();
+  const recountConciergeChats = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
+  }, [queryClient]);
   useLiveEvents(
     chatSessionTopic(conciergeChatId ?? ""),
-    { message_insert: { schema: z.unknown(), fn: refreshTopicChats } },
-    { enabled: hasConcierge && mode === "chat", onReconnect: refreshTopicChats },
+    { message_insert: { schema: z.unknown(), fn: recountConciergeChats } },
+    { enabled: hasConcierge && mode === "chat", onReconnect: recountConciergeChats },
   );
   // The chat on screen reads what arrives, so its unread count is stale.
   const conciergeUnread = conciergeChats.some(
@@ -1144,7 +1146,7 @@ export function RecentChats({
             type="button"
             onClick={() => setTasksExpanded(true)}
             data-tasks-more
-            className={`ml-2 pl-px ${MORE_ROW_CLASS}`}
+            className={`ml-2 ${MORE_ROW_CLASS}`}
           >
             {t("recentChats.moreTasks", { count: hidden })}
           </button>

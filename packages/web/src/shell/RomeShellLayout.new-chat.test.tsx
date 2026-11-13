@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { LAST_CHAT_KEY, MODE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import "@/i18n";
 import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
 
@@ -34,8 +35,6 @@ rs.mock("@/hooks/use-desktop", () => ({ useDesktop: () => true }));
 import { SlotProvider } from "../components/slot";
 import { RomeShellLayout } from "./RomeShellLayout";
 
-const MODE_KEY = "rome-chat-list-mode";
-
 beforeEach(() => {
   main.failed = false;
   rs.stubGlobal(
@@ -52,6 +51,7 @@ afterEach(() => {
   cleanup();
   rs.unstubAllGlobals();
   localStorage.clear();
+  seedChatListMode();
 });
 
 function Where() {
@@ -84,12 +84,12 @@ function openNewChat(entry: string) {
 
 describe("Ctrl+Shift+O", () => {
   it("opens a blank ordinary chat in Chat mode", () => {
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     expect(openNewChat("/chat/mine")).toBe("/chat null");
   });
 
   it("opens a blank topic chat in Concierge mode", () => {
-    localStorage.setItem(MODE_KEY, "concierge");
+    seedChatListMode({ mode: "concierge" });
     expect(openNewChat("/message")).toBe('/chat {"conciergeTopic":true}');
   });
 
@@ -99,12 +99,12 @@ describe("Ctrl+Shift+O", () => {
 
   it("opens a blank ordinary chat when the Concierge is unavailable, whatever mode was stored", () => {
     main.failed = true;
-    localStorage.setItem(MODE_KEY, "concierge");
+    seedChatListMode({ mode: "concierge" });
     expect(openNewChat("/chat/mine")).toBe("/chat null");
   });
 
   it("keeps the sidebar hidden where the page hid it", () => {
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     expect(openNewChat("/chat/mine?hideSidebar=1")).toBe("/chat?hideSidebar=1 null");
   });
 });

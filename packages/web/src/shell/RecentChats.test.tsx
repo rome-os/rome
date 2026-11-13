@@ -6,6 +6,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { LAST_CHAT_KEY, MODE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import i18n from "@/i18n";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
@@ -21,7 +22,6 @@ import { RecentChats } from "./RecentChats";
 
 // Concierge's chat id comes from its own query, which these tests do not
 // serve; each test that needs the entry sets the id here.
-const MODE_KEY = "rome-chat-list-mode";
 const concierge = rs.hoisted(() => ({
   chatId: null as string | null,
   chats: [] as Array<{ id: string; name: string; main: boolean; unread: number }>,
@@ -43,6 +43,7 @@ afterEach(() => {
   cleanup();
   rs.useRealTimers();
   localStorage.clear();
+  seedChatListMode();
   rs.restoreAllMocks();
   concierge.chatId = null;
   concierge.chats = [];
@@ -141,8 +142,7 @@ function renderRecentChats(
   live?: LiveEventsClient,
   queryClient = testQueryClient(),
 ) {
-  if (concierge.chatId && !localStorage.getItem(MODE_KEY))
-    localStorage.setItem(MODE_KEY, "concierge");
+  if (concierge.chatId && !localStorage.getItem(MODE_KEY)) seedChatListMode({ mode: "concierge" });
   const routed = (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
@@ -205,7 +205,7 @@ describe("RecentChats", () => {
 
   it("lists only common and fork chats under Projects in Chat mode, and hides the Concierge section", async () => {
     concierge.chatId = "concierge";
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     mockSessions([
       { ...sessionRow("concierge", "Concierge"), agentName: "core:concierge" },
       { ...sessionRow("topic-1", "Calendar"), agentName: "core:concierge" },
@@ -284,7 +284,7 @@ describe("RecentChats", () => {
     );
     view.unmount();
 
-    localStorage.setItem(MODE_KEY, "chat");
+    seedChatListMode({ mode: "chat" });
     renderRecentChats("/chat/mine");
     const mine = await rowOf("My own chat");
     expect(within(mine).queryByRole("img", { name: /Started by/ })).toBeNull();

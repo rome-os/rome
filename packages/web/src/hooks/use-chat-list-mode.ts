@@ -1,7 +1,10 @@
-import { useQueryClient } from "@tanstack/react-query";
+import type { ConciergeChatsResponse } from "@rome/api-types/concierge";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import { findCachedChatSession } from "@/hooks/use-chat-sessions";
+import { CONCIERGE_CHATS_QUERY_KEY } from "@/hooks/use-concierge";
+import { getSession } from "@/lib/chat-api";
 import {
   type ChatListMode,
   chatListModeForRoute,
@@ -11,7 +14,7 @@ import {
   writeChatListMode,
   writeLastOrdinaryChatId,
 } from "@/lib/chat-list-mode";
-import { type ChatKind, chatKind } from "@/lib/chat-session";
+import { activeSessionFromPath, type ChatKind, chatKind } from "@/lib/chat-session";
 
 /** The stored mode, or null on a device that has not shown one. */
 export function useStoredChatListMode(): ChatListMode | null {
@@ -24,21 +27,42 @@ export function useLastOrdinaryChatId(): string | null {
 }
 
 /**
- * Moves the stored mode to the open chat's, once per navigation, and keeps the
- * last ordinary chat. A guardian's own switch between navigations stands.
- * `kindOf` may answer null while the chat's list loads: the hook asks again
- * when it changes identity, and does nothing until the chat's kind is known.
+ * Moves the mode to the open chat's, once per navigation, and keeps the last
+ * ordinary chat. Call it once, from the shell, which stays mounted while the
+ * chat list comes and goes: a second caller would apply the same navigation
+ * again and undo a switch the guardian made since. A guardian's own switch
+ * between navigations stands.
+ *
+ * The open chat's kind comes from the chat lists and the Concierge's chats
+ * this tab has loaded, else from the chat's own session, so a deep link with no
+ * list loaded, such as on a phone, still moves the mode. The mode stays as it
+ * was until that kind is known.
  */
-export function useChatListFollowsRoute(
-  mainChatId: string | null,
-  kindOf: (id: string) => ChatKind | null,
-): void {
+export function useChatListFollowsRoute(mainChatId: string | null): void {
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const openId = activeSessionFromPath(location.pathname, mainChatId);
+  const loadedKind = (id: string): ChatKind | null => {
+    const session = findCachedChatSession(queryClient, id);
+    if (session) return chatKind(session, mainChatId);
+    const topics = queryClient.getQueryData<ConciergeChatsResponse>(CONCIERGE_CHATS_QUERY_KEY);
+    return topics?.chats.some((chat) => chat.id === id) ? "topic" : null;
+  };
+  const known = openId !== null ? loadedKind(openId) : null;
+  const { data: fetched } = useQuery({
+    queryKey: ["chat-list-route-session", openId],
+    queryFn: () => getSession(openId as string),
+    // A chat the open page is already fetching shares that request.
+    enabled: openId !== null && openId !== mainChatId && known === null,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
   const route = chatListModeForRoute({
     pathname: location.pathname,
     state: location.state,
     mainChatId,
-    kindOf,
+    kindOf: (id) =>
+      id === openId ? (known ?? (fetched ? chatKind(fetched, mainChatId) : null)) : null,
   });
   const applied = useRef<string | null>(null);
   const routeKey = `${location.key}:${location.pathname}`;
@@ -50,19 +74,6 @@ export function useChatListFollowsRoute(
     writeChatListMode(mode);
     if (ordinaryChatId) writeLastOrdinaryChatId(ordinaryChatId);
   }, [mode, ordinaryChatId, routeKey]);
-}
-
-/**
- * {@link useChatListFollowsRoute} for a caller with no chat list of its own: it
- * reads the lists this tab has already loaded, and does not follow a chat
- * that none of them holds.
- */
-export function useChatListFollowsRouteFromCache(mainChatId: string | null): void {
-  const queryClient = useQueryClient();
-  useChatListFollowsRoute(mainChatId, (id) => {
-    const session = findCachedChatSession(queryClient, id);
-    return session ? chatKind(session, mainChatId) : null;
-  });
 }
 
 /**

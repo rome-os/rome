@@ -10,22 +10,17 @@ export type ChatListMode = "chat" | "concierge";
 const MODE_STORAGE_KEY = "rome-chat-list-mode";
 const LAST_CHAT_STORAGE_KEY = "rome-last-ordinary-chat";
 
+// Each tab keeps its own mode and last ordinary chat in memory, seeded from
+// localStorage when the page loads. A tab writes localStorage so that a new tab
+// or a reload starts from the last mode, and never reads it again: another
+// tab's navigation must not change the list this tab shows.
+const state: { mode: ChatListMode | null; lastChatId: string | null } = {
+  mode: null,
+  lastChatId: null,
+};
 const listeners = new Set<() => void>();
 
-/** Calls `listener` when the mode or the last ordinary chat changes, in this tab or another. */
-export function subscribeChatListMode(listener: () => void): () => void {
-  listeners.add(listener);
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === MODE_STORAGE_KEY || event.key === LAST_CHAT_STORAGE_KEY) listener();
-  };
-  window.addEventListener("storage", onStorage);
-  return () => {
-    listeners.delete(listener);
-    window.removeEventListener("storage", onStorage);
-  };
-}
-
-function read(key: string): string | null {
+function readStorage(key: string): string | null {
   try {
     return window.localStorage.getItem(key);
   } catch {
@@ -33,33 +28,51 @@ function read(key: string): string | null {
   }
 }
 
-function write(key: string, value: string): void {
+function writeStorage(key: string, value: string): void {
   try {
-    if (window.localStorage.getItem(key) === value) return;
     window.localStorage.setItem(key, value);
   } catch {
-    // Storage is unavailable: the choice holds for this page load only.
+    // Storage is unavailable: the choice holds for this tab only.
   }
-  for (const listener of listeners) listener();
 }
 
-/** The mode this device last showed, or null before it has shown one. */
+/** Seeds this tab's state from what the device stored, as a page load does. */
+export function loadChatListModeFromStorage(): void {
+  const mode = readStorage(MODE_STORAGE_KEY);
+  state.mode = mode === "chat" || mode === "concierge" ? mode : null;
+  state.lastChatId = readStorage(LAST_CHAT_STORAGE_KEY) || null;
+  for (const listener of listeners) listener();
+}
+if (typeof window !== "undefined") loadChatListModeFromStorage();
+
+/** Calls `listener` when this tab's mode or last ordinary chat changes. */
+export function subscribeChatListMode(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+}
+
+/** This tab's mode, or null before the tab or its device has shown one. */
 export function readChatListMode(): ChatListMode | null {
-  const raw = read(MODE_STORAGE_KEY);
-  return raw === "chat" || raw === "concierge" ? raw : null;
+  return state.mode;
 }
 
 export function writeChatListMode(mode: ChatListMode): void {
-  write(MODE_STORAGE_KEY, mode);
+  writeStorage(MODE_STORAGE_KEY, mode);
+  if (state.mode === mode) return;
+  state.mode = mode;
+  for (const listener of listeners) listener();
 }
 
-/** The ordinary chat last opened on this device, or null. */
+/** The ordinary chat last opened in this tab or, at load, on this device; null when none. */
 export function readLastOrdinaryChatId(): string | null {
-  return read(LAST_CHAT_STORAGE_KEY) || null;
+  return state.lastChatId;
 }
 
 export function writeLastOrdinaryChatId(id: string): void {
-  write(LAST_CHAT_STORAGE_KEY, id);
+  writeStorage(LAST_CHAT_STORAGE_KEY, id);
+  if (state.lastChatId === id) return;
+  state.lastChatId = id;
+  for (const listener of listeners) listener();
 }
 
 /**

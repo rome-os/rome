@@ -49,10 +49,7 @@ import { agentNameChangedSchema } from "@rome/api-types/live-events";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { isChatPath, MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { useConciergeChat } from "@/hooks/use-concierge";
-import {
-  useChatListFollowsRouteFromCache,
-  useChatListModeForShell,
-} from "@/hooks/use-chat-list-mode";
+import { useChatListFollowsRoute, useChatListModeForShell } from "@/hooks/use-chat-list-mode";
 import { newChatTarget } from "@/lib/chat-list-mode";
 import { isElectronShell } from "@/lib/electron-shell";
 import { routeTitle } from "@/lib/page-title";
@@ -156,9 +153,10 @@ export function RomeShellLayout() {
   // main chat that failed to load shows a page of its own, which keeps the bar.
   const onMainChat = location.pathname === MAIN_CHAT_PATH;
   const mainChat = useConciergeChat(onMainChat);
-  // The chat list is not always mounted, so the shell also keeps its mode with
-  // the open chat, and the new-chat shortcut reads it.
-  useChatListFollowsRouteFromCache(mainChat.chatId);
+  // The chat list comes and goes, so the shell, which stays, is the one place
+  // that keeps the list's mode with the open chat. The new-chat shortcut and
+  // the rail read that mode.
+  useChatListFollowsRoute(mainChat.chatId);
   const chatListMode = useChatListModeForShell(!mainChat.failed, "chat");
   const leadingSlot = useSlotOutlet(CONCIERGE_LEADING_SLOT);
   const [headerClaimed, setHeaderClaimed] = useState(false);
