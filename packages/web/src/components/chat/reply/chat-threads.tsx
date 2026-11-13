@@ -76,8 +76,9 @@ export function taskThreads(
  * question or approval card alike. A task card, the one shown when its task
  * starts, needs none: it names its task itself. Of a run of such messages in
  * one thread, with nothing else between them, only the first and the last
- * show it, so a run of one or two shows it on each. Any other message, the
- * owner's included, ends the run.
+ * show it, so a run of one or two shows it on each. Another thread's agent
+ * message or a task card ends the run; the owner's messages, like a turn's
+ * trace, neither end nor join it.
  */
 export function threadLabels(
   messages: readonly ThreadTimelineMessage[],
@@ -85,15 +86,15 @@ export function threadLabels(
 ): Map<string, ThreadLabel> {
   const { threads, titles } = taskThreads(messages, liveTitles);
   // Each run of one thread's labelled messages, in order: a run ends where
-  // any other message comes between.
+  // another agent message comes between.
   const runs: { label: ThreadLabel; ids: string[] }[] = [];
   let open = false;
   for (const message of messages) {
-    // A turn's trace is no message of the timeline: it ends nothing.
-    if (message.role !== "assistant" && message.role !== "user") continue;
+    // A turn's trace and the owner's messages end nothing.
+    if (message.role !== "assistant") continue;
     const thread = threads.get(message.id);
     const title = thread ? titles.get(thread) : undefined;
-    if (message.role !== "assistant" || !thread || !title || isTaskCard(message)) {
+    if (!thread || !title || isTaskCard(message)) {
       open = false;
       continue;
     }

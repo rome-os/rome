@@ -106,9 +106,9 @@ describe("threadLabels", () => {
         { type: "text", content: "Here it is" },
         { type: "text", content: "# Report", forwardedFrom: { chatId: "c1", title: "Flights" } },
       ]),
-      g("x1", "q1"),
+      free("w1", "assistant"),
       withParts("card", [{ type: "task_chat", chatId: "c1", title: "Flights", show: "ask" }]),
-      g("x2", "q1"),
+      free("w2", "assistant"),
       withParts("said", [{ type: "text", content: "Two options so far." }]),
     ];
     // One label per message, each opening the thread.
@@ -138,7 +138,18 @@ describe("threadLabels", () => {
     ]);
   });
 
-  it("ends a run at another thread's message, the owner's, or one in no thread", () => {
+  it("keeps a run through the owner's messages: they neither end nor join it", () => {
+    const labels = threadLabels(
+      [g("q1"), a("a1", "q1"), g("x1", "q1"), a("a2", "q1"), free("w1"), a("a3", "q1")],
+      tasks,
+    );
+    expect(where(labels)).toEqual([
+      ["a1", "q1"],
+      ["a3", "q1"],
+    ]);
+  });
+
+  it("ends a run at another thread's message or an agent message in no thread", () => {
     const labels = threadLabels(
       [
         g("q1"),
@@ -147,7 +158,7 @@ describe("threadLabels", () => {
         a("b1", "q2"),
         a("a3", "q1"),
         a("a4", "q1"),
-        g("x1", "q1"),
+        free("w0", "assistant"),
         a("a5", "q1"),
         a("a6", "q1"),
         free("w1", "assistant"),
@@ -367,8 +378,9 @@ describe("the thread label in the transcript", () => {
       ]),
     } as ChatMessage;
     renderTranscript([...messages, forward]);
+    // The run's first and last: the owner's message between them ends nothing.
     const labels = screen.getAllByRole("button", { name: "Kyoto trip" });
-    expect(labels).toHaveLength(3);
+    expect(labels).toHaveLength(2);
     const bubble = screen.getByText("Ryokan by the river, 3 nights.");
     // No task header inside the bubble: the label below names the task.
     expect(bubble.closest("[data-concierge-bubble-part]")?.querySelector("a")).toBeNull();
@@ -494,8 +506,8 @@ describe("the source label in the transcript", () => {
       reply("a3", 12, "m1"),
       reply("a4", 12, "m1"),
     ]);
-    // a2, a3 and a4 run on with nothing between: a3 shows nothing.
-    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(3);
+    // a1 to a4 run on, the owner's m2 between them included: a2 and a3 show nothing.
+    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(2);
     expect(screen.queryByText("Routine · Check-in")).toBeNull();
   });
 
@@ -505,7 +517,7 @@ describe("the source label in the transcript", () => {
       trace("t-a3", 12, { type: "routine", name: "Check-in" }),
       reply("a3", 12, "m1"),
     ]);
-    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(2);
     expect(screen.queryByText("Routine · Check-in")).toBeNull();
   });
 });
