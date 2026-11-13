@@ -776,6 +776,10 @@ export function RecentChats({
 
   const handleDelete = useCallback(
     async (id: string) => {
+      // An ordinary chat's row stays in Chat mode: the main chat's page would
+      // switch the list to Concierge.
+      const deleted = sessions.find((s) => s.id === id);
+      const ordinary = deleted ? isProjectChat(chatKind(deleted, conciergeChatId)) : false;
       try {
         await deleteSession(id);
       } catch {
@@ -784,10 +788,10 @@ export function RecentChats({
       updateSessions((prev) => prev.filter((s) => s.id !== id));
       emitSessionsChanged();
       if (activeSessionId === id) {
-        navigate(MAIN_CHAT_PATH);
+        navigate(ordinary ? "/chat" : MAIN_CHAT_PATH);
       }
     },
-    [activeSessionId, navigate, updateSessions],
+    [activeSessionId, conciergeChatId, navigate, sessions, updateSessions],
   );
 
   const startRename = useCallback((session: ChatSession) => {

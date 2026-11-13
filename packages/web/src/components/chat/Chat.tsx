@@ -1213,9 +1213,11 @@ export function Chat({
         // best-effort — the list refresh below reconciles either way
       }
       notifySessionsChanged();
-      navigate(MAIN_CHAT_PATH);
+      // `forkable` holds for a common or fork chat, the ordinary chats. Leaving
+      // one for the main chat's page would switch the chat list to Concierge.
+      navigate(forkable ? "/chat" : MAIN_CHAT_PATH);
     },
-    [mainSessionId, notifySessionsChanged, navigate],
+    [forkable, mainSessionId, notifySessionsChanged, navigate],
   );
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does

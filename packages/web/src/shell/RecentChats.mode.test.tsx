@@ -58,8 +58,12 @@ const task = (id: string, name: string, extra: Partial<Row> = {}) =>
   chat(id, name, { triggerKind: "concierge", ...extra });
 
 function serve(rows: Row[], settings: Record<string, unknown> = {}) {
-  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
     const url = String(input);
+    if (init?.method === "DELETE") return Response.json({ ok: true });
     if (url === "/api/settings") return Response.json(settings);
     if (url.startsWith("/api/chat/sessions")) {
       return Response.json(
@@ -232,6 +236,37 @@ describe("the Chat / Concierge switch", () => {
       open("/chat/unlisted");
       await screen.findByRole("link", { name: "Main chat" });
     });
+  });
+});
+
+describe("deleting the open chat from the list", () => {
+  const deleteOpenChat = async (id: string, name: string) => {
+    const user = userEvent.setup();
+    const link = await screen.findByRole("link", { name: new RegExp(`^${name}`) });
+    const row = link.closest<HTMLElement>("[data-chat-row]") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Chat actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    return id;
+  };
+
+  it("opens a new chat for an ordinary chat, so the list stays in Chat mode", async () => {
+    seedChatListMode({ mode: "chat" });
+    serve([mainChat(), chat("mine", "My chat")]);
+    open("/chat/mine");
+    await deleteOpenChat("mine", "My chat");
+    await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/chat"));
+    expect(radio("Chat").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("opens the main chat for a task chat", async () => {
+    seedChatListMode({ mode: "concierge" });
+    concierge.chats = [{ id: "concierge", name: "Concierge", main: true, unread: 0 }];
+    serve([mainChat(), task("t1", "Find flights")]);
+    open("/chat/t1");
+    await deleteOpenChat("t1", "Find flights");
+    await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/message"));
   });
 });
 
