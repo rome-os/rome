@@ -77,6 +77,8 @@ export interface TaskCardRender {
   builtin?: boolean;
   componentId: string;
   props?: Record<string, unknown>;
+  /** The card described as data, which readers that know it draw. */
+  ui?: unknown;
 }
 
 /** How a task's question ended, once it did. */

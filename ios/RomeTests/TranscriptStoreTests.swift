@@ -224,6 +224,7 @@ final class FakeBackend: RomeBackend {
     /// The turn a successful send starts; nil is a send that started none.
     var sendTurnId: String? = "turn"
     var answeredSessions: [String] = []
+    var answeredWidgets: [String] = []
     /// What an answer fails with; nil lets it through.
     var answerError: APIError? = .network
     var pending: [PendingApproval] = []
@@ -232,8 +233,8 @@ final class FakeBackend: RomeBackend {
 
     func pendingApprovals() async throws -> [PendingApproval] { pending }
 
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
-        answeredSessions.append(sessionId)
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
+        answeredWidgets.append(widgetId)
         if let answerError { throw answerError }
     }
     /// The chats marked read, in order.

@@ -1148,25 +1148,26 @@ final class TranscriptStore {
 
     // MARK: Questions
 
-    /// `sessionId`: the question's own chat, this one unless it says otherwise.
-    func answer(_ part: MessagePart.QuestionPart, answers: [JSONValue], sessionId: String? = nil) {
-        // An empty list is an answer too: a card of only optional questions left blank.
-        guard !answering.contains(part.toolUseId) else { return }
-        let output: JSONValue = .object(["answers": .array(answers)])
-        answering.insert(part.toolUseId)
+    /// Answers the agent waiting on a widget with an event, which starts a turn.
+    /// `widgetId` is the id of the message that holds the widget; `sessionId`
+    /// is the widget's chat, this one unless it says otherwise.
+    func answer(widgetId: String, toolUseId: String, name: String, context: JSONValue, sessionId: String? = nil) {
+        guard !answering.contains(toolUseId) else { return }
+        answering.insert(toolUseId)
         // The form stays on screen, with the choices, until the server has the
         // answer: a failure leaves it as it was, to send again.
         Task {
             do {
-                try await backend.answer(sessionId: sessionId ?? self.sessionId, toolUseId: part.toolUseId, output: output)
-                localAnswers[part.toolUseId] = output
-                settle(kind: "question", id: part.toolUseId, outcome: .object(["kind": .string("answered"), "answer": .object(["text": .string(""), "output": output])]))
+                try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
+                let output = WidgetPaths.answerOutput(name, context)
+                localAnswers[toolUseId] = output
+                settle(kind: "question", id: toolUseId, outcome: .object(["kind": .string("answered"), "answer": .object(["text": .string(""), "output": output])]))
                 // An answer to a task's card wakes the task, not this chat.
                 if sessionId == nil || sessionId == self.sessionId { markRunning() }
             } catch {
                 say(String(localized: "Couldn't send your answer. Your choices are kept"))
             }
-            answering.remove(part.toolUseId)
+            answering.remove(toolUseId)
         }
     }
 
@@ -1180,7 +1181,12 @@ final class TranscriptStore {
     static func previewPhase(_ service: String) -> ConnectPhase? { nil }
     #endif
 
-    /// A widget's call on its own app, with this chat's backend.
+    /// An event on a widget that calls its app, sent to core by the widget's id.
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
+        try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
+    }
+
+    /// A widget's read of its own app, with this chat's backend.
     func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
         try await backend.appCall(appId: appId, method: method, path: path, body: body)
     }

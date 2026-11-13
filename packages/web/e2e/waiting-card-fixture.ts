@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { questionCardRender } from "../mock/fixtures/question-card";
 import type { ChatMessage, TranscriptPart } from "../src/lib/chat-types";
 
 export type WaitingCardKind = "routine" | "plan" | "question" | "ai" | "app";
@@ -46,21 +47,14 @@ export async function openWaitingCard(
             type: "pending_interaction",
             toolUseId: "waiting-card",
             appId: "core",
-            render: {
-              kind: "inline",
-              builtin: true,
-              componentId: "question-card",
-              props: {
-                questions: [
-                  {
-                    id: "day",
-                    question: "Which day should the update arrive?",
-                    type: "single",
-                    options: ["Monday", "Friday"],
-                  },
-                ],
+            render: questionCardRender([
+              {
+                id: "day",
+                question: "Which day should the update arrive?",
+                type: "single",
+                options: ["Monday", "Friday"],
               },
-            },
+            ]),
           };
   if (kind === "ai" || kind === "app")
     card = {
@@ -191,7 +185,28 @@ export async function openWaitingCard(
             success: true,
           });
         }
-        if (path === `/api/chat/sessions/${sessionId}/turns` && method === "POST") {
+        // Core answers the agent waiting on a widget with the turn below. A
+        // widget is a message of its own, so its id is the message's.
+        const answered = path.match(/^\/api\/chat\/widgets\/([^/]+)\/events$/);
+        if (answered && method === "POST") {
+          const held = messages.find((m) => m.id === decodeURIComponent(answered[1]));
+          const toolUseId = (JSON.parse(held?.content ?? "[]")[0] ?? {}).toolUseId;
+          const { name, context, turn } = JSON.parse(String(init?.body));
+          init = {
+            ...init,
+            body: JSON.stringify({
+              ...turn,
+              parts: [
+                {
+                  type: "interaction_result",
+                  toolUseId,
+                  output: name === "rome:dismiss" ? { dismissed: true } : context,
+                },
+              ],
+            }),
+          };
+        }
+        if ((path === `/api/chat/sessions/${sessionId}/turns` || answered) && method === "POST") {
           const body = JSON.parse(String(init?.body));
           messages.push({
             id: body.inputId,

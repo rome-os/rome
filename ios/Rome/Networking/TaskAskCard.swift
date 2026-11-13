@@ -14,6 +14,8 @@ struct TaskAskCard: Hashable, Sendable {
     struct Question: Hashable, Sendable {
         /// The tool use id the answer is sent to.
         let id: String
+        /// The message that holds it: the id core knows the question card by.
+        var messageId: String? = nil
         let render: JSONValue?
         let since: Double
         /// Nobody answered it in time: its task ended for no response, and it takes an answer still.
@@ -70,6 +72,7 @@ struct TaskAskCard: Hashable, Sendable {
             }
             self.kind = .question(Question(
                 id: id,
+                messageId: json["messageId"]?.string,
                 render: json["render"],
                 since: json["since"]?.number ?? 0,
                 expired: json["expired"]?.bool ?? false,
@@ -127,11 +130,12 @@ struct TaskAskCard: Hashable, Sendable {
     /// nil for an app's own card, which is answered in its task chat.
     var questionPart: MessagePart.QuestionPart? {
         guard case .question(let question) = kind, question.render?["componentId"]?.string == "question-card" else { return nil }
-        let part: JSONValue = .object(["type": .string("pending_interaction"), "toolUseId": .string(question.id), "render": question.render ?? .null])
+        let part: JSONValue = .object(["type": .string("pending_interaction"), "toolUseId": .string(question.id), "appId": .string("core"), "render": question.render ?? .null])
         guard let data = try? JSONEncoder().encode(JSONValue.array([part])),
               let content = String(data: data, encoding: .utf8),
-              case .question(let form)? = MessagePart.parse(content).first
+              case .question(var form)? = MessagePart.parse(content).first
         else { return nil }
+        if let messageId = question.messageId { form.ui?.widgetId = messageId }
         return form
     }
 

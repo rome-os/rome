@@ -433,6 +433,16 @@
         }
       }
     },
+    "Add your own…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加自己的选项…"
+          }
+        }
+      }
+    },
     "Agent" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1543,12 +1553,22 @@
         }
       }
     },
+    "Dismiss" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳过"
+          }
+        }
+      }
+    },
     "Dismissed" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已忽略"
+            "value" : "已跳过"
           }
         }
       }
@@ -5029,6 +5049,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下一页"
+          }
+        }
+      }
+    },
+    "optional" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选"
           }
         }
       }

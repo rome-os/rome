@@ -8,10 +8,26 @@ const SHORT_ANSWER = 24;
 /** How a question card's answer reads folded: the answer when short, or that it was dismissed. */
 export function answerOutcome(t: TFunction<"chat">, output: Record<string, unknown>): string {
   if (output.dismissed === true) return t("concierge.ask.dismissed");
+  // A stored answer carries `value`; what a card described as data sends
+  // carries the picked `values` and the typed `text`.
   const values = (Array.isArray(output.answers) ? output.answers : [])
-    .map((entry) =>
-      entry && typeof entry === "object" ? (entry as { value?: unknown }).value : undefined,
-    )
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return undefined;
+      const {
+        value,
+        values: picked,
+        text,
+      } = entry as {
+        value?: unknown;
+        values?: unknown;
+        text?: unknown;
+      };
+      if (typeof value === "string") return value;
+      const parts = [...(Array.isArray(picked) ? picked : []), text].filter(
+        (part): part is string => typeof part === "string" && part.trim() !== "",
+      );
+      return parts.join(", ");
+    })
     .filter((value): value is string => typeof value === "string" && value.trim() !== "");
   const text = values.join(", ");
   return text && text.length <= SHORT_ANSWER

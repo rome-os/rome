@@ -1,5 +1,7 @@
 import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
+import { questionCardRender } from "../fixtures/question-card";
+import type { Question } from "@rome/api-types/question-card";
 import type {
   ChatId,
   ChatSettings,
@@ -50,7 +52,7 @@ import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { connectorHandlers } from "./connector";
-import { mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
+import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -60,6 +62,34 @@ import { connections } from "./connections-store";
 
 /** Connected accounts left by a disconnect in this session, each with its
  *  agent. Core keeps them, so Envoys lists them as disconnected. */
+/** The questions of the mock `ask_question` card: one per layout the card takes. */
+const WAITLIST_QUESTIONS: Question[] = [
+  {
+    id: "tone",
+    question: "How should the rewrite read?",
+    type: "single",
+    options: ["Warm", "Plain", "Playful"],
+    freeText: true,
+  },
+  {
+    id: "keep",
+    question: "What should the new opening keep?",
+    type: "multi",
+    options: [
+      "The line about not holding it all in your head",
+      "The pricing note",
+      "The beta thank-you",
+    ],
+    freeText: true,
+  },
+  {
+    id: "avoid",
+    question: "Anything to avoid?",
+    type: "text",
+    optional: true,
+  },
+];
+
 const disconnectedAccounts: ConnectedAccountEntry[] = [];
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
@@ -379,6 +409,7 @@ const transcripts: Record<string, ChatMessage[]> = {
     ...turn(CONCIERGE_CHAT_ID, 8, "2026-08-07T12:40:00.000Z", "How much have I eaten today?", [
       mealPlannerCard,
       text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
+      dinnerQuestion,
     ]),
     // A finished task is reported by forwarding only its conclusion; the chip opens the task chat.
     ...turn(CONCIERGE_CHAT_ID, 9, "2026-08-07T13:00:00.000Z", "How are the Lisbon flights going?", [
@@ -448,22 +479,15 @@ const transcripts: Record<string, ChatMessage[]> = {
         type: "pending_interaction",
         toolUseId: "mock-task-tone",
         appId: "core",
-        render: {
-          kind: "inline",
-          builtin: true,
-          componentId: "question-card",
-          props: {
-            questions: [
-              {
-                id: "tone",
-                question: "Which tone should the launch email use?",
-                type: "single",
-                options: ["Warm", "Plain"],
-                freeText: true,
-              },
-            ],
+        render: questionCardRender([
+          {
+            id: "tone",
+            question: "Which tone should the launch email use?",
+            type: "single",
+            options: ["Warm", "Plain"],
+            freeText: true,
           },
-        },
+        ]),
       },
     ],
   ),
@@ -666,9 +690,10 @@ const transcripts: Record<string, ChatMessage[]> = {
         },
       ],
     ),
-    // A turn parked on an unresolved `ask_question` card. `appId` is the "core"
-    // sentinel and `builtin` routes the render to rome-web's own QuestionCard
-    // rather than an app bundle in a shadow root.
+    // A turn parked on an unresolved `ask_question` card, as core stores it:
+    // the questions and the card described from them. `appId` is the "core"
+    // sentinel and `builtin` routes the render to the question card rather
+    // than an app bundle in a shadow root.
     //
     // One question per branch the card lays out differently, so reading this
     // transcript in mock mode covers all three. The `multi` option past 32
@@ -684,39 +709,7 @@ const transcripts: Record<string, ChatMessage[]> = {
           type: "pending_interaction",
           toolUseId: "mock-chat-2-ask-1",
           appId: "core",
-          render: {
-            kind: "inline",
-            componentId: "question-card",
-            builtin: true,
-            props: {
-              questions: [
-                {
-                  id: "tone",
-                  question: "How should the rewrite read?",
-                  type: "single",
-                  options: ["Warm", "Plain", "Playful"],
-                  freeText: true,
-                },
-                {
-                  id: "keep",
-                  question: "What should the new opening keep?",
-                  type: "multi",
-                  options: [
-                    "The line about not holding it all in your head",
-                    "The pricing note",
-                    "The beta thank-you",
-                  ],
-                  freeText: true,
-                },
-                {
-                  id: "avoid",
-                  question: "Anything to avoid?",
-                  type: "text",
-                  optional: true,
-                },
-              ],
-            },
-          },
+          render: questionCardRender(WAITLIST_QUESTIONS),
         },
       ],
     ),

@@ -41,6 +41,14 @@ export interface BlockActions {
     summary?: string,
   ) => void | Promise<void>;
   onDismissAppComponent: (sessionId: string, toolUseId: string) => void | Promise<void>;
+  /** A press on a widget the agent waits on, which answers it as a turn. */
+  onAnswerWidget?: (
+    sessionId: string,
+    widgetId: string,
+    toolUseId: string,
+    name: string,
+    context: Record<string, unknown>,
+  ) => void | Promise<void>;
   interactionResults: Map<string, Record<string, unknown>>;
 }
 
@@ -305,6 +313,7 @@ const RowView = memo(function RowView({
               {renderFlatEntries(blocks, {
                 ...actions,
                 sessionId: m.sessionId,
+                messageId: m.id,
                 turnId: m.turnId ?? undefined,
                 transcript: { live: !!live },
               })}
@@ -319,6 +328,7 @@ const RowView = memo(function RowView({
             {renderFlatEntries(blocks.slice(0, recapIndex), {
               ...actions,
               sessionId: m.sessionId,
+              messageId: m.id,
               turnId: m.turnId ?? undefined,
               transcript: { live: !!live },
             })}
@@ -339,6 +349,7 @@ const RowView = memo(function RowView({
             {renderFlatEntries(blocks.slice(recapIndex + 1), {
               ...actions,
               sessionId: m.sessionId,
+              messageId: m.id,
               turnId: m.turnId ?? undefined,
               transcript: { live: !!live },
             })}

@@ -39,7 +39,7 @@ private func task(status: String, waitId: String?, endReason: String? = nil) -> 
         let open = try #require(card(question()))
         guard case .question(let asked) = open.kind else { Issue.record("no question"); return }
         #expect(asked.id == "q1" && asked.since == 5 && !asked.expired && asked.outcome == nil)
-        #expect(open.questionPart?.questions.first?.options == ["A", "B"] && !open.settled)
+        #expect(open.questionPart?.questions.first?.id == "s" && !open.settled)
 
         let answered = try #require(card(question(outcome: #"{"kind":"answered","answer":{"text":"B","output":{"answers":[{"questionId":"s","value":"B"}]}}}"#)))
         #expect(answered.settled)

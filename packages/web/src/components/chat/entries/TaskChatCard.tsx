@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { stopTask } from "@/components/concierge/send-task-action";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { Button } from "@/components/ui/button";
-import { postSessionTurnJson } from "@/lib/chat-api";
+import { postWidgetEventTurn, widgetAnswerOutput } from "@/lib/chat-api";
 import type { ApprovalCardStatus } from "@/lib/chat-types";
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { TaskApprovalOutcome, TaskCard } from "@rome/api-types/chat";
@@ -228,13 +228,15 @@ function FoldedAskCard({ card }: { card: AskedCard }) {
           />
         ) : card.outcome && card.render?.componentId === "question-card" ? (
           <QuestionCard
+            widgetId={card.messageId}
             toolUseId={card.id}
+            appId="core"
+            ui={card.render.ui}
             props={card.render.props}
             result={
               card.outcome.kind === "answered" ? card.outcome.answer.output : { dismissed: true }
             }
-            onSubmit={() => {}}
-            onDismiss={() => {}}
+            onAnswer={() => {}}
             settled="full"
           />
         ) : undefined
@@ -397,6 +399,7 @@ function WaitingTaskCard({
       ? {
           part: { toolUseId: card.id, render: card.render ?? undefined },
           key: `${card.messageId}:${card.id}`,
+          messageId: card.messageId,
         }
       : undefined;
   const approval = card.kind === "approval" ? card : undefined;
@@ -405,15 +408,13 @@ function WaitingTaskCard({
     await onRefresh();
   }
 
-  async function submit(toolUseId: string, output: Record<string, unknown>) {
+  async function answer(widgetId: string, name: string, context: Record<string, unknown>) {
     if (!interaction || submitted?.key === interaction.key) return;
-    setSubmitted({ key: interaction.key, output });
+    setSubmitted({ key: interaction.key, output: widgetAnswerOutput(name, context) });
     setError(null);
     try {
       // This turn belongs to the task, never to the main Chat's stream state.
-      const result = await postSessionTurnJson(chatId, {
-        parts: [{ type: "interaction_result", toolUseId, output }],
-      });
+      const result = await postWidgetEventTurn(widgetId, { name, context });
       if (!result.ok) {
         setError(
           result.status === 400
@@ -474,15 +475,15 @@ function WaitingTaskCard({
       ) : interaction?.part.render?.builtin &&
         interaction.part.render.componentId === "question-card" ? (
         <QuestionCard
+          widgetId={interaction.messageId}
           key={`${interaction.key}:${attempt}`}
           toolUseId={interaction.part.toolUseId}
+          appId="core"
+          ui={interaction.part.render.ui}
           props={interaction.part.render.props}
           result={submitted?.key === interaction.key ? submitted.output : undefined}
-          onSubmit={(toolUseId, output) => {
-            void submit(toolUseId, output);
-          }}
-          onDismiss={(toolUseId) => {
-            void submit(toolUseId, { dismissed: true });
+          onAnswer={(widgetId, _toolUseId, name, context) => {
+            void answer(widgetId, name, context);
           }}
           header={header}
         />

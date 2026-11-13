@@ -12,6 +12,7 @@ import { LatestTaskChatsContext, renderFlatEntries } from "./render";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import type { ChatEntry, ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { TaskChatCard } from "./TaskChatCard";
+import { questionCardRender } from "../../../../mock/fixtures/question-card";
 import type { TaskCard } from "@rome/api-types/chat";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { cardKey, LiveTaskCardsProvider } from "./live-task-cards";
@@ -29,16 +30,9 @@ const question: TranscriptPart = {
   type: "pending_interaction",
   toolUseId: "item_0",
   appId: "core",
-  render: {
-    kind: "inline",
-    builtin: true,
-    componentId: "question-card",
-    props: {
-      questions: [
-        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
-      ],
-    },
-  },
+  render: questionCardRender([
+    { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+  ]),
 };
 const message = (
   id: string,
@@ -321,7 +315,7 @@ beforeEach(async () => {
       stopped.push(stop[1]!);
       return Response.json({ ok: true });
     }
-    if (url.endsWith("/turns") && init?.method === "POST") {
+    if (url.endsWith("/events") && init?.method === "POST") {
       postAction();
       return Response.json(
         postStatus === 400
@@ -868,10 +862,7 @@ describe("TaskChatCard", () => {
         {
           ...question,
           toolUseId: "item_1",
-          render: {
-            ...question.render,
-            props: { questions: [{ id: "next", question: "Next question?", type: "text" }] },
-          },
+          render: questionCardRender([{ id: "next", question: "Next question?", type: "text" }]),
         },
       ]),
     ];
@@ -891,12 +882,9 @@ describe("TaskChatCard", () => {
     const nextQuestion = {
       ...question,
       toolUseId: "item_1",
-      render: {
-        ...question.render,
-        props: {
-          questions: [{ id: "next", question: "Next question?", type: "single", options: ["Yes"] }],
-        },
-      },
+      render: questionCardRender([
+        { id: "next", question: "Next question?", type: "single", options: ["Yes"] },
+      ]),
     };
     messages = [message("next", [nextQuestion])];
     await act(async () => {
@@ -905,9 +893,10 @@ describe("TaskChatCard", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Yes" }));
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts()).toHaveLength(2));
-    expect(JSON.parse(String(posts()[1][1]?.body)).parts[0]).toMatchObject({
-      toolUseId: "item_1",
-      output: { answers: [{ questionId: "next", value: "Yes" }] },
+    expect(posts()[1][0]).toBe("/api/chat/widgets/next/events");
+    expect(JSON.parse(String(posts()[1][1]?.body))).toMatchObject({
+      name: "rome:answer",
+      context: { answers: [{ values: ["Yes"], text: "" }] },
     });
   });
 
@@ -918,15 +907,10 @@ describe("TaskChatCard", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
     const [url, init] = posts()[0];
-    expect(url).toBe(`/api/chat/sessions/${chatId}/turns`);
+    expect(url).toBe("/api/chat/widgets/ask/events");
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      parts: [
-        {
-          type: "interaction_result",
-          toolUseId: "item_0",
-          output: { answers: [{ questionId: "tone", value: "Warm" }] },
-        },
-      ],
+      name: "rome:answer",
+      context: { answers: [{ values: ["Warm"], text: "" }] },
     });
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(screen.getByText("Answered: Warm")).toBeTruthy();
@@ -953,7 +937,7 @@ describe("TaskChatCard", () => {
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
-    expect(JSON.parse(String(posts()[0][1]?.body)).parts[0].output).toEqual({ dismissed: true });
+    expect(JSON.parse(String(posts()[0][1]?.body)).name).toBe("rome:dismiss");
     expect(screen.getByText("Dismissed")).toBeTruthy();
   });
 
@@ -1027,10 +1011,7 @@ describe("TaskChatCard", () => {
       message("second", [
         {
           ...question,
-          render: {
-            ...question.render,
-            props: { questions: [{ id: "again", question: "Ask again?", type: "text" }] },
-          },
+          render: questionCardRender([{ id: "again", question: "Ask again?", type: "text" }]),
         },
       ]),
     ];

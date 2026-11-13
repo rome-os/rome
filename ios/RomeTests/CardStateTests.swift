@@ -89,14 +89,14 @@ private func task(_ id: String, chat: String, status: String?, endReason: String
         let backend = FakeBackend()
         backend.answerError = .network
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
-        store.answer(part(), answers: [])
+        store.answer(widgetId: "m", toolUseId: part().toolUseId, name: "rome:answer", context: .object(["answers": .array([])]))
         for _ in 0..<50 where store.notice == nil { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(store.localAnswers["q1"] == nil)
         #expect(store.notice != nil)
         #expect(!store.answering.contains("q1"))
         // A sent answer is kept once the server has it.
         backend.answerError = nil
-        store.answer(part(), answers: [])
+        store.answer(widgetId: "m", toolUseId: part().toolUseId, name: "rome:answer", context: .object(["answers": .array([])]))
         for _ in 0..<50 where store.localAnswers["q1"] == nil { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(store.localAnswers["q1"] != nil)
     }
