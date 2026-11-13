@@ -2569,6 +2569,16 @@
         }
       }
     },
+    "Not started · Created %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未开始 · %@创建"
+          }
+        }
+      }
+    },
     "Not supported" : {
       "localizations" : {
         "zh-Hans" : {

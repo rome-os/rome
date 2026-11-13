@@ -85,6 +85,25 @@ private let listJSON = #"""
         #expect(check.createdAt == made)
     }
 
+    /// A task not started yet shows its age; a scheduled one, or one with a
+    /// check, keeps its own line.
+    @Test func aNotStartedTaskShowsItsAge() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let day = 86_400_000.0
+        let nowMs = now.timeIntervalSince1970 * 1000
+        #expect(TaskListWords.age(nowMs - 3 * day, now: now, calendar: calendar) == "3 days ago")
+        #expect(TaskListWords.age(nowMs - day, now: now, calendar: calendar) == "yesterday")
+        #expect(TaskListWords.age(nowMs, now: now, calendar: calendar) == "today")
+        let fresh = ConciergeTask(id: "n", title: "N", state: .next, createdAt: nowMs - 3 * day, updatedAt: nowMs, status: "later")
+        #expect(TaskListWords.task(.init(task: fresh, schedule: nil, check: nil, cardMessageId: nil), now: now).hasPrefix("Not started · Created ") == true)
+        let scheduled = TaskListItem.Task(task: fresh, schedule: .init(at: "09:00", days: nil), check: nil, cardMessageId: nil)
+        #expect(TaskListWords.task(scheduled, now: now).hasPrefix("Daily at "))
+        let checked = TaskListItem.Task(task: fresh, schedule: nil, check: .init(id: "k", at: nowMs + 3_600_000, recurring: false), cardMessageId: nil)
+        #expect(TaskListWords.task(checked, now: now) == "Checks in 1 hr")
+    }
+
     @Test func schedulesReadAsTheWebSaysThem() {
         #expect(TaskListWords.schedule(.init(at: "09:00", days: ["mon", "wed"])).hasSuffix(" at " + TaskListWords.clock("09:00")))
         #expect(TaskListWords.trigger(.init(type: "schedule", localTime: "08:00", rrule: "FREQ=DAILY")).hasPrefix("Daily at "))

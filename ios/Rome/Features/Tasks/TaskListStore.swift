@@ -144,7 +144,8 @@ enum TaskListWords {
             }
             if let repeats { return repeats }
             if let at = task.laterAt { return String(localized: "Checks \(time(at, now: now))") }
-            return String(localized: "Not started")
+            // Not started: its age, so a stale one stands out.
+            return String(localized: "Not started · Created \(age(task.createdAt, now: now))")
         case "ended":
             let how: String
             switch task.endReason {
@@ -223,6 +224,17 @@ enum TaskListWords {
         default:
             return String(localized: "On a schedule")
         }
+    }
+
+    /// "today", "yesterday", "3 days ago": a not-started task's age, by calendar day.
+    static func age(_ createdAt: Double, now: Date, calendar: Calendar = .current) -> String {
+        let made = Date(timeIntervalSince1970: createdAt / 1000)
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: made), to: calendar.startOfDay(for: now)).day ?? 0
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = RelativeTime.locale
+        formatter.dateTimeStyle = .named
+        formatter.unitsStyle = .full
+        return formatter.localizedString(from: DateComponents(day: -max(days, 0)))
     }
 
     /// A row's menu title: "Created Today 09:12", in the message menu's date style.
