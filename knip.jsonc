@@ -64,7 +64,9 @@
         "infra/**/*.test.mjs",
         // The chief of staff verifier's commands, run by path: the runner, its
         // tests, the fake environment and judge the tests spawn, and the judge.
-        "environments/chief-of-staff/verifier/{verify.mjs,test/*.test.mjs,fake/*.mjs,lib/claude-judge.mjs}"
+        "environments/chief-of-staff/verifier/{verify.mjs,test/*.test.mjs,fake/*.mjs,lib/claude-judge.mjs}",
+        // The chief of staff environment's Discord helper, run by env.sh via node.
+        "environments/chief-of-staff/discord.mjs"
       ],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.

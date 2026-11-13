@@ -273,9 +273,9 @@ link_agent() {
       if (a?.connection) process.stdout.write(a.connection);
     });' "$agent_id")"
   [ -n "$connection" ] || die "Rome lists no connected account for the agent's bot $agent_id"
-  log "linking the $COS_AGENT agent to the connected account ..."
-  printf '{"agent":"%s"}' "$COS_AGENT" | api PUT "/connected-accounts/discord/$agent_id/agent" >/dev/null ||
-    die "Rome refused to link \"$COS_AGENT\". Is the agent's app in this checkout? GET /api/agents lists the loaded agents."
+  log "linking the $COS_AGENT_NAME agent to the connected account ..."
+  printf '{"agent":"%s"}' "$COS_AGENT_NAME" | api PUT "/connected-accounts/discord/$agent_id/agent" >/dev/null ||
+    die "Rome refused to link \"$COS_AGENT_NAME\". Is the agent's app in this checkout? GET /api/agents lists the loaded agents."
   node -e '
     const fs = require("fs"); const f = process.argv[1];
     const s = JSON.parse(fs.readFileSync(f, "utf8")); s.connection = process.argv[2];
@@ -360,8 +360,8 @@ put_document() {
   node -e '
     const fs = require("fs");
     process.stdout.write(JSON.stringify({ body: fs.readFileSync(process.argv[1], "utf8") }));' "$file" |
-    api PUT "/apps/$COS_AGENT/documents/$document" >/dev/null ||
-    die "Rome refused to write the $document document. Is the $COS_AGENT app in this checkout?"
+    api PUT "/apps/$COS_AGENT_APP/documents/$document" >/dev/null ||
+    die "Rome refused to write the $document document. Is the $COS_AGENT_APP app in this checkout?"
 }
 
 # Links each member's Discord account to a person, sets their server display
