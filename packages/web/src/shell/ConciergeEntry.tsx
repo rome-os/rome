@@ -1,6 +1,6 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Ellipsis, Pencil, Plus, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Ellipsis, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
@@ -84,22 +84,11 @@ export function topicChatRows(
 
 /**
  * The sidebar's main chat entry, with a badge counting the agent messages the
- * guardian has not read, and the plus that opens a blank topic chat. A new
- * message recounts, and so does a read in this tab; another tab or device
- * catches up on its next focus refetch. The open chat reads what arrives, so
- * the entry shows no badge while it is active. The plus takes the badge's
- * place while the row is hovered or focused, so the two never overlap. On a
- * touch screen, which has no hover, it shows while there is nothing unread.
+ * guardian has not read. A new message recounts, and so does a read in this
+ * tab; another tab or device catches up on its next focus refetch. The open
+ * chat reads what arrives, so the entry shows no badge while it is active.
  */
-export function ConciergeEntry({
-  chatId,
-  active,
-  onNewTopic,
-}: {
-  chatId: string;
-  active: boolean;
-  onNewTopic: () => void;
-}) {
+export function ConciergeEntry({ chatId, active }: { chatId: string; active: boolean }) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const unread = useConciergeUnread(chatId);
@@ -115,7 +104,7 @@ export function ConciergeEntry({
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   return (
-    <div className="group/concierge relative flex items-center">
+    <div className="flex items-center">
       <Link
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
@@ -135,7 +124,7 @@ export function ConciergeEntry({
         {count > 0 ? (
           <Badge
             variant="destructive"
-            className="shrink-0 tabular-nums group-focus-within/concierge:invisible group-hover/concierge:invisible"
+            className="shrink-0 tabular-nums"
             data-concierge-unread
             role="img"
             aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
@@ -144,16 +133,6 @@ export function ConciergeEntry({
           </Badge>
         ) : null}
       </Link>
-      <IconButton
-        size="sm"
-        label={t("recentChats.newTopicChat")}
-        icon={<Plus aria-hidden />}
-        className={`absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-focus-within/concierge:opacity-100 group-hover/concierge:opacity-100 ${
-          count > 0 ? "" : "touch-show"
-        }`}
-        onClick={onNewTopic}
-        data-concierge-new-topic
-      />
     </div>
   );
 }
@@ -163,9 +142,7 @@ export function ConciergeEntry({
  * chats, latest first, the first {@link TOPIC_CHATS_VISIBLE} and a More row
  * for the rest. Each topic chat has its unread badge and a menu to rename,
  * archive or unarchive, and delete it. The status filter applies here too:
- * the main chat is never archived, so the archived filter hides it. The plus
- * beside the main entry opens a blank topic chat, which its first message
- * creates and names.
+ * the main chat is never archived, so the archived filter hides it.
  */
 export function ConciergeChats({
   mainChatId,
@@ -205,12 +182,7 @@ export function ConciergeChats({
   return (
     <section aria-label={t("recentChats.conciergeSection")} className="pt-1" data-concierge-section>
       {statusFilter === "archived" ? null : (
-        <ConciergeEntry
-          chatId={mainChatId}
-          active={activeSessionId === mainChatId}
-          // A blank topic chat, as a new chat opens blank: its first send creates it.
-          onNewTopic={() => navigate("/chat", { state: { conciergeTopic: true } })}
-        />
+        <ConciergeEntry chatId={mainChatId} active={activeSessionId === mainChatId} />
       )}
       {visible.map((chat) => (
         <ConciergeTopicEntry
