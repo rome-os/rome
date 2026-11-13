@@ -181,6 +181,7 @@
     "timed": "{{name}} · {{when}}",
     "waiting": "等待{{what}} · {{when}}检查",
     "cancel": "取消「{{name}}」",
+    "skip": "跳过 {{name}} 的下一次运行",
     "loadFailed": "无法加载排好的检查",
     "summary": "{{count}} 个检查 · 下一个：{{next}}",
     "expand": "展开排好的检查",
@@ -631,6 +632,15 @@
       "idle": "闲置后",
       "daily": "每日重置",
       "working_dir": "工作目录不存在"
+    }
+  },
+  "automatedInput": {
+    "named": "{{kind}} · {{name}}",
+    "kinds": {
+      "routine": "例程",
+      "app": "应用",
+      "agent": "Agent",
+      "automation": "自动化"
     }
   },
   "routineCard": {

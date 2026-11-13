@@ -106,7 +106,13 @@ import {
   automatedMessageNotice,
 } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { automatedSenderId } from "../../webchat/automated-source.js";
+import { automatedSenderId, automatedSource } from "../../webchat/automated-source.js";
+import {
+  automatedInputLabel,
+  automatedInputPrompt,
+  automatedInputSource,
+  fromOwner,
+} from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
@@ -3758,6 +3764,54 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // webchat — handoff children never carry the flag.
     if (session.type === "webchat" && session.archivedAt) {
       return answer({ error: "This chat is archived and read-only" }, 409);
+    }
+
+    // A Concierge chat holds only its owner's messages and the Concierge's. A
+    // routine, an app or another agent sending into it wakes the Concierge
+    // with a quiet system turn instead: the text stays in the turn's trace and
+    // the chat shows a faint line naming who sent it.
+    if (automated && isConciergeChat(session)) {
+      // An action's loopback send stands for the person its turn ran for,
+      // known here only by kind. That person must be able to open the chat,
+      // as on any send into a dashboard chat: a visitor's, of no known
+      // account, opens no one's. A send no person made is Rome's own work.
+      const actorKind = sourceId ? body.automatedActorKind : undefined;
+      if (
+        actorKind === "visitor" ||
+        (actorKind === "guardian" &&
+          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian")))
+      ) {
+        return answer({ error: "Session not found" }, 404);
+      }
+      const concierge = deps.concierge;
+      const text = body.text?.trim() ?? "";
+      // A turn takes only the text: files are refused, not dropped.
+      if (!concierge || !text || uploadedFiles.length > 0) {
+        return answer({ error: "A Concierge chat takes only text from an automation" }, 400);
+      }
+      const source = automatedInputSource(automated);
+      void concierge
+        .runSystemTurn(
+          sessionId,
+          automatedInputPrompt(
+            source,
+            text,
+            fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
+          ),
+          {
+            quiet: true,
+            inputLabel: automatedInputLabel(source),
+            inputSource: source,
+            pushLevel: "active",
+          },
+        )
+        .catch((error: unknown) =>
+          log.warn("automated input into a Concierge chat did not run", {
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return answer({ inputId, sessionId, turnId: null, disposition: "system_turn" }, 202);
     }
 
     // A branch is visible in the sidebar from its 201, but its model thread

@@ -490,6 +490,35 @@ describe("buildTraceSnapshot — summary", () => {
     expect(plain.summary.sessionRenewal).toBeUndefined();
   });
 
+  it("names who sent a system turn's input, and only when a source sent it", () => {
+    const automated = buildTraceSnapshot({
+      idPrefix: "t",
+      blocks: [
+        turnStart("concierge"),
+        {
+          type: "system_input",
+          label: "Routine · Daily summary",
+          content: "<automated_input …>",
+          source: { type: "routine", name: "Daily summary" },
+        },
+        turnEnd(900, "concierge"),
+      ],
+      resolver: testResolver,
+    });
+    const digest = buildTraceSnapshot({
+      idPrefix: "t",
+      blocks: [
+        turnStart("concierge"),
+        { type: "system_input", label: "Following · digest (2)", content: "<digest/>" },
+        turnEnd(900, "concierge"),
+      ],
+      resolver: testResolver,
+    });
+
+    expect(automated.summary.automatedInput).toEqual({ type: "routine", name: "Daily summary" });
+    expect(digest.summary.automatedInput).toBeUndefined();
+  });
+
   it("stoppedByUser resets when a later turn in the same trace completes normally", () => {
     const blocks: TraceEventDto[] = [
       { type: "result", content: "", agent: "main" },

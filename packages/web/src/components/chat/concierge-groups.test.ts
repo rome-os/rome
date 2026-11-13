@@ -401,3 +401,35 @@ describe("showsTyping", () => {
     expect(showsTyping(asked, { ...live(null), isStreaming: false })).toBe(false);
   });
 });
+
+describe("automated input", () => {
+  it("shows an automated input's turn as a line naming its source, then the Concierge's words", () => {
+    const rows: ChatRow[] = [
+      {
+        kind: "automated_input",
+        key: "automated-input:t1",
+        source: { type: "routine", name: "Daily summary" },
+        turnId: "t1",
+      },
+      agentRow(say("answer", MIN, "t1", "Here is your summary.")),
+    ];
+    const items = buildConciergeItems(rows, { typing: false });
+
+    expect(items.map((item) => item.kind)).toEqual(["automated", "separator", "group"]);
+    expect(items[0]).toEqual({
+      kind: "automated",
+      key: "automated-input:t1",
+      source: { type: "routine", name: "Daily summary" },
+    });
+  });
+
+  it("shows an automated message from before the rule as the same line, not a bubble", () => {
+    const old = guardian("old-auto", 0);
+    old.sender = { kind: "automated", sourceType: "agent", name: "Milo", iconUrl: null };
+    const items = buildConciergeItems([userRow(old)], { typing: false });
+
+    expect(items).toEqual([
+      { kind: "automated", key: "old-auto", source: { type: "agent", name: "Milo" } },
+    ]);
+  });
+});

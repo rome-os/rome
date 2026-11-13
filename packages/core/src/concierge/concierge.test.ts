@@ -5964,3 +5964,155 @@ describe("Concierge status reactions", () => {
     expect(s.pushes).toEqual([]);
   });
 });
+
+describe("scheduled tasks", () => {
+  const view = (report: "every_run" | "when_it_matters") => ({
+    at: "12:25",
+    report,
+    brief: "Sum up my last day",
+    nextRunAt: Date.UTC(2026, 10, 13, 4, 25),
+  });
+  const withSchedules = (s: ReturnType<typeof setup>, report: "every_run" | "when_it_matters") => {
+    const schedules = {
+      set: rs.fn(async () => {}),
+      remove: rs.fn(async () => true),
+      of: rs.fn(async () => view(report)),
+      takeSkip: rs.fn(async () => false),
+    };
+    (s.deps as { schedules?: unknown }).schedules = schedules;
+    return schedules;
+  };
+  const startScheduled = async (s: ReturnType<typeof setup>, report = "every_run") =>
+    JSON.parse(
+      (
+        await s.tool("chat_start", {
+          title: "Daily summary",
+          brief: "Sum up my last day",
+          schedule: { at: "12:25", report },
+        })
+      ).content[0].text,
+    ) as { chatId: string; taskId: string; scheduled: string };
+
+  it("starts a scheduled task's chat without running it, and schedules its brief", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const started = await startScheduled(s);
+
+    expect(s.posted).toEqual([]);
+    expect(schedules.set).toHaveBeenCalledWith(
+      { id: started.taskId, title: "Daily summary", owner: "guardian" },
+      { at: "12:25", report: "every_run", brief: "Sum up my last day" },
+    );
+    expect(started.scheduled).toContain("2026-11-13T04:25:00.000Z");
+  });
+
+  it("sends each run's brief into the task's own chat as the Concierge's words, reported as its own", async () => {
+    const s = setup();
+    withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    s.fakeTimers();
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+    expect(s.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ chat: expect.objectContaining({ id: chatId }) }),
+      { text: "Sum up my last day" },
+      CONCIERGE_ACCOUNT,
+    );
+    // Its result comes back as any task's does.
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId, text: "x" });
+    await rs.advanceTimersByTimeAsync(3_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0]?.prompt).toContain(taskId);
+  });
+
+  it("keeps a scheduled task's skill and sends it with every run's brief", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = JSON.parse(
+      (
+        await s.tool("chat_start", {
+          title: "Daily summary",
+          brief: "Sum up my last day",
+          skill: "coding:app_creation",
+          schedule: { at: "12:25" },
+        })
+      ).content[0].text,
+    );
+    expect(schedules.set).toHaveBeenCalledWith(expect.objectContaining({ id: taskId }), {
+      at: "12:25",
+      report: "every_run",
+      brief: "Sum up my last day",
+      skill: "coding:app_creation",
+    });
+    schedules.of.mockImplementation(async () => ({
+      ...view("every_run"),
+      skill: "coding:app_creation",
+    }));
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+    expect(s.send).toHaveBeenLastCalledWith(
+      expect.anything(),
+      { text: "Sum up my last day", skillName: "coding:app_creation" },
+      CONCIERGE_ACCOUNT,
+    );
+  });
+
+  it("lets a quiet run with nothing to ask go to the digest, not a report", async () => {
+    const s = setup();
+    withSchedules(s, "when_it_matters");
+    const { chatId, taskId } = await startScheduled(s, "when_it_matters");
+    s.fakeTimers();
+
+    await s.service.runScheduledTask(taskId, Date.now());
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId, text: "x" });
+    await rs.advanceTimersByTimeAsync(10 * 60_000);
+    expect(s.backendTurns).toEqual([]);
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toContain(
+      `<ran_on_schedule task="${taskId}"`,
+    );
+  });
+
+  it("sends nothing for a stopped task, and removes its schedule", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = await startScheduled(s);
+    await s.service.stopTask(taskId, "guardian");
+    expect(schedules.remove).toHaveBeenCalledWith(taskId);
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("stopped");
+    expect(s.posted).toEqual([]);
+  });
+
+  it("keeps a task's schedule when its owner cancels its checks from its row", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = await startScheduled(s);
+    const cancelFor = rs.fn(async () => 1);
+    s.deps.checks = { cancelFor, laterOf: async () => new Map() } as never;
+
+    await s.service.cancelChecksByOwner(taskId);
+    // The row's cancel skips the next run only; a stop removes the schedule.
+    expect(cancelFor).toHaveBeenCalledWith(taskId, "guardian", { keepSchedule: true });
+    expect(schedules.remove).not.toHaveBeenCalled();
+  });
+
+  it("changes or removes a task's schedule from task_upsert, keeping its brief", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = await startScheduled(s);
+
+    await s.tool("task_upsert", {
+      tasks: [{ id: taskId, schedule: { at: "08:00", days: ["mon"] } }],
+    });
+    expect(schedules.set).toHaveBeenLastCalledWith(
+      { id: taskId, title: "Daily summary", owner: "guardian" },
+      { at: "08:00", days: ["mon"], report: "every_run", brief: "Sum up my last day" },
+    );
+    await s.tool("task_upsert", { tasks: [{ id: taskId, schedule: null }] });
+    expect(schedules.remove).toHaveBeenCalledWith(taskId);
+    const listed = JSON.parse((await s.tool("task_list", { includeDone: true })).content[0].text);
+    expect(listed.tasks[0]).toMatchObject({
+      schedule: { at: "12:25", report: "every_run", nextRunAt: "2026-11-13T04:25:00.000Z" },
+    });
+  });
+});

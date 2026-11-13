@@ -153,6 +153,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       | "persistTranscript"
       | "persistAnswer"
       | "inputLabel"
+      | "inputSource"
       | "pushLevel"
       | "reportedTask"
       | "actor"
@@ -303,6 +304,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             persistTrace: true,
             persistTranscript: false,
             ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
+            ...(options?.inputSource ? { inputSource: options.inputSource } : {}),
             ...(options?.pushLevel ? { pushLevel: options.pushLevel } : {}),
             ...(options?.actor ? { actor: options.actor } : {}),
             ...(params.reportedTask ? { reportedTask: params.reportedTask } : {}),
@@ -339,6 +341,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       shouldRun: options?.shouldRun,
       persistAnswer: false,
       ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
+      ...(options?.inputSource ? { inputSource: options.inputSource } : {}),
       ...(options?.actor ? { actor: options.actor } : {}),
     };
     for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {

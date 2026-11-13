@@ -107,6 +107,26 @@ describe("PendingChecks", () => {
     expect(deleted).toEqual(["ci"]);
   });
 
+  it("offers to skip the next run of a task's schedule, not to cancel it", async () => {
+    const deleted = serve([
+      {
+        id: "r-3",
+        name: "Daily summary",
+        at: Date.now() + HOUR + 1_000,
+        waitingFor: null,
+        taskId: "t-2",
+        recurring: true,
+      },
+    ]);
+    const user = userEvent.setup();
+    renderChecks();
+    expect(await screen.findByText("Daily summary · in 1 hr")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Show scheduled checks" }));
+    expect(screen.queryByRole("button", { name: "Cancel Daily summary" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Skip the next run of Daily summary" }));
+    await waitFor(() => expect(deleted).toEqual(["r-3"]));
+  });
+
   it("drops a check from the strip once its time has passed", async () => {
     serve([
       { id: "soon", name: "Soon", at: Date.now() + 1_500, waitingFor: null, taskId: null },
@@ -115,6 +135,25 @@ describe("PendingChecks", () => {
     renderChecks();
     expect(await screen.findByText(/^2 checks · next: Soon/)).toBeTruthy();
     expect(await screen.findByText("Later · in 2 hr", undefined, { timeout: 5_000 })).toBeTruthy();
+  });
+
+  it("shows a scheduled task's next run once one passes, with the chat left open", async () => {
+    const run = (at: number) => ({
+      id: "r-1",
+      name: "Daily summary",
+      at,
+      waitingFor: null,
+      taskId: "t-1",
+      recurring: true,
+    });
+    serve([run(Date.now() + 1_500)]);
+    renderChecks();
+    expect(await screen.findByText(/^Daily summary · /)).toBeTruthy();
+    // The run fires quietly, and Rome stores the next one; no turn follows.
+    serve([run(Date.now() + 24 * HOUR)]);
+    expect(
+      await screen.findByText("Daily summary · in 24 hr", undefined, { timeout: 6_000 }),
+    ).toBeTruthy();
   });
 
   it("counts a check's time from now, not from when the strip first showed", async () => {
