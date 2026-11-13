@@ -33,6 +33,9 @@ import type { ConciergeOwner } from "../webchat/owner.js";
 
 const log = createLogger("concierge-task-list");
 
+/** Stored message times are whole seconds. */
+const SAME_SECOND_MS = 1_000;
+
 /** How long changes are gathered before the list is told, so a burst tells it once. */
 const CHANGE_SETTLE_MS = 150;
 
@@ -61,8 +64,10 @@ export interface ChatTaskListDeps {
   routineRuns: Pick<RoutineRunsRepository, "findLatestByRoutineIds">;
   routineEngine: Pick<RoutineEngine, "onChange">;
   /** The assistant messages of a chat that hold a task chat part, in the order said. */
+  /** From `since` on, when given. */
   taskChatPartMessages: (
     chatId: string,
+    since?: Date,
   ) => Promise<Array<{ id: string; content: string; createdAt: Date }>>;
 }
 
@@ -145,7 +150,12 @@ export class ChatTaskList {
       ),
     );
     if (waits.size === 0) return new Map();
-    return cardMessagesOf(await this.deps.taskChatPartMessages(chatId), waits);
+    // A card that shows a wait is said once the wait began: read from the
+    // oldest one's second on, not the whole chat.
+    const since = new Date(
+      Math.min(...[...waits.values()].map((wait) => wait.since)) - SAME_SECOND_MS,
+    );
+    return cardMessagesOf(await this.deps.taskChatPartMessages(chatId, since), waits);
   }
 
   private async followsIn(chatId: string, owner: ConciergeOwner): Promise<TaskListFollowItem[]> {

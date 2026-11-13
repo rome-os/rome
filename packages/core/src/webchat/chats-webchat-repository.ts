@@ -1067,10 +1067,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
 
   override async taskChatPartMessages(
     sessionId: string,
+    since?: Date,
   ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
+    const from = since ? sql` AND created_at >= ${Math.floor(since.getTime() / 1000)}` : sql``;
     return this.selectLines(
       [sessionId],
-      sql`WHERE role = 'assistant' AND content LIKE '%"task_chat"%'`,
+      sql`WHERE role = 'assistant' AND content LIKE '%"task_chat"%'${from}`,
     ).map(({ id, content, createdAt }) => ({ id, content, createdAt }));
   }
 

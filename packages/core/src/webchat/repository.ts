@@ -2484,16 +2484,19 @@ export class WebChatRepository {
 
   /**
    * The assistant messages of chat `sessionId` that hold a task chat part,
-   * in the order they were said: where a task's card can show.
+   * in the order they were said: where a task's card can show. From `since`
+   * on, when given.
    */
   async taskChatPartMessages(
     sessionId: string,
+    since?: Date,
   ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
     const rows = await this.selectMessages(
       and(
         eq(romeAgentMessages.sessionId, sessionId),
         eq(romeAgentMessages.role, "assistant"),
         like(romeAgentMessages.content, '%"task_chat"%'),
+        since ? gte(romeAgentMessages.createdAt, since) : undefined,
       ),
     );
     return rows.map(({ id, content, createdAt }) => ({ id, content, createdAt }));

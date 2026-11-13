@@ -49,6 +49,8 @@ describe("/chats/:chatId/tasks", () => {
   let checks: Record<string, Array<{ id: string; at: number | null; taskId: string | null }>>;
   let cardMessages: Record<string, Array<{ id: string; content: string; createdAt: Date }>>;
   let taskSource: ConciergeTasks | null;
+  /** The `since` each read of the chat's task chat parts asked from. */
+  let asked: Array<number | undefined>;
 
   const app = () => {
     const concierge = {
@@ -84,7 +86,10 @@ describe("/chats/:chatId/tasks", () => {
         routineRunsRepo: new RoutineRunsRepository(testDb.db),
         routineEngine,
         webchatRepo: {
-          taskChatPartMessages: async (chatId: string) => cardMessages[chatId] ?? [],
+          taskChatPartMessages: async (chatId: string, from?: Date) => {
+            asked.push(from?.getTime());
+            return cardMessages[chatId] ?? [];
+          },
         } as unknown as ApiDeps["webchatRepo"],
       }),
     );
@@ -128,6 +133,7 @@ describe("/chats/:chatId/tasks", () => {
     follows = {};
     checks = {};
     cardMessages = {};
+    asked = [];
     taskSource = null;
     const chats = new ChatsWebChatRepository(testDb.db);
     await chats.createSession(
@@ -200,6 +206,8 @@ describe("/chats/:chatId/tasks", () => {
 
   it("shows an empty tab with no groups", async () => {
     expect(await read("concierge")).toEqual({ chatId: "concierge", groups: [] });
+    // Nothing needs its owner: the chat's cards are not read at all.
+    expect(asked).toEqual([]);
   });
 
   it("stops a task of the chat for its owner only", async () => {
@@ -256,9 +264,12 @@ describe("/chats/:chatId/tasks", () => {
       said("old-ask", since - 10 * 60_000),
       said("same-second-ask", Math.floor(since / 1_000) * 1_000, "ask"),
       said("new-ask", since + 2_000),
-      said("later-task-card", since + 3_000, "task"),
     ];
     expect(await respondTo()).toBe("new-ask");
+
+    // A task card said after it is the chat's newest card, so the ask is not answerable there.
+    cardMessages.concierge.push(said("later-task-card", since + 3_000, "task"));
+    expect(await respondTo()).toBeNull();
 
     // A card that names what it shows counts by that alone, whenever it was said.
     const naming = (id: string, at: number, approval: string) => ({
@@ -275,10 +286,15 @@ describe("/chats/:chatId/tasks", () => {
       createdAt: new Date(at),
     });
     cardMessages.concierge = [
-      naming("names-it", since - 5_000, "a1"),
-      naming("names-another", since + 5_000, "a0"),
+      naming("names-another", since + 1_000, "a0"),
+      naming("names-it", since + 2_000, "a1"),
     ];
     expect(await respondTo()).toBe("names-it");
+    // Newest naming another item: the transcript draws none answerable.
+    cardMessages.concierge.reverse();
+    expect(await respondTo()).toBeNull();
+    // It reads from a second before the wait began, not the whole chat.
+    expect(asked.at(-1)).toBe(since - 1_000);
   });
 
   it("lists a routine a draft card in the chat turned on", async () => {

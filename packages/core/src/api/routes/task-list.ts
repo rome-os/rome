@@ -43,7 +43,7 @@ export function chatTaskListOf(deps: TaskListApiDeps): ChatTaskList | null {
       routines: deps.routinesRepo,
       routineRuns: deps.routineRunsRepo,
       routineEngine: deps.routineEngine,
-      taskChatPartMessages: (chatId) => deps.webchatRepo.taskChatPartMessages(chatId),
+      taskChatPartMessages: (chatId, since) => deps.webchatRepo.taskChatPartMessages(chatId, since),
     });
     lists.set(concierge, list);
   }

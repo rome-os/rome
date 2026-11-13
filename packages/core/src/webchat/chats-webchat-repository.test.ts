@@ -198,6 +198,26 @@ describe("ChatsWebChatRepository", () => {
     expect(turnsOf(plain.rows)).toEqual([8]);
   });
 
+  it("reads a chat's task chat parts from a time on", async () => {
+    const part = JSON.stringify([{ type: "task_chat", chatId: "task-1", title: "Flights" }]);
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date("2026-11-13T08:00:00Z"));
+      await repo.createSession("chat-1", "Plans");
+      rs.setSystemTime(new Date("2026-11-13T09:00:00Z"));
+      await repo.addMessage("card-old", "chat-1", "assistant", part, "turn-1");
+      rs.setSystemTime(new Date("2026-11-13T09:05:00Z"));
+      await repo.addMessage("card-new", "chat-1", "assistant", part, "turn-2");
+      await repo.addMessage("plain", "chat-1", "assistant", text("No card"), "turn-2");
+    } finally {
+      rs.useRealTimers();
+    }
+    const ids = async (since?: Date) =>
+      (await repo.taskChatPartMessages("chat-1", since)).map((line) => line.id);
+    expect(await ids()).toEqual(["card-old", "card-new"]);
+    expect(await ids(new Date("2026-11-13T09:04:59Z"))).toEqual(["card-new"]);
+  });
+
   // A subagent, fork or action run stands in no chat, so its prompts and
   // answers are its own.
   it("keeps the lines of a session in no chat as its own", async () => {

@@ -52,11 +52,13 @@ function showsWait(waitedOn: TaskChatWaitedOn, wait: ConciergeOpenWait): boolean
 }
 
 /**
- * For each task chat in `waits`, the newest of `messages` that shows the
- * question or approval card of the wait it now holds. A card names what it
- * shows; one from before names nothing and shows what was asked by its time,
- * so it counts when said no earlier than the wait's own second. A task chat
- * no such message shows is left out, and its owner answers in the task chat.
+ * For each task chat in `waits`, the message of `messages` whose card the
+ * transcript draws answerable for the wait it now holds: the newest
+ * `task_chat` part for that chat, a task card included, when it is a question
+ * or approval card that shows that wait. A card names what it shows; one from
+ * before names nothing and shows what was asked by its time, so it counts when
+ * said no earlier than the wait's own second. A task chat whose newest part is
+ * anything else is left out, and its owner answers in the task chat.
  * `messages` come in the order said.
  */
 export function cardMessagesOf(
@@ -64,7 +66,7 @@ export function cardMessagesOf(
   /** Each waiting task chat, and the wait it holds now. */
   waits: ReadonlyMap<string, ConciergeOpenWait>,
 ): Map<string, string> {
-  const found = new Map<string, string>();
+  const newest = new Map<string, { messageId: string; shows: boolean }>();
   for (const message of messages) {
     // Stored times are whole seconds: a card said in the wait's second shows it.
     const said = message.createdAt.getTime() + SAME_SECOND_MS - 1;
@@ -76,14 +78,19 @@ export function cardMessagesOf(
     }
     if (!Array.isArray(parts)) continue;
     for (const part of parts) {
-      if (!part || typeof part !== "object" || !showsAsk(part as Record<string, unknown>)) continue;
-      const { chatId, waitedOn } = part as { chatId: string; waitedOn?: TaskChatWaitedOn };
-      const wait = waits.get(chatId);
+      if (!part || typeof part !== "object") continue;
+      const record = part as Record<string, unknown>;
+      if (record.type !== "task_chat" || typeof record.chatId !== "string") continue;
+      const wait = waits.get(record.chatId);
       if (!wait) continue;
-      if (waitedOn ? showsWait(waitedOn, wait) : said >= wait.since) found.set(chatId, message.id);
+      const waitedOn = record.waitedOn as TaskChatWaitedOn | undefined;
+      const shows = showsAsk(record) && (waitedOn ? showsWait(waitedOn, wait) : said >= wait.since);
+      newest.set(record.chatId, { messageId: message.id, shows });
     }
   }
-  return found;
+  return new Map(
+    [...newest].flatMap(([chatId, { messageId, shows }]) => (shows ? [[chatId, messageId]] : [])),
+  );
 }
 
 /** The answer a question card sent, as one line: its answers' values. */
