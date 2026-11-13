@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # The chief of staff environment: a Rome container of its own, built from this
 # checkout, connected to a test Discord server through the agent's Discord bot,
-# with three member bots that play the team.
+# with bots that play the team.
 #
 #   environments/chief-of-staff/env.sh up [--no-build]  # start, or bring up to date
 #   environments/chief-of-staff/env.sh reset            # wipe Rome and the test chats, start again
 #   environments/chief-of-staff/env.sh down             # remove everything up created
+#   environments/chief-of-staff/env.sh seed <dir>       # hand the agent the team roster and goals
 #
 # The verifier drives it through cos-env only. See README.md.
 set -euo pipefail
@@ -27,13 +28,18 @@ ROME="rome-env-${NAME}-rome"
 HOME_VOLUME="rome-env-${NAME}-home"
 MEMORY_VOLUME="rome-env-${NAME}-memory"
 USER_VOLUME="rome-env-${NAME}-user"
+# A throwaway checkout where this branch is merged with the agent's ref, so the
+# test Rome carries the agent without the agent's code ever landing on this branch.
+BUILD_TREE="$RUN_DIR/agent-tree"
+# The agent under test. It lives on its own branch, not on this one. The default
+# is the head of the chief of staff agent's pull request.
+AGENT_REF="${COS_AGENT_REF:-origin/claude/project-thread-ys37d4}"
 # Rome's API inside the container, behind Caddy's sign-in check.
 API="http://127.0.0.1:4141/api"
 
 # shellcheck source=team.env
 . "$ENV_DIR/team.env"
 read -r -a MEMBERS <<<"$COS_MEMBERS"
-read -r -a MEMBER_NAMES <<<"$COS_MEMBER_NAMES"
 read -r -a CHATS <<<"$COS_CHATS"
 
 log() { printf 'env/%s: %s\n' "$NAME" "$*" >&2; }
@@ -42,8 +48,9 @@ die() {
   exit 1
 }
 
-# Reads the secrets file into the environment, and stops naming the first one
-# missing. Values are never echoed.
+# Reads the secrets into the environment, and stops naming the first one
+# missing. The fourth member token is optional: it is the second account of
+# member1, and only `--as member1:2` needs it. Values are never echoed.
 load_secrets() {
   [ -f "$SECRETS_FILE" ] || die "no secrets file at $SECRETS_FILE. README.md lists what it holds."
   set -a
@@ -61,15 +68,21 @@ load_secrets() {
     die "$SECRETS_FILE sets no model login: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
 }
 
-member_token_var() {
-  local i
-  for i in "${!MEMBERS[@]}"; do
-    if [ "${MEMBERS[$i]}" = "$1" ]; then
-      printf 'COS_MEMBER_%d_BOT_TOKEN' "$((i + 1))"
-      return
-    fi
-  done
-  die "no member named \"$1\". Members: ${MEMBERS[*]}"
+# The bot token behind a member name. member1..3 are the three accounts;
+# <member>:2 is that member's second account, the fourth bot.
+member_token() {
+  case "$1" in
+    member1) printf '%s' "$COS_MEMBER_1_BOT_TOKEN" ;;
+    member2) printf '%s' "$COS_MEMBER_2_BOT_TOKEN" ;;
+    member3) printf '%s' "$COS_MEMBER_3_BOT_TOKEN" ;;
+    *:2)
+      [ -n "${COS_MEMBER_4_BOT_TOKEN:-}" ] ||
+        die "no second account: $SECRETS_FILE sets no COS_MEMBER_4_BOT_TOKEN. Only \"--as $1\" needs it."
+      [ "$1" = "member1:2" ] || die "the only second account is member1:2, not \"$1\""
+      printf '%s' "$COS_MEMBER_4_BOT_TOKEN"
+      ;;
+    *) die "no member named \"$1\". Members: ${MEMBERS[*]} (and member1:2 with a fourth token)" ;;
+  esac
 }
 
 discord() {
@@ -121,26 +134,47 @@ image_sha() {
     sed -n 's/^ROME_BUILD_SHA=//p'
 }
 
-# Builds the production Rome image, apps included, from this checkout. Records
-# which commits went in, for `cos-env version`.
+# Builds the production Rome image, the agent app included. The agent lives on
+# its own branch, so this merges that ref into a throwaway checkout of this
+# branch and builds there — the agent's code never lands on this branch. Records
+# the commits that went in, for `cos-env version`.
 build_rome_image() {
-  local sha dirty=false
-  sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-  [ -z "$(git -C "$REPO_ROOT" status --porcelain -- . ':!environments')" ] || dirty=true
-  log "building the Rome image from ${sha:0:9}$([ "$dirty" = false ] || echo ' with uncommitted changes') ..."
+  local main_sha env_sha agent_sha env_dirty=false merged
+  git -C "$REPO_ROOT" fetch --quiet origin main
+  git -C "$REPO_ROOT" fetch --quiet origin "${AGENT_REF#origin/}" 2>/dev/null || true
+  main_sha="$(git -C "$REPO_ROOT" merge-base HEAD origin/main)"
+  env_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  agent_sha="$(git -C "$REPO_ROOT" rev-parse "$AGENT_REF" 2>/dev/null)" ||
+    die "cannot resolve the agent ref \"$AGENT_REF\". Set COS_AGENT_REF to the agent's branch or commit."
+  [ -z "$(git -C "$REPO_ROOT" status --porcelain -- environments/chief-of-staff)" ] || env_dirty=true
+
+  log "merging the agent ${agent_sha:0:9} into a throwaway checkout of ${env_sha:0:9} ..."
+  git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
+  rm -rf "$BUILD_TREE"
+  git -C "$REPO_ROOT" worktree add --quiet --detach "$BUILD_TREE" "$env_sha"
+  if ! git -C "$BUILD_TREE" merge --no-edit --no-ff "$agent_sha" >/dev/null 2>&1; then
+    git -C "$BUILD_TREE" merge --abort 2>/dev/null || true
+    git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
+    die "the agent ref does not merge cleanly into this branch. Rebase the agent branch on main, or set COS_AGENT_REF to one that merges."
+  fi
+  merged="$(git -C "$BUILD_TREE" rev-parse HEAD)"
+
+  log "building the Rome image from the merged tree ${merged:0:9} ..."
   (
-    cd "$REPO_ROOT"
+    cd "$BUILD_TREE"
     node scripts/docker/prepare-runtime-workspace.mjs >/dev/null
     docker build --quiet \
       --file .docker/rome-runtime-workspace/Dockerfile \
       --tag "$IMAGE" \
       --build-arg ROME_DOCKER_APP_CODE_MODE=compiled \
-      --build-arg "ROME_BUILD_SHA=$sha" \
+      --build-arg "ROME_BUILD_SHA=$merged" \
       --build-arg "ROME_BUILD_TIME=$(date -u +%FT%TZ)" \
       .docker/rome-runtime-workspace >/dev/null
   )
-  printf '{"rome":{"commit":"%s","dirty":%s},"app":%s,"builtAt":"%s"}\n' \
-    "$sha" "$dirty" "$(tree_json rome_apps/chief-of-staff)" "$(date -u +%FT%TZ)" >"$BUILD_FILE"
+  git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
+
+  printf '{"rome":{"commit":"%s","dirty":false},"agent":{"commit":"%s","dirty":false},"environment":{"commit":"%s","dirty":%s},"builtAt":"%s"}\n' \
+    "$main_sha" "$agent_sha" "$env_sha" "$env_dirty" "$(date -u +%FT%TZ)" >"$BUILD_FILE"
 }
 
 # A value already in the Rome env file, so the instance secrets survive a rewrite.
@@ -187,16 +221,30 @@ wait_for_rome() {
   done
 }
 
+# The chats the verifier reads and posts in: the shared ones, and one private
+# chat per member that stands in for a direct message.
+all_chat_names() {
+  local member
+  printf '%s\n' "${CHATS[@]}"
+  for member in "${MEMBERS[@]}"; do printf '%s\n' "${COS_DM_CHAT_PREFIX}${member}"; done
+}
+
 # Writes the bots' and chats' Discord ids, which every later command reads.
 write_discord_state() {
-  local agent members="" i id chats
+  local agent members="" member id chats names
   agent="$(COS_TOKEN="$COS_AGENT_BOT_TOKEN" discord whoami)"
-  for i in "${!MEMBERS[@]}"; do
-    id="$(COS_TOKEN="$(printenv "COS_MEMBER_$((i + 1))_BOT_TOKEN")" discord whoami | json id)"
-    members+="${members:+,}\"${MEMBERS[$i]}\":{\"id\":\"$id\",\"name\":\"${MEMBER_NAMES[$i]}\"}"
+  for member in "${MEMBERS[@]}"; do
+    id="$(COS_TOKEN="$(member_token "$member")" discord whoami | json id)"
+    members+="${members:+,}\"$member\":{\"id\":\"$id\"}"
   done
-  chats="$(COS_TOKEN="$COS_MEMBER_1_BOT_TOKEN" discord chats "${CHATS[@]}")"
-  printf '{"agent":%s,"members":{%s},"chats":%s}\n' "$agent" "$members" "$chats" >"$STATE_FILE"
+  if [ -n "${COS_MEMBER_4_BOT_TOKEN:-}" ]; then
+    id="$(COS_TOKEN="$COS_MEMBER_4_BOT_TOKEN" discord whoami | json id)"
+    members+=",\"member1:2\":{\"id\":\"$id\"}"
+  fi
+  mapfile -t names < <(all_chat_names)
+  chats="$(COS_TOKEN="$COS_MEMBER_1_BOT_TOKEN" discord chats "${names[@]}")"
+  printf '{"agent":%s,"members":{%s},"chats":%s,"dmPrefix":"%s"}\n' \
+    "$agent" "$members" "$chats" "$COS_DM_CHAT_PREFIX" >"$STATE_FILE"
 }
 
 state() { json "$1" <"$STATE_FILE"; }
@@ -234,32 +282,20 @@ link_agent() {
     fs.writeFileSync(f, JSON.stringify(s) + "\n");' "$STATE_FILE" "$connection"
 }
 
-# Each test chat hears every bot message, since the members are bots. Every
+# One chat setting on one chat, by its name in the state.
+set_chat() {
+  local name="$1" patch="$2"
+  printf '{"ref":{"connectionId":"%s","chatId":"%s"},"set":%s}' \
+    "$(state connection)" "$(state "chats.$name")" "$patch" | api PATCH /chat-settings >/dev/null
+}
+
+# Every test chat hears every bot message, since the members are bots. Every
 # other chat setting keeps Rome's default.
 let_chats_hear_bots() {
-  local name connection
-  connection="$(state connection)"
-  for name in "${CHATS[@]}"; do
-    printf '{"ref":{"connectionId":"%s","chatId":"%s"},"set":{"activation":{"botMessages":"all"}}}' \
-      "$connection" "$(state "chats.$name")" | api PATCH /chat-settings >/dev/null
-  done
-}
-
-# Each member bot's Discord account belongs to a person of the member's name,
-# as the guardian would link a teammate.
-add_people() {
-  local i
-  for i in "${!MEMBERS[@]}"; do
-    printf '{"displayName":"%s","bondLevel":"other","accounts":[{"channel":"discord","channelUserId":"%s"}]}' \
-      "${MEMBER_NAMES[$i]}" "$(state "members.${MEMBERS[$i]}.id")" | api POST /people >/dev/null
-  done
-}
-
-reset_display_names() {
-  local i
-  for i in "${!MEMBERS[@]}"; do
-    COS_TOKEN="$(printenv "COS_MEMBER_$((i + 1))_BOT_TOKEN")" discord rename "${MEMBER_NAMES[$i]}"
-  done
+  local name
+  while IFS= read -r name; do
+    set_chat "$name" '{"activation":{"botMessages":"all"}}'
+  done < <(all_chat_names)
 }
 
 cmd_up() {
@@ -281,18 +317,16 @@ cmd_up() {
     connect_agent_bot
     link_agent
     let_chats_hear_bots
-    add_people
   fi
-  reset_display_names
-  log "ready. Drive it with environments/chief-of-staff/cos-env"
+  log "ready. Drive it with environments/chief-of-staff/cos-env. Hand it the team with: cos-env seed <dir>"
 }
 
 clear_chats() {
   local name
-  for name in "${CHATS[@]}"; do
+  while IFS= read -r name; do
     log "clearing #$name on Discord ..."
     discord clear "$(state "chats.$name")"
-  done
+  done < <(all_chat_names)
 }
 
 remove_rome() {
@@ -319,6 +353,55 @@ cmd_down() {
   log "removed. The secrets file stays in $SECRETS_FILE, and the test chats keep their messages until the next reset."
 }
 
+# Replaces one of the agent app's documents (roster or goals) with the markdown
+# in a file, through the app's own HTTP surface.
+put_document() {
+  local document="$1" file="$2"
+  node -e '
+    const fs = require("fs");
+    process.stdout.write(JSON.stringify({ body: fs.readFileSync(process.argv[1], "utf8") }));' "$file" |
+    api PUT "/apps/$COS_AGENT/documents/$document" >/dev/null ||
+    die "Rome refused to write the $document document. Is the $COS_AGENT app in this checkout?"
+}
+
+# Links each member's Discord account to a person, sets their server display
+# names, and hands the agent the roster and goals. team.json maps each member to
+# a person: { "member1": { "displayName": "...", "bondLevel": "..." }, ... }. The
+# roster and goals are markdown the agent reads through its own documents.
+cmd_seed() {
+  local dir="${1:?usage: cos-env seed <dir>}"
+  mkdir -p "$RUN_DIR"
+  claim_ownership
+  load_secrets
+  local file
+  for file in team.json roster.md goals.md; do
+    [ -f "$dir/$file" ] || die "$dir has no $file"
+  done
+  local member display bond person person1=""
+  for member in "${MEMBERS[@]}"; do
+    display="$(json "$member.displayName" <"$dir/team.json")"
+    bond="$(json "$member.bondLevel" <"$dir/team.json")"
+    [ -n "$display" ] || die "team.json has no displayName for $member"
+    log "linking $member to $display ..."
+    person="$(printf '{"displayName":"%s","bondLevel":"%s","accounts":[{"channel":"discord","channelUserId":"%s"}]}' \
+      "$display" "${bond:-other}" "$(state "members.$member.id")" | api POST /people | json id)"
+    [ -n "$person" ] || die "Rome did not create a person for $display"
+    [ "$member" = "member1" ] && person1="$person"
+    COS_TOKEN="$(member_token "$member")" discord rename "$display"
+  done
+  # The second account belongs to the same person as member1, so attribution
+  # finds them under one person however they post.
+  if [ -n "${COS_MEMBER_4_BOT_TOKEN:-}" ]; then
+    log "linking member1's second account to $person1 ..."
+    printf '{"channel":"discord","channelUserId":"%s"}' "$(state "members.member1:2.id")" |
+      api POST "/people/$person1/accounts" >/dev/null
+  fi
+  log "handing the roster and goals to the agent ..."
+  put_document roster "$dir/roster.md"
+  put_document goals "$dir/goals.md"
+  log "seeded."
+}
+
 # Entry points for cos-env, which sources this file.
 cos_rome() {
   case "${1:-}" in
@@ -331,8 +414,33 @@ cos_rome() {
       docker restart "$ROME" >/dev/null
       wait_for_rome
       ;;
-    *) die "usage: cos-env rome stop|start|restart" ;;
+    renew-session)
+      shift
+      cos_renew_session "$@"
+      ;;
+    *) die "usage: cos-env rome stop|start|restart|renew-session --chat <name>" ;;
   esac
+}
+
+# Arms a session renewal on a chat the way a normal renewal happens: set the
+# chat's reset policy so a reset is due, then restart Rome so the next message
+# opens the session cold and renewed. The verifier posts that message, then
+# reads the chat to confirm. `cos-env reset` restores the chat's reset policy.
+cos_renew_session() {
+  local chat=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --chat) chat="${2:?--chat needs a chat name}" && shift 2 ;;
+      *) die "usage: cos-env rome renew-session --chat <name>" ;;
+    esac
+  done
+  [ -n "$chat" ] || die "usage: cos-env rome renew-session --chat <name>"
+  load_secrets
+  log "arming a session renewal on #$chat ..."
+  set_chat "$chat" '{"session":{"reset":{"mode":"idle","idleMinutes":1}}}'
+  docker restart "$ROME" >/dev/null
+  wait_for_rome
+  log "armed. The next message to the agent in #$chat renews its session once a minute has passed since its last turn. 'cos-env reset' restores the policy."
 }
 
 cos_version() {
@@ -341,19 +449,20 @@ cos_version() {
   load_secrets
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then login=anthropic-api-key; else login=claude-oauth-token; fi
   model="$(api GET /settings 2>/dev/null | json tierModelMappings)"
+  # rome is the main commit the test Rome sits on, agent and environment the
+  # refs merged on top of it, all recorded when the image was built.
   node -e '
-    const [build, verifier, environment, login, model] = process.argv.slice(1);
+    const [build, verifier, login, model] = process.argv.slice(1);
     const b = JSON.parse(build);
     console.log(JSON.stringify({
       rome: b.rome,
-      app: b.app,
+      agent: b.agent,
+      environment: b.environment,
       verifier: JSON.parse(verifier),
-      environment: JSON.parse(environment),
       model: { login, tierModelMappings: model ? JSON.parse(model) : null },
       builtAt: b.builtAt,
     }, null, 2));' \
-    "$(cat "$BUILD_FILE")" "$(tree_json environments/chief-of-staff/verifier)" \
-    "$(tree_json environments/chief-of-staff ':!environments/chief-of-staff/verifier')" "$login" "$model"
+    "$(cat "$BUILD_FILE")" "$(tree_json environments/chief-of-staff/verifier)" "$login" "$model"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -361,6 +470,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     up) cmd_up "${2:-}" ;;
     reset) cmd_reset ;;
     down) cmd_down ;;
-    *) die "usage: env.sh up [--no-build] | reset | down" ;;
+    seed) cmd_seed "${2:-}" ;;
+    *) die "usage: env.sh up [--no-build] | reset | down | seed <dir>" ;;
   esac
 fi
