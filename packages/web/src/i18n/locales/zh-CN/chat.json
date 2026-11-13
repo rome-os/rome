@@ -10,6 +10,10 @@
   "title": "Rome",
   "concierge": {
     "typing": "正在输入",
+    "newMessages": "以下为新消息",
+    "newMessagesPill_one": "{{label}} 条新消息",
+    "newMessagesPill_other": "{{label}} 条新消息",
+    "newMessagesMissing": "找不到新消息的起点",
     "taskChat": "任务对话",
     "taskStatus": {
       "running": "进行中",
@@ -643,9 +647,6 @@
   },
   "sessionRenewal": {
     "notice": "已整理上下文 · {{reason}}",
-    "showHandoff": "查看摘要",
-    "hideHandoff": "收起",
-    "handoffTitle": "带到新上下文的摘要",
     "reasons": {
       "context": "对话较长",
       "setup": "设定已更新",

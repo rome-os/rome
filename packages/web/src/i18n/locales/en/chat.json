@@ -10,6 +10,10 @@
   "title": "Rome",
   "concierge": {
     "typing": "Typing",
+    "newMessages": "New messages",
+    "newMessagesPill_one": "{{label}} new message",
+    "newMessagesPill_other": "{{label}} new messages",
+    "newMessagesMissing": "Can't find where the new messages start",
     "taskChat": "Task chat",
     "taskStatus": {
       "running": "Working",
@@ -643,9 +647,6 @@
   },
   "sessionRenewal": {
     "notice": "Context tidied up · {{reason}}",
-    "showHandoff": "Show summary",
-    "hideHandoff": "Hide summary",
-    "handoffTitle": "Summary carried over",
     "reasons": {
       "context": "conversation got long",
       "setup": "setup updated",

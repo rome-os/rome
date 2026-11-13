@@ -252,7 +252,14 @@ function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
     ...(turnEnd?.type === "turn_end" && turnEnd.status === "interrupted"
       ? { stoppedByUser: true }
       : {}),
-    ...(failed && lastError?.type === "error" ? { terminalError: lastError.error } : {}),
+    ...(failed && lastError?.type === "error"
+      ? {
+          terminalError: lastError.error,
+          ...(lastError.code ? { terminalErrorCode: lastError.code } : {}),
+          ...(lastError.provider ? { terminalErrorProvider: lastError.provider } : {}),
+          ...(lastError.reason ? { terminalErrorReason: lastError.reason } : {}),
+        }
+      : {}),
     ...(model ? { model } : {}),
   };
 }

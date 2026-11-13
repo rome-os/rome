@@ -4,10 +4,12 @@ import type {
   TraceSegment,
   TraceSnapshot,
   TraceSubagentSummary,
+  TraceSummary,
 } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { renderFlatEntries } from "@/components/chat/entries";
+import { ErrorEventView, hasGuidedErrorCopy } from "@/components/chat/entries/ErrorEventView";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
@@ -95,6 +97,8 @@ export interface MessageListProps {
   fork?: boolean;
   /** `concierge` shows a texting transcript (see ConciergeTranscript). Defaults to `default`. */
   variant?: ChatVariant;
+  /** In a `concierge` transcript, the id of the first message that was unread when the chat opened. */
+  unreadFrom?: string | null;
 }
 
 /** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
@@ -116,6 +120,23 @@ function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => 
       onOpen={onOpen}
     />
   ) : null;
+}
+
+/**
+ * A stored turn that failed with guidance, such as credits used up, shows the
+ * same guidance as the composer banner did while it ran, so a reload keeps the
+ * way to fix it. It sits in the row's body: the trace line above stays one line.
+ */
+function TraceErrorGuidance({ summary }: { summary: TraceSummary | null | undefined }) {
+  if (!summary?.terminalError || !hasGuidedErrorCopy(summary.terminalErrorCode)) return null;
+  return (
+    <ErrorEventView
+      error={summary.terminalError}
+      code={summary.terminalErrorCode}
+      provider={summary.terminalErrorProvider}
+      reason={summary.terminalErrorReason}
+    />
+  );
 }
 
 function renderSubagents(
@@ -203,6 +224,7 @@ const RowView = memo(function RowView({
         )}
       >
         {row.message.traceArchived ? <ArchivedTraceNote /> : null}
+        <TraceErrorGuidance summary={summary} />
         {plan?.steps.length ? <TurnSummaryGroup plan={plan} live={false} /> : null}
       </MessageRow>
     );
@@ -230,6 +252,11 @@ const RowView = memo(function RowView({
   const recapMessageId = row.messages.find((message) =>
     parseMessageEntries(message).some((block) => block.type === "turn_recap"),
   )?.id;
+  // A turn whose error is stored as its own message, as a model that could not
+  // be resolved is, already shows that error with its guidance.
+  const showsError = row.messages.some((message) =>
+    parseMessageEntries(message).some((block) => block.type === "error"),
+  );
   return (
     <MessageRow
       name={row.identity.name}
@@ -316,6 +343,7 @@ const RowView = memo(function RowView({
         );
       })}
       {live ? <LiveTail live={live} actions={actions} /> : null}
+      {live || showsError ? null : <TraceErrorGuidance summary={row.trace?.traceSummary} />}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
     </MessageRow>
   );
@@ -386,6 +414,7 @@ export function MessageList({
   feedback,
   fork,
   variant = "default",
+  unreadFrom,
 }: MessageListProps) {
   if (variant === "concierge") {
     return (
@@ -396,6 +425,7 @@ export function MessageList({
         actions={actions}
         contentRef={contentRef}
         feedback={feedback}
+        unreadFrom={unreadFrom}
       />
     );
   }
@@ -430,7 +460,7 @@ function TranscriptMessageList({
   actions,
   feedback,
   fork,
-}: Omit<MessageListProps, "variant">) {
+}: Omit<MessageListProps, "variant" | "unreadFrom">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;

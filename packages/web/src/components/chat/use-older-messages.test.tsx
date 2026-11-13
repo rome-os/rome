@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
@@ -260,5 +260,26 @@ describe("useOlderMessages", () => {
     await act(async () => finish({ messages: [message("m1", 1)], nextCursor: null }));
 
     expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useOlderMessages onOlderPage", () => {
+  it("reports the messages of each older page that loads, and no other", async () => {
+    const page = [message("m1", 1), message("m2", 2)];
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({ messages: page, nextCursor: null });
+    const onOlderPage = rs.fn();
+    const { result } = renderHook(() =>
+      useOlderMessages("s1", {
+        pageTurns: 7,
+        scroller: null,
+        pinned: true,
+        setMessages: () => {},
+        onOlderPage,
+      }),
+    );
+    act(() => result.current.setCursor("s1", "cursor-1"));
+    expect(onOlderPage).not.toHaveBeenCalled();
+    await act(() => result.current.loadOlder("s1"));
+    expect(onOlderPage).toHaveBeenCalledExactlyOnceWith("s1", page);
   });
 });
