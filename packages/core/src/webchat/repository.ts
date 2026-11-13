@@ -471,7 +471,9 @@ export const sessionInteractions = sql<string | null>`(
       'at', cast(m."created_at" as integer)
     ))
     from "rome_agent_messages" m, json_each(m."content") part
-    where m."session_id" = "rome_sessions"."id" and json_valid(m."content")
+    where m."session_id" = "rome_sessions"."id"
+    -- A cheap look before any JSON parsing: most messages hold no interaction.
+    and instr(m."content", 'interaction') > 0 and json_valid(m."content")
     and case when part."type" = 'object' then json_extract(part."value", '$.type') end
       in ('pending_interaction', 'interaction_result')
 )`;

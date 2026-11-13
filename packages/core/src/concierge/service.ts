@@ -1200,6 +1200,21 @@ export class ConciergeService {
   }
 
   /**
+   * Its owner's Stop in task `taskId`'s chat ended a turn. A scheduled task
+   * ends only that run: what it asked for is turned down, and the task, its
+   * schedule and its checks stay, since only the task list's Stop ends a
+   * schedule. Any other task stops as any Stop stops it.
+   */
+  async stopFromChat(taskId: string): Promise<void> {
+    if (await this.deps.schedules?.of(taskId)) {
+      const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
+      if (chatId) await this.turnDownForStop(chatId, Date.now());
+      return;
+    }
+    await this.stopTask(taskId, "guardian");
+  }
+
+  /**
    * Attaches how Rome turns down a chat's pending approvals, once the
    * approval handling is up. Until then an expiry turns none down.
    */

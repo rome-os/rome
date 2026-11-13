@@ -6247,6 +6247,37 @@ describe("scheduled tasks", () => {
     expect(s.backendTurns[0]?.prompt).toContain(taskId);
   });
 
+  it("ends only the run when its owner presses Stop in a scheduled task's chat, keeping its schedule", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    const cancelled: string[] = [];
+    s.deps.checks = {
+      cancelFor: async (id: string) => (cancelled.push(id), 0),
+      laterOf: async () => new Map(),
+    } as never;
+    const turnedDown: string[] = [];
+    s.service.attachApprovalExpiry(async (chat) => (turnedDown.push(chat), 1));
+    s.fakeTimers();
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+
+    // The Stop in the task chat interrupts the run's turn.
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      status: "interrupted",
+      text: "x",
+    });
+
+    // What the run asked for is turned down; the task, its schedule and its checks stay.
+    expect(turnedDown).toEqual([chatId]);
+    expect(schedules.remove).not.toHaveBeenCalled();
+    expect(cancelled).toEqual([]);
+    expect((await s.taskRepo.get(taskId))?.stoppedAt).toBeFalsy();
+    expect(await s.service.runScheduledTask(taskId, Date.now() + 86_400_000)).toBe("sent");
+  });
+
   it("keeps a scheduled task's skill and sends it with every run's brief", async () => {
     const s = setup();
     const schedules = withSchedules(s, "every_run");
