@@ -71,16 +71,31 @@ describe("TaskSchedules", () => {
     // The real schedule trigger, so each schedule's next run is stored as
     // the engine stores it; no fire happens while the clock stands still.
     provider = new ScheduleTriggerProvider(routines, async () => zone);
+    // As the engine: a fire tells its listeners when it ends, and again once
+    // the trigger has stored the next run.
+    const listeners = new Set<(routineId: string) => void>();
+    const changed = (routineId: string) => {
+      for (const listener of listeners) listener(routineId);
+    };
     const routineEngine = {
       activate: async (routine: Routine) => {
         active.add(routine.id);
-        await provider.activate(routine, async () => {});
+        await provider.activate(
+          routine,
+          async () => changed(routine.id),
+          () => changed(routine.id),
+        );
       },
       deactivate: async (id: string) => {
         active.delete(id);
         provider.deactivate(id);
       },
-      onChange: () => () => {},
+      onChange: (listener: (routineId: string) => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
       setFireGate: () => {},
     };
     schedules = new TaskSchedules({
@@ -88,6 +103,8 @@ describe("TaskSchedules", () => {
       routineEngine,
       timezoneOf: async (owner) => (owner === "guardian" ? "Asia/Shanghai" : "UTC"),
       floatingZone: async () => zone,
+      ownerOf: async (taskId) =>
+        taskId === "task-1" ? "guardian" : taskId === "task-2" ? "visitor:a" : null,
     });
     checks = new TaskChecks({
       routines,
@@ -227,6 +244,26 @@ describe("TaskSchedules", () => {
     expect(await schedules.takeSkip("task-1", at(15, 4, 25))).toBe(false);
   });
 
+  it("shows the next run once a run fired, and a cancel then skips that one", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+    // The task list watches the checks, reading them on every change.
+    const stop = checks.watch(() => {});
+    try {
+      // The 12:25 fire: the clock reaches it, and the trigger's timer runs.
+      rs.setSystemTime(new Date(at(13, 4, 25) + 1_000));
+      await rs.runOnlyPendingTimersAsync();
+
+      const [check] = await checks.inChat("concierge");
+      expect(check).toMatchObject({ at: at(14, 4, 25) });
+      await checks.cancel("concierge", check!.id);
+      expect((await routines.findByKey(taskScheduleKey("task-1")))?.args).toMatchObject({
+        skips: [new Date(at(14, 4, 25)).toISOString()],
+      });
+    } finally {
+      stop();
+    }
+  });
+
   it("honours a skip when its fire comes late, and keeps it through a run by hand", async () => {
     await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
     const [check] = await checks.inChat("concierge");
@@ -274,6 +311,25 @@ describe("TaskSchedules", () => {
       skill: "s:x",
     });
     expect(await schedules.of("task-1")).toMatchObject({ brief: "b", skill: "s:x" });
+  });
+
+  it("moves a visitor's schedule to their new zone, so it keeps its local time", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+    await schedules.set(
+      { id: "task-2", title: "Morning", owner: "visitor:a" },
+      { at: "07:30", report: "every_run", brief: "b" },
+    );
+    await schedules.rezone("visitor:a", "Asia/Tokyo");
+
+    const visitors = await routines.findByKey(taskScheduleKey("task-2"));
+    expect(visitors?.trigger).toMatchObject({ tzid: "Asia/Tokyo", tzMode: "fixed" });
+    // 07:30 in Tokyo is 22:30 UTC the day before.
+    expect(visitors?.nextRunAt?.getTime()).toBe(at(12, 22, 30));
+    // The guardian's floats, and is left alone.
+    expect((await routines.findByKey(taskScheduleKey("task-1")))?.trigger).toMatchObject({
+      tzid: "Asia/Shanghai",
+      tzMode: "floating",
+    });
   });
 
   it("fixes a visitor's schedule to their own zone", async () => {

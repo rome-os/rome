@@ -235,6 +235,8 @@ export interface ConciergeFollowingDeps {
   >;
   /** Runs the triage agent. */
   agentRunner: AgentRunnerInterface;
+  /** Tells what else runs at an owner's local times that their zone moved. */
+  timezoneMoved?: (owner: ConciergeOwner, timezone: string) => Promise<void>;
   /** Where triage runs are recorded, so Sessions shows them. */
   triageRecord?: TriageRecordStore;
   now?: () => number;
@@ -1295,8 +1297,9 @@ export function startConciergeFollowing(
         ...stored,
         people: { ...stored.people, [owner]: { ...stored.people?.[owner], timezone } },
       });
-      // A visitor's digest runs at their own local times.
+      // A visitor's digest, and their scheduled tasks, run at their own local times.
       await syncDigest();
+      await deps.timezoneMoved?.(owner, timezone);
     },
 
     async moveToMainChat(chatId, to = null) {

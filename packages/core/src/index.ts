@@ -1195,6 +1195,7 @@ async function main() {
     },
     // As the schedule trigger resolves a floating schedule's zone.
     floatingZone: () => resolveGuardianTimezone(settingsRepo),
+    ownerOf: async (taskId) => (await conciergeTasksRepo.getWithChat(taskId))?.owner ?? null,
   });
   const conciergeTasksRepo = new ConciergeTasksRepository(db);
   const concierge: ConciergeService = new ConciergeService({
@@ -1384,6 +1385,7 @@ async function main() {
   startConciergeEvents(concierge, turnListeners);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
+    timezoneMoved: (owner, timezone) => taskSchedules.rezone(owner, timezone),
     routines: routinesRepo,
     routineEngine,
     actions: actionRegistry,

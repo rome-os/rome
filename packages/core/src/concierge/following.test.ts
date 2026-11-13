@@ -247,7 +247,9 @@ function setup(
   let following: ConciergeFollowing | null = null;
   let nextId = 0;
   const failedReads = new Set<string>();
+  const movedZones: Array<[string, string]> = [];
   const deps: ConciergeFollowingDeps = {
+    timezoneMoved: async (owner, timezone) => void movedZones.push([owner, timezone]),
     routines: {
       create: async (data) => {
         const id = `r${nextId++}`;
@@ -402,6 +404,7 @@ function setup(
   const stop = startConciergeFollowing(service, deps);
   const action = (name: string) => actions.find((a) => a.config.name === name)!;
   return {
+    movedZones,
     routines,
     creators,
     active,
@@ -1667,6 +1670,11 @@ describe("follows in several Concierge chats", () => {
       tzid: "Europe/Paris",
     });
     expect(triggerOf("concierge-digest:09:00")).toMatchObject({ tzMode: "floating" });
+    // Their scheduled tasks move with them; the guardian's float on their own.
+    expect(s.movedZones).toEqual([
+      [ANN, "Asia/Shanghai"],
+      [ANN, "Europe/Paris"],
+    ]);
     s.stop();
   });
 
