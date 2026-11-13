@@ -1,0 +1,11 @@
+name: read_team
+type: custom
+description: >
+  Read the team roster and the goals document, as the team wrote them. Returns
+  both as markdown, each named as a source. Call it before answering anything
+  about who someone is, what they are working on, or what the team is working
+  toward.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

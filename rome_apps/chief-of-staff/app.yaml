@@ -1,0 +1,27 @@
+formatVersion: 2
+id: chief-of-staff
+name: Chief Of Staff
+icon: assets/icon.svg
+version: 0.1.0
+description: A chief of staff agent that knows the team and its goals and answers when mentioned.
+tagline: "Your team's chief of staff: knows the team and its goals, answers when asked."
+appRoot: dist
+hideInLauncher: true
+
+web:
+  manifest: web/manifest.json
+  displayName: Chief Of Staff
+  navLabel: Chief Of Staff
+
+api:
+  entry: api/index
+
+db:
+  migrations: db/migrations
+  tablePrefix: chief_of_staff
+
+agents:
+  - agents/chief-of-staff.yaml
+
+actions:
+  - actions/read-team
