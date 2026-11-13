@@ -113,27 +113,33 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     }
 
     /// Only the first and last of a run are labelled; a run of one or two
-    /// labels each. Another thread, or the guardian, ends the run.
+    /// labels each. An Agent message from another thread or none, or a task
+    /// card, ends the run; the guardian's messages are skipped.
     @Test func onlyTheEndsOfARunAreLabelled() {
+        let card: [[String: Any]] = [["type": "task_chat", "chatId": "c1", "title": "Book", "show": "task"]]
         let messages = [
             message("a1", at: 0, thread: "u", title: "Book"),
             message("a2", at: 1, thread: "u"),
-            message("a3", at: 2, thread: "u"),
-            message("a4", at: 3, thread: "u"),
+            // The guardian in the middle neither ends the run nor joins it.
+            message("q1", role: "user", at: 2),
+            message("a3", at: 3, thread: "u"),
+            message("q2", role: "user", at: 4, thread: "u"),
+            message("a4", at: 5, thread: "u"),
             // Another thread ends it.
-            message("b1", at: 4, thread: "v", title: "Fly"),
-            message("a5", at: 5, thread: "u"),
-            message("a6", at: 6, thread: "u"),
-            // The guardian ends it too.
-            message("q", role: "user", at: 7),
-            message("a7", at: 8, thread: "u"),
-            // A message in no thread ends it.
-            message("x", at: 9),
-            message("a8", at: 10, thread: "u"),
-            message("a9", at: 11, thread: "u"),
-            message("a10", at: 12, thread: "u"),
+            message("b1", at: 6, thread: "v", title: "Fly"),
+            message("a5", at: 7, thread: "u"),
+            message("q3", role: "user", at: 8),
+            message("a6", at: 9, thread: "u"),
+            // A task card ends it.
+            message("c", at: 10, thread: "u", parts: card),
+            message("a7", at: 11, thread: "u"),
+            // An Agent message in no thread ends it.
+            message("x", at: 12),
+            message("a8", at: 13, thread: "u"),
+            message("a9", at: 14, thread: "u"),
+            message("a10", at: 15, thread: "u"),
         ]
-        #expect(labels(rows(messages)) == [
+        #expect(TranscriptBuilder.threadLabels(messages) == [
             "a1": "Book", "a4": "Book", "b1": "Fly", "a5": "Book", "a6": "Book", "a7": "Book", "a8": "Book", "a10": "Book",
         ])
     }

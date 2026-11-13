@@ -428,19 +428,20 @@ enum TranscriptBuilder {
     /// does a message showing a task card, which names its task itself. A
     /// task's question or approval shown alone does get one. Of a run of one
     /// thread's messages with nothing else between them, only the first and
-    /// the last show it, so a run of one or two shows it on each; any other
-    /// message, the guardian's included, ends the run
-    /// (docs/domains/chats.md#chat-thread).
+    /// the last show it, so a run of one or two shows it on each. An Agent
+    /// message from another thread or none, or a task card, ends the run;
+    /// the guardian's messages are skipped (docs/domains/chats.md#chat-thread).
     static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
         let titles = taskThreadTitles(messages)
         var runs: [(title: String, root: String, ids: [String])] = []
         var open = false
-        for message in messages where !message.isTrace {
+        // The owner's messages neither join a run nor end it.
+        for message in messages where !message.isTrace && !message.isUser {
             let showsTaskCard = message.parts.contains {
                 if case .taskChat(_, _, let show, _) = $0 { return show != .ask }
                 return false
             }
-            guard !message.isUser, !showsTaskCard, let root = message.chatThreadId, let title = titles[root] else {
+            guard !showsTaskCard, let root = message.chatThreadId, let title = titles[root] else {
                 open = false
                 continue
             }
