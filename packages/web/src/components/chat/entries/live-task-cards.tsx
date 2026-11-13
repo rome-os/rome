@@ -15,9 +15,15 @@ export const chatCardSettledSchema = z.object({
     .transform((card) => card as unknown as Exclude<TaskCard, { kind: "unavailable" }>),
 });
 
-/** The key a live card is kept under: its kind and id. */
-export function cardKey(card: { kind: string; id?: string }): string {
-  return `${card.kind}:${card.id ?? ""}`;
+/**
+ * The key a live card is kept under: an approval by its id, a question by the
+ * message that asked it as well, since a later turn can ask again under the
+ * same tool use id.
+ */
+export function cardKey(card: { kind: string; id?: string; messageId?: string }): string {
+  return card.kind === "question"
+    ? `question:${card.messageId ?? ""}:${card.id ?? ""}`
+    : `${card.kind}:${card.id ?? ""}`;
 }
 
 /** Cards live events settled since the messages loaded, by {@link cardKey}. */

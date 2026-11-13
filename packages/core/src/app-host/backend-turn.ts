@@ -22,6 +22,7 @@
 // the webchat route do for inbound turns.
 
 import type { BackendTurnParams, BackendTurnRunner, ChatId } from "@rome-os/app-runtime";
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { AgentRunnerInterface, RunParams, ThreadContext } from "../core/types.js";
@@ -272,10 +273,14 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     asked: BackendTurnParams,
     options?: BackendTurnOptions,
   ): Promise<BackendTurnOutcome> {
-    const params: BackendTurnParams & { reportedTask?: string } = deps.resolveTurn
-      ? await deps.resolveTurn(asked)
-      : asked;
+    const params: BackendTurnParams & {
+      reportedTask?: string;
+      inputSource?: SystemInputSource;
+      inputLabel?: string;
+    } = deps.resolveTurn ? await deps.resolveTurn(asked) : asked;
     let outcome: BackendTurnOutcome = "failed";
+    const inputLabel = options?.inputLabel ?? params.inputLabel;
+    const inputSource = options?.inputSource ?? params.inputSource;
     // Resolve the continued session's project dir up front so the resumed turn
     // runs where its SDK transcript lives (defer/timer fire on a fresh stack
     // that never carried it). Undefined ⇒ keep the default-dir fallback.
@@ -303,8 +308,9 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             shouldRun: options?.shouldRun,
             persistTrace: true,
             persistTranscript: false,
-            ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
-            ...(options?.inputSource ? { inputSource: options.inputSource } : {}),
+            // A caller's label wins; else the one resolving the turn found, as a check's.
+            ...(inputLabel ? { inputLabel } : {}),
+            ...(inputSource ? { inputSource } : {}),
             ...(options?.pushLevel ? { pushLevel: options.pushLevel } : {}),
             ...(options?.actor ? { actor: options.actor } : {}),
             ...(params.reportedTask ? { reportedTask: params.reportedTask } : {}),
@@ -340,8 +346,8 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     const trace = {
       shouldRun: options?.shouldRun,
       persistAnswer: false,
-      ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
-      ...(options?.inputSource ? { inputSource: options.inputSource } : {}),
+      ...(inputLabel ? { inputLabel } : {}),
+      ...(inputSource ? { inputSource } : {}),
       ...(options?.actor ? { actor: options.actor } : {}),
     };
     for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {

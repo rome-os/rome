@@ -45,7 +45,14 @@ const message = (id: string, at: number, parts: unknown[]) => ({
 });
 const ask = (chatId = "task-1") => ({ type: "task_chat", chatId, title: "Draft", show: "ask" });
 
-function sources(cards: Map<string, TaskChatCards>, rows: ConciergeTaskRow[] = []) {
+/** The task row of task chat `chatId`, its owner's. */
+const taskOf = (chatId: string, ownerKey = "guardian") =>
+  ({ sessionId: chatId, ownerKey, expiredWaitAt: null }) as ConciergeTaskRow;
+
+function sources(
+  cards: Map<string, TaskChatCards>,
+  rows: ConciergeTaskRow[] = [...cards.keys()].map((chatId) => taskOf(chatId)),
+) {
   const reads = { cards: 0, rows: 0 };
   const read: TaskCardSources = {
     taskCardsOf: async (chatIds) => {
@@ -109,7 +116,7 @@ describe("withTaskCards", () => {
       message("c3", T, [{ type: "text", content: "plain" }]),
       message("c4", T, [{ type: "task_chat", chatId: "task-1", title: "Draft", show: "task" }]),
     ];
-    const filled = await withTaskCards(read, page);
+    const filled = await withTaskCards(read, page, "guardian");
     expect(reads).toEqual({ cards: 1, rows: 1 });
     expect(JSON.parse(filled[0]!.content)[0].card).toMatchObject({ kind: "question", id: "q1" });
     expect(JSON.parse(filled[1]!.content)[1].card).toMatchObject({ kind: "question", id: "q2" });
@@ -126,16 +133,54 @@ describe("withTaskCards", () => {
       findBySessions: async () => [],
       waitExpiry: DAY,
     };
-    const [filled] = await withTaskCards(read, [message("c1", T, [ask()])]);
+    const [filled] = await withTaskCards(read, [message("c1", T, [ask()])], "guardian");
     expect(JSON.parse(filled!.content)[0].card).toEqual({ kind: "unavailable" });
   });
 
   it("fills a card from before, which shows its task chat's question inside", async () => {
     const { read } = sources(new Map([["task-1", asked()]]));
-    const [filled] = await withTaskCards(read, [
-      message("c1", T + 60_000, [{ type: "task_chat", chatId: "task-1", title: "Draft" }]),
-    ]);
+    const [filled] = await withTaskCards(
+      read,
+      [message("c1", T + 60_000, [{ type: "task_chat", chatId: "task-1", title: "Draft" }])],
+      "guardian",
+    );
     expect(JSON.parse(filled!.content)[0].card).toMatchObject({ kind: "question", id: "q1" });
+  });
+
+  it("shows nothing of a chat that is not the reader's own task chat", async () => {
+    const { read } = sources(
+      new Map([
+        ["task-1", asked()],
+        ["visitor-task", asked()],
+      ]),
+      [taskOf("task-1"), taskOf("visitor-task", "visitor:acct-v")],
+    );
+    const filled = await withTaskCards(
+      read,
+      [
+        message("c1", T + 60_000, [ask("visitor-task")]),
+        message("c2", T + 60_000, [ask("no-task-chat")]),
+      ],
+      "guardian",
+    );
+    expect(filled.map((each) => JSON.parse(each.content)[0].card)).toEqual([
+      { kind: "unavailable" },
+      { kind: "unavailable" },
+    ]);
+  });
+});
+
+describe("cardAt and the card's own second", () => {
+  it("counts what was asked in the card's second, and nothing from the second after", () => {
+    const at = T + 500;
+    const cards: TaskChatCards = {
+      questions: [
+        { id: "same", messageId: "m1", render, since: T },
+        { id: "next", messageId: "m2", render, since: T + 1_000 },
+      ],
+      approvals: [],
+    };
+    expect(cardAt(cards, at, undefined, DAY)).toMatchObject({ id: "same" });
   });
 });
 

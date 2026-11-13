@@ -803,6 +803,20 @@ describe("Concierge tools", () => {
         `⏰ Time's up\n<defer_note scheduled_at="2026-11-12T09:00:00.000Z" task_id="${row!.id}">\nCompare with task:${other!.id} and task_id="${other!.id}"\n</defer_note>`,
       );
       expect(woken.reportedTask).toBe(row!.id);
+      // A check that came due labels its replies with its name.
+      expect(woken).toMatchObject({
+        inputSource: { type: "check", name: null },
+        inputLabel: "Check",
+      });
+      const named = await turn(
+        `⏰ Time's up: Tell the time\n<defer_note scheduled_at="2026-11-12T09:00:00.000Z">\nSay the time.\n</defer_note>`,
+      );
+      expect(named).toMatchObject({
+        inputSource: { type: "check", name: "Tell the time" },
+        inputLabel: "Check · Tell the time",
+      });
+      // A turn that is no wake-up carries no source.
+      expect(resolved).not.toHaveProperty("inputSource");
       // Text alone names no task.
       expect((await turn(`⏰ Time's up: check task:${row!.id}`)).reportedTask).toBeUndefined();
       // A batch about two tasks answers neither, so an unnamed say goes in no thread.
@@ -5512,9 +5526,19 @@ describe("Concierge status reactions", () => {
       await s.settle();
       expect(settled).toEqual([]);
       guardianSays(s, "next", "turn-b");
+      // A press queued behind the turn waits for a turn of its own.
+      const list = s.messages.get(CONCIERGE_CHAT)!;
+      list.push({
+        id: "queued",
+        role: "user",
+        content: "[]",
+        turnId: "turn-b",
+        inputState: "queued",
+      });
       await conciergeEnds(s, "completed", "turn-b");
       await s.settle();
-      expect(settled).toEqual([{ sessionId: CONCIERGE_CHAT, inputIds: ["next"] }]);
+      // The press the cut-short turn handed on is done with as well.
+      expect(settled).toEqual([{ sessionId: CONCIERGE_CHAT, inputIds: ["next", "press"] }]);
     });
 
     it("is working while a direct answer's turn runs, and goes away when it completes", async () => {

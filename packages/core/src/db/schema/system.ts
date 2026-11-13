@@ -388,14 +388,14 @@ export const approvals = sqliteTable(
     resolvedBy: text("resolved_by"),
     executedAt: integer("executed_at", { mode: "timestamp" }),
     executionError: text("execution_error"),
-    /**
-     * The chat the approval was asked in, as its payload's
-     * `channelContext.threadId` names it: kept apart so a chat's approvals are
-     * found by an index. Null when it was asked in no chat.
-     */
-    threadId: text("thread_id"),
   },
-  (table) => [index("idx_approvals_thread").on(table.threadId)],
+  (table) => [
+    // A chat's approvals are found by the chat their payload names: one copy
+    // of that fact, indexed where it is.
+    index("idx_approvals_thread").on(
+      sql`json_extract(${table.payload}, '$.channelContext.threadId')`,
+    ),
+  ],
 );
 
 export const settings = sqliteTable("settings", {

@@ -3,6 +3,7 @@ import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { TaskCard } from "@rome/api-types/chat";
 import type { ChatMessage } from "@/lib/chat-types";
 import { waitingTaskCardMessages } from "./waiting-task-cards";
+import { cardKey } from "./entries/live-task-cards";
 
 const question = (id: string): TaskCard => ({
   kind: "question",
@@ -45,7 +46,7 @@ describe("waitingTaskCardMessages", () => {
     const tasks = [task("c1", "needs_you", { kind: "card", id: "q1", since: 1 })];
     expect([...waitingTaskCardMessages(messages, tasks)]).toEqual(["new"]);
     const settled = new Map([
-      ["question:q1", { ...card, outcome: { kind: "dismissed" as const } }],
+      [cardKey(card), { ...card, outcome: { kind: "dismissed" as const } }],
     ]);
     expect([...waitingTaskCardMessages(messages, tasks, settled)]).toEqual([]);
   });

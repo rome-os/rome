@@ -1,4 +1,5 @@
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
+import { automatedInputLabel } from "./automated-input.js";
 // Concierge: texting-style chats that hand work to task chats. One Concierge
 // talks in a main chat and in any topic chats its owner starts, all sharing one
 // memory, one list of follows and one task list (docs/domains/chats.md#concierge-chat,
@@ -223,7 +224,12 @@ export interface ConciergeDeps {
  * carries, as a task event's batch names them.
  */
 export type TurnParams = BackendTurnParams & { taskIds?: readonly string[] };
-export type ResolvedTurn = TurnParams & { reportedTask?: string };
+export type ResolvedTurn = TurnParams & {
+  reportedTask?: string;
+  /** Where its input came from, when a check the Concierge set came due: its replies are labelled with it. */
+  inputSource?: SystemInputSource;
+  inputLabel?: string;
+};
 
 export interface SystemTurnOptions {
   quiet?: boolean;
@@ -242,6 +248,27 @@ export interface SystemTurnOptions {
  * line Rome writes ahead of the note (routines/defer.ts). Only the first such
  * line counts: what the note itself says names nothing.
  */
+/**
+ * The check a `defer` wake-up is, named as Rome's headline right above its
+ * `<defer_note>` line names it ("⏰ Time's up: <name>"), or null for a turn
+ * that is no wake-up.
+ */
+function deferCheckOf(prompt: string): { name: string | null } | null {
+  const lines = prompt.split("\n");
+  const header = lines.findIndex((line) => line.startsWith("<defer_note "));
+  if (header < 0) return null;
+  const name = lines[header - 1]?.match(/^(?:⏰ Time's up|📨 Event arrived): (.+)$/u)?.[1]?.trim();
+  return { name: name || null };
+}
+
+/** The source and trace label of a wake-up's turn, when the prompt is one. */
+function checkSourceOf(prompt: string): { inputSource?: SystemInputSource; inputLabel?: string } {
+  const check = deferCheckOf(prompt);
+  if (!check) return {};
+  const inputSource: SystemInputSource = { type: "check", name: check.name };
+  return { inputSource, inputLabel: automatedInputLabel(inputSource) };
+}
+
 function deferTaskIds(prompt: string): string[] {
   const header = prompt.match(/^<defer_note [^\n]*$/m)?.[0];
   const id = header?.match(/\btask_id="([^"]+)"/)?.[1];
@@ -737,6 +764,9 @@ export class ConciergeService {
       sessionId,
       prompt,
       ...(reportedTask ? { reportedTask } : {}),
+      // A check that came due: the Concierge speaks on its own, and its
+      // replies say which check woke it.
+      ...checkSourceOf(params.prompt),
     };
   }
 

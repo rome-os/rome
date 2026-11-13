@@ -223,10 +223,11 @@ export interface TraceSystemInputEvent extends TraceEventBase {
  * Where the input a system turn ran on came from, when the Concierge speaks
  * on its own rather than answering its owner: something sent it into the
  * chat, or it is what the Concierge follows (`following` for important
- * events, `digest` for the digest). The chat labels the turn's replies with it.
+ * events, `digest` for the digest), or a check it set with `defer` came due
+ * (`check`, named by the check). The chat labels the turn's replies with it.
  */
 export interface SystemInputSource {
-  type: "routine" | "app" | "agent" | "automation" | "following" | "digest";
+  type: "routine" | "app" | "agent" | "automation" | "following" | "digest" | "check";
   /** The routine's, app's or agent's name, or the kind of events followed, when it has one. */
   name: string | null;
 }

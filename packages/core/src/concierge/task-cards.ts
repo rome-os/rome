@@ -14,6 +14,7 @@ import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
 import type { AskedApproval, AskedQuestion, TaskChatCards } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
+import { GUARDIAN_OWNER } from "../webchat/owner.js";
 
 const log = createLogger("concierge-task-cards");
 
@@ -157,7 +158,9 @@ export function cardAt(
   row: ConciergeTaskRow | undefined,
   waitExpiry: number,
 ): TaskCard {
-  const by = at + SAME_SECOND_MS;
+  // Stored times are whole seconds: what was asked in the card's own second
+  // counts, and nothing from the second after.
+  const by = Math.floor(at / SAME_SECOND_MS) * SAME_SECOND_MS + SAME_SECOND_MS - 1;
   const question = asked?.questions.filter((each) => each.since <= by).at(-1);
   const approval = asked?.approvals
     .filter((each) => each.since <= by)
@@ -175,7 +178,12 @@ export function cardAt(
  */
 export async function withTaskCards<
   T extends { role: string; content: string; createdAt: Date | string },
->(sources: TaskCardSources, messages: T[]): Promise<T[]> {
+>(
+  sources: TaskCardSources,
+  messages: T[],
+  /** Whose Concierge chat the messages are: a card shows only that owner's own task chats. */
+  owner: string,
+): Promise<T[]> {
   const parsed = messages.map((message) => {
     if (message.role !== "assistant" || !message.content.includes('"task_chat"')) return null;
     try {
@@ -214,9 +222,14 @@ export async function withTaskCards<
     const at = new Date(message.createdAt).getTime();
     const filled = parts.map((part) => {
       if (!part || typeof part !== "object" || !showsAsk(part)) return part;
-      const card: TaskCard = failed
-        ? { kind: "unavailable" }
-        : cardAt(asked.get(part.chatId), at, rows.get(part.chatId), sources.waitExpiry);
+      // A part can name any chat. Only a task chat of the reader's own shows
+      // what it asked: another owner's, or a chat with no task, shows none.
+      const row = rows.get(part.chatId);
+      const own = row !== undefined && (row.ownerKey ?? GUARDIAN_OWNER) === owner;
+      const card: TaskCard =
+        failed || !own
+          ? { kind: "unavailable" }
+          : cardAt(asked.get(part.chatId), at, row, sources.waitExpiry);
       return { ...part, card };
     });
     return { ...message, content: JSON.stringify(filled) };

@@ -254,7 +254,7 @@ describe("ConciergeTasks status", () => {
     await flush();
     told = [];
     running.add("task-chat");
-    // A panel or the header reads the list between the fact and its re-check.
+    // The panel reads the list after the fact changed and before its re-check.
     await tasks.listForPanel();
     await tasks.chatChanged("task-chat");
     await flush();

@@ -2,6 +2,7 @@ import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { TaskCard } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
+import { cardKey } from "./entries/live-task-cards";
 
 /**
  * The messages of a Concierge chat whose task card holds what its task waits
@@ -27,7 +28,7 @@ export function waitingTaskCardMessages(
   const waiting = new Set<string>();
   for (const [chatId, { messageId, card }] of newest) {
     if (!card || card.kind === "unavailable") continue;
-    const now = live.get(`${card.kind}:${card.id}`) ?? card;
+    const now = live.get(cardKey(card)) ?? card;
     if (now.kind === "unavailable" || now.outcome) continue;
     const task = tasks.find((candidate) => candidate.chat?.id === chatId);
     const wait = task?.openWait;
