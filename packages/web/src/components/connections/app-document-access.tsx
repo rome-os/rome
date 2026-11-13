@@ -245,8 +245,10 @@ export function AppDocumentAccess() {
             variant="outline"
             disabled={busy}
             onClick={() => {
-              void options.refetch();
-              void policies.refetch();
+              if (appId) {
+                void options.refetch();
+                void policies.refetch();
+              }
               apps.retry();
             }}
           >

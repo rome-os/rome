@@ -40,6 +40,42 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 describe("Core app document authorization", () => {
+  it("refreshes only the app list before selection and refreshes scoped queries after selection", async () => {
+    const paths: string[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url);
+      paths.push(path);
+      if (path === "/api/apps")
+        return Response.json({ apps: [{ id: "app-a", displayName: "App A", isEnabled: true }] });
+      if (path === "/api/app-connection-access/app-a/documents?cursor=0&limit=50")
+        return Response.json({ connections: [] });
+      if (path === "/api/app-connection-access/app-a") return Response.json({ policies: [] });
+      return Response.json({ error: "Unexpected unscoped request" }, { status: 404 });
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <AppDocumentAccess />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "App document access" }));
+    await screen.findByText("App A · app-a");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh access" }));
+    await waitFor(() => expect(paths.filter((path) => path === "/api/apps")).toHaveLength(2));
+    expect(paths).toEqual(["/api/apps", "/api/apps"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "app-a" } });
+    await waitFor(() => expect(paths).toHaveLength(4));
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh access" }));
+    await waitFor(() => expect(paths).toHaveLength(7));
+    expect(paths.filter((path) => path === "/api/app-connection-access/app-a")).toHaveLength(2);
+    expect(
+      paths.filter(
+        (path) => path === "/api/app-connection-access/app-a/documents?cursor=0&limit=50",
+      ),
+    ).toHaveLength(2);
+  });
   it("does not load provider or app data until opened; submits only the chosen app, bot and document", async () => {
     const writes: Array<{ url: string; method: string; body: unknown }> = [];
     let allowed = false;
