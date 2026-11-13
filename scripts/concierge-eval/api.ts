@@ -68,16 +68,22 @@ export class Api {
   }
 
   /**
-   * A read retries a gateway error or a dropped connection a few times: the
-   * dev proxy answers 504 now and then while the backend is busy.
+   * A read, or a call safe to repeat, retries a gateway error, a locked
+   * database or a dropped connection a few times: the dev stack answers so
+   * now and then while it is busy.
    */
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async call<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    idempotent = false,
+  ): Promise<T> {
     for (let attempt = 1; ; attempt++) {
       try {
         return await this.once<T>(method, path, body);
       } catch (error) {
         const transient = error instanceof TransientError || error instanceof TypeError;
-        if (method !== "GET" || !transient || attempt >= 6) throw error;
+        if (!(method === "GET" || idempotent) || !transient || attempt >= 6) throw error;
         await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
       }
     }
@@ -98,7 +104,8 @@ export class Api {
     const text = await res.text();
     if (!res.ok) {
       const message = `${method} ${path}: ${res.status} ${text.slice(0, 300)}`;
-      throw res.status >= 502 ? new TransientError(message) : new Error(message);
+      const locked = res.status === 500 && text.includes("database is locked");
+      throw res.status >= 502 || locked ? new TransientError(message) : new Error(message);
     }
     return (text ? JSON.parse(text) : null) as T;
   }
@@ -115,11 +122,14 @@ export class Api {
   /** Sends the owner's message and answers its id. */
   async send(chatId: string, text: string, replyToMessageId?: string): Promise<string> {
     const inputId = randomUUID();
-    await this.call("POST", `/api/chat/sessions/${encodeURIComponent(chatId)}/turns`, {
-      text,
-      inputId,
-      ...(replyToMessageId ? { replyToMessageId } : {}),
-    });
+    // A send with the same input id answers the turn it already started, so
+    // it is safe to send again.
+    await this.call(
+      "POST",
+      `/api/chat/sessions/${encodeURIComponent(chatId)}/turns`,
+      { text, inputId, ...(replyToMessageId ? { replyToMessageId } : {}) },
+      true,
+    );
     return inputId;
   }
 
