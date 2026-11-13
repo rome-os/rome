@@ -48,7 +48,12 @@ struct WidgetUICardView: View {
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
             }
-            if surface.failed {
+            if surface.sendFailed {
+                Text("Couldn't send your answer. Your choices are kept")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if surface.failed {
                 Text("Could not read this card's data. \(part.text)")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.destructive)
@@ -81,6 +86,8 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var viewModel: SurfaceViewModel?
     @Published private(set) var loaded = false
     @Published private(set) var failed = false
+    /// Core did not take the last event the card sent.
+    @Published private(set) var sendFailed = false
     @Published private(set) var undrawable = false
     @Published private(set) var busy = false
     @Published private(set) var clears = WidgetClears()
@@ -108,6 +115,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         self.send = press
         loaded = false
         failed = false
+        sendFailed = false
         // A stored part is read back as data, so it is checked again here.
         guard part.isDrawable else {
             undrawable = true
@@ -217,10 +225,11 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             try await send(name, body)
             // A card the agent waits on is sent; any other card reads its data
             // again, and that read says whether the card's data failed.
+            sendFailed = false
             failed = false
             if waits { sent = true } else { await load() }
         } catch {
-            failed = true
+            sendFailed = true
         }
     }
 

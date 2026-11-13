@@ -1758,10 +1758,14 @@ export function Chat({
   );
   const handleSessionRunning = useCallback(
     (event: z.infer<typeof sessionRunningSchema>) => {
+      if (event.sessionId !== mainSessionIdRef.current) return;
       // A turn queued or ended with the chat still running is one to follow.
-      if (event.running && event.sessionId === mainSessionIdRef.current) kickTurnPoll();
+      if (event.running) kickTurnPoll();
+      // The chat stopped: what its last turn left, such as an error, may have
+      // come after the last read, and no message event announces it.
+      else resyncSessionMessages(event.sessionId);
     },
-    [kickTurnPoll],
+    [kickTurnPoll, resyncSessionMessages],
   );
   // Events missed while the stream was down may include a turn's start.
   const handleSessionEventsReconnect = useCallback(

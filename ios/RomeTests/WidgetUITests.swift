@@ -207,8 +207,9 @@ import Testing
         })
         await surface.load()
         find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
-        for _ in 0..<50 where !surface.failed { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(surface.failed && !surface.sent)
+        for _ in 0..<50 where !surface.sendFailed { try await Task.sleep(for: .milliseconds(10)) }
+        // It says the send failed, not that the card's data could not be read.
+        #expect(surface.sendFailed && !surface.failed && !surface.sent)
         find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
         for _ in 0..<50 where tries.value < 2 { try await Task.sleep(for: .milliseconds(10)) }
         #expect(tries.value == 2)
