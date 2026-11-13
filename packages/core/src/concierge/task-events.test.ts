@@ -102,6 +102,48 @@ describe("TaskEventCoalescer", () => {
     expect(s.coalescer.pending).toEqual(["t1"]);
   });
 
+  it("leaves out of a running flush the rows silenced while an earlier chat's turn ran", async () => {
+    const sent: string[][] = [];
+    const rendered: string[][] = [];
+    let endFirst: (() => void) | null = null;
+    // Each row's chat is the first letter of its id.
+    const coalescer = new TaskEventCoalescer({
+      now: () => Date.now(),
+      render: async (tasks) => {
+        rendered.push(tasks.map((task) => task.taskId));
+        const byChat = new Map<string, string[]>();
+        for (const { taskId } of tasks) {
+          byChat.set(taskId[0]!, [...(byChat.get(taskId[0]!) ?? []), taskId]);
+        }
+        return [...byChat].map(([chatId, taskIds]) => ({
+          chatId,
+          owner: "guardian",
+          taskIds,
+          prompt: taskIds.join(","),
+          quiet: true,
+        }));
+      },
+      deliver: async ({ taskIds }) => {
+        sent.push(taskIds);
+        if (taskIds.includes("a1")) await new Promise<void>((resolve) => (endFirst = resolve));
+        return "completed";
+      },
+      giveUp: () => {},
+    });
+    for (const taskId of ["a1", "b1", "b2", "c1"]) coalescer.mark(quiet(taskId));
+    await rs.advanceTimersByTimeAsync(QUIET_DELAY_MS);
+    expect(sent).toEqual([["a1"]]);
+    // Chat b's and chat c's payloads were built; then b1 and c1 are silenced.
+    coalescer.silence(["b1", "c1"]);
+    endFirst!();
+    await rs.advanceTimersByTimeAsync(0);
+    // Chat b's turn tells b2 alone, built again without b1; chat c's has nothing left.
+    expect(sent).toEqual([["a1"], ["b2"]]);
+    expect(rendered.at(-1)).toEqual(["b2"]);
+    expect(coalescer.pending).toEqual([]);
+    coalescer.stop();
+  });
+
   describe("awaitingReport", () => {
     it("holds an urgent row from its mark until the turn that reports it ends", async () => {
       const s = setup();

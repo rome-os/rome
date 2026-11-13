@@ -180,6 +180,29 @@ export class TaskEventCoalescer {
     if (taskIds.length > 0) this.changed();
   }
 
+  /** Whether row `taskId` is silenced now. */
+  private isSilenced(taskId: string): boolean {
+    return (this.silenced.get(taskId) ?? Number.NEGATIVE_INFINITY) > this.deps.now();
+  }
+
+  /**
+   * `delivery` without the rows silenced since it was built: as it is when
+   * none was, built again from the others' changes when some were, and null
+   * when nothing is left to tell. Rows it cannot build again wait for a retry.
+   */
+  private async withoutSilenced(
+    delivery: TaskEventDelivery,
+    tasks: DirtyTask[],
+    notRun: Set<string>,
+  ): Promise<TaskEventDelivery | null> {
+    const kept = delivery.taskIds.filter((taskId) => !this.isSilenced(taskId));
+    if (kept.length === delivery.taskIds.length) return delivery;
+    if (kept.length === 0) return null;
+    const [rebuilt] = await this.deps.render(tasks.filter((task) => kept.includes(task.taskId)));
+    if (!rebuilt) for (const taskId of kept) notRun.add(taskId);
+    return rebuilt ?? null;
+  }
+
   /** Marks a row dirty with one more change. */
   mark(change: TaskChange): void {
     const now = this.deps.now();
@@ -354,7 +377,11 @@ export class TaskEventCoalescer {
       }
       notRun.clear();
       // One chat's turn failing leaves the other chats' turns to run.
-      for (const delivery of deliveries) {
+      for (const built of deliveries) {
+        // A row silenced while an earlier chat's turn ran is not told: the
+        // rest of its payload is built again without it.
+        const delivery = await this.withoutSilenced(built, tasks, notRun);
+        if (!delivery) continue;
         const outcome = await this.deps.deliver(delivery).catch((error: unknown) => {
           log.warn("task event delivery to one chat failed", {
             error: error instanceof Error ? error.message : String(error),

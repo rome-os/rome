@@ -4915,7 +4915,7 @@ describe("Concierge chats", () => {
       s.tasks.attachFacts({
         now: () => Date.now(),
         running: (chatId) => chatId === running.chatId,
-        waitingSince: async () => new Map(),
+        openWaits: async () => new Map(),
         reportPending: () => [],
       });
       s.chats.activeTurns = (chatId: string) => (chatId === running.chatId ? ["t1"] : []);
