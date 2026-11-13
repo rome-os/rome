@@ -1,3 +1,4 @@
+import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import type {
   ChatId,
@@ -18,7 +19,6 @@ import { http, HttpResponse } from "msw";
 import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
-  type ChatPendingChecksResponse,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
@@ -65,6 +65,7 @@ import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser"
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
+import { taskListHandlers } from "./task-list";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -388,6 +389,46 @@ const transcripts: Record<string, ChatMessage[]> = {
         forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
       } as TranscriptPart,
     ]),
+    // A task's thread: the Concierge's reply in it carries the task's label.
+    {
+      id: `${CONCIERGE_CHAT_ID}-thread-1`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-thread-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("I found three tables for Friday at 7.")]),
+      createdAt: "2026-08-07T13:01:00.000Z",
+      chatThreadId: "mock-thread-table",
+      chatThreadTitle: "Book a table for Friday",
+    },
+    // A routine made the Concierge speak: its reply carries the routine's name.
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-trace`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "trace",
+      content: "[]",
+      createdAt: "2026-08-07T13:02:00.000Z",
+      traceSummary: {
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        automatedInput: { type: "routine", name: "Daily summary" },
+      },
+    },
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-reply`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
+      createdAt: "2026-08-07T13:02:01.000Z",
+    },
+    // The owner's latest message, which the Concierge is still working on: it
+    // carries the working status reaction, as a live turn sets it.
+    {
+      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T13:05:00.000Z", "Book the 9:40 one", [])[0]!,
+      statusReaction: "working",
+    },
   ],
   // The task chat the conclusion above came from: the full answer, then its conclusion.
   "mock-chat-lisbon": turn(
@@ -1235,6 +1276,7 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 });
 
 export const handlers = [
+  ...appDocumentAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
   // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
   // section shows the account row rather than a reconnect prompt.
@@ -1298,10 +1340,6 @@ export const handlers = [
       },
     );
   }),
-  // Mock mode runs no turns, so no chat ever has a check scheduled.
-  http.get("/api/chat/sessions/:id/checks", () =>
-    HttpResponse.json({ checks: [] } satisfies ChatPendingChecksResponse),
-  ),
   http.get("/api/concierge/tasks", () =>
     HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
   ),
@@ -1680,6 +1718,7 @@ export const handlers = [
   // orders its own routes internally, so they can be appended in any order —
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
+  ...taskListHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,

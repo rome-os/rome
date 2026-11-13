@@ -22,6 +22,10 @@ export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: stri
     ? hostId !== undefined && threads.taskThreads.has(hostId)
     : draft?.thread !== null && draft?.thread !== undefined;
   const opensThread = draft?.threads === true && inTaskThread;
+  // The task the thread is, for the reply bar: from the timeline's threads,
+  // or the open view's own.
+  const threadOf = threads && hostId !== undefined ? threads.taskThreads.get(hostId) : undefined;
+  const threadTitle = threadOf ? threads?.titles.get(threadOf) : draft?.threadTitle;
   const jumpable = opensThread || draft?.has(part.messageId) === true;
   const body = (
     <>
@@ -46,18 +50,13 @@ export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: stri
       className={cn(frame, "cursor-pointer transition-colors hover:bg-border")}
       onClick={() =>
         opensThread
-          ? draft.openThread(
-              {
-                messageId: part.messageId,
-                author: part.author,
-                ...(part.name ? { name: part.name } : {}),
-                preview: plainQuote(part.text),
-              },
+          ? draft.openThread({
               // The reply is in the task's thread; the original it quotes may
               // be in none, as when the reply started the task. The view and
               // what is sent from it follow the reply.
-              hostId,
-            )
+              thread: hostId ?? part.messageId,
+              title: threadTitle ?? "",
+            })
           : draft.jump(part.messageId)
       }
     >

@@ -94,8 +94,10 @@ export class RoutineEngine {
   }
 
   /**
-   * Calls `listener` with a routine's id when it is activated, deactivated or
-   * fires, so a reader of pending routines (a task's next check) reads again.
+   * Calls `listener` with a routine's id when it is activated, deactivated,
+   * fires, settles a run now or has its runs stopped, so a reader of pending
+   * routines or their last runs (a task's next check, a chat's task list)
+   * reads again.
    * Returns the unsubscribe.
    */
   onChange(listener: (routineId: string) => void): () => void {
@@ -201,7 +203,13 @@ export class RoutineEngine {
     const presser = await currentSessionActor();
     const byPerson =
       presser?.kind === "visitor" || (presser?.kind === "guardian" && presser.via === "cookie");
-    return this.dispatch(toRoutine(row), payload, { manual: byPerson ? "person" : "background" });
+    try {
+      return await this.dispatch(toRoutine(row), payload, {
+        manual: byPerson ? "person" : "background",
+      });
+    } finally {
+      this.changed(routineId);
+    }
   }
 
   /** Stop a routine's running run(s), forcing each to a terminal "cancelled".
@@ -237,6 +245,7 @@ export class RoutineEngine {
       await this.routineRunsRepo.updateStatus(run.id, { status: "cancelled" });
     }
 
+    this.changed(routineId);
     log.info("routine runs cancelled", {
       routineId,
       count: running.length,

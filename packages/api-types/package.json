@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./bootstrap": "./src/bootstrap.ts",
     "./chat": "./src/chat.ts",
+    "./task-list": "./src/task-list.ts",
     "./concierge": "./src/concierge.ts",
     "./concierge-activity": "./src/concierge-activity.ts",
     "./concierge-task-status": "./src/concierge-task-status.ts",
@@ -37,7 +38,8 @@
     "./devices": "./src/devices.ts",
     "./node-console": "./src/node-console.ts",
     "./wechat-app": "./src/wechat-app.ts",
-    "./live-events": "./src/live-events.ts"
+    "./live-events": "./src/live-events.ts",
+    "./app-connection-access": "./src/app-connection-access.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

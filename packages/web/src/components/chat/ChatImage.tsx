@@ -1,10 +1,17 @@
-import { createContext, useContext, useMemo, useState, type ComponentPropsWithoutRef } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import Zoom from "react-medium-image-zoom";
 import "./composer/pending-image-preview.css";
 import { useDesktop } from "@/hooks/use-desktop";
-import { mediaKindOfSrc } from "@/lib/asset-links";
+import { mediaKindOfSrc, thumbnailSrc } from "@/lib/asset-links";
 import { cn } from "@/lib/utils";
 import { FileChip } from "./FileChip";
 import { ImagePreviewContent, type PreviewContentProps } from "./composer/ImagePreviewContent";
@@ -20,20 +27,54 @@ export const InsideLinkContext = createContext(false);
 // A picture on this instance's asset routes loads as a thumbnail this wide.
 // The viewer and Download use the original.
 const THUMBNAIL_WIDTH = 900;
-const ASSET_SRC = /^\/api\/(?:(?:projects|memory)\/asset(?:[/?]|$)|assets\/)/;
 
 // Space around an open picture. A phone gives it little, so a picture as wide
 // as the column still opens larger than its thumbnail.
 const VIEWER_MARGIN_WIDE = 64;
 const VIEWER_MARGIN_PHONE = 16;
 
-/** `src` asking the server for a thumbnail, or `src` itself when it is not an asset route. */
-function thumbnailSrc(src: string): string {
-  if (!ASSET_SRC.test(src) || /[?&]w=/.test(src)) return src;
-  const hashAt = src.indexOf("#");
-  const path = hashAt < 0 ? src : src.slice(0, hashAt);
-  const hash = hashAt < 0 ? "" : src.slice(hashAt);
-  return `${path}${path.includes("?") ? "&" : "?"}w=${THUMBNAIL_WIDTH}${hash}`;
+/**
+ * Opens its picture in the viewer on a tap. `src` is the original, which the
+ * viewer swaps in and Download saves; `thumbnail` is what `children` shows.
+ * The viewer's component is stable for one picture, so a streaming re-render
+ * does not remount an open viewer. It downloads the original even while the
+ * viewer still shows the thumbnail.
+ */
+export function ZoomableImage({
+  src,
+  alt,
+  thumbnail,
+  children,
+}: {
+  src: string;
+  alt?: string;
+  thumbnail: string;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation("chat");
+  const desktop = useDesktop();
+  const ZoomContent = useMemo(
+    () =>
+      function ReplyImagePreviewContent(props: PreviewContentProps) {
+        return <ImagePreviewContent {...props} inReply downloadSrc={src} />;
+      },
+    [src],
+  );
+  return (
+    <Zoom
+      a11yNameButtonZoom={t("composer.previewImage")}
+      a11yNameButtonUnzoom={t("composer.closeImagePreview")}
+      classDialog="pending-image-preview"
+      IconZoom={NoGlyph}
+      IconUnzoom={X}
+      ZoomContent={ZoomContent}
+      zoomImg={thumbnail === src ? undefined : { src, alt }}
+      canSwipeToUnzoom={false}
+      zoomMargin={desktop ? VIEWER_MARGIN_WIDE : VIEWER_MARGIN_PHONE}
+    >
+      {children}
+    </Zoom>
+  );
 }
 
 type ChatImageProps = ComponentPropsWithoutRef<"img"> & {
@@ -109,21 +150,10 @@ export function ChatImage({
   const { t } = useTranslation("chat");
   const [failedSrc, setFailedSrc] = useState<string>();
   const insideLink = useContext(InsideLinkContext);
-  const desktop = useDesktop();
-  // The viewer's component is stable for one picture, so a streaming re-render
-  // does not remount an open viewer. It downloads the original even while the
-  // viewer still shows the thumbnail.
-  const ZoomContent = useMemo(
-    () =>
-      function ReplyImagePreviewContent(props: PreviewContentProps) {
-        return <ImagePreviewContent {...props} inReply downloadSrc={src} />;
-      },
-    [src],
-  );
   if (!src) return null;
   const media = mediaKindOfSrc(src);
   if (media) return <ChatMedia src={src} kind={media} label={alt} />;
-  const thumbnail = thumbnailSrc(src);
+  const thumbnail = thumbnailSrc(src, THUMBNAIL_WIDTH);
 
   const image = (
     <img
@@ -155,19 +185,9 @@ export function ChatImage({
       ) : insideLink ? (
         image
       ) : (
-        <Zoom
-          a11yNameButtonZoom={t("composer.previewImage")}
-          a11yNameButtonUnzoom={t("composer.closeImagePreview")}
-          classDialog="pending-image-preview"
-          IconZoom={NoGlyph}
-          IconUnzoom={X}
-          ZoomContent={ZoomContent}
-          zoomImg={thumbnail === src ? undefined : { src, alt }}
-          canSwipeToUnzoom={false}
-          zoomMargin={desktop ? VIEWER_MARGIN_WIDE : VIEWER_MARGIN_PHONE}
-        >
+        <ZoomableImage src={src} alt={alt} thumbnail={thumbnail}>
           {image}
-        </Zoom>
+        </ZoomableImage>
       )}
     </div>
   );
