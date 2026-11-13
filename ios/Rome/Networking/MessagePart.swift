@@ -28,7 +28,9 @@ enum MessagePart: Hashable, Sendable {
     /// marks it done.
     case webOnly(WebOnlyKind, toolUseId: String? = nil)
     /// The guardian's answer to an interactive card.
-    case interactionResult(toolUseId: String, output: JSONValue)
+    /// `messageId`: the message that holds the card it answers, when core
+    /// wrote it.
+    case interactionResult(toolUseId: String, output: JSONValue, messageId: String? = nil)
     /// A turn that failed before it ran.
     case error(TurnError)
     /// A quiet line, such as the chat moving to another model (`quota_switch`).
@@ -259,7 +261,7 @@ enum MessagePart: Hashable, Sendable {
             return .webOnly(value["appId"]?.string.map(WebOnlyKind.app) ?? .unknown)
         case "interaction_result":
             guard let toolUseId = value["toolUseId"]?.string else { return nil }
-            return .interactionResult(toolUseId: toolUseId, output: value["output"] ?? .null)
+            return .interactionResult(toolUseId: toolUseId, output: value["output"] ?? .null, messageId: value["messageId"]?.string)
         case "routine_draft_card":
             guard let draft = value["draft"], let name = draft["name"]?.string else { return .webOnly(.unknown) }
             return .routineDraft(routineDraft(draft, name: name, toolUseId: value["toolUseId"]?.string ?? "", key: value["routineKey"]?.string))

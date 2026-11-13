@@ -114,7 +114,7 @@ interface StoredWidget {
 }
 
 export interface WidgetEventDeps {
-  webchatRepo: Pick<WebChatRepository, "widgetMessage" | "getSession">;
+  webchatRepo: Pick<WebChatRepository, "widgetMessage" | "getSession" | "getMessages">;
   /** Hands a request to Rome's own API, as if the caller had sent it there.
    *  `env` is the incoming request's, so the caller resolves the same way. */
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
@@ -161,6 +161,12 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     if (!widget) return c.json({ error: "No widget with this id" }, 404);
     if (!eventNames(widget.components).has(name)) {
       return c.json({ error: "This widget declares no such event" }, 400);
+    }
+
+    // A card the agent waits on takes events only while it waits: an answered
+    // card's event would reach its owner again, and could repeat what it did.
+    if (widget.waits && !(await stillWaits(message.chatId, widget.toolUseId, widgetId))) {
+      return c.json({ error: "This card was already answered" }, 400);
     }
 
     const headers = new Headers(c.req.raw.headers);
@@ -237,6 +243,29 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     const open = vetLink(said?.open, getExternalRequestOrigin(c.req.raw).origin);
     return c.json(open ? { open } : {});
   });
+
+  /** Whether the card in message `widgetId` is still the open one for its
+   *  tool-use id: no answer has followed it. */
+  async function stillWaits(chatId: string, toolUseId: string, widgetId: string) {
+    let open: string | undefined;
+    for (const message of await deps.webchatRepo.getMessages(chatId)) {
+      let parts: unknown;
+      try {
+        parts = JSON.parse(message.content);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(parts)) continue;
+      for (const part of parts) {
+        if (!isObject(part) || part.toolUseId !== toolUseId) continue;
+        if (part.type === "pending_interaction" && message.role === "assistant") open = message.id;
+        if (part.type === "interaction_result" && message.role === "user") {
+          if (part.messageId === undefined || part.messageId === open) open = undefined;
+        }
+      }
+    }
+    return open === widgetId;
+  }
 
   /**
    * Answers the agent waiting on `widget` with `output`, as a turn in its chat
