@@ -81,11 +81,20 @@ describe("a widget described as data", () => {
     expect(screen.getByText("Calories")).toBeTruthy();
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("1200");
 
-    fireEvent.click(screen.getByRole("button", { name: "Log a glass of water" }));
-    await waitFor(() => expect(fetch.mock.calls.length).toBe(3));
-    const post = fetch.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(String(post?.[0])).toBe("/api/apps/meals/water");
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ date: "2026-11-11" });
+    // The data draws before the first read settles and turns the button on,
+    // so a click on the first frame with data would hit a disabled button.
+    const button = screen.getByRole("button", { name: "Log a glass of water" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    calories = 1450;
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("1450"),
+    );
+    const posts = fetch.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(String(posts[0]?.[0])).toBe("/api/apps/meals/water");
+    expect(JSON.parse(String(posts[0]?.[1]?.body))).toEqual({ date: "2026-11-11" });
+    expect(fetch.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(2);
   });
 
   it("keeps a widget part with neither a component nor a description out of the transcript", () => {

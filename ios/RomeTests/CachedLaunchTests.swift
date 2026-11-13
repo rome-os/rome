@@ -111,6 +111,9 @@ extension LastInstanceDefaults {
                 await app.launch(skipSnapshot: true)
                 #expect(app.phase == .ready)
                 #expect(app.workspace?.isVisitor == true && app.workspace?.accountLabel == "Ada")
+                // The widget files this instance's apps under its id; without
+                // it a cached launch never wrote them.
+                #expect(app.workspace?.instanceID == "b")
                 try? await Task.sleep(for: .milliseconds(200))
                 #expect(app.phase == .ready && app.workspace != nil)
             }
@@ -298,6 +301,100 @@ extension LastInstanceDefaults {
                 await app.launch(skipSnapshot: true)
                 #expect(app.phase == .ready)
                 #expect(await eventually { app.chatRequest.serial == 1 })
+            }
+        }
+
+        /// A widget tap that launched the app is followed once the kept
+        /// instance is open, by the shell of that instance only. Fails before
+        /// the fix: the cached launch never routed it.
+        @Test func aWidgetTapThatLaunchedTheAppIsFollowed() async {
+            await clean {
+                LaunchProtocol.offline = true
+                let (app, _) = model(session: fresh)
+                await app.openFromWidget(.newApp)
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.widgetRequest != nil })
+                #expect(app.takeWidgetLink(for: "other") == nil)
+                #expect(app.takeWidgetLink(for: "b") == .newApp)
+                #expect(app.widgetRequest == nil)
+            }
+        }
+
+        /// On a stopped page, a widget tap opens its app's instance, then the
+        /// app, as a push tap opens its chat. Fails before the fix: the link
+        /// only waited, and nothing showed.
+        @Test func aWidgetTapOnAStoppedPageOpensItsInstance() async {
+            await clean {
+                LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"stopped"}]}"#)
+                let (app, _) = model(session: fresh)
+                await app.openFromPush(PushTarget(instanceId: "c", chatId: "concierge"))
+                await app.launch(skipSnapshot: true)
+                #expect(app.phase == .stopped(instanceName: "C"))
+                await app.openFromWidget(.app(instanceId: "b", appId: "habits"))
+                #expect(await eventually { app.widgetRequest != nil })
+                #expect(app.currentInstance?.id == "b")
+                #expect(app.takeWidgetLink(for: "b") == .app(instanceId: "b", appId: "habits"))
+            }
+        }
+
+        /// A widget tap whose instance switch failed does not pull the
+        /// guardian away from the instance they open next. Fails before the
+        /// fix: opening B switched to C again.
+        @Test func aTapWhoseSwitchFailedDoesNotFollowTheNextInstance() async {
+            await clean {
+                LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"running"}]}"#)
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.instances.count == 2 })
+                // C has no session to open with: its switch fails.
+                await app.openFromWidget(.app(instanceId: "c", appId: "habits"))
+                #expect(await eventually { app.workspace == nil && app.phase != .ready })
+                await app.openInstance(preferring: "b")
+                #expect(app.phase == .ready && app.currentInstance?.id == "b")
+                try? await Task.sleep(for: .milliseconds(200))
+                #expect(app.currentInstance?.id == "b" && app.workspace != nil)
+                #expect(app.widgetRequest == nil)
+            }
+        }
+
+        private var cSession: InstanceSession { InstanceSession(token: "c", expiresAt: iso(3600), origin: "https://c.example") }
+        private func listBC() {
+            LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"running"}]}"#)
+        }
+
+        /// A tap for C that came while signed out is followed once sign-in has
+        /// opened B: the app switches to C and shows the app.
+        @Test func aTapQueuedBeforeSignInIsFollowedAfterTheOpen() async {
+            await clean {
+                listBC()
+                let (app, _) = model(session: fresh, kept: false, others: [cSession])
+                await app.openFromWidget(.app(instanceId: "c", appId: "habits"))
+                // Sign-in opens the first running instance, B.
+                await app.openInstance(preferring: nil)
+                #expect(await eventually { app.currentInstance?.id == "c" && app.widgetRequest != nil })
+                #expect(app.takeWidgetLink(for: "c") == .app(instanceId: "c", appId: "habits"))
+            }
+        }
+
+        /// A tap for B that came while C was still connecting is followed once
+        /// C is open.
+        @Test func aTapQueuedWhileConnectingIsFollowedAfterTheOpen() async {
+            await clean {
+                listBC()
+                LaunchProtocol.slow["/api/auth/me"] = 0.6
+                let (app, _) = model(session: fresh, others: [cSession])
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.instances.count == 2 })
+                guard let c = app.instances.first(where: { $0.id == "c" }) else {
+                    Issue.record("C is listed")
+                    return
+                }
+                let switching = Task { await app.switchInstance(to: c) }
+                #expect(await eventually { app.currentInstanceID == "c" })
+                await app.openFromWidget(.app(instanceId: "b", appId: "habits"))
+                await switching.value
+                #expect(await eventually { app.currentInstance?.id == "b" && app.widgetRequest != nil })
+                #expect(app.takeWidgetLink(for: "b") == .app(instanceId: "b", appId: "habits"))
             }
         }
 

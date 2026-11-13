@@ -1,3 +1,5 @@
+import { Cron } from "croner";
+import { withoutSessionActor } from "../access/session-actor.js";
 import type { TriggerProvider } from "./trigger-provider.js";
 import type { EventBusTrigger, EventFilterCondition, Routine } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
@@ -9,6 +11,17 @@ const log = createLogger("event-bus-trigger");
 interface Registration {
   routine: Routine;
   fire: (payload: Record<string, unknown>) => Promise<void>;
+  /** Ends a `once` wait with a deadline when no event came by then. */
+  deadline?: Cron;
+}
+
+/** The deadline a `once` wait from `defer` carries in its args, and what it waits for. */
+function deadlineOf(routine: Routine): { at: Date; waitingFor: string | null } | null {
+  const args = routine.args as Record<string, unknown> | null;
+  if (!args || typeof args !== "object" || typeof args.deadline !== "string") return null;
+  const at = new Date(args.deadline);
+  if (Number.isNaN(at.getTime())) return null;
+  return { at, waitingFor: typeof args.waitingFor === "string" ? args.waitingFor : null };
 }
 
 /**
@@ -22,7 +35,9 @@ interface Registration {
  *
  * A `once` routine fires on its first match and is then disabled. It drops
  * its registration synchronously before firing, so a second matching event
- * can't fire it again.
+ * can't fire it again. One with a deadline in its args fires at the deadline
+ * when no event matched by then, with a payload that says so; a deadline
+ * that passed while Rome was down fires when it activates.
  */
 export class EventBusTriggerProvider implements TriggerProvider {
   readonly type = "event-bus";
@@ -40,7 +55,27 @@ export class EventBusTriggerProvider implements TriggerProvider {
   ): Promise<void> {
     this.ensureSubscribed();
     const trigger = routine.trigger as EventBusTrigger;
-    this.registrations.set(routine.id, { routine, fire });
+    const registration: Registration = { routine, fire };
+    this.registrations.set(routine.id, registration);
+    const deadline = trigger.once ? deadlineOf(routine) : null;
+    if (deadline) {
+      const payload = {
+        deadlinePassed: true,
+        ...(deadline.waitingFor ? { waitingFor: deadline.waitingFor } : {}),
+        deadline: deadline.at.toISOString(),
+      };
+      if (deadline.at.getTime() <= Date.now()) {
+        this.fireOnce(routine.id, payload);
+      } else {
+        // Like a schedule's timer, the deadline's fire acts for no session.
+        registration.deadline = withoutSessionActor(
+          () =>
+            new Cron(deadline.at, { maxRuns: 1 }, () => {
+              this.fireOnce(routine.id, payload);
+            }),
+        );
+      }
+    }
     log.info("event-bus trigger activated", {
       routineId: routine.id,
       name: routine.name,
@@ -50,6 +85,7 @@ export class EventBusTriggerProvider implements TriggerProvider {
   }
 
   deactivate(routineId: string): void {
+    this.registrations.get(routineId)?.deadline?.stop();
     this.registrations.delete(routineId);
   }
 
@@ -58,6 +94,7 @@ export class EventBusTriggerProvider implements TriggerProvider {
   }
 
   stop(): void {
+    for (const registration of this.registrations.values()) registration.deadline?.stop();
     this.registrations.clear();
     this.unsubscribe?.();
     this.unsubscribe = null;

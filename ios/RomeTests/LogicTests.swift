@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Testing
+import UIKit
 @testable import Rome
 
 private func task(_ id: String, _ state: TaskState, updated: Double, completed: Double? = nil, archived: Double? = nil, rank: Double? = nil) -> ConciergeTask {
@@ -118,6 +119,32 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
             .code(language: "swift", text: "let a = 1"),
             .rule,
         ])
+    }
+
+    @Test func aCommentLineShowsNothingAndSeparatesBlocks() {
+        let blocks = MarkdownParser.parse("""
+        Details.
+        <!-- rome:conclusion -->
+        Found 3 flights. Which one?
+        <!-- /rome:conclusion -->
+        """)
+        #expect(blocks == [.paragraph("Details."), .paragraph("Found 3 flights. Which one?")])
+    }
+
+    @Test func theConclusionMarkersShowNothingAndTheirLineKeepsTheRest() {
+        #expect(MarkdownParser.parse("<!-- rome:conclusion -->Done.<!-- /rome:conclusion -->") == [.paragraph("Done.")])
+        #expect(MarkdownParser.parse("<!--rome:conclusion-->Done.") == [.paragraph("Done.")])
+        #expect(MarkdownParser.parse("<!--  /rome:conclusion  -->") == [])
+    }
+
+    @Test func otherCommentsStayAsTheyAre() {
+        #expect(MarkdownParser.parse("Keep <!-- keep --> this.") == [.paragraph("Keep <!-- keep --> this.")])
+        #expect(MarkdownParser.parse("Use `<!-- keep -->` here.") == [.paragraph("Use `<!-- keep -->` here.")])
+        #expect(MarkdownParser.parse("<!-- keep -->") == [.paragraph("<!-- keep -->")])
+    }
+
+    @Test func aMarkerInsideACodeBlockStaysLiteral() {
+        #expect(MarkdownParser.parse("```\n<!-- rome:conclusion -->\n```") == [.code(language: nil, text: "<!-- rome:conclusion -->")])
     }
 
     @Test func unterminatedCodeStillRenders() {
@@ -620,6 +647,240 @@ final class StubBackend: RomeBackend {
     }
 }
 
+/// The widget's copy, written by the app: SVGs drawn, a changed icon
+/// replaced and an unchanged one left alone, and nothing written by a
+/// workspace that has been left or an account that has ended.
+@MainActor
+@Suite struct WidgetShelfTests {
+    private final class Owner {}
+    private let svg = Data(##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#d97757"/></svg>"##.utf8)
+    private func png(_ color: UIColor) -> Data {
+        UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }.pngData()!
+    }
+    private func shelf() -> WidgetShelf {
+        WidgetShelf(store: AppShelfStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-shelf-\(UUID().uuidString)", directoryHint: .isDirectory), suite: "rome-shelf-\(UUID().uuidString)"))
+    }
+    private func app(_ id: String, version: String = "1") -> InstalledApp {
+        InstalledApp(id: id, iconUrl: "/api/apps/\(id)/icon", version: version)
+    }
+
+    /// Fails before the fix: an SVG icon was dropped and the widget drew a letter.
+    @Test func anSVGIconIsDrawnForTheWidget() async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": svg]
+        let shelf = shelf(), owner = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let written = try? Data(contentsOf: shelf.store!.iconURL("a"))
+        #expect(written.flatMap(UIImage.init(data:)) != nil)
+    }
+
+    @Test func onlyANewOrMissingIconIsFetched() async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let shelf = shelf(), owner = Owner()
+        let store = shelf.store!
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let first = try? Data(contentsOf: store.iconURL("a"))
+        #expect(first != nil && backend.apiFileRequests.count == 1)
+        // The same app again: its icon is kept, not fetched.
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(backend.apiFileRequests.count == 1)
+        // A new version brings a new icon, written over the old one.
+        backend.apiFiles["/apps/a/icon"] = png(.blue)
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let second = try? Data(contentsOf: store.iconURL("a"))
+        #expect(backend.apiFileRequests.count == 2 && second != nil && second != first)
+        // Gone from the group, the same list fills it in again.
+        try? FileManager.default.removeItem(at: store.iconURL("a"))
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(store.hasIconFile("a"))
+    }
+
+    /// An icon fetch cut short by the next pass, or one that failed, is
+    /// tried again: its new key is kept only once its file is written.
+    /// Fails before the fix: the key was saved with the list.
+    @Test(arguments: ["cancelled", "failed"])
+    func anIconNotWrittenIsFetchedAgain(_ how: String) async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let shelf = shelf(), owner = Owner()
+        let store = shelf.store!
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let first = try? Data(contentsOf: store.iconURL("a"))
+        // Version 2 does not land: its fetch is cut short, or fails.
+        if how == "cancelled" {
+            backend.apiFiles["/apps/a/icon"] = png(.blue)
+            backend.duringApiFile = { shelf.hand(to: owner, instanceId: "i") }
+        } else {
+            backend.apiFiles["/apps/a/icon"] = nil
+        }
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect((try? Data(contentsOf: store.iconURL("a"))) == first)
+        // The next pass fetches it again and writes it.
+        backend.duringApiFile = nil
+        backend.apiFiles["/apps/a/icon"] = png(.blue)
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let second = try? Data(contentsOf: store.iconURL("a"))
+        #expect(second != nil && second != first)
+    }
+
+    /// A list from the workspace left behind, after a switch or a sign-out,
+    /// writes nothing.
+    @Test func aLateListIsDropped() {
+        let backend = FakeBackend()
+        let shelf = shelf(), old = Owner(), new = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: old, instanceId: "i1")
+        shelf.hand(to: new, instanceId: "i2")
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: .unchecked, by: new)
+        shelf.shelve([app("old")], instanceId: "i1", backend: backend, account: .unchecked, by: old)
+        #expect(shelf.store!.read()?.instanceId == "i2")
+        #expect(shelf.store!.read()?.apps.map(\.id) == ["a"])
+
+        shelf.clear()
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: .unchecked, by: new)
+        #expect(shelf.store!.read() == nil)
+
+        // An account that has ended writes nothing either.
+        let accounts = AccountGeneration()
+        let stamp = accounts.stamp()
+        accounts.end()
+        shelf.hand(to: new, instanceId: "i2")
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: stamp, by: new)
+        #expect(shelf.store!.read() == nil)
+    }
+
+    /// An icon that arrives after a switch or a sign-out is not written.
+    @Test(arguments: ["switch", "signOut"])
+    func aLateIconIsDropped(_ leave: String) async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let shelf = shelf(), owner = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        backend.duringApiFile = {
+            if leave == "switch" { shelf.hand(to: Owner(), instanceId: "other") } else { shelf.clear() }
+        }
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(!shelf.store!.hasIconFile("a"))
+    }
+
+    /// Sign-out forgets the apps opened last with the rest.
+    @Test func clearingForgetsTheAppsOpenedLast() {
+        let shelf = shelf(), owner = Owner()
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.recordOpen(appId: "a", instanceId: "i")
+        #expect(shelf.store!.recent(instanceId: "i") == ["a"])
+        shelf.clear()
+        #expect(shelf.store!.recent(instanceId: "i").isEmpty)
+    }
+}
+
+@Suite struct WidgetSlotsTests {
+    private static func app(_ id: String, opens: Bool = true) -> ShelfApp {
+        ShelfApp(id: id, name: id.capitalized, opens: opens, hasIcon: false)
+    }
+
+    private static let list = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map { app($0) }
+
+    /// Picked apps first in their order, then the ones opened last, then the rest.
+    @Test func pickedThenRecentThenTheRest() {
+        #expect(WidgetSlots.choose(picked: ["c"], recent: ["e"], apps: Self.list).map(\.id) == ["c", "e", "a", "b"])
+        #expect(WidgetSlots.choose(picked: ["c", "a"], recent: ["e", "b"], apps: Self.list).map(\.id) == ["c", "a", "e", "b"])
+        // More picks than spots: the first four win.
+        #expect(WidgetSlots.choose(picked: ["j", "i", "h", "g", "f"], recent: ["a"], apps: Self.list).map(\.id) == ["j", "i", "h", "g"])
+    }
+
+    /// Each app once, four at most, and only apps the list still has.
+    @Test func dedupedCappedAndCurrent() {
+        let chosen = WidgetSlots.choose(picked: ["b", "gone", "b"], recent: ["b", "a", "gone"], apps: Self.list)
+        #expect(chosen.map(\.id) == ["b", "a", "c", "d"])
+        #expect(WidgetSlots.small == 4)
+        #expect(Set(chosen.map(\.id)).count == chosen.count)
+        #expect(WidgetSlots.choose(picked: [], recent: [], apps: Array(Self.list.prefix(3))).map(\.id) == ["a", "b", "c"])
+        #expect(WidgetSlots.choose(picked: ["a"], recent: [], apps: []).isEmpty)
+    }
+
+    /// Opening an app puts it first among the recent ones, once.
+    @Test func recentOpensComeFirst() throws {
+        let suite = "rome-tests-\(UUID().uuidString)"
+        let root = FileManager.default.temporaryDirectory.appending(path: suite, directoryHint: .isDirectory)
+        let store = AppShelfStore(root: root, suite: suite)
+        defer {
+            UserDefaults().removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        store.recordOpen(instanceId: "i1", appId: "a")
+        store.recordOpen(instanceId: "i1", appId: "b")
+        store.recordOpen(instanceId: "i1", appId: "a")
+        store.recordOpen(instanceId: "i2", appId: "z")
+        #expect(store.recent(instanceId: "i1") == ["a", "b"])
+        #expect(store.recent(instanceId: "i2") == ["z"])
+
+        let shelf = Shelf(instanceId: "i1", apps: [Self.app("a")])
+        #expect(store.write(shelf))
+        #expect(!store.write(shelf))
+        #expect(store.read() == shelf)
+        store.clear()
+        #expect(store.read() == nil)
+    }
+}
+
+@Suite struct WidgetLinkTests {
+    /// An app's link names its instance and app, and reads back the same.
+    @Test func anAppLinkRoundTrips() throws {
+        let link = WidgetLink.app(instanceId: "inst-1", appId: "habits")
+        let url = link.url(scheme: "rome")
+        #expect(url.absoluteString == "rome://app/inst-1/habits")
+        #expect(WidgetLink(url: url) == link)
+        #expect(WidgetLink(url: link.url(scheme: "rome-dev")) == link)
+        // An id with a slash or a space survives the trip.
+        let odd = WidgetLink.app(instanceId: "i 2", appId: "a/b")
+        #expect(WidgetLink(url: odd.url(scheme: "rome")) == odd)
+    }
+
+    @Test func theAppsPageAndNewApp() throws {
+        #expect(WidgetLink(url: try #require(URL(string: "rome://apps"))) == .apps)
+        #expect(WidgetLink(url: try #require(URL(string: "rome-dev://new-app"))) == .newApp)
+        #expect(WidgetLink.newApp.url(scheme: "rome").absoluteString == "rome://new-app")
+    }
+
+    /// Anything else is not a widget link.
+    @Test func otherURLsAreRefused() throws {
+        for text in ["https://romeos.cc/app/a/b", "rome://app/only-one", "rome://app//b", "rome://app/a/b/c", "rome://apps/x", "rome://chat", "other://app/a/b"] {
+            #expect(WidgetLink(url: try #require(URL(string: text))) == nil, "\(text)")
+        }
+    }
+
+    /// A link to another running instance switches to it first, as a push
+    /// does; a stopped one is named as such, and the widget then opens Apps.
+    @Test func anotherInstanceIsSwitchedTo() {
+        let other = CloudInstance(id: "i2", name: "Team", slug: "team", origin: "https://team.romeos.cc", status: "running")
+        let stopped = CloudInstance(id: "i3", name: "Old", slug: "old", origin: "https://old.romeos.cc", status: "stopped")
+        #expect(PushRoute.decide(instanceId: "i2", currentInstanceID: "i1", instances: [other]) == .switchTo(other))
+        #expect(PushRoute.decide(instanceId: "i1", currentInstanceID: "i1", instances: [other]) == .openConcierge)
+        #expect(PushRoute.decide(instanceId: "i3", currentInstanceID: "i1", instances: [stopped]) == .showStopped(stopped))
+    }
+}
+
 @Suite struct ChatLinkTests {
     private static let origin = URL(string: "https://me.romeos.cc")!
     private static let apps = [
@@ -651,6 +912,10 @@ final class StubBackend: RomeBackend {
         #expect(try link("/apps") == .page(URL(string: "https://me.romeos.cc/apps")!))
         #expect(try link("/apps/a/b") == .page(URL(string: "https://me.romeos.cc/apps/a/b")!))
         #expect(try link("https://me.romeos.cc/chat/123") == .page(URL(string: "https://me.romeos.cc/chat/123")!))
+        // A stored file (a pdf, a video) opens in the same web view, which has the session.
+        let stored = "/api/assets/0123456789abcdef0123456789abcdef.pdf"
+        #expect(try link(stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
+        #expect(try link("https://me.romeos.cc" + stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
         // No origin (demo data): a page has nowhere to resolve.
         #expect(try link("/settings", origin: nil) == .system)
         #expect(try link("/apps/habit-tracker", origin: nil) == .app(id: "habit-tracker", page: nil))

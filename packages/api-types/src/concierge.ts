@@ -2,8 +2,13 @@
 // server is packages/core/src/concierge and the client is packages/web.
 
 import type { ConciergeActivity } from "./concierge-activity.js";
+import type { ConciergeTaskEndReason, ConciergeTaskStatus } from "./concierge-task-status.js";
+import type { TaskCardRender } from "./chat.js";
 
-/** What a task row is doing. The Concierge sets it; the system never derives it. */
+/**
+ * What a task row is doing, as apps from before derived status read it. Rome
+ * maps it from the task's status (`legacyTaskState`); read `status` instead.
+ */
 export const CONCIERGE_TASK_STATES = [
   "next",
   "doing",
@@ -71,16 +76,53 @@ export const CONCIERGE_DONE_DAYS = 7;
 export const CONCIERGE_TASK_SUMMARY_MAX_LENGTH = 120;
 
 /** One row of the task panel. Times are epoch milliseconds. */
+/**
+ * The card or approval a task chat waits on its owner for: a card by its
+ * tool use id, with the message that holds it and how it renders, or a
+ * pending approval by its id. `since` is when the wait began: the oldest
+ * item still open in the chat, as all of them are one wait.
+ */
+export type ConciergeOpenWait =
+  | {
+      kind: "card";
+      id: string;
+      messageId: string;
+      render: TaskCardRender | null;
+      since: number;
+    }
+  | { kind: "approval"; id: string; since: number };
+
 export interface ConciergeTaskDto {
   id: string;
   title: string;
+  /** Mapped from `status` for apps from before it. */
   state: ConciergeTaskState;
+  /**
+   * How the task stands, derived by Rome (`taskStatus` in
+   * concierge-task-status.ts). Read it with `parseTaskStatus`. Absent from
+   * servers before it.
+   */
+  status?: ConciergeTaskStatus;
+  /** Why an ended task ended; null while it has not. */
+  endReason?: ConciergeTaskEndReason | null;
+  /** When the wait on its owner began, while one is open in its task chat, epoch milliseconds. */
+  waitingSince?: number | null;
+  /**
+   * What its task chat waits on its owner for now, or null: the newest open
+   * card or approval. Open after the wait expired too, since the card still
+   * takes an answer. Absent from servers before it.
+   */
+  openWait?: ConciergeOpenWait | null;
+  /** When the check scheduled for it is due, while one is pending, epoch milliseconds. */
+  laterAt?: number | null;
   summary: string | null;
   waitingOn: string | null;
   dueAt: number | null;
   rank: number | null;
   /** The linked task chat, with its current name, or null when the row has none. */
   chat: { id: string; name: string } | null;
+  /** The id of the first message of the task's chat thread in its Concierge chat, or null. */
+  threadRoot?: string | null;
   /** The Concierge chat the row came from; its results and the panel's buttons go there. */
   conciergeChat: ConciergeChatRef;
   /**
@@ -94,6 +136,31 @@ export interface ConciergeTaskDto {
   archivedAt: number | null;
   /** Set when the Concierge did not pick up the row's task chat events after a retry. */
   notSynced: boolean;
+}
+
+/**
+ * A wake-up pending in a chat: a check the agent scheduled with `defer`,
+ * which the chat shows until it fires and its owner can cancel there. Times
+ * are epoch milliseconds.
+ */
+export interface ChatPendingCheckDto {
+  id: string;
+  name: string;
+  /** When it wakes the chat: its time, or the deadline of the event it waits for; null for an event wait with no deadline. */
+  at: number | null;
+  /** What an event wait waits for; null for a timed check. */
+  waitingFor: string | null;
+  /** The task it is for, or null. */
+  taskId: string | null;
+  /** That task's title, or null. */
+  taskTitle?: string | null;
+  /** The next run of the task's repeating schedule: cancelling it skips that run only. */
+  recurring?: boolean;
+}
+
+/** `GET /chat/sessions/:id/checks`, the soonest first. */
+export interface ChatPendingChecksResponse {
+  checks: ChatPendingCheckDto[];
 }
 
 /** `GET /concierge/tasks`. */
@@ -246,9 +313,10 @@ export interface ConciergeConnectorDto {
 }
 
 /**
- * `GET /api/concierge/connectors`, and what the Concierge's following list
- * returns: one structure for every client and the agent. Which connectors are
- * listed is decided here, not by the client.
+ * `GET /api/concierge/connectors`: one structure for every client. The
+ * Concierge's following list answers the same entries, without what only a
+ * client draws with (`agentViewOf`). Which connectors are listed is decided
+ * here, not by the client.
  */
 export interface ConciergeConnectorsResponse {
   connectors: ConciergeConnectorDto[];

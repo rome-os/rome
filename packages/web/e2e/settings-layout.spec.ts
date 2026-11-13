@@ -9,10 +9,14 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
     let headerLeft: number | undefined;
+    const dialog = page.getByRole("dialog", { name: "Settings" });
+    const heading = dialog.getByRole("heading", { name: "Settings", exact: true });
+    // Load once, then switch sections from the menu. Each fresh load also
+    // renders the main chat behind the dialog, and six of them exceed the
+    // test timeout on a shared runner.
+    await page.goto(`/settings/${tabs[0]}`);
     for (const tab of tabs) {
-      await page.goto(`/settings/${tab}`);
-      const dialog = page.getByRole("dialog", { name: "Settings" });
-      const heading = dialog.getByRole("heading", { name: "Settings", exact: true });
+      if (tab !== tabs[0]) await dialog.locator(`nav a[href="/settings/${tab}"]`).click();
       await expect(heading).toBeVisible();
       await expect(dialog.locator('nav a[aria-current="page"]')).toHaveAttribute(
         "href",

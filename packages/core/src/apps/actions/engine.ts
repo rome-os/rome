@@ -140,6 +140,7 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "system:create_routine",
   "system:send_feedback",
   "core:set_agent_name",
+  "core:show_file",
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",
@@ -153,6 +154,9 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "core:concierge_unfollow",
   "core:concierge_following_list",
   "core:concierge_following_configure",
+  // A task's scheduled run (concierge/task-schedule.ts). It sends the task's
+  // brief through the Concierge, which only the main process holds.
+  "core:concierge_task_run",
 ]);
 
 export interface ActionRunContext {

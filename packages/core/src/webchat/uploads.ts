@@ -1,5 +1,5 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
-import { basename, extname, join, relative } from "node:path";
+import { basename } from "node:path";
+import { storeAssetBytes } from "../assets/store.js";
 
 export interface WebchatIncomingUpload {
   name: string;
@@ -8,11 +8,13 @@ export interface WebchatIncomingUpload {
 }
 
 export interface SavedWebchatUpload {
+  /** The sanitized name the guardian uploaded; it labels the link. */
   name: string;
   mimeType?: string;
+  /** Where the copy lives on disk: `<profile>/assets/<id>.<ext>`. */
   path: string;
-  relativePath: string;
-  linkPath: string;
+  /** The URL the dashboard serves it from: `/api/assets/<id>.<ext>`. */
+  url: string;
   size: number;
 }
 
@@ -26,46 +28,6 @@ function sanitizeUploadFileName(fileName: string): string {
   }
 
   return trimmed;
-}
-
-async function resolveUniqueUploadPath(uploadDir: string, fileName: string): Promise<string> {
-  const extension = extname(fileName);
-  const stem = extension ? fileName.slice(0, -extension.length) : fileName;
-
-  let attempt = 0;
-  while (true) {
-    const candidateName = attempt === 0 ? fileName : `${stem}-${attempt + 1}${extension}`;
-    const candidatePath = join(uploadDir, candidateName);
-
-    try {
-      await access(candidatePath);
-      attempt += 1;
-    } catch {
-      return candidatePath;
-    }
-  }
-}
-
-function uploadDatePath(now = new Date()): string {
-  const year = String(now.getFullYear());
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-
-  return `${year}/${month}/${day}`;
-}
-
-function virtualProjectPath(projectsRoot: string, path: string): string {
-  const projectRelativePath = relative(projectsRoot, path).split("\\").join("/");
-  if (
-    !projectRelativePath ||
-    projectRelativePath === ".." ||
-    projectRelativePath.startsWith("../") ||
-    /^[A-Za-z]:/.test(projectRelativePath)
-  ) {
-    throw new Error("Uploaded file is outside the projects root");
-  }
-
-  return `/projects/${projectRelativePath}`;
 }
 
 function escapeMarkdownLabel(label: string): string {
@@ -86,45 +48,40 @@ function encodeMarkdownDestination(path: string): string {
     .join("/");
 }
 
-function uploadLabel(relativePath: string): string {
-  return relativePath.split("/").filter(Boolean).at(-1) ?? relativePath;
-}
-
+/**
+ * Copy each upload into the asset store: a new random name every time, so two
+ * pastes of `image.png` never meet. `maxBytes` caps one file (default
+ * `MAX_ASSET_BYTES`); a larger one rejects with `AssetTooLargeError`.
+ */
 export async function saveWebchatUploads(
-  workingDir: string,
-  projectsRoot: string,
   uploads: WebchatIncomingUpload[],
-  now = new Date(),
+  options: { maxBytes?: number } = {},
 ): Promise<SavedWebchatUpload[]> {
-  if (uploads.length === 0) {
-    return [];
-  }
-
-  const uploadDir = join(workingDir, uploadDatePath(now));
-  await mkdir(uploadDir, { recursive: true });
-
   const savedUploads: SavedWebchatUpload[] = [];
   for (const upload of uploads) {
-    const sanitizedName = sanitizeUploadFileName(upload.name);
-    const fullPath = await resolveUniqueUploadPath(uploadDir, sanitizedName);
-    await writeFile(fullPath, upload.data);
-
+    const name = sanitizeUploadFileName(upload.name);
+    const stored = await storeAssetBytes(upload.data, name, options);
     savedUploads.push({
-      name: basename(fullPath),
+      name,
       mimeType: upload.mimeType,
-      path: fullPath,
-      relativePath: relative(workingDir, fullPath).split("\\").join("/"),
-      linkPath: virtualProjectPath(projectsRoot, fullPath),
-      size: upload.data.byteLength,
+      path: stored.path,
+      url: stored.url,
+      size: stored.size,
     });
   }
 
   return savedUploads;
 }
 
+/**
+ * The turn text with one `- File N: [name](<url>)` line per upload. That text
+ * is what gets persisted and shown. With `localPaths` (the model's copy of the
+ * turn) each line also names the file on disk, so the agent can read it.
+ */
 export function appendUploadPathsToPrompt(
   text: string,
-  uploads: Pick<SavedWebchatUpload, "linkPath" | "relativePath">[],
+  uploads: Pick<SavedWebchatUpload, "name" | "url" | "path">[],
+  options: { localPaths?: boolean } = {},
 ): string {
   if (uploads.length === 0) {
     return text.trim();
@@ -133,9 +90,9 @@ export function appendUploadPathsToPrompt(
   const promptText = text.trim();
   const lines = uploads.map(
     (upload, index) =>
-      `- File ${index + 1}: [${escapeMarkdownLabel(uploadLabel(upload.relativePath))}](<${encodeMarkdownDestination(
-        upload.linkPath,
-      )}>)`,
+      `- File ${index + 1}: [${escapeMarkdownLabel(upload.name)}](<${encodeMarkdownDestination(
+        upload.url,
+      )}>)${options.localPaths ? ` — local file: ${upload.path}` : ""}`,
   );
 
   return [promptText, lines.join("\n")].filter(Boolean).join("\n\n").trim();

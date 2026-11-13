@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { threadIdOf } from "../apps/repositories/approvals.js";
+import { approvalWaits } from "../test/open-waits.js";
+import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
+import type { DrizzleTx } from "../db/index.js";
+import { POSTPONED_CHECKS } from "./service.js";
 import type {
   Account,
   AgentTurnFinishedEvent,
@@ -25,8 +30,9 @@ import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js"
 import { createTestDb, type TestDb } from "../test/db.js";
 import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
-import { startConciergeEvents } from "./events.js";
-import { RETRY_MS } from "./task-events.js";
+import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
+import { resultSummary, startConciergeEvents } from "./events.js";
+import { MIN_FLUSH_SPACING_MS, RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import { mainChatIdOf } from "./main-chat.js";
 import { createConciergeOwners } from "./owners.js";
@@ -50,11 +56,16 @@ import {
   RESTRICTED_PLAN,
 } from "../test/kit/model-accounts.js";
 import type { ModelAccountReports } from "../agent/index.js";
+import { CONCLUSION_CLOSE, CONCLUSION_MAX_CHARS, CONCLUSION_OPEN } from "./conclusion.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
 /** A topic chat: another Concierge chat. */
 const TOPIC_CHAT = "topic-1";
 const isConciergeChatId = (id: string) => id === CONCIERGE_CHAT || id === TOPIC_CHAT;
+
+/** A task chat's final answer: its details, then its conclusion between the markers. */
+const concluded = (conclusion: string, details = "Full details of the work.") =>
+  `${details}\n\n${CONCLUSION_OPEN}\n${conclusion}\n${CONCLUSION_CLOSE}`;
 
 const opened: TestDb[] = [];
 afterEach(() => {
@@ -216,6 +227,8 @@ function setup(
   const posted: string[] = [];
   /** What the next send answers when it is refused. */
   let refuseWith: Exclude<SendResult, { ok: true }> | null = null;
+  /** The task chats whose turn runs: from a message sent in until it finishes. */
+  const runningTaskChats = new Set<string>();
   const backendTurns: BackendTurnParams[] = [];
   const order: string[] = [];
   let startedChats = 0;
@@ -233,11 +246,16 @@ function setup(
     isBusy: rs.fn(() => false),
     openTool: rs.fn(() => null),
     onTurnChange: rs.fn(() => () => {}),
-    activeTurns: rs.fn(() => []),
+    // A task chat runs from the message that starts its turn until that
+    // turn finishes, as the dashboard's runtime reports it.
+    activeTurns: rs.fn((chatId: string) =>
+      runningTaskChats.has(chatId) ? [`task-turn-${chatId}`] : [],
+    ),
     interruptTurn: rs.fn(async () => {}),
   };
   const send = rs.fn(async (place: Place, body: Body, as: Account): Promise<SendResult> => {
     if (refuseWith) return refuseWith;
+    if (place.chat.id.startsWith("task-")) runningTaskChats.add(place.chat.id);
     order.push("post");
     const id = `input-${posted.length + 1}`;
     const list = messages.get(place.chat.id) ?? [];
@@ -320,10 +338,24 @@ function setup(
         },
       ),
       createSession: rs.fn(async () => {}),
+      archiveSessionIn: (tx: DrizzleTx, id: string) => {
+        storedChats.archiveSessionIn(tx, id);
+        if (sessions.has(id)) sessions.set(id, { ...sessions.get(id), archivedAt: new Date() });
+      },
+      deleteSessionIn: (tx: DrizzleTx, id: string) => {
+        storedChats.deleteSessionIn(tx, id);
+        sessions.delete(id);
+      },
+      deleteSession: rs.fn(async (id: string) => {
+        await storedChats.deleteSession(id);
+        sessions.delete(id);
+      }),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
       // The activity's own sources (activity.test.ts covers it).
       onMessageInserted: () => () => {},
       awaitingGuardianSince: async () => new Map<string, number>(),
+      openWaitsOf: async () => new Map(),
+      taskCardsOf: async () => new Map(),
       ownerSpokeAt: async () => null,
     },
     tasks,
@@ -420,6 +452,7 @@ function setup(
     /** A newer input cut the turn short and took its work on. */
     handedOn?: boolean;
   }) => {
+    if (!isConciergeChatId(event.chatId) && !event.handedOn) runningTaskChats.delete(event.chatId);
     for (const listener of listeners) {
       listener({
         ...(event.handedOn ? { handedOn: true } : {}),
@@ -450,6 +483,7 @@ function setup(
     error: string;
     agentName?: string;
   }) => {
+    runningTaskChats.delete(event.chatId);
     for (const listener of failedBeforeStartListeners) {
       listener({
         turn: {
@@ -506,11 +540,14 @@ function setup(
       fake = true;
       rs.useFakeTimers();
     },
+    // As the repository tells it: with the chat its payload names kept apart.
     createApproval: (approval: Record<string, unknown>) => {
-      for (const listener of approvalListeners) listener(approval);
+      for (const listener of approvalListeners)
+        listener({ ...approval, threadId: threadIdOf(approval.payload) });
     },
     resolveApproval: (approval: Record<string, unknown>) => {
-      for (const listener of resolvedListeners) listener(approval);
+      for (const listener of resolvedListeners)
+        listener({ ...approval, threadId: threadIdOf(approval.payload) });
     },
     chats,
     send,
@@ -557,28 +594,25 @@ describe("Concierge tools", () => {
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
   });
 
-  it("uses task cards as the needs_user anchor for task questions and approvals", async () => {
+  it("asks the guardian about a task with its own card, which the row then points to", async () => {
     const s = setup();
     const tools = await buildConciergeTools(s.service, s.context());
     const upsert = tools.find((tool) => tool.name === "task_upsert")!;
     const schema = upsert.inputSchema as {
-      properties: { tasks: { items: { properties: { messageId: { description: string } } } } };
+      properties: { tasks: { items: { properties: Record<string, { description: string }> } } };
     };
-    for (const description of [
-      upsert.description,
-      schema.properties.tasks.items.properties.messageId.description,
-    ]) {
-      expect(description).toContain("show a task question or approval with chat_card");
-      expect(description).toContain("otherwise ask with say or chat_forward");
-      expect(description).toContain("Use the returned messageId as the row anchor");
+    const fields = schema.properties.tasks.items.properties;
+    // Rome keeps the status: the Concierge writes none of its fields.
+    for (const field of ["state", "waitingOn", "dueAt", "rank", "chatId"]) {
+      expect(fields[field]).toBeUndefined();
     }
+    expect(upsert.description).toContain("Rome keeps each task's status");
     const card = tools.find((tool) => tool.name === "chat_card")!;
-    expect(card.description).toContain("for a task question or approval");
-    expect(card.description).toContain("returned messageId as the needs_user row anchor");
+    expect(card.description).toContain("the card is its question or approval alone");
     expect(card.description).toContain(
       "An existing task row automatically points to this card in this Concierge chat",
     );
-    expect(schema.properties.tasks.items.properties.messageId.description).toContain(
+    expect(fields.messageId.description).toContain(
       "chat_card and chat_forward update this anchor automatically",
     );
   });
@@ -606,6 +640,37 @@ describe("Concierge tools", () => {
       [{ type: "text", content: "on it" }],
       [{ type: "text", content: "# Report", format: "long" }],
     ]);
+  });
+
+  it("sends a message repeated word for word in one turn once, so the phone rings once", async () => {
+    const s = setup();
+    const idOf = (result: unknown) =>
+      JSON.parse((result as { content: { text: string }[] }).content[0]!.text).messageId as string;
+    const first = idOf(await s.tool("say", { text: "apple.txt is made." }));
+    await s.tool("say", { text: "pear.txt is made." });
+    const again = idOf(await s.tool("say", { text: "apple.txt is made." }));
+
+    expect(again).toBe(first);
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "text", content: "apple.txt is made." }],
+      [{ type: "text", content: "pear.txt is made." }],
+    ]);
+  });
+
+  it("says the same words about two tasks as two messages, one for each", async () => {
+    const s = setup();
+    const idOf = (result: unknown) =>
+      JSON.parse((result as { content: { text: string }[] }).content[0]!.text).messageId as string;
+    const [apple, pear] = await s.taskRepo.upsertMany([
+      { title: "Apple", state: "doing", chatId: CONCIERGE_CHAT },
+      { title: "Pear", state: "doing", chatId: CONCIERGE_CHAT },
+    ]);
+    const first = idOf(await s.tool("say", { text: "Done ✅", task: apple!.id }));
+    const second = idOf(await s.tool("say", { text: "Done ✅", task: pear!.id }));
+    expect(second).not.toBe(first);
+    expect(s.messages.get(CONCIERGE_CHAT)).toHaveLength(2);
+    // The same words about the same task are still one message.
+    expect(idOf(await s.tool("say", { text: "Done ✅", task: pear!.id }))).toBe(second);
   });
 
   describe("chat threads", () => {
@@ -712,40 +777,50 @@ describe("Concierge tools", () => {
       expect(threadOf(s, ack)).toBe("g0");
     });
 
-    it("a task event's turn reports on the one task it names, and a batch on none", async () => {
+    it("a turn reports on the one task it was started about, and a batch on none", async () => {
       const s = setup();
-      const [row] = await s.tasks.repo.upsertMany([
+      const [row, other] = await s.tasks.repo.upsertMany([
         { title: "Flights", state: "doing", chatId: CONCIERGE_CHAT, sourceMessageId: "ack-1" },
-      ]);
-      const resolved = await s.service.resolveTurn({
-        agentName: CONCIERGE_AGENT_ID,
-        sessionId: "runtime-1",
-        channel: "webchat",
-        threadId: CONCIERGE_CHAT,
-        prompt: `<task_events>\n<task id="${row!.id}" title="Flights">\n</task>\n</task_events>`,
-      });
-      const woken = await s.service.resolveTurn({
-        agentName: CONCIERGE_AGENT_ID,
-        sessionId: "runtime-1",
-        channel: "webchat",
-        threadId: CONCIERGE_CHAT,
-        prompt: `⏰ Time's up: check task:${row!.id}`,
-      });
-
-      expect(resolved.reportedTask).toBe(row!.id);
-      expect(woken.reportedTask).toBe(row!.id);
-
-      // A batch about two tasks answers neither, so an unnamed say goes in no thread.
-      const [other] = await s.tasks.repo.upsertMany([
         { title: "Hotels", state: "doing", chatId: CONCIERGE_CHAT, sourceMessageId: "ack-1" },
       ]);
-      const batch = await s.service.resolveTurn({
-        agentName: CONCIERGE_AGENT_ID,
-        sessionId: "runtime-1",
-        channel: "webchat",
-        threadId: CONCIERGE_CHAT,
-        prompt: `<task_events>\n<task id="${row!.id}" title="Flights">\n</task>\n<task id="${other!.id}" title="Hotels">\n</task>\n</task_events>`,
+      const turn = (prompt: string, taskIds?: string[]) =>
+        s.service.resolveTurn({
+          agentName: CONCIERGE_AGENT_ID,
+          sessionId: "runtime-1",
+          channel: "webchat",
+          threadId: CONCIERGE_CHAT,
+          prompt,
+          ...(taskIds ? { taskIds } : {}),
+        });
+      // A task event's batch of one, whatever its text names.
+      const resolved = await turn(
+        `<task_events>\n<task id="${row!.id}" title="Flights">\nguardian: see task:${other!.id}\n</task>\n</task_events>`,
+        [row!.id],
+      );
+      expect(resolved.reportedTask).toBe(row!.id);
+      // A defer wake-up names its task in Rome's header, not in its note.
+      const woken = await turn(
+        `⏰ Time's up\n<defer_note scheduled_at="2026-11-12T09:00:00.000Z" task_id="${row!.id}">\nCompare with task:${other!.id} and task_id="${other!.id}"\n</defer_note>`,
+      );
+      expect(woken.reportedTask).toBe(row!.id);
+      // A check that came due labels its replies with its name.
+      expect(woken).toMatchObject({
+        inputSource: { type: "check", name: null },
+        inputLabel: "Check",
       });
+      const named = await turn(
+        `⏰ Time's up: Tell the time\n<defer_note scheduled_at="2026-11-12T09:00:00.000Z">\nSay the time.\n</defer_note>`,
+      );
+      expect(named).toMatchObject({
+        inputSource: { type: "check", name: "Tell the time" },
+        inputLabel: "Check · Tell the time",
+      });
+      // A turn that is no wake-up carries no source.
+      expect(resolved).not.toHaveProperty("inputSource");
+      // Text alone names no task.
+      expect((await turn(`⏰ Time's up: check task:${row!.id}`)).reportedTask).toBeUndefined();
+      // A batch about two tasks answers neither, so an unnamed say goes in no thread.
+      const batch = await turn("<task_events>…</task_events>", [row!.id, other!.id]);
       expect(batch.reportedTask).toBeUndefined();
     });
 
@@ -786,6 +861,7 @@ describe("Concierge tools", () => {
       await s.service.systemTurnOutcome(
         CONCIERGE_CHAT,
         `<task_events>\n<task id="${taskId}" title="Flights">\n</task>\n</task_events>`,
+        { taskIds: [taskId] },
       );
       s.onBackendTurn(() => "completed");
     };
@@ -1035,6 +1111,9 @@ describe("Concierge tools", () => {
       );
       expect(await s.tasks.repo.threadRoot(taskId)).toBe("t0");
 
+      // The task still runs, so it starts a new thread in the main chat.
+      s.chats.activeTurns = (chatId: string) => (chatId === "task-1" ? ["task-turn"] : []);
+      await s.storedChats.archiveSession(TOPIC_CHAT);
       await s.service.retireChat(TOPIC_CHAT, "archived");
       expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
 
@@ -1102,9 +1181,7 @@ describe("Concierge tools", () => {
       );
       expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
       expect(threadOf(s, "reply")).toBe("g0");
-      expect((await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["reply"])).get("reply")).toBe(
-        "working",
-      );
+      expect((await s.tasks.reactionsOf(CONCIERGE_CHAT, ["reply"])).get("reply")).toBe("working");
     });
 
     it("roots a task started for a reply to a message in no task at that reply", async () => {
@@ -1147,7 +1224,7 @@ describe("Concierge tools", () => {
       const hotels = await startTaskFor(s, "ask-2", ["h0"]);
       s.messages.get(hotels.chatId)?.push({
         role: "assistant",
-        content: JSON.stringify([{ type: "text", content: "2 hotels" }]),
+        content: JSON.stringify([{ type: "text", content: concluded("2 hotels") }]),
       });
       s.inTurn("reply-turn");
       guardianSays(s, { id: "show", turnId: "reply-turn", chatThread: "g0", settled: true });
@@ -1162,7 +1239,7 @@ describe("Concierge tools", () => {
       const short = await startTaskFor(s, "routine", []);
       s.messages.get(short.chatId)?.push({
         role: "assistant",
-        content: JSON.stringify([{ type: "text", content: "# Report" }]),
+        content: JSON.stringify([{ type: "text", content: concluded("# Report") }]),
       });
       await reportTakenOver(s, short.taskId);
       s.inTurn("notes");
@@ -1199,7 +1276,7 @@ describe("Concierge tools", () => {
       const hotels = await startTaskFor(s, "ask-2", []);
       s.messages.get(hotels.chatId)?.push({
         role: "assistant",
-        content: JSON.stringify([{ type: "text", content: "2 hotels" }]),
+        content: JSON.stringify([{ type: "text", content: concluded("2 hotels") }]),
       });
       s.inTurn("two");
       // One message is in the flights thread, the other in none.
@@ -1244,7 +1321,7 @@ describe("Concierge tools", () => {
       CONCIERGE_ACCOUNT,
     );
     expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
-      { type: "task_chat", chatId: "task-1", title: "Flights" },
+      { type: "task_chat", chatId: "task-1", title: "Flights", show: "task" },
     ]);
   });
 
@@ -1297,7 +1374,7 @@ describe("Concierge tools", () => {
       taskId: expect.any(String),
     });
     expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
-      { type: "task_chat", chatId: "task-1", title: "Flights" },
+      { type: "task_chat", chatId: "task-1", title: "Flights", show: "task" },
     ]);
   });
 
@@ -1408,11 +1485,12 @@ describe("Concierge tools", () => {
     );
     s.messages.get("task-1")?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "# Report" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("# Report") }]),
     });
     await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     const result = await s.tool("chat_forward", { chatId: "task-1" });
     expect(JSON.parse(result.content[0].text)).toEqual({
+      forwarded: "conclusion",
       forwardedChars: 8,
       messageId: "said-1",
       taskAnchored: started.taskId,
@@ -1429,14 +1507,330 @@ describe("Concierge tools", () => {
     ]);
   });
 
-  it("chat_stop stops each of the task chat's turns", async () => {
+  it("chat_stop stops each of the task chat's turns, and its task", async () => {
     const s = setup();
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+    );
     s.chats.activeTurns = () => ["t1", "t2"];
     const result = await s.tool("chat_stop", { chatId: "task-1" });
     expect(JSON.parse(result.content[0].text)).toEqual({ stopped: 2 });
     expect(s.chats.interruptTurn).toHaveBeenCalledWith("t1");
     expect(s.chats.interruptTurn).toHaveBeenCalledWith("t2");
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      stoppedAt: expect.any(Date),
+      stopReason: "concierge",
+    });
+  });
+
+  it("a stop, an archive or a delete turns down the task chat's approvals, and runs no turn on", async () => {
+    const s = setup();
+    const turnedDown: [string, number, boolean][] = [];
+    s.service.attachApprovalExpiry(async (chatId, turnDown) => {
+      turnedDown.push([chatId, turnDown.until, turnDown.continueTurn]);
+      return 1;
+    });
+    const first = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(first.taskId, "guardian");
+    const second = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    await s.service.endTaskChat(second.chatId, "archived");
+    // Only approvals that began by the stop.
+    expect(turnedDown).toEqual([
+      [first.chatId, expect.any(Number), false],
+      [second.chatId, expect.any(Number), false],
+    ]);
+    expect(turnedDown.every(([, until]) => Number.isFinite(until))).toBe(true);
+  });
+
+  it("turns down an approval the stopped task's turn asked for while it was being stopped", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === chatId ? ["t1"] : []);
+    let askedAt = 0;
+    s.chats.interruptTurn = async () => {
+      // The turn asks for an approval just before it stops.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      askedAt = Date.now();
+    };
+    const cutoffs: number[] = [];
+    s.service.attachApprovalExpiry(async (_chat, turnDown) => {
+      cutoffs.push(turnDown.until);
+      return 1;
+    });
+    await s.service.stopTask(taskId, "guardian");
+    expect(cutoffs).toHaveLength(1);
+    expect(cutoffs[0]).toBeGreaterThanOrEqual(askedAt);
+  });
+
+  it("still turns down a stopped task's approvals when stopping one of its turns throws", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === chatId ? ["t1", "t2"] : []);
+    const interrupted: string[] = [];
+    s.chats.interruptTurn = async (turnId: string) => {
+      interrupted.push(turnId);
+      // The turn ended on its own meanwhile: the backend answers 409.
+      if (turnId === "t1") throw new Error("409 turn not running");
+    };
+    const turnedDown: string[] = [];
+    s.service.attachApprovalExpiry(async (chat) => (turnedDown.push(chat), 1));
+    expect(await s.service.stopTask(taskId, "guardian")).toBe(2);
+    expect(interrupted).toEqual(["t1", "t2"]);
+    expect(turnedDown).toEqual([chatId]);
+  });
+
+  it("turns down an approval a stopped task's work asks for after its interrupt was accepted", async () => {
+    const s = setup();
+    const stopped = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    const open = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    await s.service.stopTask(stopped.taskId, "guardian");
+    const turnedDown: [string, string][] = [];
+    s.service.attachApprovalExpiry(async (chat, turnDown) => {
+      turnedDown.push([chat, turnDown.resolvedBy]);
+      return 1;
+    });
+    await s.settle();
+    turnedDown.length = 0;
+    const ask = (chatId: string) =>
+      s.createApproval({
+        status: "pending",
+        description: "Send the booking email",
+        payload: { channelContext: { threadId: chatId } },
+      });
+    ask(stopped.chatId);
+    ask(open.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([[stopped.chatId, RESOLVED_BY_STOP]]);
+    // A chat still in use keeps its approvals: one whose row only was
+    // archived after its task ended, and one unarchived after its archive
+    // stopped the task.
+    await s.taskRepo.setLastOutcome(open.taskId, "succeeded", new Date(), { reported: false });
+    await s.taskRepo.upsertMany([{ id: open.taskId, archived: true }]);
+    const restored = JSON.parse(
+      (await s.tool("chat_start", { title: "Cars", brief: "Find a car" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === restored.chatId ? ["t1"] : []);
+    await s.service.endTaskChat(restored.chatId, "archived");
+    s.chats.activeTurns = () => [];
+    turnedDown.length = 0;
+    // Still archived: its approvals are the stopped work's.
+    ask(restored.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([[restored.chatId, RESOLVED_BY_STOP]]);
+    await s.service.restoreTaskChat(restored.chatId);
+    turnedDown.length = 0;
+    ask(open.chatId);
+    ask(restored.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([]);
+  });
+
+  it("drops a stop's turn-down retry once the task is taken up again", async () => {
+    const s = setup();
+    s.fakeTimers();
+    let calls = 0;
+    s.service.attachApprovalExpiry(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("database is locked");
+      return 1;
+    });
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(taskId, "guardian");
+    expect(calls).toBe(1);
+    // The owner types in the task chat before the retry: its new work's approvals are its own.
+    await s.service.resumeTaskChat(chatId);
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(calls).toBe(1);
+  });
+
+  it("turns down at start what a stopped task's chat still has pending", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    // Stopped before the approval handling was up, as across a crash.
+    await s.service.stopTask(taskId, "guardian");
+    const turnedDown: [string, string][] = [];
+    s.service.attachApprovalExpiry(async (chat, turnDown) => {
+      turnedDown.push([chat, turnDown.resolvedBy]);
+      return 1;
+    });
+    await s.settle();
+    expect(turnedDown).toEqual([[chatId, RESOLVED_BY_STOP]]);
+  });
+
+  it("lets a failed turn-down reach the expiry, and a stop go ahead anyway", async () => {
+    const s = setup();
+    s.service.attachApprovalExpiry(async () => {
+      throw new Error("database is locked");
+    });
+    await expect(
+      s.service.expireApprovals("task-1", {
+        until: 0,
+        reason: "No response",
+        resolvedBy: RESOLVED_BY_EXPIRY,
+        continueTurn: true,
+      }),
+    ).rejects.toThrow("database is locked");
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(taskId, "guardian");
+    expect((await s.taskRepo.get(taskId))?.stoppedAt).toEqual(expect.any(Date));
+  });
+
+  it("tells the Concierge quietly when the owner cancels a task's checks, and lets a failure through", async () => {
+    const s = setup();
+    const [row] = await s.taskRepo.upsertMany([{ title: "PR 42", chatId: CONCIERGE_CHAT }]);
+    const pending = () =>
+      (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents.pending;
+    s.deps.checks = {
+      cancelFor: async () => {
+        throw new Error("database is locked");
+      },
+      laterOf: async () => new Map(),
+    } as never;
+    await expect(s.service.cancelChecksByOwner(row!.id)).rejects.toThrow("database is locked");
+    expect(pending()).not.toContain(row!.id);
+    s.deps.checks = { cancelFor: async () => 1, laterOf: async () => new Map() } as never;
+    await s.service.cancelChecksByOwner(row!.id);
+    expect(pending()).toContain(row!.id);
+  });
+
+  it("tells the Concierge quietly when the owner cancels a task's check from the chat's checks", async () => {
+    const s = setup();
+    const [row] = await s.taskRepo.upsertMany([{ title: "PR 42", chatId: CONCIERGE_CHAT }]);
+    const pending = () =>
+      (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents.pending;
+    s.deps.checks = {
+      inChat: async () => [{ id: "r-1", name: "CI", at: 5, waitingFor: null, taskId: row!.id }],
+      cancel: async (_chat: string, id: string) => id === "r-1",
+      laterOf: async () => new Map(),
+    } as never;
+    expect(await s.service.cancelCheckByOwner(CONCIERGE_CHAT, "r-9")).toBe(false);
+    expect(pending()).not.toContain(row!.id);
+    expect(await s.service.cancelCheckByOwner(CONCIERGE_CHAT, "r-1")).toBe(true);
+    expect(pending()).toContain(row!.id);
+  });
+
+  it("archiving a task that is still open stops it, and leaves an ended one's outcome alone", async () => {
+    const s = setup();
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    s.chats.activeTurns = () => ["t1"];
+    await s.tool("task_upsert", { tasks: [{ id: taskId, archived: true }] });
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      stopReason: "concierge",
+      archivedAt: expect.any(Date),
+    });
+    s.chats.activeTurns = () => [];
+    const [done] = await s.taskRepo.upsertMany([{ title: "Done" }]);
+    await s.taskRepo.setLastOutcome(done!.id, "succeeded", new Date(), { reported: false });
+    await s.tool("task_upsert", { tasks: [{ id: done!.id, archived: true }] });
+    expect((await s.taskRepo.get(done!.id))?.stoppedAt).toBeNull();
+  });
+
+  it("archiving a task chat that waits on an approval stops its task, though the approval is turned down first", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.taskRepo.setLastOutcome(taskId, "succeeded", new Date(), { reported: false });
+    const waiting = new Map([[chatId, Date.now()]]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async (ids) =>
+        approvalWaits(new Map([...waiting].filter(([id]) => ids.includes(id)))),
+      reportPending: () => [],
+    });
+    s.service.attachApprovalExpiry(async (chat) => {
+      // Turned down: the chat waits on nothing any more.
+      waiting.delete(chat);
+      return 1;
+    });
+    await s.service.endTaskChat(chatId, "archived");
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ stopReason: "archived" });
+  });
+
+  it("archiving or deleting a task chat stops only an open task, and a finished one stays done", async () => {
+    const s = setup();
+    const open = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    const done = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    await s.taskRepo.setLastOutcome(done.taskId, "succeeded", new Date(), { reported: false });
+    s.chats.activeTurns = (chatId: string) => (chatId === open.chatId ? ["t1"] : []);
+    await s.service.endTaskChat(open.chatId, "archived");
+    await s.service.endTaskChat(done.chatId, "deleted");
+    expect(await s.taskRepo.get(open.taskId)).toMatchObject({ stopReason: "archived" });
+    expect(await s.taskRepo.get(done.taskId)).toMatchObject({
+      stoppedAt: null,
+      archivedAt: expect.any(Date),
+    });
+    const row = await s.taskRepo.get(done.taskId);
+    expect((await s.tasks.statusOf([row!])).get(done.taskId)).toMatchObject({
+      status: "ended",
+      endReason: "done",
+    });
+  });
+
+  it("takes a stopped task up again when its owner types in its chat, or the Concierge starts its row", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(taskId, "concierge");
+    await s.service.resumeTaskChat(chatId);
+    expect((await s.taskRepo.get(taskId))?.stoppedAt).toBeNull();
+
+    const [planned] = await s.taskRepo.upsertMany([{ title: "Later" }]);
+    await s.taskRepo.stop(planned!.id, "guardian");
+    await s.tool("chat_start", { title: "Later", brief: "Go", taskId: planned!.id });
+    expect((await s.taskRepo.get(planned!.id))?.stoppedAt).toBeNull();
+  });
+
+  it("chat_start that cannot send its brief leaves no chat, a failed row, and no second task on retry", async () => {
+    const s = setup();
+    const error = "The chat cannot take a message";
+    s.refuseSends({ ok: false, error, delivery: { state: "failed", error, at: new Date(0) } });
+    const result = await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("is marked failed");
+    expect(await s.storedChats.getSession("task-1")).toBeNull();
+    const [row] = await s.tasks.repo.listForAgent(true);
+    expect(row.row).toMatchObject({
+      title: "Flights",
+      sessionId: null,
+      lastOutcome: "failed",
+      state: "dropped",
+    });
+
+    const retry = await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    expect(retry.isError).toBe(true);
+    expect(retry.content[0].text).toContain(`Task ${row.row.id} already failed to start`);
+    // A retry that renames the task is the same start.
+    const renamed = await s.tool("chat_start", { title: "Flight search", brief: "Find flights" });
+    expect(renamed.content[0].text).toContain(`Task ${row.row.id} already failed to start`);
+    expect(s.chats.startChat).toHaveBeenCalledTimes(1);
+    expect(await s.tasks.repo.listForAgent(true)).toHaveLength(1);
   });
 
   it("chat_list labels each chat with its kind, and a task chat with the Concierge chat it came from", async () => {
@@ -1453,14 +1847,14 @@ describe("Concierge tools", () => {
         chatId: "task-1",
         title: "Flights",
         kind: "task chat",
-        from: { chatId: CONCIERGE_CHAT, title: "Main chat" },
+        from: CONCIERGE_CHAT,
         status: "idle",
       },
       {
         chatId: "task-2",
         title: "Agenda",
         kind: "task chat",
-        from: { chatId: TOPIC_CHAT, title: "Calendar" },
+        from: TOPIC_CHAT,
         status: "idle",
       },
     ]);
@@ -1478,6 +1872,21 @@ describe("Concierge tools", () => {
       "task chat",
       "task chat",
     ]);
+  });
+
+  it("chat_list leaves out an ended task's chat unless asked", async () => {
+    const s = setup();
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+    );
+    await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" });
+    await s.tool("task_upsert", { tasks: [{ id: taskId, stop: true }] });
+    const titles = async (input: Record<string, unknown>) =>
+      JSON.parse((await s.tool("chat_list", input)).content[0].text).map(
+        (chat: { title: string }) => chat.title,
+      );
+    expect(await titles({})).toEqual(["Calendar", "Hotels"]);
+    expect(await titles({ includeEnded: true })).toEqual(["Calendar", "Flights", "Hotels"]);
   });
 
   it("chat_read reads another Concierge chat, and refuses a chat that is neither kind", async () => {
@@ -1548,7 +1957,41 @@ describe("Concierge tools", () => {
     const result = await s.tool("chat_card", { chatId: "task-1" });
     expect(result.isError).toBeFalsy();
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
-      [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
+      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "task" }],
+    ]);
+  });
+
+  it("chat_card shows a task waiting on the guardian as its question or approval alone", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async (ids) => approvalWaits(new Map(ids.map((id) => [id, Date.now() - 60_000]))),
+      reportPending: () => [],
+    });
+    await s.tool("chat_card", { chatId: "task-1" });
+    // Once it waits on nobody, the card to find it by is its task card again.
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async () => new Map(),
+      reportPending: () => [],
+    });
+    await s.tool("chat_card", { chatId: "task-1" });
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      // The ask card keeps what the task waited on, so it shows that item
+      // even once a newer one is asked and settled.
+      [
+        {
+          type: "task_chat",
+          chatId: "task-1",
+          title: "Flights",
+          show: "ask",
+          waitedOn: { kind: "approval", id: "approval-task-1" },
+        },
+      ],
+      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "task" }],
     ]);
   });
 
@@ -1557,7 +2000,7 @@ describe("Concierge tools", () => {
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     s.messages.get("task-1")?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "# Report\n\nThree options." }]),
+      content: JSON.stringify([{ type: "text", content: concluded("# Report\n\nThree options.") }]),
     });
     const result = await s.tool("chat_forward", { chatId: "task-1", intro: "Here it is" });
     expect(result.isError).toBeFalsy();
@@ -1579,7 +2022,7 @@ describe("Concierge tools", () => {
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     s.messages.get("task-1")?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "Three options." }]),
+      content: JSON.stringify([{ type: "text", content: concluded("Three options.") }]),
     });
     await s.tool("chat_forward", { chatId: "task-1" });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
@@ -1592,6 +2035,129 @@ describe("Concierge tools", () => {
         },
       ],
     ]);
+  });
+
+  describe("chat_forward passes on a task's conclusion", () => {
+    const DETAILS = "A long table of fares that must stay in the task chat.";
+    const text = (result: { content: Array<{ text: string }> }) =>
+      JSON.parse(result.content[0].text);
+    /** A started task chat whose latest answer is `answer`. */
+    const withAnswer = async (answer: string) => {
+      const s = setup();
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+      s.messages.get("task-1")?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: answer }]),
+      });
+      return s;
+    };
+    const stored = (s: Awaited<ReturnType<typeof withAnswer>>) =>
+      (s.messages.get(CONCIERGE_CHAT) ?? []).map((row) => JSON.parse(row.content));
+    /** The guardian sent a message in the running turn. */
+    const guardianAsked = (s: Awaited<ReturnType<typeof withAnswer>>) => {
+      const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+      list.push({
+        id: "g-ask",
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "show me the full report" }]),
+        turnId: "concierge-turn-1",
+      });
+      s.messages.set(CONCIERGE_CHAT, list);
+    };
+
+    it("forwards only the conclusion, word for word, with its source chat and no marker", async () => {
+      const s = await withAnswer(concluded("Found 3 flights. Which one?", DETAILS));
+      const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+      expect(result).toMatchObject({
+        forwarded: "conclusion",
+        forwardedChars: "Found 3 flights. Which one?".length,
+      });
+      const forwarded = stored(s).at(-1);
+      expect(forwarded).toEqual([
+        {
+          type: "text",
+          content: "Found 3 flights. Which one?",
+          format: "long",
+          forwardedFrom: { chatId: "task-1", title: "Flights" },
+        },
+      ]);
+      expect(JSON.stringify(stored(s))).not.toContain("rome:conclusion");
+      expect(JSON.stringify(stored(s))).not.toContain("long table of fares");
+    });
+
+    it("anchors the task's row to the forwarded message, so it can be needs_user", async () => {
+      const s = await withAnswer(concluded("Which one?", DETAILS));
+      const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+      expect(
+        await s.taskRepo.getWithChat(result.taskAnchored)?.then((row) => row?.sourceMessageId),
+      ).toBe(result.messageId);
+    });
+
+    it("refuses an answer with no conclusion, sends nothing, and says what to do instead", async () => {
+      const s = await withAnswer(DETAILS);
+      const result = await s.tool("chat_forward", { chatId: "task-1", intro: "Done" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("no conclusion section");
+      expect(result.content[0].text).toContain("Nothing was sent");
+      expect(result.content[0].text).toContain("at most two sentences");
+      expect(stored(s)).toEqual([]);
+    });
+
+    it("refuses a conclusion over the cap, sends nothing, and moves no thread", async () => {
+      const s = await withAnswer(concluded("x".repeat(CONCLUSION_MAX_CHARS + 1), DETAILS));
+      const result = await s.tool("chat_forward", { chatId: "task-1" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(`over the ${CONCLUSION_MAX_CHARS} limit`);
+      expect(stored(s)).toEqual([]);
+    });
+
+    it("refuses the full text in a turn the guardian did not start, so a report turn never pastes a report", async () => {
+      const s = await withAnswer(concluded("Done.", DETAILS));
+      const result = await s.tool("chat_forward", { chatId: "task-1", full: true });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("only in a turn they started");
+      expect(stored(s)).toEqual([]);
+    });
+
+    it("sends the whole answer, without markers, when the guardian asked for it this turn", async () => {
+      const s = await withAnswer(concluded("Done.", DETAILS));
+      guardianAsked(s);
+      const result = text(await s.tool("chat_forward", { chatId: "task-1", full: true }));
+      expect(result.forwarded).toBe("full");
+      const body = stored(s).at(-1)[0].content as string;
+      expect(body).toContain(DETAILS);
+      expect(body).toContain("Done.");
+      expect(body).not.toContain("rome:conclusion");
+    });
+
+    it("sends the whole answer byte for byte but for the markers, code block blank lines included", async () => {
+      const code = "```py\nx = 1\n\n\n\ny = 2\n```";
+      const answer = `Intro.\n\n\n\n${code}\n\n${CONCLUSION_OPEN}\nDone.\n${CONCLUSION_CLOSE}\n`;
+      const s = await withAnswer(answer);
+      guardianAsked(s);
+      await s.tool("chat_forward", { chatId: "task-1", full: true });
+      expect(stored(s).at(-1)[0].content).toBe(`Intro.\n\n\n\n${code}\n\nDone.\n`);
+    });
+
+    it("sends the whole answer even when it has no conclusion, in a guardian's turn", async () => {
+      const s = await withAnswer(DETAILS);
+      guardianAsked(s);
+      const result = text(await s.tool("chat_forward", { chatId: "task-1", full: true }));
+      expect(result).toMatchObject({ forwarded: "full", forwardedChars: DETAILS.length });
+    });
+
+    it("describes itself as conclusion-first, with an explicit full flag", async () => {
+      const s = setup();
+      const tools = await buildConciergeTools(s.service, s.context());
+      const forward = tools.find((candidate) => candidate.name === "chat_forward")!;
+      expect(forward.description).toContain("conclusion");
+      expect(forward.description).toContain(`${CONCLUSION_MAX_CHARS} characters`);
+      expect(forward.description).toContain("explicitly asks for the full text");
+      expect(forward.description).not.toContain("long content the guardian asked for");
+      expect(forward.inputSchema).toHaveProperty("properties.full");
+      const start = tools.find((candidate) => candidate.name === "chat_start")!;
+      expect(JSON.stringify(start.inputSchema)).toContain("written in the guardian's language");
+    });
   });
 
   it("say marks no origin on what the agent writes itself", async () => {
@@ -1613,31 +2179,26 @@ describe("Concierge tools", () => {
 describe("Concierge task list tools", () => {
   const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
 
-  it("chat_start without a taskId puts a doing row on the list and answers its id", async () => {
+  it("chat_start without a taskId puts a row for its chat on the list and answers its id", async () => {
     const s = setup();
     const result = text(await s.tool("chat_start", { title: "Flights", brief: "Find flights" }));
     expect(await s.taskRepo.get(result.taskId)).toMatchObject({
       title: "Flights",
-      state: "doing",
       sessionId: "task-1",
+      linkedAt: expect.any(Date),
     });
     expect((await s.taskRepo.findBySession("task-1"))?.id).toBe(result.taskId);
   });
 
-  it("chat_start with a taskId links the planned row and sets it doing", async () => {
+  it("chat_start with a taskId links the planned row", async () => {
     const s = setup();
-    const [planned] = await s.taskRepo.upsertMany([
-      { title: "Book flights", state: "next", rank: 1, waitingOn: "a date" },
-    ]);
+    const [planned] = await s.taskRepo.upsertMany([{ title: "Book flights" }]);
     const result = text(
       await s.tool("chat_start", { title: "Flights", brief: "Find flights", taskId: planned.id }),
     );
     expect(result).toEqual({ chatId: "task-1", taskId: planned.id });
     expect(await s.taskRepo.get(planned.id)).toMatchObject({
       title: "Book flights",
-      state: "doing",
-      rank: 1,
-      waitingOn: null,
       sessionId: "task-1",
     });
     expect(await s.taskRepo.listForAgent(true)).toHaveLength(1);
@@ -1666,7 +2227,6 @@ describe("Concierge task list tools", () => {
     expect((await s.tool("chat_send", { chatId: "legacy", text: "More" })).isError).toBeFalsy();
     expect(await s.taskRepo.findBySession("legacy")).toMatchObject({
       title: "Old task",
-      state: "doing",
       sourceMessageId: null,
     });
     // A second send does not add a second row.
@@ -1674,68 +2234,70 @@ describe("Concierge task list tools", () => {
     expect(await s.taskRepo.listForAgent(true)).toHaveLength(1);
   });
 
-  it("task_upsert creates and updates rows in one batch and answers each row's id", async () => {
+  it.each([
+    "concierge",
+    "guardian",
+  ] as const)("chat_send takes up a task stopped by the %s again: it is active once more", async (by) => {
+    const s = setup();
+    const { taskId } = text(await s.tool("chat_start", { title: "Flights", brief: "Find" }));
+    await s.service.stopTask(taskId, by);
+    expect((await s.taskRepo.get(taskId))?.stopReason).toBe(by);
+    await s.tool("chat_send", { chatId: "task-1", text: "Look again" });
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ stoppedAt: null, stopReason: null });
+    const [row] = await s.tasks.listForPanel();
+    expect(row).toMatchObject({ id: taskId, status: "active" });
+  });
+
+  it("task_upsert creates and updates rows in one batch, and answers each row's id and status", async () => {
     const s = setup();
     const created = text(
       await s.tool("task_upsert", {
         tasks: [
-          { title: "Renew passport", state: "next", rank: 2, dueAt: "2026-11-01T09:00:00Z" },
-          { title: "Watch CI", state: "watching", waitingOn: "CI" },
+          { title: "Renew passport", note: "Form at gov.example/renew" },
+          { title: "Pay rent" },
         ],
       }),
     );
     expect(created.tasks.map((task: { title: string }) => task.title)).toEqual([
       "Renew passport",
-      "Watch CI",
+      "Pay rent",
     ]);
-    const [passport, ci] = created.tasks;
+    const [passport] = created.tasks;
     const updated = text(
       await s.tool("task_upsert", {
-        tasks: [
-          { id: passport.id, state: "doing" },
-          { id: ci.id, state: "done", summary: "Green", waitingOn: null },
-          { title: "Pay rent" },
-        ],
+        tasks: [{ id: passport.id, summary: "Sent", note: null }],
       }),
     );
-    expect(updated.tasks.map((task: { state: string }) => task.state)).toEqual([
-      "doing",
-      "done",
-      "next",
-    ]);
-    expect(await s.taskRepo.get(ci.id)).toMatchObject({
-      state: "done",
-      summary: "Green",
-      waitingOn: null,
-    });
-    expect((await s.taskRepo.get(passport.id))?.dueAt?.toISOString()).toBe(
-      "2026-11-01T09:00:00.000Z",
-    );
+    // A row with no task chat yet is later until the Concierge starts or stops it.
+    expect(updated.tasks).toEqual([expect.objectContaining({ id: passport.id, status: "later" })]);
+    expect(await s.taskRepo.get(passport.id)).toMatchObject({ summary: "Sent", note: null });
   });
 
-  it("task_upsert validates states, times, ranks, chats and titles, and writes nothing on a bad batch", async () => {
+  it("task_upsert refuses the fields Rome now keeps, and writes nothing on a bad batch", async () => {
     const s = setup();
     const bad = async (entry: Record<string, unknown>, message: string) => {
       const result = await s.tool("task_upsert", { tasks: [{ title: "Fine" }, entry] });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain(message);
     };
-    await bad({ title: "x", state: "failed" }, "state must be one of");
-    await bad({ title: "x", dueAt: "tomorrow-ish" }, "dueAt must be an ISO 8601 time");
-    await bad({ title: "x", rank: 1.5 }, "rank must be an integer");
-    await bad({ title: "x", chatId: CONCIERGE_CHAT }, "No task chat");
-    await bad({ state: "doing" }, "title is required to create a row");
-    await bad({ id: "nope", state: "done" }, "No task nope");
+    for (const field of ["state", "waitingOn", "dueAt", "rank", "chatId"]) {
+      await bad({ title: "x", [field]: "anything" }, `${field} is no longer written`);
+    }
+    await bad({ summary: "x" }, "title is required to create a row");
+    await bad({ id: "nope", summary: "x" }, "No task nope");
+    await bad({ title: "x", stop: true }, "stop needs the id");
     expect((await s.tool("task_upsert", { tasks: [] })).isError).toBe(true);
     expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });
 
-  it("task_upsert links a task chat once, and says which row holds it", async () => {
+  it("task_upsert stops a task and its chat's running work", async () => {
     const s = setup();
-    const started = text(await s.tool("chat_start", { title: "Flights", brief: "Find flights" }));
-    const result = await s.tool("task_upsert", { tasks: [{ title: "Dupe", chatId: "task-1" }] });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain(`already linked to task ${started.taskId}`);
+    const { taskId } = text(await s.tool("chat_start", { title: "Flights", brief: "Find" }));
+    s.chats.activeTurns = () => ["t1"];
+    const result = text(await s.tool("task_upsert", { tasks: [{ id: taskId, stop: true }] }));
+    expect(result.tasks).toEqual([expect.objectContaining({ id: taskId, status: "ended" })]);
+    expect(s.chats.interruptTurn).toHaveBeenCalledWith("t1");
+    expect((await s.taskRepo.get(taskId))?.stopReason).toBe("concierge");
   });
 
   it("task_upsert caps a summary at 120 characters", async () => {
@@ -1754,26 +2316,51 @@ describe("Concierge task list tools", () => {
     expect(seen).toEqual(["A", "B"]);
   });
 
-  it("task_list answers compact open rows, and the finished ones on request", async () => {
-    const s = setup();
-    await s.tool("task_upsert", {
-      tasks: [
-        { title: "Open", state: "watching", waitingOn: "CI", dueAt: "2026-11-01T09:00:00Z" },
-        { title: "Finished", state: "done" },
-      ],
+  it("task_list lists a task whose check waits on an event with no deadline, with no time", async () => {
+    const s = setup({ startEvents: false });
+    const [row] = await s.taskRepo.upsertMany([{ title: "CI run", chatId: CONCIERGE_CHAT }]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async () => new Map(),
+      reportPending: () => [],
+      laterOf: async () => new Map([[row!.id, Number.POSITIVE_INFINITY]]),
     });
+    const listed = text(await s.tool("task_list", {})).tasks;
+    expect(listed).toEqual([expect.objectContaining({ id: row!.id, status: "later" })]);
+    expect(listed[0]).not.toHaveProperty("laterAt");
+    const [dto] = await s.tasks.toDtos([(await s.taskRepo.getWithChat(row!.id))!]);
+    expect(dto?.laterAt).toBeNull();
+  });
+
+  it("task_list answers compact rows with their status, and the ended ones on request", async () => {
+    const s = setup();
+    const { taskId } = text(await s.tool("chat_start", { title: "Flights", brief: "Find" }));
+    await s.tool("task_upsert", { tasks: [{ id: taskId, note: "Fly Friday" }] });
+    const finished = text(await s.tool("task_upsert", { tasks: [{ title: "Finished" }] })).tasks[0];
+    await s.taskRepo.setLastOutcome(finished.id, "succeeded", new Date(), { reported: false });
+    s.chats.activeTurns = () => ["t1"];
     const open = text(await s.tool("task_list", {}));
     expect(open.tasks).toEqual([
+      { id: taskId, title: "Flights", status: "active", chatId: "task-1" },
+    ]);
+    const detailed = text(await s.tool("task_list", { details: true })).tasks;
+    expect(detailed).toEqual([
       {
-        id: expect.any(String),
-        title: "Open",
-        state: "watching",
-        waitingOn: "CI",
-        dueAt: "2026-11-01T09:00:00.000Z",
+        id: taskId,
+        title: "Flights",
+        status: "active",
+        chatId: "task-1",
+        note: "Fly Friday",
         updatedAt: expect.any(String),
       },
     ]);
-    expect(text(await s.tool("task_list", { includeDone: true })).tasks).toHaveLength(2);
+    const all = text(await s.tool("task_list", { includeDone: true })).tasks;
+    expect(all).toHaveLength(2);
+    expect(all.find((task: { title: string }) => task.title === "Finished")).toMatchObject({
+      status: "ended",
+      endReason: "done",
+    });
   });
 });
 
@@ -1786,12 +2373,12 @@ describe("Concierge task anchors", () => {
 
   it("say, chat_card and chat_forward answer the id of the message they stored", async () => {
     const s = setup();
-    const said = text(await s.tool("say", { text: "On it" }));
+    const said = text(await s.tool("say", { text: "Looking for flights" }));
     expect(said).toEqual({ sent: expect.any(String), messageId: "said-1" });
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     s.messages.get("task-1")?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
     });
     expect(text(await s.tool("chat_card", { chatId: "task-1" }))).toEqual({
       sent: expect.any(String),
@@ -1830,7 +2417,7 @@ describe("Concierge task anchors", () => {
     s.tasks.subscribe(emit);
     s.messages.get(chatId)?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
     });
 
     s.turnIn(forwardedIn);
@@ -1839,7 +2426,12 @@ describe("Concierge task anchors", () => {
     const forwarded = text(result);
     expect(s.messages.get(forwardedIn)?.at(-1)?.id).toBe(forwarded.messageId);
     expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
-    expect(forwarded).toEqual({ forwardedChars: 9, messageId: "said-2", taskAnchored: taskId });
+    expect(forwarded).toEqual({
+      forwarded: "conclusion",
+      forwardedChars: 9,
+      messageId: "said-2",
+      taskAnchored: taskId,
+    });
     expect(await s.taskRepo.get(taskId)).toEqual({
       ...before,
       chatId: forwardedIn === CONCIERGE_CHAT ? null : forwardedIn,
@@ -1857,11 +2449,13 @@ describe("Concierge task anchors", () => {
       }),
     });
 
-    const completed = text(await s.tool("task_upsert", { tasks: [{ id: taskId, state: "done" }] }));
+    const completed = text(
+      await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "3 options" }] }),
+    );
     expect(completed.tasks[0]).toMatchObject({ anchor: forwarded.messageId, anchorKept: true });
     expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
     expect((await s.tasks.listForPanel())[0]).toMatchObject({
-      state: "done",
+      summary: "3 options",
       conciergeChat: expect.objectContaining({ id: forwardedIn }),
       sourceMessageId: forwarded.messageId,
       notSynced: false,
@@ -1946,7 +2540,7 @@ describe("Concierge task anchors", () => {
       const result = await s.tool("task_upsert", {
         tasks: [
           { title: "Other errand", messageId },
-          { id: taskId, state: "watching", messageId },
+          { id: taskId, summary: "Checking", messageId },
         ],
       });
 
@@ -1968,6 +2562,8 @@ describe("Concierge task anchors", () => {
         ...row,
         summary: "Found 3 options",
         updatedAt: expect.anything(),
+        // Kept as its status reads after the write.
+        endedAt: expect.toBeOneOf([null, expect.any(Date)]),
       });
     });
 
@@ -1993,7 +2589,10 @@ describe("Concierge task anchors", () => {
       expect(result.content[0].text).toContain("belongs to another Concierge chat");
       // Only the main chat's own task started a chat.
       expect(s.chats.startChat).toHaveBeenCalledTimes(1);
-      expect(await s.taskRepo.get(planned!.id)).toEqual(before);
+      expect({ ...(await s.taskRepo.get(planned!.id)), endedAt: null }).toEqual({
+        ...before,
+        endedAt: null,
+      });
       expect(await s.tasks.repo.threadRoot(planned!.id)).toBeNull();
     });
 
@@ -2012,6 +2611,7 @@ describe("Concierge task anchors", () => {
       const { chatId, taskId } = text(
         await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" }),
       );
+      await s.storedChats.archiveSession(TOPIC_CHAT);
       await s.service.retireChat(TOPIC_CHAT, "archived");
       const sent = s.posted.length;
 
@@ -2037,7 +2637,7 @@ describe("Concierge task anchors", () => {
     );
     s.messages.get(chatId)?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
     });
     const forwarded = text(await s.tool("chat_forward", { chatId }));
     expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
@@ -2060,17 +2660,21 @@ describe("Concierge task anchors", () => {
     s.messages.set(chatId, [
       {
         role: "assistant",
-        content: JSON.stringify([{ type: "text", content: "3 options" }]),
+        content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
       },
     ]);
     const result = await s.tool("chat_forward", { chatId });
     expect(result.isError).toBeFalsy();
-    expect(text(result)).toEqual({ forwardedChars: 9, messageId: "said-1" });
+    expect(text(result)).toEqual({
+      forwarded: "conclusion",
+      forwardedChars: 9,
+      messageId: "said-1",
+    });
     expect(await s.taskRepo.findBySession(chatId)).toBeNull();
     expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });
 
-  it("repeated chat_card re-anchors a needs_user row without another task_upsert", async () => {
+  it("repeated chat_card re-anchors a row without another task_upsert", async () => {
     const s = setup();
     const { chatId, taskId } = text(
       await s.tool("chat_start", { title: "Flights", brief: "Find flights" }),
@@ -2079,7 +2683,7 @@ describe("Concierge task anchors", () => {
     expect(
       (
         await s.tool("task_upsert", {
-          tasks: [{ id: taskId, state: "needs_user", messageId: first, summary: "Pick a flight" }],
+          tasks: [{ id: taskId, messageId: first, summary: "Pick a flight" }],
         })
       ).isError,
     ).toBeFalsy();
@@ -2087,10 +2691,7 @@ describe("Concierge task anchors", () => {
     const second = text(await s.tool("chat_card", { chatId })).messageId;
     expect(second).not.toBe(first);
     expect(await anchorOf(s, taskId)).toBe(second);
-    expect(await s.taskRepo.get(taskId)).toMatchObject({
-      state: "needs_user",
-      summary: "Pick a flight",
-    });
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ summary: "Pick a flight" });
   });
 
   it("chat_card shows a task without a row without creating one", async () => {
@@ -2107,18 +2708,15 @@ describe("Concierge task anchors", () => {
     expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });
 
-  it("anchors needs_user to chat_card rather than an introductory say", async () => {
+  it("anchors a row to chat_card rather than an introductory say", async () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     await s.tool("say", { text: "The task needs your input." });
     const { messageId } = text(await s.tool("chat_card", { chatId: "task-1" }));
     const task = (await s.taskRepo.findBySession("task-1"))!;
-    const result = await s.tool("task_upsert", {
-      tasks: [{ id: task.id, state: "needs_user", messageId }],
-    });
+    const result = await s.tool("task_upsert", { tasks: [{ id: task.id, messageId }] });
     expect(result.isError).toBeFalsy();
     expect(await anchorOf(s, task.id)).toBe(messageId);
-    expect((await s.taskRepo.get(task.id))?.state).toBe("needs_user");
   });
 
   it("points a new row at the latest thing the Concierge said this turn", async () => {
@@ -2164,13 +2762,13 @@ describe("Concierge task anchors", () => {
   it("keeps a row's message on an update, and a new messageId replaces it", async () => {
     const s = setup({ said: false });
     const first = text(await s.tool("say", { text: "Pay the rent?" })).messageId;
-    const id = await created(s, { state: "next" });
+    const id = await created(s, {});
     const asked = text(await s.tool("say", { text: "Which account?" })).messageId;
 
     await s.tool("task_upsert", { tasks: [{ id, summary: "Waiting" }] });
     expect(await anchorOf(s, id)).toBe(first);
 
-    await s.tool("task_upsert", { tasks: [{ id, state: "needs_user", messageId: asked }] });
+    await s.tool("task_upsert", { tasks: [{ id, messageId: asked }] });
     expect(await anchorOf(s, id)).toBe(asked);
 
     const bad = await s.tool("task_upsert", { tasks: [{ id, messageId: "no-such-message" }] });
@@ -2178,89 +2776,48 @@ describe("Concierge task anchors", () => {
     expect(await anchorOf(s, id)).toBe(asked);
   });
 
-  it("refuses needs_user without a messageId, on a create and on an update, and writes nothing", async () => {
-    const s = setup({ said: false });
-    await s.tool("say", { text: "Which account?" });
-    const id = await created(s, { state: "next" });
-    const before = await s.taskRepo.get(id);
-
-    // The turn has said something, so a create of another state would have an anchor; needs_user still needs the id.
-    const create = await s.tool("task_upsert", {
-      tasks: [
-        { title: "Fine", state: "next" },
-        { title: "Pick one", state: "needs_user" },
-      ],
-    });
-    expect(create.isError).toBe(true);
-    expect(create.content[0].text).toContain(
-      "tasks[1]: needs_user requires messageId: show a task question or approval with chat_card",
-    );
-    const update = await s.tool("task_upsert", { tasks: [{ id, state: "needs_user" }] });
-    expect(update.isError).toBe(true);
-    expect(update.content[0].text).toContain("tasks[0]: needs_user requires messageId");
-    // The batch is atomic: not even the valid first entry was written.
-    expect((await s.taskRepo.listForAgent(true)).map(({ row }) => row.title)).toEqual(["Pay rent"]);
-    expect(await s.taskRepo.get(id)).toEqual(before);
-  });
-
-  it("takes needs_user with a valid messageId, which replaces the anchor", async () => {
+  it("takes a valid messageId, which replaces the anchor", async () => {
     const s = setup({ said: false });
     await s.tool("say", { text: "Planning" });
-    const id = await created(s, { state: "doing" });
+    const id = await created(s, {});
     const asked = text(await s.tool("say", { text: "Which one?" })).messageId;
-    const result = text(
-      await s.tool("task_upsert", {
-        tasks: [{ id, state: "needs_user", waitingOn: "a choice", messageId: asked }],
-      }),
-    );
+    const result = text(await s.tool("task_upsert", { tasks: [{ id, messageId: asked }] }));
     expect(await anchorOf(s, id)).toBe(asked);
-    expect(result.tasks[0]).toMatchObject({ state: "needs_user", anchor: asked });
+    expect(result.tasks[0]).toMatchObject({ anchor: asked });
     expect(result.tasks[0]).not.toHaveProperty("anchorKept");
 
-    // A new needs_user row takes the id too, whatever the turn said last.
+    // A new row takes the id too, whatever the turn said last.
     await s.tool("say", { text: "Something else" });
-    const made = await created(s, { title: "Choose", state: "needs_user", messageId: asked });
+    const made = await created(s, { title: "Choose", messageId: asked });
     expect(await anchorOf(s, made)).toBe(asked);
   });
 
-  it("refuses a needs_user messageId that is not a message of the Concierge chat", async () => {
+  it("refuses a messageId that is not a message of the Concierge chat, and writes nothing", async () => {
     const s = setup({ said: false });
     await s.tool("say", { text: "Planning" });
-    const id = await created(s, { state: "doing" });
+    const id = await created(s, {});
+    const before = await s.taskRepo.get(id);
     s.messages.set("task-1", [
       { id: "foreign-1", role: "assistant", content: "[]", turnId: "concierge-turn-1" },
     ]);
     for (const messageId of ["foreign-1", "no-such-message"]) {
       const result = await s.tool("task_upsert", {
-        tasks: [{ id, state: "needs_user", messageId }],
+        tasks: [{ id, summary: "Asked", messageId }],
       });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain(`No message ${messageId} in this chat`);
     }
-    expect((await s.taskRepo.get(id))?.state).toBe("doing");
+    expect(await s.taskRepo.get(id)).toEqual(before);
   });
 
-  it("leaves an update that sets no needs_user alone: the anchor stays and the result says so", async () => {
+  it("leaves an update without a messageId alone: the anchor stays and the result says so", async () => {
     const s = setup({ said: false });
     const first = text(await s.tool("say", { text: "Planning" })).messageId;
-    const id = await created(s, { state: "doing" });
+    const id = await created(s, {});
     await s.tool("say", { text: "Later" });
-    const result = text(
-      await s.tool("task_upsert", { tasks: [{ id, state: "watching", summary: "Waiting" }] }),
-    );
+    const result = text(await s.tool("task_upsert", { tasks: [{ id, summary: "Waiting" }] }));
     expect(await anchorOf(s, id)).toBe(first);
-    expect(result.tasks[0]).toMatchObject({ state: "watching", anchor: first, anchorKept: true });
-    // A write with no state field touches a needs_user row without the requirement.
-    const asked = text(await s.tool("say", { text: "Which?" })).messageId;
-    await s.tool("task_upsert", { tasks: [{ id, state: "needs_user", messageId: asked }] });
-    const touched = text(
-      await s.tool("task_upsert", { tasks: [{ id, summary: "Still waiting" }] }),
-    );
-    expect(touched.tasks[0]).toMatchObject({
-      state: "needs_user",
-      anchor: asked,
-      anchorKept: true,
-    });
+    expect(result.tasks[0]).toMatchObject({ anchor: first, anchorKept: true });
   });
 
   it("answers a created row's anchor without the kept flag, and leaves out an anchor a legacy row never had", async () => {
@@ -2270,7 +2827,7 @@ describe("Concierge task anchors", () => {
     expect(made.tasks[0]).toEqual({
       id: expect.any(String),
       title: "New",
-      state: "next",
+      status: "later",
       anchor: "said-1",
     });
     const [legacy] = await s.taskRepo.upsertMany([{ title: "Old", state: "next" }]);
@@ -2278,19 +2835,19 @@ describe("Concierge task anchors", () => {
     expect(kept.tasks[0]).toEqual({
       id: legacy.id,
       title: "Old",
-      state: "next",
+      status: "later",
       anchorKept: true,
     });
   });
 
-  it("chat_start linking a taskId sets doing and needs no messageId", async () => {
+  it("chat_start linking a taskId needs no messageId", async () => {
     const s = setup({ said: false });
     const first = text(await s.tool("say", { text: "Planning" })).messageId;
-    const planned = await created(s, { state: "next" });
+    const planned = await created(s, {});
     const result = await s.tool("chat_start", { title: "Go", brief: "Do it", taskId: planned });
     expect(result.isError).toBeFalsy();
     expect(await anchorOf(s, planned)).toBe(first);
-    expect((await s.taskRepo.get(planned))?.state).toBe("doing");
+    expect((await s.taskRepo.get(planned))?.sessionId).toBe("task-1");
   });
 
   it("chat_start points the row it creates at the latest message of the turn", async () => {
@@ -2319,12 +2876,12 @@ describe("Concierge task anchors", () => {
   it("chat_start keeps a linked row's message unless a messageId replaces it", async () => {
     const s = setup({ said: false });
     const first = text(await s.tool("say", { text: "Planning" })).messageId;
-    const planned = await created(s, { state: "next" });
+    const planned = await created(s, {});
     await s.tool("say", { text: "Starting now" });
     await s.tool("chat_start", { title: "Flights", brief: "Find flights", taskId: planned });
     expect(await anchorOf(s, planned)).toBe(first);
 
-    const other = await created(s, { title: "Other", state: "next" });
+    const other = await created(s, { title: "Other" });
     const chosen = text(await s.tool("say", { text: "Choose" })).messageId;
     await s.tool("chat_start", {
       title: "Hotels",
@@ -2373,6 +2930,92 @@ describe("Concierge events", () => {
       text: "x",
     });
 
+  it("keeps a finished task's line current: the result's first sentence, until the Concierge writes another", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Waiting for the airline" }]);
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      text: concluded(
+        "Saved [flights.md](/projects/default/flights.md) with three options. Prices change daily.",
+      ),
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Saved flights.md with three options.");
+    // A summary the Concierge writes after the result wins.
+    await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "Booked the 9am" }] });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Booked the 9am");
+  });
+
+  it("takes a result's first sentence in Chinese too, no longer than a summary the Concierge writes", () => {
+    expect(resultSummary("我订好了明天的机票。航班号是CA123，早上八点起飞。")).toBe(
+      "我订好了明天的机票。",
+    );
+    expect(resultSummary("Done. Next step.")).toBe("Done.");
+    const long = resultSummary(`${"word ".repeat(60)}end.`);
+    expect(long?.length).toBe(CONCIERGE_TASK_SUMMARY_MAX_LENGTH);
+    expect(long?.endsWith("…")).toBe(true);
+  });
+
+  it("keeps a failed task's line as it was", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Searching flights" }]);
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      status: "error",
+      text: "Something broke.",
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Searching flights");
+  });
+
+  it("holds a result its chat's other work outlives, until the task ends, unless the Concierge writes first", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Waiting for approval" }]);
+    // An approved action's turn ends inside the stream it runs in, which runs on.
+    const stillRunning = (id: string) => (id === chatId ? ["backend:approval"] : []);
+    s.chats.activeTurns = stillRunning;
+    s.chats.isRunning = (id: string) => stillRunning(id).length > 0;
+    await s.finish({
+      turnId: "task-turn-2",
+      agentName: "core:main",
+      chatId,
+      text: concluded("Sent the booking email. It went to Eric."),
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Waiting for approval");
+
+    s.chats.activeTurns = () => [];
+    s.chats.isRunning = () => false;
+    const row = await s.taskRepo.get(taskId);
+    await s.tasks.statusOf(row ? [row] : []);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Sent the booking email.");
+
+    // A result held when the Concierge writes the task is dropped.
+    s.chats.activeTurns = stillRunning;
+    s.chats.isRunning = (id: string) => stillRunning(id).length > 0;
+    await s.finish({
+      turnId: "task-turn-3",
+      agentName: "core:main",
+      chatId,
+      text: concluded("Sent the follow-up."),
+    });
+    await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "Eric replied" }] });
+    s.chats.activeTurns = () => [];
+    s.chats.isRunning = () => false;
+    const again = await s.taskRepo.get(taskId);
+    await s.tasks.statusOf(again ? [again] : []);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Eric replied");
+  });
+
   it("tells the Concierge of a result it asked for two seconds after the turn ends, as one batch", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
@@ -2387,7 +3030,7 @@ describe("Concierge events", () => {
       threadId: CONCIERGE_CHAT,
     });
     expect(s.backendTurns[0].prompt).toBe(
-      `${MAIN_LINE}<task_events>\n<task id="${taskId}" chat_id="task-1" title="Flights" state="doing" changes="turn_end:completed by=concierge">\nreply: 3 options\n</task>\n</task_events>`,
+      `${MAIN_LINE}<task_events>\n<task id="${taskId}" chat_id="task-1" title="Flights" status="ended" end_reason="done" changes="turn_end:completed by=concierge">\nreply: 3 options\n</task>\n</task_events>`,
     );
     expect(s.quietFlags).toEqual([false]);
     // The guardian did not start it, so its first message goes to the phone.
@@ -2438,6 +3081,40 @@ describe("Concierge events", () => {
     expect(await replyLine("我".repeat(700))).toBe("我".repeat(700));
   });
 
+  /** The prompt of the one task event a finished task's answer `text` brings. */
+  const eventFor = async (text: string) => {
+    const s = setup();
+    const { chatId } = await startTask(s, text);
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    rs.useRealTimers();
+    return s.backendTurns[0].prompt;
+  };
+
+  it("gives the Concierge a task's conclusion whole, and the rest of its answer as the usual excerpt", async () => {
+    const question = "Which one should I book?";
+    const prompt = await eventFor(concluded(question, "y".repeat(2_000)));
+    expect(prompt).toContain(`\nconclusion: ${question}\n`);
+    expect(prompt).toContain(`\nreply: ${"y".repeat(400)}${leftOut(1_300)}${"y".repeat(300)}\n`);
+    expect(prompt).not.toContain("rome:conclusion");
+  });
+
+  it("gives only the conclusion when it is all the answer holds", async () => {
+    const prompt = await eventFor(
+      `${CONCLUSION_OPEN}\nAll done, nothing to decide.\n${CONCLUSION_CLOSE}`,
+    );
+    expect(prompt).toContain("\nconclusion: All done, nothing to decide.\n</task>");
+    expect(prompt).not.toContain("reply:");
+  });
+
+  it("falls back to the excerpt, without markers, for a conclusion over the cap", async () => {
+    const prompt = await eventFor(concluded("z".repeat(CONCLUSION_MAX_CHARS + 1), "Details."));
+    expect(prompt).not.toContain("conclusion:");
+    expect(prompt).not.toContain("rome:conclusion");
+    expect(prompt).toContain(`reply: Details.\n\n${"z".repeat(CONCLUSION_MAX_CHARS + 1)}`);
+  });
+
   it("puts tasks that finish together in one turn", async () => {
     const s = setup();
     const first = await startTask(s);
@@ -2486,7 +3163,7 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(RETRY_MS);
     expect(s.backendTurns).toHaveLength(5);
     expect(s.backendTurns[4].prompt).toContain(
-      `<task id="${taskId}" chat_id="${chatId}" title="Flights" state="doing" changes="turn_end:completed by=concierge">`,
+      `<task id="${taskId}" chat_id="${chatId}" title="Flights" status="ended" end_reason="done" changes="turn_end:completed by=concierge">`,
     );
   });
 
@@ -2502,6 +3179,112 @@ describe("Concierge events", () => {
     expect(s.backendTurns).toHaveLength(1);
   });
 
+  it("shows a result the guardian's Stop cut off before it was said as never told", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "stopped");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.reportGivenUp).toBe(true);
+    expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
+  });
+
+  it("counts a result the report turn said before the guardian's Stop as said, not as never told", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(async () => {
+      s.inTurn("report");
+      await s.tool("say", { text: "Three options found", task: taskId });
+      return "stopped" as const;
+    });
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await s.settle();
+    const row = await s.taskRepo.get(taskId);
+    expect(row?.reportGivenUp).toBe(false);
+    expect(row?.outcomeUnsaid).toBe(false);
+    expect(
+      (await s.tasks.listForPanel()).find((each) => each.id === taskId)?.notSynced,
+    ).toBeFalsy();
+  });
+
+  it("still reports a result whose report failed after the Concierge edits the row meanwhile", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "failed");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    // In a turn of its own, the Concierge renames the row: it never got the result.
+    await s.tool("task_upsert", { tasks: [{ id: taskId, title: "Flights to Rome" }] });
+    s.onBackendTurn(() => "completed");
+    await rs.advanceTimersByTimeAsync(RETRY_MS + 1_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`id="${taskId}"`);
+  });
+
+  describe("a finished task leaves Active, whatever its report turn does", () => {
+    const outcomes = ["completed", "failed", "interrupted"] as const;
+    for (const outcome of outcomes) {
+      for (const edits of [false, true]) {
+        for (const says of [false, true]) {
+          it(`report ends ${outcome}${edits ? ", row edited mid-turn" : ""}${says ? ", result said mid-turn" : ""}`, async () => {
+            const s = setup();
+            const { chatId, taskId } = await startTask(s);
+            s.fakeTimers();
+            s.onBackendTurn(async () => {
+              if (edits) await s.taskRepo.upsertMany([{ id: taskId, note: "Edited" }]);
+              if (says) {
+                s.inTurn("report");
+                await s.tool("say", { text: "Three options found", task: taskId });
+              }
+              return outcome;
+            });
+            await finishTask(s, chatId);
+            await rs.advanceTimersByTimeAsync(2_000);
+            expect(s.backendTurns).toHaveLength(1);
+            // Every later report runs to its end.
+            s.onBackendTurn(() => "completed");
+            await rs.advanceTimersByTimeAsync(2 * RETRY_MS);
+            const reports = s.backendTurns.filter((turn) => turn.prompt.includes(`id="${taskId}"`));
+            expect(reports.length).toBeGreaterThan(0);
+            // A report that ran to its end carried it; none is left owed.
+            if (outcome !== "completed") expect(reports.length).toBeGreaterThan(1);
+            await s.settle();
+            const row = await s.taskRepo.get(taskId);
+            expect(row?.outcomeUnsaid).toBe(false);
+            expect((await s.tasks.statusOf([row!])).get(taskId)?.status).toBe("ended");
+          });
+        }
+      }
+    }
+  });
+
+  it("still reports a result whose report turn wrote the row and then failed", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    // The report turn renames the row, then fails before it says the result.
+    s.onBackendTurn(async () => {
+      await s.taskRepo.upsertMany([{ id: taskId, title: "Flights to Rome" }]);
+      return "failed" as const;
+    });
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    s.onBackendTurn(() => "completed");
+    await rs.advanceTimersByTimeAsync(RETRY_MS + 1_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`id="${taskId}"`);
+    // Once a report ran to its end, the result is said.
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.outcomeUnsaid).toBe(false);
+  });
+
   it("hands a task's result over again when a newer message, not a Stop, cut the turn short", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
@@ -2511,7 +3294,10 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
     s.onBackendTurn(() => "completed");
-    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    // The guardian's turn that took the report over ends without saying it:
+    // the next flush does, not RETRY_MS later.
+    s.service.turnSettled(CONCIERGE_CHAT);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
     expect(s.backendTurns).toHaveLength(2);
   });
 
@@ -2638,6 +3424,8 @@ describe("Concierge events", () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
+    // The task's turn ended awaiting the decision.
+    s.chats.activeTurns = () => [];
     s.resolveApproval({ status: "approved", payload: { channelContext: { threadId: chatId } } });
     // The carried-on turn's prompt is the action's result, recorded with no sender.
     s.messages.get(chatId)?.push({
@@ -2654,7 +3442,11 @@ describe("Concierge events", () => {
     });
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
-    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=concierge"');
+    // The decision rides along with the turn that carries on from it.
+    expect(s.backendTurns[0].prompt).toContain(
+      'changes="approval_decided, turn_end:completed by=concierge"',
+    );
+    expect(s.backendTurns[0].prompt).toContain("approved by the guardian");
 
     // Only that one turn: the guardian's next typed message is theirs again.
     s.messages.get(chatId)?.push({
@@ -2671,6 +3463,80 @@ describe("Concierge events", () => {
     });
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
+  });
+
+  it.each([
+    ["rejected", "guardian", "rejected by the guardian"],
+    ["approved", "guardian", "approved by the guardian"],
+  ])("tells the Concierge an approval was %s after its task's turn ended (%s)", async (status, resolvedBy, said) => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    // The task's turn ended awaiting the decision, and that was reported.
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    // The guardian decides on its card; no turn of the task follows.
+    s.resolveApproval({
+      status,
+      resolvedBy,
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+    });
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`approval: Send the invoice — ${said}`);
+  });
+
+  it.each([
+    ["Rome turned it down on the task's Stop", "rome:task-stopped", false],
+    ["Rome turned it down when its wait expired", "rome:task-ended", false],
+    ["the guardian decided while a task turn ran", "guardian", true],
+  ])("tells the Concierge no separate decision when %s", async (_case, resolvedBy, running) => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    if (running) s.chats.activeTurns = (id: string) => (id === chatId ? ["task-turn-2"] : []);
+    s.resolveApproval({
+      status: "rejected",
+      resolvedBy,
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+    });
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(s.backendTurns).toHaveLength(1);
+  });
+
+  it("tells the chat showing a task's approval card how it was decided, as it reads now", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    const asked = {
+      id: "approval-1",
+      status: "rejected",
+      resolvedBy: "guardian",
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+      since: Date.now(),
+    };
+    (s.deps.webchatRepo as { taskCardsOf: unknown }).taskCardsOf = async () =>
+      new Map([[chatId, { questions: [], approvals: [asked] }]]);
+    const events: unknown[] = [];
+    s.service.onCardSettled((event) => events.push(event));
+    s.resolveApproval({ ...asked });
+    await s.settle();
+    expect(events).toEqual([
+      {
+        sessionId: CONCIERGE_CHAT,
+        card: expect.objectContaining({
+          kind: "approval",
+          id: "approval-1",
+          outcome: { kind: "rejected" },
+        }),
+      },
+    ]);
   });
 
   it("tells the Concierge of a pending approval in a task chat at once", async () => {
@@ -2707,7 +3573,7 @@ describe("Concierge events", () => {
     const expectFailedTurn = (s: ReturnType<typeof setup>, chatId: string, taskId: string) => {
       expect(s.backendTurns).toHaveLength(1);
       expect(s.backendTurns[0].prompt).toContain(
-        `<task id="${taskId}" chat_id="${chatId}" title="Flights" state="doing" changes="turn_end:error by=concierge">`,
+        `<task id="${taskId}" chat_id="${chatId}" title="Flights" status="ended" end_reason="failed" changes="turn_end:error by=concierge">`,
       );
       expect(s.backendTurns[0].prompt).toContain(`error: ${error}`);
       expect(s.quietFlags).toEqual([false]);
@@ -2725,6 +3591,8 @@ describe("Concierge events", () => {
     // No agent session opened: the dashboard tells the Concierge itself.
     const cold = setup();
     const second = await startTask(cold);
+    // The turn never started, so the chat runs none.
+    cold.chats.activeTurns = () => [];
     cold.fakeTimers();
     cold.service.turnFailedBeforeStart({
       turn: {
@@ -2740,21 +3608,77 @@ describe("Concierge events", () => {
     expectFailedTurn(cold, second.chatId, second.taskId);
   });
 
-  it("tells the Concierge quietly that a task chat was deleted, and the row stays", async () => {
+  it("wakes no turn for a scheduled run that finished with nothing to ask, and lists it in the next digest", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
     s.fakeTimers();
-    const linked = await s.service.taskOfChat(chatId);
+    // A routine woke the task chat; nobody typed in it, and it asked nothing.
+    await s.finish({
+      turnId: "scheduled-turn",
+      agentName: "core:main",
+      chatId,
+      status: "completed",
+    });
+    await rs.advanceTimersByTimeAsync(10 * 60_000);
+    expect(s.backendTurns).toEqual([]);
+    // Its result waits for no report: the task ended, and nothing stays working.
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      lastOutcome: "succeeded",
+      outcomeUnsaid: false,
+    });
+    const notes = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
+    expect(notes.text).toContain(`<ran_on_schedule task="${taskId}" title="Flights"/>`);
+    // Listed once, after a digest that listed it ran to its end.
+    await s.service.markTaskNotesListed(notes);
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).not.toContain(
+      "ran_on_schedule",
+    );
+  });
+
+  it("keeps a digest's no-response and scheduled-run notes until a digest that lists them runs to its end", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.finish({
+      turnId: "scheduled-turn",
+      agentName: "core:main",
+      chatId,
+      status: "completed",
+    });
+    await rs.advanceTimersByTimeAsync(10 * 60_000);
+    const [unanswered] = await s.taskRepo.upsertMany([{ title: "Pick a seat" }]);
+    await s.taskRepo.markWaitExpired(unanswered!.id, new Date(Date.now() - 2 * 86_400_000));
+    // A digest turn that failed marked nothing: the next digest reads the same notes.
+    const first = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
+    const again = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
+    expect(again).toEqual(first);
+    expect(first.text).toContain(`<ran_on_schedule task="${taskId}"`);
+    expect(first.text).toContain(`<ended_no_response task="${unanswered!.id}"`);
+    await s.service.markTaskNotesListed(again);
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
+  });
+
+  it("tells the Concierge quietly that a task chat was deleted, and its row stays stopped and archived", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    const linked = await s.service.endTaskChat(chatId, "deleted");
     expect(linked).toBe(taskId);
-    await s.storedChats.deleteSession(chatId);
+    expect(await s.storedChats.getSession(chatId)).toBeNull();
     s.service.chatDeleted(taskId);
     await rs.advanceTimersByTimeAsync(59_000);
     expect(s.backendTurns).toEqual([]);
     await rs.advanceTimersByTimeAsync(1_000);
     expect(s.backendTurns[0].prompt).toBe(
-      `${MAIN_LINE}<task_events>\n<task id="${taskId}" title="Flights" state="doing" changes="chat_deleted" quiet="true">\nThe task chat was deleted.\n</task>\n</task_events>`,
+      `${MAIN_LINE}<task_events>\n<task id="${taskId}" title="Flights" status="ended" end_reason="stopped" changes="chat_deleted" quiet="true">\nThe task chat was deleted.\n</task>\n</task_events>`,
     );
-    expect(await s.taskRepo.get(taskId)).toMatchObject({ sessionId: null, title: "Flights" });
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      sessionId: null,
+      title: "Flights",
+      archivedAt: expect.any(Date),
+      stoppedAt: expect.any(Date),
+      stopReason: "deleted",
+    });
   });
 
   it("after a restart, hands over rows whose chat was active since the row was written", async () => {
@@ -2785,31 +3709,17 @@ describe("Concierge events", () => {
     expect(s.quietFlags).toEqual([true]);
   });
 
-  it("stops asking once the Concierge writes the row, and marks the row not synced when it never does", async () => {
-    const answered = setup();
-    const task = await startTask(answered);
-    answered.fakeTimers();
-    await finishTask(answered, task.chatId);
+  it("settles a task's news once the Concierge's turn that reports it completes, with no row write", async () => {
+    const s = setup();
+    const task = await startTask(s);
+    s.fakeTimers();
+    await finishTask(s, task.chatId);
     await rs.advanceTimersByTimeAsync(2_000);
-    await answered.taskRepo.upsertMany([{ id: task.taskId, state: "done", summary: "3 options" }]);
+    expect(s.backendTurns).toHaveLength(1);
     await rs.advanceTimersByTimeAsync(120_000);
-    expect(answered.backendTurns).toHaveLength(1);
-
-    const ignored = setup();
-    const quiet = await startTask(ignored);
-    ignored.fakeTimers();
-    await finishTask(ignored, quiet.chatId);
-    await rs.advanceTimersByTimeAsync(2_000);
-    expect(ignored.backendTurns).toHaveLength(1);
-    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
-    await rs.advanceTimersByTimeAsync(10_000);
-    expect(ignored.backendTurns).toHaveLength(2);
-    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(true);
-    await rs.advanceTimersByTimeAsync(120_000);
-    expect(ignored.backendTurns).toHaveLength(2);
-    // A later write by the Concierge clears the mark.
-    await ignored.taskRepo.upsertMany([{ id: quiet.taskId, summary: "ok" }]);
-    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
+    // No retry, and the row stays synced: the Concierge had the news.
+    expect(s.backendTurns).toHaveLength(1);
+    expect((await s.tasks.listForPanel())[0].notSynced).toBe(false);
   });
 
   it("does not report a task chat the list does not know", async () => {
@@ -3002,7 +3912,7 @@ describe("Concierge pushes", () => {
     ) as { chatId: string };
     s.messages.get(started.chatId)?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: answer }]),
+      content: JSON.stringify([{ type: "text", content: concluded(answer) }]),
     });
     return started.chatId;
   };
@@ -3048,7 +3958,10 @@ describe("Concierge pushes", () => {
     });
     await s.storedChats.createSession(chatId, "Login code 7291");
     s.messages.set(chatId, [
-      { role: "assistant", content: JSON.stringify([{ type: "text", content: SECRET_ANSWER }]) },
+      {
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: concluded(SECRET_ANSWER) }]),
+      },
     ]);
     // A guardian's turn sends into it, which fills in its row from the chat's name.
     await s.tool("chat_send", { chatId, text: "Anything new?" });
@@ -3610,7 +4523,7 @@ describe("Concierge provider recovery", () => {
     [true, "working"],
   ] as const)("settles the failed turn's marks when its recovery ends, unless a newer input took the recovery over (%s)", async (handedOn, reaction) => {
     const { s } = await prepared({ delay: async () => {} });
-    await s.taskRepo.markTurnWorking("failed", { chatId: CONCIERGE_CHAT, messageKey: "g1" });
+    await s.taskRepo.takeMessage("failed", { chatId: CONCIERGE_CHAT, messageKey: "g1" });
     s.onBackendTurn(() => {
       void s.finish({
         turnId: "recovery",
@@ -3624,7 +4537,7 @@ describe("Concierge provider recovery", () => {
     await finish(s, failure("Repeated 529 Overloaded errors"));
     await s.settle();
     expect(s.backendTurns).toHaveLength(1);
-    const marks = await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["g1"]);
+    const marks = await s.tasks.reactionsOf(CONCIERGE_CHAT, ["g1"]);
     expect(marks.get("g1") ?? null).toBe(reaction);
   });
   it("waits about thirty seconds before one same-model retry, then stops on success", async () => {
@@ -3866,9 +4779,10 @@ describe("Concierge chats", () => {
       prompt: "⏰ Time's up: watch task:abc",
       ownerKey: "guardian",
     };
+    // Bound to its chat: it wakes the chat's current session, not the one that set it.
     expect(await s.service.resolveTurn(wakeUp)).toMatchObject({
       threadId: TOPIC_CHAT,
-      sessionId: "runtime-topic",
+      sessionId: "runtime-1",
     });
     if (how === "archived") {
       s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
@@ -3946,23 +4860,92 @@ describe("Concierge chats", () => {
     expect(await s.service.deliveryChat(TOPIC_CHAT, "guardian")).toBe(CONCIERGE_CHAT);
   });
 
-  it("retiring a topic chat moves its open tasks to the main chat and says so there; the main chat cannot be retired", async () => {
+  it("retiring a topic chat hands its open tasks to the main chat and says so there; the main chat cannot be retired", async () => {
     const s = setup({ startEvents: false });
     await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
     s.turnIn(TOPIC_CHAT);
-    await s.tool("task_upsert", { tasks: [{ title: "Book dentist" }] });
-    await s.tool("task_upsert", { tasks: [{ title: "Old", state: "done" }] });
+    // "Book dentist" runs in its task chat; "Old" has ended.
+    await s.tool("say", { text: "On it" });
+    await s.tool("chat_start", { title: "Book dentist", brief: "Book it" });
+    const made = (await s.tool("task_upsert", { tasks: [{ title: "Old" }] })) as {
+      content: { text: string }[];
+    };
+    const oldId = JSON.parse(made.content[0]!.text).tasks[0].id as string;
+    await s.taskRepo.setLastOutcome(oldId, "succeeded", new Date(), { reported: false });
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: (chatId) => chatId === "task-1",
+      openWaits: async () => new Map(),
+      reportPending: () => [],
+    });
+    await s.storedChats.archiveSession(TOPIC_CHAT);
     await s.service.retireChat(TOPIC_CHAT, "archived");
     await new Promise((resolve) => setTimeout(resolve, 20));
     const rows = await s.tasks.listForPanel();
+    // Every row reads as the main chat's, and none is moved.
     expect(rows.find((row) => row.title === "Book dentist")?.conciergeChat.main).toBe(true);
-    // A finished row keeps its chat, and its owner with it.
-    expect(rows.find((row) => row.title === "Old")?.conciergeChat.id).toBe(TOPIC_CHAT);
+    const old = rows.find((row) => row.title === "Old");
+    expect(old?.conciergeChat.main).toBe(true);
+    expect((await s.taskRepo.get(old!.id))?.chatId).toBe(TOPIC_CHAT);
     expect(s.backendTurns.at(-1)).toMatchObject({ threadId: CONCIERGE_CHAT });
     expect(s.backendTurns.at(-1)?.prompt).toContain(
       '<concierge_chat_retired name="Calendar" how="archived" follows="0" tasks="1"/>',
     );
     await expect(s.service.retireChat(CONCIERGE_CHAT, "deleted")).rejects.toThrow("main");
+  });
+
+  it("asks once in the digest about a row left a day with no task chat and nothing scheduled", async () => {
+    const s = setup({ startEvents: false });
+    const day = s.tasks.waitExpiry;
+    const aged = new Date(Date.now() - day - 1_000);
+    const [old, checked] = await s.taskRepo.upsertMany(
+      [
+        { title: "Follow up hiring", chatId: CONCIERGE_CHAT },
+        { title: "Checked", chatId: CONCIERGE_CHAT },
+      ],
+      aged,
+    );
+    // Written just now: not a day old yet.
+    await s.taskRepo.upsertMany([{ title: "Fresh", chatId: CONCIERGE_CHAT }]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async () => new Map(),
+      reportPending: () => [],
+      laterOf: async () => new Map([[checked!.id, Date.now() + 60_000]]),
+    });
+    const notes = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
+    expect(notes.text).toBe(
+      `<task_review>\n<not_started task="${old!.id}" title="Follow up hiring"/>\n</task_review>`,
+    );
+    expect(notes.unstarted).toEqual([old!.id]);
+    // Listed once: after a digest that ran to its end, it is not listed again.
+    await s.service.markTaskNotesListed(notes);
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
+  });
+
+  it("flags in the digest a task still waiting on a check it scheduled three times", async () => {
+    const s = setup({ startEvents: false });
+    const [often, once] = await s.taskRepo.upsertMany([{ title: "CI run" }, { title: "Reply" }]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async () => new Map(),
+      reportPending: () => [],
+      laterOf: async (ids) => new Map(ids.map((id) => [id, Date.now() + 60_000])),
+    });
+    s.deps.checks = {
+      timesScheduled: async () =>
+        new Map([
+          [often.id, POSTPONED_CHECKS],
+          [once.id, 1],
+        ]),
+    } as never;
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe(
+      `<task_review>\n<check_postponed task="${often.id}" title="CI run" checks="3"/>\n</task_review>`,
+    );
+    s.deps.checks = { timesScheduled: async () => new Map() } as never;
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
   });
 
   it("switches a topic chat's provider when its quota runs out, as the main chat's", async () => {
@@ -4149,7 +5132,7 @@ describe("Concierge status reactions", () => {
     s.messages.set(CONCIERGE_CHAT, list);
   };
   const reactionOf = async (s: ReturnType<typeof setup>, messageKey: string) =>
-    (await s.taskRepo.reactionsOf(CONCIERGE_CHAT, [messageKey])).get(messageKey) ?? null;
+    (await s.tasks.reactionsOf(CONCIERGE_CHAT, [messageKey])).get(messageKey) ?? null;
   const started = async (s: ReturnType<typeof setup>, args: Record<string, unknown> = {}) =>
     JSON.parse(
       (await s.tool("chat_start", { title: "Weather", brief: "Check the weather", ...args }))
@@ -4166,8 +5149,25 @@ describe("Concierge status reactions", () => {
     await s.service.systemTurnOutcome(
       CONCIERGE_CHAT,
       `<task_events>\n<task id="${task!.id}" title="Weather">\n</task>\n</task_events>`,
+      { taskIds: [task!.id] },
     );
     s.onBackendTurn(() => "completed");
+    // As the flush that carried the news settles it: only a report that ran
+    // to its end does, and its result is then said.
+    const events = (
+      s.service as unknown as {
+        taskEvents: { dirty: Map<string, unknown>; changed(): void } | null;
+      }
+    ).taskEvents;
+    if (outcome === "completed") {
+      events?.dirty.delete(task!.id);
+      events?.changed();
+      await s.taskRepo.markReported([task!.id]);
+    } else if (outcome === "stopped") {
+      events?.dirty.delete(task!.id);
+      await s.taskRepo.markGivenUp(task!.id);
+      events?.changed();
+    }
   };
   /** The task chat's turn ends `status`, and, unless it was stopped, the Concierge reports it. */
   const finishTask = async (
@@ -4176,8 +5176,9 @@ describe("Concierge status reactions", () => {
     status?: AgentTurnFinishedEvent["status"],
     { reported = true }: { reported?: boolean } = {},
   ) => {
+    // The turn the Concierge's brief started, so it reports to the Concierge.
     await s.finish({
-      turnId: `task-turn-${chatId}`,
+      turnId: "task-turn-1",
       agentName: "core:main",
       chatId,
       status,
@@ -4185,18 +5186,137 @@ describe("Concierge status reactions", () => {
     });
     if (reported && status !== "interrupted") await reportEnds(s, chatId);
   };
+  /**
+   * The guardian typed in task chat `chatId` themself, so its turn is theirs:
+   * its end is quiet news, not one that needs no word.
+   */
+  const guardianTyped = (s: ReturnType<typeof setup>, chatId: string) =>
+    s.messages.get(chatId)?.push({
+      id: `typed-${chatId}`,
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: "Also check Friday" }]),
+      senderId: "guardian-1",
+      turnId: "task-turn-1",
+    });
   /** Task chat `chatId` wrote a reply, so its turn's end has news to report. */
   const replies = (s: ReturnType<typeof setup>, chatId: string) =>
     s.messages.get(chatId)?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "Sunny" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("Sunny") }]),
     });
   /** Every reaction change the dashboard is told of, in order. */
   const watch = (s: ReturnType<typeof setup>) => {
     const seen: [string, string | null][] = [];
-    s.taskRepo.onReaction((target, reaction) => seen.push([target.messageKey, reaction]));
+    s.tasks.onReaction((target, reaction) => seen.push([target.messageKey, reaction]));
     return seen;
   };
+
+  describe("a task's conclusion forwarded, or refused", () => {
+    /** The task finished with `answer`; its news waits for the Concierge's report turn. */
+    const finishedWith = async (answer: string) => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.messages.get(chatId)?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: answer }]),
+      });
+      await finishTask(s, chatId, "completed", { reported: false });
+      s.inTurn("report-turn");
+      return { s, chatId, taskId };
+    };
+    const threadOfId = (s: ReturnType<typeof setup>, id: string) =>
+      s.messages.get(CONCIERGE_CHAT)?.find((row) => row.id === id)?.chatThread;
+
+    it("forwards the conclusion into the task's thread, anchors the row to it, and the report's end settles the reaction", async () => {
+      const { s, chatId, taskId } = await finishedWith(concluded("Found 3 flights. Which one?"));
+      expect(await reactionOf(s, "g1")).toBe("working");
+      const forwarded = JSON.parse((await s.tool("chat_forward", { chatId })).content[0].text);
+      expect(threadOfId(s, forwarded.messageId)).toBe("g1");
+      expect((await s.taskRepo.getWithChat(taskId))?.sourceMessageId).toBe(forwarded.messageId);
+      // Only the Concierge's turn that reports it tells the guardian: the end settles it.
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("leaves the reaction as it was when the forward is refused, and the report said in the task's thread settles it", async () => {
+      const { s, chatId, taskId } = await finishedWith("Details, but no conclusion section.");
+      const seen = watch(s);
+      const refused = await s.tool("chat_forward", { chatId });
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toContain("with task set to this task's id");
+      // Nothing was said, moved or marked.
+      expect(seen).toEqual([]);
+      expect(await reactionOf(s, "g1")).toBe("working");
+      const said = JSON.parse(
+        (
+          await s.tool("say", {
+            text: "Found 3 flights, cheapest ¥4,380. Which one?",
+            task: taskId,
+          })
+        ).content[0].text,
+      );
+      expect(threadOfId(s, said.messageId)).toBe("g1");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("never leaves 👀 stuck on a refused forward: the report turn's end settles it even when nothing more is said", async () => {
+      const { s, chatId } = await finishedWith("x".repeat(CONCLUSION_MAX_CHARS + 1));
+      expect((await s.tool("chat_forward", { chatId })).isError).toBe(true);
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    /** An input of the report turn that an automation or an agent wrote, stored as a user message. */
+    const automatedSays = (s: ReturnType<typeof setup>, id: string, senderId: string) => {
+      const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+      list.push({ id, role: "user", content: "[]", turnId: "report-turn", senderId });
+      s.messages.set(CONCIERGE_CHAT, list);
+    };
+
+    it.each([
+      ["a tagged routine", "automated::0::routine:Morning briefing"],
+      ["a tagged app on the guardian's behalf", "automated::1::app:daily-report"],
+      ["a tagged agent", "automated::0::agent:coding:coding"],
+      ["an agent's own account", "core:concierge"],
+    ])("refuses the full text in a turn only %s started, such as a continuation after a quota reset", async (_who, senderId) => {
+      const { s, chatId } = await finishedWith(concluded("Done."));
+      automatedSays(s, "auto", senderId);
+      const refused = await s.tool("chat_forward", { chatId, full: true });
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toContain("only in a turn they started");
+    });
+
+    it("allows the full text when the guardian's own message is in the turn beside an automated input", async () => {
+      const { s, chatId } = await finishedWith(concluded("Done."));
+      automatedSays(s, "auto", "automated::0::routine:Morning briefing");
+      guardianSays(s, "g2", "report-turn");
+      const allowed = await s.tool("chat_forward", { chatId, full: true });
+      expect(allowed.isError).toBeFalsy();
+    });
+
+    it("still takes an automated input as a message the turn answers, whatever the full-text gate says", async () => {
+      const { s } = await finishedWith(concluded("Done."));
+      automatedSays(s, "auto", "automated::0::routine:Morning briefing");
+      // `answers` may name it, as it may name any message of the turn.
+      const said = await s.tool("say", { text: "Noted.", answers: "auto" });
+      expect(said.isError).toBeFalsy();
+    });
+
+    it("does not count a message an earlier, cut-short turn handed on as the guardian starting this turn", async () => {
+      const { s, chatId } = await finishedWith(concluded("Done."));
+      s.service.handOnPrompts(CONCIERGE_CHAT, ["g1"]);
+      const refused = await s.tool("chat_forward", { chatId, full: true });
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toContain("only in a turn they started");
+      // Its own message in the turn does.
+      guardianSays(s, "g2", "report-turn");
+      const allowed = await s.tool("chat_forward", { chatId, full: true });
+      expect(allowed.isError).toBeFalsy();
+    });
+  });
 
   it("marks the guardian message a task starts for as working, with no acknowledgement first", async () => {
     const s = setup({ said: false });
@@ -4236,11 +5356,14 @@ describe("Concierge status reactions", () => {
     s.chats.activeTurns = () => ["task-turn-1"];
     s.inTurn("call-off");
     guardianSays(s, "g2", "call-off");
-    await s.tool("chat_stop", { chatId });
-    s.chats.activeTurns = () => [];
     const seen = watch(s);
-    await finishTask(s, chatId, "interrupted");
+    // The stop ends the task at once, so its message's mark goes then.
+    await s.tool("chat_stop", { chatId });
+    await s.settle();
     expect(await reactionOf(s, "g1")).toBeNull();
+    expect(seen).toEqual([["g1", null]]);
+    s.chats.activeTurns = () => [];
+    await finishTask(s, chatId, "interrupted");
     expect(seen).toEqual([["g1", null]]);
     // The call-off is answered in its own turn and gets none.
     expect(await reactionOf(s, "g2")).toBeNull();
@@ -4258,7 +5381,7 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBeNull();
   });
 
-  it("marks a message passed on to a task, and settles only the work still open", async () => {
+  it("marks a message passed on to a task, and shows each message made for the task its latest outcome", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
     const { chatId } = await started(s);
@@ -4271,8 +5394,9 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g2")).toBe("working");
     expect(seen).toEqual([["g2", "working"]]);
 
+    // A task made for both messages ended failed, so both show it.
     await finishTask(s, chatId, "error");
-    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, "failed"]);
+    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual(["failed", "failed"]);
   });
 
   it("marks only the message chat_send names when the guardian sent several", async () => {
@@ -4352,26 +5476,65 @@ describe("Concierge status reactions", () => {
     expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, null]);
   });
 
-  it("settles when the Concierge closes the row, as after a question the guardian answered", async () => {
+  it("stops a task its owner stops, cancels its checks, and tells the Concierge quietly", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
     const { taskId } = await started(s);
-    await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
+    const cancelled: string[] = [];
+    s.deps.checks = {
+      cancelFor: async (id: string) => (cancelled.push(id), 0),
+      laterOf: async () => new Map(),
+    } as never;
+    s.chats.activeTurns = () => ["task-turn-1"];
+    expect(await s.service.stopTask(taskId, "guardian")).toBe(1);
+    expect(s.chats.interruptTurn).toHaveBeenCalledWith("task-turn-1");
+    expect(cancelled).toEqual([taskId]);
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ stopReason: "guardian" });
+    const coalescer = (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents;
+    expect(coalescer.pending).toContain(taskId);
     expect(await reactionOf(s, "g1")).toBeNull();
   });
 
-  it("clears the reaction when the Concierge drops the row, as a stop does", async () => {
+  it("stops a task whose owner pressed Stop in its task chat as any Stop does", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId, taskId } = await started(s);
+    const cancelled: string[] = [];
+    s.deps.checks = {
+      cancelFor: async (id: string) => (cancelled.push(id), 0),
+      laterOf: async () => new Map(),
+    } as never;
+    const turnedDown: string[] = [];
+    s.service.attachApprovalExpiry(async (chat) => (turnedDown.push(chat), 1));
+    // The Stop in the task chat interrupts its turn, not through the task.
+    await finishTask(s, chatId, "interrupted");
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ stopReason: "guardian" });
+    expect(cancelled).toEqual([taskId]);
+    expect(turnedDown).toEqual([chatId]);
+  });
+
+  it("reads every task made for the messages in one read, not one per task", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    await started(s);
+    await started(s, { title: "Tides", brief: "Check the tides" });
+    const one = rs.spyOn(s.taskRepo, "get");
+    expect(await reactionOf(s, "g1")).toBe("working");
+    expect(one).not.toHaveBeenCalled();
+  });
+
+  it("clears the reaction when the Concierge stops the task", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
     const { taskId } = await started(s);
-    await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+    await s.tool("task_upsert", { tasks: [{ id: taskId, stop: true }] });
     expect(await reactionOf(s, "g1")).toBeNull();
   });
 
   describe("from the turn that takes the message", () => {
     // The send route marks a message once a Concierge turn takes it.
     const taken = (s: ReturnType<typeof setup>, key: string, turnId = "concierge-turn-1") =>
-      s.taskRepo.markTurnWorking(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
+      s.taskRepo.takeMessage(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
     const conciergeEnds = (
       s: ReturnType<typeof setup>,
       status?: AgentTurnFinishedEvent["status"],
@@ -4386,6 +5549,30 @@ describe("Concierge status reactions", () => {
         text: "ok",
         handedOn,
       });
+
+    it("says when the turn that took the owner's messages in ended, unless a newer one carries them on", async () => {
+      const s = setup({ said: false });
+      const settled: unknown[] = [];
+      s.service.onInputsSettled((event) => settled.push(event));
+      guardianSays(s, "press", "turn-a");
+      await conciergeEnds(s, "interrupted", "turn-a", true);
+      await s.settle();
+      expect(settled).toEqual([]);
+      guardianSays(s, "next", "turn-b");
+      // A press queued behind the turn waits for a turn of its own.
+      const list = s.messages.get(CONCIERGE_CHAT)!;
+      list.push({
+        id: "queued",
+        role: "user",
+        content: "[]",
+        turnId: "turn-b",
+        inputState: "queued",
+      });
+      await conciergeEnds(s, "completed", "turn-b");
+      await s.settle();
+      // The press the cut-short turn handed on is done with as well.
+      expect(settled).toEqual([{ sessionId: CONCIERGE_CHAT, inputIds: ["next", "press"] }]);
+    });
 
     it("is working while a direct answer's turn runs, and goes away when it completes", async () => {
       const s = setup({ said: false });
@@ -4488,9 +5675,7 @@ describe("Concierge status reactions", () => {
       expect(await s.tool("chat_send", { chatId, text: "Make it 3 fruits" })).toMatchObject({
         isError: true,
       });
-      expect(await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["b"])).toEqual(
-        new Map([["b", "working"]]),
-      );
+      expect(await s.tasks.reactionsOf(CONCIERGE_CHAT, ["b"])).toEqual(new Map([["b", "working"]]));
       await s.tool("chat_send", { chatId, text: "Make it 3 fruits", answers: "a" });
       await s.tool("say", { text: "I'm well, thanks.", answers: "b" });
       expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", null]);
@@ -4512,12 +5697,15 @@ describe("Concierge status reactions", () => {
       expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
     });
 
-    it.each(["error", "stopped"] as const)("fails when the turn ends %s", async (status) => {
+    it.each([
+      ["error", "failed"],
+      ["stopped", null],
+    ] as const)("shows %s's mark when the turn ends so: %s", async (status, reaction) => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       await taken(s, "g1");
       await conciergeEnds(s, status);
-      expect(await reactionOf(s, "g1")).toBe("failed");
+      expect(await reactionOf(s, "g1")).toBe(reaction);
     });
 
     it("marks each message a turn takes, and settles them together", async () => {
@@ -4539,6 +5727,22 @@ describe("Concierge status reactions", () => {
       await finishTask(s, chatId);
       // The task is done; the Concierge's own turn still runs.
       expect(await reactionOf(s, "g1")).toBe("working");
+    });
+
+    it("tells the next turn once of a message its owner stopped before an answer, and not of one handed on", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await conciergeEnds(s, "interrupted");
+      expect(await s.service.stoppedRequestLines(CONCIERGE_CHAT)).toBe(
+        '<stopped_request message_id="g1"/>',
+      );
+      expect(await s.service.stoppedRequestLines(CONCIERGE_CHAT)).toBe("");
+      // A turn a newer input took over was not stopped: its work goes on.
+      guardianSays(s, "g2", "turn-b");
+      await taken(s, "g2", "turn-b");
+      await conciergeEnds(s, "interrupted", "turn-b", true);
+      expect(await s.service.stoppedRequestLines(CONCIERGE_CHAT)).toBe("");
     });
 
     it("fails the messages handed on to a turn that never started, and hands none further", async () => {
@@ -4708,7 +5912,7 @@ describe("Concierge status reactions", () => {
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
-    it("settles when another turn says the result, naming the task", async () => {
+    it("keeps working when another turn says the result, until a report that carried it ends", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
@@ -4716,78 +5920,55 @@ describe("Concierge status reactions", () => {
       s.inTurn("later");
       guardianSays(s, "g2", "later");
       await s.tool("say", { text: "Sunny all week", task: taskId });
-      expect(await reactionOf(s, "g1")).toBe("working");
       await s.finish({
         turnId: "later",
         agentName: "core:concierge",
         chatId: CONCIERGE_CHAT,
         text: "ok",
       });
-      expect(await reactionOf(s, "g1")).toBeNull();
-    });
-
-    it("settles when the Concierge writes the row done, though its report turn is then cut short", async () => {
-      const s = setup({ said: false });
-      guardianSays(s, "g1");
-      const { chatId, taskId } = await started(s);
-      s.fakeTimers();
-      s.onBackendTurn(async () => {
-        await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
-        return "interrupted" as const;
-      });
-      replies(s, chatId);
-      await finishTask(s, chatId, "completed", { reported: false });
-      // Nobody asked for this result, so it waits for the next batch.
-      await rs.advanceTimersByTimeAsync(60_000);
-      expect(s.backendTurns).toHaveLength(1);
-      expect(await reactionOf(s, "g1")).toBeNull();
-    });
-
-    it.each([
-      ["done", "completed", null],
-      ["done", "error", "failed"],
-      ["dropped", "completed", null],
-      ["dropped", "error", null],
-    ] as const)("a row written %s while a task that ended %s waits for its report shows %s", async (state, ended, reaction) => {
-      const s = setup({ said: false });
-      guardianSays(s, "g1");
-      const { chatId, taskId } = await started(s);
-      await finishTask(s, chatId, ended, { reported: false });
+      // Saying it settles nothing: a report that carried it does.
       expect(await reactionOf(s, "g1")).toBe("working");
-      await s.taskRepo.upsertMany([{ id: taskId, state }]);
-      expect(await reactionOf(s, "g1")).toBe(reaction);
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
     });
 
-    it("clears a failed task's mark when the Concierge drops it", async () => {
+    it("clears a failed task's mark when the Concierge stops it", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
       await finishTask(s, chatId, "error");
       expect(await reactionOf(s, "g1")).toBe("failed");
-      await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+      await s.tool("task_upsert", { tasks: [{ id: taskId, stop: true }] });
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
-    it("shows failed once Rome gives up on the report", async () => {
+    it("shows failed once Rome gives up on the report, and marks the row not synced", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
       await finishTask(s, chatId, "completed", { reported: false });
       const coalescer = (
-        s.service as unknown as { taskEvents: { deps: { giveUp: (id: string) => void } } }
+        s.service as unknown as {
+          taskEvents: { dirty: Map<string, unknown>; deps: { giveUp: (id: string) => void } };
+        }
       ).taskEvents;
+      // As the coalescer does when a Stop ended the turn that carried it.
+      coalescer.dirty.delete(taskId);
       coalescer.deps.giveUp(taskId);
       await s.settle();
+      // Its owner was never told, whatever the task's outcome.
       expect(await reactionOf(s, "g1")).toBe("failed");
+      expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
     });
 
-    it("runs no report again that a turn which took it over said", async () => {
+    it("reports again a result a turn that took the report over said, so none is lost", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
       s.fakeTimers();
       s.onBackendTurn(() => "interrupted");
       replies(s, chatId);
+      guardianTyped(s, chatId);
       await finishTask(s, chatId, "completed", { reported: false });
       // Nobody asked for this result, so it waits for the next batch.
       await rs.advanceTimersByTimeAsync(60_000);
@@ -4802,9 +5983,44 @@ describe("Concierge status reactions", () => {
         chatId: CONCIERGE_CHAT,
         text: "",
       });
+      // Saying it settled nothing: the cut-short report runs again, to its end.
       await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
-      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns).toHaveLength(2);
+      expect(s.backendTurns[1]?.prompt).toContain(taskId);
       expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("keeps a task's news that came after the turn said its result, with the result it brought", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.fakeTimers();
+      s.onBackendTurn(() => "interrupted");
+      replies(s, chatId);
+      guardianTyped(s, chatId);
+      await finishTask(s, chatId, "completed", { reported: false });
+      await rs.advanceTimersByTimeAsync(60_000);
+      s.onBackendTurn(() => "completed");
+      s.inTurn("takeover");
+      guardianSays(s, "g2", "takeover");
+      await s.tool("say", { text: "Sunny all week", task: taskId });
+      // The task chat gives a new result before the Concierge's turn ends.
+      await s.taskRepo.setLastOutcome(taskId, "succeeded");
+      const coalescer = (
+        s.service as unknown as {
+          taskEvents: { mark: (change: unknown) => void; pending: string[] };
+        }
+      ).taskEvents;
+      coalescer.mark({ taskId, kind: "turn_end:completed by=system", urgent: true });
+      await s.finish({
+        turnId: "takeover",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      await s.settle();
+      expect(coalescer.pending).toContain(taskId);
+      expect((await s.taskRepo.get(taskId))?.outcomeUnsaid).toBe(true);
     });
 
     it("keeps a report the Concierge never got, though a turn names its task, and reports it again", async () => {
@@ -4815,6 +6031,7 @@ describe("Concierge status reactions", () => {
       // The report turn fails before the Concierge sees it.
       s.onBackendTurn(() => "failed");
       replies(s, chatId);
+      guardianTyped(s, chatId);
       await finishTask(s, chatId, "completed", { reported: false });
       await rs.advanceTimersByTimeAsync(60_000);
       expect(s.backendTurns).toHaveLength(1);
@@ -4857,7 +6074,8 @@ describe("Concierge status reactions", () => {
       const { chatId, taskId } = await started(s);
       replies(s, chatId);
       // The stopped process held the result; its pending report died with it.
-      await s.taskRepo.holdReactions(taskId, "done");
+      await s.taskRepo.setLastOutcome(taskId, "succeeded");
+      s.chats.activeTurns = () => [];
       s.fakeTimers();
       s.startEvents();
       await rs.advanceTimersByTimeAsync(60_000);
@@ -4875,6 +6093,9 @@ describe("Concierge status reactions", () => {
       await finishTask(s, chatId, "completed", { reported: false });
       // Past the wait for the stream, which never ends here.
       await rs.advanceTimersByTimeAsync(11_000);
+      expect(await reactionOf(s, "g1")).toBe("working");
+      // The stream ends, and the turn that reports the result.
+      s.chats.activeTurns = () => [];
       await reportEnds(s, chatId);
       expect(await reactionOf(s, "g1")).toBeNull();
     });
@@ -4884,6 +6105,7 @@ describe("Concierge status reactions", () => {
       guardianSays(s, "g1");
       const { chatId } = await started(s);
       replies(s, chatId);
+      guardianTyped(s, chatId);
       s.fakeTimers();
       s.onBackendTurn(() => "interrupted");
       await finishTask(s, chatId, "completed", { reported: false });
@@ -4908,13 +6130,15 @@ describe("Concierge status reactions", () => {
       expect(s.backendTurns.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("runs no report again for two tasks a takeover turn said, after their batch was cut short", async () => {
+    it("reports again two tasks a takeover turn said, after their batch was cut short", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const weather = await started(s, { title: "Weather" });
       const traffic = await started(s, { title: "Traffic" });
       replies(s, weather.chatId);
       replies(s, traffic.chatId);
+      guardianTyped(s, weather.chatId);
+      guardianTyped(s, traffic.chatId);
       s.fakeTimers();
       s.onBackendTurn(() => "interrupted");
       await finishTask(s, weather.chatId, "completed", { reported: false });
@@ -4935,9 +6159,11 @@ describe("Concierge status reactions", () => {
         chatId: CONCIERGE_CHAT,
         text: "",
       });
-      expect(await reactionOf(s, "g1")).toBeNull();
       await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
-      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns).toHaveLength(2);
+      expect(s.backendTurns[1]?.prompt).toContain(weather.taskId);
+      expect(s.backendTurns[1]?.prompt).toContain(traffic.taskId);
+      expect(await reactionOf(s, "g1")).toBeNull();
     });
 
     it("clears a stopped task at once, with nothing to report", async () => {
@@ -4953,8 +6179,162 @@ describe("Concierge status reactions", () => {
     const s = setup({ said: false, startEvents: false });
     guardianSays(s, "g1");
     const { taskId } = await started(s);
-    await s.taskRepo.settleReactions(taskId, "done");
+    s.chats.activeTurns = () => [];
+    await s.taskRepo.setLastOutcome(taskId, "succeeded");
+    await s.taskRepo.markReported([taskId]);
     expect(await reactionOf(s, "g1")).toBeNull();
     expect(s.pushes).toEqual([]);
+  });
+});
+
+describe("scheduled tasks", () => {
+  const view = (report: "every_run" | "when_it_matters") => ({
+    at: "12:25",
+    report,
+    brief: "Sum up my last day",
+    nextRunAt: Date.UTC(2026, 10, 13, 4, 25),
+  });
+  const withSchedules = (s: ReturnType<typeof setup>, report: "every_run" | "when_it_matters") => {
+    const schedules = {
+      set: rs.fn(async () => {}),
+      remove: rs.fn(async () => true),
+      of: rs.fn(async () => view(report)),
+      takeSkip: rs.fn(async () => false),
+    };
+    (s.deps as { schedules?: unknown }).schedules = schedules;
+    return schedules;
+  };
+  const startScheduled = async (s: ReturnType<typeof setup>, report = "every_run") =>
+    JSON.parse(
+      (
+        await s.tool("chat_start", {
+          title: "Daily summary",
+          brief: "Sum up my last day",
+          schedule: { at: "12:25", report },
+        })
+      ).content[0].text,
+    ) as { chatId: string; taskId: string; scheduled: string };
+
+  it("starts a scheduled task's chat without running it, and schedules its brief", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const started = await startScheduled(s);
+
+    expect(s.posted).toEqual([]);
+    expect(schedules.set).toHaveBeenCalledWith(
+      { id: started.taskId, title: "Daily summary", owner: "guardian" },
+      { at: "12:25", report: "every_run", brief: "Sum up my last day" },
+    );
+    expect(started.scheduled).toContain("2026-11-13T04:25:00.000Z");
+  });
+
+  it("sends each run's brief into the task's own chat as the Concierge's words, reported as its own", async () => {
+    const s = setup();
+    withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    s.fakeTimers();
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+    expect(s.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ chat: expect.objectContaining({ id: chatId }) }),
+      { text: "Sum up my last day" },
+      CONCIERGE_ACCOUNT,
+    );
+    // Its result comes back as any task's does.
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId, text: "x" });
+    await rs.advanceTimersByTimeAsync(3_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0]?.prompt).toContain(taskId);
+  });
+
+  it("keeps a scheduled task's skill and sends it with every run's brief", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = JSON.parse(
+      (
+        await s.tool("chat_start", {
+          title: "Daily summary",
+          brief: "Sum up my last day",
+          skill: "coding:app_creation",
+          schedule: { at: "12:25" },
+        })
+      ).content[0].text,
+    );
+    expect(schedules.set).toHaveBeenCalledWith(expect.objectContaining({ id: taskId }), {
+      at: "12:25",
+      report: "every_run",
+      brief: "Sum up my last day",
+      skill: "coding:app_creation",
+    });
+    schedules.of.mockImplementation(async () => ({
+      ...view("every_run"),
+      skill: "coding:app_creation",
+    }));
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+    expect(s.send).toHaveBeenLastCalledWith(
+      expect.anything(),
+      { text: "Sum up my last day", skillName: "coding:app_creation" },
+      CONCIERGE_ACCOUNT,
+    );
+  });
+
+  it("lets a quiet run with nothing to ask go to the digest, not a report", async () => {
+    const s = setup();
+    withSchedules(s, "when_it_matters");
+    const { chatId, taskId } = await startScheduled(s, "when_it_matters");
+    s.fakeTimers();
+
+    await s.service.runScheduledTask(taskId, Date.now());
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId, text: "x" });
+    await rs.advanceTimersByTimeAsync(10 * 60_000);
+    expect(s.backendTurns).toEqual([]);
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toContain(
+      `<ran_on_schedule task="${taskId}"`,
+    );
+  });
+
+  it("sends nothing for a stopped task, and removes its schedule", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = await startScheduled(s);
+    await s.service.stopTask(taskId, "guardian");
+    expect(schedules.remove).toHaveBeenCalledWith(taskId);
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("stopped");
+    expect(s.posted).toEqual([]);
+  });
+
+  it("keeps a task's schedule when its owner cancels its checks from its row", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = await startScheduled(s);
+    const cancelFor = rs.fn(async () => 1);
+    s.deps.checks = { cancelFor, laterOf: async () => new Map() } as never;
+
+    await s.service.cancelChecksByOwner(taskId);
+    // The row's cancel skips the next run only; a stop removes the schedule.
+    expect(cancelFor).toHaveBeenCalledWith(taskId, "guardian", { keepSchedule: true });
+    expect(schedules.remove).not.toHaveBeenCalled();
+  });
+
+  it("changes or removes a task's schedule from task_upsert, keeping its brief", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = await startScheduled(s);
+
+    await s.tool("task_upsert", {
+      tasks: [{ id: taskId, schedule: { at: "08:00", days: ["mon"] } }],
+    });
+    expect(schedules.set).toHaveBeenLastCalledWith(
+      { id: taskId, title: "Daily summary", owner: "guardian" },
+      { at: "08:00", days: ["mon"], report: "every_run", brief: "Sum up my last day" },
+    );
+    await s.tool("task_upsert", { tasks: [{ id: taskId, schedule: null }] });
+    expect(schedules.remove).toHaveBeenCalledWith(taskId);
+    const listed = JSON.parse((await s.tool("task_list", { includeDone: true })).content[0].text);
+    expect(listed.tasks[0]).toMatchObject({
+      schedule: { at: "12:25", report: "every_run", nextRunAt: "2026-11-13T04:25:00.000Z" },
+    });
   });
 });

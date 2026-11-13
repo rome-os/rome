@@ -1,3 +1,4 @@
+import { AppDocumentAccess } from "@/components/connections/app-document-access";
 import { Measure, Section } from "@rome-os/ui/page";
 import { ListCollection } from "@rome-os/ui/layout-list";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -248,6 +249,9 @@ export function ConnectionsSection({
 
   return (
     <Measure className="space-y-6">
+      {connections.some((connection) => connection.connectionKind === "feishu" && connection.id) ? (
+        <AppDocumentAccess />
+      ) : null}
       <Section>
         {loading ? (
           <div className="flex flex-col gap-2" role="status" aria-label={t("connections.loading")}>

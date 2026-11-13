@@ -46,6 +46,7 @@ function shape(items: ConciergeItem[]): string[] {
   return items.map((item) => {
     if (item.kind === "separator") return "sep";
     if (item.kind === "notice") return "notice";
+    if (item.kind === "unread") return "new";
     const ids = item.entries.map((e) => e.message.id).join(",");
     return `${item.sender === "guardian" ? "G" : "A"}:${ids}${item.typing ? "+typing" : ""}`;
   });
@@ -241,6 +242,91 @@ describe("buildConciergeItems", () => {
   });
 });
 
+describe("buildConciergeItems unread divider", () => {
+  const withDivider = (rows: ChatRow[], unreadFrom: string | null | undefined) =>
+    shape(buildConciergeItems(rows, { typing: false, unreadFrom }));
+
+  it("draws no divider without an unread message", () => {
+    const rows = [agentRow(say("a1", 0), say("a2", MIN))];
+    expect(withDivider(rows, undefined)).toEqual(["sep", "A:a1,a2"]);
+    expect(withDivider(rows, null)).toEqual(["sep", "A:a1,a2"]);
+  });
+
+  it("splits the group above the first unread message", () => {
+    const rows = [agentRow(say("a1", 0), say("a2", MIN), say("a3", 2 * MIN))];
+    expect(withDivider(rows, "a2")).toEqual(["sep", "A:a1", "new", "A:a2,a3"]);
+  });
+
+  it("goes after the time separator that introduces the first unread message", () => {
+    const rows = [agentRow(say("a1", 0)), agentRow(say("a2", 20 * MIN))];
+    expect(withDivider(rows, "a2")).toEqual(["sep", "A:a1", "sep", "new", "A:a2"]);
+  });
+
+  it("goes above the first message of the chat when everything is unread", () => {
+    const rows = [agentRow(say("a1", 0), say("a2", MIN))];
+    expect(withDivider(rows, "a1")).toEqual(["sep", "new", "A:a1,a2"]);
+  });
+
+  it("counts a guardian message sent from another device among the unread ones", () => {
+    const rows = [
+      agentRow(say("a1", 0)),
+      userRow(guardian("g1", MIN)),
+      agentRow(say("a2", 2 * MIN)),
+    ];
+    expect(withDivider(rows, "a1")).toEqual(["sep", "new", "A:a1", "G:g1", "A:a2"]);
+  });
+
+  it("draws no divider when the named message draws nothing", () => {
+    const empty = {
+      ...say("empty", MIN),
+      content: JSON.stringify([{ type: "text", content: " " }]),
+    };
+    const rows = [agentRow(say("a1", 0), empty, say("a2", 2 * MIN))];
+    expect(withDivider(rows, "empty")).toEqual(["sep", "A:a1,a2"]);
+  });
+
+  it("gives a message that arrives after a hidden unread tail no divider", () => {
+    const empty = {
+      ...say("empty", MIN),
+      content: JSON.stringify([{ type: "text", content: " " }]),
+    };
+    const rows = [agentRow(say("a1", 0), empty)];
+    expect(withDivider(rows, "empty")).toEqual(["sep", "A:a1"]);
+    expect(withDivider([...rows, agentRow(say("a2", 2 * MIN))], "empty")).toEqual([
+      "sep",
+      "A:a1,a2",
+    ]);
+    expect(withDivider([...rows, userRow(guardian("g1", 2 * MIN))], "empty")).toEqual([
+      "sep",
+      "A:a1",
+      "G:g1",
+    ]);
+  });
+
+  it("draws no divider when the unread message is not in the rows", () => {
+    expect(withDivider([agentRow(say("a1", 0))], "older")).toEqual(["sep", "A:a1"]);
+  });
+
+  it("draws one divider only", () => {
+    const rows = [
+      agentRow(say("a1", 0)),
+      agentRow(say("a2", 20 * MIN)),
+      agentRow(say("a3", 40 * MIN)),
+    ];
+    expect(withDivider(rows, "a2").filter((entry) => entry === "new")).toHaveLength(1);
+  });
+
+  it("hands back the same divider object on every build", () => {
+    const rows = [agentRow(say("a1", 0), say("a2", MIN))];
+    const find = () =>
+      buildConciergeItems(rows, { typing: false, unreadFrom: "a2" }).find(
+        (item) => item.kind === "unread",
+      );
+    expect(find()).toBeDefined();
+    expect(find()).toBe(find());
+  });
+});
+
 describe("buildConciergeItems reference stability", () => {
   const history = [
     guardian("u1", 0),
@@ -307,26 +393,6 @@ describe("buildConciergeItems reference stability", () => {
     expect(after[1]).toBe(before[1]);
     expect(after[2]).not.toBe(before[2]);
     expect(after[3]).toBe(before[3]);
-  });
-});
-
-it("groups an on-behalf Concierge message with adjacent guardian messages", () => {
-  const automated = guardian("on-behalf", MIN);
-  automated.sender = {
-    kind: "automated",
-    sourceType: "agent",
-    name: "Concierge",
-    iconUrl: null,
-    onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
-  };
-  const items = buildConciergeItems([userRow(guardian("typed", 0)), userRow(automated)], {
-    typing: false,
-  });
-  const groups = items.filter((item) => item.kind === "group");
-  expect(groups).toHaveLength(1);
-  expect(groups[0]).toMatchObject({
-    sender: "guardian",
-    entries: [{ message: { id: "typed" } }, { message: { id: "on-behalf" } }],
   });
 });
 
@@ -399,5 +465,63 @@ describe("showsTyping", () => {
 
   it("never types once the turn has ended", () => {
     expect(showsTyping(asked, { ...live(null), isStreaming: false })).toBe(false);
+  });
+});
+
+describe("where a reply came from", () => {
+  const routine = { type: "routine" as const, name: "Daily summary" };
+  const inputRow = (turnId: string, source = routine): ChatRow => ({
+    kind: "automated_input",
+    key: `automated-input:${turnId}`,
+    source,
+    turnId,
+  });
+  const entries = (items: ConciergeItem[]) =>
+    items.flatMap((item) => (item.kind === "group" ? item.entries : []));
+
+  it("labels the replies of a turn an automated input started with its source, and draws no line for it", () => {
+    const items = build([
+      inputRow("t1"),
+      agentRow(say("answer", MIN, "t1"), say("more", MIN + 1_000, "t1")),
+    ]);
+    expect(shape(items)).toEqual(["sep", "A:answer,more"]);
+    expect(entries(items).map((entry) => entry.source)).toEqual([routine, routine]);
+  });
+
+  it("draws nothing for an automated input whose turn said nothing", () => {
+    expect(build([inputRow("t1")])).toEqual([]);
+  });
+
+  it("leaves a reply to the owner unlabelled", () => {
+    const asked = guardian("asked", 0);
+    asked.turnId = "t2";
+    const items = build([inputRow("t1"), userRow(asked), agentRow(say("answer", MIN, "t2"))]);
+    expect(entries(items).map((entry) => entry.source)).toEqual([undefined, undefined]);
+  });
+
+  it("draws an on-behalf message from before as no owner bubble, and labels its turn's reply", () => {
+    const old = guardian("on-behalf", 0);
+    old.turnId = "t1";
+    old.sender = {
+      kind: "automated",
+      sourceType: "agent",
+      name: "Flint",
+      iconUrl: null,
+      onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+    };
+    const items = build([
+      userRow(guardian("typed", -MIN)),
+      userRow(old),
+      agentRow(say("answer", MIN, "t1")),
+    ]);
+    expect(shape(items)).toEqual(["sep", "G:typed", "A:answer"]);
+    expect(entries(items).at(-1)?.source).toEqual({ type: "agent", name: "Flint" });
+  });
+
+  it("draws an automated message from before as no bubble, and nothing when its turn said nothing", () => {
+    const old = guardian("old-auto", 0);
+    old.turnId = "t1";
+    old.sender = { kind: "automated", sourceType: "agent", name: "Milo", iconUrl: null };
+    expect(build([userRow(old)])).toEqual([]);
   });
 });

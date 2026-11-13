@@ -15,6 +15,7 @@ import {
   RECHECK_MS,
   TOOL_HOLD_MS,
 } from "./activity.js";
+import { taskStatus } from "@rome/api-types/concierge-task-status";
 
 const task = (extra: Partial<TaskChatActivityFacts> = {}): TaskChatActivityFacts => ({
   title: "Book the flight",
@@ -92,6 +93,14 @@ describe("conciergeActivity", () => {
     });
   });
 
+  it("says it is tidying up while its session is renewed, ahead of everything else", () => {
+    expect(
+      conciergeActivity(
+        facts({ tidying: true, awaitingGuardian: true, turn: { running: true, tool: null } }),
+      ),
+    ).toEqual({ kind: "tool", tool: "tidyingUp" });
+  });
+
   it("puts a card waiting here or in a task chat ahead of a report and running tasks", () => {
     const rest = { reportPending: true, tasks: [task({ running: true })] };
     expect(conciergeActivity(facts({ ...rest, awaitingGuardian: true }))).toEqual({
@@ -158,7 +167,7 @@ function world() {
   /** When the owner last spoke in each Concierge chat. */
   const spoke = new Map<string, number>();
   const pending: string[] = [];
-  const rows: (ActivityTaskRow & { conciergeChat: string })[] = [];
+  const rows: (Omit<ActivityTaskRow, "status" | "waitingSince"> & { conciergeChat: string })[] = [];
   const chats = new Map<string, string>([
     ["main", "guardian"],
     ["topic", "guardian"],
@@ -172,9 +181,28 @@ function world() {
     awaitingGuardianSince: async (ids) =>
       new Map(ids.filter((id) => awaiting.has(id)).map((id) => [id, waitBegan.get(id) ?? now])),
     ownerSpokeAt: async (chatId) => spoke.get(chatId) ?? null,
+    // Each row's status read from the same facts, as events.ts reads it.
     tasksOf: async (chatId) => {
       reads += 1;
-      return rows.filter((row) => row.conciergeChat === chatId);
+      return rows
+        .filter((row) => row.conciergeChat === chatId)
+        .map((row) => {
+          const waitingSince =
+            row.chatId && awaiting.has(row.chatId) ? (waitBegan.get(row.chatId) ?? now) : null;
+          const { status } = taskStatus(
+            {
+              stoppedAt: null,
+              waitingSince,
+              running: row.chatId ? running.has(row.chatId) : false,
+              reportPending: pending.includes(row.id),
+              laterAt: null,
+              lastOutcome: null,
+              started: true,
+            },
+            now,
+          );
+          return { ...row, status, waitingSince };
+        });
     },
     reportPending: () => pending,
     ownerOf: async (chatId) => chats.get(chatId) ?? null,
@@ -272,6 +300,26 @@ describe("ConciergeActivityTracker", () => {
     expect(Number.isFinite(fresh?.at)).toBe(true);
     // And as JSON, the way it travels.
     expect(typeof JSON.parse(JSON.stringify(fresh)).at).toBe("number");
+  });
+
+  it("says it is tidying up while a renewal's handoff is written, then what comes next", async () => {
+    const w = world();
+    await flush();
+    let release!: () => void;
+    const work = w.tracker.tidying(
+      "main",
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    await flush();
+    expect(w.last("main")).toEqual({ kind: "tool", tool: "tidyingUp" });
+    w.running.add("main");
+    release();
+    await work;
+    await flush();
+    // Its label holds a moment like any named tool's, then the turn shows.
+    w.advance(TOOL_HOLD_MS);
+    await flush();
+    expect(w.last("main")).toEqual({ kind: "working" });
   });
 
   it("says working the moment the turn starts, and only on a change", async () => {

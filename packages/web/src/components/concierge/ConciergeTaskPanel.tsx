@@ -1,9 +1,21 @@
-import { Archive, Check, ChevronDown, ListChecks, MessageSquare, RotateCcw } from "lucide-react";
+import {
+  AlarmClockOff,
+  Archive,
+  Check,
+  ChevronDown,
+  ListChecks,
+  MessageSquare,
+  RotateCcw,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import type { ConciergeTaskAction, ConciergeTaskDto } from "@rome/api-types/concierge";
+import {
+  type ConciergeTaskStatusResult,
+  taskStatusOfDto,
+} from "@rome/api-types/concierge-task-status";
 import {
   EmptyState,
   EmptyStateDescription,
@@ -22,24 +34,43 @@ import {
 import { useActiveSessionId } from "@/hooks/use-active-session-id";
 import { useConciergeName } from "@/hooks/use-concierge";
 import { cn } from "@/lib/utils";
-import { checkPresses } from "./check-presses";
+import { inputsSettledSchema, settlePresses } from "./check-presses";
+import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { requestConciergeJump } from "./concierge-jump";
-import { doneMessage, pressText, sendTaskAction } from "./send-task-action";
+import { doneMessage, pressText, sendTaskAction, stopTask } from "./send-task-action";
 import { StopGlyph } from "./StopGlyph";
 import { TaskGlyph } from "./TaskGlyph";
 import { formatTaskTime, groupTasks, taskTime, tasksOfChat, type TaskGroupKey } from "./tasks";
 import { type PendingAction, settlePending, usePendingActions } from "./task-pending";
 import { useConciergeTasks } from "./use-concierge-tasks";
 
-/** How often a pending press asks whether its turn has ended. */
-const CHECK_PRESSES_MS = 2_000;
+/** What a row's button does: a press the Concierge hears, or cancelling its checks. */
+type RowAction = ConciergeTaskAction | "cancelCheck";
 
-/** The action a row offers: Stop on a Doing row with a chat, Done on a Needs you one, Archive on a finished one. */
-function rowAction(task: ConciergeTaskDto): ConciergeTaskAction | null {
-  if (task.state === "doing" && task.chat) return "stop";
-  if (task.state === "needs_user") return "done";
-  if (task.state === "done" || task.state === "dropped") return "archive";
+/**
+ * The action a row offers: Stop on an active row with a chat, Done on one
+ * that needs the guardian, Archive on an ended one, and Cancel check on a
+ * later one waiting on a check.
+ */
+function rowAction(task: ConciergeTaskDto, status: ConciergeTaskStatusResult): RowAction | null {
+  if (status.status === "active" && task.chat) return "stop";
+  if (status.status === "needs_you") return "done";
+  if (status.status === "ended") return "archive";
+  if (status.status === "later" && task.laterAt != null) return "cancelCheck";
   return null;
+}
+
+/** Cancels task `task`'s pending checks; the task stays, read again without them. */
+async function cancelTaskChecks(task: Pick<ConciergeTaskDto, "id">, failed: string) {
+  try {
+    const response = await fetch(`/api/concierge/tasks/${encodeURIComponent(task.id)}/checks`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!response.ok) toast.error(failed);
+  } catch {
+    toast.error(failed);
+  }
 }
 
 function TaskRow({
@@ -57,12 +88,15 @@ function TaskRow({
 }) {
   const { t, i18n } = useTranslation("chat");
   const name = useConciergeName();
-  const action = rowAction(task);
-  const finished = task.state === "done" || task.state === "dropped";
-  const detail =
-    task.state === "watching" || task.state === "needs_user"
-      ? (task.waitingOn ?? task.summary)
-      : task.summary;
+  const taskStatus = taskStatusOfDto(task);
+  const action = rowAction(task, taskStatus);
+  const finished = taskStatus.status === "ended";
+  // An ended task that did not finish says why, ahead of the Concierge's words.
+  const ended =
+    taskStatus.endReason && taskStatus.endReason !== "done"
+      ? t(`concierge.tasks.ended.${taskStatus.endReason}`)
+      : null;
+  const detail = [ended, task.summary].filter(Boolean).join(" · ");
   // One quiet line under the title: what a press did so far, else the Concierge's own words.
   const status = pending
     ? pending.phase === "pending"
@@ -71,8 +105,14 @@ function TaskRow({
     : [detail, task.notSynced ? t("concierge.tasks.notSynced") : null].filter(Boolean).join(" · ");
   const at = taskTime(task);
   const retry = pending !== undefined && pending.phase !== "pending";
-  const press = (kind: ConciergeTaskAction) => {
-    if (kind === "done") {
+  const press = (kind: RowAction) => {
+    if (kind === "cancelCheck") {
+      // Only its checks go: the task stays, and Rome reads its status again.
+      void cancelTaskChecks(task, t("checks.cancelFailed"));
+    } else if (kind === "stop") {
+      // A stop needs no turn of the Concierge: Rome stops the task at once.
+      void stopTask(task);
+    } else if (kind === "done") {
       const { text, replyToMessageId } = doneMessage(t, task, rows);
       void sendTaskAction(task, kind, text, replyToMessageId);
     } else {
@@ -96,8 +136,8 @@ function TaskRow({
       size="md"
       className="group/row relative transition-colors hover:bg-surface-hover"
     >
-      <li data-task-id={task.id} data-task-state={task.state}>
-        <TaskGlyph state={task.state} />
+      <li data-task-id={task.id} data-task-status={taskStatus.status}>
+        <TaskGlyph status={taskStatus} />
         <ListRowContent>
           <button
             type="button"
@@ -163,6 +203,8 @@ function TaskRow({
                     <StopGlyph />
                   ) : action === "done" ? (
                     <Check />
+                  ) : action === "cancelCheck" ? (
+                    <AlarmClockOff />
                   ) : (
                     <Archive />
                   )
@@ -185,8 +227,8 @@ function TitleText({ task, finished }: { task: ConciergeTaskDto; finished: boole
 }
 
 /**
- * The Concierge's task list: what needs the guardian, what it is doing, what is
- * next, what it is watching, and what it finished. Read-only: a button sends the
+ * The Concierge's task list: what waits for the guardian, what is at work,
+ * what is checked later, and what ended. Read-only: a button sends the
  * Concierge a message, and the row changes when the Concierge writes it.
  */
 export function ConciergeTaskPanel({
@@ -202,7 +244,7 @@ export function ConciergeTaskPanel({
   const activeSessionId = useActiveSessionId();
   const openChatId = chatId === undefined ? activeSessionId : chatId;
   // Finished work is history, so that group starts folded.
-  const [folded, setFolded] = useState<ReadonlySet<TaskGroupKey>>(new Set(["done"]));
+  const [folded, setFolded] = useState<ReadonlySet<TaskGroupKey>>(new Set(["ended"]));
   const [showAllDone, setShowAllDone] = useState(false);
   // Every finished row is loaded and the 7-day window is applied here, so the
   // panel knows how many older ones "Show older" holds.
@@ -213,12 +255,10 @@ export function ConciergeTaskPanel({
 
   // Rows the Concierge wrote settle their pending buttons, and a turn that took
   // a press in and ended without a write tells that button nothing changed.
-  const waiting = [...pending.values()].some((press) => press.phase === "pending");
-  useEffect(() => {
-    if (!waiting) return;
-    const timer = setInterval(() => void checkPresses().catch(() => {}), CHECK_PRESSES_MS);
-    return () => clearInterval(timer);
-  }, [waiting]);
+  // The server says when that turn ended; the panel pages no chat for it.
+  useLiveEvents(chatStatusTopic, {
+    inputs_settled: { schema: inputsSettledSchema, fn: settlePresses },
+  });
   useEffect(() => {
     for (const task of tasks) settlePending(task);
   }, [tasks]);
@@ -280,7 +320,7 @@ export function ConciergeTaskPanel({
                       onNavigate={onNavigate}
                     />
                   ))}
-                  {group.key === "done" && (group.hidden > 0 || showAllDone) ? (
+                  {group.key === "ended" && (group.hidden > 0 || showAllDone) ? (
                     <li>
                       <ListRow
                         asChild

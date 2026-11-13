@@ -7,8 +7,18 @@ enum LiveEvent: Sendable {
     case sessionRunning(sessionId: String, running: Bool)
     /// A message was stored in a chat (`chat.session:<id>`).
     case messageInsert(ChatMessage)
-    /// A message was placed in a chat thread (`message_chat_thread`).
-    case messageThread(sessionId: String, messageId: String, chatThreadId: String?)
+    /// A message was placed in a chat thread (`message_chat_thread`), with
+    /// the title of the task the thread is.
+    case messageThread(sessionId: String, messageId: String, chatThreadId: String?, title: String? = nil)
+    /// A task left the chat and took its thread with it (`chat_thread_retired`):
+    /// its messages are in no thread now.
+    case threadRetired(sessionId: String, chatThreadId: String)
+    /// Rome's mark on a guardian message changed (`message_status_reaction`).
+    /// Nil: it has none now.
+    case statusReaction(sessionId: String, messageId: String, reaction: String?)
+    /// A task's question or approval that a card in the chat shows ended
+    /// (`chat_card_settled`): `card` replaces the card of every part that shows it.
+    case cardSettled(sessionId: String, card: JSONValue)
     /// A Concierge chat's activity changed (`concierge_activity`). Nil: a
     /// state this build does not know, shown as no status line.
     /// `at`: when it took effect on the server, epoch milliseconds.
@@ -307,6 +317,12 @@ final class LiveEventsSocket: LiveEventSource {
         case "message_insert":
             guard let message = data.decoded(ChatMessage.self) else { return nil }
             return .messageInsert(message)
+        case "message_status_reaction":
+            guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
+            return .statusReaction(sessionId: id, messageId: message, reaction: data["statusReaction"]?.string)
+        case "chat_card_settled":
+            guard let id = data["sessionId"]?.string, let card = data["card"], card["kind"]?.string != nil, card["id"]?.string != nil else { return nil }
+            return .cardSettled(sessionId: id, card: card)
         case "concierge_activity":
             guard let chatId = data["chatId"]?.string, let activity = data["activity"] else { return nil }
             return .conciergeActivity(chatId: chatId, activity: ConciergeActivity(json: activity), at: data["at"]?.number)
@@ -314,7 +330,10 @@ final class LiveEventsSocket: LiveEventSource {
             return .agentName(AgentName.display(data["agentName"]?.string))
         case "message_chat_thread":
             guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
-            return .messageThread(sessionId: id, messageId: message, chatThreadId: data["chatThreadId"]?.string)
+            return .messageThread(sessionId: id, messageId: message, chatThreadId: data["chatThreadId"]?.string, title: data["chatThreadTitle"]?.string)
+        case "chat_thread_retired":
+            guard let id = data["sessionId"]?.string, let root = data["chatThreadId"]?.string else { return nil }
+            return .threadRetired(sessionId: id, chatThreadId: root)
         case "task_upsert":
             guard let event = data.decoded(TaskUpsertEvent.self) else { return nil }
             return .taskUpsert(event.task)

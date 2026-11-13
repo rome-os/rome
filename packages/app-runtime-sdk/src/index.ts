@@ -2611,6 +2611,8 @@ export interface AppConnectionErrorBody {
     | "outcome_unknown"
     | "provider_error";
   message: string;
+  /** Optional stable provider reason. Human-readable messages are not machine codes. */
+  reason?: string;
   retryable: boolean;
 }
 

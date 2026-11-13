@@ -192,13 +192,19 @@ struct ApprovalCardView: View {
     let resolvedAt: Date?
     /// A visitor sees the card but cannot answer it.
     var canResolve = true
+    /// Drawn whole and read only, as a folded card opens: what it asked, no controls.
+    var settled = false
+    /// How it ended, in the line above a settled card's title.
+    var settledLabel: String? = nil
     let onResolve: (Bool) -> Void
 
     private var title: String { part.title.flatMap { $0.isEmpty ? nil : $0 } ?? displayActionName(part.actionName) }
 
     var body: some View {
         Group {
-            switch status {
+            switch settled ? .pending : status {
+            case _ where settled:
+                settledCard
             case nil:
                 HStack(spacing: 10) {
                     Spinner(size: 16, color: Palette.sub)
@@ -226,6 +232,43 @@ struct ApprovalCardView: View {
         }
     }
 
+    /// An approval that no longer waits, opened read only: as an answered
+    /// question card draws itself, the outcome, what it asked, then its
+    /// details as a plain list.
+    private var settledCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(verbatim: settledLabel ?? String(localized: "Approval"))
+                .romeFont(CardScale.label)
+                .foregroundStyle(Palette.sub)
+            Text(title)
+                .romeFont(CardScale.title, .semibold)
+                .foregroundStyle(Palette.sub)
+                .lineSpacing(3)
+            let rows: [(label: String?, value: String)] =
+                ((part.summary ?? "").isEmpty ? [] : [(nil, part.summary ?? "")])
+                + part.fields.map { (Optional($0.label), $0.value) }
+            if !rows.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                        if index > 0 { OptionDivider() }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            if let label = row.label {
+                                Text(label).romeFont(CardScale.caption).foregroundStyle(Palette.sub).frame(width: 44, alignment: .leading)
+                            }
+                            Text(row.value).romeFont(CardScale.body).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(minHeight: CardScale.optionMinHeight, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .fillsBubbleWidth()
+        .cardPadding()
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
+        .hairline(radius: Metrics.bigCardRadius)
+        .transition(.opacity)
+    }
+
     private var pendingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
@@ -235,7 +278,7 @@ struct ApprovalCardView: View {
                     .frame(width: CardScale.iconBox, height: CardScale.iconBox)
                     .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Needs approval")
+                    (settled ? Text("Approval") : Text("Needs approval"))
                         .romeFont(CardScale.label)
                         .foregroundStyle(Palette.sub)
                     Text(title)
@@ -285,7 +328,9 @@ struct ApprovalCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            if canResolve {
+            if settled {
+                EmptyView()
+            } else if canResolve {
                 // Sized to their words at the card's foot: Approve the one
                 // accent button, Reject a quiet one beside it.
                 HStack(spacing: 6) {
@@ -331,6 +376,7 @@ struct ApprovalCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
@@ -367,7 +413,7 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 AlertGlyph(size: 15)
-                Text("Approved, but “\(title)” did not finish").romeFont(14, .medium)
+                Text("Approved, but “\(title)” didn't finish").romeFont(14, .medium)
             }
             .foregroundStyle(Palette.destructive)
             .padding(.horizontal, 12)
@@ -375,6 +421,7 @@ struct ApprovalCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
@@ -405,6 +452,13 @@ struct QuestionCardView: View {
                 .foregroundStyle(Palette.sub)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// A thin rule between the rows of a card's plain list.
+struct OptionDivider: View {
+    var body: some View {
+        Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 30)
     }
 }
 
@@ -455,22 +509,5 @@ struct WebOnlyCard: View {
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
         .hairline(radius: Metrics.groupRadius)
-    }
-}
-
-struct ErrorLine: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-            AlertGlyph(size: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-            Text(text)
-                .romeFont(15)
-                .lineSpacing(5)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(2)
-        .accessibilityElement(children: .combine)
     }
 }

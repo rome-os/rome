@@ -111,6 +111,7 @@
     "archived": "Steps from this turn are archived.",
     "loading": "Loading trace...",
     "retry": "Retry",
+    "failed": "Error",
     "failedWithReason": "Error: {{reason}}",
     "stoppedByUser": "Stopped by user",
     "thinking": "Thinking...",
