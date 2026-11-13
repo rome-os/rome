@@ -7,19 +7,14 @@ import type { ChatMessage } from "@/lib/chat-types";
 export interface UnreadAtOpen {
   /** The chat's read mark before the open marked it read: an ISO time, whole seconds. */
   watermark: string;
-  /** The ids of the messages the chat opened with, frozen: a message that arrives later is not among them. */
-  openIds: ReadonlySet<string>;
-  /** The earliest `createdAt` of those messages, in milliseconds. A message older than it came from an older page. */
-  oldestAt: number;
-}
-
-/** The part of a chat's history that was there when it opened, as {@link UnreadAtOpen} holds it. */
-export function openingHistory(
-  messages: ChatMessage[],
-): Pick<UnreadAtOpen, "openIds" | "oldestAt"> | null {
-  const times = messages.map((message) => Date.parse(message.createdAt)).filter(Number.isFinite);
-  if (messages.length === 0 || times.length === 0) return null;
-  return { openIds: new Set(messages.map((message) => message.id)), oldestAt: Math.min(...times) };
+  /**
+   * The ids of the messages that can be unread: those the chat opened with, and
+   * those that came from older pages since. A message that arrives live is never
+   * among them. Time cannot tell the two apart, because a page holds whole
+   * turns and a turn that began on an older page can reply after the opening
+   * page began.
+   */
+  memberIds: ReadonlySet<string>;
 }
 
 /** The unread agent messages of a chat, as far as its loaded history shows them. */
@@ -47,10 +42,15 @@ function drawsBubble(message: ChatMessage): boolean {
  * same: a message is unread when it was created after the read mark, and both
  * times have one-second precision, so a message in the same second as the mark
  * is read. Each message is judged on its own, because the transcript's order
- * groups messages by turn and is not time order. Only the opening history
- * counts, plus older pages loaded since. A message that arrived after the chat
- * opened is neither, however it sorts. `hasOlder` says older pages are not all
- * loaded. Returns null when nothing is unread.
+ * groups messages by turn and is not time order, and only the messages in
+ * `open.memberIds` count. `hasOlder` says older pages are not all loaded.
+ * Returns null when no loaded message is unread.
+ *
+ * A page holds whole turns, so a turn on an older page can reply after the
+ * mark whatever the loaded turns hold. The first unread message is therefore
+ * known only once no older page remains, or once the oldest loaded turn has no
+ * unread message, which ends the unread run. A turn that began before every
+ * loaded one and replies after the mark is not looked for.
  */
 export function summarizeUnread(
   messages: ChatMessage[],
@@ -58,18 +58,17 @@ export function summarizeUnread(
   hasOlder: boolean,
 ): UnreadSummary | null {
   const mark = seconds(open.watermark);
-  if (Number.isNaN(mark)) return null;
+  if (Number.isNaN(mark) || messages.length === 0) return null;
+  const isUnread = (message: ChatMessage) => seconds(message.createdAt) > mark;
   const agent = messages.filter(
-    (message) =>
-      message.role === "assistant" &&
-      (open.openIds.has(message.id) || Date.parse(message.createdAt) < open.oldestAt),
+    (message) => message.role === "assistant" && open.memberIds.has(message.id),
   );
-  const drawn = agent.filter(
-    (message) => seconds(message.createdAt) > mark && drawsBubble(message),
-  );
+  const drawn = agent.filter((message) => isUnread(message) && drawsBubble(message));
   if (drawn.length === 0) return null;
-  // Unread messages are the newest, so a loaded read one means nothing older is unread.
-  const more = hasOlder && !agent.some((message) => seconds(message.createdAt) <= mark);
+  const oldestTurn = messages[0].turnId ?? messages[0].id;
+  const more =
+    hasOlder &&
+    agent.some((message) => (message.turnId ?? message.id) === oldestTurn && isUnread(message));
   return { firstId: more ? null : drawn[0].id, count: drawn.length, more };
 }
 
@@ -82,10 +81,10 @@ const MARK_WAIT_MS = 2000;
  * absence means the chat does no pre-read work. A chat opened without an id
  * is a draft that a first send turns into a chat, and has nothing unread.
  *
- * Two things fix `unread`, and neither changes afterward, even once the chat
- * is marked read: the read mark, and the messages of the history the chat
- * opened with, which `noteOpened` reports. Messages that arrive live after that
- * are never unread.
+ * Two things fix `unread`, even once the chat is marked read: the read mark,
+ * and which messages can be unread. Those are the messages the chat opened
+ * with, which `noteOpened` reports, and the ones older pages bring, which
+ * `noteOlder` reports. Messages that arrive live are never unread.
  */
 export function useUnreadAtOpen({
   chatId,
@@ -98,6 +97,8 @@ export function useUnreadAtOpen({
   unread: UnreadAtOpen | null;
   /** Reports the history the chat opened with, once. The first report is the one that counts. */
   noteOpened: (messages: ChatMessage[]) => void;
+  /** Reports the messages of an older page that loaded. */
+  noteOlder: (messages: ChatMessage[]) => void;
   /**
    * Resolves once the read mark is known, or after {@link MARK_WAIT_MS}. Null
    * when none is on the way. Await it before marking the chat read.
@@ -107,7 +108,8 @@ export function useUnreadAtOpen({
   const openedAsDraft = useRef(!chatId);
   const request = useRef<Promise<void> | null>(null);
   const [watermark, setWatermark] = useState<string | null>(null);
-  const [opening, setOpening] = useState<ReturnType<typeof openingHistory> | undefined>(undefined);
+  const [openIds, setOpenIds] = useState<ReadonlySet<string> | null | undefined>(undefined);
+  const [olderIds, setOlderIds] = useState<ReadonlySet<string>>(new Set());
 
   // The request starts in an effect that runs before the one that loads the
   // chat's messages, and nothing marks the chat read before that load.
@@ -126,13 +128,25 @@ export function useUnreadAtOpen({
 
   const noteOpened = useCallback(
     (messages: ChatMessage[]) =>
-      setOpening((current) => (current === undefined ? openingHistory(messages) : current)),
+      setOpenIds((current) =>
+        current === undefined
+          ? messages.length > 0
+            ? new Set(messages.map((message) => message.id))
+            : null
+          : current,
+      ),
+    [],
+  );
+  const noteOlder = useCallback(
+    (messages: ChatMessage[]) =>
+      setOlderIds((current) => new Set([...current, ...messages.map((message) => message.id)])),
     [],
   );
   const pendingMark = useCallback(() => request.current, []);
   const unread = useMemo(
-    () => (watermark && opening ? { watermark, ...opening } : null),
-    [watermark, opening],
+    () =>
+      watermark && openIds ? { watermark, memberIds: new Set([...openIds, ...olderIds]) } : null,
+    [watermark, openIds, olderIds],
   );
-  return { unread, noteOpened, pendingMark };
+  return { unread, noteOpened, noteOlder, pendingMark };
 }

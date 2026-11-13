@@ -679,6 +679,21 @@ export function Chat({
     [stickContentRef],
   );
 
+  // What was unread when this Concierge chat opened. It stays put while the
+  // chat is open, so the divider outlives the read mark and ignores arrivals.
+  const {
+    unread: unreadAtOpen,
+    noteOpened,
+    noteOlder,
+    pendingMark,
+  } = useUnreadAtOpen({ chatId: sessionId, loadReadMark });
+  const onOlderPage = useCallback(
+    (id: string, page: ChatMessage[]) => {
+      if (id === mainSessionIdRef.current) noteOlder(page);
+    },
+    [noteOlder],
+  );
+
   // The main session loads its newest turns first and pages older ones in as
   // the transcript scrolls toward the top.
   const {
@@ -691,6 +706,7 @@ export function Chat({
     scroller: scrollerEl,
     pinned: isAtBottom,
     setMessages,
+    onOlderPage,
   });
 
   // The view derivation lives in the pure `buildChatView`; here we just memoize
@@ -712,13 +728,6 @@ export function Chat({
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, identityBySession, interactionResults } = view;
-  // What was unread when this Concierge chat opened. It stays put while the
-  // chat is open, so the divider outlives the read mark and ignores arrivals.
-  const {
-    unread: unreadAtOpen,
-    noteOpened,
-    pendingMark,
-  } = useUnreadAtOpen({ chatId: sessionId, loadReadMark });
   const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
   const unread = useMemo(
     () => (unreadAtOpen ? summarizeUnread(displayMessages, unreadAtOpen, olderRemains) : null),
