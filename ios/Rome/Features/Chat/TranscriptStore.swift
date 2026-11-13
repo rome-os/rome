@@ -28,6 +28,12 @@ final class TranscriptStore {
     private(set) var running = false
     /// The running turn is one the guardian should see as typing (not a quiet background turn).
     private(set) var visibleTurn = false
+    /// The turns the instance listed as running or queued at the last look.
+    private(set) var activeTurns: [ActiveTurn] = []
+    /// How often a running chat asks the instance whether its turn is over, in
+    /// case the live event that says so never comes.
+    @ObservationIgnored var runningPollInterval: Duration = .seconds(10)
+    @ObservationIgnored private var runningPoll: Task<Void, Never>?
     private(set) var activeTurnId: String?
     private(set) var stopping = false
     /// The guardian stopped the last turn. Cleared when a new turn starts.
@@ -100,8 +106,26 @@ final class TranscriptStore {
             messages: messages,
             pending: pending,
             answers: answers,
-            options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: kind == .concierge && running && visibleTurn)
+            options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping)
         )
+    }
+
+    /// Whether the Chat shows its typing dots, by the web's rule: a turn that
+    /// took the guardian's message shows none (its status mark says it is on
+    /// it), and any other visible turn shows them only until it has said
+    /// something.
+    var showsTyping: Bool {
+        guard kind == .concierge, running, visibleTurn else { return false }
+        // A send the instance has not stored yet is the input of the turn.
+        if pending.contains(where: { if case .failed = $0.state { return false } else { return true } }) { return false }
+        let visible = activeTurns.filter { $0.quiet != true }
+        guard let turn = visible.first(where: { $0.status == "running" }) ?? visible.first else { return false }
+        let ids = Set([turn.turnId, turn.agentTurnId].compactMap { $0 })
+        if messages.contains(where: { $0.isUser && $0.turnId.map(ids.contains) == true }) { return false }
+        return !messages.contains { message in
+            guard let id = message.turnId, ids.contains(id) else { return false }
+            return TranscriptBuilder.isReply(message, parts: message.parts)
+        }
     }
 
     /// The first message the guardian wrote, which for a task chat is the brief
@@ -567,6 +591,7 @@ final class TranscriptStore {
             return
         }
         markRunning()
+        activeTurns = turns
         visibleTurn = turns.contains { $0.quiet != true }
         activeTurnId = turns.first { $0.status == "running" }?.turnId ?? turns.first?.turnId
     }
@@ -574,12 +599,30 @@ final class TranscriptStore {
     private func markRunning() {
         running = true
         stopped = false
+        startRunningPoll()
+    }
+
+    /// While the chat runs, asks the instance now and then whether it still
+    /// does, so a live event that never arrives cannot leave it busy.
+    private func startRunningPoll() {
+        guard kind == .concierge, runningPoll == nil else { return }
+        runningPoll = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let interval = self?.runningPollInterval else { return }
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled, let self, self.running else { return }
+                await self.refreshRunning()
+            }
+        }
     }
 
     private func markIdle() {
         if stopping { stopped = true }
         running = false
         visibleTurn = false
+        activeTurns = []
+        runningPoll?.cancel()
+        runningPoll = nil
         activeTurnId = nil
         stopping = false
     }
@@ -596,7 +639,6 @@ final class TranscriptStore {
         pending.append(PendingSend(id: inputId, text: trimmed, images: images, createdAt: .now, state: .sending, thread: thread))
         if kind == .concierge {
             markRunning()
-            visibleTurn = true
         }
         deliver(inputId: inputId, text: trimmed, images: images, fromComposer: fromComposer, thread: thread)
         return true

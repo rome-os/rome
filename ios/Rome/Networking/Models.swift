@@ -266,6 +266,8 @@ struct ActiveTurn: Codable, Hashable, Sendable {
     var turnId: String
     var status: String?
     var quiet: Bool?
+    /// The agent's own id for a backend turn, which its saved messages carry.
+    var agentTurnId: String?
 }
 
 /// How a sent input treats a turn that is already running.
