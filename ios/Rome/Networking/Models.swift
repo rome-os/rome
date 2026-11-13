@@ -707,6 +707,26 @@ struct ToolCall: Identifiable, Hashable, Sendable {
 
 // MARK: - Dates
 
+/// Remembers what a pure parse made of a string. A chat's rows are rebuilt from
+/// its messages on every update of the chat, and parsing each message's date and
+/// parts again each time (an ISO 8601 formatter, a JSON decode) made a sheet or
+/// the sidebar stutter on a long chat.
+final class ParseCache<Value>: @unchecked Sendable {
+    private final class Box {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+
+    private let cache = NSCache<NSString, Box>()
+
+    func value(for key: String, _ make: (String) -> Value) -> Value {
+        if let hit = cache.object(forKey: key as NSString) { return hit.value }
+        let value = make(key)
+        cache.setObject(Box(value), forKey: key as NSString)
+        return value
+    }
+}
+
 enum RomeDate {
     nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -720,9 +740,11 @@ enum RomeDate {
         return formatter
     }()
 
+    private static let parsed = ParseCache<Date?>()
+
     static func parse(_ text: String?) -> Date? {
         guard let text else { return nil }
-        return fractional.date(from: text) ?? plain.date(from: text)
+        return parsed.value(for: text) { fractional.date(from: $0) ?? plain.date(from: $0) }
     }
 
     static func string(_ date: Date) -> String {

@@ -202,8 +202,14 @@ enum MessagePart: Hashable, Sendable {
         }
     }
 
+    private static let parsed = ParseCache<[MessagePart]>()
+
     /// Parses a message's stored content.
     static func parse(_ content: String) -> [MessagePart] {
+        parsed.value(for: content, decode)
+    }
+
+    private static func decode(_ content: String) -> [MessagePart] {
         guard let data = content.data(using: .utf8),
               let value = try? JSONDecoder().decode(JSONValue.self, from: data),
               case .array(let items) = value
