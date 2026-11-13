@@ -4,7 +4,18 @@ import { approvals } from "../../db/schema.js";
 import type { DrizzleDb } from "../../db/index.js";
 import { APPROVAL_TYPES, type ApprovalStatus, type ApprovalType } from "@rome/api-types/approvals";
 
-export type ApprovalRow = typeof approvals.$inferSelect;
+type StoredApproval = typeof approvals.$inferSelect;
+/** An approval as read: its row, with the chat its payload names (`threadIdOf`). */
+export type ApprovalRow = StoredApproval & { threadId: string | null };
+
+/** The chat an approval's payload says it was asked in, as an index on payload reads it. */
+const approvalThread = sql<
+  string | null
+>`json_extract(${approvals.payload}, '$.channelContext.threadId')`;
+
+function read(row: StoredApproval): ApprovalRow {
+  return { ...row, threadId: threadIdOf(row.payload) };
+}
 type ResolveAction = "approve" | "reject";
 
 export type ResolvePendingResult =
@@ -70,25 +81,28 @@ export class ApprovalsRepository {
 
   constructor(private db: DrizzleDb) {}
 
-  /** Chat `threadId`'s approvals of `status`, newest first, found by its index. */
-  async listInThread(threadId: string, status?: ApprovalStatus) {
-    return this.db
+  /**
+   * Chat `threadId`'s approvals of `status`, newest first, found by the index
+   * on the chat their payload names.
+   */
+  async listInThread(threadId: string, status?: ApprovalStatus): Promise<ApprovalRow[]> {
+    const rows = await this.db
       .select()
       .from(approvals)
-      .where(
-        and(eq(approvals.threadId, threadId), status ? eq(approvals.status, status) : undefined),
-      )
+      .where(and(eq(approvalThread, threadId), status ? eq(approvals.status, status) : undefined))
       .orderBy(desc(approvals.createdAt), desc(approvals.id))
       .all();
+    return rows.map(read);
   }
 
-  async list(status?: ApprovalStatus) {
-    return this.db
+  async list(status?: ApprovalStatus): Promise<ApprovalRow[]> {
+    const rows = await this.db
       .select()
       .from(approvals)
       .where(status ? eq(approvals.status, status) : undefined)
       .orderBy(desc(approvals.createdAt), desc(approvals.id))
       .all();
+    return rows.map(read);
   }
 
   async create(data: {
@@ -118,7 +132,6 @@ export class ApprovalsRepository {
       requestedBy: data.requestedBy,
       description: data.description,
       payload: data.payload ?? null,
-      threadId,
       executionState: "idle",
       createdAt: now,
       resolvedAt: null,
@@ -187,17 +200,19 @@ export class ApprovalsRepository {
     return rows.length > 0;
   }
 
-  async findPending() {
-    return this.db.select().from(approvals).where(eq(approvals.status, "pending"));
+  async findPending(): Promise<ApprovalRow[]> {
+    return (await this.db.select().from(approvals).where(eq(approvals.status, "pending"))).map(
+      read,
+    );
   }
 
-  async findByType(type: ApprovalType) {
-    return this.db.select().from(approvals).where(eq(approvals.type, type));
+  async findByType(type: ApprovalType): Promise<ApprovalRow[]> {
+    return (await this.db.select().from(approvals).where(eq(approvals.type, type))).map(read);
   }
 
-  async findById(id: string) {
+  async findById(id: string): Promise<ApprovalRow | null> {
     const rows = await this.db.select().from(approvals).where(eq(approvals.id, id));
-    return rows[0] ?? null;
+    return rows[0] ? read(rows[0]) : null;
   }
 
   async resolvePending(
@@ -232,8 +247,9 @@ export class ApprovalsRepository {
       };
     }
 
-    for (const listener of this.resolvedListeners) listener(updated[0]);
-    return { outcome: "resolved", approval: updated[0] };
+    const resolved = read(updated[0]);
+    for (const listener of this.resolvedListeners) listener(resolved);
+    return { outcome: "resolved", approval: resolved };
   }
 
   async claimExecution(id: string): Promise<boolean> {
@@ -343,6 +359,6 @@ export class ApprovalsRepository {
       };
     }
 
-    return { outcome: "queued", approval: rows[0] };
+    return { outcome: "queued", approval: read(rows[0]) };
   }
 }

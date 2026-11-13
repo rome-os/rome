@@ -649,7 +649,8 @@
       "agent": "Agent",
       "automation": "自动化",
       "following": "关注",
-      "digest": "关注 · 摘要"
+      "digest": "关注 · 摘要",
+      "check": "检查"
     }
   },
   "routineCard": {

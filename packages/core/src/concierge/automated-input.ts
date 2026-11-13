@@ -20,6 +20,7 @@ const KIND_LABEL: Record<SystemInputSource["type"], string> = {
   automation: "Automation",
   following: "Following",
   digest: "Following · digest",
+  check: "Check",
 };
 
 /** The source a turn's trace and the chat's faint line name. */

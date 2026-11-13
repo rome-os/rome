@@ -411,13 +411,25 @@ export function startConciergeEvents(
     // a newer input took it over and carries them on: a task panel press
     // reads from this that its turn ended, without paging the chat.
     if (!event.handedOn) {
+      // What earlier turns handed on to this one is done with too. Read now,
+      // before the turn's end forgets it.
+      const carried = [...service.promptsHandedOn(chatId)];
       void webchatRepo
         .getTurnChatMessages(chatId, event.turn.turnId)
         .then((rows) =>
-          service.inputsSettled(
-            chatId,
-            rows.filter((row) => row.role === "user").map((row) => row.id),
-          ),
+          service.inputsSettled(chatId, [
+            ...new Set([
+              // Only what the turn took in: one queued behind it waits for its own turn.
+              ...rows
+                .filter(
+                  (row) =>
+                    row.role === "user" &&
+                    (row.inputState === "consumed" || row.inputState == null),
+                )
+                .map((row) => row.id),
+              ...carried,
+            ]),
+          ]),
         )
         .catch((error: unknown) =>
           log.warn("failed to tell a turn's messages are done with", {

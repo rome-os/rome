@@ -4896,6 +4896,38 @@ describe("Webchat API", () => {
       expect(stored.at(-1)?.content).not.toContain("reply_to");
     });
 
+    it("tells the cards that show a question it settled once the owner's answer is taken", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(parkedEvents("tu-park-settle"));
+      const settled: unknown[] = [];
+      deps.concierge = {
+        cardSettled: async (chatId: string, item: unknown) => {
+          settled.push([chatId, item]);
+        },
+        onCardSettled: () => () => {},
+      } as never;
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "design a workflow" }),
+      });
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            { type: "interaction_result", toolUseId: "tu-park-settle", output: { ok: true } },
+          ],
+        }),
+      });
+      expect(settled).toEqual([[sessionId, { kind: "question", id: "tu-park-settle" }]]);
+    });
+
     it("frames a dismissal so the agent does not retry", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(parkedEvents("tu-park-3"));
@@ -6865,7 +6897,9 @@ describe("Webchat API", () => {
               ],
             ]);
           },
-          findBySessions: async () => [],
+          findBySessions: async () => [
+            { sessionId: "task-chat", ownerKey: "guardian", expiredWaitAt: null },
+          ],
           waitExpiry: 1,
         }),
         onCardSettled: (listener: (event: unknown) => void) => {

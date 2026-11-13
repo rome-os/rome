@@ -1,4 +1,5 @@
 import { withTaskCards } from "../../concierge/task-cards.js";
+import { ownerOf } from "../../webchat/owner.js";
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
@@ -1050,7 +1051,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         emit("message_insert", message);
         return;
       }
-      void fillTaskCards([message])
+      void fillTaskCards(sessionId, [message])
         .catch(() => [message])
         .then(([filled]) => emit("message_insert", filled ?? message));
     });
@@ -1523,18 +1524,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
   // A task card's question or approval and how it ended, read for the whole
   // page at once (concierge/task-cards.ts). Only a Concierge chat has them.
-  const fillTaskCards = <T extends { role: string; content: string; createdAt: Date | string }>(
+  const fillTaskCards = async <
+    T extends { role: string; content: string; createdAt: Date | string },
+  >(
+    sessionId: string,
     messages: T[],
-  ): Promise<T[]> =>
-    deps.concierge && messages.some((message) => message.content.includes('"task_chat"'))
-      ? withTaskCards(deps.concierge.taskCardSources(), messages)
-      : Promise.resolve(messages);
+  ): Promise<T[]> => {
+    if (!deps.concierge || !messages.some((message) => message.content.includes('"task_chat"'))) {
+      return messages;
+    }
+    // A card shows only the reader's own task chats: the chat's owner's.
+    const chat = await deps.webchatRepo.getSession(sessionId);
+    if (!chat) return messages;
+    return withTaskCards(deps.concierge.taskCardSources(), messages, ownerOf(chat));
+  };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachChatThreadTitles(
       sessionId,
       await attachStatusReactions(
         sessionId,
-        await attachTraceSummaries(sessionId, await fillTaskCards(messages)),
+        await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
       ),
     );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
@@ -4189,6 +4198,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
+    // An answer, and the cards a typed reply dismisses, settle the cards a
+    // Concierge chat shows for them. The owner's input announces no insert,
+    // so it is told here.
+    for (const toolUseId of [...(resolution ? [resolution.toolUseId] : []), ...skippedCardIds]) {
+      void deps.concierge
+        ?.cardSettled(sessionId, { kind: "question", id: toolUseId })
+        .catch((error: unknown) =>
+          log.warn("failed to tell a settled card", {
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
     // Words typed into a task chat take a stopped task up again.
     if (!conciergeHeader) {
       await deps.concierge?.resumeTaskChat?.(sessionId).catch((error: unknown) =>

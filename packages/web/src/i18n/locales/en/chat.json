@@ -649,7 +649,8 @@
       "agent": "Agent",
       "automation": "Automation",
       "following": "Following",
-      "digest": "Following · digest"
+      "digest": "Following · digest",
+      "check": "Check"
     }
   },
   "routineCard": {

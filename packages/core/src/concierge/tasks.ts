@@ -322,11 +322,9 @@ export class ConciergeTasks {
   /** The rows' DTOs, with their status read now. */
   async toDtos(tasks: readonly ConciergeTaskWithChat[]): Promise<ConciergeTaskDto[]> {
     const status = await this.statusOf(tasks.map((task) => task.row));
-    return tasks.map((task) => {
-      const of = status.get(task.row.id) as TaskStatusView;
-      this.told.set(task.row.id, keyOf(of));
-      return this.toDto(task, of);
-    });
+    // A read tells no one: only a re-check records what it told, so a read
+    // between a fact and its re-check never hides the change from the push.
+    return tasks.map((task) => this.toDto(task, status.get(task.row.id) as TaskStatusView));
   }
 
   /** One owner's panel rows: every open row, and the finished ones of the last `doneDays` days. */

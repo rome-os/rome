@@ -126,8 +126,9 @@ export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
   and m."sender_agent" is not null and json_valid(m."parts")
   and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
 ) or "rome_sessions"."id" in (
-  select a."thread_id" from "approvals" a
-  where a."status" = 'pending' and a."thread_id" is not null
+  select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
+  where a."status" = 'pending'
+  and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
 
 /**

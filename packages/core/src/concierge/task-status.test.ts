@@ -249,6 +249,18 @@ describe("ConciergeTasks status", () => {
     expect(told.map((task) => task.summary)).toEqual([null, "one", "two"]);
   });
 
+  it("tells a task's new status even when a read saw it first", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await flush();
+    told = [];
+    running.add("task-chat");
+    // The panel reads the list after the fact changed and before its re-check.
+    await tasks.listForPanel();
+    await tasks.chatChanged("task-chat");
+    await flush();
+    expect(told.map((task) => [task.id, task.status])).toEqual([[row.id, "active"]]);
+  });
+
   it("tells a task again when a fact of its chat changes its status, and only then", async () => {
     const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
     await flush();
