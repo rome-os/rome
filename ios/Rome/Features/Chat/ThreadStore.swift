@@ -23,6 +23,8 @@ final class ThreadStore {
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private var tokens: [UUID] = []
     @ObservationIgnored private var loads = 0
+    /// Set while `load` changes the root and the messages, which rebuild once after both.
+    @ObservationIgnored private var rowsHeld = false
 
     init(anchor: ChatMessage, chat: TranscriptStore, backend: RomeBackend, older: [ChatMessage] = []) {
         self.anchor = anchor
@@ -91,8 +93,12 @@ final class ThreadStore {
         do {
             let thread = try await backend.thread(sessionId: sessionId, messageId: anchor.id)
             guard mine == loads else { return }
+            // The root and the messages arrive together: one rebuild for both.
+            rowsHeld = true
             if let first = thread.first?.chatThreadId { root = first }
             older = thread
+            rowsHeld = false
+            rebuildRows()
         } catch {
             // The thread stays as it is shown.
         }
@@ -150,6 +156,7 @@ final class ThreadStore {
     /// Answers come from the chat and from the thread's own older messages,
     /// so a card answered before the chat's pages shows done.
     func rebuildRows(chatAnswers: [String: JSONValue]? = nil) {
+        guard !rowsHeld else { return }
         var all = TranscriptBuilder.answers(in: older)
         all.merge(chatAnswers ?? chat?.answers ?? [:]) { _, chat in chat }
         let held = messages

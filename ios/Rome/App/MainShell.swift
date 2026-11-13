@@ -230,7 +230,10 @@ struct MainShell: View {
         .onChange(of: ObjectIdentifier(workspace)) { installShellActions() }
         .onDisappear {
             model.hide(by: screenID)
-            // They hold this view's state, which they must not outlive.
+            // They hold this view's state, which they must not outlive. The
+            // Agent page's full-screen cover takes the shell off screen too,
+            // and uses them meanwhile: they stay while it is up.
+            guard agentPage == nil else { return }
             linkOpener.run = { _ in .systemAction }
             openUsage.run = { _ in }
             openUsageFromCover.run = { _ in }

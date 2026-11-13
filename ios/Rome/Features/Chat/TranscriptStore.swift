@@ -259,6 +259,9 @@ final class TranscriptStore {
         holdWork?.cancel()
         holdWork = nil
         held = []
+        // The screen's callback holds the shell, which holds the workspace
+        // that holds this store: a stopped store lets go of it.
+        actions.onOpenChat = { _, _ in }
     }
 
     func reload() async {
@@ -460,10 +463,13 @@ final class TranscriptStore {
                 messages[index].statusReaction = reaction
             }
         case .messageThread(let id, let messageId, let root, let title) where id == sessionId:
-            if let index = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[index].chatThreadId = root
-                messages[index].chatThreadTitle = title
-                messages[index].knowsThreads = true
+            if messages.contains(where: { $0.id == messageId }) {
+                editMessages { messages in
+                    guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
+                    messages[index].chatThreadId = root
+                    messages[index].chatThreadTitle = title
+                    messages[index].knowsThreads = true
+                }
             } else {
                 parkedPlacements[messageId] = (root, title)
             }

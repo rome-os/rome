@@ -208,6 +208,24 @@ private func message(
         store.stop()
     }
 
+    /// The screen's callback holds what holds the store (the shell, the
+    /// workspace): a stopped store lets go of it, so nothing keeps the old
+    /// workspace alive after a sign-out or a switch of instance.
+    @Test func aStoppedStoreLetsGoOfTheScreenCallback() async {
+        final class Owner {}
+        let backend = FakeBackend()
+        let store = await chat(backend)
+        weak var released: Owner?
+        do {
+            let owner = Owner()
+            released = owner
+            store.actions.onOpenChat = { _, _ in _ = owner }
+        }
+        #expect(released != nil)
+        store.stop()
+        #expect(released == nil)
+    }
+
     @Test func aShellActionKeepsItsIdentityWhileItsClosureChanges() {
         let action = ShellAction<Int, Int> { $0 + 1 }
         let held = action

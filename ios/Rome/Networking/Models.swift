@@ -717,7 +717,13 @@ final class ParseCache<Value>: @unchecked Sendable {
         init(_ value: Value) { self.value = value }
     }
 
-    private let cache = NSCache<NSString, Box>()
+    /// Bounded, so one-off strings (timestamps of health samples, audit
+    /// entries, another account's messages) do not pile up.
+    private let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.countLimit = 4000
+        return cache
+    }()
 
     func value(for key: String, _ make: (String) -> Value) -> Value {
         if let hit = cache.object(forKey: key as NSString) { return hit.value }
