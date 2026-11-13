@@ -91,8 +91,9 @@ export function ChatMedia({
 }
 
 /**
- * A picture in a chat message. A tap opens the viewer, which can also download
- * it. Inside a link, the tap follows the link instead. The wrapper and image
+ * A picture in a chat message, on a line of its own: text in the same Markdown
+ * paragraph sits above or below it, never beside it. A tap opens the viewer,
+ * which can also download it. Inside a link, the tap follows the link instead. The wrapper and image
  * keep Streamdown's `data-streamdown` hooks, so the kit's block spacing applies.
  * A picture that fails to load shows a line of text, not a broken icon.
  */
@@ -141,7 +142,7 @@ export function ChatImage({
   return (
     <div
       data-streamdown="image-wrapper"
-      className={cn("my-4 inline-block max-w-full", wrapperClassName)}
+      className={cn("my-4 block w-fit max-w-full", wrapperClassName)}
     >
       {failedSrc === src ? (
         <span
