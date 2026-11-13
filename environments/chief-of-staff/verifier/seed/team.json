@@ -1,0 +1,66 @@
+{
+  "members": [
+    {
+      "account": "member1",
+      "name": "Marisol Okonkwo-Vance",
+      "role": "Tidal sensor firmware lead",
+      "currentWork": "Porting the Kelpie-7 buoy firmware to the Zephyr RTOS",
+      "tokens": ["Okonkwo-Vance", "Kelpie-7"]
+    },
+    {
+      "account": "member2",
+      "name": "Teodor Halvorsen-Abara",
+      "role": "Data pipeline engineer",
+      "currentWork": "Rebuilding the brine-salinity ingest job, codenamed Saltmarsh",
+      "tokens": ["Halvorsen-Abara", "Saltmarsh"]
+    },
+    {
+      "account": "member3",
+      "name": "Priya Lindqvist-Mbeki",
+      "role": "Field operations coordinator",
+      "currentWork": "Scheduling the Orkney pier sensor installs for week 49",
+      "tokens": ["Lindqvist-Mbeki", "Orkney"]
+    }
+  ],
+  "formerMembers": [
+    {
+      "name": "Gustavo Ferreira-Yildiz",
+      "note": "Left the team on 2026-10-30. Named in the goals document only as the owner of the dropped goal.",
+      "tokens": ["Ferreira-Yildiz", "Gustavo"]
+    }
+  ],
+  "goals": [
+    {
+      "id": "G1",
+      "title": "Ship Kelpie-7 firmware 3.0 to all 40 buoys",
+      "owner": "Marisol Okonkwo-Vance",
+      "date": "2027-01-22"
+    },
+    {
+      "id": "G2",
+      "title": "Cut salinity ingest lag below 90 seconds",
+      "owner": "Teodor Halvorsen-Abara",
+      "date": "2026-12-11"
+    },
+    {
+      "id": "G3",
+      "title": "Install 12 sensors on Orkney piers",
+      "owner": "Priya Lindqvist-Mbeki",
+      "date": "2027-02-05"
+    }
+  ],
+  "droppedGoals": [
+    {
+      "id": "D1",
+      "title": "Migrate the ops dashboards to Grafanite",
+      "owner": "Gustavo Ferreira-Yildiz",
+      "dropped": "2026-10-30",
+      "tokens": ["Grafanite"]
+    }
+  ],
+  "chats": {
+    "general": { "readers": ["member1", "member2", "member3"], "namedForAgent": true },
+    "standup": { "readers": ["member1", "member2", "member3"], "namedForAgent": true },
+    "leads": { "readers": ["member1", "member2"], "namedForAgent": true }
+  }
+}
