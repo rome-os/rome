@@ -988,16 +988,19 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
 [data-concierge-transcript] [data-timeline-landed] {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
-/* A status reaction grows in from 0.6, as a tapback does, and fades out
-   (status-reaction.tsx, MARK_FADE_MS). */
-@keyframes rome-mark-pop-in {
+/* A status reaction fades in and out (status-reaction.tsx, MARK_FADE_MS). */
+@keyframes rome-mark-fade-in {
   from {
     opacity: 0;
-    transform: scale(0.6);
   }
 }
+/* Its fill is the secondary gray stepped 8% toward the surface ink, so the
+   disc stands off the chat's canvas in every theme and mode: darker on a light
+   canvas, lighter on a dark one. The surface ink is never re-mapped inside a
+   sent bubble, where the mark sits (`.rome-bubble-on-primary`). */
 [data-status-reaction] {
-  animation: rome-mark-pop-in 150ms ease-out;
+  background-color: color-mix(in oklab, var(--secondary), var(--surface-foreground) 8%);
+  animation: rome-mark-fade-in 150ms ease-out;
   transition: opacity 150ms ease-in;
 }
 [data-status-reaction][data-leaving] {

@@ -19,12 +19,6 @@ import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
-// Room every guardian bubble keeps above it for its status reaction, which
-// hangs half out of the bubble's top-left corner (status-reaction.tsx). With
-// the group's 8px gap it clears the bubble above. It is there whether or not
-// a mark shows, so nothing moves when one comes or goes.
-const GUARDIAN_BUBBLE_GAP = "mt-2";
-
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
 const GuardianBubble = memo(
@@ -53,7 +47,6 @@ const GuardianBubble = memo(
         }
         anchorId={msg.id}
         arrival={arrival}
-        className={GUARDIAN_BUBBLE_GAP}
       >
         <UserMessageBubble
           msg={msg}
@@ -209,8 +202,11 @@ export const ConciergeGroup = memo(function ConciergeGroup({
       className={cn(
         // A card keeps no margin of its own here, so its thread label sits as
         // close to it as a bubble's does.
-        "flex flex-col gap-2 [&_[data-chat-card]]:mb-0",
-        group.sender === "guardian" ? "items-end" : "items-start",
+        "flex flex-col [&_[data-chat-card]]:mb-0",
+        // The guardian's bubbles sit 16px apart, mark or not: a status
+        // reaction hangs 12px below its bubble (status-reaction.tsx) and must
+        // clear the next one without moving it.
+        group.sender === "guardian" ? "items-end gap-4" : "items-start gap-2",
       )}
     >
       {group.entries.map((entry) => {

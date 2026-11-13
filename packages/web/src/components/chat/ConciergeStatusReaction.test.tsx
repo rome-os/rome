@@ -123,18 +123,16 @@ describe("Concierge status reaction", () => {
     }
   });
 
-  it("draws the emoji alone on the bubble's top-left corner, at full strength, and only shows", () => {
+  it("draws a round badge on the bubble's bottom-right corner, at full strength, and only shows", () => {
     const { container } = render(transcript());
     const badge = container.querySelector<HTMLElement>("[data-status-reaction]");
     expect(badge).not.toBeNull();
     const classes = badge?.className.split(/\s+/) ?? [];
-    // Centered on the top-left corner, so half of it hangs out.
+    // Centered on the bottom edge near the right corner, a 24px disc.
     expect(classes).toEqual(
-      expect.arrayContaining(["absolute", "-top-2.5", "-left-2.5", "size-5"]),
+      expect.arrayContaining(["absolute", "right-2", "-bottom-3", "size-6", "rounded-full"]),
     );
-    // No disc behind it: no fill, ring, or rounded box.
-    expect(classes.some((name) => /^(bg-|ring-|rounded-|shadow-)/.test(name))).toBe(false);
-    expect(classes.some((name) => /^(right|bottom|-right|-bottom)-/.test(name))).toBe(false);
+    expect(classes.some((name) => /^-?(top|left)-/.test(name))).toBe(false);
     // Neither shrunk nor dimmed: the emoji keeps its own colors.
     expect(classes.some((name) => /^(scale-|opacity-)/.test(name))).toBe(false);
     expect(badge?.querySelector("[class*='opacity-']")).toBeNull();
@@ -145,15 +143,25 @@ describe("Concierge status reaction", () => {
     expect(classes).toContain("pointer-events-none");
   });
 
-  it("keeps the same room above every guardian bubble, mark or not, and none above the agent's", () => {
-    const { container } = render(transcript());
-    const box = (id: string) =>
-      container.querySelector<HTMLElement>(`[data-timeline-anchor="${id}"]`)?.className ?? "";
-    const room = (className: string) => className.match(/\bmt-[\w.]+/g) ?? [];
-    // "weather" has a mark, "thanks" has none: the same room either way.
-    expect(room(box("weather"))).toEqual(["mt-2"]);
-    expect(room(box("thanks"))).toEqual(["mt-2"]);
-    expect(room(box("you're welcome"))).toEqual([]);
+  it("spaces the guardian's bubbles the same with or without a mark", () => {
+    const groupOf = (container: HTMLElement, id: string) =>
+      container.querySelector<HTMLElement>(`[data-timeline-anchor="${id}"]`)?.parentElement
+        ?.className ?? "";
+    const marked = render(transcript());
+    const withMarks = groupOf(marked.container, "weather");
+    marked.unmount();
+    const plain = render(
+      transcript(
+        new Map([
+          ["weather", null],
+          ["quoted", null],
+        ]),
+      ),
+    );
+    expect(groupOf(plain.container, "weather")).toBe(withMarks);
+    expect(withMarks).toMatch(/\bgap-4\b/);
+    // The agent's bubbles keep their tighter spacing.
+    expect(groupOf(plain.container, "you're welcome")).toMatch(/\bgap-2\b/);
   });
 
   it("follows the live reaction once one arrives", async () => {

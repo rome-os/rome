@@ -40,14 +40,13 @@ const MARK_FADE_MS = 150;
 
 /**
  * Rome's status reaction on a guardian message in a Concierge chat
- * (docs/domains/chats.md#status-reaction), placed like an iMessage tapback:
- * the emoji alone, centered on the bubble's top-left corner, so half of it
- * hangs outside the bubble, clear of its text. It is a child of the bubble,
- * so it stays on the bubble whatever the row around it holds. It takes no
- * room: every guardian bubble in a Concierge chat keeps a fixed gap above it
- * for the mark (GUARDIAN_BUBBLE_GAP in ConciergeGroup.tsx), mark or not, so
- * the timeline never moves when it comes or goes. It grows in and fades out,
- * and only shows; it does nothing.
+ * (docs/domains/chats.md#status-reaction): a round badge on the bubble's
+ * bottom-right corner, like a tapback, centered on the bubble's bottom edge so
+ * half of it hangs below, clear of the text. It is a child of the bubble, so
+ * it stays on the bubble whatever the row around it holds. It takes no room:
+ * the guardian's bubbles in a Concierge chat sit far enough apart for it,
+ * mark or not (ConciergeGroup.tsx), so the timeline never moves when it comes
+ * or goes. It fades in and out, and only shows; it does nothing.
  */
 export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusReaction | null }) {
   const { t } = useTranslation("chat");
@@ -82,9 +81,11 @@ export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusRea
       title={label}
       data-status-reaction={shown}
       data-leaving={leaving || undefined}
-      // The emoji alone, 18px at full color, centered on the bubble's corner
-      // so half of it hangs outside.
-      className="pointer-events-none absolute -top-2.5 -left-2.5 flex size-5 select-none items-center justify-center text-title"
+      // A 24px disc with the emoji at 15px in its own colors, ringed in the
+      // chat's background (the chat sets --background to its canvas) so it
+      // cuts cleanly into the bubble, with the faintest shadow. Its fill is
+      // in globals.css (`[data-status-reaction]`).
+      className="pointer-events-none absolute right-2 -bottom-3 z-10 flex size-6 select-none items-center justify-center rounded-full text-section shadow-1 ring-2 ring-background"
     >
       {EMOJI[shown]}
     </span>

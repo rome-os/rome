@@ -418,7 +418,7 @@ describe("Concierge layout", () => {
         expect(classes).not.toContain("max-w-full");
         // A percentage of a box that shrinks to the bubble would wrap short
         // text, so the cap sits right in the group, which spans the column.
-        expect(cap.parentElement?.className).toContain("gap-2");
+        expect(cap.parentElement?.className).toMatch(/\bgap-[24]\b/);
       }
     });
 
@@ -477,7 +477,9 @@ describe("Concierge layout", () => {
       expect(within(mine as HTMLElement).getByText("Two")).toBeTruthy();
       expect(within(theirs as HTMLElement).getByText("Reply A")).toBeTruthy();
       expect(within(theirs as HTMLElement).getByText("Reply B")).toBeTruthy();
-      expect((mine as HTMLElement).className).toContain("gap-2");
+      // The guardian's bubbles leave room for the status reaction under each.
+      expect((mine as HTMLElement).className).toContain("gap-4");
+      expect((theirs as HTMLElement).className).toContain("gap-2");
       expect((mine as HTMLElement).parentElement?.className).toContain("gap-4");
     });
 
