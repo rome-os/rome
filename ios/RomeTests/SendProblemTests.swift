@@ -27,8 +27,9 @@ import Testing
         return message
     }
 
-    /// Retry on a stored message hands it over again under the id it has, and only the app's own sends can be deleted.
-    @Test func retryRedeliversAStoredMessageWithItsInputId() async {
+    /// Retry on a stored message is a new send with a fresh id (the instance drops
+    /// the old id as a duplicate), and the stored bubble gives way to it.
+    @Test func retryOfAStoredMessageIsANewSendThatReplacesIt() async {
         let backend = FakeBackend()
         backend.sendSucceeds = true
         backend.stored = [stored("in-1", inputState: "failed")]
@@ -37,29 +38,42 @@ import Testing
         #expect(!store.isPending("in-1:0"))
         store.retry("in-1:0")
         for _ in 0..<100 where backend.sentInputIds.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(backend.sentInputIds == ["in-1"])
+        #expect(backend.sentInputIds.count == 1 && backend.sentInputIds[0] != "in-1")
         #expect(backend.calls.last == "send \(conciergeChatID) hello")
-
-        // A send the app holds is sent again and can be deleted.
-        backend.sendSucceeds = false
-        backend.sendError = .network
-        store.send("later")
-        for _ in 0..<50 { try? await Task.sleep(for: .milliseconds(10)) }
-        let pendingId = store.pending[0].id
-        #expect(store.isPending(pendingId))
-        store.removePending(pendingId)
-        #expect(!store.isPending(pendingId))
+        // One bubble for the message: the stored one is not drawn beside the new one.
+        let texts = store.rows.compactMap { row -> String? in if case .userText(_, let text, _, _) = row { return text } else { return nil } }
+        #expect(texts == ["hello"])
+        #expect(store.replaced == ["in-1"])
     }
 
-    @Test func aFailedRedeliverSaysSo() async {
+    /// A send the app still holds keeps its own id when retried: the instance's dedupe is right there.
+    @Test func retryOfAPendingSendKeepsItsId() async {
+        let backend = FakeBackend()
+        backend.sendError = .network
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        store.send("later")
+        for _ in 0..<50 { try? await Task.sleep(for: .milliseconds(10)) }
+        let id = store.pending[0].id
+        #expect(store.isPending(id))
+        backend.sendError = .network
+        store.retry(id)
+        for _ in 0..<50 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.sentInputIds == [id, id])
+        store.removePending(id)
+        #expect(!store.isPending(id))
+    }
+
+    /// A retry that fails again is the new bubble's own failure, with its own icon.
+    @Test func aFailedRetryOfAStoredMessageShowsItsOwnIcon() async {
         let backend = FakeBackend()
         backend.sendError = .network
         backend.stored = [stored("in-2", inputState: "unknown")]
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
         await store.reload()
         store.retry("in-2:0")
-        for _ in 0..<100 where store.notice == nil { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(store.notice != nil)
+        for _ in 0..<100 where store.pending.first?.state == .sending || store.pending.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.pending.first?.state == .failed(.unreachable))
+        #expect(store.isPending(store.pending[0].id))
     }
 }
 

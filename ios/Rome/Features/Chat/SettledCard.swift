@@ -212,7 +212,8 @@ enum TaskAskMode: Equatable {
         if card.settled { return .settled }
         // An older copy is never answerable, expired or not.
         guard latest else { return .open }
-        if card.expired { return .expired }
+        // An expired card reopens only as its task's current wait.
+        if card.expired { return task?.waitId == id ? .expired : .open }
         guard task?.status == "needs_you", task?.waitId == id else { return .open }
         return .waiting
     }

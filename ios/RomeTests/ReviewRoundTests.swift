@@ -62,7 +62,12 @@ private func message(_ id: String, role: String = "assistant", turn: String? = n
         var task = ConciergeTask(id: "k", title: "T", state: .needsUser, createdAt: 0, updatedAt: 0)
         task.status = "ended"
         #expect(TaskAskMode.of(card: card, latest: false, task: task) == .open)
+        #expect(TaskAskMode.of(card: card, latest: true, task: task) == .open)
+        // It reopens only as the task's current wait.
+        task.openWait = .object(["kind": .string("card"), "id": .string("q1"), "since": .number(5)])
         #expect(TaskAskMode.of(card: card, latest: true, task: task) == .expired)
+        task.openWait = .object(["kind": .string("card"), "id": .string("other"), "since": .number(5)])
+        #expect(TaskAskMode.of(card: card, latest: true, task: task) == .open)
     }
 
     /// Closing the chat ends the poll, and a late result does not start it again.

@@ -108,7 +108,7 @@ final class TranscriptStore {
     var rows: [TranscriptRow] {
         let answers = answers
         return TranscriptBuilder.rows(
-            messages: messages,
+            messages: replaced.isEmpty ? messages : messages.filter { !replaced.contains($0.id) },
             pending: pending,
             answers: answers,
             options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping)
@@ -708,6 +708,10 @@ final class TranscriptStore {
         if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: id) }
     }
 
+    /// Stored messages a new send took the place of (a retry of a message the
+    /// instance did not take): not drawn.
+    private(set) var replaced: Set<String> = []
+
     /// Whether the row is a send the app still holds, which only it can drop.
     func isPending(_ rowId: String) -> Bool { pending.contains { $0.id == rowId } }
 
@@ -720,27 +724,14 @@ final class TranscriptStore {
             deliver(inputId: id, text: pending[index].text, images: pending[index].images, thread: pending[index].thread)
             return
         }
+        // The instance keeps what it stored under its own `inputId` and drops a
+        // second send of it as a duplicate, so this goes as a new message, and
+        // the stored one gives way to it: no two bubbles for one message.
         guard let messageId = id.split(separator: ":").first.map(String.init), let stored = message(messageId),
-              let text = stored.parts.compactMap(\.textContent).first else { return }
-        let trimmed = UploadLines.split(text).0
-        guard !trimmed.isEmpty else { return }
-        Task {
-            do {
-                _ = try await backend.send(sessionId: sessionId, text: trimmed, files: [], inputId: messageId, priority: kind == .concierge ? .now : .next, thread: nil)
-                refreshLatestSoon()
-            } catch {
-                say(String(localized: "Couldn't send. Try again"))
-            }
-        }
-    }
-
-    /// The instance does not announce a guardian's own message: read the newest page shortly.
-    private func refreshLatestSoon() {
-        Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            _ = await refreshLatest()
-            await refreshRunning()
-        }
+              let text = stored.parts.compactMap(\.textContent).first, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        replaced.insert(messageId)
+        send(text)
     }
 
     private func deliver(inputId: String, text: String, images: [ComposerImage], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
