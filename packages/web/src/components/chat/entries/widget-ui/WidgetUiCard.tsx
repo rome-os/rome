@@ -235,7 +235,7 @@ export function WidgetUiCard({
   // An answered card shows what the guardian sent, which core keeps as `card`.
   // A dismissed card was never answered, so it shows nothing picked rather
   // than its defaults.
-  const answeredKey = JSON.stringify(result?.card ?? (dismissed ? [] : null));
+  const answeredKey = JSON.stringify(result?.card ?? sentCard(result) ?? (dismissed ? [] : null));
   useEffect(() => {
     const card = JSON.parse(answeredKey) as unknown;
     if (card === null) return;
@@ -312,4 +312,18 @@ export function WidgetUiCard({
       ) : null}
     </div>
   );
+}
+
+/**
+ * What the card sent, before core has stored it as `card`: answers in the
+ * card's own shape (`values` and `text`, no `questionId`), as a reader that
+ * has not heard back from core still holds them.
+ */
+function sentCard(result: Record<string, unknown> | undefined): unknown[] | null {
+  const answers = result?.answers;
+  if (!Array.isArray(answers) || answers.length === 0) return null;
+  const ownShape = answers.every(
+    (a) => !!a && typeof a === "object" && !("questionId" in a) && "values" in a,
+  );
+  return ownShape ? answers : null;
 }

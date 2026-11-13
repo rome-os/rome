@@ -924,8 +924,11 @@ final class TranscriptStore {
     /// starts, comes back with the next read: the server announces no message
     /// of the guardian's own.
     func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
+        // Whatever core said, read the chat again: a card answered elsewhere
+        // shows its answer, and a turn the event started shows even if it
+        // ended before this chat saw it run.
+        defer { resync() }
         try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
-        resync()
     }
 
     /// A widget's read of its own app, with this chat's backend.

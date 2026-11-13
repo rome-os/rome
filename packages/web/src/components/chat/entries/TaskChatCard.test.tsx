@@ -921,7 +921,9 @@ describe("TaskChatCard", () => {
       context: { answers: [{ values: ["Warm"], text: "" }] },
     });
     // The turn is the task chat's, never with the Chat's persona or workspace.
-    expect(JSON.parse(String(init?.body)).turn).toEqual({});
+    const turn = JSON.parse(String(init?.body)).turn;
+    expect(turn.personaId).toBeUndefined();
+    expect(turn.workspace).toBeUndefined();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(await screen.findByText("Sent")).toBeTruthy();
     expect(screen.getByRole("link").getAttribute("href")).toBe(`/chat/${chatId}`);

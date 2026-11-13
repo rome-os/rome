@@ -29,8 +29,7 @@ const settled = (result: Record<string, unknown>) =>
       ui={card.ui}
       props={card.props}
       result={result}
-      onSubmit={() => {}}
-      onDismiss={() => {}}
+      widgetId="m-1"
     />,
   );
 
@@ -46,5 +45,24 @@ describe("QuestionCard — settled", () => {
   it("folds a dismissed card to say so", () => {
     settled({ dismissed: true });
     expect(screen.getByRole("button", { name: "Which areas?Dismissed" })).toBeTruthy();
+  });
+});
+
+describe("QuestionCard — just answered", () => {
+  it("shows what was sent when the folded card opens, before core has stored it", async () => {
+    render(
+      <QuestionCard
+        toolUseId="t-1"
+        appId="core"
+        ui={card.ui}
+        props={card.props}
+        result={{ answers: [{ values: ["Design"], text: "" }] }}
+        widgetId="m-1"
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Which areas\?/ }));
+    const design = await screen.findByRole("button", { name: "Design" });
+    expect(design.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "AI" }).getAttribute("aria-pressed")).toBe("false");
   });
 });
