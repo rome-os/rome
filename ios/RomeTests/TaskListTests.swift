@@ -96,6 +96,11 @@ private let listJSON = #"""
         #expect(TaskListWords.age(nowMs - 3 * day, now: now, calendar: calendar) == "3 days ago")
         #expect(TaskListWords.age(nowMs - day, now: now, calendar: calendar) == "yesterday")
         #expect(TaskListWords.age(nowMs, now: now, calendar: calendar) == "today")
+        // As the web words it: 今天创建, 昨天创建, 3天前创建 once in the line.
+        let zh = Locale(identifier: "zh-Hans_CN")
+        #expect(TaskListWords.age(nowMs, now: now, calendar: calendar, locale: zh) == "今天")
+        #expect(TaskListWords.age(nowMs - day, now: now, calendar: calendar, locale: zh) == "昨天")
+        #expect(TaskListWords.age(nowMs - 3 * day, now: now, calendar: calendar, locale: zh) == "3天前")
         let fresh = ConciergeTask(id: "n", title: "N", state: .next, createdAt: nowMs - 3 * day, updatedAt: nowMs, status: "later")
         #expect(TaskListWords.task(.init(task: fresh, schedule: nil, check: nil, cardMessageId: nil), now: now).hasPrefix("Not started · Created ") == true)
         let scheduled = TaskListItem.Task(task: fresh, schedule: .init(at: "09:00", days: nil), check: nil, cardMessageId: nil)

@@ -629,7 +629,13 @@ final class DemoBackend: RomeBackend {
         let event = LiveEvent.sessionRunning(sessionId: sessionId, running: turnId != nil)
         bus.emit(LiveTopic.chatStatus, event)
         bus.emit(LiveTopic.chat(sessionId), event)
+        // As a Claude turn does: it writes while it runs.
+        if let turn = turnId ?? writingTurn[sessionId] {
+            writingTurn[sessionId] = turnId
+            bus.emit(LiveTopic.chat(sessionId), .messageWriting(sessionId: sessionId, turnId: turn, mode: .exact, writing: turnId != nil))
+        }
     }
+    private var writingTurn: [String: String] = [:]
 
     private func json(_ parts: [JSONValue]) -> String {
         String(data: (try? JSONEncoder().encode(parts)) ?? Data(), encoding: .utf8) ?? "[]"

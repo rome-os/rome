@@ -7,113 +7,104 @@ private func chatMessage(_ id: String, role: String, turn: String?, text: String
     return ChatMessage(id: id, sessionId: conciergeChatID, turnId: turn, role: role, content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)))
 }
 
-/// The Chat's typing dots follow the web's rule: none for a turn that took the
-/// guardian's message, none once the turn has spoken, and a poll that ends them
-/// when the live event never comes.
+/// The Chat's typing dots come from the server's `message_writing` alone
+/// (docs/domains/chats.md#status-reaction): no trace, no guess.
 @MainActor
 @Suite struct TypingDotsTests {
     private func store(_ backend: FakeBackend) -> TranscriptStore {
-        TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        store.start()
+        return store
     }
 
     private func dots(_ store: TranscriptStore) -> Bool { store.rows.contains { $0 == .typing } }
 
-    @Test func aTurnForTheGuardiansMessageShowsNoDots() async {
+    private func writing(_ backend: FakeBackend, turn: String = "t1", _ mode: WritingMode, _ on: Bool) {
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageWriting(sessionId: conciergeChatID, turnId: turn, mode: mode, writing: on))
+    }
+
+    @Test func theEventIsRead() {
+        guard case .messageWriting(let id, let turn, let mode, let on) = LiveEventsSocket.decode(name: "message_writing", data: .object([
+            "sessionId": .string("s"), "turnId": .string("t"), "mode": .string("simulated"), "writing": .bool(false),
+        ])) else { Issue.record("not read"); return }
+        #expect(id == "s" && turn == "t" && mode == .simulated && !on)
+        #expect(LiveEventsSocket.decode(name: "message_writing", data: .object(["sessionId": .string("s"), "turnId": .string("t"), "mode": .string("guess")])) == nil)
+    }
+
+    /// A running turn alone shows nothing: only the server's word does.
+    @Test func aRunningTurnAloneShowsNoDots() async {
         let backend = FakeBackend()
-        backend.stored = [chatMessage("u1", role: "user", turn: "t1", at: 0)]
         backend.turns = [ActiveTurn(turnId: "t1", status: "running", quiet: false)]
         let store = store(backend)
         await store.reload()
-        #expect(store.running)
-        #expect(!dots(store))
+        #expect(store.running && !dots(store))
+        store.stop()
     }
 
-    @Test func aSendShowsNoDotsBeforeItsTurnIsKnown() async {
+    /// Exact (Claude): the dots show while the turn writes, and go when it stops.
+    @Test func exactShowsTheDotsWhileWriting() async {
         let backend = FakeBackend()
-        backend.sendSucceeds = true
-        backend.turns = [ActiveTurn(turnId: "turn", status: "running", quiet: false)]
-        let store = store(backend)
-        store.send("hello")
-        #expect(store.running)
-        #expect(!dots(store))
-    }
-
-    @Test func aTurnWithNoOwnerMessageShowsDotsUntilItSpeaks() async {
-        let backend = FakeBackend()
-        backend.stored = [chatMessage("a0", role: "assistant", turn: "old", at: 0)]
-        backend.turns = [ActiveTurn(turnId: "backend:x", status: "running", quiet: false, agentTurnId: "agent-x")]
         let store = store(backend)
         await store.reload()
+        writing(backend, .exact, true)
         #expect(dots(store))
-
-        // Its saved messages carry the agent's own id.
-        backend.stored.append(chatMessage("a1", role: "assistant", turn: "agent-x", at: 5))
-        await store.reload()
-        #expect(store.running)
+        writing(backend, .exact, false)
         #expect(!dots(store))
+        // The turn ending clears a writing state whose last word was lost.
+        writing(backend, .exact, true)
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .sessionRunning(sessionId: conciergeChatID, running: false))
+        for _ in 0..<100 where dots(store) { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(!dots(store))
+        store.stop()
     }
 
-    @Test func aTraceAloneIsNotSpeaking() async {
+    /// Simulated (Codex): each new message waits behind the dots for 5 ms a
+    /// character, 0.5 to 1 s, one after the other; history never waits.
+    @Test func simulatedHoldsEachNewMessage() async {
         let backend = FakeBackend()
-        backend.stored = [chatMessage("tr", role: "trace", turn: "t9", at: 0)]
-        backend.turns = [ActiveTurn(turnId: "t9", status: "running", quiet: false)]
+        backend.stored = [chatMessage("old", role: "assistant", turn: "t1", at: 0)]
         let store = store(backend)
         await store.reload()
+        writing(backend, .simulated, false)
+        #expect(!dots(store))
+        #expect(store.rows.contains { $0.id == "old:0" })
+
+        let first = chatMessage("a1", role: "assistant", turn: "t1", text: "short", at: 5)
+        let second = chatMessage("a2", role: "assistant", turn: "t1", text: String(repeating: "x", count: 150), at: 6)
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageInsert(first))
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageInsert(second))
         #expect(dots(store))
+        #expect(!store.rows.contains { $0.id == "a1:0" || $0.id == "a2:0" })
+        #expect(store.held.map(\.wait) == [.milliseconds(500), .milliseconds(750)])
+
+        // The first shows after its wait, then the second after its own.
+        for _ in 0..<100 where !store.rows.contains(where: { $0.id == "a1:0" }) { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.rows.contains { $0.id == "a1:0" } && !store.rows.contains { $0.id == "a2:0" } && dots(store))
+        for _ in 0..<150 where !store.rows.contains(where: { $0.id == "a2:0" }) { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.rows.contains { $0.id == "a2:0" } && !dots(store))
+        store.stop()
     }
 
-    @Test func aQuietTurnShowsNoDots() async {
+    /// A message of another turn, or of an exact turn, never waits.
+    @Test func onlyTheSimulatedTurnsMessagesWait() async {
         let backend = FakeBackend()
-        backend.turns = [ActiveTurn(turnId: "q", status: "running", quiet: true)]
         let store = store(backend)
         await store.reload()
-        #expect(store.running)
-        #expect(!dots(store))
+        writing(backend, .simulated, false)
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageInsert(chatMessage("b1", role: "assistant", turn: "other", at: 5)))
+        #expect(store.held.isEmpty && store.rows.contains { $0.id == "b1:0" })
+        writing(backend, turn: "t2", .exact, false)
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageInsert(chatMessage("b2", role: "assistant", turn: "t2", at: 6)))
+        #expect(store.held.isEmpty && !dots(store))
+        store.stop()
+    }
+
+    @Test func simulatedWaitsByLength() {
+        #expect(TranscriptStore.simulatedWait(chatMessage("x", role: "assistant", turn: nil, text: "hi", at: 0)) == .milliseconds(500))
+        #expect(TranscriptStore.simulatedWait(chatMessage("x", role: "assistant", turn: nil, text: String(repeating: "y", count: 400), at: 0)) == .milliseconds(1000))
     }
 
     @Test func theFallbackPollIsTheWebs() {
-        #expect(store(FakeBackend()).runningPollInterval == .seconds(30))
-    }
-
-    @Test func aRunningChatAsksAgainAndStopsWhenTheTurnEnded() async {
-        let backend = FakeBackend()
-        backend.turns = [ActiveTurn(turnId: "backend:y", status: "running", quiet: false)]
-        let store = store(backend)
-        store.runningPollInterval = .milliseconds(30)
-        await store.reload()
-        #expect(dots(store))
-
-        // No live event arrives: only the poll can tell.
-        backend.turns = []
-        for _ in 0..<100 where store.running { try? await Task.sleep(for: .milliseconds(20)) }
-        #expect(!store.running)
-        #expect(!dots(store))
-    }
-
-    /// Coming back to the screen asks once, at once.
-    @Test func comingBackAsksOnce() async {
-        let backend = FakeBackend()
-        backend.turns = [ActiveTurn(turnId: "backend:z", status: "running", quiet: false)]
-        let store = store(backend)
-        store.runningPollInterval = .seconds(3600)
-        await store.reload()
-        #expect(dots(store))
-        backend.turns = []
-        store.recheckRunning()
-        for _ in 0..<100 where store.running { try? await Task.sleep(for: .milliseconds(20)) }
-        #expect(!store.running && !dots(store))
-    }
-
-    /// A chat that shows no dots (its turn took the guardian's message) is not polled.
-    @Test func noDotsNoPoll() async {
-        let backend = FakeBackend()
-        backend.stored = [chatMessage("u1", role: "user", turn: "t1", at: 0)]
-        backend.turns = [ActiveTurn(turnId: "t1", status: "running", quiet: false)]
-        let store = store(backend)
-        store.runningPollInterval = .milliseconds(30)
-        await store.reload()
-        backend.turns = []
-        try? await Task.sleep(for: .milliseconds(200))
-        #expect(store.running)
+        #expect(TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: FakeBackend()).runningPollInterval == .seconds(30))
     }
 }

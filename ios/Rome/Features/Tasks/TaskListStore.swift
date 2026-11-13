@@ -301,11 +301,11 @@ enum TaskListWords {
     }
 
     /// "today", "yesterday", "3 days ago": a not-started task's age, by calendar day.
-    static func age(_ createdAt: Double, now: Date, calendar: Calendar = .current) -> String {
+    static func age(_ createdAt: Double, now: Date, calendar: Calendar = .current, locale: Locale = RelativeTime.locale) -> String {
         let made = Date(timeIntervalSince1970: createdAt / 1000)
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: made), to: calendar.startOfDay(for: now)).day ?? 0
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = RelativeTime.locale
+        formatter.locale = locale
         formatter.dateTimeStyle = .named
         formatter.unitsStyle = .full
         return formatter.localizedString(from: DateComponents(day: -max(days, 0)))

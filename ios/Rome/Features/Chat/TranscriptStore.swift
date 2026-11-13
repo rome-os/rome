@@ -125,21 +125,51 @@ final class TranscriptStore {
         )
     }
 
-    /// Whether the Chat shows its typing dots, by the web's rule: a turn that
-    /// took the guardian's message shows none (its status mark says it is on
-    /// it), and any other visible turn shows them only until it has said
-    /// something.
+    /// How the running turn shows the typing dots, as the server last said
+    /// (`message_writing`); nil when no turn runs.
+    private(set) var writing: (turnId: String, mode: WritingMode, writing: Bool)?
+    /// New messages of a `simulated` turn waiting behind the dots, oldest
+    /// first, each with how long it waits.
+    private(set) var held: [(id: String, wait: Duration)] = []
+    @ObservationIgnored private var holdWork: Task<Void, Never>?
+
+    /// Whether the Chat shows its typing dots: the Concierge is writing a
+    /// message (docs/domains/chats.md#status-reaction). The server alone says
+    /// so: while an `exact` turn writes, or while a `simulated` turn's new
+    /// message waits behind them. 👀 on the guardian's message says it started.
     var showsTyping: Bool {
-        guard kind == .concierge, running, visibleTurn else { return false }
-        // A send the instance has not stored yet is the input of the turn.
-        if pending.contains(where: { if case .failed = $0.state { return false } else { return true } }) { return false }
-        let visible = activeTurns.filter { $0.quiet != true }
-        guard let turn = visible.first(where: { $0.status == "running" }) ?? visible.first else { return false }
-        let ids = Set([turn.turnId, turn.agentTurnId].compactMap { $0 })
-        if messages.contains(where: { $0.isUser && $0.turnId.map(ids.contains) == true }) { return false }
-        return !messages.contains { message in
-            guard let id = message.turnId, ids.contains(id) else { return false }
-            return TranscriptBuilder.isReply(message, parts: message.parts)
+        guard kind == .concierge else { return false }
+        if !held.isEmpty { return true }
+        guard let writing else { return false }
+        return writing.mode == .exact && writing.writing
+    }
+
+    /// How long a `simulated` turn's message waits: 5 ms a character, 0.5 to 1 s.
+    nonisolated static func simulatedWait(_ message: ChatMessage) -> Duration {
+        let length = message.parts.compactMap(\.textContent).reduce(0) { $0 + $1.count }
+        return .milliseconds(min(1000, max(500, length * 5)))
+    }
+
+    /// New messages of the `simulated` turn that arrived after every message
+    /// held so far wait behind the dots, one after the other.
+    private func hold(_ arrived: [ChatMessage], after newest: Date?) {
+        guard kind == .concierge, loaded, let writing, writing.mode == .simulated else { return }
+        for message in arrived where !message.isUser && !message.isTrace && message.turnId == writing.turnId {
+            if let newest, message.date < newest { continue }
+            guard TranscriptBuilder.isReply(message, parts: message.parts) else { continue }
+            held.append((message.id, Self.simulatedWait(message)))
+        }
+        releaseHeld()
+    }
+
+    private func releaseHeld() {
+        guard holdWork == nil, let head = held.first else { return }
+        holdWork = Task { [weak self] in
+            try? await Task.sleep(for: head.wait)
+            guard let self else { return }
+            self.holdWork = nil
+            if self.held.first?.id == head.id { self.held.removeFirst() }
+            self.releaseHeld()
         }
     }
 
@@ -310,6 +340,9 @@ final class TranscriptStore {
     /// arrived in; the order never changes when the same rows arrive again.
     private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        let newest = messages.map(\.date).max()
+        let arrived = incoming.filter { byID[$0.id] == nil }
+        defer { hold(arrived, after: newest) }
         for var message in incoming {
             if message.knowsThreads {
                 instanceKnowsThreads = true
@@ -372,6 +405,8 @@ final class TranscriptStore {
             if message.statusReaction == nil { message.statusReaction = held?.statusReaction }
             merge([message])
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
+        case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
+            writing = (turnId, mode, isWriting)
         case .sessionRunning(let id, let isRunning) where id == sessionId:
             if isRunning != running || isRunning {
                 Task { await refreshRunning(hint: isRunning) }
@@ -644,7 +679,7 @@ final class TranscriptStore {
     /// The stored messages drawn: a message sent again gives way to its new
     /// copy, both while the copy is on its way and once it is stored.
     var visibleMessages: [ChatMessage] {
-        let hidden = TranscriptBuilder.resent(in: messages).union(replaced.values)
+        let hidden = TranscriptBuilder.resent(in: messages).union(replaced.values).union(held.map(\.id))
         return hidden.isEmpty ? messages : messages.filter { !hidden.contains($0.id) }
     }
 
@@ -738,9 +773,9 @@ final class TranscriptStore {
         Task { await refreshRunning() }
     }
 
-    /// While the dots show, asks the instance now and then whether the turn
-    /// still runs, so a live event that never arrives cannot leave them on.
-    /// The poll ends with the running state.
+    /// While a turn runs, asks the instance now and then whether it still
+    /// does, so a live event that never arrives cannot leave Stop up. The
+    /// dots go by `message_writing` alone. The poll ends with the running state.
     private func startRunningPoll() {
         guard kind == .concierge, !closed, runningPoll == nil else { return }
         runningPoll = Task { [weak self] in
@@ -748,13 +783,15 @@ final class TranscriptStore {
                 guard let interval = self?.runningPollInterval else { return }
                 try? await Task.sleep(for: interval)
                 guard !Task.isCancelled, let self, self.running else { return }
-                if self.showsTyping { await self.refreshRunning() }
+                await self.refreshRunning()
             }
         }
     }
 
     private func markIdle() {
         if stopping { stopped = true }
+        // The turn is over: no message is being written.
+        if writing?.writing == true { writing?.writing = false }
         running = false
         visibleTurn = false
         activeTurns = []
