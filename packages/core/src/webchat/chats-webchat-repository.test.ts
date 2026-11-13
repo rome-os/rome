@@ -218,6 +218,35 @@ describe("ChatsWebChatRepository", () => {
     expect(await ids(new Date("2026-11-13T09:04:59Z"))).toEqual(["card-new"]);
   });
 
+  it("reads task chat parts in the transcript's order when two turns' cards share a second", async () => {
+    const part = JSON.stringify([{ type: "task_chat", chatId: "task-1", title: "Flights" }]);
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date("2026-11-13T08:00:00Z"));
+      await repo.createSession("chat-1", "Plans");
+      // "turn-z" starts first, "turn-a" later; both cards land in one second.
+      rs.setSystemTime(new Date("2026-11-13T09:00:00Z"));
+      await repo.addMessage("in-z", "chat-1", "user", text("Book it"), "turn-z");
+      rs.setSystemTime(new Date("2026-11-13T09:00:05Z"));
+      await repo.addMessage("in-a", "chat-1", "user", text("Something else"), "turn-a");
+      rs.setSystemTime(new Date("2026-11-13T09:00:10Z"));
+      await repo.addMessage("new-task", "chat-1", "assistant", part, "turn-a");
+      await repo.addMessage("ask", "chat-1", "assistant", part, "turn-z");
+    } finally {
+      rs.useRealTimers();
+    }
+    expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
+      "in-z",
+      "ask",
+      "in-a",
+      "new-task",
+    ]);
+    const ids = async (since?: Date) =>
+      (await repo.taskChatPartMessages("chat-1", since)).map((line) => line.id);
+    expect(await ids()).toEqual(["ask", "new-task"]);
+    expect(await ids(new Date("2026-11-13T09:00:09Z"))).toEqual(["ask", "new-task"]);
+  });
+
   // A subagent, fork or action run stands in no chat, so its prompts and
   // answers are its own.
   it("keeps the lines of a session in no chat as its own", async () => {

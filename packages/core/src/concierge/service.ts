@@ -76,6 +76,31 @@ export interface DigestTaskNotes {
 /** How long a stopped task's failed approval turn-down waits to be tried again, doubling up to the most. */
 const STOP_RETRY_FIRST_MS = 30_000;
 const STOP_RETRY_MAX_MS = 60 * 60 * 1000;
+/**
+ * The scheduled runs stopped from their task chat whose approvals are still
+ * to be turned down: `{ runs: [{ chatId, stoppedAt }] }`. A run's stop keeps
+ * its task, so the stopped tasks the start sweep reads do not hold it.
+ */
+const STOPPED_RUNS_SETTING_KEY = "conciergeStoppedRuns";
+
+/** What a stop ended: its whole task, or one scheduled run of it. */
+type StopScope = "task" | "run";
+
+interface StoppedRun {
+  chatId: string;
+  stoppedAt: number;
+}
+
+function parseStoppedRuns(value: unknown): StoppedRun[] {
+  const runs = (value as { runs?: unknown } | null)?.runs;
+  if (!Array.isArray(runs)) return [];
+  return runs.flatMap((run) => {
+    const { chatId, stoppedAt } = (run ?? {}) as Record<string, unknown>;
+    return typeof chatId === "string" && typeof stoppedAt === "number"
+      ? [{ chatId, stoppedAt }]
+      : [];
+  });
+}
 
 /** A task checked this many times and still waiting is flagged in the digest. */
 export const POSTPONED_CHECKS = 3;
@@ -1208,7 +1233,7 @@ export class ConciergeService {
   async stopFromChat(taskId: string): Promise<void> {
     if (await this.deps.schedules?.of(taskId)) {
       const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
-      if (chatId) await this.turnDownForStop(chatId, Date.now());
+      if (chatId) await this.turnDownForStop(chatId, Date.now(), 0, "run");
       return;
     }
     await this.stopTask(taskId, "guardian");
@@ -1249,6 +1274,42 @@ export class ConciergeService {
     for (const { chatId } of chats) {
       await this.turnDownForStop(chatId, Number.POSITIVE_INFINITY);
     }
+    // A stopped run's task runs on: only what began by its stop is turned down.
+    for (const run of await this.stoppedRuns()) {
+      await this.turnDownForStop(run.chatId, run.stoppedAt, 0, "run");
+    }
+  }
+
+  private async stoppedRuns(): Promise<StoppedRun[]> {
+    try {
+      return parseStoppedRuns(await this.deps.settingsRepo.get(STOPPED_RUNS_SETTING_KEY));
+    } catch (error) {
+      log.warn("failed to read the stopped runs", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Keeps or drops stopped run `run` for the start sweep. Written only while
+   * its turn-down has failed, so a stop that turns down at once writes nothing.
+   */
+  private async keepStoppedRun(run: StoppedRun, keep: boolean): Promise<void> {
+    const runs = await this.stoppedRuns();
+    const same = (other: StoppedRun) =>
+      other.chatId === run.chatId && other.stoppedAt === run.stoppedAt;
+    const held = runs.some(same);
+    if (held === keep) return;
+    const next = keep ? [...runs, run] : runs.filter((other) => !same(other));
+    await this.deps.settingsRepo
+      .set(STOPPED_RUNS_SETTING_KEY, { runs: next })
+      .catch((error: unknown) =>
+        log.warn("failed to keep a stopped run", {
+          chatId: run.chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
   }
 
   /**
@@ -1265,10 +1326,16 @@ export class ConciergeService {
    * carries on. The stop goes ahead whatever happens here; a failed turn-down
    * is tried again, backing off, and the next start sweeps any left.
    */
-  private async turnDownForStop(chatId: string, stoppedAt: number, failures = 0): Promise<void> {
+  private async turnDownForStop(
+    chatId: string,
+    stoppedAt: number,
+    failures = 0,
+    scope: StopScope = "task",
+  ): Promise<void> {
     // A retry after the task was taken up again turns down nothing: the
-    // approvals its new work asks for are its own.
-    if (failures > 0) {
+    // approvals its new work asks for are its own. A run's stop keeps its
+    // task, so its retry goes on: the cutoff holds it to the stopped run's.
+    if (failures > 0 && scope === "task") {
       const row = await this.deps.tasks.repo.findBySession(chatId);
       if (row && (!stopHolds(row) || (row.stoppedAt?.getTime() ?? 0) > stoppedAt)) return;
     }
@@ -1281,14 +1348,20 @@ export class ConciergeService {
         resolvedBy: RESOLVED_BY_STOP,
         continueTurn: false,
       });
+      if (scope === "run") await this.keepStoppedRun({ chatId, stoppedAt }, false);
     } catch (error) {
       log.warn("failed to turn down a stopped task chat's approvals", {
         chatId,
         failures: failures + 1,
         error: error instanceof Error ? error.message : String(error),
       });
+      // A stopped task's own row brings it back to the start sweep; a run's needs keeping.
+      if (scope === "run") await this.keepStoppedRun({ chatId, stoppedAt }, true);
       const wait = Math.min(STOP_RETRY_FIRST_MS * 2 ** failures, STOP_RETRY_MAX_MS);
-      setTimeout(() => void this.turnDownForStop(chatId, stoppedAt, failures + 1), wait).unref?.();
+      setTimeout(
+        () => void this.turnDownForStop(chatId, stoppedAt, failures + 1, scope),
+        wait,
+      ).unref?.();
     }
   }
 

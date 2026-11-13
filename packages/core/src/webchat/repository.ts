@@ -2493,15 +2493,30 @@ export class WebChatRepository {
     sessionId: string,
     since?: Date,
   ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
-    const rows = await this.selectMessages(
-      and(
-        eq(romeAgentMessages.sessionId, sessionId),
-        eq(romeAgentMessages.role, "assistant"),
-        like(romeAgentMessages.content, '%"task_chat"%'),
-        since ? gte(romeAgentMessages.createdAt, since) : undefined,
-      ),
-    );
-    return rows.map(({ id, content, createdAt }) => ({ id, content, createdAt }));
+    // A turn starts where its first row does, its user and trace rows
+    // included: the start is read over all of them, not only the cards kept,
+    // so two turns whose cards share a second keep the transcript's order.
+    const turnStart = sql`(
+      SELECT MIN(t.created_at) FROM rome_agent_messages t
+      WHERE t.session_id = ${romeAgentMessages.sessionId}
+        AND COALESCE(t.turn_id, t.id) = COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})
+    )`;
+    return this.db
+      .select({
+        id: romeAgentMessages.id,
+        content: romeAgentMessages.content,
+        createdAt: romeAgentMessages.createdAt,
+      })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "assistant"),
+          like(romeAgentMessages.content, '%"task_chat"%'),
+          since ? gte(romeAgentMessages.createdAt, since) : undefined,
+        ),
+      )
+      .orderBy(turnStart, asc(romeAgentMessages.turnId), asc(romeAgentMessages.createdAt));
   }
 
   private selectMessages(where: SQL | undefined) {

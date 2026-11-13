@@ -1069,11 +1069,23 @@ export class ChatsWebChatRepository extends WebChatRepository {
     sessionId: string,
     since?: Date,
   ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
-    const from = since ? sql` AND created_at >= ${Math.floor(since.getTime() / 1000)}` : sql``;
-    return this.selectLines(
-      [sessionId],
-      sql`WHERE role = 'assistant' AND content LIKE '%"task_chat"%'${from}`,
-    ).map(({ id, content, createdAt }) => ({ id, content, createdAt }));
+    const from = since ? sql` AND p.created_at >= ${Math.floor(since.getTime() / 1000)}` : sql``;
+    // A turn starts where its first line does, its prompt or trace included:
+    // the start is read over all of them, before the filter keeps the cards,
+    // so two turns whose cards share a second keep the transcript's order.
+    return this.db
+      .all<LineRow>(sql`
+        WITH lines AS ${sessionLines([sessionId])}
+        SELECT p.* FROM lines p
+        WHERE p.role = 'assistant' AND p.content LIKE '%"task_chat"%'${from}
+        ORDER BY (
+            SELECT MIN(l.created_at) FROM lines l
+            WHERE COALESCE(l.turn_id, l.id) = COALESCE(p.turn_id, p.id)
+          ),
+          p.turn_id, p.created_at, p.line_order, p.seq
+      `)
+      .map(storedLine)
+      .map(({ id, content, createdAt }) => ({ id, content, createdAt }));
   }
 
   private selectLines(
