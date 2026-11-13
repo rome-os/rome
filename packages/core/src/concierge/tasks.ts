@@ -337,6 +337,22 @@ export class ConciergeTasks {
     return this.toDtos(rows.filter((row) => row.owner === owner));
   }
 
+  /**
+   * The panel rows of one Concierge chat of `owner`, as {@link listForPanel}
+   * reads them. A row's status is read only for this chat's rows.
+   */
+  async listForChatPanel(
+    owner: ConciergeOwner,
+    chatId: string,
+    doneDays = CONCIERGE_DONE_DAYS,
+    now = Date.now(),
+  ): Promise<ConciergeTaskDto[]> {
+    const rows = await this.repo.listForPanel(new Date(now - doneDays * DAY_MS));
+    return this.toDtos(
+      rows.filter((row) => row.owner === owner && row.conciergeChat.id === chatId),
+    );
+  }
+
   /** Emits `task_upsert` for every change of one owner's rows. Returns the unsubscribe. */
   subscribe(emit: LiveEventEmit, owner: ConciergeOwner = GUARDIAN_OWNER): () => void {
     // Each change is told in the order it happened: reading a row's status

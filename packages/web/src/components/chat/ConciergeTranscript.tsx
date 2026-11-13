@@ -13,6 +13,7 @@ import { SessionRenewalNotice } from "./SessionRenewalNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
 import { buildConciergeItems, showsTyping } from "@/components/chat/concierge-groups";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
+import { useSimulatedTyping } from "@/components/chat/use-simulated-typing";
 
 function TypingBubble() {
   const { t } = useTranslation("chat");
@@ -41,7 +42,7 @@ const TYPING_BUBBLE = <TypingBubble />;
  * it says arrives as messages.
  */
 export function ConciergeTranscript({
-  rows,
+  rows: allRows,
   live,
   selection,
   actions,
@@ -61,7 +62,9 @@ export function ConciergeTranscript({
   unreadFrom?: string | null;
 }) {
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
-  const typing = showsTyping(rows, live);
+  const simulated = useSimulatedTyping(allRows, live);
+  const rows = simulated.rows;
+  const typing = showsTyping(rows, live, simulated.holding);
   const items = useMemo(
     () => buildConciergeItems(rows, { typing, unreadFrom }),
     [rows, typing, unreadFrom],

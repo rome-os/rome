@@ -324,7 +324,16 @@ export interface MessagePageOptions {
   limit: number;
   /** Return only groups strictly older than this cursor. */
   before?: MessagePageCursor | null;
+  /**
+   * A message the page must reach: the page holds every group down to the one
+   * with this message, and a few older ones, so one read lands on it however
+   * far back it is. A message the chat does not hold changes nothing.
+   */
+  through?: string;
 }
+
+/** How many groups older than a `through` message a page holds, so it opens with some context. */
+export const THROUGH_CONTEXT_GROUPS = 2;
 
 function traceReadFields(archivedSessionIds: string[]) {
   const archived = archivedSessionIds.length
@@ -463,7 +472,9 @@ export const sessionInteractions = sql<string | null>`(
       'at', cast(m."created_at" as integer)
     ))
     from "rome_agent_messages" m, json_each(m."content") part
-    where m."session_id" = "rome_sessions"."id" and json_valid(m."content")
+    where m."session_id" = "rome_sessions"."id"
+    -- A cheap look before any JSON parsing: most messages hold no interaction.
+    and instr(m."content", 'interaction') > 0 and json_valid(m."content")
     and case when part."type" = 'object' then json_extract(part."value", '$.type') end
       in ('pending_interaction', 'interaction_result')
 )`;
@@ -2409,6 +2420,9 @@ export class WebChatRepository {
    */
   async getMessagesPage(sessionId: string, options: MessagePageOptions) {
     const before = options.before;
+    const limit = options.through
+      ? Math.max(options.limit, await this.groupsThrough(sessionId, before, options.through))
+      : options.limit;
     const groups = await this.db.all<{ key: string; startedAt: number }>(sql`
       SELECT key, startedAt FROM (
         SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
@@ -2419,9 +2433,9 @@ export class WebChatRepository {
       )
       ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
       ORDER BY startedAt DESC, key DESC
-      LIMIT ${options.limit + 1}
+      LIMIT ${limit + 1}
     `);
-    const pageGroups = groups.slice(0, options.limit);
+    const pageGroups = groups.slice(0, limit);
     if (pageGroups.length === 0) return { rows: [], nextCursor: null };
     const keys = pageGroups.map((group) => group.key);
     const rows = await this.selectMessages(
@@ -2434,10 +2448,79 @@ export class WebChatRepository {
     return {
       rows,
       nextCursor:
-        groups.length > options.limit && oldest
+        groups.length > limit && oldest
           ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
           : null,
     };
+  }
+
+  /**
+   * How many groups a page from `before` must hold to reach the group of
+   * message `through`, with {@link THROUGH_CONTEXT_GROUPS} older ones. Zero
+   * when the chat does not hold that message, or it is not older than `before`.
+   */
+  protected async groupsThrough(
+    sessionId: string,
+    before: MessagePageCursor | null | undefined,
+    through: string,
+  ): Promise<number> {
+    const [row] = await this.db.all<{ n: number }>(sql`
+      WITH g AS (
+        SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
+               MIN(${romeAgentMessages.createdAt}) AS startedAt
+        FROM ${romeAgentMessages}
+        WHERE ${romeAgentMessages.sessionId} = ${sessionId}
+        GROUP BY key
+      ),
+      t AS (
+        SELECT g.key, g.startedAt FROM g
+        WHERE g.key = (
+          SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})
+          FROM ${romeAgentMessages}
+          WHERE ${romeAgentMessages.sessionId} = ${sessionId} AND ${romeAgentMessages.id} = ${through}
+        )
+      )
+      SELECT count(*) AS n FROM g, t
+      WHERE (g.startedAt, g.key) >= (t.startedAt, t.key)
+      ${before ? sql`AND (g.startedAt, g.key) < (${before.startedAt}, ${before.key})` : sql``}
+    `);
+    const n = row?.n ?? 0;
+    return n === 0 ? 0 : n + THROUGH_CONTEXT_GROUPS;
+  }
+
+  /**
+   * The assistant messages of chat `sessionId` that hold a task chat part,
+   * in the order they were said: where a task's card can show. From `since`
+   * on, when given.
+   */
+  async taskChatPartMessages(
+    sessionId: string,
+    since?: Date,
+  ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
+    // A turn starts where its first row does, its user and trace rows
+    // included: the start is read over all of them, not only the cards kept,
+    // so two turns whose cards share a second keep the transcript's order.
+    const turnStart = sql`(
+      SELECT MIN(t.created_at) FROM rome_agent_messages t
+      WHERE t.session_id = ${romeAgentMessages.sessionId}
+        AND COALESCE(t.turn_id, t.id) = COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})
+    )`;
+    return this.db
+      .select({
+        id: romeAgentMessages.id,
+        content: romeAgentMessages.content,
+        createdAt: romeAgentMessages.createdAt,
+      })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "assistant"),
+          like(romeAgentMessages.content, '%"task_chat"%'),
+          since ? gte(romeAgentMessages.createdAt, since) : undefined,
+        ),
+      )
+      .orderBy(turnStart, asc(romeAgentMessages.turnId), asc(romeAgentMessages.createdAt));
   }
 
   private selectMessages(where: SQL | undefined) {

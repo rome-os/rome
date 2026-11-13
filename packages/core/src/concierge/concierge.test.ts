@@ -27,6 +27,7 @@ import { MessageRepository as StoredMessages } from "../chats/storage/message-re
 import { placeIn } from "../chats/storage/place.js";
 import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
+import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
@@ -6245,6 +6246,124 @@ describe("scheduled tasks", () => {
     await rs.advanceTimersByTimeAsync(3_000);
     expect(s.backendTurns).toHaveLength(1);
     expect(s.backendTurns[0]?.prompt).toContain(taskId);
+  });
+
+  it("ends only the run when its owner presses Stop in a scheduled task's chat, keeping its schedule", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    const cancelled: string[] = [];
+    s.deps.checks = {
+      cancelFor: async (id: string) => (cancelled.push(id), 0),
+      laterOf: async () => new Map(),
+    } as never;
+    const turnedDown: string[] = [];
+    s.service.attachApprovalExpiry(async (chat) => (turnedDown.push(chat), 1));
+    s.fakeTimers();
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+
+    // The Stop in the task chat interrupts the run's turn.
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      status: "interrupted",
+      text: "x",
+    });
+
+    // What the run asked for is turned down; the task, its schedule and its checks stay.
+    expect(turnedDown).toEqual([chatId]);
+    expect(schedules.remove).not.toHaveBeenCalled();
+    expect(cancelled).toEqual([]);
+    expect((await s.taskRepo.get(taskId))?.stoppedAt).toBeFalsy();
+    expect(await s.service.runScheduledTask(taskId, Date.now() + 86_400_000)).toBe("sent");
+  });
+
+  it("retries a stopped run's turn-down, keeping its schedule, and keeps it for the start sweep", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    const stored = new Map<string, unknown>();
+    s.deps.settingsRepo = {
+      get: async (key: string) => stored.get(key) ?? null,
+      set: async (key: string, value: unknown) => void stored.set(key, value),
+    } as never;
+    const cutoffs: number[] = [];
+    let calls = 0;
+    s.service.attachApprovalExpiry(async (_chat, turnDown) => {
+      calls += 1;
+      if (calls === 1) throw new Error("database is locked");
+      cutoffs.push(turnDown.until);
+      return 1;
+    });
+    s.fakeTimers();
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+    const stoppedAt = Date.now();
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      status: "interrupted",
+      text: "x",
+    });
+    // The first turn-down failed: the run is kept for a start in between.
+    expect(calls).toBe(1);
+    expect(stored.get("conciergeStoppedRuns")).toEqual({ runs: [{ chatId, stoppedAt }] });
+
+    // The retry turns down what the stopped run asked for, though its task was never stopped.
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(cutoffs).toEqual([stoppedAt]);
+    expect(stored.get("conciergeStoppedRuns")).toEqual({ runs: [] });
+    expect(schedules.remove).not.toHaveBeenCalled();
+    expect((await s.taskRepo.get(taskId))?.stoppedAt).toBeFalsy();
+  });
+
+  it("keeps both of two stopped runs whose turn-downs fail at once, in the real settings", async () => {
+    const s = setup();
+    const db = createTestDb();
+    opened.push(db);
+    const settings = new SettingsRepository(db.db);
+    s.deps.settingsRepo = settings as never;
+    s.service.attachApprovalExpiry(async () => {
+      throw new Error("database is locked");
+    });
+    const turnDown = (
+      s.service as unknown as {
+        turnDownForStop(chatId: string, at: number, failures: number, scope: "run"): Promise<void>;
+      }
+    ).turnDownForStop.bind(s.service);
+    s.fakeTimers();
+    await Promise.all([
+      turnDown("chat-a", 1, 0, "run"),
+      turnDown("chat-b", 2, 0, "run"),
+      turnDown("chat-c", 3, 0, "run"),
+    ]);
+    expect(await settings.get("conciergeStoppedRuns")).toEqual({
+      runs: [
+        { chatId: "chat-a", stoppedAt: 1 },
+        { chatId: "chat-b", stoppedAt: 2 },
+        { chatId: "chat-c", stoppedAt: 3 },
+      ],
+    });
+  });
+
+  it("turns down at start what a stopped run asked for by its stop, and no later", async () => {
+    const s = setup();
+    const stored = new Map<string, unknown>([
+      ["conciergeStoppedRuns", { runs: [{ chatId: "task-chat-9", stoppedAt: 1_000 }] }],
+    ]);
+    s.deps.settingsRepo = {
+      get: async (key: string) => stored.get(key) ?? null,
+      set: async (key: string, value: unknown) => void stored.set(key, value),
+    } as never;
+    const turnedDown: [string, number][] = [];
+    s.service.attachApprovalExpiry(async (chat, turnDown) => {
+      turnedDown.push([chat, turnDown.until]);
+      return 1;
+    });
+    await s.settle();
+    expect(turnedDown).toEqual([["task-chat-9", 1_000]]);
+    expect(stored.get("conciergeStoppedRuns")).toEqual({ runs: [] });
   });
 
   it("keeps a scheduled task's skill and sends it with every run's brief", async () => {
