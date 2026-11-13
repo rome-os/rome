@@ -196,10 +196,16 @@ export interface ChatMessagePage {
  */
 export async function listSessionMessagePage(
   sessionId: string,
-  options: { limit: number; before?: string | null },
+  options: {
+    limit: number;
+    before?: string | null;
+    /** A message the page must reach, however far back: one read lands on it. */
+    through?: string;
+  },
 ): Promise<ChatMessagePage | null> {
   const params = new URLSearchParams({ limit: String(options.limit) });
   if (options.before) params.set("before", options.before);
+  if (options.through) params.set("through", options.through);
   const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
     credentials: "include",
   });
@@ -704,6 +710,8 @@ export interface CreateRoutinePayload {
    * (other prefixes belong to apps' managed routines). A repeat create with
    * the same key returns the routine that already holds it, not a duplicate. */
   key?: string;
+  /** The chat whose card turns it on. */
+  chatId?: string;
 }
 
 export interface CreateRoutineResult {

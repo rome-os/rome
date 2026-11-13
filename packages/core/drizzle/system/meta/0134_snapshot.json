@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2a1d9ce0-1ccf-4b2b-84f5-73f9b34a3639",
+  "id": "0bf0473f-8d02-48cf-8a45-f37c4351a4f9",
   "prevId": "b3bb0907-2c02-47e9-ac60-2c38ea7de629",
   "tables": {
     "account_profiles": {
@@ -1013,13 +1013,6 @@
             "key"
           ],
           "isUnique": true
-        },
-        "idx_chat_messages_by_key": {
-          "name": "idx_chat_messages_by_key",
-          "columns": [
-            "key"
-          ],
-          "isUnique": false
         },
         "idx_chat_messages_chat_thread": {
           "name": "idx_chat_messages_chat_thread",
@@ -3575,6 +3568,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -3604,6 +3604,13 @@
             "key"
           ],
           "isUnique": true
+        },
+        "idx_routines_chat_id": {
+          "name": "idx_routines_chat_id",
+          "columns": [
+            "chat_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},

@@ -18,7 +18,7 @@ export const CONCIERGE_UNREAD_CAP = 100;
 const MAX_DONE_DAYS = 3650;
 
 /** An SSE stream of what `subscribe` emits, with a heartbeat, until the client goes. */
-function streamEvents(
+export function streamEvents(
   c: Context,
   subscribe: (emit: (event: string, data: unknown) => void) => () => void,
 ): Response {
@@ -47,23 +47,27 @@ function streamEvents(
   });
 }
 
+/**
+ * Whose Concierge the caller reaches: the guardian's, or a dashboard
+ * visitor's own. Null for anyone else, app users included.
+ */
+export async function conciergeCallerOwner(
+  dashboardAccessState: Pick<ApiDeps["dashboardAccessState"], "isCloudEmailAllowed">,
+): Promise<string | null> {
+  const actor = await currentSessionActor();
+  if (actor?.kind === "guardian") return sessionOwnerKey(actor);
+  if (actor?.kind === "visitor" && dashboardAccessState.isCloudEmailAllowed(actor.email)) {
+    return sessionOwnerKey(actor);
+  }
+  return null;
+}
+
 export function conciergeRoutes(
   deps: Pick<ApiDeps, "concierge" | "dashboardAccessState" | "webchatRepo">,
 ): Hono {
   const app = new Hono();
 
-  /**
-   * Whose Concierge the caller reaches: the guardian's, or a dashboard
-   * visitor's own. Null for anyone else, app users included.
-   */
-  const callerOwner = async (): Promise<string | null> => {
-    const actor = await currentSessionActor();
-    if (actor?.kind === "guardian") return sessionOwnerKey(actor);
-    if (actor?.kind === "visitor" && deps.dashboardAccessState.isCloudEmailAllowed(actor.email)) {
-      return sessionOwnerKey(actor);
-    }
-    return null;
-  };
+  const callerOwner = () => conciergeCallerOwner(deps.dashboardAccessState);
 
   // The caller's main Concierge chat, created on first use, and how many
   // agent messages it got since it was last read. 404 without the Concierge service.

@@ -1,3 +1,4 @@
+import type { MessageWritingEvent } from "@rome/api-types/concierge";
 import { memo, type ReactNode, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -59,6 +60,8 @@ export interface LivePreview {
   runningTurnId: string | null;
   /** The running turn is housekeeping for the agent, so the Concierge chat holds back its typing indicator. */
   quiet?: boolean;
+  /** How the running turn shows the typing dots, as the server last said (`message_writing`). */
+  writing?: MessageWritingEvent | null;
   snapshot: TraceSnapshot | null;
   /**
    * The text block being typed. A store rather than a string, so each delivery

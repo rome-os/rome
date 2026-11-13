@@ -86,8 +86,22 @@ describe("TaskChecks", () => {
     const soon = await waiting("chat-1", NOW + HOUR, { taskId: "task-1" });
     await timed("chat-2", NOW + HOUR);
     expect(await checks.inChat("chat-1")).toEqual([
-      { id: soon, name: "wait chat-1", at: NOW + HOUR, waitingFor: "the CI run", taskId: "task-1" },
-      { id: later, name: "check chat-1", at: NOW + 2 * HOUR, waitingFor: null, taskId: null },
+      {
+        id: soon,
+        name: "wait chat-1",
+        at: NOW + HOUR,
+        waitingFor: "the CI run",
+        taskId: "task-1",
+        createdAt: expect.any(Number),
+      },
+      {
+        id: later,
+        name: "check chat-1",
+        at: NOW + 2 * HOUR,
+        waitingFor: null,
+        taskId: null,
+        createdAt: expect.any(Number),
+      },
     ]);
   });
 
@@ -145,7 +159,14 @@ describe("TaskChecks", () => {
     });
     expect(await checks.laterOf(["task-1"])).toEqual(new Map([["task-1", Infinity]]));
     expect(await checks.inChatForApi("chat-1")).toEqual([
-      { id: old, name: "old wait", at: null, waitingFor: null, taskId: "task-1" },
+      {
+        id: old,
+        name: "old wait",
+        at: null,
+        waitingFor: null,
+        taskId: "task-1",
+        createdAt: expect.any(Number),
+      },
     ]);
   });
 
