@@ -21,6 +21,12 @@ export interface ConciergeEntry {
    * from one place however many bubbles it has.
    */
   endsTurn: boolean;
+  /**
+   * Where the input of the message's turn came from, when the Concierge spoke
+   * on its own rather than answering its owner: a routine, an app, another
+   * agent, or what it follows. Drawn as one quiet label under the message.
+   */
+  source?: SystemInputSource;
 }
 
 export type ConciergeItem =
@@ -29,8 +35,6 @@ export type ConciergeItem =
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
   /** Faint line where the chat's agent session was renewed, for `reason`. */
   | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
-  /** Faint line naming the routine, app or agent whose input a turn ran on. */
-  | { kind: "automated"; key: string; source: SystemInputSource }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -140,10 +144,21 @@ export function showsTyping(
 const builtEntries = new WeakMap<ChatMessage, ConciergeEntry>();
 const builtItems = new WeakMap<ChatMessage, ConciergeItem[]>();
 
-function entryFor(message: ChatMessage, endsTurn: boolean): ConciergeEntry {
+function entryFor(
+  message: ChatMessage,
+  endsTurn: boolean,
+  source: SystemInputSource | undefined,
+): ConciergeEntry {
   const built = builtEntries.get(message);
-  if (built && built.endsTurn === endsTurn) return built;
-  const entry = { message, endsTurn };
+  if (
+    built &&
+    built.endsTurn === endsTurn &&
+    built.source?.type === source?.type &&
+    built.source?.name === source?.name
+  ) {
+    return built;
+  }
+  const entry: ConciergeEntry = { message, endsTurn, ...(source ? { source } : {}) };
   builtEntries.set(message, entry);
   return entry;
 }
@@ -160,13 +175,6 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
   if (a.kind === "renewal") return b.kind === "renewal" && a.key === b.key && a.reason === b.reason;
-  if (a.kind === "automated")
-    return (
-      b.kind === "automated" &&
-      a.key === b.key &&
-      a.source.type === b.source.type &&
-      a.source.name === b.source.name
-    );
   if (a.kind === "notice")
     return (
       b.kind === "notice" &&
@@ -205,7 +213,6 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
     | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
-    | { kind: "automated"; key: string; source: SystemInputSource }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
@@ -235,20 +242,23 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
     previous = message;
   };
 
+  // Where each turn's input came from, when it was not the owner's own words.
+  // The chat draws no line for it: the turn's replies carry it as a label.
+  const sources = new Map<string, SystemInputSource>();
   let automaticModel: string | undefined;
   for (const row of rows) {
     if (row.kind === "user") {
-      // A Concierge chat holds no automated messages: one from before that
-      // rule shows as the line a newer one gets. One said on the owner's
-      // behalf is theirs, and stays their bubble.
+      // A Concierge chat holds no automated messages. One from before that
+      // rule, sent on the owner's behalf or not, is no owner's bubble: like a
+      // newer one, it names the replies of the turn it started.
       const sender = row.message.sender;
-      if (sender?.kind === "automated" && !sender.onBehalfOf) {
-        slots.push({
-          kind: "automated",
-          key: row.message.id,
-          source: { type: sender.sourceType ?? "automation", name: sender.name },
-        });
-        group = null;
+      if (sender?.kind === "automated") {
+        if (row.message.turnId) {
+          sources.set(row.message.turnId, {
+            type: sender.sourceType ?? "automation",
+            name: sender.name,
+          });
+        }
       } else if (isRenderable(row.message)) add(row.message, "guardian");
     } else if (row.kind === "agent") {
       for (const message of row.messages) {
@@ -272,8 +282,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
       });
       group = null;
     } else if (row.kind === "automated_input") {
-      slots.push({ kind: "automated", key: row.key, source: row.source });
-      group = null;
+      sources.set(row.turnId, row.source);
     } else if (row.kind === "model_switch") {
       if (row.model === automaticModel) {
         automaticModel = undefined;
@@ -299,7 +308,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   for (const slot of slots) {
     if (slot.kind === "separator") {
       items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
-    } else if (slot.kind === "notice" || slot.kind === "renewal" || slot.kind === "automated") {
+    } else if (slot.kind === "notice" || slot.kind === "renewal") {
       items.push(slot);
     } else {
       const entries = slot.messages.map((message) =>
@@ -308,6 +317,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
           slot.sender === "agent" &&
             !!message.turnId &&
             turnEnds.get(`${message.sessionId}:${message.turnId}`) === message,
+          slot.sender === "agent" && message.turnId ? sources.get(message.turnId) : undefined,
         ),
       );
       items.push(

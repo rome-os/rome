@@ -645,7 +645,9 @@
       "routine": "Routine",
       "app": "App",
       "agent": "Agent",
-      "automation": "Automation"
+      "automation": "Automation",
+      "following": "Following",
+      "digest": "Following · digest"
     }
   },
   "routineCard": {

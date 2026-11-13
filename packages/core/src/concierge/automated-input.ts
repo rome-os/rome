@@ -18,6 +18,8 @@ const KIND_LABEL: Record<SystemInputSource["type"], string> = {
   app: "App",
   agent: "Agent",
   automation: "Automation",
+  following: "Following",
+  digest: "Following · digest",
 };
 
 /** The source a turn's trace and the chat's faint line name. */

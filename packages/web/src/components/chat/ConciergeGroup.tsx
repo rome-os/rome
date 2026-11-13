@@ -1,6 +1,5 @@
 import { ThreadLabelLine } from "@/components/chat/reply/chat-threads";
 import { Fragment, memo, useMemo, type ReactNode } from "react";
-import { UserMessage } from "./UserMessage";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleContent";
@@ -209,16 +208,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
       {group.entries.map((entry) => {
         const bubble = (
           <>
-            {entry.message.sender?.kind === "automated" && entry.message.sender.onBehalfOf ? (
-              // Sent for the guardian, so it stays with their messages and names its source.
-              <div
-                key={entry.message.id}
-                data-timeline-anchor={entry.message.id}
-                className="w-full"
-              >
-                <UserMessage msg={entry.message} />
-              </div>
-            ) : group.sender === "guardian" ? (
+            {group.sender === "guardian" ? (
               <GuardianBubble
                 key={entry.message.id}
                 msg={entry.message}
@@ -233,7 +223,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 arrival={arrival}
               />
             )}
-            <ThreadLabelLine message={entry.message} />
+            <ThreadLabelLine message={entry.message} source={entry.source} />
           </>
         );
         if (!selection) return <Fragment key={entry.message.id}>{bubble}</Fragment>;
