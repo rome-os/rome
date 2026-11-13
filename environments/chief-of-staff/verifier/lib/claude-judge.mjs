@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const { prompt } = JSON.parse(readFileSync(0, "utf8"));
-const model = process.env.COS_JUDGE_MODEL ?? "claude-sonnet-5-5";
+const model = process.env.COS_JUDGE_MODEL || "claude-haiku-5-5";
 const out = execFileSync("claude", ["-p", "--model", model], {
   input: prompt,
   encoding: "utf8",

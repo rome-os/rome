@@ -30,7 +30,7 @@ const { values } = parseArgs({
 const words = (s) => s.split(" ").filter(Boolean);
 const seconds = (s) => Math.round(Number(s) * 1000);
 const judgeCommand = values.judge.includes("claude-judge.mjs")
-  ? `claude-judge (${process.env.COS_JUDGE_MODEL ?? "claude-sonnet-5-5"})`
+  ? `claude-judge (${process.env.COS_JUDGE_MODEL || "claude-haiku-5-5"})`
   : values.judge;
 const judgeName = `${judgeCommand}, prompt ${JUDGE_PROMPT_VERSION}`;
 

@@ -70,7 +70,9 @@ A Discord bot cannot send another bot a direct message, so in the scripted run a
 
 ## The judge
 
-A model grades answers that must be compared with the answer sheet. `lib/judge-prompt.md` is the fixed prompt, with a version in `JUDGE_PROMPT_VERSION`. A change to the prompt bumps it, because a judge change is a verifier change, and every report names the judge model and the prompt version its verdicts came from. The judge is any command that reads `{ prompt, input }` as JSON on stdin and prints `{ "verdict": "pass" | "fail", "reasons": "..." }`. The default, `lib/claude-judge.mjs`, sends the prompt through the `claude` command to the model in `COS_JUDGE_MODEL` (default `claude-sonnet-5-5`). The report keeps each verdict, its reasons and the answer it graded. A judge that prints no verdict leaves that check not checked.
+A model grades answers that must be compared with the answer sheet. `lib/judge-prompt.md` is the fixed prompt, with a version in `JUDGE_PROMPT_VERSION`. A change to the prompt bumps it, because a judge change is a verifier change, and every report names the judge model and the prompt version its verdicts came from. The judge is any command that reads `{ prompt, input }` as JSON on stdin and prints `{ "verdict": "pass" | "fail", "reasons": "..." }`. The default, `lib/claude-judge.mjs`, sends the prompt through the `claude` command to the model in `COS_JUDGE_MODEL` (default `claude-haiku-5-5`). The report keeps each verdict, its reasons and the answer it graded. A judge that prints no verdict leaves that check not checked.
+
+`calibrate-judge.mjs [rounds]` grades 13 answers whose right verdict is known, such as a goal given another goal's owner, and prints the score. Run it after any change to the judge's model or prompt. The default model is the cheapest one that grades reliably: prompt J2 on `claude-haiku-5-5` scored 39 of 39 over 3 rounds, while prompt J1 on the same model passed a goal with a swapped owner every time.
 
 ## Tests
 
