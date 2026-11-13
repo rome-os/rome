@@ -185,10 +185,13 @@ final class FakeBackend: RomeBackend {
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         sentFiles = files
+        sentInputIds.append(inputId)
         calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")
         if sendSucceeds { return CreatedTurn(turnId: sendTurnId, inputId: inputId, disposition: "started") }
         throw sendError
     }
+    /// The input id of each send, in order.
+    var sentInputIds: [String] = []
     /// What a send fails with when `sendSucceeds` is off.
     var sendError: APIError = .network
     /// The turn a successful send starts; nil is a send that started none.

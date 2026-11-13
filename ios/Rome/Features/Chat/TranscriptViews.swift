@@ -33,6 +33,8 @@ struct BubbleMenu {
     var onShare: (() -> Void)? = nil
     /// Inside a thread view: a tap on the bubble stays on it.
     var inThread = false
+    /// A message that did not go through: its reason and what to do come first.
+    var problem: SendProblem? = nil
 }
 
 /// The menu's items, shared by both bubbles.
@@ -41,6 +43,10 @@ private struct BubbleMenuItems: View {
     let menu: BubbleMenu
 
     var body: some View {
+        if let problem = menu.problem {
+            // Not sent, so there is nothing to reply to or share yet.
+            SendProblemItems(problem: problem, text: text)
+        } else {
         Section {
             if let onReply = menu.onReply {
                 Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
@@ -53,6 +59,7 @@ private struct BubbleMenuItems: View {
             }
         } header: {
             if let date = menu.date { Text(verbatim: RelativeTime.separator(date)) }
+        }
         }
     }
 }
@@ -85,22 +92,22 @@ struct UserBubble: View {
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
 
-    private var failure: SendFailure? {
-        if case .failed(let failure)? = pending { return failure }
-        return nil
+    private var problem: SendProblem? {
+        SendProblem(pending, onRetry: onRetry, onDelete: onDelete)
+    }
+
+    /// The long-press menu, with the problem first when the message has one.
+    private var bubbleMenu: BubbleMenu {
+        var menu = menu
+        menu.problem = problem
+        return menu
     }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
             HStack(alignment: .center, spacing: 8) {
-                if let failure {
-                    if failure.retryable {
-                        Button(action: onRetry) { AlertGlyph(size: 18) }
-                            .frame(width: 28, height: 28)
-                            .accessibilityLabel(failure.line)
-                    } else {
-                        AlertGlyph(size: 18).frame(width: 28, height: 28)
-                    }
+                if let problem {
+                    SendProblemIcon(problem: problem, text: text)
                 }
                 VStack(alignment: .trailing, spacing: 6) {
                     if !images.isEmpty {
@@ -122,7 +129,7 @@ struct UserBubble: View {
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .bubbleMenu(text: text, menu: menu)
+                            .bubbleMenu(text: text, menu: bubbleMenu)
                     }
                 }
                 // The mark sits on the top leading corner of the bubble, or of the
@@ -135,30 +142,6 @@ struct UserBubble: View {
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
-            }
-            if let failure {
-                if failure.retryable {
-                    Button(failure.line, action: onRetry)
-                        .romeFont(12, .medium)
-                        .foregroundStyle(Palette.destructive)
-                } else {
-                    // A refusal stays a refusal: the text can be kept, or the send removed.
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(failure.line)
-                            .romeFont(12, .medium)
-                            .foregroundStyle(Palette.destructive)
-                        HStack(spacing: 14) {
-                            Button("Copy text") { UIPasteboard.general.string = text }
-                            if let onDelete { Button("Delete", role: .destructive, action: onDelete) }
-                        }
-                        .romeFont(12, .medium)
-                        .foregroundStyle(Palette.sub)
-                    }
-                }
-            } else if pending == .notDelivered {
-                Text("Not delivered").romeFont(12, .medium).foregroundStyle(Palette.destructive)
-            } else if pending == .unconfirmed {
-                Text("Delivery unconfirmed · not sent again").romeFont(12, .medium).foregroundStyle(Palette.sub)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)

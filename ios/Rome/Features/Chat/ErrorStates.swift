@@ -67,13 +67,88 @@ enum SendFailure: Hashable, Sendable {
         }
     }
 
-    /// The line under the bubble.
-    var line: String {
-        switch (reason, retryable) {
-        case (nil, _): return String(localized: "Not sent · Tap to retry")
-        case (let reason?, true): return String(localized: "Not sent · \(reason) · Tap to retry")
-        case (let reason?, false): return String(localized: "Not sent · \(reason)")
+    /// Why it did not go, in plain words, at the top of the bubble's menu.
+    var menuTitle: String {
+        guard let reason else { return String(localized: "Not sent") }
+        return String(localized: "Not sent · \(reason)")
+    }
+}
+
+/// What is wrong with a guardian's message, as the menu on its icon says it:
+/// the reason, then what can be done.
+struct SendProblem {
+    var title: String
+    /// "Retry" or "Send again"; nil where trying again cannot work.
+    var retryTitle: String?
+    /// Rome is not sure it arrived, which is less than a failure: a calmer icon.
+    var calm = false
+    var onRetry: () -> Void = {}
+    /// Removes a send nothing has kept; nil leaves it out.
+    var onDelete: (() -> Void)?
+
+    init?(_ state: PendingSend.State?, onRetry: @escaping () -> Void, onDelete: (() -> Void)?) {
+        switch state {
+        case .failed(let failure)?:
+            title = failure.menuTitle
+            retryTitle = failure.retryable ? String(localized: "Retry") : nil
+        case .notDelivered?:
+            title = String(localized: "Not delivered")
+            retryTitle = String(localized: "Retry")
+        case .unconfirmed?:
+            title = String(localized: "Not sure Chat got this. You can send it again.")
+            retryTitle = String(localized: "Send again")
+            calm = true
+        default:
+            return nil
         }
+        self.onRetry = onRetry
+        self.onDelete = onDelete
+    }
+}
+
+/// The menu of a message that did not go through: the reason on top, then
+/// Retry where it can work, Copy and Delete.
+struct SendProblemItems: View {
+    let problem: SendProblem
+    let text: String
+
+    var body: some View {
+        Section {
+            if let retryTitle = problem.retryTitle {
+                Button(action: problem.onRetry) { Label(retryTitle, systemImage: "arrow.clockwise") }
+            }
+            if !text.isEmpty { CopyButton(text: text) }
+            if let onDelete = problem.onDelete {
+                Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
+            }
+        } header: {
+            Text(verbatim: problem.title)
+        }
+    }
+}
+
+/// The icon at a message's leading side: a tap opens the same menu as a long press.
+struct SendProblemIcon: View {
+    let problem: SendProblem
+    let text: String
+
+    var body: some View {
+        Menu {
+            SendProblemItems(problem: problem, text: text)
+        } label: {
+            Group {
+                if problem.calm {
+                    Image(systemName: "questionmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Palette.sub)
+                } else {
+                    AlertGlyph(size: 18)
+                }
+            }
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(problem.title)
     }
 }
 
@@ -206,21 +281,24 @@ struct TranscriptBanners: View {
 
     /// Whether any banner shows, for the room the screen leaves for it.
     static func shows(_ store: TranscriptStore) -> Bool {
-        store.loadError == .offline || store.loadFailed || store.notice != nil
+        store.loadError == .offline || store.loadFailed || store.retrying || store.notice != nil
     }
 
     var body: some View {
         VStack(spacing: 8) {
             if store.loadError == .offline {
                 TopBanner(kind: .warning, text: String(localized: "No network connection"))
+            } else if store.retrying {
+                TopBanner(kind: .info, text: String(localized: "Retrying…"))
             } else if store.loadFailed {
-                TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry")) { store.resync() }
+                TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry")) { store.retryLoad() }
             }
             if let notice = store.notice {
                 TopBanner(kind: .error, text: notice)
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.loadFailed)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.retrying)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.notice)
     }
 }

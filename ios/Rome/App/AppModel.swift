@@ -421,9 +421,10 @@ final class Workspace {
         concierge = store
     }
 
-    /// The chat came back in front, or the app did: asks its store once whether its turn still runs.
-    func recheckRunning(chat: String) {
-        if isMainChat(chat) { concierge.recheckRunning() } else { topicStores[chat]?.recheckRunning() }
+    /// The chat came back in front, or the app did: its store tries a failed
+    /// load again, visibly, or asks once whether its turn still runs.
+    func chatShown(chat: String) {
+        if isMainChat(chat) { concierge.chatShown() } else { topicStores[chat]?.chatShown() }
     }
 
     /// The id this person's main chat goes by, here and on the server.
@@ -1286,7 +1287,7 @@ final class AppModel {
             if let visibleChat {
                 clearDelivered(for: visibleChat)
                 // Back in front: its turn may have ended unheard.
-                workspace?.recheckRunning(chat: visibleChat)
+                workspace?.chatShown(chat: visibleChat)
             }
         }
     }
@@ -1322,7 +1323,7 @@ final class AppModel {
         // Back in front on a chat counts as opening it: its delivered pushes go.
         if let visibleChat {
             clearDelivered(for: visibleChat)
-            workspace?.recheckRunning(chat: visibleChat)
+            workspace?.chatShown(chat: visibleChat)
         }
         syncLanguage()
         // Notifications turned on in the Settings app register this phone.

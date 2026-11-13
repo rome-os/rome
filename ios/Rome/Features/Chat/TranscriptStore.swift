@@ -18,6 +18,8 @@ final class TranscriptStore {
     private(set) var pending: [PendingSend] = []
     private(set) var loaded = false
     private(set) var loadError: APIError?
+    /// A load the guardian started (Retry, or coming back to the chat) is on its way.
+    private(set) var retrying = false
     private(set) var loadingOlder = false
     /// An older page fetched and waiting for the list to place it.
     private(set) var olderPage: MessagePage?
@@ -633,6 +635,24 @@ final class TranscriptStore {
         startRunningPoll()
     }
 
+    /// Tries the failed load again, visibly: the banner goes, "Retrying…"
+    /// shows, and the banner returns only if this attempt fails too.
+    func retryLoad() {
+        loadError = nil
+        retrying = true
+        Task {
+            resync()
+            await resyncWork?.value
+            retrying = false
+        }
+    }
+
+    /// The chat is in front again, or entered: a load that failed before is
+    /// tried at once and visibly; otherwise only the running turn is looked at.
+    func chatShown() {
+        if loadFailed { retryLoad() } else { recheckRunning() }
+    }
+
     /// The chat came back to the screen: asks once whether its turn still runs.
     func recheckRunning() {
         guard kind == .concierge, running else { return }
@@ -688,10 +708,39 @@ final class TranscriptStore {
         if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: id) }
     }
 
+    /// Whether the row is a send the app still holds, which only it can drop.
+    func isPending(_ rowId: String) -> Bool { pending.contains { $0.id == rowId } }
+
+    /// Tries a message again. One the app still holds is sent again; one the
+    /// instance stored as not delivered or unconfirmed is handed over again
+    /// under the id it already has.
     func retry(_ id: String) {
-        guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
-        pending[index].state = .sending
-        deliver(inputId: id, text: pending[index].text, images: pending[index].images, thread: pending[index].thread)
+        if let index = pending.firstIndex(where: { $0.id == id }) {
+            pending[index].state = .sending
+            deliver(inputId: id, text: pending[index].text, images: pending[index].images, thread: pending[index].thread)
+            return
+        }
+        guard let messageId = id.split(separator: ":").first.map(String.init), let stored = message(messageId),
+              let text = stored.parts.compactMap(\.textContent).first else { return }
+        let trimmed = UploadLines.split(text).0
+        guard !trimmed.isEmpty else { return }
+        Task {
+            do {
+                _ = try await backend.send(sessionId: sessionId, text: trimmed, files: [], inputId: messageId, priority: kind == .concierge ? .now : .next, thread: nil)
+                refreshLatestSoon()
+            } catch {
+                say(String(localized: "Couldn't send. Try again"))
+            }
+        }
+    }
+
+    /// The instance does not announce a guardian's own message: read the newest page shortly.
+    private func refreshLatestSoon() {
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            _ = await refreshLatest()
+            await refreshRunning()
+        }
     }
 
     private func deliver(inputId: String, text: String, images: [ComposerImage], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
@@ -761,6 +810,7 @@ final class TranscriptStore {
 
     /// The chat's newest page could not be read, and nothing offline explains it.
     var loadFailed: Bool {
+        if retrying { return false }
         switch loadError {
         case nil, .offline?, .unauthorized?, .conciergeOff?: return false
         default: return true

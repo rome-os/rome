@@ -243,7 +243,7 @@ struct ConciergeRow: View {
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
             let quote = quote(id)
-            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: { store.removePending(id) }, menu: menu(reply: false),
+            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(reply: false),
                        mark: store.statusMark(ofRow: row),
                        quote: quote, onQuote: quote.flatMap { inThread ? nil : store.quoteAction(reply: row.messageId ?? "", original: $0.messageId) })
         case .agentText(_, let text, _, let forwardedFrom, let position):

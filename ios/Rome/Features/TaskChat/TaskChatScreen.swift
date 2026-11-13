@@ -172,7 +172,7 @@ struct TaskChatScreen: View {
                 // The Concierge relays the guardian's words: their side, its name.
                 ConciergeBubble(name: message.sender?.name ?? model.workspace?.agentDisplayName ?? AgentName.fallback, text: text, menu: menu(row))
             } else {
-                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: { store.removePending(id) }, menu: menu(row))
+                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(row))
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu(row))

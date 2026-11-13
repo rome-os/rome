@@ -1111,16 +1111,6 @@
         }
       }
     },
-    "Copy text" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制文字"
-          }
-        }
-      }
-    },
     "Could not check the connection" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1321,6 +1311,16 @@
         }
       }
     },
+    "Couldn't send. Try again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送失败，请重试"
+          }
+        }
+      }
+    },
     "Couldn't start the update. Try again in a moment." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1437,16 +1437,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除这个聊天？"
-          }
-        }
-      }
-    },
-    "Delivery unconfirmed · not sent again" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未确认送达 · 不会重发"
           }
         }
       }
@@ -2389,32 +2379,22 @@
         }
       }
     },
+    "Not sent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未发送"
+          }
+        }
+      }
+    },
     "Not sent · %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "未发送 · %@"
-          }
-        }
-      }
-    },
-    "Not sent · %@ · Tap to retry" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未发送 · %@ · 点按重试"
-          }
-        }
-      }
-    },
-    "Not sent · Tap to retry" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未发送 · 点按重试"
           }
         }
       }
@@ -2445,6 +2425,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不支持"
+          }
+        }
+      }
+    },
+    "Not sure Chat got this. You can send it again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不确定 Chat 是否收到。可以再发一次。"
           }
         }
       }
@@ -3103,6 +3093,16 @@
         }
       }
     },
+    "Retrying…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在重试…"
+          }
+        }
+      }
+    },
     "Revoked" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3309,6 +3309,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发送消息"
+          }
+        }
+      }
+    },
+    "Send again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再发一次"
           }
         }
       }

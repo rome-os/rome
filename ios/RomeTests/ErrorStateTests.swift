@@ -44,9 +44,9 @@ private func message(
         for failure in [SendFailure.archived, .notFound, .chatOff, .rejected("no")] {
             #expect(!failure.retryable)
         }
-        #expect(SendFailure.unknown.line == "Not sent · Tap to retry")
-        #expect(SendFailure.offline.line == "Not sent · No network · Tap to retry")
-        #expect(SendFailure.archived.line == "Not sent · Chat is archived")
+        #expect(SendFailure.unknown.menuTitle == "Not sent")
+        #expect(SendFailure.offline.menuTitle == "Not sent · No network")
+        #expect(SendFailure.archived.menuTitle == "Not sent · Chat is archived")
     }
 }
 
