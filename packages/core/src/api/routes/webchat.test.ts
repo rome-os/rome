@@ -1,5 +1,6 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { askQuestionToolOutput, type Question, questionCardUi } from "../../agent/index.js";
+import { connectCardUiFromProps } from "../../connections/connect-card.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7767,6 +7768,56 @@ describe("Webchat API", () => {
             toolUseId,
             appId: "core",
             render: { kind: "inline", componentId: "ai-tools-card", props: {}, builtin: true },
+          }),
+        ]);
+      } else {
+        expect(cards).toEqual([]);
+      }
+    });
+
+    // Core's connect card: only connect_account may mount it, and core builds
+    // its description from the connection kind, so no tool can supply one.
+    it.each([
+      ["persists", "connect_account", true],
+      ["rejects", "connector_connect", false],
+    ])("%s a connect card emitted by the %s tool", async (_label, tool, persisted) => {
+      const sessionId = `sess-connect-${tool}`;
+      await deps.webchatRepo.createSession(sessionId, "Connect card");
+      const { runtime } = createWebchatRuntime(deps);
+      const toolUseId = `connect-${tool}`;
+
+      await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        emit({
+          type: "tool_result",
+          tool,
+          toolUseId,
+          output: {
+            pendingInteraction: true,
+            appId: "core",
+            render: {
+              kind: "inline",
+              componentId: "connect-card",
+              props: { kind: "github" },
+              builtin: true,
+            },
+          },
+        });
+        emit({ type: "result", content: "" });
+      });
+
+      const cards = (await deps.webchatRepo.getMessages(sessionId))
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => JSON.parse(message.content) as Array<Record<string, unknown>>)
+        .filter((part) => part.type === "pending_interaction");
+      if (persisted) {
+        expect(cards).toEqual([
+          expect.objectContaining({
+            toolUseId,
+            appId: "core",
+            render: expect.objectContaining({
+              componentId: "connect-card",
+              ui: connectCardUiFromProps({ kind: "github" }),
+            }),
           }),
         ]);
       } else {

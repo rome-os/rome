@@ -154,7 +154,7 @@ describe("romeToolPorts defer", () => {
 });
 
 describe("romeToolPorts sessionTools", () => {
-  it("serves the tools Rome adds, then propose_routine, to a turn with a speaker", async () => {
+  it("serves the tools Rome adds, then propose_routine and connect_account, to a turn with a speaker", async () => {
     const extra = {
       name: "extra",
       description: "",
@@ -163,7 +163,7 @@ describe("romeToolPorts sessionTools", () => {
     };
     const { sessionTools, provided } = ports(rs.fn(async () => [extra]));
     const tools = await sessionTools.forTurn(turn(), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["extra", "propose_routine"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["extra", "propose_routine", "connect_account"]);
     expect(provided).toHaveBeenCalledWith(
       expect.objectContaining({
         agentName: "core:main",
@@ -173,15 +173,16 @@ describe("romeToolPorts sessionTools", () => {
     );
   });
 
-  it("serves only propose_routine to a turn with no speaker", async () => {
+  it("serves only propose_routine and connect_account to a turn with no speaker", async () => {
     const { sessionTools, provided } = ports();
     const tools = await sessionTools.forTurn(turn(), false);
-    expect(tools.map((tool) => tool.name)).toEqual(["propose_routine"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["propose_routine", "connect_account"]);
     expect(provided).not.toHaveBeenCalled();
   });
 
-  it("serves no propose_routine where cards draw as plain text", async () => {
+  it("serves only connect_account where cards draw as plain text", async () => {
     const { sessionTools } = ports();
-    expect(await sessionTools.forTurn(turn({ widgets: "plain_text" }), true)).toEqual([]);
+    const tools = await sessionTools.forTurn(turn({ widgets: "plain_text" }), true);
+    expect(tools.map((tool) => tool.name)).toEqual(["connect_account"]);
   });
 });

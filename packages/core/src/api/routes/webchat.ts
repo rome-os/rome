@@ -123,6 +123,7 @@ import {
   questionCardUi,
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
+import { connectCardUiFromProps } from "../../connections/connect-card.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
@@ -602,6 +603,10 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
       emittedBy: (tool) => tool === "ask_question" || tool.endsWith("__ask_question"),
     },
     { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
+    {
+      componentId: "connect-card",
+      emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
+    },
   ];
 
 /** Validate and shape a host-owned suspension a tool result may emit.
@@ -625,6 +630,9 @@ function buildBuiltinCard(
     // from `props`.
     const questions =
       suspension.componentId === "question-card" ? parseAskQuestionInput(suspension.props) : null;
+    // The connect card described as data, built here for the same reason.
+    const connectUi =
+      suspension.componentId === "connect-card" ? connectCardUiFromProps(suspension.props) : null;
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -636,6 +644,7 @@ function buildBuiltinCard(
         builtin: true,
         ...(suspension.requiresCard ? { requiresCard: true } : {}),
         ...(questions?.ok ? { ui: questionCardUi(questions.questions) } : {}),
+        ...(connectUi ? { ui: connectUi } : {}),
       },
     };
   }

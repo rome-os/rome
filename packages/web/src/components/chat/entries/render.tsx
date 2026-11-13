@@ -235,9 +235,10 @@ export function renderSingleEntry(
           />
         );
       }
-      // An app's card described as data, which the agent waits on: drawn like
-      // any widget, and answered by one of its events, which core routes.
-      if (block.render.ui && block.render.componentId === undefined) {
+      // A card described as data, which the agent waits on, whether an app's
+      // or core's own: drawn like any widget, and answered by one of its
+      // events, which core routes to its owner.
+      if (block.render.ui) {
         return (
           <CardBoundary key={`app-widget-${block.toolUseId}`} fallback={null}>
             <Suspense fallback={null}>

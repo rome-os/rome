@@ -370,7 +370,13 @@ describe("AgentSession turn usage", () => {
     const [source, fork] = opened;
     const catalog = (params: ModelSessionParams) =>
       params.tools.listTools("ask_user").map((tool) => tool.name);
-    expect(catalog(source)).toEqual(["ask_question", "defer", "say", "propose_routine"]);
+    expect(catalog(source)).toEqual([
+      "ask_question",
+      "defer",
+      "say",
+      "propose_routine",
+      "connect_account",
+    ]);
     expect(catalog(fork)).toEqual(catalog(source));
 
     const say = await fork.tools.callTool("ask_user", "say", {});
@@ -387,6 +393,8 @@ describe("AgentSession turn usage", () => {
     });
     expect(propose).toMatchObject({ isError: true });
     expect(propose.content[0].text).toContain("NOT shown");
+    const connect = await fork.tools.callTool("ask_user", "connect_account", { kind: "github" });
+    expect(connect).toMatchObject({ isError: true });
   });
 
   it("leaves no position to branch at after a turn that never reached the model", async () => {

@@ -24,6 +24,7 @@ import {
   type RoutineActivationGate,
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
+import { connectAccountTools } from "./connect-account-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 
 export interface RomeToolPortsDeps {
@@ -195,6 +196,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           runAction: (name: string, input: unknown): Promise<ActionResult> =>
             actions.run(turn, name, input),
         }),
+        ...connectAccountTools({ widgets: turn.widgets, hasSpeaker }),
       ];
     },
   };
