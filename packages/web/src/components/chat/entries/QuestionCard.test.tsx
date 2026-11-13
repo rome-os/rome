@@ -48,3 +48,38 @@ describe("QuestionCard — settled", () => {
     expect(screen.getByRole("button", { name: "Which areas?Dismissed" })).toBeTruthy();
   });
 });
+
+describe("QuestionCard — just answered", () => {
+  it("shows what was sent when the folded card opens, before core has stored it", async () => {
+    render(
+      <QuestionCard
+        toolUseId="t-1"
+        appId="core"
+        ui={card.ui}
+        props={card.props}
+        result={{ answers: [{ values: ["Design"], text: "" }] }}
+        onSubmit={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Which areas\?/ }));
+    const design = await screen.findByRole("button", { name: "Design" });
+    expect(design.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "AI" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("unlocks again when the dismissal fails to send", async () => {
+    render(
+      <QuestionCard
+        toolUseId="t-1"
+        appId="core"
+        ui={card.ui}
+        props={card.props}
+        onSubmit={() => {}}
+        onDismiss={() => Promise.reject(new Error("offline"))}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    expect(await screen.findByRole("button", { name: "Dismiss" })).toBeTruthy();
+  });
+});
