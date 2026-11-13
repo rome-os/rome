@@ -45,23 +45,32 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
   "connect-card": {
     connect: async (context, io) => {
       const kind = String(context.kind ?? "");
-      const connection = (await io.connections()).find((c) => c.connectionKind === kind);
-      if (connection?.state === "working") return { answer: { kind, status: "connected" } };
-      const connect = connection?.connect;
-      if (!connect?.available || !connect.url) {
+      const ofKind = (await io.connections()).filter((c) => c.connectionKind === kind);
+      if (ofKind.some((c) => c.state === "working")) {
+        return { answer: { kind, status: "connected" } };
+      }
+      // A kind can list more than one connection; any one with a link starts it.
+      const connect = ofKind.find((c) => c.connect?.available && c.connect.url)?.connect;
+      if (!connect?.url) {
         const reason =
-          connect?.unavailableReason ??
+          ofKind.find((c) => c.connect?.unavailableReason)?.connect?.unavailableReason ??
           `${kind} can't be connected from the chat on this instance.`;
         return Response.json({ error: reason }, { status: 409 });
       }
-      return { open: new URL(connect.url, io.origin).toString() };
+      return { open: connect.url };
     },
     check: async (context, io) => {
       const kind = String(context.kind ?? "");
-      const connection = (await io.connections()).find((c) => c.connectionKind === kind);
-      return connection?.state === "working"
-        ? { answer: { kind, status: "connected" } }
-        : { ok: true };
+      const connections = (await io.connections()).filter((c) => c.connectionKind === kind);
+      if (connections.some((c) => c.state === "working")) {
+        return { answer: { kind, status: "connected" } };
+      }
+      // Pressed before the authorization landed: say so, so the press shows.
+      const label = connections[0]?.kindLabel ?? kind;
+      return Response.json(
+        { error: `${label} isn't connected yet. Finish authorizing, then try again.` },
+        { status: 409 },
+      );
     },
     dismiss: async (context) => ({ answer: { kind: context.kind, dismissed: true } }),
   },

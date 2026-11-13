@@ -5,6 +5,7 @@ import {
   OAUTH_PROVIDER_DESCRIPTORS,
   type OAuthProvider,
 } from "./oauth/oauth-providers.js";
+import { createRomeCloudOAuthStartUrl } from "./oauth/rome-cloud-oauth.js";
 
 /**
  * The card that connects a connection kind Rome connects itself, such as
@@ -85,6 +86,15 @@ export function parseConnectAccountInput(
  */
 export function connectAccountToolOutput(kind: OAuthProvider, widgetsShow: boolean): unknown {
   const label = OAUTH_PROVIDER_DESCRIPTORS[kind].label;
+  // Where this instance cannot start the kind's authorization, a card's
+  // Connect could only fail: say why instead.
+  const link = createRomeCloudOAuthStartUrl(kind);
+  if (!link.available) {
+    return (
+      `${label} can't be connected from the chat on this instance: ${link.unavailableReason ?? "it is not set up"}. ` +
+      `Tell the guardian, in a message, to connect ${label} in Settings › Connections.`
+    );
+  }
   if (!widgetsShow) {
     return (
       "This conversation cannot show the connect card. Ask the guardian, in a message, " +

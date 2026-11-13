@@ -545,7 +545,7 @@ describe("an event on the connect card core owns", () => {
     );
     expect(
       await (await notYet.fire("m", { name: "check", context: { kind: "github" } })).json(),
-    ).toEqual({});
+    ).toEqual({ error: "github isn't connected yet. Finish authorizing, then try again." });
     expect(notYet.forwarded).toEqual([]);
 
     const working = setup(

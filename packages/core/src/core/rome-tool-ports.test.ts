@@ -184,6 +184,18 @@ describe("romeToolPorts defer for a task", () => {
 });
 
 describe("romeToolPorts sessionTools", () => {
+  it("serves no connect_account where the session's own tools show a connect card", async () => {
+    const connectCard = {
+      name: "connect_card",
+      description: "",
+      inputSchema: {},
+      handler: async () => ({ content: [] }),
+    };
+    const { sessionTools } = ports(rs.fn(async () => [connectCard]));
+    const tools = await sessionTools.forTurn(turn(), true);
+    expect(tools.map((tool) => tool.name)).toEqual(["connect_card", "propose_routine"]);
+  });
+
   it("serves the tools Rome adds, then propose_routine and connect_account, to a turn with a speaker", async () => {
     const extra = {
       name: "extra",
