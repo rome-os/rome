@@ -840,9 +840,10 @@ export function Chat({
   }, [displayMessages]);
   const findingMessageRef = useRef(false);
   // Pages older history in until `find` returns an element, then hands it to
-  // `reveal`. Only one search runs at a time.
+  // `reveal`, or says `missing` when the search runs out. Only one search runs
+  // at a time.
   const revealWhenLoaded = useCallback(
-    async (find: () => HTMLElement | null, reveal: () => void) => {
+    async (find: () => HTMLElement | null, reveal: () => void, missing: string) => {
       if (!mainSessionId || findingMessageRef.current) return;
       if (find()) {
         reveal();
@@ -868,7 +869,7 @@ export function Chat({
           stalled = shownCountRef.current === before ? stalled + 1 : 0;
           if (stalled >= 2) break;
         }
-        toast.error(t("concierge.tasks.sourceMissing"));
+        toast.error(missing);
       } finally {
         toast.dismiss(loading);
         findingMessageRef.current = false;
@@ -883,9 +884,10 @@ export function Chat({
       return revealWhenLoaded(
         () => findMessageAnchor(scroller, messageId),
         () => jumpToMessage(messageId),
+        t("concierge.tasks.sourceMissing"),
       );
     },
-    [scrollerEl, revealWhenLoaded, jumpToMessage],
+    [scrollerEl, revealWhenLoaded, jumpToMessage, t],
   );
   // The unread divider's pill: scrolls to the divider, paging in older
   // messages first when it is still on one.
@@ -893,11 +895,15 @@ export function Chat({
     const scroller = scrollerEl;
     if (!scroller) return;
     const find = () => scroller.querySelector<HTMLElement>("[data-concierge-unread-divider]");
-    void revealWhenLoaded(find, () => {
-      const divider = find();
-      if (divider) scrollToAnchor(scroller, divider);
-    });
-  }, [scrollerEl, revealWhenLoaded, scrollToAnchor]);
+    void revealWhenLoaded(
+      find,
+      () => {
+        const divider = find();
+        if (divider) scrollToAnchor(scroller, divider);
+      },
+      t("concierge.newMessagesMissing"),
+    );
+  }, [scrollerEl, revealWhenLoaded, scrollToAnchor, t]);
   useEffect(() => {
     if (!concierge) return;
     return onConciergeJump((messageId) => void showSourceMessage(messageId));
@@ -1218,7 +1224,7 @@ export function Chat({
           if (local?.size === 0) localOptimisticMessageIdsRef.current.delete(id);
         }
         if (!loadedSessionsRef.current.has(id) && isReadVisibleSession(id)) {
-          noteOpened(fetchedMessages.at(-1)?.id ?? null);
+          noteOpened(fetchedMessages);
         }
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {

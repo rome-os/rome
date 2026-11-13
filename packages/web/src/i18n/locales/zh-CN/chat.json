@@ -13,6 +13,7 @@
     "newMessages": "以下为新消息",
     "newMessagesPill_one": "{{label}} 条新消息",
     "newMessagesPill_other": "{{label}} 条新消息",
+    "newMessagesMissing": "找不到新消息的起点",
     "taskChat": "任务对话",
     "taskStatus": {
       "running": "进行中",
