@@ -30,6 +30,18 @@ const configSchema = z.object({
   linkedinPollMinMinutes: z.coerce.number().int().positive().default(15),
   linkedinPollMaxMinutes: z.coerce.number().int().positive().default(30),
 
+  // How long a renewed session's predecessor has to write its handoff before
+  // a small model writes it from the chat's messages instead
+  // (docs/concepts/sessions.md#handoff).
+  sessionHandoffTimeoutSeconds: z.coerce.number().int().positive().default(30),
+  // How long the small model then has to write it.
+  sessionHandoffFallbackTimeoutSeconds: z.coerce.number().int().positive().default(30),
+  // Past this many tokens of context, a Concierge session is renewed with a
+  // handoff once its turn ends and nothing waits on it.
+  // At least 50K: a new session starts near 30K, and a limit near that would
+  // renew it after every turn.
+  sessionHandoffContextTokens: z.coerce.number().int().min(50_000).default(150_000),
+
   // Personal WeChat is opt-in and runs as the Rome service user.
   wechatUserEnabled: z
     .enum(["true", "false"])
@@ -158,6 +170,15 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
   if (env.LINKEDIN_POLL_MAX_MINUTES) {
     raw.linkedinPollMaxMinutes = env.LINKEDIN_POLL_MAX_MINUTES;
+  }
+  if (env.SESSION_HANDOFF_TIMEOUT_SECONDS) {
+    raw.sessionHandoffTimeoutSeconds = env.SESSION_HANDOFF_TIMEOUT_SECONDS;
+  }
+  if (env.SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS) {
+    raw.sessionHandoffFallbackTimeoutSeconds = env.SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS;
+  }
+  if (env.SESSION_HANDOFF_CONTEXT_TOKENS) {
+    raw.sessionHandoffContextTokens = env.SESSION_HANDOFF_CONTEXT_TOKENS;
   }
   if (env.WECHAT_USER_ENABLED !== undefined) {
     raw.wechatUserEnabled = env.WECHAT_USER_ENABLED;

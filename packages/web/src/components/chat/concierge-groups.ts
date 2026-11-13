@@ -28,7 +28,7 @@ export type ConciergeItem =
   | { kind: "separator"; key: string; at: string }
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
   /** Faint line where the chat's agent session was renewed, for `reason`. */
-  | { kind: "renewal"; key: string; reason: string }
+  | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
   /** Faint line naming the routine, app or agent whose input a turn ran on. */
   | { kind: "automated"; key: string; source: SystemInputSource }
   /**
@@ -204,7 +204,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
-    | { kind: "renewal"; key: string; reason: string }
+    | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
     | { kind: "automated"; key: string; source: SystemInputSource }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
@@ -263,7 +263,13 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
         } else if (isRenderable(message)) add(message, "agent");
       }
     } else if (row.kind === "session_renewal") {
-      slots.push({ kind: "renewal", key: row.key, reason: row.reason });
+      slots.push({
+        kind: "renewal",
+        key: row.key,
+        reason: row.reason,
+        chatId: row.chatId,
+        renewedSessionId: row.renewedSessionId,
+      });
       group = null;
     } else if (row.kind === "automated_input") {
       slots.push({ kind: "automated", key: row.key, source: row.source });

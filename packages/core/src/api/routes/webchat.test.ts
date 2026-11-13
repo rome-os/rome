@@ -14,6 +14,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
 import { Session } from "../../agent/index.js";
+import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
 import { webchatChannel, webchatCaller } from "../../webchat/dashboard-account.js";
@@ -621,6 +622,46 @@ describe("Webchat API", () => {
       // guardian's.
       unattributed: { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
     });
+  });
+
+  it("shows a renewal's handoff to the chat's owner only, and only for a session of that chat", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    await deps.webchatRepo.createSession(
+      "visitor-main",
+      "Concierge",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await deps.webchatRepo.createSession("other", "Other");
+    const retired = Session.create("core:concierge", {
+      continuityKey: webchatSessionKey("visitor-main"),
+    });
+    await deps.sessionRepository.add(retired);
+    const renewed = retired.replace({ reason: "setup", handoff: "- Agreed: Friday at 7." });
+    await deps.sessionRepository.replace(retired, renewed);
+    const read = async (actor: typeof guardian | typeof visitor, chatId: string) => {
+      const res = await runWithSessionActor(actor, () =>
+        app.request(`/chat/sessions/${chatId}/renewals/${renewed.id}`),
+      );
+      return { status: res.status, body: await res.json() };
+    };
+
+    expect(await read(visitor, "visitor-main")).toEqual({
+      status: 200,
+      body: { handoff: "- Agreed: Friday at 7." },
+    });
+    // Anyone else, the guardian included, finds no such chat.
+    expect((await read(guardian, "visitor-main")).status).toBe(404);
+    // A chat the caller may open does not reach another chat's session.
+    expect((await read(guardian, "other")).status).toBe(404);
   });
 
   it("persists appended inputs once and keeps one stream owner", async () => {
@@ -8454,6 +8495,20 @@ describe("Webchat API", () => {
       expect(workspace).toBeLessThan(reply);
       expect(reply).toBeLessThan(current);
       expect(prompt.slice(current)).toContain('invoked the skill "app_creation"');
+    });
+
+    it("says the workspace closed once, on the input after one that had it open", async () => {
+      const { send } = await setup();
+      const open = { builtins: [{ kind: "desktop" as const, line: "a window" }], apps: [] };
+      await send({ text: "one", workspace: open });
+      await send({ text: "two" });
+      await send({ text: "three" });
+      await send({ text: "four", workspace: open });
+
+      expect(prompts[0]).toContain("surfaces open in their workspace");
+      expect(prompts[1].startsWith("<workspace_context/>\n\n")).toBe(true);
+      expect(prompts[2]).not.toContain("workspace_context");
+      expect(prompts[3]).toContain("surfaces open in their workspace");
     });
 
     it("rejects an id that is not a message of this chat", async () => {

@@ -62,6 +62,12 @@ export const sessions = sqliteTable(
     supersededBy: text("superseded_by"),
     /** Why the reset replaced it: setup, idle, daily or working_dir. */
     supersededFor: text("superseded_for"),
+    /** The handoff the session it replaced wrote for it in a renewal. Null
+     *  for a session that no renewal handoff started. */
+    handoff: text("handoff"),
+    /** How many tokens the provider's context held at the session's last
+     *  turn that reported it. Null until one does. */
+    contextTokens: integer("context_tokens"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
     status: text("status", {

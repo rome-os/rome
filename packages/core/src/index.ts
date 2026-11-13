@@ -1,4 +1,7 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { STICKY_HEADERS } from "./core/sticky-headers.js";
+import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
+import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
@@ -1276,6 +1279,21 @@ async function main() {
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
+      // A thread reads which chat it is in, whom it serves and the open
+      // workspace again only when they change.
+      stickyHeaders: STICKY_HEADERS,
+      // A renewal whose agent asks for it starts from a handoff (Concierge chats).
+      handoffs: createRenewalHandoffs({
+        timeoutMs: config.sessionHandoffTimeoutSeconds * 1_000,
+        contextLimitTokens: config.sessionHandoffContextTokens,
+        fallbackTimeoutMs: config.sessionHandoffFallbackTimeoutSeconds * 1_000,
+        modelResolver,
+        rows: async (chatId, turns) =>
+          (await webchatRepo.getMessagesPage(chatId, { limit: turns })).rows,
+        openTasks: (chatId) => conciergeOpenTasks(concierge, chatId),
+        ownerLabel: (chatId) => conciergeOwnerLabel(concierge, chatId),
+        tidying: (chatId, work) => concierge.activity?.tidying(chatId, work) ?? work(),
+      }),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );

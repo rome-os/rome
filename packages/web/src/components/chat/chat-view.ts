@@ -308,6 +308,8 @@ export type ChatRow =
       kind: "session_renewal";
       reason: string;
       renewedSessionId: string;
+      /** The chat the renewed session serves. */
+      chatId: string;
       turnId: string;
     })
   // The turn after it ran on what a routine, an app or another agent sent
@@ -482,6 +484,7 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
           key: `session-renewal:${renewal.sessionId}`,
           reason: renewal.reason,
           renewedSessionId: renewal.sessionId,
+          chatId: turn.sessionId,
           turnId: turn.turnId,
         };
         const built = builtRenewals.get(row);

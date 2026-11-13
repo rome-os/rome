@@ -93,6 +93,14 @@ describe("conciergeActivity", () => {
     });
   });
 
+  it("says it is tidying up while its session is renewed, ahead of everything else", () => {
+    expect(
+      conciergeActivity(
+        facts({ tidying: true, awaitingGuardian: true, turn: { running: true, tool: null } }),
+      ),
+    ).toEqual({ kind: "tool", tool: "tidyingUp" });
+  });
+
   it("puts a card waiting here or in a task chat ahead of a report and running tasks", () => {
     const rest = { reportPending: true, tasks: [task({ running: true })] };
     expect(conciergeActivity(facts({ ...rest, awaitingGuardian: true }))).toEqual({
@@ -292,6 +300,26 @@ describe("ConciergeActivityTracker", () => {
     expect(Number.isFinite(fresh?.at)).toBe(true);
     // And as JSON, the way it travels.
     expect(typeof JSON.parse(JSON.stringify(fresh)).at).toBe("number");
+  });
+
+  it("says it is tidying up while a renewal's handoff is written, then what comes next", async () => {
+    const w = world();
+    await flush();
+    let release!: () => void;
+    const work = w.tracker.tidying(
+      "main",
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    await flush();
+    expect(w.last("main")).toEqual({ kind: "tool", tool: "tidyingUp" });
+    w.running.add("main");
+    release();
+    await work;
+    await flush();
+    // Its label holds a moment like any named tool's, then the turn shows.
+    w.advance(TOOL_HOLD_MS);
+    await flush();
+    expect(w.last("main")).toEqual({ kind: "working" });
   });
 
   it("says working the moment the turn starts, and only on a change", async () => {

@@ -46,7 +46,12 @@ import {
   renderDigestTurn,
   renderImportantTurn,
 } from "./alerts.js";
-import { mergeConnectors, type ProviderService, type ProviderWatchSection } from "./connectors.js";
+import {
+  agentViewOf,
+  mergeConnectors,
+  type ProviderService,
+  type ProviderWatchSection,
+} from "./connectors.js";
 import { addressedToOf, cleanLabels } from "./event-shape.js";
 import { optionValue, renderOptions } from "./follow-options.js";
 import type { ConciergeService, DigestTaskNotes } from "./service.js";
@@ -1545,13 +1550,25 @@ function registerFollowingActions(
   actions.register({
     config: followingActionConfig(
       CONCIERGE_FOLLOWING_ACTIONS.list,
-      "Everything about what the Concierge follows for the guardian, in one structure: every source (ready or not, with what is missing), its account, target format, kinds and options, what is followed there with its current settings, and the rules. Call it first for anything about following.",
+      "Everything about what the Concierge follows for the guardian, in one structure: every service (connected or not, with what is missing), its account, what is followed there with its current settings, and the rules. Pass service for that service's watch catalog too: its target format, kinds and options, which a follow card is built from.",
       "read-only",
     ),
-    inputSchema: { type: "object", properties: {} },
-    execute: async () => {
+    inputSchema: {
+      type: "object",
+      properties: {
+        service: {
+          type: "string",
+          description: "One service, as the list names it, with its watch catalog.",
+        },
+      },
+    },
+    execute: async (args) => {
       try {
-        return { status: "ok", data: await following.list(await callingOwner()) };
+        const service = typeof args.service === "string" && args.service ? args.service : undefined;
+        return {
+          status: "ok",
+          data: agentViewOf(await following.list(await callingOwner()), service),
+        };
       } catch (error) {
         return errorOf(error);
       }

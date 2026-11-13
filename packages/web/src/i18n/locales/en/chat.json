@@ -133,7 +133,8 @@
         "startingTopic": "Starting a topic chat",
         "checkingFollows": "Checking what you follow",
         "searchingWeb": "Searching the web",
-        "readingPage": "Reading a page"
+        "readingPage": "Reading a page",
+        "tidyingUp": "Tidying up context"
       }
     },
     "statusReaction": {
@@ -626,9 +627,13 @@
     "replyPlaceholder": "Reply"
   },
   "sessionRenewal": {
-    "notice": "New session · {{reason}}",
+    "notice": "Context tidied up · {{reason}}",
+    "showHandoff": "Show summary",
+    "hideHandoff": "Hide summary",
+    "handoffTitle": "Summary carried over",
     "reasons": {
-      "setup": "setup changed",
+      "context": "conversation got long",
+      "setup": "setup updated",
       "idle": "after a quiet period",
       "daily": "daily reset",
       "working_dir": "working folder gone"
