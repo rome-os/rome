@@ -16,7 +16,6 @@ struct TopicChatScreen: View {
     let onArchived: () -> Void
     let onCreated: (String) -> Void
 
-    @Environment(AppModel.self) private var model
     @Environment(\.visibleChat) private var visibleChat
     @State private var draft = ""
     @State private var starting: String?
@@ -37,10 +36,6 @@ struct TopicChatScreen: View {
         return starting == nil
     }
 
-    private var title: String {
-        TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             content
@@ -49,29 +44,26 @@ struct TopicChatScreen: View {
         // Under an open thread, VoiceOver reads the thread, not what it covers.
         .accessibilityHidden(store?.thread != nil)
         .floatingTopBar {
-            ChatHeader(
-                // The Concierge's name, as in the main chat; the topic's own
-                // title stays in the "…" menu.
-                name: workspace.agentDisplayName,
-                menuTitle: title,
-                activity: workspace.topics.activity(for: chatId),
-                announces: chatId != nil && model.visibleChat == chatId,
+            // The title and the status are read by the header itself, so a
+            // change in them never redraws the transcript.
+            TopicChatHeader(
+                workspace: workspace,
+                chatId: chatId,
+                draftKey: draftKey,
+                share: store?.share,
                 onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
                 },
                 onAgent: { onAgent(chatId) },
-                zoomSource: AgentZoom.source(chatId ?? draftKey),
-                // A blank chat has nothing to rename, archive or delete yet.
-                onRename: chatId == nil ? nil : {
+                onRename: { title in
                     newName = title
                     renaming = true
                 },
                 onArchive: chatId.map { id in { archive(id) } },
-                onDelete: chatId == nil ? nil : { confirmDelete = true }
+                onDelete: { confirmDelete = true }
             )
-            .shareModeHeader(store?.share)
             .accessibilityHidden(store?.thread != nil)
         }
         .overlay(alignment: .top) {
@@ -80,7 +72,7 @@ struct TopicChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: { workspace.topics.activity(for: chatId) }, onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
@@ -237,5 +229,42 @@ struct TopicChatScreen: View {
                 attachments.restore(images)
             }
         }
+    }
+}
+
+/// A topic chat's header. It reads the chat's title, its status and whether it
+/// is on screen itself, so a change in any of them redraws it alone.
+private struct TopicChatHeader: View {
+    let workspace: Workspace
+    let chatId: String?
+    let draftKey: String
+    let share: ChatShareFlow?
+    let onMenu: () -> Void
+    /// The header's mascot was tapped: the Agent page, for this chat.
+    let onAgent: () -> Void
+    /// Rename, with the chat's current title.
+    let onRename: (String) -> Void
+    let onArchive: (() -> Void)?
+    let onDelete: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let title = TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
+        ChatHeader(
+            // The Concierge's name, as in the main chat; the topic's own
+            // title stays in the "…" menu.
+            name: workspace.agentDisplayName,
+            menuTitle: title,
+            activity: workspace.topics.activity(for: chatId),
+            announces: chatId != nil && model.visibleChat == chatId,
+            onMenu: onMenu,
+            onAgent: onAgent,
+            zoomSource: AgentZoom.source(chatId ?? draftKey),
+            // A blank chat has nothing to rename, archive or delete yet.
+            onRename: chatId == nil ? nil : { onRename(title) },
+            onArchive: onArchive,
+            onDelete: chatId == nil ? nil : onDelete
+        )
+        .shareModeHeader(share)
     }
 }

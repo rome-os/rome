@@ -11,7 +11,8 @@ struct ThreadOverlay: View {
     let tasks: TasksStore
     /// The chat's name and status, as its header shows them.
     let name: String
-    var activity: ConciergeActivity? = nil
+    /// Read by the header copy, so a status change redraws it alone.
+    var activity: () -> ConciergeActivity? = { nil }
     let onOpenChat: (String, String) -> Void
     let onClose: () -> Void
 
@@ -89,7 +90,7 @@ struct ThreadOverlay: View {
         HStack(alignment: .center) {
             // Where the drawer button sits below, so the identity keeps its place.
             Color.clear.frame(width: 44, height: 44)
-            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, still: true) }
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity(), still: true) }
             GlassCircleButton(accessibilityLabel: "Close", action: close) {
                 Image(systemName: "xmark").romeFont(15, .semibold)
             }

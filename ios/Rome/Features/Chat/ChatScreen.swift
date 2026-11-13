@@ -14,14 +14,9 @@ struct ChatScreen: View {
     /// Chat is the page in front, with nothing pushed over it.
     var visible = true
 
+    #if DEBUG
     @Environment(AppModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    /// How far the header's status capsule reaches below the header row.
-    private var statusOverhang: CGFloat {
-        let activity = workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID)
-        return activity?.statusLine == nil ? 0 : ChatIdentity.statusHeight(for: dynamicTypeSize)
-    }
+    #endif
     @State private var draft = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -38,20 +33,21 @@ struct ChatScreen: View {
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(name: workspace.agentDisplayName, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), announces: model.visibleChat == conciergeChatID, onMenu: {
+                // The status, the access notice and the push prompt are read
+                // by these two, so a change in them never redraws the transcript.
+                ChatHeaderBar(workspace: workspace, store: store, onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
-                }, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), showsMenu: false)
-                .shareModeHeader(store.share)
-                banners
+                }, onAgent: onAgent)
+                ChatBanners(workspace: workspace, store: store)
             }
             .accessibilityHidden(store.thread != nil)
         }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: { workspace.mainChatActivity }, onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
@@ -119,39 +115,6 @@ struct ChatScreen: View {
     #endif
 
     @ViewBuilder
-    private var banners: some View {
-        VStack(spacing: 8) {
-            if let hint = model.accessNotice {
-                TopBanner(kind: .info, text: hint)
-                    .onTapGesture { model.accessNotice = nil }
-                    .task {
-                        try? await Task.sleep(for: .seconds(5))
-                        withAnimation { model.accessNotice = nil }
-                    }
-            }
-            TranscriptBanners(store: store)
-            if offersPush {
-                PushPromptCard(
-                    onTurnOn: { Task { await model.push.setEnabled(true) } },
-                    onNotNow: { model.push.notNow() }
-                )
-                .padding(.horizontal, Metrics.pagePadding)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        // Below the header's status capsule, which hangs under the header row.
-        .padding(.top, model.accessNotice != nil || TranscriptBanners.shows(store) || offersPush ? 10 + statusOverhang : 0)
-        .readableColumn()
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
-    }
-
-    /// Offered once Concierge is open, never while it loads or is off.
-    private var offersPush: Bool {
-        workspace.conciergeState == .ready && !workspace.isVisitor && model.push.offersPrompt()
-    }
-
-    @ViewBuilder
     private var content: some View {
         switch workspace.conciergeState {
         case .loading:
@@ -204,6 +167,75 @@ struct ChatScreen: View {
                 .onChange(of: store.arrivals) { store.arrived() }
             }
         }
+    }
+}
+
+extension Workspace {
+    /// What the Concierge is doing in the main chat.
+    var mainChatActivity: ConciergeActivity? {
+        topics.activity(for: mainChatServerID ?? conciergeChatID)
+    }
+}
+
+/// The main Chat's header. It reads the chat's status and whether the chat is
+/// on screen itself, so a change in either redraws it alone.
+private struct ChatHeaderBar: View {
+    let workspace: Workspace
+    let store: TranscriptStore
+    let onMenu: () -> Void
+    let onAgent: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ChatHeader(name: workspace.agentDisplayName, activity: workspace.mainChatActivity, announces: model.visibleChat == conciergeChatID, onMenu: onMenu, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), showsMenu: false)
+            .shareModeHeader(store.share)
+    }
+}
+
+/// What shows under the main Chat's header: the access notice, the store's
+/// banners and the push prompt. It reads their state itself, and the status
+/// the header's capsule hangs under it with.
+private struct ChatBanners: View {
+    let workspace: Workspace
+    let store: TranscriptStore
+    @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// How far the header's status capsule reaches below the header row.
+    private var statusOverhang: CGFloat {
+        workspace.mainChatActivity?.statusLine == nil ? 0 : ChatIdentity.statusHeight(for: dynamicTypeSize)
+    }
+
+    /// Offered once Concierge is open, never while it loads or is off.
+    private var offersPush: Bool {
+        workspace.conciergeState == .ready && !workspace.isVisitor && model.push.offersPrompt()
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if let hint = model.accessNotice {
+                TopBanner(kind: .info, text: hint)
+                    .onTapGesture { model.accessNotice = nil }
+                    .task {
+                        try? await Task.sleep(for: .seconds(5))
+                        withAnimation { model.accessNotice = nil }
+                    }
+            }
+            TranscriptBanners(store: store)
+            if offersPush {
+                PushPromptCard(
+                    onTurnOn: { Task { await model.push.setEnabled(true) } },
+                    onNotNow: { model.push.notNow() }
+                )
+                .padding(.horizontal, Metrics.pagePadding)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        // Below the header's status capsule, which hangs under the header row.
+        .padding(.top, model.accessNotice != nil || TranscriptBanners.shows(store) || offersPush ? 10 + statusOverhang : 0)
+        .readableColumn()
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
     }
 }
 
