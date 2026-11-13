@@ -112,7 +112,13 @@ export function conciergeChatGuard(deps: ConciergeChatGuardDeps) {
         .join("\n\n")
         .trim();
     await deps.refuseAnotherOwnersChat(chatId);
-    if (!text) throw new Error("A Concierge chat takes only text from another agent or an app");
+    // A turn takes only the text: a file or a card is refused, not dropped.
+    const more =
+      (message.attachments?.length ?? 0) > 0 ||
+      (message.parts ?? []).some((part) => part.type !== "text");
+    if (!text || more) {
+      throw new Error("A Concierge chat takes only text from another agent or an app");
+    }
     const source = automatedInputSource(await deps.senderOf(agentName));
     void deps
       .runSystemTurn(chatId, automatedInputPrompt(source, text), {

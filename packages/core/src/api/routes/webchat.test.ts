@@ -8055,6 +8055,26 @@ describe("Webchat API", () => {
       expect(prompts[1]).toMatch(/^<automated_input source="app" name="[^"]+">/);
     });
 
+    it("refuses a routine's send that carries a file, rather than drop the file", async () => {
+      const { runSystemTurn, runtime } = await setup();
+      const loopback = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+      const res = await runWithSessionActor(loopback, () =>
+        runtime.routes.request("/chat/sessions/concierge/turns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: "Here is today's report.",
+            files: [{ name: "report.pdf", path: "/tmp/report.pdf" }],
+            automatedSource: "routine:Daily summary",
+            automatedActorKind: "guardian",
+          }),
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      expect(runSystemTurn).not.toHaveBeenCalled();
+    });
+
     it("refuses a visitor's action, which may not open the guardian's Concierge chat", async () => {
       const { runSystemTurn, runtime } = await setup();
       const loopback = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };

@@ -137,6 +137,25 @@ describe("PendingChecks", () => {
     expect(await screen.findByText("Later · in 2 hr", undefined, { timeout: 5_000 })).toBeTruthy();
   });
 
+  it("shows a scheduled task's next run once one passes, with the chat left open", async () => {
+    const run = (at: number) => ({
+      id: "r-1",
+      name: "Daily summary",
+      at,
+      waitingFor: null,
+      taskId: "t-1",
+      recurring: true,
+    });
+    serve([run(Date.now() + 1_500)]);
+    renderChecks();
+    expect(await screen.findByText(/^Daily summary · /)).toBeTruthy();
+    // The run fires quietly, and Rome stores the next one; no turn follows.
+    serve([run(Date.now() + 24 * HOUR)]);
+    expect(
+      await screen.findByText("Daily summary · in 24 hr", undefined, { timeout: 6_000 }),
+    ).toBeTruthy();
+  });
+
   it("counts a check's time from now, not from when the strip first showed", async () => {
     serve([]);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

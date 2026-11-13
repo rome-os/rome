@@ -3804,7 +3804,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       const concierge = deps.concierge;
       const text = body.text?.trim() ?? "";
-      if (!concierge || !text) {
+      // A turn takes only the text: files are refused, not dropped.
+      if (!concierge || !text || uploadedFiles.length > 0) {
         return answer({ error: "A Concierge chat takes only text from an automation" }, 400);
       }
       const source = automatedInputSource(automated);

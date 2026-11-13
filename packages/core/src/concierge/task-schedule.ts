@@ -168,13 +168,15 @@ function withSkips(routine: Routine, skips: number[]): Record<string, unknown> {
 export interface TaskSchedulesDeps {
   routines: Pick<
     RoutinesRepository,
-    "create" | "update" | "findByKey" | "findById" | "deleteIfNoActiveRuns"
+    "create" | "update" | "findByKey" | "findById" | "deleteIfNoActiveRuns" | "listRoutines"
   >;
   routineEngine: Pick<RoutineEngine, "activate" | "deactivate">;
   /** The owner's time zone. */
   timezoneOf: (owner: ConciergeOwner) => Promise<string>;
   /** The zone a floating schedule fires in now, as the schedule trigger resolves it. */
   floatingZone: () => Promise<string>;
+  /** Whose task `taskId` is, from its row; null for a task that is gone. */
+  ownerOf: (taskId: string) => Promise<ConciergeOwner | null>;
 }
 
 /** Each task's schedule: written, read back, skipped once, removed. */
@@ -216,6 +218,30 @@ export class TaskSchedules {
       await this.deps.routines.update(id, { name: task.title, trigger, args, enabled: true });
     }
     await this.reactivate(id);
+  }
+
+  /**
+   * Moves owner `owner`'s fixed schedules to their new zone `timezone`, so
+   * each still runs at its local time there. The guardian's float, and follow
+   * their zone on their own.
+   */
+  async rezone(owner: ConciergeOwner, timezone: string): Promise<void> {
+    for (const routine of await this.deps.routines.listRoutines()) {
+      const trigger = routine.trigger;
+      const taskId = (routine.args as Record<string, unknown>).taskId;
+      if (
+        routine.actionName !== CONCIERGE_TASK_RUN_ACTION ||
+        trigger.type !== "schedule" ||
+        trigger.tzMode !== "fixed" ||
+        trigger.tzid === timezone ||
+        typeof taskId !== "string" ||
+        (await this.deps.ownerOf(taskId)) !== owner
+      ) {
+        continue;
+      }
+      await this.deps.routines.update(routine.id, { trigger: { ...trigger, tzid: timezone } });
+      await this.reactivate(routine.id);
+    }
   }
 
   /** Removes task `taskId`'s schedule. Answers whether it had one. */

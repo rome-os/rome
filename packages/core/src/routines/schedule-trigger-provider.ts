@@ -24,6 +24,7 @@ export class ScheduleTriggerProvider implements TriggerProvider {
   async activate(
     routine: Routine,
     fire: (payload: Record<string, unknown>) => Promise<void>,
+    settled: () => void = () => {},
   ): Promise<void> {
     this.deactivate(routine.id);
 
@@ -53,6 +54,7 @@ export class ScheduleTriggerProvider implements TriggerProvider {
             await this.routinesRepo.updateNextRun(routine.id, null);
             await this.routinesRepo.update(routine.id, { enabled: false });
             this.jobs.delete(routine.id);
+            settled();
           } catch (err) {
             log.error("dated one-off schedule trigger failed", {
               routineId: routine.id,
@@ -128,6 +130,7 @@ export class ScheduleTriggerProvider implements TriggerProvider {
                   if (due) await fire({ scheduledTime: new Date().toISOString() });
                 } finally {
                   await this.routinesRepo.updateNextRun(routine.id, expected);
+                  settled();
                 }
               } catch (err) {
                 log.error("recurring schedule trigger failed", {

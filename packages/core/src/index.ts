@@ -1198,6 +1198,7 @@ async function main() {
     },
     // As the schedule trigger resolves a floating schedule's zone.
     floatingZone: () => resolveGuardianTimezone(settingsRepo),
+    ownerOf: async (taskId) => (await conciergeTasksRepo.getWithChat(taskId))?.owner ?? null,
   });
   const conciergeTasksRepo = new ConciergeTasksRepository(db);
   const concierge: ConciergeService = new ConciergeService({
@@ -1402,6 +1403,7 @@ async function main() {
   startConciergeEvents(concierge, turnListeners);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
+    timezoneMoved: (owner, timezone) => taskSchedules.rezone(owner, timezone),
     routines: routinesRepo,
     routineEngine,
     actions: actionRegistry,
@@ -1465,16 +1467,18 @@ async function main() {
         : null) ?? { sourceType: null, name: null },
     runSystemTurn: (chatId, prompt, options) => concierge.runSystemTurn(chatId, prompt, options),
   });
-  const appChannelsService: ChannelsService = {
-    ...channelsService,
-    send: async (target, chatId, message) =>
+  // Built on the service, not spread from it, so the removed members still
+  // answer with their migration message.
+  const appChannelsService = Object.create(channelsService) as ChannelsService;
+  Object.defineProperty(appChannelsService, "send", {
+    value: async (...[target, chatId, message]: Parameters<ChannelsService["send"]>) =>
       (await intoConciergeChat(
         target,
         chatId,
         message,
         actionExecutionContext.getStore()?.agentName,
       )) ?? channelsService.send(target, chatId, message),
-  };
+  });
   const appActionDeps = {
     agentRunner,
     resolveOneOffDate: (trigger: Trigger) =>
