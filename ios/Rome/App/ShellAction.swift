@@ -28,10 +28,18 @@ final class ShellActions {
     let openUsage = ShellAction<Void, Void> { _ in }
     /// The same, for the Agent page's cover, which closes before Settings opens.
     let openUsageFromCover = ShellAction<Void, Void> { _ in }
+    /// The main Chat's header: the drawer or the sidebar, and the Agent page.
+    let toggleNavigation = ShellAction<Void, Void> { _ in }
+    let openAgent = ShellAction<Void, Void> { _ in }
+    /// A task chat opened from the main Chat, pushed over it.
+    let openTaskChat = ShellAction<(chatId: String, title: String), Void> { _ in }
 
     func reset() {
         linkOpener.reset()
         openUsage.reset()
         openUsageFromCover.reset()
+        toggleNavigation.reset()
+        openAgent.reset()
+        openTaskChat.reset()
     }
 }

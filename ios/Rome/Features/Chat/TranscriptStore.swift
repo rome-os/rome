@@ -119,6 +119,9 @@ final class TranscriptStore {
     /// What the transcript draws, built again whenever one of its inputs
     /// changes (`rebuildRows`), never on a read.
     private(set) var rows: [TranscriptRow] = []
+    /// Whether there are no rows: what a screen reads that only needs to
+    /// know that, so a new row does not draw it again.
+    private(set) var rowsEmpty = true
     /// What each text row draws from its message, built with the rows.
     private(set) var rowInfo: [String: RowInfo] = [:]
 
@@ -138,6 +141,7 @@ final class TranscriptStore {
         )
         // An equal list is not stored: no reader is told of a change that is none.
         if built != rows { rows = built }
+        if built.isEmpty != rowsEmpty { rowsEmpty = built.isEmpty }
         let infos = RowInfo.build(rows: built, messages: messages, pending: pending, kind: kind)
         if infos != rowInfo { rowInfo = infos }
         thread?.rebuildRows(chatAnswers: answers)
@@ -271,6 +275,15 @@ final class TranscriptStore {
         actions.onOpenChat = { _, _ in }
     }
 
+    /// Nothing would be lost if the workspace let go of this store: no
+    /// screen runs it, no send of the guardian's is held or on its way, and
+    /// no share is open. Reopened, the chat loads again (a topic chat from
+    /// the copy kept on disk first).
+    var mayBeDropped: Bool {
+        tokens.isEmpty && !onScreen && pending.isEmpty && resending.isEmpty
+            && !share.isSelecting && !share.coversChat && !share.creating
+    }
+
     func reload() async {
         await readResends()
         do {
@@ -388,56 +401,110 @@ final class TranscriptStore {
             rowsHeld = false
             rebuildRows()
         }
+        // A copy of a message already held, with the same turn and time,
+        // keeps its place: every key the order goes by is unchanged, so it
+        // replaces the held one where it stands, with no sort. Streaming and
+        // live edits of a message take this path.
+        if !incoming.isEmpty, let placed = placedInPlace(incoming) {
+            if placed != messages { messages = placed }
+            if persist { cache?.save(chat: sessionId, messages: messages) }
+            return
+        }
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for var message in incoming {
-            if message.knowsThreads {
-                instanceKnowsThreads = true
-            } else if let held = byID[message.id], held.knowsThreads {
-                // A live insert leaves the thread out: keep the one already known.
-                message.chatThreadId = held.chatThreadId
-                message.chatThreadTitle = held.chatThreadTitle
-                message.knowsThreads = true
+        for message in incoming {
+            byID[message.id] = completed(message, held: byID[message.id]) { root in
+                byID.values.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
             }
-            // A copy that leaves the title out keeps the one already known, and a
-            // message of a thread takes its title from the thread.
-            if message.chatThreadTitle == nil, let root = message.chatThreadId {
-                if let held = byID[message.id], held.chatThreadId == root, let title = held.chatThreadTitle {
-                    message.chatThreadTitle = title
-                } else {
-                    message.chatThreadTitle = byID.values.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
-                }
-            }
-            // A placement that came before its message lands with it.
-            if let placed = parkedPlacements.removeValue(forKey: message.id) {
-                message.chatThreadId = placed.root
-                message.chatThreadTitle = placed.title
-                message.knowsThreads = true
-            }
-            byID[message.id] = message
             if seen[message.id] == nil {
                 seen[message.id] = seen.count
             }
         }
-        let all = Array(byID.values)
-        var turnStart: [String: Date] = [:]
-        var turnArrival: [String: Int] = [:]
-        for message in all {
-            let key = message.turnId ?? message.id
-            turnStart[key] = min(turnStart[key] ?? message.date, message.date)
-            turnArrival[key] = min(turnArrival[key] ?? Int.max, seen[message.id]!)
-        }
-        messages = all.sorted { a, b in
-            let keyA = a.turnId ?? a.id, keyB = b.turnId ?? b.id
-            let startA = turnStart[keyA]!, startB = turnStart[keyB]!
-            if startA != startB { return startA < startB }
-            // Ids are random, so comparing them would decide a tie by chance.
-            if keyA != keyB { return turnArrival[keyA]! < turnArrival[keyB]! }
-            if a.date != b.date { return a.date < b.date }
-            return seen[a.id]! < seen[b.id]!
-        }
+        messages = Self.ordered(Array(byID.values), seen: seen)
         let stored = Set(messages.map(\.id))
         if pending.contains(where: { stored.contains($0.id) }) { pending.removeAll { stored.contains($0.id) } }
         if persist { cache?.save(chat: sessionId, messages: messages) }
+    }
+
+    /// `incoming` put in place of the messages it updates, or nil when one
+    /// of them is new or moved to another turn or time and the order must be
+    /// worked out again.
+    private func placedInPlace(_ incoming: [ChatMessage]) -> [ChatMessage]? {
+        var placed = messages
+        for message in incoming {
+            guard let index = placed.firstIndex(where: { $0.id == message.id }),
+                  placed[index].turnId == message.turnId, placed[index].createdAt == message.createdAt
+            else { return nil }
+            placed[index] = completed(message, held: placed[index]) { root in
+                placed.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
+            }
+        }
+        return placed
+    }
+
+    /// An incoming copy with what the chat already knows about it: its
+    /// thread, the thread's title, a placement that came before it.
+    private func completed(_ incoming: ChatMessage, held: ChatMessage?, threadTitle: (String) -> String?) -> ChatMessage {
+        var message = incoming
+        if message.knowsThreads {
+            instanceKnowsThreads = true
+        } else if let held, held.knowsThreads {
+            // A live insert leaves the thread out: keep the one already known.
+            message.chatThreadId = held.chatThreadId
+            message.chatThreadTitle = held.chatThreadTitle
+            message.knowsThreads = true
+        }
+        // A copy that leaves the title out keeps the one already known, and a
+        // message of a thread takes its title from the thread.
+        if message.chatThreadTitle == nil, let root = message.chatThreadId {
+            if let held, held.chatThreadId == root, let title = held.chatThreadTitle {
+                message.chatThreadTitle = title
+            } else {
+                message.chatThreadTitle = threadTitle(root)
+            }
+        }
+        // A placement that came before its message lands with it.
+        if let placed = parkedPlacements.removeValue(forKey: message.id) {
+            message.chatThreadId = placed.root
+            message.chatThreadTitle = placed.title
+            message.knowsThreads = true
+        }
+        return message
+    }
+
+    /// The server's order: turns by when they started, then by when they
+    /// first arrived; in a turn, rows by time, then by arrival. Each
+    /// message's keys are worked out once, not on every comparison.
+    static func ordered(_ all: [ChatMessage], seen: [String: Int]) -> [ChatMessage] {
+        struct Keys {
+            let turn: String
+            let date: Date
+            let arrival: Int
+        }
+        let keys = all.map { Keys(turn: $0.turnId ?? $0.id, date: $0.date, arrival: seen[$0.id] ?? Int.max) }
+        var turnStart: [String: Date] = [:]
+        var turnArrival: [String: Int] = [:]
+        for key in keys {
+            turnStart[key.turn] = min(turnStart[key.turn] ?? key.date, key.date)
+            turnArrival[key.turn] = min(turnArrival[key.turn] ?? Int.max, key.arrival)
+        }
+        struct Sorted {
+            let index: Int
+            let start: Date
+            let turnArrival: Int
+            let turn: String
+            let date: Date
+            let arrival: Int
+        }
+        let sorted = keys.enumerated().map { index, key in
+            Sorted(index: index, start: turnStart[key.turn]!, turnArrival: turnArrival[key.turn]!, turn: key.turn, date: key.date, arrival: key.arrival)
+        }.sorted { a, b in
+            if a.start != b.start { return a.start < b.start }
+            // Ids are random, so comparing them would decide a tie by chance.
+            if a.turn != b.turn { return a.turnArrival < b.turnArrival }
+            if a.date != b.date { return a.date < b.date }
+            return a.arrival < b.arrival
+        }
+        return sorted.map { all[$0.index] }
     }
 
     // MARK: Live events

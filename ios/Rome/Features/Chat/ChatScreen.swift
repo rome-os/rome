@@ -5,14 +5,17 @@ import SwiftUI
 let transcriptScrollLog = Logger(subsystem: "cc.romeos.mobile", category: "TranscriptScroll")
 
 /// Board 4: the Concierge chat, the app's home screen.
-struct ChatScreen: View {
+struct ChatScreen: View, Equatable {
     let workspace: Workspace
-    let onMenu: () -> Void
-    /// The header's mascot was tapped: the Agent page.
-    let onAgent: () -> Void
-    let onOpenChat: (String, String) -> Void
     /// Chat is the page in front, with nothing pushed over it.
     var visible = true
+
+    nonisolated static func == (lhs: ChatScreen, rhs: ChatScreen) -> Bool {
+        lhs.workspace === rhs.workspace && lhs.visible == rhs.visible
+    }
+
+    /// What it calls in the shell: the drawer, the Agent page, a task chat.
+    private var shell: ShellActions { workspace.shellActions }
 
     #if DEBUG
     @Environment(AppModel.self) private var model
@@ -35,11 +38,11 @@ struct ChatScreen: View {
             VStack(spacing: 0) {
                 // The status, the access notice and the push prompt are read
                 // by these two, so a change in them never redraws the transcript.
-                ChatHeaderBar(workspace: workspace, store: store, onMenu: {
+                ChatHeaderBar(workspace: workspace, store: store, onMenu: { [shell] in
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
-                    onMenu()
-                }, onAgent: onAgent)
+                    shell.toggleNavigation.run(())
+                }, onAgent: { [shell] in shell.openAgent.run(()) })
                 ChatBanners(workspace: workspace, store: store)
             }
             .accessibilityHidden(store.thread != nil)
@@ -52,7 +55,9 @@ struct ChatScreen: View {
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
         .onChange(of: store.replies) { composerFocused = true }
-        .onChange(of: ObjectIdentifier(store), initial: true) { store.actions.onOpenChat = onOpenChat }
+        .onChange(of: ObjectIdentifier(store), initial: true) { [shell] in
+            store.actions.onOpenChat = { shell.openTaskChat.run((chatId: $0, title: $1)) }
+        }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
@@ -75,7 +80,7 @@ struct ChatScreen: View {
                         QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    if ConciergeStarters.visible(loaded: store.readOnce, rows: store.rows) {
+                    if ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) {
                         ConciergeStarters { store.send($0.text) }
                     }
                     // While a chat thread is open, the composer sends into it.
@@ -90,7 +95,7 @@ struct ChatScreen: View {
                     }
                 }
                 .shareModeComposer(store.share)
-                .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
+                .animation(.easeOut(duration: 0.2), value: store.rowsEmpty)
                 .animation(.easeOut(duration: 0.2), value: store.quote)
                 .padding(.horizontal, Metrics.pagePadding)
                 .readableColumn()
@@ -140,7 +145,7 @@ struct ChatScreen: View {
                 actionTitle: "Try again"
             ) { Task { await workspace.openConcierge() } }
         case .ready:
-            if store.readOnce && store.rows.isEmpty {
+            if store.readOnce && store.rowsEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Spacer()
                     Text("What needs doing?")

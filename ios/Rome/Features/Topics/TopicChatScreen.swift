@@ -32,7 +32,7 @@ struct TopicChatScreen: View {
 
     /// A blank chat, or one whose transcript loaded empty.
     private var showsStarters: Bool {
-        if let store { return ConciergeStarters.visible(loaded: store.readOnce, rows: store.rows) }
+        if let store { return ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) }
         return starting == nil
     }
 

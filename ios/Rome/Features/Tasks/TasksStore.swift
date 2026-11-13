@@ -7,8 +7,26 @@ import Observation
 @Observable
 final class TasksStore {
     private let backend: RomeBackend
-    private(set) var tasks: [ConciergeTask] = []
+    /// Written only when it changes: every task card in a chat reads the
+    /// store, and a write that changes nothing would still draw them all.
+    private(set) var tasks: [ConciergeTask] = [] { didSet { indexByChat() } }
     private(set) var chats: [String: ChatSession] = [:]
+    /// The first task of each chat, and the first one not archived: what a
+    /// card or a header looks up, without a scan of the list.
+    private(set) var taskByChat: [String: ConciergeTask] = [:]
+    private var openTaskByChat: [String: ConciergeTask] = [:]
+
+    private func indexByChat() {
+        var first: [String: ConciergeTask] = [:]
+        var open: [String: ConciergeTask] = [:]
+        for task in tasks {
+            guard let chat = task.chat?.id else { continue }
+            if first[chat] == nil { first[chat] = task }
+            if open[chat] == nil, task.archivedAt == nil { open[chat] = task }
+        }
+        if first != taskByChat { taskByChat = first }
+        if open != openTaskByChat { openTaskByChat = open }
+    }
     private(set) var loaded = false
     /// The task list arrived at least once: a task missing from it is gone,
     /// not just unread yet.
@@ -45,13 +63,12 @@ final class TasksStore {
         async let taskList = try? backend.tasks()
         async let sessionList = try? backend.sessions()
         if let list = await taskList {
-            tasks = list.filter { !isGone($0) }
-            listed = true
+            let kept = list.filter { !isGone($0) }
+            if kept != tasks { tasks = kept }
+            if !listed { listed = true }
         }
-        if let list = await sessionList {
-            chats = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        }
-        loaded = true
+        if let list = await sessionList { setChats(list) }
+        if !loaded { loaded = true }
     }
 
     /// Refreshes after events may have been missed. A burst of requests (one
@@ -76,9 +93,12 @@ final class TasksStore {
         guard !refreshingChats else { return }
         refreshingChats = true
         defer { refreshingChats = false }
-        if let list = try? await backend.sessions() {
-            chats = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        }
+        if let list = try? await backend.sessions() { setChats(list) }
+    }
+
+    private func setChats(_ list: [ChatSession]) {
+        let byID = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if byID != chats { chats = byID }
     }
 
     private func handle(_ event: LiveEvent) {
@@ -86,7 +106,7 @@ final class TasksStore {
         case .taskUpsert(let task):
             apply(task)
         case .sessionRunning(let id, let running):
-            if var chat = chats[id] {
+            if var chat = chats[id], chat.running != running {
                 chat.running = running
                 chats[id] = chat
             }
@@ -103,14 +123,16 @@ final class TasksStore {
     /// archived row leaves the list.
     func apply(_ task: ConciergeTask) {
         if let held = tasks.first(where: { $0.id == task.id }), held.updatedAt > task.updatedAt { return }
-        tasks.removeAll { $0.id == task.id }
-        if task.archivedAt == nil, !isGone(task) { tasks.append(task) }
+        var next = tasks
+        next.removeAll { $0.id == task.id }
+        if task.archivedAt == nil, !isGone(task) { next.append(task) }
+        if next != tasks { tasks = next }
     }
 
     /// A task chat archived or deleted here: its row and its cards leave.
     func forget(chat chatId: String) {
         goneChats.insert(chatId)
-        tasks.removeAll { $0.chat?.id == chatId }
+        if tasks.contains(where: { $0.chat?.id == chatId }) { tasks.removeAll { $0.chat?.id == chatId } }
     }
 
     /// Whether task chat `chatId` was archived or deleted here.
@@ -124,7 +146,7 @@ final class TasksStore {
 
     /// The status of a task chat, as its card and header show it.
     func tone(forChat chatId: String) -> TaskTone {
-        if let task = tasks.first(where: { $0.chat?.id == chatId && $0.archivedAt == nil }) {
+        if let task = openTaskByChat[chatId] {
             switch task.state {
             case .needsUser: return .needsYou
             case .doing: return chats[chatId]?.lastTurnFailed == true && chats[chatId]?.running != true ? .failed : .running
@@ -140,11 +162,11 @@ final class TasksStore {
     }
 
     func title(forChat chatId: String, fallback: String) -> String {
-        chats[chatId]?.name ?? tasks.first { $0.chat?.id == chatId }?.title ?? fallback
+        chats[chatId]?.name ?? taskByChat[chatId]?.title ?? fallback
     }
 
     func task(forChat chatId: String) -> ConciergeTask? {
-        tasks.first { $0.chat?.id == chatId }
+        taskByChat[chatId]
     }
 
     // MARK: Task cards

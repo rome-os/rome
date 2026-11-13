@@ -221,6 +221,8 @@ struct MainShell: View {
         // The workspace empties them when it stops; a shell built again
         // for the same workspace sets them anew.
         .onAppear { installShellActions() }
+        // What toggling the navigation does depends on the width.
+        .onChange(of: usesSidebar) { installShellActions() }
         .onDisappear { model.hide(by: screenID) }
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .onChange(of: drawerOpen) { _, open in
@@ -375,6 +377,9 @@ struct MainShell: View {
     private func installShellActions() {
         let actions = workspace.shellActions
         actions.linkOpener.run = { openChatLink($0) }
+        actions.toggleNavigation.run = { _ in toggleNavigation() }
+        actions.openAgent.run = { _ in agentPage = AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID) }
+        actions.openTaskChat.run = { path.append(.taskChat(chatId: $0.chatId, title: $0.title)) }
         actions.openUsage.run = { _ in
             settingsPath = []
             showSettings = true
@@ -421,15 +426,15 @@ struct MainShell: View {
         // Chat stays alive under the other pages: rebuilt, its list would load
         // again from the top and scroll down while the drawer closes onto it.
         ZStack {
+            // Values and the workspace's actions only, so a shell update
+            // that changes neither leaves Chat alone.
             ChatScreen(
                 workspace: workspace,
-                onMenu: { toggleNavigation() },
-                onAgent: { agentPage = AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID) },
-                onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) },
                 // The same answer the server watch and push banners go by: a
                 // sheet, the drawer or a pushed page over Chat hides it.
                 visible: visibleChat == conciergeChatID
             )
+            .equatable()
             .opacity(section == .chat ? 1 : 0)
             .environment(\.offScreen, section != .chat || covered)
             .allowsHitTesting(section == .chat)

@@ -102,8 +102,9 @@ final class Workspace {
     private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
-    /// Each opened topic chat's transcript, kept while the instance is open so
-    /// coming back to a chat does not load it from the top again.
+    /// The opened topic chats' transcripts, the newest `keptStores` of them
+    /// kept while the instance is open, so coming back to a chat does not
+    /// load it from the top again.
     @ObservationIgnored private var topicStores: [String: TranscriptStore] = [:]
     /// Goes up per topic chat when it must show its newest rows: a tapped push.
     private(set) var topicLatest: [String: Int] = [:]
@@ -218,13 +219,53 @@ final class Workspace {
     }
 
     func topicStore(_ chatId: String) -> TranscriptStore {
+        Self.used(chatId, in: &recentTopics)
         if let store = topicStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .concierge, backend: backend)
         store.drafts = ChatDrafts(store: drafts, chat: chatId)
         store.cache = transcripts
         store.showCached()
         topicStores[chatId] = store
+        trimStoresSoon()
         return store
+    }
+
+    /// How many topic chats, and how many task chats, keep their transcript
+    /// in memory once the guardian has left them.
+    static let keptStores = 8
+    /// The topic and task chats by when they were last opened, newest last.
+    @ObservationIgnored private var recentTopics: [String] = []
+    @ObservationIgnored private var recentTasks: [String] = []
+
+    private static func used(_ chatId: String, in recent: inout [String]) {
+        guard recent.last != chatId else { return }
+        recent.removeAll { $0 == chatId }
+        recent.append(chatId)
+    }
+
+    /// After the view update that made a store: closing one changes state
+    /// that views read.
+    private func trimStoresSoon() {
+        Task { @MainActor [weak self] in self?.trimStores() }
+    }
+
+    /// Past `keptStores`, the chats opened longest ago let go of their
+    /// transcripts, oldest first, except one that would lose something
+    /// (`TranscriptStore.mayBeDropped`).
+    func trimStores() {
+        Self.trim(&topicStores, recent: &recentTopics)
+        Self.trim(&taskStores, recent: &recentTasks)
+    }
+
+    private static func trim(_ stores: inout [String: TranscriptStore], recent: inout [String]) {
+        var excess = stores.count - keptStores
+        for chatId in recent where excess > 0 {
+            guard let store = stores[chatId], store.mayBeDropped else { continue }
+            stores[chatId] = nil
+            store.close()
+            excess -= 1
+        }
+        recent.removeAll { stores[$0] == nil }
     }
 
     /// Starts a topic chat, then sends it its first message, in that order.
@@ -241,10 +282,12 @@ final class Workspace {
     }
 
     func taskStore(_ chatId: String) -> TranscriptStore {
+        Self.used(chatId, in: &recentTasks)
         if let store = taskStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .task, backend: backend)
         store.drafts = ChatDrafts(store: drafts, chat: chatId)
         taskStores[chatId] = store
+        trimStoresSoon()
         return store
     }
 
