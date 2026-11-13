@@ -437,6 +437,26 @@ describe("ChatThreadView", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
   });
 
+  it("covers the chat behind with a near-opaque backdrop and keeps blend modes inside the list", async () => {
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    await screen.findByText("Which day?");
+    const view = screen.getByRole("dialog", { name: "Chat thread" });
+    const [backdrop, list] = view.querySelectorAll<HTMLElement>("[data-chat-thread-fade]");
+    // Readable without the blur: an avatar's blend ring once cut it off.
+    expect(backdrop?.className).toContain("bg-chat-canvas/95");
+    expect(backdrop?.className).not.toMatch(/supports-\[backdrop-filter\]/);
+    expect(list?.className.split(" ")).toContain("isolate");
+  });
+
   it("tints the message it opened from once it has faded in, then lets it go", async () => {
     render(
       host(

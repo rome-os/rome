@@ -311,6 +311,27 @@ describe("AnthropicProvider", () => {
       ]);
     });
 
+    it("reports a compaction the SDK made partway through a turn", async () => {
+      scripted(async function* (sent) {
+        const prompt = await sent();
+        yield { ...prompt, isReplay: true };
+        yield {
+          type: "system",
+          subtype: "compact_boundary",
+          compact_metadata: { trigger: "auto", pre_tokens: 180_000 },
+        };
+        yield say("Done", prompt.uuid);
+        yield result("Done", [prompt.uuid], "human");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "go on", inputId: p });
+      const turn = await nextTurn(session.events[Symbol.asyncIterator]());
+      await session.close();
+
+      expect(turn.filter((m) => m.type === "model_context_compacted")).toHaveLength(1);
+      expect(turn.at(-1)).toMatchObject({ type: "result", content: "Done" });
+    });
+
     it("keeps a turn the SDK starts while idle out of Rome's next turn", async () => {
       scripted(async function* (sent) {
         const first = await sent();
@@ -2600,6 +2621,53 @@ describe("AnthropicProvider", () => {
   });
 
   describe("accounting", () => {
+    it("counts only the context rows that occupy the window, not the compaction reserve", async () => {
+      mockQuery(
+        [
+          {
+            type: "result",
+            subtype: "success",
+            result: "Done",
+            usage: { input_tokens: 10, output_tokens: 1 },
+            num_turns: 1,
+            stop_reason: "end_turn",
+            duration_ms: 5,
+          },
+        ],
+        {
+          // The SDK's total includes the reserve here; the used rows sum to 35,000.
+          totalTokens: 68000,
+          maxTokens: 200000,
+          rawMaxTokens: 200000,
+          percentage: 34,
+          categories: [
+            { name: "System prompt", tokens: 5000, color: "x", kind: "used" },
+            { name: "Messages", tokens: 30000, color: "x", kind: "used" },
+            { name: "Autocompact buffer", tokens: 33000, color: "x", kind: "buffer" },
+            { name: "MCP tools", tokens: 9000, color: "x", kind: "deferred", isDeferred: true },
+            { name: "Free space", tokens: 123000, color: "x", kind: "free" },
+          ],
+          gridRows: [],
+          model: "claude-sonnet-5",
+          memoryFiles: [],
+          mcpTools: [],
+          agents: [],
+          isAutoCompactEnabled: true,
+        },
+      );
+      const provider = new AnthropicProvider();
+      const session = await provider.openSession(
+        buildParams({ config: { model: "claude-sonnet-5" } }),
+      );
+      const messages = await collectEvents(session);
+      await session.close();
+      expect(messages[0]).toMatchObject({
+        accounting: {
+          context: { usedTokens: 35000, windowTokens: 200000, remainingTokens: 165000 },
+        },
+      });
+    });
+
     it("attaches normalized accounting metadata to result messages", async () => {
       mockQuery(
         [

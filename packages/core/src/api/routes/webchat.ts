@@ -106,10 +106,17 @@ import {
   automatedMessageNotice,
 } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { automatedSenderId } from "../../webchat/automated-source.js";
+import { automatedSenderId, automatedSource } from "../../webchat/automated-source.js";
+import {
+  automatedInputLabel,
+  automatedInputPrompt,
+  automatedInputSource,
+  fromOwner,
+} from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
+import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
 import type {
   BackendEmitOptions,
   BackendSessionTask,
@@ -3147,6 +3154,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   });
 
+  // The handoff a renewal started one of the chat's sessions from, for the
+  // chat's renewal line (docs/concepts/sessions.md#handoff). Null when none
+  // was written.
+  app.get("/chat/sessions/:id/renewals/:sessionId", async (c) => {
+    const chatId = c.req.param("id");
+    const lookup = await getStoredWebchatSession(c, chatId);
+    if ("response" in lookup) return lookup.response;
+    const renewed = await deps.sessionRepository.session(c.req.param("sessionId"));
+    if (!renewed || renewed.continuityKey !== webchatSessionKey(chatId)) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+    return c.json({ handoff: renewed.handoff });
+  });
+
   app.get("/chat/sessions/:id/events", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
@@ -3649,6 +3670,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     replyQuote?: unknown;
   };
 
+  // The chats whose last input carried an open workspace. In memory: after a
+  // restart a closed workspace is not announced, and the next one opened is.
+  const workspaceOpenIn = new Set<string>();
+
   const parseChatSendBody = async (c: Context): Promise<SendBody> => {
     const contentType = c.req.header("content-type") ?? "";
     if (contentType.includes("multipart/form-data")) {
@@ -3758,6 +3783,54 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // webchat — handoff children never carry the flag.
     if (session.type === "webchat" && session.archivedAt) {
       return answer({ error: "This chat is archived and read-only" }, 409);
+    }
+
+    // A Concierge chat holds only its owner's messages and the Concierge's. A
+    // routine, an app or another agent sending into it wakes the Concierge
+    // with a quiet system turn instead: the text stays in the turn's trace and
+    // the chat shows a faint line naming who sent it.
+    if (automated && isConciergeChat(session)) {
+      // An action's loopback send stands for the person its turn ran for,
+      // known here only by kind. That person must be able to open the chat,
+      // as on any send into a dashboard chat: a visitor's, of no known
+      // account, opens no one's. A send no person made is Rome's own work.
+      const actorKind = sourceId ? body.automatedActorKind : undefined;
+      if (
+        actorKind === "visitor" ||
+        (actorKind === "guardian" &&
+          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian")))
+      ) {
+        return answer({ error: "Session not found" }, 404);
+      }
+      const concierge = deps.concierge;
+      const text = body.text?.trim() ?? "";
+      // A turn takes only the text: files are refused, not dropped.
+      if (!concierge || !text || uploadedFiles.length > 0) {
+        return answer({ error: "A Concierge chat takes only text from an automation" }, 400);
+      }
+      const source = automatedInputSource(automated);
+      void concierge
+        .runSystemTurn(
+          sessionId,
+          automatedInputPrompt(
+            source,
+            text,
+            fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
+          ),
+          {
+            quiet: true,
+            inputLabel: automatedInputLabel(source),
+            inputSource: source,
+            pushLevel: "active",
+          },
+        )
+        .catch((error: unknown) =>
+          log.warn("automated input into a Concierge chat did not run", {
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return answer({ inputId, sessionId, turnId: null, disposition: "system_turn" }, 202);
     }
 
     // A branch is visible in the sidebar from its 201, but its model thread
@@ -3904,7 +3977,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const repliedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached fixed part of the system prompt stays stable.
-    const workspaceSection = buildWorkspaceContextSection(body.workspace);
+    // The session leaves out a block that did not change, so the input after
+    // one with an open workspace says it closed with an empty block.
+    const openWorkspace = buildWorkspaceContextSection(body.workspace);
+    const workspaceSection =
+      openWorkspace ?? (workspaceOpenIn.has(sessionId) ? EMPTY_WORKSPACE_CONTEXT : null);
+    if (openWorkspace) workspaceOpenIn.add(sessionId);
+    else workspaceOpenIn.delete(sessionId);
     const contextPrompt = workspaceSection
       ? `${workspaceSection}\n\n${repliedPrompt}`
       : repliedPrompt;
