@@ -133,6 +133,18 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 
     /// A provider reuses tool-use ids across turns: an answer belongs to the
     /// card before it, and a later card with the same id stays open.
+    /// A result that names its card's message answers that card, even read
+    /// after a later card with the same tool-use id.
+    @Test func aResultThatNamesItsCardAnswersThatCard() {
+        let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "appId": "connector", "render": ["kind": "inline", "ui": ["components": [["id": "root", "component": "Text", "text": "Connect"]]]]]
+        let first = message("c1", role: "assistant", [card], at: 0)
+        let second = message("c2", role: "assistant", [card], at: 0)
+        let result = message("r1", role: "user", [["type": "interaction_result", "toolUseId": "item_0", "messageId": "c1", "output": ["from": "connector", "value": "ok"]]], at: 0)
+        let answers = TranscriptBuilder.answers(in: [first, second, result])
+        #expect(answers["c1"] != nil)
+        #expect(answers["c2"] == nil)
+    }
+
     /// An answer known only from older messages, as a thread's own older
     /// page holds it, reaches the card's row.
     @Test func aWaitingCardsRowCarriesItsAnswer() {

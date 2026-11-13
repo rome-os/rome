@@ -52,6 +52,18 @@ function setup(
     webchatRepo: {
       widgetMessage: async (id) =>
         rows[id] ? { chatId: rows[id].chatId, content: JSON.stringify(rows[id].content) } : null,
+      getMessages: (async (chatId: string) =>
+        Object.entries(rows)
+          .filter(([, row]) => row.chatId === chatId)
+          .map(([id, row]) => ({
+            id,
+            role: row.content.some(
+              (part) => (part as { type?: string }).type === "interaction_result",
+            )
+              ? "user"
+              : "assistant",
+            content: JSON.stringify(row.content),
+          }))) as never,
       getSession: (async (id: string) =>
         id === "private"
           ? { id, agentName: "core:concierge", ownerKey: "guardian", triggerKind: null }
@@ -288,6 +300,9 @@ describe("an event on a widget", () => {
     const app = widgetEventRoutes({
       webchatRepo: {
         widgetMessage: async () => ({ chatId: "c1", content: JSON.stringify([connect]) }),
+        getMessages: (async () => [
+          { id: "m7", role: "assistant", content: JSON.stringify([connect]) },
+        ]) as never,
         getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
       },
       callerOwner: async () => "guardian",
@@ -304,6 +319,35 @@ describe("an event on a widget", () => {
     });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "Log in to Composio first" });
+  });
+
+  it("refuses an event on a card that was already answered, without calling its app", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("connect", "connect"),
+          ],
+        },
+      },
+    };
+    const { fire, forwarded } = setup({
+      m9: { chatId: "c1", content: [connect] },
+      r9: {
+        chatId: "c1",
+        content: [
+          { type: "interaction_result", toolUseId: "tu-connect", messageId: "m9", output: {} },
+        ],
+      },
+    });
+    const res = await fire("m9", { name: "connect" });
+    expect(res.status).toBe(400);
+    expect(forwarded).toEqual([]);
   });
 
   it("dismisses with the output every dismissal has", async () => {
