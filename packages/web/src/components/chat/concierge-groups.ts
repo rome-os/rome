@@ -88,12 +88,6 @@ export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
   );
 }
 
-/** Whether turn `turnId` took one of the owner's messages as its input. */
-function turnTookOwnerMessage(rows: ChatRow[], turnId: string | null): boolean {
-  if (!turnId) return false;
-  return rows.some((row) => row.kind === "user" && row.message.turnId === turnId);
-}
-
 // The tools whose call is itself a message the chat draws: once one lands,
 // nothing is left to type for it.
 const MESSAGE_TOOLS = new Set(["say", "chat_forward"]);
@@ -106,19 +100,26 @@ function bareTool(tool: string): string {
   ).toLowerCase();
 }
 
+type LiveBlock = { type: string; id?: string; tool?: string; toolUseId?: string };
+
+/** The live trace's blocks, in the order they happened. */
+function liveBlocks(snapshot: TraceSnapshot | null): LiveBlock[] {
+  if (!snapshot) return [];
+  return [...snapshot.segments]
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .flatMap((segment) => (segment.kind === "run" ? segment.blocks : [segment.block]))
+    .map((block) => block as LiveBlock);
+}
+
 /**
  * Whether the live trace has a call open, other than one that says a message:
  * the turn is working on something the chat does not show yet.
  */
 export function hasOpenWorkCall(snapshot: TraceSnapshot | null): boolean {
-  if (!snapshot) return false;
-  const blocks = [...snapshot.segments]
-    .sort((a, b) => a.ordinal - b.ordinal)
-    .flatMap((segment) => (segment.kind === "run" ? segment.blocks : [segment.block]));
   const open = new Map<string, string>();
   let anon = 0;
-  for (const block of blocks) {
-    if (block.type === "tool_use") open.set(block.id ?? `anon:${anon++}`, block.tool);
+  for (const block of liveBlocks(snapshot)) {
+    if (block.type === "tool_use") open.set(block.id ?? `anon:${anon++}`, block.tool ?? "");
     else if (block.type === "tool_result") {
       if (block.toolUseId) open.delete(block.toolUseId);
       else {
@@ -131,23 +132,45 @@ export function hasOpenWorkCall(snapshot: TraceSnapshot | null): boolean {
 }
 
 /**
- * Whether the Concierge chat shows its typing dots. A turn that took the
- * owner's message shows none: that message's status reaction already says
- * the Concierge is on it (docs/domains/chats.md#status-reaction). Any other
- * turn, such as one bringing back a task's result, shows them until it says
- * its first message, unless it is quiet. Once it has said one they show only
- * while it is in a call other than one that says a message, so a turn that
- * only closes off after its last message (writing its private `done`) shows
- * none.
+ * Whether the turn is producing output with no work call open, inferred where
+ * the provider does not say it is writing a message: the live trace ends on a
+ * work call's result, or, until the turn has spoken (`spoken`), on a finished
+ * thinking block. A message's own result means it just landed, and thinking
+ * after a message is the turn closing off.
+ */
+function generating(snapshot: TraceSnapshot | null, spoken: boolean): boolean {
+  const last = liveBlocks(snapshot).at(-1);
+  if (!last || hasOpenWorkCall(snapshot)) return false;
+  if (last.type === "tool_result") return !MESSAGE_TOOLS.has(bareTool(last.tool ?? ""));
+  return last.type === "thinking" && !spoken;
+}
+
+/** Whether the live trace holds call `toolUseId`'s whole call: the message it writes is landing. */
+function callLanded(snapshot: TraceSnapshot | null, toolUseId: string): boolean {
+  return liveBlocks(snapshot).some((block) => block.type === "tool_use" && block.id === toolUseId);
+}
+
+/**
+ * Whether the Concierge chat shows its typing dots: the Concierge is writing
+ * a message (docs/domains/chats.md#status-reaction). The owner's message it
+ * took shows 👀 for having started; the dots say a message is coming.
+ * - Exactly, where the provider streams a call's input: from the first input
+ *   of a message call (`live.writing`) until the call lands.
+ * - Otherwise inferred: no work call is open and the live trace ends on a
+ *   work call's result, or on a finished thinking block until the turn's
+ *   first message, so a turn that only closes off after its last message
+ *   (writing its private `done`) shows none.
+ * A quiet turn shows none until it says something.
  */
 export function showsTyping(
   rows: ChatRow[],
-  live: Pick<LivePreview, "isStreaming" | "runningTurnId" | "quiet" | "snapshot">,
+  live: Pick<LivePreview, "isStreaming" | "runningTurnId" | "quiet" | "snapshot" | "writing">,
 ): boolean {
   if (!live.isStreaming) return false;
-  if (turnTookOwnerMessage(rows, live.runningTurnId)) return false;
-  if (!turnHasSpoken(rows, live.runningTurnId)) return !live.quiet;
-  return hasOpenWorkCall(live.snapshot);
+  const spoken = turnHasSpoken(rows, live.runningTurnId);
+  if (live.quiet && !spoken) return false;
+  if (live.writing && !callLanded(live.snapshot, live.writing)) return true;
+  return generating(live.snapshot, spoken);
 }
 
 // What the last build made, keyed by the message each piece starts from. A

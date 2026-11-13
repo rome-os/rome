@@ -111,6 +111,7 @@ A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) t
 - Stopping a task that failed takes its mark away.
 - It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
 - A common chat has none, and neither does a task chat.
+- The working mark says the Concierge has started on the message. Its **typing dots** say something else: the Concierge is writing a message now. A provider that streams a call's input shows them exactly, from the first word of a `say` or `chat_forward` call until it lands. Otherwise Rome infers it: no work call is open, and the turn last finished thinking or got a work call's result back. After the turn's first message, only a work call's result counts, so a turn that only closes off after its last message shows none. A quiet turn, one that is housekeeping, shows none until it says something.
 
 ## Concierge chat
 

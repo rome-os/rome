@@ -5,6 +5,7 @@ import {
   endStream,
   runningTurnIdOf,
   startStream,
+  startWriting,
   updateAssistantBlock,
   updateSnapshot,
   type StreamingSessionMap,
@@ -155,5 +156,16 @@ describe("streaming-sessions state", () => {
     const after = updateAssistantBlock(state, "A", "turn-1", 3, true);
     expect(after).toBe(state);
     expect(state.get("A")?.assistantBlockIx).toBe(0);
+  });
+
+  it("holds the message call the agent writes, for the running turn only", () => {
+    const state = startStream(new Map(), "A", "turn-1");
+    const writing = startWriting(state, "A", "turn-1", "call-1");
+    expect(writing.get("A")?.writing).toBe("call-1");
+    // The same call again changes nothing; a stale turn's is ignored.
+    expect(startWriting(writing, "A", "turn-1", "call-1")).toBe(writing);
+    expect(startWriting(writing, "A", "turn-0", "call-9")).toBe(writing);
+    // A newer turn starts with none.
+    expect(startStream(writing, "A", "turn-2").get("A")?.writing).toBeUndefined();
   });
 });

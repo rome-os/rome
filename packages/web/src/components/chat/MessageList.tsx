@@ -51,6 +51,8 @@ export interface LivePreview {
   runningTurnId: string | null;
   /** The running turn is housekeeping for the agent, so the Concierge chat holds back its typing indicator. */
   quiet?: boolean;
+  /** The call the agent started writing as a message, while the server says so (`message_writing`). */
+  writing?: string;
   snapshot: TraceSnapshot | null;
   /**
    * The text block being typed. A store rather than a string, so each delivery

@@ -117,6 +117,7 @@ import {
 } from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
+import { messageWritingStart } from "./message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
 import type {
@@ -316,7 +317,8 @@ type WebchatEventName =
   | "done"
   | "stream_error"
   | "keepalive"
-  | "turn_id";
+  | "turn_id"
+  | "message_writing";
 
 // Mirror the agent's propose_routine tool call into a first-class assistant
 // `routine_draft_card` message so the confirm card renders inline. The card
@@ -3572,12 +3574,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         let assistantBlockIx = 0;
         let terminalError: Extract<StreamAgentEvent, { type: "error" }> | undefined;
         let interrupted = false;
+        const writingTold = new Set<string>();
         const write = (event: WebchatEventName, data: unknown) => {
           queue = queue.then(() => sse.writeSSE({ event, data: JSON.stringify(data) }));
         };
         const project = (message: StreamAgentEvent) => {
           if (message.type === "input_status") {
             write("input_status", message);
+            return;
+          }
+          const writing = messageWritingStart(message, writingTold);
+          if (writing) {
+            write("message_writing", { turnId, toolUseId: writing });
             return;
           }
           if (isTransientDelta(message) && message.type !== "text_delta") return;
@@ -4383,6 +4391,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
+            const writingTold = new Set<string>();
             const romeSession = {
               _romeSessionId: sessionId,
               _type: session.type as RomeSessionType,
@@ -4390,7 +4399,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             for await (const event of handle.events()) {
               const msg = withRomeSession(event, romeSession);
               if (msg.type === "input_status") continue;
-              // Deltas other than text have no webchat consumer yet.
+              const writing = messageWritingStart(msg, writingTold);
+              if (writing) {
+                emitToStream(
+                  stream,
+                  "message_writing",
+                  { turnId, toolUseId: writing },
+                  "message_writing",
+                );
+                continue;
+              }
+              // Other deltas than text have no webchat consumer.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
@@ -4874,6 +4893,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
     let recordedCardWrites: Promise<void> = Promise.resolve();
+    const writingTold = new Set<string>();
     // The same rule as a foreground turn: an agent whose text is private keeps
     // its narration in the trace.
     const deliversText =
@@ -4913,7 +4933,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           };
         }
       }
-      // Backend turns have no live bubble; drop delta events.
+      const writing = messageWritingStart(msg, writingTold);
+      if (writing) {
+        emitToStream(
+          stream,
+          "message_writing",
+          { turnId: recordedTurnId ?? stream.turnId, toolUseId: writing },
+          "message_writing",
+        );
+        return recordedCardWrites;
+      }
+      // Backend turns have no live bubble; drop the other delta events.
       if (isTransientDelta(msg) || msg.type === "input_status") return recordedCardWrites;
       if (recorded) {
         emitLiveTraceEvent(stream, msg);

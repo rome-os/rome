@@ -536,6 +536,7 @@ export function Chat({
     start: startSessionStream,
     update: updateSessionSnapshot,
     updateText: updateSessionAssistantText,
+    writing: startSessionWriting,
     adoptAgentTurn: adoptSessionAgentTurn,
     end: endSessionStream,
   } = useStreamingSessions();
@@ -1512,6 +1513,16 @@ export function Chat({
             }
             continue;
           }
+          if (evt.event === "message_writing") {
+            // The agent started writing a message: the typing dots' exact sign.
+            try {
+              const { toolUseId } = JSON.parse(evt.data) as { toolUseId?: string };
+              if (toolUseId) startSessionWriting(sessionId, turnId, toolUseId);
+            } catch {
+              // ignore parse errors
+            }
+            continue;
+          }
           if (evt.event === "input_status") {
             try {
               const status = JSON.parse(
@@ -1595,6 +1606,7 @@ export function Chat({
       streamingSessionsRef,
       updateSessionSnapshot,
       updateSessionAssistantText,
+      startSessionWriting,
       adoptSessionAgentTurn,
       isReadVisibleSession,
     ],
@@ -2656,6 +2668,7 @@ export function Chat({
                           isStreaming: displayedStreaming,
                           runningTurnId,
                           quiet: activeSessionStream?.quiet,
+                          writing: activeSessionStream?.writing,
                           snapshot: currentSnapshot,
                           textStore: liveTextStore,
                           blockIx: activeSessionStream?.assistantBlockIx,

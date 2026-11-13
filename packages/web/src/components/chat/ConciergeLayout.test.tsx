@@ -494,7 +494,7 @@ describe("Concierge layout", () => {
     });
 
     it("puts the typing bubble in the agent's group", () => {
-      // The turn has spoken, so it types only while it works on in a call.
+      // The turn has spoken, so it types only once a work call's result is back.
       const working = {
         segments: [
           {
@@ -502,6 +502,12 @@ describe("Concierge layout", () => {
             id: "b0",
             ordinal: 0,
             block: { type: "tool_use" as const, id: "w1", tool: "WebSearch", input: {} },
+          },
+          {
+            kind: "block" as const,
+            id: "b1",
+            ordinal: 1,
+            block: { type: "tool_result" as const, toolUseId: "w1", tool: "WebSearch", output: "" },
           },
         ],
         summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },

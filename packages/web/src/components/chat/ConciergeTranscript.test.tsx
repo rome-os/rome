@@ -50,6 +50,24 @@ const agent = (id: string, turnId: string): ChatMessage => ({
   createdAt: "2026-10-27T00:00:00.000Z",
 });
 
+/** A live trace of these blocks, in order. */
+function traceOf(...blocks: Record<string, unknown>[]): LivePreview["snapshot"] {
+  return {
+    segments: blocks.map((block, ordinal) => ({
+      kind: "block" as const,
+      id: `b${ordinal}`,
+      ordinal,
+      block,
+    })),
+    summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+  } as unknown as LivePreview["snapshot"];
+}
+const THINKING = { type: "thinking", content: "…" };
+const searched = [
+  { type: "tool_use", id: "w1", tool: "WebSearch", input: {} },
+  { type: "tool_result", toolUseId: "w1", tool: "WebSearch", output: "" },
+];
+
 function transcript(
   messages: ChatMessage[],
   streaming = false,
@@ -160,8 +178,8 @@ describe("ConciergeTranscript when the loaded history is replaced", () => {
 });
 
 describe("ConciergeTranscript as a live log", () => {
-  it("is a log of additions, busy while a turn runs", () => {
-    const { getByRole, rerender } = render(transcript(history, true));
+  it("is a log of additions, busy while the turn writes a message", () => {
+    const { getByRole, rerender } = render(transcript(history, true, false, traceOf(THINKING)));
     const log = getByRole("log");
     expect(log.getAttribute("aria-relevant")).toBe("additions");
     expect(log.getAttribute("aria-busy")).toBe("true");
@@ -222,8 +240,10 @@ describe("ConciergeTranscript typing indicator", () => {
   const dots = (container: HTMLElement) =>
     container.querySelector('[role="status"][aria-label="Typing"]');
 
-  it("shows the typing dots while a turn runs", () => {
-    const { container } = render(transcript(history, true));
+  it("shows the typing dots while the turn writes a message, and none at its start", () => {
+    const { container, rerender } = render(transcript(history, true));
+    expect(dots(container)).toBeNull();
+    rerender(transcript(history, true, false, traceOf(THINKING)));
     expect(dots(container)).not.toBeNull();
   });
 
@@ -233,25 +253,14 @@ describe("ConciergeTranscript typing indicator", () => {
     expect(getByRole("log").hasAttribute("aria-busy")).toBe(false);
   });
 
-  it("hides the dots once the turn has said something, and shows them while it works on", () => {
-    const { container, rerender } = render(transcript(history, true));
+  it("hides the dots once the turn has said something, and shows them after more work", () => {
+    const { container, rerender } = render(transcript(history, true, false, traceOf(THINKING)));
     expect(dots(container)).not.toBeNull();
     // The turn's message lands; it only closes off after it.
-    rerender(transcript([...history, agent("a9", "t9")], true));
+    rerender(transcript([...history, agent("a9", "t9")], true, false, traceOf(THINKING)));
     expect(dots(container)).toBeNull();
-    // It starts another call.
-    const working = {
-      segments: [
-        {
-          kind: "block" as const,
-          id: "b0",
-          ordinal: 0,
-          block: { type: "tool_use" as const, id: "w1", tool: "WebSearch", input: {} },
-        },
-      ],
-      summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
-    };
-    rerender(transcript([...history, agent("a9", "t9")], true, false, working));
+    // A call's result comes back: it writes on.
+    rerender(transcript([...history, agent("a9", "t9")], true, false, traceOf(...searched)));
     expect(dots(container)).not.toBeNull();
   });
 

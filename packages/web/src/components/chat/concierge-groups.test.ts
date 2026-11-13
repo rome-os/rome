@@ -415,56 +415,77 @@ describe("showsTyping", () => {
     tool,
     output: "",
   });
-  const asked = [userRow(guardian("g1", 0))];
-  const live = (snapshot: TraceSnapshot | null, extra: { quiet?: boolean } = {}) => ({
+  const thinking = { type: "thinking", content: "…" };
+  // The owner's message the running turn took: it shows 👀, and the dots say a message is coming.
+  const asked = [userRow({ ...guardian("g1", 0), turnId: "t1" } as ChatMessage)];
+  const live = (
+    snapshot: TraceSnapshot | null,
+    extra: { quiet?: boolean; writing?: string } = {},
+  ) => ({
     isStreaming: true,
     runningTurnId: "t1",
     snapshot,
     ...extra,
   });
 
-  it("types from the turn's start until its first message", () => {
-    expect(showsTyping(asked, live(null))).toBe(true);
-    expect(showsTyping(asked, live(trace(use("s1", "core:say"))))).toBe(true);
+  it("types while the provider says a message is being written, until its call lands", () => {
+    expect(showsTyping(asked, live(null, { writing: "s1" }))).toBe(true);
+    expect(showsTyping(asked, live(trace(thinking), { writing: "s1" }))).toBe(true);
+    expect(showsTyping(asked, live(trace(use("s1", "core:say")), { writing: "s1" }))).toBe(false);
   });
 
-  it("stops once the turn has said something, while it only closes off", () => {
-    const said = [...asked, agentRow(say("a1", MIN))];
-    const afterSay = trace(use("s1", "core:say"), result("s1", "core:say"));
-    expect(showsTyping(said, live(afterSay))).toBe(false);
-    // A forward is a message too.
-    expect(showsTyping(said, live(trace(use("f1", "mcp__rome__chat_forward"))))).toBe(false);
+  it("shows none at the turn's start, which the owner's 👀 already covers", () => {
+    expect(showsTyping(asked, live(null))).toBe(false);
   });
 
-  it("types again while the turn works on in another call, and stops at its next message", () => {
-    const said = [...asked, agentRow(say("a1", MIN))];
-    const working = trace(use("s1", "core:say"), result("s1", "core:say"), use("w1", "WebSearch"));
-    expect(showsTyping(said, live(working))).toBe(true);
-    const done = trace(
-      use("s1", "core:say"),
-      result("s1", "core:say"),
-      use("w1", "WebSearch"),
-      result("w1", "WebSearch"),
-      use("s2", "core:say"),
-      result("s2", "core:say"),
+  it("infers writing after finished thinking or a work call's result, with no work call open", () => {
+    expect(showsTyping(asked, live(trace(thinking)))).toBe(true);
+    expect(showsTyping(asked, live(trace(use("w1", "WebSearch"))))).toBe(false);
+    expect(showsTyping(asked, live(trace(use("w1", "WebSearch"), result("w1", "WebSearch"))))).toBe(
+      true,
     );
-    expect(showsTyping([...said, agentRow(say("a2", 2 * MIN))], live(done))).toBe(false);
+    // A message's own result: it just landed.
+    expect(showsTyping(asked, live(trace(use("s1", "core:say"), result("s1", "core:say"))))).toBe(
+      false,
+    );
+  });
+
+  it("after a message, types only after a work call's result, so closing off shows none", () => {
+    const said = [...asked, agentRow(say("a1", MIN))];
+    const afterSay = [use("s1", "core:say"), result("s1", "core:say")];
+    expect(showsTyping(said, live(trace(...afterSay)))).toBe(false);
+    expect(showsTyping(said, live(trace(...afterSay, thinking)))).toBe(false);
+    expect(showsTyping(said, live(trace(...afterSay, use("w1", "WebSearch"))))).toBe(false);
+    expect(
+      showsTyping(
+        said,
+        live(trace(...afterSay, use("w1", "WebSearch"), result("w1", "WebSearch"))),
+      ),
+    ).toBe(true);
+    // A forward is a message too.
+    expect(
+      showsTyping(
+        said,
+        live(trace(use("f1", "mcp__rome__chat_forward"), result("f1", "chat_forward"))),
+      ),
+    ).toBe(false);
   });
 
   it("keeps a quiet turn silent until it says something", () => {
-    expect(showsTyping(asked, live(null, { quiet: true }))).toBe(false);
+    expect(showsTyping(asked, live(trace(thinking), { quiet: true, writing: "s1" }))).toBe(false);
     const said = [...asked, agentRow(say("a1", MIN))];
-    expect(showsTyping(said, live(trace(use("w1", "WebSearch")), { quiet: true }))).toBe(true);
-  });
-
-  it("never types in a turn that took the owner's message, which shows its own mark", () => {
-    const taken = [userRow({ ...guardian("g2", MIN), turnId: "t1" } as ChatMessage)];
-    expect(showsTyping(taken, live(null))).toBe(false);
-    expect(showsTyping(taken, live(trace(use("w1", "WebSearch"))))).toBe(false);
+    expect(
+      showsTyping(
+        said,
+        live(trace(use("w1", "WebSearch"), result("w1", "WebSearch")), { quiet: true }),
+      ),
+    ).toBe(true);
   });
 
   it("never types once the turn has ended", () => {
-    expect(showsTyping(asked, { ...live(null), isStreaming: false })).toBe(false);
+    expect(
+      showsTyping(asked, { ...live(trace(thinking), { writing: "s1" }), isStreaming: false }),
+    ).toBe(false);
   });
 });
 

@@ -25,6 +25,12 @@ export type SessionStreamState = {
   /** A backend turn that is housekeeping for the agent: the Concierge chat
    *  shows no typing indicator for it until the agent speaks. */
   quiet?: boolean;
+  /**
+   * The newest call the server said the agent started writing as a message
+   * (`message_writing`): open until its `tool_use` reaches the snapshot.
+   * Only a provider that streams a call's input sends it.
+   */
+  writing?: string;
 };
 
 export type StreamingSessionMap = ReadonlyMap<string, SessionStreamState>;
@@ -74,6 +80,20 @@ export function adoptAgentTurnId(
   if (!existing || existing.turnId !== turnId || existing.agentTurnId === agentTurnId) return prev;
   const next = new Map(prev);
   next.set(sessionId, { ...existing, agentTurnId });
+  return next;
+}
+
+// Turn-guarded like updateSnapshot.
+export function startWriting(
+  prev: StreamingSessionMap,
+  sessionId: string,
+  turnId: string,
+  toolUseId: string,
+): StreamingSessionMap {
+  const existing = prev.get(sessionId);
+  if (!existing || existing.turnId !== turnId || existing.writing === toolUseId) return prev;
+  const next = new Map(prev);
+  next.set(sessionId, { ...existing, writing: toolUseId });
   return next;
 }
 
@@ -167,6 +187,9 @@ export function useStreamingSessions() {
     },
     [liveSource],
   );
+  const writing = useCallback((sessionId: string, turnId: string, toolUseId: string) => {
+    setStreams((prev) => startWriting(prev, sessionId, turnId, toolUseId));
+  }, []);
   const adoptAgentTurn = useCallback((sessionId: string, turnId: string, agentTurnId: string) => {
     setStreams((prev) => adoptAgentTurnId(prev, sessionId, turnId, agentTurnId));
   }, []);
@@ -178,5 +201,15 @@ export function useStreamingSessions() {
     [liveSource],
   );
 
-  return { streams, streamsRef, liveText, start, update, updateText, adoptAgentTurn, end };
+  return {
+    streams,
+    streamsRef,
+    liveText,
+    start,
+    update,
+    updateText,
+    writing,
+    adoptAgentTurn,
+    end,
+  };
 }
