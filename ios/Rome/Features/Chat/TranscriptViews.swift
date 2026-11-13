@@ -79,6 +79,9 @@ struct UserBubble: View {
     var menu = BubbleMenu()
     /// Rome's mark on the message: being worked on, or failed.
     var mark: StatusMark? = nil
+    /// The bubble keeps room for a mark whether or not it has one, so a mark
+    /// coming or going never moves the rows around it.
+    var reservesMark = false
 
     private var failure: SendFailure? {
         if case .failed(let failure)? = pending { return failure }
@@ -140,7 +143,7 @@ struct UserBubble: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 56)
         // Room for the mark that hangs below the bubble.
-        .padding(.bottom, mark == nil ? 0 : 12)
+        .padding(.bottom, reservesMark || mark != nil ? 12 : 0)
         .animation(.easeOut(duration: 0.2), value: pending)
         .animation(.easeOut(duration: 0.15), value: mark)
     }

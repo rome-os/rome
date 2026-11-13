@@ -36,19 +36,8 @@ struct TaskChatScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .floatingTopBar { header }
         .overlay(alignment: .top) {
-            VStack(spacing: 8) {
-                if store.loadError == .offline {
-                    TopBanner(kind: .warning, text: String(localized: "No network connection"))
-                } else if store.loadFailed {
-                    TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry")) { store.resync() }
-                }
-                if let notice = store.notice {
-                    TopBanner(kind: .error, text: notice)
-                }
-            }
-            .padding(.top, 62)
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.loadFailed)
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.notice)
+            TranscriptBanners(store: store)
+                .padding(.top, 62)
         }
         .background(Palette.bg.ignoresSafeArea())
         .composerDraft(workspace.drafts, chat: chatId, text: $draft, attachments: attachments, transcript: store)

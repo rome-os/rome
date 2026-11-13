@@ -8,6 +8,8 @@ enum SendFailure: Hashable, Sendable {
     case sessionExpired
     case archived
     case notFound
+    /// Chat is turned off on this instance.
+    case chatOff
     case serverError
     /// The instance refused the message and said why (a 4xx with `error`).
     case rejected(String)
@@ -22,7 +24,8 @@ enum SendFailure: Hashable, Sendable {
         case .offline: self = .offline
         case .network: self = .unreachable
         case .unauthorized: self = .sessionExpired
-        case .conciergeOff, .notFound: self = .notFound
+        case .conciergeOff: self = .chatOff
+        case .notFound: self = .notFound
         case .tooLarge: self = .rejected(String(localized: "Too large to send"))
         case .decoding: self = .unknown
         case .server(let status, let message):
@@ -49,6 +52,7 @@ enum SendFailure: Hashable, Sendable {
         case .sessionExpired: return String(localized: "Session expired")
         case .archived: return String(localized: "Chat is archived")
         case .notFound: return String(localized: "Chat not found")
+        case .chatOff: return String(localized: "Chat is off")
         case .serverError: return String(localized: "Server error")
         case .rejected(let text): return text
         case .unknown: return nil
@@ -58,7 +62,7 @@ enum SendFailure: Hashable, Sendable {
     /// Whether sending the same message again can work. A refusal stays a refusal.
     var retryable: Bool {
         switch self {
-        case .archived, .notFound, .rejected: return false
+        case .archived, .notFound, .chatOff, .rejected: return false
         default: return true
         }
     }
@@ -106,7 +110,7 @@ struct TurnError: Hashable, Sendable, ExpressibleByStringLiteral {
         if reason == "not_logged_in" { return .notSignedIn }
         if reason == "quota_exhausted" { return provider == nil ? .allAtLimit : .limit }
         if reason == "model_access_denied" { return .modelDenied }
-        if reason == "no_available_provider" || code == "model_provider_unavailable" || code == "no_model_provider_available" { return .noProvider }
+        if reason == "no_available_provider" || ["model_unavailable", "model_provider_unavailable", "no_model_provider_available"].contains(code) { return .noProvider }
         if fromTrace, Self.limitWords.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil { return .limit }
         return .other
     }
@@ -114,7 +118,7 @@ struct TurnError: Hashable, Sendable, ExpressibleByStringLiteral {
     /// The wording of a provider's own limit messages ("You've hit your limit",
     /// "out of usage credits", "credit balance is too low", a spend limit).
     private static let limitWords = try! NSRegularExpression(
-        pattern: "hit your (?:session |weekly )?limit|usage limit|out of usage credits|credit balance|spend(?:ing)? limit|shared budget|quota",
+        pattern: "hit your (?:session |weekly )?limit|usage limit|out of usage credits|credit balance|spend(?:ing)? limit|shared budget",
         options: .caseInsensitive
     )
 
@@ -215,6 +219,32 @@ struct ErrorLine: View {
 extension EnvironmentValues {
     /// Opens Settings, where each AI tool's usage shows. Nil where there is no Settings.
     @Entry var openUsage: (@MainActor () -> Void)? = nil
+}
+
+/// What a transcript's store has to say above the chat: no network, a load
+/// that failed, or a short notice about an action that failed.
+struct TranscriptBanners: View {
+    let store: TranscriptStore
+
+    /// Whether any banner shows, for the room the screen leaves for it.
+    static func shows(_ store: TranscriptStore) -> Bool {
+        store.loadError == .offline || store.loadFailed || store.notice != nil
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if store.loadError == .offline {
+                TopBanner(kind: .warning, text: String(localized: "No network connection"))
+            } else if store.loadFailed {
+                TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry")) { store.resync() }
+            }
+            if let notice = store.notice {
+                TopBanner(kind: .error, text: notice)
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.loadFailed)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.notice)
+    }
 }
 
 /// A quiet centered line in the transcript, such as the chat moving to

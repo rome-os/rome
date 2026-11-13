@@ -28,6 +28,7 @@ private func message(
         #expect(SendFailure(APIError.network) == .unreachable)
         #expect(SendFailure(APIError.unauthorized) == .sessionExpired)
         #expect(SendFailure(APIError.notFound) == .notFound)
+        #expect(SendFailure(APIError.conciergeOff) == .chatOff)
         #expect(SendFailure(APIError.server(status: 409, message: "This chat is archived and read-only")) == .archived)
         #expect(SendFailure(APIError.server(status: 503, message: nil)) == .unreachable)
         #expect(SendFailure(APIError.server(status: 500, message: "boom")) == .serverError)
@@ -40,7 +41,7 @@ private func message(
         for failure in [SendFailure.offline, .unreachable, .sessionExpired, .serverError, .unknown] {
             #expect(failure.retryable)
         }
-        for failure in [SendFailure.archived, .notFound, .rejected("no")] {
+        for failure in [SendFailure.archived, .notFound, .chatOff, .rejected("no")] {
             #expect(!failure.retryable)
         }
         #expect(SendFailure.unknown.line == "Not sent · Tap to retry")
@@ -69,6 +70,8 @@ private func message(
         #expect(error?.title == "Codex usage limit reached")
         #expect(parse(["type": "error", "error": "x", "provider": "anthropic", "reason": "not_logged_in"])?.title == "Claude is not signed in")
         #expect(parse(["type": "error", "error": "x", "code": "credits_used_up"])?.kind == .creditsUsedUp)
+        #expect(parse(["type": "error", "error": "x", "code": "model_unavailable"])?.kind == .noProvider)
+        #expect(TurnError(text: "Quota exceeded for the maps API", fromTrace: true).kind == .other)
         #expect(parse(["type": "error", "error": "x", "code": "model_unavailable", "reason": "model_access_denied"])?.kind == .modelDenied)
     }
 
@@ -134,6 +137,21 @@ private func message(
             message("tr", role: "trace", turn: "t", at: 1, trace: TraceSummary(totalSteps: 0, turnStatus: "error", terminalError: "x")),
         ])
         #expect(errors(list).count == 1)
+    }
+
+    @Test func aFailureTheChatRecoveredFromShowsNoLine() {
+        let trace = TraceSummary(totalSteps: 0, turnStatus: "error", terminalError: "You've hit your limit")
+        let failed = message("tr", role: "trace", turn: "t1", at: 1, trace: trace)
+        let switched = message("sw", [["type": "quota_switch", "from": "openai", "to": "anthropic", "reason": "quota", "model": "claude-sonnet-5-5"]], at: 2)
+        let user = message("u", role: "user", turn: "t1", [["type": "text", "content": "hi"]], at: 0)
+        // Failed, switched, nothing said yet: the line stays.
+        #expect(errors(rows([user, failed, switched])).count == 1)
+        // The recovery turn replied: no line.
+        let reply = message("r", turn: "t2", [["type": "text", "content": "Done"]], at: 3)
+        #expect(errors(rows([user, failed, switched, reply])).isEmpty)
+        // A turn that said something and then failed shows none either.
+        let partial = message("p", turn: "t1", [["type": "text", "content": "Working…"]], at: 0.5)
+        #expect(errors(rows([user, partial, failed])).isEmpty)
     }
 
     @Test func aTaskChatKeepsItsToolsRowAndAddsTheLine() {
@@ -228,11 +246,15 @@ private func message(
     @Test func aSendTheServerTookWithNoTurnClearsTheDots() async {
         let backend = FakeBackend()
         backend.sendSucceeds = true
+        backend.sendTurnId = nil
         backend.turns = []
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
         store.send("hello")
-        await settle(store)
-        #expect(store.pending.first?.state == .sent || store.pending.isEmpty)
+        #expect(store.running)
+        for _ in 0..<100 where store.running { try? await Task.sleep(for: .milliseconds(20)) }
+        #expect(store.pending.first?.state == .sent)
+        #expect(!store.running && !store.visibleTurn)
+        #expect(!store.rows.contains { $0 == .typing })
     }
 
     @Test func aLoadFailureIsToldUnlessOfflineOrSignedOut() async {
@@ -243,6 +265,17 @@ private func message(
         #expect(store.loadFailed)
         backend.messagesError = .offline
         await store.reload()
+        #expect(!store.loadFailed)
+    }
+
+    @Test func aFetchThatWorksClearsTheLoadError() async {
+        let backend = FakeBackend()
+        backend.messagesError = .server(status: 500, message: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        #expect(store.loadFailed)
+        backend.messagesError = nil
+        #expect(await store.refreshLatest())
         #expect(!store.loadFailed)
     }
 }

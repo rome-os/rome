@@ -143,8 +143,13 @@ enum TranscriptBuilder {
             return turn
         })
 
+        // Where an agent last said something a guardian reads, so a failure
+        // the Chat recovered from (a switch of model, a retry) shows no line.
+        let lastReply = messages.lastIndex { Self.isReply($0) }
+        let repliedTurns = Set(messages.filter(Self.isReply).compactMap(\.turnId))
+
         // Messages come in the store's order, which follows the server's turns.
-        for message in messages {
+        for (index, message) in messages.enumerated() {
             if message.isTrace {
                 var rows: [TranscriptRow] = []
                 if options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 {
@@ -152,7 +157,8 @@ enum TranscriptBuilder {
                 }
                 // A turn that failed mid-run leaves only its trace: the line says why.
                 // A turn that failed before it ran stored its error as a reply, which says it.
-                if let error = failure(of: message, storedErrors: storedErrors) {
+                let replied = (lastReply.map { $0 > index } ?? false) || (message.turnId.map(repliedTurns.contains) ?? false)
+                if !replied, let error = failure(of: message, storedErrors: storedErrors) {
                     rows.append(.error(id: "failed-\(message.id)", error: error))
                 }
                 if !rows.isEmpty {
@@ -265,6 +271,18 @@ enum TranscriptBuilder {
         }
         if options.typing { output.append(.typing) }
         return output
+    }
+
+    /// An agent message with something to read: text or a card. An error, a
+    /// model switch and what no transcript shows do not count.
+    static func isReply(_ message: ChatMessage) -> Bool {
+        guard !message.isUser, !message.isTrace else { return false }
+        return message.parts.contains { part in
+            switch part {
+            case .error, .notice, .other, .interactionResult: return false
+            default: return part.isVisible
+            }
+        }
     }
 
     /// What a failed turn's trace says went wrong; nil for a turn that did not fail,

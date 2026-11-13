@@ -203,6 +203,7 @@ final class TranscriptStore {
     func refreshLatest() async -> Bool {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
         merge(page.messages)
+        loadError = nil
         return true
     }
 

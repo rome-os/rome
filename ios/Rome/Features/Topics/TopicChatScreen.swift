@@ -73,6 +73,9 @@ struct TopicChatScreen: View {
             .shareModeHeader(store?.share)
             .accessibilityHidden(store?.thread != nil)
         }
+        .overlay(alignment: .top) {
+            if let store { TranscriptBanners(store: store).padding(.top, 70) }
+        }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {

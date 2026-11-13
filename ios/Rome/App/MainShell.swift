@@ -157,6 +157,15 @@ struct MainShell: View {
             }
             .environment(model)
             .environment(\.chatLinkOpener, openChatLink)
+            // Settings is a sheet of this view: the cover closes first.
+            .environment(\.openUsage, {
+                agentPage = nil
+                Task {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    settingsPath = []
+                    showSettings = true
+                }
+            })
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
