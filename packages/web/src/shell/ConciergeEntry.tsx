@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
-import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +14,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
 import { Badge } from "@/components/ui/badge";
 import { RomeLogo } from "@/components/logo";
@@ -22,8 +21,6 @@ import {
   CONCIERGE_SESSION_QUERY_KEY,
   CONCIERGE_UNREAD_CAP,
   useConciergeChats,
-  useConciergeChatWork,
-  useConciergeName,
   useConciergeUnread,
   useRefreshTopicChats,
 } from "@/hooks/use-concierge";
@@ -37,21 +34,6 @@ const anyEvent = z.unknown();
 
 /** How many topic chats show before the More row. */
 export const TOPIC_CHATS_VISIBLE = 5;
-
-/** How many follows and tasks the delete dialog lists before "and N more". */
-const DELETE_DIALOG_ITEMS = 5;
-
-/** The delete dialog's two choices for a topic chat's follows and open tasks. */
-const DELETE_CHOICE_KEYS = {
-  move: {
-    label: "recentChats.topicChatDeleteMove",
-    hint: "recentChats.topicChatDeleteMoveHint",
-  },
-  stop: {
-    label: "recentChats.topicChatDeleteStop",
-    hint: "recentChats.topicChatDeleteStopHint",
-  },
-} as const;
 
 /** A topic chat as the sidebar lists it. */
 export interface TopicChatRow extends ConciergeChatDto {
@@ -267,26 +249,11 @@ function ConciergeTopicEntry({
   onGone: () => void;
 }) {
   const { t } = useTranslation("common");
-  const conciergeName = useConciergeName();
   // An untitled chat shows as a new chat until its first message names it.
   const name = chat.name || t("recentChats.newChat");
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(chat.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // What happens to the chat's follows and open tasks when it is deleted.
-  const [work, setWork] = useState<"move" | "stop">("move");
-  // An archived chat's follows and tasks moved when it was archived.
-  const chatWork = useConciergeChatWork(chat.id, confirmDelete && !chat.archived);
-  const items = [
-    ...(chatWork.data?.follows ?? []).map((follow) => ({
-      key: `follow:${follow.source}:${follow.target}`,
-      text: t("recentChats.topicChatDeleteFollow", { source: follow.label, target: follow.target }),
-    })),
-    ...(chatWork.data?.openTasks ?? []).map((task) => ({
-      key: `task:${task.id}`,
-      text: t("recentChats.topicChatDeleteTask", { title: task.title }),
-    })),
-  ];
   const count = active ? 0 : chat.unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   const rename = async () => {
@@ -398,82 +365,17 @@ function ConciergeTopicEntry({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <RomeConfirmDialog
+      <TopicChatDeleteDialog
         open={confirmDelete}
-        destructive
-        title={t("recentChats.topicChatDeleteTitle", { name })}
-        // While the list loads, or when it cannot, the chat's follows and open
-        // tasks are assumed and move, as they do without a choice.
-        description={
-          chatWork.data
-            ? t(
-                items.length > 0
-                  ? "recentChats.topicChatDeleteWithWork"
-                  : "recentChats.topicChatDeleteEmpty",
-              )
-            : t("recentChats.topicChatDeleteMoves", { name: conciergeName })
-        }
-        confirmLabel={t("recentChats.delete")}
-        onCancel={() => {
+        chatId={chat.id}
+        name={name}
+        archived={chat.archived}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={(stopWork) => {
           setConfirmDelete(false);
-          setWork("move");
+          void retire("delete", stopWork);
         }}
-        onConfirm={() => {
-          setConfirmDelete(false);
-          setWork("move");
-          void retire("delete", items.length > 0 && work === "stop");
-        }}
-      >
-        {items.length > 0 ? (
-          <div className="grid gap-4">
-            {/* Long titles keep to two lines, and the list scrolls on a short
-                screen, so the choice and the buttons stay in view. */}
-            <ul className="grid max-h-[30dvh] gap-1 overflow-y-auto text-ui text-foreground">
-              {items.slice(0, DELETE_DIALOG_ITEMS).map((item) => (
-                <li key={item.key} className="flex gap-2">
-                  <span aria-hidden>•</span>
-                  <span className="line-clamp-2 min-w-0 break-words">{item.text}</span>
-                </li>
-              ))}
-              {items.length > DELETE_DIALOG_ITEMS ? (
-                <li className="text-muted-foreground">
-                  {t("recentChats.topicChatDeleteMore", {
-                    count: items.length - DELETE_DIALOG_ITEMS,
-                  })}
-                </li>
-              ) : null}
-            </ul>
-            <div className="grid gap-2">
-              <p id={`topic-delete-work-${chat.id}`} className="text-ui text-foreground">
-                {t("recentChats.topicChatDeleteChoice")}
-              </p>
-              <RadioGroup
-                aria-labelledby={`topic-delete-work-${chat.id}`}
-                value={work}
-                onValueChange={(next) => setWork(next === "stop" ? "stop" : "move")}
-              >
-                {(["move", "stop"] as const).map((value) => (
-                  <label
-                    key={value}
-                    htmlFor={`topic-delete-${value}-${chat.id}`}
-                    className="flex items-start gap-3 text-ui text-foreground"
-                  >
-                    <span className="flex h-5 items-center">
-                      <RadioGroupItem id={`topic-delete-${value}-${chat.id}`} value={value} />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block">{t(DELETE_CHOICE_KEYS[value].label)}</span>
-                      <span className="block text-aux text-muted-foreground">
-                        {t(DELETE_CHOICE_KEYS[value].hint)}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </RadioGroup>
-            </div>
-          </div>
-        ) : null}
-      </RomeConfirmDialog>
+      />
     </div>
   );
 }
