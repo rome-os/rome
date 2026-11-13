@@ -117,6 +117,10 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
   // Turn outcome comes from turn_end, not provider transport completion.
   let stoppedByUser = false;
   let terminalError: string | undefined;
+  let terminalErrorDetail: Pick<
+    TraceSummary,
+    "terminalErrorCode" | "terminalErrorProvider" | "terminalErrorReason"
+  > = {};
   let latestPlan: TraceSummary["plan"];
   let turnModel: string | undefined;
   let sessionRenewal: TraceSummary["sessionRenewal"];
@@ -196,6 +200,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
         turnStatus = undefined;
         stoppedByUser = false;
         terminalError = undefined;
+        terminalErrorDetail = {};
         latestPlan = undefined;
         turnModel = undefined;
         lastTerminal = undefined;
@@ -215,10 +220,16 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
         // interrupted turn doesn't leave `stoppedByUser` sticky for the turns
         // that follow it.
         stoppedByUser = block.status === "interrupted";
-        terminalError =
-          block.status === "error" && lastTerminal?.type === "error"
-            ? lastTerminal.error
-            : undefined;
+        const failed =
+          block.status === "error" && lastTerminal?.type === "error" ? lastTerminal : undefined;
+        terminalError = failed?.error;
+        terminalErrorDetail = failed
+          ? {
+              ...(failed.code ? { terminalErrorCode: failed.code } : {}),
+              ...(failed.provider ? { terminalErrorProvider: failed.provider } : {}),
+              ...(failed.reason ? { terminalErrorReason: failed.reason } : {}),
+            }
+          : {};
         turnModel = lastTerminal?.accounting?.model || undefined;
         lastTerminal = undefined;
         return changed;
@@ -354,7 +365,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
           turnStatus,
           invocationCounts: { ...invocationCounts },
           ...(stoppedByUser ? { stoppedByUser: true } : {}),
-          ...(terminalError ? { terminalError } : {}),
+          ...(terminalError ? { terminalError, ...terminalErrorDetail } : {}),
           ...(turnModel ? { model: turnModel } : {}),
           ...(sessionRenewal ? { sessionRenewal: { ...sessionRenewal } } : {}),
           ...(latestPlan

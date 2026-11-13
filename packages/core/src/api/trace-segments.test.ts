@@ -412,6 +412,48 @@ describe("buildTraceSnapshot — summary", () => {
     expect(snap.summary.turnStatus).toBe("error");
   });
 
+  it("carries a failed turn's error code, provider and reason, as the done event does", () => {
+    const snap = buildTraceSnapshot({
+      idPrefix: "t",
+      blocks: [
+        {
+          type: "error",
+          error: "Codex usage limit reached",
+          code: "credits_used_up",
+          provider: "openai",
+          reason: "quota_exhausted",
+          agent: "main",
+        },
+        turnEnd(500, "main", "error"),
+      ],
+      resolver: testResolver,
+    });
+    expect(snap.summary).toMatchObject({
+      terminalError: "Codex usage limit reached",
+      terminalErrorCode: "credits_used_up",
+      terminalErrorProvider: "openai",
+      terminalErrorReason: "quota_exhausted",
+    });
+  });
+
+  it("carries only the error fields the failure had, and none for a later turn", () => {
+    const blocks: TraceEventDto[] = [
+      { type: "error", error: "Overloaded", code: "transient", agent: "main" },
+      turnEnd(500, "main", "error"),
+    ];
+    const failed = buildTraceSnapshot({ idPrefix: "t", blocks, resolver: testResolver }).summary;
+    expect(failed.terminalErrorCode).toBe("transient");
+    expect(failed).not.toHaveProperty("terminalErrorProvider");
+    expect(failed).not.toHaveProperty("terminalErrorReason");
+
+    const next = buildTraceSnapshot({
+      idPrefix: "t",
+      blocks: [...blocks, turnStart("main")],
+      resolver: testResolver,
+    }).summary;
+    expect(next).not.toHaveProperty("terminalErrorCode");
+  });
+
   it("interrupted turn with an error terminal is reported as stopped rather than failed", () => {
     // A user stop that the provider surfaced as an error block: the
     // AgentSession classifies it `interrupted` on the bracket, which wins

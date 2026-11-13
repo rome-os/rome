@@ -294,6 +294,13 @@ export interface TraceSummary {
   /** Terminal agent error for failed turns. Present only when the trace ended
    *  with an error rather than a user stop. */
   terminalError?: string;
+  /** The failed turn's error code, provider and reason, as its terminal error
+   *  and the stream's `done` event carry them. Present only with
+   *  `terminalError`, and only the ones the error had, so a client can show
+   *  the same guidance after a reload as while the turn ran. */
+  terminalErrorCode?: AgentErrorCode;
+  terminalErrorProvider?: AgentErrorProvider;
+  terminalErrorReason?: AgentErrorReason;
   plan?: AgentPlan;
   /** The model that produced the turn, from the accounting on its terminal
    *  block. Absent while the turn runs and when the terminal recorded none. */

@@ -139,7 +139,10 @@ import { useConciergeActivity } from "@/components/concierge/use-concierge-activ
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
   AgentMention,
+  ChatErrorCode,
   ChatErrorNotice,
+  ChatErrorProvider,
+  ChatErrorReason,
   ChatMessage,
   CreateTurnResponse,
   DoneEventData,
@@ -229,6 +232,12 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
     invocationCounts: z.record(z.string(), z.number()),
     stoppedByUser: z.boolean().optional(),
     terminalError: z.string().optional(),
+    // Any string, so a code a newer server adds still parses and reads as raw text.
+    terminalErrorCode: z.custom<ChatErrorCode>((value) => typeof value === "string").optional(),
+    terminalErrorProvider: z
+      .custom<ChatErrorProvider>((value) => typeof value === "string")
+      .optional(),
+    terminalErrorReason: z.custom<ChatErrorReason>((value) => typeof value === "string").optional(),
     plan: agentPlanSchema.optional(),
     model: z.string().optional(),
     sessionRenewal: z.object({ reason: z.string(), sessionId: z.string() }).optional(),
