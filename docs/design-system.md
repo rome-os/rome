@@ -15,7 +15,7 @@ Within layer 1, tokens are primitive or semantic.
 
 **Primitive** tokens are the raw palette, named for the value: `--neutral-500`, `--red-400`, `--orange-300`. A primitive is never named for a role. It says what color it is, and which role reads it is the theme mapping's job.
 
-The scale is a fixed set of 68 names, `--neutral-*` plus five hue ramps. Every theme carries all of them with its own values, so Ember's `--neutral-100` is warm linen and Slate's is a cool grey. These are plain custom properties, deliberately not in `@theme`, so Tailwind emits no utilities for the palette steps. See [`ui/primitive-token/color-primitives.md`](ui/primitive-token/color-primitives.md).
+The scale is a fixed set of 112 names, `--neutral-*` plus nine hue ramps. Every theme carries all of them with its own values, so Ember's `--neutral-100` is warm linen and Slate's is a cool grey. These are plain custom properties, deliberately not in `@theme`, so Tailwind emits no utilities for the palette steps. See [`ui/primitive-token/color-primitives.md`](ui/primitive-token/color-primitives.md).
 
 **Semantic** tokens are named by intent: `--chat-canvas`, `--app-canvas`, `--primary`, `--destructive`. Each source mapping points at a primitive step. The mapping is per theme, with a `light` and a `dark` half. That is what lets Ember map `--info` to its orange while Slate maps it to blue, without either primitive name lying.
 
@@ -56,7 +56,7 @@ Color is selected by two orthogonal attributes on `<html>`.
 - **Theme** — the `data-theme="<id>"` attribute, carrying which palette is active.
 - **Mode** — the `.dark` class. Light against dark within the active theme.
 
-Three themes ship, defined as `ThemeDefinition`s in `src/lib/themes.ts`. **Ember** is the default and warm. **Ash** is Ember cooled: near-neutral light surfaces, warm ink, and deepened coral accents that clear AA. **Slate** is cool grey with an ink accent. The set is open-ended, since `ThemeName` is `string`, so adding a theme is a data edit rather than a type or CSS change.
+Seven themes ship, defined as `ThemeDefinition`s in `src/lib/themes.ts`. **Ember** is the default and warm. **Ash** is Ember cooled: near-neutral light surfaces, warm ink, and deepened coral accents that clear AA. **Slate** is cool grey with an ink accent. **Sky**, **Mint**, **Lavender** and **Blossom** are pastel themes modeled on Ash: cool, near-achromatic neutrals (OKLCH chroma ≤ .004) in both modes, and a dusty low-chroma accent, each in its own hue ramp (`--sky-*`, `--teal-*`, `--violet-*`, `--pink-*`), that clears AA and appears only on primary actions, links, the focus ring and the brand mark. In dark mode the accent is a pale tone of the hue. They share one mapping and differ only in palette values. The set is open-ended, since `ThemeName` is `string`, so adding a theme is a data edit rather than a type or CSS change.
 
 Each theme is a pair of generated blocks. `[data-theme="<id>"]` carries the palette and resolved light values. `[data-theme="<id>"].dark` carries resolved dark values. `buildThemeCss` emits both into the runtime `<style id="rome-theme-tokens">`.
 
@@ -247,7 +247,7 @@ Roughly 55 hand-rolled `focus-visible:ring-*` call sites in pages and shell comp
 
 ## Component gallery
 
-`/dev/gallery` is a specimen page for every `ui/` primitive, covering variants, sizes, and states. Theme switches (Ember, Ash, Slate) and mode switches (light, dark, system) drive it through the real `lib/theme` helpers.
+`/dev/gallery` is a specimen page for every `ui/` primitive, covering variants, sizes, and states. Theme switches (every built-in theme) and mode switches (light, dark, system) drive it through the real `lib/theme` helpers.
 
 It is one of the dev-only routes: `src/pages/dev/`, registered in `dev-routes.ts` and linked from the `/dev` index. It therefore renders outside `AuthGate`. Run `pnpm start:web` and open `/dev/gallery` with no backend and no auth. The theme switchers write the dashboard's own stored preference, so a theme picked there is the theme the rest of the app renders in.
 
