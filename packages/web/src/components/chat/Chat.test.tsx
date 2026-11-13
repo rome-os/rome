@@ -229,6 +229,7 @@ rs.mock("@/components/chat/MessageList", () => ({
     onOpenStoredTrace: (target: unknown) => void;
     live: {
       identity: { name: string };
+      writing?: { writing: boolean } | null;
       snapshot: { segments: unknown[]; summary: { totalSteps: number } } | null;
     };
     rows: {
@@ -243,7 +244,11 @@ rs.mock("@/components/chat/MessageList", () => ({
     }[];
   }) => (
     <>
-      <div data-testid="message-list" data-unread-from={unreadFrom ?? ""}>
+      <div
+        data-testid="message-list"
+        data-unread-from={unreadFrom ?? ""}
+        data-writing={live.writing?.writing ? "true" : ""}
+      >
         {live.identity.name}
       </div>
       {live.snapshot ? (
@@ -1148,6 +1153,47 @@ describe("Chat session events", () => {
     rs.mocked(listSessionMessages).mockClear();
     act(() => source.emitLifecycle("error", MockEventSource.CLOSED));
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalledOnce());
+  });
+
+  it("drops the typing word it held when the session event stream reconnects", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    // A chat with a message, so it shows its transcript, not its empty state.
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "a1",
+        sessionId: "concierge",
+        turnId: "turn-0",
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "hello" }]),
+        createdAt: "2026-10-27T12:00:00.000Z",
+      },
+    ]);
+    const writing = () => screen.getByTestId("message-list").getAttribute("data-writing");
+    try {
+      renderChat(<Chat sessionId="concierge" variant="concierge" />);
+      await screen.findByTestId("message-list");
+      await waitFor(() => expect(chatEvents()).toBeTruthy());
+      const source = chatEvents()!;
+      act(() => source.emitLifecycle("open", MockEventSource.OPEN));
+
+      act(() => {
+        source.emit("message_writing", {
+          sessionId: "concierge",
+          turnId: "turn-1",
+          mode: "exact",
+          writing: true,
+        });
+      });
+      await waitFor(() => expect(writing()).toBe("true"));
+
+      act(() => {
+        source.emitLifecycle("error", MockEventSource.CONNECTING);
+        source.emitLifecycle("open", MockEventSource.OPEN);
+      });
+      await waitFor(() => expect(writing()).toBe(""));
+    } finally {
+      rs.mocked(listSessionMessages).mockResolvedValue([]);
+    }
   });
 });
 

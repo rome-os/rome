@@ -197,6 +197,16 @@ describe("/chats/:chatId/tasks", () => {
     });
   });
 
+  it("gives a routine's schedule its zone, so the row can name a fixed one", async () => {
+    await summary("concierge", "Daily summary");
+
+    const work = await read("concierge");
+    const row = work.groups.flatMap((group) => group.items).find((item) => item.kind === "routine");
+    expect(row).toMatchObject({
+      trigger: { type: "schedule", localTime: "09:00", tzid: "UTC", tzMode: "fixed" },
+    });
+  });
+
   it("answers the newest ended rows and their count, and older ones from a cursor", async () => {
     const made = await tasks.upsertMany(
       Array.from({ length: TASK_LIST_ENDED_PAGE + 3 }, (_, index) => ({ title: `Old ${index}` })),
@@ -387,6 +397,49 @@ describe("/chats/:chatId/tasks", () => {
       on_its_own: ["routine Morning nudge"],
     });
     expect(kindsIn(await read("concierge"))).toEqual({});
+  });
+
+  it("moves a waiting task's Respond to a new ask card said with no change to the task", async () => {
+    await new ChatsWebChatRepository(testDb.db).createSession("task-chat", "Flights");
+    await tasks.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const since = Date.now() - 60_000;
+    const ask = (id: string, at: number) => ({
+      id,
+      content: JSON.stringify([
+        { type: "task_chat", chatId: "task-chat", title: "Flights", show: "ask" },
+      ]),
+      createdAt: new Date(at),
+    });
+    const tasksWith = new ConciergeTasks(tasks);
+    tasksWith.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async () =>
+        new Map([["task-chat", [{ kind: "approval" as const, id: "a1", since }]]]),
+      reportPending: () => [],
+    });
+    taskSource = tasksWith;
+    const respondTo = async () => {
+      const [item] = (await read("concierge")).groups[0]!.items;
+      return item?.kind === "task" ? item.cardMessageId : undefined;
+    };
+    cardMessages.concierge = [ask("first-ask", since + 1_000)];
+    expect(await respondTo()).toBe("first-ask");
+
+    const stream = await app().request("/chats/concierge/tasks/events", guardian);
+    const reader = stream.body!.getReader();
+    // The Concierge asks again: a new card, and no task row changes.
+    cardMessages.concierge.push(ask("second-ask", since + 2_000));
+    for (const listener of inserted) {
+      listener({ sessionId: "concierge", role: "assistant", content: ask("", 0).content });
+    }
+    let text = "";
+    while (!text.includes("tasks_changed")) {
+      text += new TextDecoder().decode((await reader.read()).value);
+    }
+    await reader.cancel();
+    // The list the change tells it to read points at the new card.
+    expect(await respondTo()).toBe("second-ask");
   });
 
   it("tells the chat's list to read again when a task card is said in it", async () => {

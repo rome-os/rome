@@ -1772,6 +1772,14 @@ export function Chat({
     (sid: string) => {
       setLiveReactions(new Map());
       setLiveCards(new Map());
+      // The word before the drop may be stale; the server replays the latest
+      // to the new subscription.
+      setLiveWriting((prev) => {
+        if (!prev.has(sid)) return prev;
+        const next = new Map(prev);
+        next.delete(sid);
+        return next;
+      });
       resyncSessionMessages(sid);
       if (sid === mainSessionIdRef.current) kickTurnPoll();
     },
