@@ -811,7 +811,12 @@ async function findOpenSuspensions(
           ui?: unknown;
         };
       };
-      if (part.type === "pending_interaction" && typeof part.toolUseId === "string") {
+      // Only a card the agent said opens a wait; a turn cannot carry one.
+      if (
+        part.type === "pending_interaction" &&
+        typeof part.toolUseId === "string" &&
+        msg.role === "assistant"
+      ) {
         const builtin = part.render?.builtin === true;
         const questions =
           builtin && part.render?.componentId === "question-card"
@@ -3916,6 +3921,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A resolution from an app interaction surface is a valid turn trigger even
     // with no typed text: it re-drives the calling agent with the artifact.
     const resolution = interpretInteractionResult(body.parts);
+    // A card is Rome's to show: a turn that carries one is refused.
+    if (
+      Array.isArray(body.parts) &&
+      body.parts.some(
+        (p) =>
+          !!p &&
+          typeof p === "object" &&
+          ["widget", "pending_interaction"].includes(String((p as { type?: unknown }).type)),
+      )
+    ) {
+      return answer({ error: "A turn cannot carry a card" }, 400);
+    }
     // A turn answers one card. More than one result would let a valid answer
     // carry another past the checks below, which look only at the first.
     if (

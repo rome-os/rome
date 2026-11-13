@@ -5667,6 +5667,23 @@ describe("Webchat API", () => {
         }),
       });
       expect(smuggled.status).toBe(400);
+      // Nor by a card of its own under the same tool-use id, posted first.
+      const posed = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "a card of my own",
+          parts: [
+            {
+              type: "pending_interaction",
+              toolUseId: "tu-widget-waits",
+              appId: "core",
+              render: { kind: "inline", componentId: "question-card", builtin: true },
+            },
+          ],
+        }),
+      });
+      expect(posed.status).toBe(400);
 
       const widgetId = (await deps.webchatRepo.getMessages(sessionId)).find((m) =>
         m.content.includes("tu-widget-waits"),
