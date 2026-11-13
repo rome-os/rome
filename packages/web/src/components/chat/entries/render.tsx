@@ -121,7 +121,7 @@ export function renderSingleEntry(
     toolUseId: string,
     name: string,
     context: Record<string, unknown>,
-  ) => void onAnswerWidget?.(sid, id, toolUseId, name, context);
+  ) => onAnswerWidget?.(sid, id, toolUseId, name, context);
   const dismiss = onDismissAppComponent
     ? (toolUseId: string) => onDismissAppComponent(sid, toolUseId)
     : () => {};

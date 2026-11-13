@@ -129,7 +129,9 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         ]) && send("updateComponents", [
             "surfaceId": surfaceId, "components": .array(components),
         ]) && (part.data.object ?? [:]).allSatisfy { key, value in
-            send("updateDataModel", ["surfaceId": surfaceId, "path": .string("/\(key)"), "value": value])
+            // A key is one JSON Pointer token: `~` and `/` are escaped.
+            let token = key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
+            return send("updateDataModel", ["surfaceId": surfaceId, "path": .string("/\(token)"), "value": value])
         }
         viewModel = created ? processor.surfaceGroupModel.surfacesMap[part.toolUseId] : nil
         undrawable = viewModel == nil
@@ -144,17 +146,29 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     func showAnswered(_ answered: Rome.JSONValue?) {
         guard let part, viewModel != nil else { return }
         let dismissed = answered?["dismissed"]?.bool == true
-        guard let card = answered?["card"] ?? (dismissed ? .array([]) : nil) else { return }
+        guard let card = answered?["card"] ?? Self.sentCard(answered) ?? (dismissed ? .array([]) : nil) else { return }
         _ = send("updateDataModel", ["surfaceId": .string(part.toolUseId), "path": .string("/answers"), "value": card])
     }
 
+    /// What the card sent, before core has stored it as `card`: answers in the
+    /// card's own shape (`values` and `text`, no `questionId`).
+    static func sentCard(_ answered: Rome.JSONValue?) -> Rome.JSONValue? {
+        guard let answers = answered?["answers"]?.array, !answers.isEmpty,
+              answers.allSatisfy({ $0["questionId"] == nil && $0["values"] != nil })
+        else { return nil }
+        return .array(answers)
+    }
+
     /// The card's components with each `{ string }` replaced by Rome's own
-    /// string in the guardian's language.
-    private static func withHostStrings(_ value: Rome.JSONValue) -> Rome.JSONValue {
+    /// string in the guardian's language. A button's `action` is the app's
+    /// data, not something shown, so it is sent as written, as the web does.
+    static func withHostStrings(_ value: Rome.JSONValue) -> Rome.JSONValue {
         switch value {
         case .object(let fields):
             if fields.count == 1, let name = fields["string"]?.string { return .string(WidgetPaths.hostString(name)) }
-            return .object(fields.mapValues(withHostStrings))
+            return .object(Dictionary(uniqueKeysWithValues: fields.map { key, field in
+                (key, key == "action" ? field : withHostStrings(field))
+            }))
         case .array(let items):
             return .array(items.map(withHostStrings))
         default:

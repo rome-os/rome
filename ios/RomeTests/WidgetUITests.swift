@@ -219,3 +219,24 @@ final class Box<T>: @unchecked Sendable {
     var value: T
     init(_ value: T) { self.value = value }
 }
+
+@MainActor @Suite struct WidgetHostStringTests {
+    /// A button's action is the app's data, sent as written, as the web sends it.
+    @Test func aButtonsActionIsSentAsWritten() {
+        let component: Rome.JSONValue = .object([
+            "id": .string("b"), "component": .string("Button"), "child": .string("l"),
+            "action": .object(["event": .object(["name": .string("tag"), "context": .object(["tag": .array([.object(["string": .string("send")])])])])]),
+        ])
+        let drawn = WidgetSurface.withHostStrings(component)
+        #expect(drawn["action"] == component["action"])
+    }
+
+    /// An answer the card sent, before core stored it as `card`, still shows
+    /// what was picked when the card is drawn again.
+    @Test func whatTheCardSentShowsBeforeCoreStoresIt() {
+        let sent: Rome.JSONValue = .object(["answers": .array([.object(["values": .array([.string("Plain")]), "text": .string("")])])])
+        #expect(WidgetSurface.sentCard(sent) == sent["answers"])
+        let stored: Rome.JSONValue = .object(["answers": .array([.object(["questionId": .string("tone"), "value": .string("Plain")])])])
+        #expect(WidgetSurface.sentCard(stored) == nil)
+    }
+}
