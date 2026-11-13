@@ -1,16 +1,33 @@
 import { tokensIn } from "../lib/checks.mjs";
-import { ask, check, required, ruleResult } from "../lib/scenario.mjs";
+import { ask, check, required, ruleResult, waitsOnDesign } from "../lib/scenario.mjs";
 
-const CHAT = "standup";
+const GROUP_CHAT = "standup";
 const RENAMED_TO = "Teo (on call)";
 const SECOND_ACCOUNT_NAME = "Mari (laptop)";
+const GROUP_DECISION = "how the agent learns who sent each message in a chat with several members";
 
 /**
- * Each commitment carries words no other commitment uses, so an answer that repeats them
- * attributes that commitment. The member at index 1 posts once before and once after a
- * display name change.
+ * K3 is reported in four legs, each with its own commitments. Every commitment carries words no
+ * other commitment uses, so an answer that repeats them attributes that commitment.
+ * - single-member chat: said in the member's private chat with the agent, asked there.
+ * - group chat: one commitment from each member in the shared chat.
+ * - changed display name: posted by member 1 after their display name changes.
+ * - two accounts: posted by member 0 from a second account of the same person.
  */
-const COMMITMENTS = [
+const LEGS = {
+  single: "single-member chat",
+  group: "group chat",
+  renamed: "changed display name",
+  twoAccounts: "two accounts",
+};
+
+const SINGLE = {
+  member: 2,
+  text: "My commitment this week: walking the Rackwick cable route with the survey team.",
+  tokens: ["Rackwick"],
+};
+
+const GROUP = [
   {
     member: 0,
     text: "This week I'm committing to flashing the new bootloader onto buoys 14 through 19.",
@@ -26,103 +43,140 @@ const COMMITMENTS = [
     text: "This week I'll get the harbour-master permit for Stromness pier signed.",
     tokens: ["Stromness", "harbour-master"],
   },
-  {
-    member: 1,
-    afterRename: true,
-    text: "One more for this week: I'm rotating the ingest service account for the Hoy station by Thursday.",
-    tokens: ["Hoy station"],
-  },
 ];
 
-// A commitment the member at index 0 posts from a second Discord account of the same person.
-const SECOND_ACCOUNT_COMMITMENT = {
+const RENAMED = {
+  member: 1,
+  text: "One more for this week: I'm rotating the ingest service account for the Hoy station by Thursday.",
+  tokens: ["Hoy station"],
+};
+
+const SECOND_ACCOUNT = {
   member: 0,
   text: "From my spare account: I'm also writing the Kelpie-7 flashing runbook for the field team.",
   tokens: ["flashing runbook"],
 };
 
+/**
+ * Grades one leg: each of its commitments must appear in the answer about its own member and
+ * in no answer about anyone else.
+ */
+function gradeLeg(name, commitments, answers, team) {
+  const evidence = [
+    ...commitments.map((c) => c.id),
+    ...answers.flatMap((a) => [a.questionId, a.reply?.id]),
+  ];
+  const problems = [];
+  for (const c of commitments) {
+    const own = answers.find((a) => a.member === c.member);
+    if (!own?.reply) problems.push(`no answer about ${team.members[c.member].name}`);
+    else if (tokensIn(own.reply.text, c.tokens).length === 0) {
+      problems.push(`${c.id} missing from the answer about ${team.members[c.member].name}`);
+    }
+    for (const other of answers.filter((a) => a.member !== c.member && a.reply)) {
+      if (tokensIn(other.reply.text, c.tokens).length > 0) {
+        problems.push(
+          `${c.id} by ${team.members[c.member].name} attributed to ${team.members[other.member].name}`,
+        );
+      }
+    }
+  }
+  return problems.length > 0
+    ? check(name, "fail", problems.join("; "), evidence)
+    : check(
+        name,
+        "pass",
+        "every commitment attributed to its own member and nobody else",
+        evidence,
+      );
+}
+
 export default {
   rule: "K3",
   title: "Who said it",
   phase: 1,
+  legs: Object.values(LEGS),
   async run(ctx) {
     const { env, team } = ctx;
-    const renamed = team.members[1];
-    const posted = [];
-    for (const commitment of COMMITMENTS) {
-      if (commitment.afterRename && !posted.some((p) => p.afterRename)) {
-        await env.rename({ as: renamed.account, displayName: RENAMED_TO });
-      }
-      const id = await env.post({
-        as: team.members[commitment.member].account,
-        chat: CHAT,
-        text: commitment.text,
-      });
-      posted.push({ ...commitment, id });
-    }
+    const account = (i) => team.members[i].account;
 
-    // One person, two accounts. When cos-env cannot post from a second account, the
-    // two-account part of the rule stays unchecked and K3 cannot pass.
-    const secondAccount = `${team.members[0].account}:2`;
-    let twoAccountCheck;
+    // Single-member chat: said and asked in the member's private chat with the agent.
+    const single = {
+      ...SINGLE,
+      id: await env.dm({ as: account(SINGLE.member), text: SINGLE.text }),
+    };
+
+    const group = [];
+    for (const c of GROUP)
+      group.push({
+        ...c,
+        id: await env.post({ as: account(c.member), chat: GROUP_CHAT, text: c.text }),
+      });
+
+    await env.rename({ as: account(RENAMED.member), displayName: RENAMED_TO });
+    const renamed = {
+      ...RENAMED,
+      id: await env.post({ as: account(RENAMED.member), chat: GROUP_CHAT, text: RENAMED.text }),
+    };
+
+    // One person, two accounts. When cos-env cannot post from a second account, this leg
+    // stays unchecked and K3 cannot pass.
+    let second = null;
+    let secondError = null;
     try {
+      const secondAccount = `${account(SECOND_ACCOUNT.member)}:2`;
       await env.rename({ as: secondAccount, displayName: SECOND_ACCOUNT_NAME });
-      const id = await env.post({
-        as: secondAccount,
-        chat: CHAT,
-        text: SECOND_ACCOUNT_COMMITMENT.text,
-      });
-      posted.push({ ...SECOND_ACCOUNT_COMMITMENT, id, secondAccount: true });
+      second = {
+        ...SECOND_ACCOUNT,
+        id: await env.post({ as: secondAccount, chat: GROUP_CHAT, text: SECOND_ACCOUNT.text }),
+      };
     } catch (error) {
-      twoAccountCheck = required(
-        check(
-          "a person with two accounts",
-          "not_checked",
-          `cos-env could not post from a second account: ${error.message}`,
-        ),
-      );
+      secondError = error.message;
     }
 
-    const checks = [];
+    // One question per member in the group chat, each from another member.
+    const answers = [];
     for (const [index, member] of team.members.entries()) {
-      const asker = team.members[(index + 1) % team.members.length].account;
-      const { questionId, reply } = await ask(ctx, {
-        as: asker,
-        chat: CHAT,
+      const asked = await ask(ctx, {
+        as: account((index + 1) % team.members.length),
+        chat: GROUP_CHAT,
         text: `What did ${member.name} commit to this week?`,
       });
-      const own = posted.filter((p) => p.member === index);
-      const others = posted.filter((p) => p.member !== index);
-      const evidence = [questionId, reply?.id, ...posted.map((p) => p.id)];
-      if (!reply) {
-        checks.push(check(member.name, "fail", "no reply within the reply wait", evidence));
-        continue;
-      }
-      const missing = own.filter((p) => tokensIn(reply.text, p.tokens).length === 0);
-      const misattributed = others.filter((p) => tokensIn(reply.text, p.tokens).length > 0);
-      const problems = [
-        ...missing.map(
-          (p) =>
-            `missed ${p.id}${p.afterRename ? " (posted after the rename)" : ""}${p.secondAccount ? " (posted from the second account)" : ""}`,
-        ),
-        ...misattributed.map((p) => `attributed ${p.id} by ${team.members[p.member].name} to them`),
-      ];
-      checks.push(
-        problems.length > 0
-          ? { ...check(member.name, "fail", problems.join("; "), evidence), quote: reply.text }
-          : {
-              ...check(
-                member.name,
-                "pass",
-                "every commitment theirs, none of anyone else's",
-                evidence,
-              ),
-              quote: reply.text,
-            },
-      );
+      answers.push({ member: index, ...asked });
     }
-    if (twoAccountCheck) checks.push(twoAccountCheck);
-    await env.rename({ as: renamed.account, displayName: renamed.name });
-    return ruleResult(checks);
+    const privateAnswer = {
+      member: SINGLE.member,
+      ...(await ask(ctx, {
+        as: account(SINGLE.member),
+        text: `What did ${team.members[SINGLE.member].name} commit to this week?`,
+      })),
+    };
+    await env.rename({
+      as: account(RENAMED.member),
+      displayName: team.members[RENAMED.member].name,
+    });
+
+    const checks = [
+      gradeLeg(LEGS.single, [single], [privateAnswer], team),
+      waitsOnDesign(gradeLeg(LEGS.group, group, answers, team), GROUP_DECISION),
+      gradeLeg(LEGS.renamed, [renamed], answers, team),
+      second
+        ? gradeLeg(LEGS.twoAccounts, [second], answers, team)
+        : required(
+            check(
+              LEGS.twoAccounts,
+              "not_checked",
+              `cos-env could not post from a second account: ${secondError}`,
+            ),
+          ),
+    ];
+    const result = ruleResult(checks);
+    result.answers = [...answers, privateAnswer].map((a) => ({
+      about: team.members[a.member].name,
+      questionId: a.questionId,
+      replyId: a.reply?.id ?? null,
+      text: a.reply?.text ?? null,
+    }));
+    return result;
   },
 };

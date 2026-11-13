@@ -49,7 +49,48 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
       report.results.every((r) => r.evidence.length > 0),
       "every rule names evidence",
     );
-    assert.match(readFileSync(join(outDir, "report.md"), "utf8"), /\| K1 Team \| pass/);
+    assert.deepEqual(report.summary.rules, {
+      of: 7,
+      pass: 7,
+      fail: 0,
+      waitsOnDesign: 0,
+      notChecked: 0,
+    });
+    assert.deepEqual(report.summary.byLeg.K3, {
+      of: 4,
+      pass: 4,
+      fail: 0,
+      waitsOnDesign: 0,
+      notChecked: 0,
+    });
+    const markdown = readFileSync(join(outDir, "report.md"), "utf8");
+    assert.match(markdown, /\| K1 Team \| pass/);
+    assert.match(markdown, /Rules other than K3: 7 of 7 pass\./);
+    assert.match(markdown, /K3 by leg: 4 of 4 pass\./);
+  });
+
+  it("reports a group-chat attribution failure as waiting on a design decision", async () => {
+    const { report, outDir } = await runAgainst("fail-K3group");
+    const expected = Object.fromEntries(
+      PHASE_1.map((r) => [r, r === "K3" ? "waits_on_design" : "pass"]),
+    );
+    assert.deepEqual(statuses(report), expected);
+    assert.deepEqual(report.summary.byLeg.K3, {
+      of: 4,
+      pass: 3,
+      fail: 0,
+      waitsOnDesign: 1,
+      notChecked: 0,
+    });
+    assert.equal(report.summary.agentFailures, 0);
+    const legs = Object.fromEntries(
+      report.results.find((r) => r.rule === "K3").checks.map((c) => [c.name, c.status]),
+    );
+    assert.equal(legs["group chat"], "waits_on_design");
+    assert.match(
+      readFileSync(join(outDir, "report.md"), "utf8"),
+      /## Waiting on a design decision/,
+    );
   });
 
   for (const rule of PHASE_1) {
@@ -76,8 +117,10 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     const k3 = report.results.find((r) => r.rule === "K3");
     assert.match(k3.reason, /second account/);
     assert.ok(
-      k3.checks.some((c) => c.name.startsWith("Marisol") && c.status === "pass"),
-      "the single-account attribution still passed",
+      ["single-member chat", "group chat", "changed display name"].every((leg) =>
+        k3.checks.some((c) => c.name === leg && c.status === "pass"),
+      ),
+      "the other three legs still passed",
     );
   });
 

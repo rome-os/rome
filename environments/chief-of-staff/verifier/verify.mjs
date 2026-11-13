@@ -54,7 +54,7 @@ try {
   for (const r of report.results)
     console.log(`${r.rule}\t${r.status}${r.partial ? " (partly checked)" : ""}\t${r.reason}`);
   console.log(`report: ${join(outDir, "report.md")}`);
-  process.exit(report.summary.fail > 0 ? 1 : 0);
+  process.exit(report.summary.agentFailures > 0 ? 1 : 0);
 } catch (error) {
   console.error(`verify: ${error.message}`);
   process.exit(2);

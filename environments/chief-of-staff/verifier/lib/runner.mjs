@@ -12,6 +12,32 @@ const verifierDir = dirname(dirname(fileURLToPath(import.meta.url)));
 
 export const DEFAULT_RUNS_DIR = join(homedir(), ".rome-environments/chief-of-staff/runs");
 
+function tally(items) {
+  const count = (status) => items.filter((i) => i.status === status).length;
+  return {
+    of: items.length,
+    pass: count("pass"),
+    fail: count("fail"),
+    waitsOnDesign: count("waits_on_design"),
+    notChecked: count("not_checked"),
+  };
+}
+
+/**
+ * Two kinds of number: the rules scored whole, and each rule scored by leg (K3), whose legs
+ * are tallied on their own. `agentFailures` counts failures that are the agent's: a leg that
+ * waits on a design decision is not one.
+ */
+export function summarize(results) {
+  const whole = results.filter((r) => !r.byLeg);
+  const byLeg = Object.fromEntries(
+    results.filter((r) => r.byLeg).map((r) => [r.rule, tally(r.checks)]),
+  );
+  const agentFailures =
+    tally(whole).fail + Object.values(byLeg).reduce((sum, legs) => sum + legs.fail, 0);
+  return { rules: tally(whole), byLeg, agentFailures };
+}
+
 /** The scenarios for `rules` when given, else every rule of `phase` and the phases before it. */
 export function selectScenarios({ rules, phase }) {
   if (rules) {
@@ -100,7 +126,13 @@ export async function verify({
         checks: [],
       };
     }
-    results.push({ rule: scenario.rule, title: scenario.title, phase: scenario.phase, ...result });
+    results.push({
+      rule: scenario.rule,
+      title: scenario.title,
+      phase: scenario.phase,
+      byLeg: Boolean(scenario.legs),
+      ...result,
+    });
     log(`${scenario.rule}: ${result.status}`);
   }
   for (const rule of missing) {
@@ -125,11 +157,7 @@ export async function verify({
       "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. The real direct-message path is checked by hand in the live trial.",
     ],
     selection: rules ? { rules } : { phase: phase ?? 1 },
-    summary: {
-      pass: results.filter((r) => r.status === "pass").length,
-      fail: results.filter((r) => r.status === "fail").length,
-      notChecked: results.filter((r) => r.status === "not_checked").length,
-    },
+    summary: summarize(results),
     results,
   };
   writeFileSync(join(dir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);

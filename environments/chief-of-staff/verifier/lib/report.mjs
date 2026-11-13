@@ -2,7 +2,26 @@
 
 function status(result) {
   if (result.status === "pass" && result.partial) return "pass (partly checked)";
-  return result.status.replace("_", " ");
+  return result.status.replaceAll("_", " ");
+}
+
+function counts(t) {
+  const parts = [`${t.pass} of ${t.of} pass`];
+  if (t.fail) parts.push(`${t.fail} fail`);
+  if (t.waitsOnDesign) parts.push(`${t.waitsOnDesign} waiting on a design decision`);
+  if (t.notChecked) parts.push(`${t.notChecked} not checked`);
+  return parts.join(", ");
+}
+
+function summaryLines(report) {
+  const { rules, byLeg } = report.summary;
+  const legRules = Object.keys(byLeg);
+  const lines = [
+    `- ${legRules.length > 0 ? `Rules other than ${legRules.join(", ")}` : "Rules"}: ${counts(rules)}.`,
+  ];
+  for (const [rule, legs] of Object.entries(byLeg))
+    lines.push(`- ${rule} by leg: ${counts(legs)}.`);
+  return lines;
 }
 
 function part(name, value) {
@@ -15,7 +34,9 @@ export function renderMarkdown(report) {
   const lines = [
     `# Chief of staff verifier run, ${report.startedAt}`,
     "",
-    `Rules version ${report.rulesVersion}. ${report.summary.pass} pass, ${report.summary.fail} fail, ${report.summary.notChecked} not checked.`,
+    `Rules version ${report.rulesVersion}.`,
+    "",
+    ...summaryLines(report),
     "",
     "## Under test",
     "",
@@ -31,6 +52,14 @@ export function renderMarkdown(report) {
     lines.push("", `Run with --dirty: uncommitted changes in ${report.dirty.join(", ")}.`);
   }
   for (const note of report.notes ?? []) lines.push("", note);
+  const waiting = report.results.flatMap((r) =>
+    r.checks.filter((c) => c.status === "waits_on_design").map((c) => ({ rule: r.rule, ...c })),
+  );
+  if (waiting.length > 0) {
+    lines.push("", "## Waiting on a design decision", "", "Not counted as agent failures.", "");
+    for (const c of waiting)
+      lines.push(`- ${c.rule} ${c.name}: ${c.detail}. Evidence: ${c.evidence.join(", ")}.`);
+  }
   lines.push(
     "",
     "## Results",
@@ -49,7 +78,7 @@ export function renderMarkdown(report) {
     lines.push("", `## ${r.rule} ${r.title}`, "");
     for (const c of r.checks) {
       lines.push(
-        `- **${c.name}**: ${c.status.replace("_", " ")}. ${c.detail}. Evidence: ${c.evidence.join(", ") || "none"}.`,
+        `- **${c.name}**: ${c.status.replaceAll("_", " ")}. ${c.detail}. Evidence: ${c.evidence.join(", ") || "none"}.`,
       );
       if (c.quote) lines.push("", "  > " + c.quote.replaceAll("\n", "\n  > "), "");
     }

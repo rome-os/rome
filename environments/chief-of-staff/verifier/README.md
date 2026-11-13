@@ -24,7 +24,7 @@ node environments/chief-of-staff/verifier/verify.mjs --rules K1,A5
 | `--poll <s>` | How often to read the chat while waiting | 5 |
 | `--out <dir>` | Write the report here instead of the runs folder | |
 
-It exits 0 when no rule fails, 1 when one does, and 2 when it could not run.
+It exits 0 when the agent fails nothing, 1 when it fails a rule or a leg, and 2 when it could not run. A leg that waits on a design decision does not count as an agent failure.
 
 Each run first calls `cos-env reset`, then hands the agent the seeded team with `cos-env seed`, then sets each member's display name to their seeded name.
 
@@ -35,7 +35,7 @@ Each run writes `report.json` and `report.md` to `~/.rome-environments/chief-of-
 - The commits under test: Rome, the agent (`rome_apps/chief-of-staff/`), the environment and the verifier, each marked when it had uncommitted changes. The first three come from `cos-env version`. The verifier reads its own.
 - The model the test Rome ran on, the judge, the rules version and the waits used.
 
-Then each rule is pass, fail or not checked, with the reason and the ids of the messages that are the evidence. A rule passes "partly checked" when every check that ran passed and some part of the rule could not be checked. The report names that part.
+Then the summary gives two numbers: the rules scored whole (the seven phase 1 rules other than K3), and K3 by leg. Each rule is pass, fail, waiting on a design decision, or not checked, with the reason and the ids of the messages that are the evidence. A rule passes "partly checked" when every check that ran passed and some optional part could not be checked. The report names that part. Failures that wait on a design decision are listed in their own section, apart from the agent's failures.
 
 The verifier refuses to run when anything under test has uncommitted changes, unless `--dirty` is passed.
 
@@ -55,7 +55,7 @@ The rules and their pass bars come from the rules doc, version R2. `scenarios/in
 | --- | --- | --- |
 | K1 Team | A member asks in the private chat who is on the team, with roles and current work | The judge compares the answer with the roster. Naming the former member fails it mechanically |
 | K2 Goals | A member asks in the private chat for the current goals with owners and dates | The judge compares the answer with the goals. Naming the dropped goal fails it mechanically |
-| K3 Who said it | Each member posts a commitment in `standup`. One member changes display name and posts another. One member posts a further commitment from a second account of the same person. Then the agent is asked what each member committed to | Each commitment has words no other commitment uses. Each answer must repeat its member's and none of anyone else's. The second-account leg is required: when no second account is available, K3 does not pass and the report says so |
+| K3 Who said it | Reported in four legs. **Single-member chat**: a member states a commitment in their private chat and is asked about it there. **Group chat**: each member posts a commitment in `standup`. **Changed display name**: one member changes display name and posts another. **Two accounts**: one member posts from a second account of the same person. The agent is asked in `standup` what each member committed to | Each commitment has words no other commitment uses. Each leg's commitments must appear in the answer about their own member and in no other. A group-chat failure is reported as waiting on a design decision (how the agent learns who sent each message in a chat with several members), not as an agent failure. The two-accounts leg is required: when no second account is available, K3 does not pass and the report says so |
 | K5 No invention | 20 questions in the private chat, 5 about things nobody said | The judge grades each answer against its sheet answer, or checks it says it does not know. Every known answer must carry a link |
 | K6 Survives a restart | Asks the K1 and K2 questions, renews the agent's session, asks again, restarts Rome, asks again | The judge checks the answers state the same facts. The renewal and the restart are separate legs. The renewal leg is required: when the session cannot be renewed, K6 does not pass and the report says so |
 | K7 Keeps private things private | A member tells the agent something in their private chat, and another says something in `leads`. A member who cannot read `leads` then asks about both in `general` | No agent message in `general` or `standup` repeats either |

@@ -17,7 +17,16 @@ function who(state, message, breaks) {
   }
   // A person's accounts share a base name before the colon: "member1" and "member1:2".
   const base = message.author.split(":")[0];
-  return team.members.find((m) => m.account === base);
+  const index = team.members.findIndex((m) => m.account === base);
+  if (breaks === "K3group" && message.chat !== `dm-${base}`) {
+    // Gets only the group chat wrong: each member's first message there lands on the next
+    // member, which leaves the later messages of the rename and two-account legs right.
+    const first = state.messages.find(
+      (m) => m.chat === message.chat && m.author.split(":")[0] === base,
+    );
+    if (first?.id === message.id) return team.members[(index + 1) % team.members.length];
+  }
+  return team.members[index];
 }
 
 function roster(state, breaks) {
@@ -50,10 +59,13 @@ function answer(state, message, breaks) {
   const commit = text.match(/what did (.+) commit to this week/i);
   if (commit) {
     const person = state.team.members.find((m) => m.name === commit[1]);
+    // What was said in the group chat, plus what was said in the chat the question came from.
     const said = state.messages.filter(
       (m) =>
-        m.chat === "standup" &&
+        (m.chat === "standup" || m.chat === message.chat) &&
         !m.mentionsAgent &&
+        !m.text.trim().endsWith("?") &&
+        m.id !== message.id &&
         m.author !== "agent" &&
         who(state, m, breaks) === person,
     );
