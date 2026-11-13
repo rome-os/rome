@@ -292,7 +292,9 @@ export function WidgetUiCard({
       ) : drawable ? null : (
         undrawable
       )}
-      {waiting && locked ? (
+      {/* A view that only shows the chat locks an open card without sending
+          it, so it says how the card ended only when it did. */}
+      {waiting && (result !== undefined || sent) ? (
         <span className="text-aux text-muted-foreground">
           {t(
             result === undefined

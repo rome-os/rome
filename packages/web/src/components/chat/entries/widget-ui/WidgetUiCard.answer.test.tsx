@@ -162,6 +162,8 @@ describe("a question card described as data", () => {
     expect(await screen.findByText("Which tone?")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    // Nothing was sent, so it does not say so.
+    expect(screen.queryByText("Sent")).toBeNull();
     expect(events).toEqual([]);
   });
 
