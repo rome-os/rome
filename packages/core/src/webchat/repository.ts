@@ -2952,6 +2952,18 @@ export class WebChatRepository {
     return row?.sessionId ?? null;
   }
 
+  /** A message that holds a widget, by the id clients know it by: its chat and
+   *  its parts, read from one row, or null when no row or more than one has
+   *  that id. */
+  async widgetMessage(id: string): Promise<{ chatId: string; content: string } | null> {
+    const [row] = await this.db
+      .select({ sessionId: romeAgentMessages.sessionId, content: romeAgentMessages.content })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.id, id))
+      .limit(1);
+    return row ? { chatId: row.sessionId, content: row.content } : null;
+  }
+
   /** The chat a stored message belongs to, or null. */
   async sessionIdOfMessage(messageId: string): Promise<string | null> {
     const [row] = await this.db

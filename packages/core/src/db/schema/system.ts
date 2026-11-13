@@ -658,6 +658,8 @@ export const chatMessages = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
+    // A dashboard line by the id clients know it by, such as a widget's.
+    index("idx_chat_messages_by_key").on(table.key),
     // One chat thread's lines.
     index("idx_chat_messages_chat_thread").on(table.chatId, table.chatThreadId),
     // A place's lines by time. Within one second lines keep the order they

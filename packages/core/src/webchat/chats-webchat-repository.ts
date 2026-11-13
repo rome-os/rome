@@ -734,28 +734,29 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return this.selectLines([sessionId]);
   }
 
-  /** A dashboard line's session, by the id clients know it by (its key):
-   *  the session whose turn said it, else the one standing in its chat. A
-   *  line said before the switch is still in the session's own table. */
-  override async sessionIdOfMessage(messageId: string): Promise<string | null> {
-    const [row] = this.db.all<{ session_id: string | null }>(sql`
-      SELECT COALESCE(l.session_id, s.id) AS session_id
-      FROM chat_messages m
-      LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.role = 'answer'
-      LEFT JOIN rome_sessions s ON s.chat_id = m.chat_id AND s.thread_id IS m.thread_id
-      WHERE m.key = ${messageId}
-      ORDER BY s.created_at
-      LIMIT 1
+  /** A dashboard line that holds a widget, by its key, read from one row:
+   *  the session whose turn said it, else the one standing in its chat. A key
+   *  is unique only in its chat, so a key that two dashboard lines share
+   *  finds none. A line said before the switch is still in the session's own
+   *  table. */
+  override async widgetMessage(id: string): Promise<{ chatId: string; content: string } | null> {
+    const rows = this.db.all<{ session_id: string | null; parts: string }>(sql`
+      SELECT COALESCE(
+        (SELECT l.session_id FROM agent_turn_messages l
+          WHERE l.message_id = m.id AND l.role = 'answer' LIMIT 1),
+        (SELECT s.id FROM rome_sessions s
+          WHERE s.chat_id = m.chat_id AND s.thread_id IS m.thread_id
+          ORDER BY s.created_at LIMIT 1)
+      ) AS session_id, m.parts AS parts
+      FROM ${CHAT_MESSAGES} m
+      JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = ${WEBCHAT_PLATFORM}
+      WHERE m.key = ${id}
+      LIMIT 2
     `);
-    return row?.session_id ?? (await super.sessionIdOfMessage(messageId));
-  }
-
-  /** A dashboard line's parts, by its key, else a row of the session's own table. */
-  override async getMessageContent(id: string) {
-    const [row] = this.db.all<{ parts: string | null }>(sql`
-      SELECT parts FROM chat_messages WHERE key = ${id} LIMIT 1
-    `);
-    return row?.parts ?? (await super.getMessageContent(id));
+    if (rows.length > 1) return null;
+    const [row] = rows;
+    if (row) return row.session_id ? { chatId: row.session_id, content: row.parts } : null;
+    return super.widgetMessage(id);
   }
 
   /** The newest `options.limit` turn groups of a session, as
