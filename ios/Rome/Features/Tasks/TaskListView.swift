@@ -178,13 +178,14 @@ struct TaskListView: View {
                 onOpenChat: task.task.chat.map { chat in { onOpenChat(chat) } }
             )
         case .check(let check):
-            TaskListPlainRow(title: check.check.name, line: TaskListWords.check(check, now: now), last: last)
+            TaskListPlainRow(title: check.check.name, line: TaskListWords.check(check, now: now), created: item.createdAt, last: last)
         case .follow(let follow):
-            TaskListPlainRow(title: follow.target, line: TaskListWords.follow(follow), dimmed: follow.state != "active", last: last)
+            TaskListPlainRow(title: follow.target, line: TaskListWords.follow(follow), created: item.createdAt, dimmed: follow.state != "active", last: last)
         case .routine(let routine):
             TaskListPlainRow(
                 title: routine.name,
                 line: TaskListWords.routine(routine, now: now),
+                created: item.createdAt,
                 failed: routine.lastRun?.status == "error",
                 dimmed: !routine.enabled,
                 last: last
@@ -198,6 +199,7 @@ struct TaskListView: View {
 struct TaskListPlainRow: View {
     let title: String
     let line: String
+    let created: Date?
     var failed = false
     var dimmed = false
     let last: Bool
@@ -219,6 +221,10 @@ struct TaskListPlainRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Long-pressed, it says when it was made, and offers nothing else.
+        .contextMenu {
+            if let created { Text(verbatim: TaskListWords.created(created)) }
+        }
         .accessibilityElement(children: .combine)
     }
 }
@@ -228,6 +234,8 @@ struct TaskListPlainRow: View {
 /// the long-press menu; nothing asks to confirm, and a press shows at once.
 struct TaskListRow: View {
     let item: TaskListItem.Task
+
+    private var created: Date? { TaskListItem.task(item).createdAt }
     let stopping: Bool
     let now: Date
     let last: Bool
@@ -286,12 +294,21 @@ struct TaskListRow: View {
                 }
             }
         }
+        // Titled with when the task was made, as a message's menu is with its time.
         .contextMenu {
-            if stops {
-                Button(role: .destructive, action: onStop) { Label("Stop", systemImage: "stop.circle") }
-            }
-            if let onOpenChat {
-                Button(action: onOpenChat) { Label("Open task chat", systemImage: "bubble.left") }
+            if stops || onOpenChat != nil {
+                Section {
+                    if stops {
+                        Button(role: .destructive, action: onStop) { Label("Stop", systemImage: "stop.circle") }
+                    }
+                    if let onOpenChat {
+                        Button(action: onOpenChat) { Label("Open task chat", systemImage: "bubble.left") }
+                    }
+                } header: {
+                    if let created { Text(verbatim: TaskListWords.created(created)) }
+                }
+            } else if let created {
+                Text(verbatim: TaskListWords.created(created))
             }
         }
         .accessibilityElement(children: .contain)

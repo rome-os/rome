@@ -51,7 +51,7 @@ final class TaskListStore {
         do {
             let list = try await backend.taskList(chatId: chatId)
             guard mine == reads else { return }
-            groups = list.groups
+            groups = TaskListGroup.ordered(list.groups)
             loadFailed = false
             // A stop shows its effect once the task reads as ended.
             stopping = stopping.filter { id in task(id).map { !TaskListWords.isEnded($0.task) } ?? false }
@@ -223,6 +223,11 @@ enum TaskListWords {
         default:
             return String(localized: "On a schedule")
         }
+    }
+
+    /// A row's menu title: "Created Today 09:12", in the message menu's date style.
+    static func created(_ date: Date, now: Date = .now) -> String {
+        String(localized: "Created \(RelativeTime.separator(date, now: now))")
     }
 
     // MARK: Times

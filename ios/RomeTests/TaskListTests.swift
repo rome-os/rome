@@ -54,6 +54,37 @@ private let listJSON = #"""
         #expect(TaskListWords.task(waiting, now: now, stopping: true) == "Stopping…")
     }
 
+    /// The groups keep their fixed order, Ended always last, whatever order
+    /// they arrive in, with some missing or all there.
+    @Test func groupsKeepTheirOrder() async throws {
+        func group(_ key: TaskListGroup.Key) -> TaskListGroup { TaskListGroup(key: key, items: []) }
+        let all: [TaskListGroup.Key] = [.needsYou, .active, .later, .onItsOwn, .ended]
+        #expect(TaskListGroup.ordered([.ended, .later, .needsYou, .onItsOwn, .active].map(group)).map(\.key) == all)
+        #expect(TaskListGroup.ordered([.ended, .active].map(group)).map(\.key) == [.active, .ended])
+        #expect(TaskListGroup.ordered([.later, .ended, .needsYou].map(group)).map(\.key) == [.needsYou, .later, .ended])
+        // The store keeps that order too.
+        let backend = FakeBackend()
+        var list = try decoded()
+        list.groups.reverse()
+        backend.taskLists["concierge"] = list
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        await store.load()
+        #expect(store.groups.map(\.key) == [.needsYou, .later, .onItsOwn, .ended])
+    }
+
+    /// Each row's menu is titled with when it was made; a row whose kind the
+    /// instance gives no time has none, rather than a guessed one.
+    @Test func eachRowSaysWhenItWasMade() throws {
+        let list = try decoded()
+        guard case .task(let task) = list.groups[0].items[0] else { Issue.record("no task"); return }
+        #expect(list.groups[0].items[0].createdAt == Date(timeIntervalSince1970: 0.001) && task.task.createdAt == 1)
+        #expect(list.groups[1].items[1].createdAt == nil)
+        let made = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(TaskListWords.created(made, now: made) == "Created " + RelativeTime.separator(made, now: made))
+        let check = try JSONDecoder().decode(TaskListItem.self, from: Data(#"{"kind":"check","check":{"id":"k","name":"n","at":null,"waitingFor":null,"createdAt":1800000000000}}"#.utf8))
+        #expect(check.createdAt == made)
+    }
+
     @Test func schedulesReadAsTheWebSaysThem() {
         #expect(TaskListWords.schedule(.init(at: "09:00", days: ["mon", "wed"])).hasSuffix(" at " + TaskListWords.clock("09:00")))
         #expect(TaskListWords.trigger(.init(type: "schedule", localTime: "08:00", rrule: "FREQ=DAILY")).hasPrefix("Daily at "))

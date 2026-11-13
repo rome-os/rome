@@ -11,8 +11,16 @@ struct TaskListResponse: Decodable, Hashable, Sendable {
 }
 
 struct TaskListGroup: Decodable, Hashable, Sendable, Identifiable {
-    enum Key: String, Decodable, Sendable {
+    enum Key: String, Decodable, Sendable, CaseIterable {
         case needsYou = "needs_you", active, later, onItsOwn = "on_its_own", ended
+
+        /// The fixed order of the groups, Ended always last.
+        var order: Int { Self.allCases.firstIndex(of: self) ?? 0 }
+    }
+
+    /// The groups in their fixed order, whatever order they came in.
+    static func ordered(_ groups: [TaskListGroup]) -> [TaskListGroup] {
+        groups.sorted { $0.key.order < $1.key.order }
     }
 
     var key: Key
@@ -79,6 +87,8 @@ enum TaskListItem: Decodable, Hashable, Sendable, Identifiable {
             var name: String
             var at: Double?
             var waitingFor: String?
+            /// Epoch ms; an instance that does not send it gives the menu no title.
+            var createdAt: Double?
         }
         var check: Body
     }
@@ -92,6 +102,7 @@ enum TaskListItem: Decodable, Hashable, Sendable, Identifiable {
         var state: String
         /// `HH:mm`, sorted.
         var digestTimes: [String]
+        var createdAt: Double?
     }
 
     /// A routine that works for this chat.
@@ -114,6 +125,7 @@ enum TaskListItem: Decodable, Hashable, Sendable, Identifiable {
         var enabled: Bool
         var nextRunAt: Double?
         var lastRun: LastRun?
+        var createdAt: Double?
     }
 
     private enum CodingKeys: String, CodingKey { case kind }
@@ -127,6 +139,19 @@ enum TaskListItem: Decodable, Hashable, Sendable, Identifiable {
         case "routine": self = .routine(try Routine(from: decoder))
         default: throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "kind \(kind)"))
         }
+    }
+
+    /// When the row's work was made, for its menu's title; nil where the
+    /// instance does not say.
+    var createdAt: Date? {
+        let ms: Double?
+        switch self {
+        case .task(let item): ms = item.task.createdAt
+        case .check(let item): ms = item.check.createdAt
+        case .follow(let item): ms = item.createdAt
+        case .routine(let item): ms = item.createdAt
+        }
+        return RomeDate.fromMillis(ms)
     }
 
     var id: String {

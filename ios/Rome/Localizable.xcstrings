@@ -1421,6 +1421,16 @@
         }
       }
     },
+    "Created %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建于 %@"
+          }
+        }
+      }
+    },
     "Creating…" : {
       "localizations" : {
         "zh-Hans" : {
