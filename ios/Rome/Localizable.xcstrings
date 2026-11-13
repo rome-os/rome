@@ -371,6 +371,16 @@
         }
       }
     },
+    "Agent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent"
+          }
+        }
+      }
+    },
     "Allow Rome to read Health" : {
       "localizations" : {
         "zh-Hans" : {
@@ -417,6 +427,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已回答"
+          }
+        }
+      }
+    },
+    "App" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用"
           }
         }
       }
@@ -547,6 +567,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自动"
+          }
+        }
+      }
+    },
+    "Automation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动化"
           }
         }
       }
@@ -897,6 +927,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接没有开始"
+          }
+        }
+      }
+    },
+    "Context tidied up · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已整理上下文 · %@"
           }
         }
       }
@@ -2733,6 +2773,16 @@
         }
       }
     },
+    "Routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "例程"
+          }
+        }
+      }
+    },
     "Run action" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3021,6 +3071,16 @@
         }
       }
     },
+    "Shows the summary carried over" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示带到新上下文的摘要"
+          }
+        }
+      }
+    },
     "Sign in again" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3287,6 +3347,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "帮我总结本周的 AI 新闻"
+          }
+        }
+      }
+    },
+    "Summary carried over" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "带到新上下文的摘要"
           }
         }
       }
@@ -3607,6 +3677,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这一轮没有完成"
+          }
+        }
+      }
+    },
+    "Tidying up context…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整理上下文…"
           }
         }
       }
@@ -4249,6 +4329,16 @@
         }
       }
     },
+    "after a quiet period" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "闲置后"
+          }
+        }
+      }
+    },
     "by day" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4289,6 +4379,26 @@
         }
       }
     },
+    "conversation got long" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话较长"
+          }
+        }
+      }
+    },
+    "daily reset" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每日重置"
+          }
+        }
+      }
+    },
     "iPad use" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4319,6 +4429,16 @@
         }
       }
     },
+    "setup updated" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设定已更新"
+          }
+        }
+      }
+    },
     "status.needsYou" : {
       "localizations" : {
         "en" : {
@@ -4331,6 +4451,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等你回复"
+          }
+        }
+      }
+    },
+    "working folder gone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作目录不存在"
           }
         }
       }

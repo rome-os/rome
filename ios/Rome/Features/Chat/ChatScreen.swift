@@ -265,6 +265,10 @@ struct ConciergeRow: View {
                 .keepsTaps(inThread)
         case .error(_, let text):
             ErrorLine(text: text)
+        case .automatedInput(_, let source):
+            AutomatedInputLine(source: source)
+        case .sessionRenewal(_, let reason, let sessionId):
+            SessionRenewalLine(reason: reason, sessionId: sessionId, store: store)
         }
     }
 }

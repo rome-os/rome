@@ -95,7 +95,7 @@ final class TranscriptStore {
             messages: messages,
             pending: pending,
             answers: answers,
-            options: .init(showTools: kind == .task, showThreads: kind == .concierge, typing: kind == .concierge && running && visibleTurn)
+            options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: kind == .concierge && running && visibleTurn)
         )
     }
 
@@ -436,6 +436,26 @@ final class TranscriptStore {
     /// The messages held for this chat that are in `root`'s thread.
     func messages(inThread root: String) -> [ChatMessage] {
         messages.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == root) }
+    }
+
+    // MARK: Session renewals
+
+    /// The handoff each renewed session started from, by session id: nil
+    /// inside when it wrote none. Read once; a handoff never changes.
+    private(set) var handoffs: [String: String?] = [:]
+
+    /// Reads a renewed session's handoff, once. A failed read tries again
+    /// the next time its line shows.
+    func loadHandoff(_ renewedSession: String) async {
+        guard handoffs[renewedSession] == nil else { return }
+        let read: String?
+        do {
+            read = try await backend.renewalHandoff(sessionId: sessionId, renewedSession: renewedSession)
+        } catch {
+            return
+        }
+        let text = read?.trimmingCharacters(in: .whitespacesAndNewlines)
+        handoffs[renewedSession] = .some(text?.isEmpty == false ? text : nil)
     }
 
     /// A stored message, by id.

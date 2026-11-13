@@ -48,6 +48,12 @@ enum TranscriptRow: Identifiable, Hashable {
     /// thread goes on beyond that stretch: how many replies it has.
     /// `guardian`: the message is the guardian's, so the line sits right.
     case threadReplies(id: String, messageId: String, count: Int, guardian: Bool)
+    /// A faint centered line in a Concierge chat where a routine, an app or
+    /// another agent sent something in: who sent it. Not tappable.
+    case automatedInput(id: String, source: TraceSummary.InputSource)
+    /// A faint centered line where the chat's agent session was renewed,
+    /// with why; `sessionId` is the new session, whose handoff a tap opens.
+    case sessionRenewal(id: String, reason: String, sessionId: String?)
     case typing
 
     var id: String {
@@ -55,7 +61,7 @@ enum TranscriptRow: Identifiable, Hashable {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
              .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _), .error(let id, _), .tools(let id, _, _),
-             .threadReplies(let id, _, _, _):
+             .threadReplies(let id, _, _, _), .automatedInput(let id, _), .sessionRenewal(let id, _, _):
             return id
         case .typing:
             return "typing"
@@ -102,6 +108,9 @@ enum TranscriptBuilder {
         var showTools = false
         /// Concierge chats mark a chat thread's first message with its replies.
         var showThreads = false
+        /// Concierge chats show a line for automated input and for a renewed
+        /// session, where the turn they belong to starts.
+        var showNotices = false
         var typing = false
     }
 
@@ -119,6 +128,8 @@ enum TranscriptBuilder {
             let rows: [TranscriptRow]
             /// Rows that are text bubbles take part in the corner shapes.
             let bubbleIndexes: [Int]
+            /// A faint line of its own, which ends a run of bubbles.
+            var notice = false
         }
 
         var entries: [Entry] = []
@@ -126,8 +137,33 @@ enum TranscriptBuilder {
         let storedIDs = Set(messages.map(\.id))
         let replies = options.showThreads ? threadLines(messages) : [:]
 
+        // A turn's lines stand before its first message; a turn that shows
+        // nothing else, as an automated input the Concierge answers with
+        // silence, gets them where its trace sits.
+        var summaries: [String: TraceSummary] = [:]
+        if options.showNotices {
+            for message in messages where message.isTrace {
+                if let turn = message.turnId, let summary = message.traceSummary { summaries[turn] = summary }
+            }
+        }
+        var noticed = Set<String>()
+        func notices(for message: ChatMessage) {
+            guard options.showNotices, let turn = message.turnId, let summary = summaries[turn], noticed.insert(turn).inserted else { return }
+            for row in Self.noticeRows(turn: turn, summary: summary) {
+                entries.append(Entry(id: row.id, date: message.date, guardian: false, rows: [row], bubbleIndexes: [], notice: true))
+            }
+        }
+
         // Messages come in the store's order, which follows the server's turns.
         for message in messages {
+            notices(for: message)
+            // A Concierge chat holds no automated messages: one from before
+            // that rule draws as the line a newer one gets. One said on the
+            // owner's behalf is theirs, and stays their bubble.
+            if options.showNotices, let source = Self.automatedSource(message) {
+                entries.append(Entry(id: message.id, date: message.date, guardian: false, rows: [.automatedInput(id: "automated-\(message.id)", source: source)], bubbleIndexes: [], notice: true))
+                continue
+            }
             if message.isTrace {
                 guard options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 else { continue }
                 entries.append(Entry(
@@ -217,7 +253,7 @@ enum TranscriptBuilder {
             if previous == nil || gap >= separatorGap || newDay {
                 closeRun()
                 output.append(.separator(id: "sep-\(entry.id)", date: entry.date))
-            } else if entry.guardian != previous?.guardian || gap >= groupGap {
+            } else if entry.guardian != previous?.guardian || gap >= groupGap || entry.notice || previous?.notice == true {
                 closeRun()
             }
             for (index, row) in entry.rows.enumerated() {
@@ -272,6 +308,26 @@ enum TranscriptBuilder {
             if interrupted { lines[shown[newest].id] = count }
         }
         return lines
+    }
+
+    /// The lines a turn's trace summary asks for: the renewed session first,
+    /// then who sent the input it ran on.
+    static func noticeRows(turn: String, summary: TraceSummary) -> [TranscriptRow] {
+        var rows: [TranscriptRow] = []
+        if let renewal = summary.sessionRenewal, let reason = renewal.reason, !reason.isEmpty {
+            rows.append(.sessionRenewal(id: "renewal-\(turn)", reason: reason, sessionId: renewal.sessionId))
+        }
+        if let source = summary.automatedInput {
+            rows.append(.automatedInput(id: "automated-\(turn)", source: source))
+        }
+        return rows
+    }
+
+    /// The source of an automated message from before Concierge chats held
+    /// none; nil for any other message, an on-behalf one included.
+    static func automatedSource(_ message: ChatMessage) -> TraceSummary.InputSource? {
+        guard message.isUser, let sender = message.sender, sender.kind == "automated", sender.onBehalfOf == nil else { return nil }
+        return TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

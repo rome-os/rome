@@ -221,6 +221,14 @@ final class DemoBackend: RomeBackend {
         return message
     }
 
+    /// The handoff each renewed demo session started from.
+    private var handoffs: [String: String] = [:]
+
+    func renewalHandoff(sessionId: String, renewedSession: String) async throws -> String? {
+        try await pause(0.2)
+        return handoffs[renewedSession]
+    }
+
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
         try await pause(0.25)
         let all = messages[sessionId] ?? []
@@ -748,6 +756,18 @@ final class DemoBackend: RomeBackend {
         ]
 
         // Concierge, as on the design's Chat board.
+        // The chat's session was renewed before the weather question, with a
+        // handoff; then a routine sent its summary in, which shows
+        // only as a line, then the Concierge's answer (rome-os/rome#2076, #2088).
+        var renewed = trace(steps: 0, at: at(9, 52), session: conciergeChatID)
+        renewed.turnId = "turn-c3"
+        renewed.traceSummary?.sessionRenewal = TraceSummary.SessionRenewal(reason: "context", sessionId: "demo-session-2")
+        handoffs["demo-session-2"] = "官网首页要改成中英双语，标题控制在 8 个词以内。\n价格追踪在等批准发提醒邮件；竞品调研在等调研范围。"
+        var routineRun = trace(steps: 1, at: at(9, 58), session: conciergeChatID)
+        routineRun.turnId = "turn-routine"
+        routineRun.traceSummary?.automatedInput = TraceSummary.InputSource(type: "routine", name: "每日摘要")
+        var routineAnswer = agent("今天的摘要：两个任务在等你，一个在跑。", at: at(9, 58).addingTimeInterval(5))
+        routineAnswer.turnId = "turn-routine"
         messages[conciergeChatID] = [
             user("u1", "帮我把官网首页的文案改成中英双语", at: at(9, 12)),
             agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)),
@@ -757,7 +777,9 @@ final class DemoBackend: RomeBackend {
             parts([.object(["type": .string("task_chat"), "chatId": .string("chat-price"), "title": .string("价格追踪：发提醒邮件")])], at: at(9, 40).addingTimeInterval(1), session: conciergeChatID),
             agent("竞品调研想确认一下范围，你看下。", at: at(9, 40).addingTimeInterval(2)),
             parts([.object(["type": .string("task_chat"), "chatId": .string("chat-research"), "title": .string("竞品定价调研")])], at: at(9, 40).addingTimeInterval(3), session: conciergeChatID),
+
             // The Concierge asks and waits for an approval in the main chat too.
+            renewed,
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),
             parts([.object([
                 "type": .string("pending_interaction"), "toolUseId": .string("q-hk"),
@@ -772,6 +794,8 @@ final class DemoBackend: RomeBackend {
                     .object(["label": .string("时间"), "value": .string("明天 15:00–15:30")]),
                 ])]),
             ])], at: at(9, 53), session: conciergeChatID),
+            routineRun,
+            routineAnswer,
         ]
         approvals["ap-cal"] = ApprovalRecord(id: "ap-cal", status: "pending")
 

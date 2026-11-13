@@ -93,7 +93,7 @@ enum SnapshotRunner {
             // The header's status line in each state, then back to the name alone.
             let states: [(String, ConciergeActivity)] = [
                 ("working", .working), ("tool", .tool(.searchingWeb)), ("tasks", .tasks(title: "整理本周会议纪要", more: 1)),
-                ("needs-you", .needsYou), ("idle", .idle),
+                ("needs-you", .needsYou), ("tidying", .tool(.tidyingUp)), ("idle", .idle),
             ]
             for (name, state) in states {
                 await capture("60-status-\(name)", style: styleName, in: directory, wait: 0.8) {

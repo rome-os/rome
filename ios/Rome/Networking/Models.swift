@@ -134,6 +134,49 @@ struct TraceSummary: Codable, Hashable, Sendable {
     var turnStatus: String?
     var stoppedByUser: Bool?
     var terminalError: String?
+    /// The turn is the first of a session that replaced the chat's earlier one.
+    var sessionRenewal: SessionRenewal? = nil
+    /// The turn ran on what a routine, an app or another agent sent into a
+    /// Concierge chat, which shows a faint line naming it.
+    var automatedInput: InputSource? = nil
+
+    /// Why a chat's agent session was renewed (`setup`, `idle`, `daily`,
+    /// `working_dir`, `context`, or a newer one), and the session it started.
+    struct SessionRenewal: Codable, Hashable, Sendable {
+        var reason: String?
+        var sessionId: String?
+    }
+
+    /// Who sent the input a turn ran on (`SystemInputSource` on the wire).
+    struct InputSource: Codable, Hashable, Sendable {
+        /// `routine`, `app`, `agent` or `automation`.
+        var type: String?
+        var name: String?
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case totalSteps, turnStatus, stoppedByUser, terminalError, sessionRenewal, automatedInput
+    }
+
+    init(totalSteps: Int? = nil, turnStatus: String? = nil, stoppedByUser: Bool? = nil, terminalError: String? = nil, sessionRenewal: SessionRenewal? = nil, automatedInput: InputSource? = nil) {
+        self.totalSteps = totalSteps
+        self.turnStatus = turnStatus
+        self.stoppedByUser = stoppedByUser
+        self.terminalError = terminalError
+        self.sessionRenewal = sessionRenewal
+        self.automatedInput = automatedInput
+    }
+
+    /// A shape this build does not know drops only its own field, never the message.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        totalSteps = try? container.decodeIfPresent(Int.self, forKey: .totalSteps)
+        turnStatus = try? container.decodeIfPresent(String.self, forKey: .turnStatus)
+        stoppedByUser = try? container.decodeIfPresent(Bool.self, forKey: .stoppedByUser)
+        terminalError = try? container.decodeIfPresent(String.self, forKey: .terminalError)
+        sessionRenewal = try? container.decodeIfPresent(SessionRenewal.self, forKey: .sessionRenewal)
+        automatedInput = try? container.decodeIfPresent(InputSource.self, forKey: .automatedInput)
+    }
 }
 
 /// `GET /system/upgrade/check`: the instance's release and the latest one,
@@ -254,6 +297,8 @@ enum ConciergeActivity: Hashable, Sendable {
     enum Tool: String, Sendable, CaseIterable {
         case startingTask, messagingTask, readingChat, stoppingTask, updatingTasks
         case startingTopic, checkingFollows, searchingWeb, readingPage
+        /// A handoff is being written for the chat's next session.
+        case tidyingUp
     }
 
     /// Lenient, as the contract asks: an unknown kind is nil (no line), an
@@ -302,6 +347,7 @@ enum ConciergeActivity: Hashable, Sendable {
             case .checkingFollows: return String(localized: "Checking what you follow")
             case .searchingWeb: return String(localized: "Searching the web")
             case .readingPage: return String(localized: "Reading a page")
+            case .tidyingUp: return String(localized: "Tidying up context…")
             }
         }
     }

@@ -163,6 +163,16 @@ final class FakeBackend: RomeBackend {
     /// Runs inside a thread read, before it answers.
     var duringThreadRead: (() async -> Void)?
 
+    /// Each renewed session's handoff; one missing fails the read.
+    var handoffs: [String: String?] = [:]
+    var handoffReads: [String] = []
+
+    func renewalHandoff(sessionId: String, renewedSession: String) async throws -> String? {
+        handoffReads.append(renewedSession)
+        guard let handoff = handoffs[renewedSession] else { throw APIError.network }
+        return handoff
+    }
+
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
         threadReads.append(messageId)
         await duringThreadRead?()

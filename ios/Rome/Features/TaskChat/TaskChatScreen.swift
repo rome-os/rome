@@ -180,8 +180,8 @@ struct TaskChatScreen: View {
             TaskCard(title: title) {}
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .threadReplies:
-            // Task chats have no chat threads.
+        case .threadReplies, .automatedInput, .sessionRenewal:
+            // Task chats have no chat threads, and only a Concierge chat draws its faint lines.
             EmptyView()
         }
     }

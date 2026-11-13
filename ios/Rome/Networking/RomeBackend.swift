@@ -42,6 +42,9 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Every message of the chat thread `messageId` is in, oldest first.
     /// Only an instance with chat threads answers it.
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage]
+    /// The handoff a renewal started session `renewedSession` of chat
+    /// `sessionId` from; nil when none was written.
+    func renewalHandoff(sessionId: String, renewedSession: String) async throws -> String?
     /// A file in the chats' project folder, by its `/projects/…` path without the slash.
     func asset(path: String) async throws -> Data
     /// The same file shrunk to `width` (600 or 900) by an instance that can, and
@@ -149,6 +152,11 @@ final class LiveBackend: RomeBackend {
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
         let page: MessagePage = try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: [URLQueryItem(name: "thread", value: messageId)])
         return page.messages
+    }
+
+    func renewalHandoff(sessionId: String, renewedSession: String) async throws -> String? {
+        let reply: JSONValue = try await client.get("/chat/sessions/\(escape(sessionId))/renewals/\(escape(renewedSession))")
+        return reply["handoff"]?.string
     }
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
@@ -406,6 +414,7 @@ extension RomeBackend {
         try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
     }
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] { throw APIError.notFound }
+    func renewalHandoff(sessionId: String, renewedSession: String) async throws -> String? { nil }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     /// Stand-ins (demo, tests) are no guardian of a real instance.
