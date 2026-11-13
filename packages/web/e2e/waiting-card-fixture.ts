@@ -185,7 +185,28 @@ export async function openWaitingCard(
             success: true,
           });
         }
-        if (path === `/api/chat/sessions/${sessionId}/turns` && method === "POST") {
+        // Core answers the agent waiting on a widget with the turn below. A
+        // widget is a message of its own, so its id is the message's.
+        const answered = path.match(/^\/api\/chat\/widgets\/([^/]+)\/events$/);
+        if (answered && method === "POST") {
+          const held = messages.find((m) => m.id === decodeURIComponent(answered[1]));
+          const toolUseId = (JSON.parse(held?.content ?? "[]")[0] ?? {}).toolUseId;
+          const { name, context, turn } = JSON.parse(String(init?.body));
+          init = {
+            ...init,
+            body: JSON.stringify({
+              ...turn,
+              parts: [
+                {
+                  type: "interaction_result",
+                  toolUseId,
+                  output: name === "rome:dismiss" ? { dismissed: true } : context,
+                },
+              ],
+            }),
+          };
+        }
+        if ((path === `/api/chat/sessions/${sessionId}/turns` || answered) && method === "POST") {
           const body = JSON.parse(String(init?.body));
           messages.push({
             id: body.inputId,

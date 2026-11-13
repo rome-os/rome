@@ -6,6 +6,10 @@ import Foundation
 /// dashboard's does, so both draw the same card.
 struct WidgetUIPart: Hashable, Sendable {
     let toolUseId: String
+    /// The widget's id: the id of the message that holds it, since a widget
+    /// is a message of its own. Set by whoever reads the message; its events
+    /// go to core by it.
+    var widgetId = ""
     let appId: String
     /// The widget's line, for when the card cannot be drawn or read.
     let text: String
@@ -49,17 +53,23 @@ struct WidgetUIPart: Hashable, Sendable {
     var isDrawable: Bool {
         guard WidgetPaths.appAPIPath(appId: appId, path: "x") != nil else { return false }
         let posts = components.compactMap { $0["action"]?["event"]?["name"]?.string }
-            .filter { !(waits && WidgetPaths.answersTheCard($0)) }
+            .filter { !(waits && WidgetPaths.startsATurn($0)) }
         return (Array(bind.values) + posts).allSatisfy(WidgetPaths.isAppPath)
     }
 }
 
 /// The paths a card reads and writes, and the images it loads.
 enum WidgetPaths {
-    /// Whether a button's event answers the card the agent waits on, rather
-    /// than posting to the app.
-    static func answersTheCard(_ name: String) -> Bool {
+    /// Whether a press answers the interaction the agent waits on, so it starts
+    /// a turn the chat follows. Where the press goes is core's to decide.
+    static func startsATurn(_ name: String) -> Bool {
         name == "rome:answer" || name == "rome:dismiss"
+    }
+
+    /// The interaction result a widget's answer becomes, as the chat shows it
+    /// before the server's copy arrives.
+    static func answerOutput(_ name: String, _ context: JSONValue) -> JSONValue {
+        name == "rome:dismiss" ? .object(["dismissed": .bool(true)]) : context
     }
 
     /// Rome's own strings a card names with `{ string }`: the question card's labels.

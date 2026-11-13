@@ -13,6 +13,7 @@ import {
 } from "@opentelemetry/sdk-logs";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { widgetEventRoutes } from "./widget-events.js";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
 import { Session } from "../../agent/index.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
@@ -1283,8 +1284,9 @@ describe("Webchat API", () => {
       });
     }
     const isWebchat = type === "webchat" || variant === "promoted-fork";
-    const reply = JSON.stringify([
-      { type: "text", content: "The final reply" },
+    const reply = JSON.stringify([{ type: "text", content: "The final reply" }]);
+    // A card the agent waits on is a message of its own.
+    const card = JSON.stringify([
       {
         type: "pending_interaction",
         toolUseId: "question",
@@ -1318,6 +1320,13 @@ describe("Webchat API", () => {
         sessionId,
         "assistant",
         reply,
+        turnId,
+      );
+      await deps.webchatRepo.addMessage(
+        `${sessionId}-${turnId}-card`,
+        sessionId,
+        "assistant",
+        card,
         turnId,
       );
     }
@@ -5125,6 +5134,124 @@ describe("Webchat API", () => {
       });
       expect(ctl.sentTurns.at(-1)?.prompt ?? "").not.toContain('"card"');
       expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
+    });
+
+    it("answers a described question card through the widget's events route, by its message id", async () => {
+      const questions: Question[] = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ];
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-route",
+          tool: "ask_question",
+          output: askQuestionToolOutput(questions, true),
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me write" }),
+        }),
+      );
+      expect(await findCard(sessionId, "tu-ask-route")).toBeDefined();
+      // A widget is a message of its own: its id is the message's.
+      const widgetId = (await deps.webchatRepo.getMessages(sessionId)).find((m) =>
+        m.content.includes("tu-ask-route"),
+      )?.id;
+      expect(widgetId).toBeDefined();
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const events = widgetEventRoutes({
+        webchatRepo: deps.webchatRepo,
+        forward: (request) =>
+          app.fetch(new Request(request.url.replace("/api/chat/", "/chat/"), request)),
+      });
+      const res = await events.request(`/chat/widgets/${widgetId}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "rome:answer",
+          context: { answers: [{ values: ["Plain"], text: "" }] },
+        }),
+      });
+      expect(res.status).toBe(200);
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-ask-route",
+        messageId: widgetId,
+        output: {
+          answers: [{ questionId: "tone", value: "Plain" }],
+          card: [{ values: ["Plain"], text: "" }],
+        },
+      });
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
+    });
+
+    it("answers only the card pressed when a later card reuses its tool-use id", async () => {
+      const questions: Question[] = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ];
+      const ctl = mockScriptedManager();
+      const ask = async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "item_0",
+          tool: "ask_question",
+          output: askQuestionToolOutput(questions, true),
+        };
+        yield { type: "result", content: "" };
+      };
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      const events = widgetEventRoutes({
+        webchatRepo: deps.webchatRepo,
+        forward: (request) =>
+          app.fetch(new Request(request.url.replace("/api/chat/", "/chat/"), request)),
+      });
+      const cardIds = async () =>
+        (await deps.webchatRepo.getMessages(sessionId))
+          .filter((m) => m.content.includes('"pending_interaction"'))
+          .map((m) => m.id);
+      const press = (widgetId: string | undefined) =>
+        events.request(`/chat/widgets/${widgetId}/events`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "rome:answer",
+            context: { answers: [{ values: ["Plain"], text: "" }] },
+          }),
+        });
+
+      ctl.setEvents(ask);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me write" }),
+        }),
+      );
+      const [older] = await cardIds();
+      // Answering the older card starts a turn that asks again, under the same id.
+      ctl.setEvents(ask);
+      expect((await press(older)).status).toBe(200);
+      await expect.poll(async () => (await cardIds()).length).toBe(2);
+      const newer = (await cardIds()).find((id) => id !== older);
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      expect((await press(older)).status).toBe(400);
+      expect((await press(newer)).status).toBe(200);
     });
 
     it("keeps what a described question card holds beside answers a reader sent in their own shape", async () => {

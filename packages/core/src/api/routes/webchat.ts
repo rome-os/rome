@@ -742,6 +742,21 @@ interface OpenSuspensionCard {
   dismissedByReply?: boolean;
   /** The questions of an open question card, to read its answers by. */
   questions?: Question[];
+  /** The message that holds the card. */
+  messageId: string;
+}
+
+/** The message an `interaction_result` part says holds its card, when it says. */
+function addressedMessageId(parts: unknown, toolUseId: string): string | undefined {
+  if (!Array.isArray(parts)) return undefined;
+  const part = parts.find(
+    (p) =>
+      !!p &&
+      typeof p === "object" &&
+      (p as { type?: unknown }).type === "interaction_result" &&
+      (p as { toolUseId?: unknown }).toolUseId === toolUseId,
+  ) as { messageId?: unknown } | undefined;
+  return typeof part?.messageId === "string" ? part.messageId : undefined;
 }
 
 async function findOpenSuspensions(
@@ -779,6 +794,7 @@ async function findOpenSuspensions(
           dismissedByReply:
             builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
           ...(questions?.ok ? { questions: questions.questions } : {}),
+          messageId: msg.id,
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -3975,6 +3991,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const openSuspensions = await findOpenSuspensions(deps.webchatRepo, sessionId);
 
     if (resolution && !openSuspensions.has(resolution.toolUseId)) {
+      return answer({ error: "No open interaction matches this toolUseId" }, 400);
+    }
+    // A widget's event names the message that holds the card. A later card can
+    // reuse the tool-use id, so the answer goes only to the card pressed.
+    const addressed = resolution ? addressedMessageId(body.parts, resolution.toolUseId) : undefined;
+    if (
+      resolution &&
+      addressed !== undefined &&
+      openSuspensions.get(resolution.toolUseId)?.messageId !== addressed
+    ) {
       return answer({ error: "No open interaction matches this toolUseId" }, 400);
     }
     // A question card drawn from its description sends its data model; store

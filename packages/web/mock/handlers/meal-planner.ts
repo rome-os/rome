@@ -23,6 +23,19 @@ export const mealPlannerHandlers = [
     glasses += 1;
     return HttpResponse.json({ water: glasses });
   }),
+  // The card's water button, answered through core, which calls the app's
+  // `water` above. The card declares no other event.
+  http.post("/api/chat/widgets/:widgetId/events", async ({ request }) => {
+    const { name } = (await request.json()) as { name?: unknown };
+    if (name !== "water") {
+      return HttpResponse.json(
+        { error: "This widget has no button for that event" },
+        { status: 400 },
+      );
+    }
+    glasses += 1;
+    return HttpResponse.json({ water: glasses });
+  }),
 ];
 
 const ids = (...list: string[]) => list;

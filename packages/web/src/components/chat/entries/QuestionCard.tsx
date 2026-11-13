@@ -9,6 +9,8 @@ const WidgetUiCard = lazy(() =>
 );
 
 export interface QuestionCardProps {
+  /** The widget's id: the id of the message that holds the card. */
+  widgetId: string;
   toolUseId: string;
   appId: string;
   /** The card core described from the questions (`render.ui`). */
@@ -17,8 +19,13 @@ export interface QuestionCardProps {
   props?: Record<string, unknown>;
   /** Prior submitted output when this instance already resolved. */
   result?: Record<string, unknown>;
-  onSubmit: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
-  onDismiss: (toolUseId: string) => void;
+  /** Sends Send or Dismiss, which core turns into the answer. */
+  onAnswer: (
+    widgetId: string,
+    toolUseId: string,
+    name: string,
+    context: Record<string, unknown>,
+  ) => void;
   /** Shown at the top inside the card, such as the task it is for. */
   header?: ReactNode;
   /**
@@ -50,13 +57,13 @@ export function QuestionCard({ settled = "fold", ...card }: QuestionCardProps) {
  * as a line.
  */
 function WholeQuestionCard({
+  widgetId,
   toolUseId,
   appId,
   ui,
   props,
   result,
-  onSubmit,
-  onDismiss,
+  onAnswer,
   header,
 }: Omit<QuestionCardProps, "settled">) {
   const line = <QuestionLine props={props} />;
@@ -66,11 +73,12 @@ function WholeQuestionCard({
       <Suspense fallback={null}>
         {header ? <div className="flex min-w-0 flex-col pb-2">{header}</div> : null}
         <WidgetUiCard
+          widgetId={widgetId}
           toolUseId={toolUseId}
           appId={appId}
           ui={ui as never}
           text=""
-          waiting={{ result, onSubmit, onDismiss }}
+          waiting={{ result, onAnswer }}
         />
       </Suspense>
     </CardBoundary>

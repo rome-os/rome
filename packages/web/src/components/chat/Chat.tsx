@@ -179,6 +179,8 @@ import {
   openTurnStream,
   postSessionTurn,
   postSessionTurnJson,
+  postWidgetEventTurn,
+  widgetAnswerOutput,
   type PostTurnResult,
   updateSessionModel,
 } from "@/lib/chat-api";
@@ -2099,6 +2101,35 @@ export function Chat({
     [runTurnLifecycle, workspaceContextRegistry],
   );
 
+  // A widget the agent waits on is answered through core, which turns the
+  // press into the interaction result; the turn it starts is this chat's.
+  const handleAnswerWidget = useCallback(
+    async (
+      sendingSessionId: string,
+      widgetId: string,
+      toolUseId: string,
+      name: string,
+      context: Record<string, unknown>,
+    ) => {
+      if (!sendingSessionId || !widgetId) return;
+      const meta = composerRef.current?.getMetadataSnapshot();
+      const turn: Record<string, unknown> = {};
+      if (meta) {
+        if (meta.personaId) turn.personaId = meta.personaId;
+        turn.reasoningEffort = meta.reasoningEffort;
+      }
+      const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
+      if (ws) turn.workspace = ws;
+      const output = widgetAnswerOutput(name, context);
+      await runTurnLifecycle(
+        sendingSessionId,
+        () => postWidgetEventTurn(widgetId, { name, context, turn }),
+        JSON.stringify([{ type: "interaction_result", toolUseId, output }]),
+      );
+    },
+    [runTurnLifecycle, workspaceContextRegistry],
+  );
+
   const handleDismissAppComponent = useCallback(
     async (sessionId: string, toolUseId: string) => {
       await handleSubmitAppComponent(sessionId, toolUseId, { dismissed: true });
@@ -2253,12 +2284,14 @@ export function Chat({
       onApprovalResolved: refreshActiveSession,
       onSubmitAppComponent: handleSubmitAppComponent,
       onDismissAppComponent: handleDismissAppComponent,
+      onAnswerWidget: handleAnswerWidget,
       interactionResults: stableInteractionResults,
     }),
     [
       refreshActiveSession,
       handleSubmitAppComponent,
       handleDismissAppComponent,
+      handleAnswerWidget,
       stableInteractionResults,
     ],
   );

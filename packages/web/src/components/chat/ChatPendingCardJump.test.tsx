@@ -59,8 +59,8 @@ function Harness({
                 ui={questionCardUi(question)}
                 props={{ questions: question }}
                 result={questionResult?.resolved as Record<string, unknown> | undefined}
-                onSubmit={() => {}}
-                onDismiss={() => {}}
+                widgetId="m1"
+                onAnswer={() => {}}
               />
             ) : (
               <RoutineDraftCard

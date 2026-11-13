@@ -22,6 +22,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
+import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
@@ -698,6 +699,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     content: string,
     turnId: string | null = null,
   ) {
+    assertWidgetAloneInContent(content);
     const standing = role === "user" || role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.addMessage(id, sessionId, role, content, turnId);
     this.say(standing, id, role as "user" | "assistant", partsOf(content), turnId);
@@ -711,6 +713,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     id?: string,
     chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
+    assertWidgetAlone(parts);
     const standing = role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.insertBackendMessage(sessionId, turnId, role, parts, id);
     const key = id ?? randomUUID();
@@ -730,6 +733,31 @@ export class ChatsWebChatRepository extends WebChatRepository {
 
   override async getMessages(sessionId: string) {
     return this.selectLines([sessionId]);
+  }
+
+  /** A dashboard line that holds a widget, by its key, read from one row:
+   *  the session whose turn said it, else the one standing in its chat. A key
+   *  is unique only in its chat, so a key that two dashboard lines share
+   *  finds none. A line said before the switch is still in the session's own
+   *  table. */
+  override async widgetMessage(id: string): Promise<{ chatId: string; content: string } | null> {
+    const rows = this.db.all<{ session_id: string | null; parts: string }>(sql`
+      SELECT COALESCE(
+        (SELECT l.session_id FROM agent_turn_messages l
+          WHERE l.message_id = m.id AND l.role = 'answer' LIMIT 1),
+        (SELECT s.id FROM rome_sessions s
+          WHERE s.chat_id = m.chat_id AND s.thread_id IS m.thread_id
+          ORDER BY s.created_at LIMIT 1)
+      ) AS session_id, m.parts AS parts
+      FROM ${CHAT_MESSAGES} m
+      JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = ${WEBCHAT_PLATFORM}
+      WHERE m.key = ${id}
+      LIMIT 2
+    `);
+    if (rows.length > 1) return null;
+    const [row] = rows;
+    if (row) return row.session_id ? { chatId: row.session_id, content: row.parts } : null;
+    return super.widgetMessage(id);
   }
 
   /** The newest `options.limit` turn groups of a session, as

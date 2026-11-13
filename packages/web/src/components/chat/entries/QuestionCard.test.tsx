@@ -29,8 +29,8 @@ const settled = (result: Record<string, unknown>) =>
       ui={card.ui}
       props={card.props}
       result={result}
-      onSubmit={() => {}}
-      onDismiss={() => {}}
+      widgetId="m-1"
+      onAnswer={() => {}}
     />,
   );
 
@@ -58,8 +58,8 @@ describe("QuestionCard — just answered", () => {
         ui={card.ui}
         props={card.props}
         result={{ answers: [{ values: ["Design"], text: "" }] }}
-        onSubmit={() => {}}
-        onDismiss={() => {}}
+        widgetId="m-1"
+        onAnswer={() => {}}
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: /Which areas\?/ }));
@@ -75,8 +75,8 @@ describe("QuestionCard — just answered", () => {
         appId="core"
         ui={card.ui}
         props={card.props}
-        onSubmit={() => {}}
-        onDismiss={() => Promise.reject(new Error("offline"))}
+        widgetId="m-1"
+        onAnswer={() => Promise.reject(new Error("offline"))}
       />,
     );
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));

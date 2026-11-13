@@ -10,6 +10,7 @@ const meta = {
     sessionId: "storybook-chat-entries",
     onSubmitAppComponent: () => undefined,
     onDismissAppComponent: () => undefined,
+    onAnswerWidget: () => undefined,
   },
 } satisfies Meta<typeof ChatEntryPreview>;
 
@@ -66,7 +67,7 @@ export const UnbrokenLabels: Story = {
 
 export const WrappedSubmission: Story = {
   ...NarrowQuestion,
-  args: { ...NarrowQuestion.args, onSubmitAppComponent: fn() },
+  args: { ...NarrowQuestion.args, onAnswerWidget: fn() },
   play: async ({ canvas, args }) => {
     const answer = "要，中文 + 英文，默认跟随 Rome 界面语言";
     const option = await canvas.findByRole("button", { name: answer });
@@ -74,16 +75,17 @@ export const WrappedSubmission: Story = {
     await userEvent.keyboard(" ");
     await expect(option).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(canvas.getByRole("button", { name: /^(Send|发送)$/ }));
-    await expect(args.onSubmitAppComponent).toHaveBeenCalledWith(
+    await expect(args.onAnswerWidget).toHaveBeenCalledWith(
       "storybook-chat-entries",
       "dev-ask-cjk",
+      "dev-ask-cjk",
+      "rome:answer",
       {
         answers: [
           { values: [answer], text: "" },
           { values: [], text: "" },
         ],
       },
-      undefined,
     );
     await expect(option).toBeDisabled();
   },

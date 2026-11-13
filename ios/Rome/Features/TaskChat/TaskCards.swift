@@ -435,16 +435,15 @@ struct QuestionCardView: View {
     let part: MessagePart.QuestionPart
     let answered: JSONValue?
     let sending: Bool
-    /// The interaction's output: the card's answers, or `{ dismissed: true }`.
-    let onAnswer: (JSONValue) -> Void
+    /// Send or Dismiss: its event name and context, which core turns into the answer.
+    let onAnswer: (String, JSONValue) -> Void
 
     var body: some View {
         if let card = part.ui {
             WidgetUICardView(part: card, call: { _, _, _ in throw APIError.notFound }, waiting: .init(
                 answered: answered,
                 sending: sending,
-                answer: onAnswer,
-                dismiss: { onAnswer(.object(["dismissed": .bool(true)])) }
+                answer: onAnswer
             ))
         } else {
             Text(verbatim: part.questions.map(\.text).joined(separator: "\n"))

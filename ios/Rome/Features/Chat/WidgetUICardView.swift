@@ -5,23 +5,25 @@ import SwiftUI
 /// A card described as data, drawn natively. Google's A2UI engine reads the
 /// card, resolves its paths and keeps its data; `WidgetCatalog` draws it.
 /// Each `bind` is read from the app's API when the card appears, so it shows
-/// the app's data as it stands. A button POSTs its context to the app's API
-/// and reads every `bind` again; nothing is said in the chat. On a card the
-/// agent waits on, `rome:answer` and `rome:dismiss` answer the interaction
-/// instead.
+/// the app's data as it stands. A press goes to core, which calls the app; the
+/// card then reads every `bind` again, and nothing is said in the chat. On a
+/// card the agent waits on, `rome:answer` and `rome:dismiss` start a turn,
+/// which the chat sends so it can follow it.
 struct WidgetUICardView: View {
     /// What a card the agent waits on needs: the stored answer once there is
     /// one, which locks the card, and how to answer or dismiss it.
     struct Waiting {
         let answered: Rome.JSONValue?
         let sending: Bool
-        let answer: (Rome.JSONValue) -> Void
-        let dismiss: () -> Void
+        /// Sends a press that starts a turn: its event name and context.
+        let answer: (String, Rome.JSONValue) -> Void
     }
 
     let part: WidgetUIPart
-    /// A call on the card's own app: method, path in its API, JSON body.
+    /// A read of the card's own app: method, path in its API, JSON body.
     let call: (String, String, Rome.JSONValue?) async throws -> ConnectReply
+    /// A press on a button, sent to core: event name and context.
+    var press: (String, Rome.JSONValue) async throws -> Void = { _, _ in throw APIError.notFound }
     var waiting: Waiting? = nil
 
     private var locked: Bool { waiting.map { $0.answered != nil || $0.sending } ?? false }
@@ -62,7 +64,7 @@ struct WidgetUICardView: View {
         .task(id: part) {
             surface.waiting = waiting
             surface.locked = locked
-            surface.show(part, call: call)
+            surface.show(part, call: call, press: press)
             surface.showAnswered(waiting?.answered)
             await surface.load()
         }
@@ -91,14 +93,20 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     private var processor: MessageProcessor?
     private var part: WidgetUIPart?
     private var call: ((String, String, Rome.JSONValue?) async throws -> ConnectReply)?
+    private var send: ((String, Rome.JSONValue) async throws -> Void)?
     /// Only the newest read writes the data: a slow read must not land after
     /// a newer one and put back an older value.
     private var reads = 0
 
-    func show(_ part: WidgetUIPart, call: @escaping (String, String, Rome.JSONValue?) async throws -> ConnectReply) {
+    func show(
+        _ part: WidgetUIPart,
+        call: @escaping (String, String, Rome.JSONValue?) async throws -> ConnectReply,
+        press: @escaping (String, Rome.JSONValue) async throws -> Void = { _, _ in throw APIError.notFound }
+    ) {
         guard self.part != part else { return }
         self.part = part
         self.call = call
+        self.send = press
         loaded = false
         failed = false
         // A stored part is read back as data, so it is checked again here.
@@ -201,17 +209,18 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     nonisolated func handle(error: RendererError, from surfaceID: String) {}
 
     private func press(_ name: String, body: Rome.JSONValue) async {
-        if WidgetPaths.answersTheCard(name) {
-            guard part?.waits == true, let waiting, !locked else { return }
-            if name == "rome:dismiss" { waiting.dismiss() } else { waiting.answer(body) }
+        // Core decides what every press means. A press that answers the agent
+        // starts a turn, which the chat sends so it can follow it.
+        if part?.waits == true, WidgetPaths.startsATurn(name) {
+            guard let waiting, !locked else { return }
+            waiting.answer(name, body)
             return
         }
-        guard let call, !busy, WidgetPaths.isAppPath(name) else { return }
+        guard let send, !busy else { return }
         busy = true
         defer { busy = false }
         do {
-            let reply = try await call("POST", name, body)
-            if !reply.ok { failed = true; return }
+            try await send(name, body)
             await load()
         } catch {
             failed = true
