@@ -236,16 +236,6 @@ final class Workspace {
             .contains { store in store.pending.contains { $0.state == .sending } }
     }
 
-    @ObservationIgnored private var taskWaits: [String: TaskWaitStore] = [:]
-
-    /// What a waiting task chat asks, for its card in the main Chat.
-    func taskWait(_ chatId: String) -> TaskWaitStore {
-        if let store = taskWaits[chatId] { return store }
-        let store = TaskWaitStore(chatId: chatId, backend: backend, task: { [weak self] in self?.tasks.task(forChat: chatId) })
-        taskWaits[chatId] = store
-        return store
-    }
-
     func taskStore(_ chatId: String) -> TranscriptStore {
         if let store = taskStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .task, backend: backend)

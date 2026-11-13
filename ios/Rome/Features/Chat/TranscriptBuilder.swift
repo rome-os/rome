@@ -43,9 +43,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case userText(id: String, text: String, images: [UserImage] = [], pending: PendingSend.State?)
     case agentText(id: String, text: String, long: Bool, forwardedFrom: MessagePart.ForwardedFrom?, position: BubblePosition)
     /// `latest`: the newest card for that task chat, the only one that may
-    /// show what the task waits on. `embedsWait`: a card from before
-    /// `show`, which carries the task's question or approval inside.
-    case taskCard(id: String, chatId: String, title: String, latest: Bool = false, embedsWait: Bool = true)
+    /// show what the task waits on. `ask`: the question or approval a card
+    /// from before `show` carries inside it.
+    case taskCard(id: String, chatId: String, title: String, latest: Bool = false, ask: TaskAskCard? = nil)
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
     /// `done`: an interactive card the guardian already answered.
@@ -59,9 +59,8 @@ enum TranscriptRow: Identifiable, Hashable {
     case tools(id: String, traceMessageId: String, count: Int)
     /// A task's question or approval shown on its own (`show: "ask"`).
     /// `latest`: the newest card for that task chat, the only one that may
-    /// take an answer; `shownAt`: when it was said, so a folded one tells the
-    /// wait that was open then.
-    case taskAsk(id: String, chatId: String, title: String, latest: Bool = false, shownAt: Date)
+    /// take an answer. `card`: what the instance filled in for it.
+    case taskAsk(id: String, chatId: String, title: String, card: TaskAskCard?, latest: Bool = false)
     /// Under a Concierge message in a task's chat thread: `↳ <task title>`,
     /// which opens the thread view (docs/domains/chats.md#chat-thread).
     case threadLabel(id: String, messageId: String, title: String)
@@ -247,10 +246,10 @@ enum TranscriptBuilder {
                         bubbles.append(rows.count)
                         rows.append(.agentText(id: id, text: text, long: long, forwardedFrom: forwarded, position: .single))
                     }
-                case .taskChat(let chatId, let title, .ask):
-                    rows.append(.taskAsk(id: id, chatId: chatId, title: title, shownAt: message.date))
-                case .taskChat(let chatId, let title, let show):
-                    rows.append(.taskCard(id: id, chatId: chatId, title: title, embedsWait: show == nil))
+                case .taskChat(let chatId, let title, .ask, let card):
+                    rows.append(.taskAsk(id: id, chatId: chatId, title: title, card: card))
+                case .taskChat(let chatId, let title, let show, let card):
+                    rows.append(.taskCard(id: id, chatId: chatId, title: title, ask: show == nil ? card : nil))
                 case .approval(let approval):
                     rows.append(.approval(id: id, part: approval, sessionId: message.sessionId))
                 case .question(let question):
@@ -339,10 +338,10 @@ enum TranscriptBuilder {
         var marked = Set<String>()
         for index in output.indices.reversed() {
             switch output[index] {
-            case .taskCard(let id, let chatId, let title, _, let embeds) where marked.insert(chatId).inserted:
-                output[index] = .taskCard(id: id, chatId: chatId, title: title, latest: true, embedsWait: embeds)
-            case .taskAsk(let id, let chatId, let title, _, let shownAt) where marked.insert(chatId).inserted:
-                output[index] = .taskAsk(id: id, chatId: chatId, title: title, latest: true, shownAt: shownAt)
+            case .taskCard(let id, let chatId, let title, _, let ask) where marked.insert(chatId).inserted:
+                output[index] = .taskCard(id: id, chatId: chatId, title: title, latest: true, ask: ask)
+            case .taskAsk(let id, let chatId, let title, let card, _) where marked.insert(chatId).inserted:
+                output[index] = .taskAsk(id: id, chatId: chatId, title: title, card: card, latest: true)
             default:
                 break
             }
@@ -393,7 +392,7 @@ enum TranscriptBuilder {
         for message in messages where !message.isUser && !message.isTrace {
             guard let root = message.chatThreadId, let title = titles[root] else { continue }
             let showsTaskCard = message.parts.contains {
-                if case .taskChat(_, _, let show) = $0 { return show != .ask }
+                if case .taskChat(_, _, let show, _) = $0 { return show != .ask }
                 return false
             }
             if !showsTaskCard { labels[message.id] = title }

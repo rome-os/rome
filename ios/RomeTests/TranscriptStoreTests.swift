@@ -220,7 +220,13 @@ final class FakeBackend: RomeBackend {
     }
     func stopTask(id: String) async throws { stoppedTasks.append(id) }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
-    func resolveApproval(id: String, approve: Bool) async throws { throw APIError.network }
+    /// What a decision on an approval fails with; nil lets it through.
+    var resolveError: APIError? = .network
+    var resolved: [String] = []
+    func resolveApproval(id: String, approve: Bool) async throws {
+        if let resolveError { throw resolveError }
+        resolved.append(id)
+    }
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }
     func aiTools() async throws -> AIToolsStatus { throw APIError.network }
     func setConciergeEnabled(_ enabled: Bool) async throws {}

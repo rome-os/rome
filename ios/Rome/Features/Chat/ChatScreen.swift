@@ -257,7 +257,7 @@ struct ConciergeRow: View {
         case .taskCard(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             // Archived or deleted from this app.
             EmptyView()
-        case .taskCard(_, let chatId, let title, let latest, let embedsWait):
+        case .taskCard(_, let chatId, let title, let latest, let ask):
             let name = tasks.title(forChat: chatId, fallback: title)
             VStack(alignment: .leading, spacing: 8) {
                 let state = tasks.cardState(forChat: chatId)
@@ -270,23 +270,18 @@ struct ConciergeRow: View {
                     onOpenChat(chatId, name)
                 }
                 // The newest card from before `show` of a task that waits on
-                // the guardian shows what it asks, answered right here
-                // (rome-os/rome#1949).
-                if latest, embedsWait, !inThread, TaskWaitView.waits(tasks.chats[chatId]), let workspace = model.workspace {
-                    TaskWaitView(store: workspace.taskWait(chatId), session: tasks.chats[chatId], onOpenChat: { onOpenChat(chatId, name) },
-                                 note: tasks.task(forChat: chatId).map { $0.status == "ended" && $0.endReason == "no_response" } == true ? "Expired — answer to continue" : nil,
-                                 waitKey: tasks.task(forChat: chatId)?.openWait.map { "\($0)" } ?? "")
+                // the guardian shows what it asks, answered right here.
+                if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId)) != .settled {
+                    TaskAskView(chatId: chatId, card: ask, latest: true, tasks: tasks, store: store) { onOpenChat(chatId, name) }
                 }
             }
         case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             EmptyView()
-        case .taskAsk(_, let chatId, let title, let latest, let shownAt):
-            if let workspace = model.workspace {
-                TaskAskView(chatId: chatId, latest: latest, shownAt: shownAt, tasks: tasks, wait: workspace.taskWait(chatId)) {
-                    onOpenChat(chatId, tasks.title(forChat: chatId, fallback: title))
-                }
-                .keepsTaps(inThread)
+        case .taskAsk(_, let chatId, let title, let card, let latest):
+            TaskAskView(chatId: chatId, card: card, latest: latest, tasks: tasks, store: store) {
+                onOpenChat(chatId, tasks.title(forChat: chatId, fallback: title))
             }
+            .keepsTaps(inThread)
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
         case .approval, .question, .webOnly, .routineDraft, .tools, .connect, .widgetUI:

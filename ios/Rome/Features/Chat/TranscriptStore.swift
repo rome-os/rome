@@ -366,6 +366,8 @@ final class TranscriptStore {
             } else {
                 parkedPlacements[messageId] = (root, title)
             }
+        case .cardSettled(let id, let card) where id == sessionId:
+            settle(card)
         case .threadRetired(let id, let root) where id == sessionId:
             // Its task left the chat: the thread's messages lose their label.
             for index in messages.indices where messages[index].chatThreadId == root {
@@ -376,6 +378,26 @@ final class TranscriptStore {
             resync()
         default:
             break
+        }
+    }
+
+    /// Puts a settled card in place of the card of every part that shows it.
+    func settle(_ card: JSONValue) {
+        for index in messages.indices {
+            if let content = TaskAskCard.settling(content: messages[index].content, with: card) {
+                messages[index].content = content
+            }
+        }
+        thread?.settle(card)
+    }
+
+    /// Shows an answer or a decision the instance took before it announces
+    /// it: the cards that show `id` take `outcome`.
+    private func settle(kind: String, id: String, outcome: JSONValue) {
+        for index in messages.indices {
+            if let content = TaskAskCard.settling(content: messages[index].content, kind: kind, id: id, outcome: outcome) {
+                messages[index].content = content
+            }
         }
     }
 
@@ -815,6 +837,7 @@ final class TranscriptStore {
         Task {
             do {
                 try await backend.resolveApproval(id: id, approve: approve)
+                settle(kind: "approval", id: id, outcome: .object(["kind": .string(approve ? "approved" : "rejected")]))
                 if let record = try? await backend.approval(id: id) { approvals[id] = record }
                 approvalPolls[id]?.cancel()
                 approvalPolls[id] = nil
@@ -840,7 +863,9 @@ final class TranscriptStore {
             do {
                 try await backend.answer(sessionId: sessionId ?? self.sessionId, toolUseId: part.toolUseId, output: output)
                 localAnswers[part.toolUseId] = output
-                markRunning()
+                settle(kind: "question", id: part.toolUseId, outcome: .object(["kind": .string("answered"), "answer": .object(["text": .string(""), "output": output])]))
+                // An answer to a task's card wakes the task, not this chat.
+                if sessionId == nil || sessionId == self.sessionId { markRunning() }
             } catch {
                 say(String(localized: "Couldn't send your answer. Your choices are kept"))
             }

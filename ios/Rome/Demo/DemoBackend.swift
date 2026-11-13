@@ -605,8 +605,38 @@ final class DemoBackend: RomeBackend {
         ]), createdAt: RomeDate.string(date))
     }
 
-    private func taskPart(_ chatId: String, _ title: String, show: String, at date: Date, session: String = conciergeChatID) -> ChatMessage {
-        parts([.object(["type": .string("task_chat"), "chatId": .string(chatId), "title": .string(title), "show": .string(show)])], at: date, session: session)
+    private func taskPart(_ chatId: String, _ title: String, show: String, card: JSONValue? = nil, at date: Date, session: String = conciergeChatID) -> ChatMessage {
+        var part: [String: JSONValue] = ["type": .string("task_chat"), "chatId": .string(chatId), "title": .string(title), "show": .string(show)]
+        // The instance fills in the card of a part that shows one.
+        if let card { part["card"] = card }
+        return parts([.object(part)], at: date, session: session)
+    }
+
+    /// A task's question as its card carries it, with the outcome it ended in.
+    private func questionCard(_ id: String, _ question: String, options: [String], expired: Bool = false, answered: String? = nil, since: Date) -> JSONValue {
+        var card: [String: JSONValue] = [
+            "kind": .string("question"), "id": .string(id), "messageId": .string("m-\(id)"),
+            "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
+                .object(["id": .string("q"), "question": .string(question), "type": .string("single"), "options": .array(options.map { .string($0) })]),
+            ])])]),
+            "since": .number(since.timeIntervalSince1970 * 1000), "expired": .bool(expired),
+        ]
+        if let answered {
+            card["outcome"] = .object(["kind": .string("answered"), "answer": .object(["text": .string(answered), "output": .object(["answers": .array([.object(["questionId": .string("q"), "value": .string(answered)])])])])])
+        }
+        return .object(card)
+    }
+
+    private func approvalCard(_ id: String, _ title: String, outcome: String? = nil, since: Date) -> JSONValue {
+        var card: [String: JSONValue] = [
+            "kind": .string("approval"), "id": .string(id), "title": .string(title), "actionName": .string("system:send_email"),
+            "preview": .object(["kind": .string("generic"), "title": .string(title), "summary": .string(""), "fields": .array([
+                .object(["label": .string("收件人"), "value": .string("lin@example.com")]),
+            ])]),
+            "since": .number(since.timeIntervalSince1970 * 1000),
+        ]
+        if let outcome { card["outcome"] = .object(["kind": .string(outcome)]) }
+        return .object(card)
     }
 
     private func user(_ id: String, _ text: String, at date: Date, session: String = conciergeChatID) -> ChatMessage {
@@ -687,7 +717,7 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-errors", name: "出错的情况", main: false, unread: 0),
         ]
 
-        func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, root: String? = nil, status: String? = nil, endReason: String? = nil) -> ConciergeTask {
+        func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, root: String? = nil, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
             let updated = nowMs - minutesAgo * 60_000
             return ConciergeTask(
                 id: id, title: title, state: state, summary: summary, waitingOn: waitingOn,
@@ -696,11 +726,11 @@ final class DemoBackend: RomeBackend {
                 conciergeChat: topic.flatMap { id in topicChats.first { $0.id == id } },
                 sourceMessageId: nil, createdAt: updated - 3_600_000, updatedAt: updated,
                 completedAt: done ? updated : nil, archivedAt: nil, notSynced: false,
-                threadRoot: root, status: status, endReason: endReason
+                threadRoot: root, status: status, endReason: endReason, openWait: wait
             )
         }
         tasks = [
-            task("t1", "价格追踪：发提醒邮件", .needsUser, chat: "chat-price", waitingOn: "需要批准发送邮件", minutesAgo: 10, root: "c-price", status: "needs_you"),
+            task("t1", "价格追踪：发提醒邮件", .needsUser, chat: "chat-price", waitingOn: "需要批准发送邮件", minutesAgo: 10, root: "c-price", status: "needs_you", wait: .object(["kind": .string("approval"), "id": .string("ap-1"), "since": .number(nowMs - 10 * 60_000)])),
             // Its question waited more than a day: it ended for no response.
             task("t2", "竞品定价调研", .done, chat: "chat-research", waitingOn: "在等你回答调研范围", minutesAgo: 25, root: "c-research", status: "ended", endReason: "no_response"),
             task("t3", "官网首页双语文案", .doing, chat: "chat-site", summary: "正在逐段翻译首页文案", minutesAgo: 2, root: "c-site", status: "active"),
@@ -803,17 +833,17 @@ final class DemoBackend: RomeBackend {
         messages[conciergeChatID] = [
             threaded(user("c-login", "登录页的按钮间距不对，深色模式下也看不清，修一下。", at: at(9, 58, daysAgo: 3)), "c-login"),
             threaded(taskPart("chat-login", "修复登录页样式", show: "task", at: at(9, 59, daysAgo: 3)), "c-login"),
-            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", at: at(10, 11, daysAgo: 3)), "c-login"),
-            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", at: at(10, 31, daysAgo: 3)), "c-login"),
+            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", card: questionCard("q-login", "深色模式下按钮用珊瑚色，还是用中性色？", options: ["珊瑚色", "中性色"], answered: "珊瑚色", since: at(10, 10, daysAgo: 3)), at: at(10, 11, daysAgo: 3)), "c-login"),
+            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", card: approvalCard("ap-login", "发布预览环境", outcome: "approved", since: at(10, 30, daysAgo: 3)), at: at(10, 31, daysAgo: 3)), "c-login"),
             threaded(agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 41, daysAgo: 3)), "c-login"),
             threaded(user("c-site", "帮我把官网首页的文案改成中英双语", at: at(9, 12)), "c-site"),
             threaded(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), "c-site"),
             threaded(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), "c-site"),
             threaded(taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)), "c-site"),
             threaded(agent("竞品调研想确认一下范围，你看下。", at: at(9, 15), id: "c-research"), "c-research"),
-            threaded(taskPart("chat-research", "竞品定价调研", show: "ask", at: at(9, 15).addingTimeInterval(1)), "c-research"),
+            threaded(taskPart("chat-research", "竞品定价调研", show: "ask", card: questionCard("q-1", "调研范围只看国内产品，还是包括海外？", options: ["只看国内", "包括海外"], expired: true, since: at(9, 15)), at: at(9, 15).addingTimeInterval(1)), "c-research"),
             threaded(agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40), id: "c-price"), "c-price"),
-            threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", at: at(9, 40).addingTimeInterval(1)), "c-price"),
+            threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)), "c-price"),
             // The Concierge asks and waits for an approval in the main chat too.
             renewed,
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),

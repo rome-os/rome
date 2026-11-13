@@ -104,6 +104,15 @@ final class ThreadStore {
         }
     }
 
+    /// Puts a settled card in place in the messages the read brought.
+    func settle(_ card: JSONValue) {
+        for index in older.indices {
+            if let content = TaskAskCard.settling(content: older[index].content, with: card) {
+                older[index].content = content
+            }
+        }
+    }
+
     /// Oldest first; messages written in the same second keep the order they came in.
     static func ordered(_ messages: [ChatMessage]) -> [ChatMessage] {
         var seen = Set<String>()

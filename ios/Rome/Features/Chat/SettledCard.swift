@@ -84,91 +84,172 @@ extension SettledCard where Full == EmptyView {
 
 /// A task's question or approval shown on its own in a Concierge chat
 /// (`show: "ask"`), with no task card around it: the label under it names
-/// the task. The newest one of a task that waits takes its answer here. An
-/// expired one folds to one line that opens to the form, and counts as
-/// waiting nowhere until then. Once answered, decided or turned down, or
+/// the task. It is drawn from the `card` its message carries, and the task
+/// chat is never read. The newest one of a task that waits takes its answer
+/// here. An expired one folds to one line that opens to the form, and counts
+/// as waiting nowhere until then. Once answered, decided or turned down, or
 /// superseded by a newer copy, it folds to what it asked and how it ended,
 /// opening read only.
 struct TaskAskView: View {
     let chatId: String
+    let card: TaskAskCard?
     let latest: Bool
-    let shownAt: Date
     let tasks: TasksStore
-    let wait: TaskWaitStore
+    let store: TranscriptStore
     let onOpenChat: () -> Void
 
     @State private var openedExpired = false
+    @Environment(\.isVisitor) private var isVisitor
 
     var body: some View {
-        let session = tasks.chats[chatId]
-        let mode = TaskAskMode.of(latest: latest, session: session, task: tasks.task(forChat: chatId), openedExpired: openedExpired)
         Group {
-            switch mode {
-            case .expired:
-                SettledCard(title: expiredTitle, outcome: String(localized: "Expired · answer to continue"), chevron: true) {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { openedExpired = true }
-                }
-                .task(id: "\(chatId)|\(tasks.task(forChat: chatId)?.openWait.map { "\($0)" } ?? "")") { await wait.load() }
-            case .waiting(let expired):
-                TaskWaitView(store: wait, session: session, onOpenChat: onOpenChat, note: expired ? "Expired — answer to continue" : nil, waitKey: tasks.task(forChat: chatId)?.openWait.map { "\($0)" } ?? "")
-            case .settled:
-                folded
-                    // Read again only when the task's wait changed, not on every bit of its activity.
-                    .task(id: "\(chatId)|\(shownAt.timeIntervalSince1970)|\(TaskWaitView.waits(session))|\(tasks.task(forChat: chatId)?.status ?? "")|\(tasks.task(forChat: chatId)?.endReason ?? "")") {
-                        await wait.loadSettled(until: shownAt)
-                    }
+            switch card?.kind ?? .unavailable {
+            case .unavailable:
+                Text("This card is no longer available")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
+                    .padding(.horizontal, CardScale.paddingH)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .question(let question):
+                questionCard(question)
+            case .approval(let approval):
+                approvalCard(approval)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The expired question, as the task's card read gives it.
-    private var expiredTitle: String? {
-        if case .question(let part, _) = wait.card { return SettledOutcome.title(part) }
-        return nil
+    private var mode: TaskAskMode {
+        TaskAskMode.of(card: card, latest: latest, task: tasks.task(forChat: chatId))
     }
 
     @ViewBuilder
-    private var folded: some View {
-        if let ask = wait.settled[shownAt] {
-            switch ask.kind {
-            case .question(let part, let answer?):
-                SettledCard(title: ask.title, outcome: ask.outcome) {
-                    QuestionCardView(part: part, answered: answer, sending: false) { _ in }
+    private func questionCard(_ question: TaskAskCard.Question) -> some View {
+        let part = card?.questionPart
+        let title = part.map(SettledOutcome.title)
+        switch mode {
+        case .settled:
+            if let outcome = question.outcome, let part {
+                SettledCard(title: title, outcome: SettledOutcome.answer(outcome.output)) {
+                    QuestionCardView(part: part, answered: outcome.output, sending: false) { _ in }
                 }
-            case .question:
-                // Still open: its newer copy below takes the answer, and this one does not open.
-                SettledCard(title: ask.title, outcome: ask.outcome)
-            case .approval(let part, _):
-                SettledCard(title: ask.title, outcome: ask.outcome) {
-                    ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true, settledLabel: ask.outcome) { _ in }
-                }
+            } else {
+                SettledCard(title: title, outcome: question.outcome.map { SettledOutcome.answer($0.output) } ?? String(localized: "Answered"))
             }
-        } else if wait.settledRead.contains(shownAt) || wait.settledFailed.contains(shownAt) {
-            // The card could not be found, or read: a plain line holds its place.
-            SettledCard(title: nil, outcome: String(localized: "Answered"))
-        } else {
-            // Its place is held while the task chat is read, so nothing
-            // below jumps when it lands; the read runs from here.
-            Color.clear.frame(height: 52)
+        case .expired where !openedExpired:
+            SettledCard(title: title, outcome: String(localized: "Expired · answer to continue"), chevron: true) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { openedExpired = true }
+            }
+        case .waiting, .expired:
+            if let part {
+                QuestionCardView(part: part, answered: store.localAnswers[question.id], sending: store.answering.contains(question.id)) { answers in
+                    store.answer(part, answers: answers, sessionId: chatId)
+                }
+                .id(question.id)
+                .bubbleWidth()
+            } else {
+                // An app's own card, such as a sign-in, is answered in its task chat.
+                SettledCard(title: nil, outcome: String(localized: "Open the task chat to answer"), chevron: true, onOpen: onOpenChat)
+            }
+        case .open:
+            // Its newer copy below takes the answer, or the task no longer waits.
+            SettledCard(title: title, outcome: latest ? String(localized: "No longer waiting") : String(localized: "Waiting: answer the card below"))
+        }
+    }
+
+    @ViewBuilder
+    private func approvalCard(_ approval: TaskAskCard.Approval) -> some View {
+        if let part = card?.approvalPart {
+            switch mode {
+            case .settled:
+                let line = approval.outcome.map(TaskAskCard.outcomeLine) ?? ""
+                SettledCard(title: SettledOutcome.title(part), outcome: line) {
+                    ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true, settledLabel: line) { _ in }
+                }
+            case .waiting, .expired:
+                ApprovalCardView(
+                    part: part,
+                    status: .pending,
+                    submitting: store.resolvingApproval[approval.id],
+                    error: store.approvalErrors[approval.id],
+                    resolvedAt: nil,
+                    canResolve: !isVisitor
+                ) { approve in
+                    store.resolve(approval.id, approve: approve)
+                }
+                .id(approval.id)
+                .bubbleWidth()
+            case .open:
+                SettledCard(title: SettledOutcome.title(part), outcome: latest ? String(localized: "No longer waiting") : String(localized: "Waiting: answer the card below"))
+            }
         }
     }
 }
 
-/// What a `show: "ask"` card draws.
+/// What a task's question or approval card draws.
 enum TaskAskMode: Equatable {
-    /// The task waits on this card: it takes an answer. `expired`: its wait
-    /// ran out and it was opened again, so it waits on no one.
-    case waiting(expired: Bool)
-    /// Its wait ran out: one folded line until it is opened.
+    /// The task waits on this card: it takes an answer.
+    case waiting
+    /// A question nobody answered in time: one folded line until it is
+    /// opened, then the form. It waits on no one.
     case expired
-    /// Answered, decided, turned down, or not the newest copy.
+    /// Answered, dismissed, decided or turned down.
     case settled
+    /// Not answered, yet not waiting: not the newest card of its task, or its task moved on.
+    case open
 
-    static func of(latest: Bool, session: ChatSession?, task: ConciergeTask?, openedExpired: Bool) -> TaskAskMode {
-        guard latest, TaskWaitView.waits(session) else { return .settled }
-        let expired = task?.status == "ended" && task?.endReason == "no_response"
-        if expired && !openedExpired { return .expired }
-        return .waiting(expired: expired)
+    /// The newest card of its task chat, with no outcome, whose task needs the
+    /// guardian and whose open wait is this card, takes the answer.
+    static func of(card: TaskAskCard?, latest: Bool, task: ConciergeTask?) -> TaskAskMode {
+        guard let card, let id = card.id else { return .settled }
+        if card.settled { return .settled }
+        if card.expired { return .expired }
+        guard latest, task?.status == "needs_you", task?.waitId == id else { return .open }
+        return .waiting
+    }
+}
+
+/// The words of a folded question or approval card (docs/domains/chats.md).
+enum SettledOutcome {
+    /// An answer this long or shorter is repeated on the fold.
+    static let shortAnswer = 24
+
+    /// What a question card asked, its questions on one line.
+    static func title(_ part: MessagePart.QuestionPart) -> String {
+        part.questions.map(\.text).joined(separator: " · ")
+    }
+
+    static func title(_ part: MessagePart.ApprovalPart) -> String {
+        part.title.flatMap { $0.isEmpty ? nil : $0 } ?? displayActionName(part.actionName)
+    }
+
+    /// "Answered: Tea" for a short answer, "Answered" for a long one, or
+    /// "Dismissed".
+    static func answer(_ output: JSONValue) -> String {
+        if output["dismissed"]?.bool == true { return String(localized: "Dismissed") }
+        let values = (output["answers"]?.array ?? [])
+            .compactMap { $0["value"]?.string }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let text = values.joined(separator: ", ")
+        guard !text.isEmpty, text.count <= shortAnswer else { return String(localized: "Answered") }
+        return String(localized: "Answered: \(text)")
+    }
+
+    /// Whether an approval with this status folds: decided, and not failed,
+    /// which keeps its own card.
+    static func folds(_ status: ApprovalStatus) -> Bool {
+        status != .pending && status != .failed
+    }
+
+    /// How a decided approval ended: approved, rejected by the guardian, or
+    /// turned down by Rome as its task's wait ran out or its task stopped.
+    static func approval(_ status: ApprovalStatus, resolvedBy: String?) -> String {
+        if resolvedBy == "rome:task-ended" { return String(localized: "Turned down: no answer within a day") }
+        if resolvedBy == "rome:task-stopped" { return String(localized: "Turned down: task stopped") }
+        switch status {
+        case .rejected: return String(localized: "Rejected")
+        case .failed: return String(localized: "Approved, but did not finish")
+        default: return String(localized: "Approved")
+        }
     }
 }

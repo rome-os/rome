@@ -1571,16 +1571,6 @@
         }
       }
     },
-    "Expired — answer to continue" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已过期，回答后继续"
-          }
-        }
-      }
-    },
     "Failed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2245,6 +2235,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "还没有活动"
+          }
+        }
+      }
+    },
+    "No longer waiting" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不再等待"
           }
         }
       }
@@ -4007,6 +4007,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此操作无法撤销。"
+          }
+        }
+      }
+    },
+    "This card is no longer available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张卡片已不可用"
           }
         }
       }

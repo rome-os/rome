@@ -10,7 +10,9 @@ enum MessagePart: Hashable, Sendable {
     /// A card for a task chat the Concierge started. `show` says what it
     /// draws: the task card, or the task's question or approval alone; nil
     /// on a part from before, which draws the task card with its wait inside.
-    case taskChat(chatId: String, title: String, show: TaskChatShow? = nil)
+    /// `card` is the question or approval, filled in by the instance for a
+    /// part that shows one.
+    case taskChat(chatId: String, title: String, show: TaskChatShow? = nil, card: TaskAskCard? = nil)
     /// An action paused for the guardian's approval.
     case approval(ApprovalPart)
     /// The agent asked the guardian a question (`ask_question`).
@@ -240,7 +242,7 @@ enum MessagePart: Hashable, Sendable {
             ))
         case "task_chat":
             guard let chatId = value["chatId"]?.string else { return nil }
-            return .taskChat(chatId: chatId, title: value["title"]?.string ?? "", show: value["show"]?.string.flatMap(TaskChatShow.init))
+            return .taskChat(chatId: chatId, title: value["title"]?.string ?? "", show: value["show"]?.string.flatMap(TaskChatShow.init), card: TaskAskCard(json: value["card"]))
         case "approval_card":
             guard let approvalId = value["approvalId"]?.string else { return nil }
             return .approval(approval(value, id: approvalId))
