@@ -483,7 +483,16 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
-        state = try c.decode(TaskState.self, forKey: .state)
+        // A state this build does not know reads from the derived status.
+        let derived = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? nil
+        state = (try? c.decode(TaskState.self, forKey: .state)) ?? {
+            switch derived {
+            case "needs_you": return .needsUser
+            case "later": return .next
+            case "ended": return .done
+            default: return .doing
+            }
+        }()
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         waitingOn = try c.decodeIfPresent(String.self, forKey: .waitingOn)
         dueAt = try c.decodeIfPresent(Double.self, forKey: .dueAt)

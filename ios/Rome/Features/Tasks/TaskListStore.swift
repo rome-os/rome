@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import OSLog
+
+let taskListLog = Logger(subsystem: "cc.romeos.mobile", category: "TaskList")
 
 /// One Concierge chat's task list, the Agent page's Tasks tab: what runs for
 /// the chat, as the server groups it. It reads again whenever the live socket
@@ -22,6 +25,8 @@ final class TaskListStore {
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private var tokens: [UUID] = []
     @ObservationIgnored private var reads = 0
+    /// The read whose list is shown; 0 before any.
+    @ObservationIgnored private var applied = 0
 
     /// How many ended rows show at first, and how many more each "Show more" adds.
     nonisolated static let endedPage = 20
@@ -50,17 +55,25 @@ final class TaskListStore {
         let mine = reads
         do {
             let list = try await backend.taskList(chatId: chatId)
-            guard mine == reads else { return }
+            // A newer read already put its list up: this older one gives way.
+            guard mine > applied else { return }
+            applied = mine
             groups = TaskListGroup.ordered(list.groups)
             loadFailed = false
+            loaded = true
             // A stop shows its effect once the task reads as ended.
             stopping = stopping.filter { id in task(id).map { !TaskListWords.isEnded($0.task) } ?? false }
+        } catch is CancellationError {
+            // A read the screen gave up on says nothing about the list.
+            taskListLog.notice("read cancelled")
         } catch {
-            guard mine == reads else { return }
-            // What is shown stays; a first read that fails says so.
-            if !loaded { loadFailed = true }
+            taskListLog.error("read failed: \(String(describing: error), privacy: .public)")
+            // What is shown stays. Only with no list at all, and no other read
+            // on its way that could still bring one, does the tab say it failed.
+            guard applied == 0, mine == reads else { return }
+            loadFailed = true
+            loaded = true
         }
-        loaded = true
     }
 
     private func handle(_ event: LiveEvent) {
