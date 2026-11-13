@@ -2,6 +2,7 @@
 // wording is tested without a DOM.
 
 import type { TaskListSchedule, TaskListTrigger } from "@rome/api-types/task-list";
+import { scheduleZoneSuffix } from "@/lib/routine-language";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -59,7 +60,8 @@ export function describeRoutineTrigger(
   if (trigger.type === "event-bus") {
     return t("concierge.taskList.schedule.event", { event: trigger.eventName });
   }
-  const time = formatClock(trigger.localTime, locale);
+  // A fixed-zone time names its zone, as the Routines page does.
+  const time = `${formatClock(trigger.localTime, locale)}${scheduleZoneSuffix(trigger)}`;
   if (trigger.date) {
     const date = new Date(`${trigger.date}T00:00:00`);
     const day = Number.isNaN(date.getTime())

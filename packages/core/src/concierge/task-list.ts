@@ -86,6 +86,8 @@ function triggerOf(routine: Routine): TaskListTrigger {
       localTime: trigger.localTime,
       rrule: trigger.rrule?.trim() || null,
       date: trigger.date ?? null,
+      tzid: trigger.tzid,
+      tzMode: trigger.tzMode,
     };
   }
   if (trigger.type === "event-bus") return { type: "event-bus", eventName: trigger.eventName };

@@ -434,20 +434,25 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   const [older, setOlder] = useState<{ items: TaskListItem[]; cursor: string | null } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pending, setPending] = useState<ReadonlyMap<string, "stop" | "respond">>(new Map());
-  const { data, isError, dataUpdatedAt } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: chatTaskListKey(chatId),
     queryFn: () =>
       fetchJson<TaskListResponse>(listUrl(chatId), {
         fallback: t("concierge.taskList.loadFailed"),
       }),
   });
-  // A re-read of the first page may move rows across the pages read before
-  // it: they go, and Show more reads on from the new first page.
-  const firstPageRead = useRef(dataUpdatedAt);
-  firstPageRead.current = dataUpdatedAt;
+  // A re-read that changes the first page of ended rows may move rows across
+  // the pages read before it: they go, and Show more reads on from the new
+  // first page. A re-read with the same ended rows in the same order keeps them.
+  const endedGroup = data?.groups.find((group) => group.key === "ended");
+  const endedFirstPage = endedGroup
+    ? [...endedGroup.items.map(itemKey), endedGroup.nextCursor ?? ""].join("\n")
+    : null;
+  const firstPageRead = useRef(endedFirstPage);
+  firstPageRead.current = endedFirstPage;
   useEffect(() => {
-    if (dataUpdatedAt) setOlder(null);
-  }, [dataUpdatedAt]);
+    if (endedFirstPage !== null) setOlder(null);
+  }, [endedFirstPage]);
   const reread = () => queryClient.invalidateQueries({ queryKey: chatTaskListKey(chatId) });
   useLiveEvents(
     { topic: chatTasksTopicName(chatId), sseUrl: `${listUrl(chatId)}/events` },
