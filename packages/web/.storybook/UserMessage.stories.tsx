@@ -76,6 +76,7 @@ const meta = {
             jump: fn(),
             threads: false,
             thread: null,
+            threadTitle: null,
             openThread: fn(),
             closeThread: fn(),
           }}

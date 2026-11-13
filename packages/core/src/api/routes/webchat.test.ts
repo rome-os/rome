@@ -7419,6 +7419,73 @@ describe("Webchat API", () => {
       expect(openToolOf([{ ...running, finished: true }, queued])).toBeNull();
     });
 
+    it("tells an open chat how its turn shows the typing dots: exact on Claude, while a message is written", async () => {
+      const sessionId = "sess-writing-exact";
+      await deps.webchatRepo.createSession(sessionId, "Writing");
+      rs.spyOn(deps.agentSessionManager, "find").mockReturnValue({
+        providerId: "anthropic",
+      } as never);
+      const { runtime } = createWebchatRuntime(deps);
+      const told: unknown[] = [];
+      const stop = runtime.subscribeSessionEvents(sessionId, (event, data) => {
+        if (event === "message_writing") told.push(data);
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        await emit({ type: "turn_start", turnId: "agent-turn" } as never);
+        await emit({ type: "tool_input_delta", toolUseId: "s1", tool: "say", content: "{" });
+        await emit({ type: "tool_input_delta", toolUseId: "s1", tool: "say", content: '"' });
+        await emit({ type: "tool_use", id: "s1", tool: "say", input: {} });
+        await gate;
+      });
+      await rs.waitFor(() => expect(told).toHaveLength(3));
+      const at = (writing: boolean) =>
+        expect.objectContaining({ sessionId, mode: "exact", writing });
+      expect(told).toEqual([at(false), at(true), at(false)]);
+      // A late subscriber gets the running turn's latest at once.
+      const late: unknown[] = [];
+      const stopLate = runtime.subscribeSessionEvents(sessionId, (event, data) => {
+        if (event === "message_writing") late.push(data);
+      });
+      expect(late).toEqual([at(false)]);
+      stopLate();
+      release();
+      await task;
+      await runtime.flushAll();
+      // Its end is told too.
+      expect(told.at(-1)).toEqual(at(false));
+      stop();
+    });
+
+    it("marks a turn whose provider cannot say when it writes as simulated, and never writing", async () => {
+      const sessionId = "sess-writing-simulated";
+      await deps.webchatRepo.createSession(sessionId, "Writing");
+      rs.spyOn(deps.agentSessionManager, "find").mockReturnValue({ providerId: "openai" } as never);
+      const { runtime } = createWebchatRuntime(deps);
+      const told: unknown[] = [];
+      const stop = runtime.subscribeSessionEvents(sessionId, (event, data) => {
+        if (event === "message_writing") told.push(data);
+      });
+      await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        await emit({ type: "turn_start", turnId: "agent-turn" } as never);
+        await emit({ type: "thinking", content: "…" } as never);
+        await emit({ type: "tool_use", id: "s1", tool: "say", input: {} });
+      });
+      await runtime.flushAll();
+      expect(told.length).toBeGreaterThan(0);
+      expect(
+        told.every(
+          (event) =>
+            (event as { mode: string; writing: boolean }).mode === "simulated" &&
+            !(event as { writing: boolean }).writing,
+        ),
+      ).toBe(true);
+      stop();
+    });
+
     it("counts a quiet backend turn as busy only once it says something", async () => {
       const sessionId = "sess-quiet-busy";
       await deps.webchatRepo.createSession(sessionId, "Quiet busy");

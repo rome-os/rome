@@ -205,7 +205,7 @@ export class TaskSchedules {
     const id = existing
       ? existing.id
       : await this.deps.routines.create({
-          // The chat's check strip names the run by it.
+          // The task list names the run by it.
           name: task.title,
           key,
           trigger,
@@ -213,6 +213,8 @@ export class TaskSchedules {
           args,
           // A run acts for the person the task is for.
           createdBy: { owner: task.owner },
+          // The task's row says where it reports, which can move.
+          chatId: null,
         });
     if (existing) {
       await this.deps.routines.update(id, { name: task.title, trigger, args, enabled: true });

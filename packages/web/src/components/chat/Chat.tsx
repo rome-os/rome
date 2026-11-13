@@ -24,7 +24,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
-  ListChecks,
   MoreHorizontal,
   PanelRightOpen,
   Share2,
@@ -32,6 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { z } from "zod";
+import type { MessageWritingEvent } from "@rome/api-types/concierge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -140,8 +140,7 @@ import {
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
-import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
-import { PendingChecks } from "./PendingChecks";
+import { useTaskList } from "@/components/concierge/TaskListPane";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
@@ -270,6 +269,14 @@ const sessionNameSchema = z.object({
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
+/** How the running turn shows the typing dots (`message_writing`). */
+const messageWritingSchema: z.ZodType<MessageWritingEvent> = z.object({
+  sessionId: z.string(),
+  turnId: z.string(),
+  mode: z.enum(["exact", "simulated"]),
+  writing: z.boolean(),
+});
+
 const messageChatThreadSchema = z.object({
   sessionId: z.string(),
   messageId: z.string(),
@@ -296,6 +303,8 @@ interface ChatSessionEventsProps {
   onChatCardSettled?: (event: z.infer<typeof chatCardSettledSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
+  /** How the running turn shows the typing dots changed. */
+  onMessageWriting?: (event: MessageWritingEvent) => void;
   onReconnect: (sessionId: string) => void;
 }
 
@@ -308,6 +317,7 @@ function ChatSessionEvents({
   onChatCardSettled,
   onSessionName,
   onSessionRunning,
+  onMessageWriting,
   onReconnect,
 }: ChatSessionEventsProps) {
   useLiveEvents(
@@ -349,6 +359,12 @@ function ChatSessionEvents({
         schema: sessionRunningSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onSessionRunning(event);
+        },
+      },
+      message_writing: {
+        schema: messageWritingSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageWriting?.(event);
         },
       },
     },
@@ -589,6 +605,15 @@ export function Chat({
   const handleMessageStatusReaction = useCallback(
     ({ messageId, statusReaction }: z.infer<typeof messageStatusReactionSchema>) =>
       setLiveReactions((prev) => new Map(prev).set(messageId, statusReaction)),
+    [],
+  );
+  // How each chat's running turn shows the typing dots, its latest word.
+  const [liveWriting, setLiveWriting] = useState<ReadonlyMap<string, MessageWritingEvent>>(
+    new Map(),
+  );
+  const handleMessageWriting = useCallback(
+    (event: MessageWritingEvent) =>
+      setLiveWriting((prev) => new Map(prev).set(event.sessionId, event)),
     [],
   );
   // Task cards' questions and approvals live events settled since the
@@ -872,8 +897,9 @@ export function Chat({
     [scrollerEl, floorEl, landOn, jumpToMessage],
   );
 
-  // A row of the task panel points to a Concierge message that may sit pages
-  // above the loaded ones, so the jump pages older history in until it renders.
+  // Respond in the Tasks panel points to a Concierge message that may sit
+  // pages above the loaded ones, so the jump reads history down through it in
+  // one page; the unread divider pages older history in until it renders.
   const olderRef = useRef({ hasOlder, loadOlder });
   olderRef.current = { hasOlder, loadOlder };
   const shownCountRef = useRef(0);
@@ -882,36 +908,45 @@ export function Chat({
   }, [displayMessages]);
   const findingMessageRef = useRef(false);
   // Pages older history in until `find` returns an element, then hands it to
-  // `reveal`, or says `missing` when the search runs out. Only one search runs
-  // at a time.
+  // `reveal`, or says `missing` when the search runs out. With `through`, the
+  // message it looks for, one read brings the history down to it instead of
+  // a page at a time. Only one search runs at a time. Resolves whether it
+  // revealed it.
   const revealWhenLoaded = useCallback(
-    async (find: () => HTMLElement | null, reveal: () => void, missing: string) => {
-      if (!mainSessionId || findingMessageRef.current) return;
+    async (
+      find: () => HTMLElement | null,
+      reveal: () => void,
+      missing: string,
+      through?: string,
+    ): Promise<boolean> => {
+      if (!mainSessionId || findingMessageRef.current) return false;
       if (find()) {
         reveal();
-        return;
+        return true;
       }
       findingMessageRef.current = true;
       const loading = toast.loading(t("concierge.tasks.findingMessage"));
       try {
         let stalled = 0;
-        for (let page = 0; page < MAX_JUMP_PAGES; page++) {
+        for (let page = 0; page < (through ? 1 : MAX_JUMP_PAGES); page++) {
           if (!olderRef.current.hasOlder(mainSessionId)) break;
           const before = shownCountRef.current;
-          await olderRef.current.loadOlder(mainSessionId);
+          await olderRef.current.loadOlder(mainSessionId, through ? { through } : undefined);
           // The page lands in state first and renders a moment later.
           for (let wait = 0; wait < 40 && shownCountRef.current === before; wait++) {
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
+          await new Promise((resolve) => requestAnimationFrame(resolve));
           if (find()) {
             reveal();
-            return;
+            return true;
           }
           // A page that fails to load changes nothing; two in a row end the search.
           stalled = shownCountRef.current === before ? stalled + 1 : 0;
           if (stalled >= 2) break;
         }
         toast.error(missing);
+        return false;
       } finally {
         toast.dismiss(loading);
         findingMessageRef.current = false;
@@ -922,11 +957,12 @@ export function Chat({
   const showSourceMessage = useCallback(
     (messageId: string) => {
       const scroller = scrollerEl;
-      if (!scroller) return Promise.resolve();
+      if (!scroller) return Promise.resolve(false);
       return revealWhenLoaded(
         () => findMessageAnchor(scroller, messageId),
         () => jumpToMessage(messageId),
         t("concierge.tasks.sourceMissing"),
+        messageId,
       );
     },
     [scrollerEl, revealWhenLoaded, jumpToMessage, t],
@@ -948,7 +984,7 @@ export function Chat({
   }, [scrollerEl, revealWhenLoaded, scrollToAnchor, t]);
   useEffect(() => {
     if (!concierge) return;
-    return onConciergeJump((messageId) => void showSourceMessage(messageId));
+    return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
   const displayedMessageIds = useMemo(
@@ -2337,7 +2373,8 @@ export function Chat({
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  const conciergeTaskList = useConciergeTaskList(concierge ? (mainSessionId ?? null) : null);
+  // The agent's logo in the header opens the chat's task list: what runs for it.
+  const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
   // A Concierge chat's header buttons sit on round badges like its pill, except
   // in the Mac app's title bar, where they are any chat's.
   const floating = concierge && !navbarSlot;
@@ -2347,16 +2384,21 @@ export function Chat({
   // The name the header shows for the Concierge, which a share of this chat
   // labels its turns by too.
   const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
-  const conciergeStatus = concierge ? (
-    <ConciergeHeaderStatus
-      // Every Concierge chat, main or topic, goes by the Concierge's name
-      // here; a topic chat's own name is in the chat list.
-      name={conciergeDisplayName}
-      activity={conciergeActivity}
-      // A chat with no messages yet draws its own large mascot.
-      badge={!conciergeEmpty}
-    />
-  ) : null;
+  // A blank topic chat, before its first message, shows nothing in the
+  // header: its empty state speaks for it, and it has no tasks yet.
+  const blankTopicChat = conciergeEmpty && !isMainChat;
+  const conciergeStatus =
+    concierge && !blankTopicChat ? (
+      <ConciergeHeaderStatus
+        // Every Concierge chat, main or topic, goes by the Concierge's name
+        // here; a topic chat's own name is in the chat list.
+        name={conciergeDisplayName}
+        activity={conciergeActivity}
+        // A chat with no messages yet draws its own large mascot.
+        badge={!conciergeEmpty}
+        onOpenTasks={taskList.open}
+      />
+    ) : null;
 
   const navbarTitle = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -2399,12 +2441,6 @@ export function Chat({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {concierge ? (
-              <DropdownMenuItem onSelect={conciergeTaskList.open}>
-                <ListChecks className="size-4" />
-                {t("concierge.tasks.title")}
-              </DropdownMenuItem>
-            ) : null}
             <DropdownMenuItem onSelect={() => enterShareMode()}>
               <Share2 className="size-4" />
               {t("share.title", "Share chat")}
@@ -2540,7 +2576,7 @@ export function Chat({
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
-      {conciergeTaskList.sheet}
+      {taskList.sheet}
     </>
   ) : null;
 
@@ -2564,6 +2600,7 @@ export function Chat({
           onChatCardSettled={handleChatCardSettled}
           onSessionName={handleSessionName}
           onSessionRunning={handleSessionRunning}
+          onMessageWriting={handleMessageWriting}
           onReconnect={handleSessionEventsReconnect}
         />
       ))}
@@ -2647,6 +2684,7 @@ export function Chat({
                           isStreaming: displayedStreaming,
                           runningTurnId,
                           quiet: activeSessionStream?.quiet,
+                          writing: liveWriting.get(activeSessionId) ?? null,
                           snapshot: currentSnapshot,
                           textStore: liveTextStore,
                           blockIx: activeSessionStream?.assistantBlockIx,
@@ -2781,9 +2819,6 @@ export function Chat({
                   {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                   <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
-                    {mainSessionId && !isArchived ? (
-                      <PendingChecks chatId={mainSessionId} turnKey={displayedStreaming} />
-                    ) : null}
                     {isArchived ? (
                       <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                         <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>

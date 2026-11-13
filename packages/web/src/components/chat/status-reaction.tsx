@@ -40,14 +40,15 @@ const MARK_FADE_MS = 150;
 
 /**
  * Rome's status reaction on a guardian message in a Concierge chat
- * (docs/domains/chats.md#status-reaction), placed like an iMessage tapback:
- * the emoji alone, centered on the bubble's top-left corner, so half of it
- * hangs outside the bubble, clear of its text. It is a child of the bubble,
- * so it stays on the bubble whatever the row around it holds. It takes no
- * room: every guardian bubble in a Concierge chat keeps a fixed gap above it
- * for the mark (GUARDIAN_BUBBLE_GAP in ConciergeGroup.tsx), mark or not, so
- * the timeline never moves when it comes or goes. It grows in and fades out,
- * and only shows; it does nothing.
+ * (docs/domains/chats.md#status-reaction), as the iOS app draws it: the emoji
+ * in a round badge centered on the bubble's top-left corner, so half of it
+ * hangs outside the bubble, clear of its text, with one small dot trailing off
+ * it like a thought. It is a child of the bubble, so it stays on the bubble
+ * whatever the row around it holds. It takes no room: every guardian bubble
+ * in a Concierge chat keeps a fixed gap above it for the badge
+ * (GUARDIAN_BUBBLE_GAP in ConciergeGroup.tsx), mark or not, so the timeline
+ * never moves when it comes or goes. It grows in and fades out, and only
+ * shows; it does nothing.
  */
 export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusReaction | null }) {
   const { t } = useTranslation("chat");
@@ -82,11 +83,16 @@ export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusRea
       title={label}
       data-status-reaction={shown}
       data-leaving={leaving || undefined}
-      // The emoji alone, 18px at full color, centered on the bubble's corner
-      // so half of it hangs outside.
-      className="pointer-events-none absolute -top-2.5 -left-2.5 flex size-5 select-none items-center justify-center text-title"
+      // A 28px badge centered on the bubble's corner, lighter than the page
+      // in both themes so the emoji reads, with a hairline edge.
+      className="pointer-events-none absolute -top-3.5 -left-3.5 flex size-7 select-none items-center justify-center rounded-full border-[0.5px] border-surface-foreground/10 bg-surface-elevated text-composer shadow-1 dark:bg-surface-hover"
     >
       {EMOJI[shown]}
+      {/* The thought dot, trailing off the badge's lower left. */}
+      <span
+        aria-hidden="true"
+        className="absolute top-6 -left-0.5 size-1.5 rounded-full border-[0.5px] border-surface-foreground/10 bg-surface-elevated dark:bg-surface-hover"
+      />
     </span>
   );
 }

@@ -494,20 +494,10 @@ describe("Concierge layout", () => {
     });
 
     it("puts the typing bubble in the agent's group", () => {
-      // The turn has spoken, so it types only while it works on in a call.
-      const working = {
-        segments: [
-          {
-            kind: "block" as const,
-            id: "b0",
-            ordinal: 0,
-            block: { type: "tool_use" as const, id: "w1", tool: "WebSearch", input: {} },
-          },
-        ],
-        summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
-      };
+      // The server says the running turn writes a message.
+      const writing = { sessionId: "s", turnId: "turn-1", mode: "exact", writing: true } as const;
       const { container } = renderTranscript([agentRow(agent("a1", 0, [text("One sec.")]))], {
-        live: { ...idle, isStreaming: true, runningTurnId: "turn-1", snapshot: working },
+        live: { ...idle, isStreaming: true, runningTurnId: "turn-1", writing },
       });
 
       const groups = topLevel(container).filter((el) => el.tagName === "DIV");
@@ -597,18 +587,13 @@ describe("Concierge reply", () => {
     expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   });
 
-  it("gives a task chat card the same Reply, quoting it as one line", () => {
-    const draft = draftOf();
-    inChat(draft, [
+  it("offers a task card no Reply: only a message with text is replyable", () => {
+    inChat(draftOf(), [
       agentRow(agent("c1", 0, [{ type: "task_chat", chatId: "chat-7", title: "Trip" }])),
     ]);
 
     expect(screen.getByTestId("task-card")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-
-    expect(draft.set).toHaveBeenCalledWith(
-      expect.objectContaining({ messageId: "c1", preview: "[Task chat] Trip (chat chat-7)" }),
-    );
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   });
 
   it("makes each message the target of a jump from a quote of it", () => {

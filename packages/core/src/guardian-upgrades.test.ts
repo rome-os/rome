@@ -31,6 +31,8 @@ const noSources: LiveEventSources = {
   subscribeAppCatalog: () => () => {},
   subscribeConciergeTasks: () => () => {},
   subscribeConciergeActivity: () => () => {},
+  hasChatTasks: async () => false,
+  subscribeChatTasks: () => () => {},
 };
 
 function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
