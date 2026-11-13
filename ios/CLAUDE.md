@@ -6,6 +6,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 - Before building, testing or running the app, read [`README.md`](README.md); it covers the simulator, Mac Catalyst, demo data and a local Rome.
 - Before designing or changing a screen, read [`DESIGN.md`](DESIGN.md), the interface principles every screen follows.
+- Before changing the transcript, a list, a store or anything that runs while a chat streams, read [`PERFORMANCE.md`](PERFORMANCE.md), and measure the change with `ROME_PERF`.
 - When changing a screen, run the snapshot pass in [`README.md`](README.md#snapshots) and look at both the light and dark images.
 - When reading a new wire field, add it to `Rome/Networking/Models.swift` as optional, so an older server keeps decoding.
 - When adding text, use `romeFont(_:_:)` from `Rome/Design/Typography.swift`, never `.font(.system(size:))`, so it scales with Dynamic Type.
@@ -51,5 +52,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 **The swipe home starts on the transcript and reads as a drag away from the bottom.** So does Notification Center pulled down over the app. Rows refetched on return then land below the screen, which looks like a stale chat. `TranscriptList` goes by whether the bottom was on screen when the app resigned active, and a tapped push always shows the newest rows.
 
 **A fling's glide wins over `ScrollViewReader.scrollTo`.** The tap reaches the button and `scrollTo` runs, but the list keeps decelerating the other way, so a tap mid-glide seems to do nothing. A Simulator tap after a slow drag does not show it; a real fling does. `ScrollHandle` stops the `UIScrollView`'s deceleration before scrolling, and older pages wait until the jump lands, because content that grows under the scroll animation moves its target.
+
+**A page that stays mounted keeps its animations running.** Chat stays in the tree, faded out, under the other sections, and a `TimelineView(.animation)` draws every frame there for no one. Pass `paused: offScreen`; see [`PERFORMANCE.md`](PERFORMANCE.md).
 
 **A system switch ignores the Simulator panel's `tap`.** The tap has no duration, and a `Toggle` waits for a touch that lasts. Use `touch_path` with two samples at the same point about 120 ms apart; the simulator log (`xcrun simctl spawn booted log show`) tells whether the app received anything.

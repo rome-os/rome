@@ -5,14 +5,10 @@ import SwiftUI
 let transcriptScrollLog = Logger(subsystem: "cc.romeos.mobile", category: "TranscriptScroll")
 
 /// Board 4: the Concierge chat, the app's home screen.
-struct ChatScreen: View, Equatable {
+struct ChatScreen: View {
     let workspace: Workspace
     /// Chat is the page in front, with nothing pushed over it.
     var visible = true
-
-    nonisolated static func == (lhs: ChatScreen, rhs: ChatScreen) -> Bool {
-        lhs.workspace === rhs.workspace && lhs.visible == rhs.visible
-    }
 
     /// What it calls in the shell: the drawer, the Agent page, a task chat.
     private var shell: ShellActions { workspace.shellActions }
@@ -27,6 +23,7 @@ struct ChatScreen: View, Equatable {
     private var store: TranscriptStore { workspace.concierge }
 
     var body: some View {
+        let _ = PerfProbe.count("chatBody")
         VStack(spacing: 0) {
             content
         }
@@ -288,6 +285,7 @@ struct ConciergeRow: View, Equatable {
 
     var body: some View {
         let actions = store.actions
+        let _ = PerfProbe.count("rowBody")
         switch row {
         case .separator(_, let date):
             TimeSeparator(date: date)
@@ -566,6 +564,7 @@ private struct StatusLine: View {
         if shimmers {
             line.overlay {
                 TimelineView(.animation(paused: offScreen)) { context in
+                    let _ = PerfProbe.count("shimmerTick")
                     // One pass every two seconds, left to right.
                     let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2) / 2
                     GeometryReader { geometry in

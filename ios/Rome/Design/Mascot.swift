@@ -40,6 +40,7 @@ struct Mascot: View {
             if alive && canMove {
                 // While something loads: frames at a modest rate, the paths parsed once.
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: offScreen)) { context in
+                    let _ = PerfProbe.count("mascotTick")
                     figure(MascotPose(time: context.date.timeIntervalSinceReferenceDate))
                 }
             } else {

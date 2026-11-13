@@ -49,6 +49,7 @@ enum MarkdownParser {
     }
 
     private static func blocks(_ source: String) -> [MarkdownBlock] {
+        PerfProbe.count("markdownParse")
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var listItems: [String] = []

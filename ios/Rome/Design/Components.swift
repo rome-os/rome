@@ -207,6 +207,7 @@ struct TypingDots: View {
 
     var body: some View {
         TimelineView(.animation(paused: offScreen)) { context in
+            let _ = PerfProbe.count("dotsTick")
             let elapsed = context.date.timeIntervalSince(start)
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { index in

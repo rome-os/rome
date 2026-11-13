@@ -132,6 +132,7 @@ final class TranscriptStore {
 
     private func rebuildRows() {
         guard !rowsHeld else { return }
+        PerfProbe.count("rowBuild")
         let answers = answers
         let built = TranscriptBuilder.rows(
             messages: visibleMessages,

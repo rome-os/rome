@@ -32,6 +32,7 @@ struct ImageDiskCache: Sendable {
     }
 
     func entry(instance: String, key: String) -> Entry? {
+        PerfProbe.count("diskImageRead")
         let base = file(instance: instance, key: key)
         guard let png = try? Data(contentsOf: base.appendingPathExtension("png")),
               let meta = try? Data(contentsOf: base.appendingPathExtension("json")),

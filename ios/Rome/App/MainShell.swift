@@ -88,6 +88,7 @@ struct MainShell: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let _ = PerfProbe.count("shellBody")
             let width = min(318, geometry.size.width * 0.81)
             // Pinned, the drawer takes this much of the width beside the page;
             // pushed aside (compact), none, and the slide moves the page instead.
@@ -264,6 +265,7 @@ struct MainShell: View {
         // A window that turns wide pins the drawer; the one it pushed aside is closed.
         .onChange(of: usesSidebar) { drawerOpen = false }
         #if DEBUG
+        .onAppear { PerfProbe.start(model: model) }
         .onChange(of: model.debugCommand) { _, command in
             switch command {
             case .drawer(let open):
@@ -426,15 +428,15 @@ struct MainShell: View {
         // Chat stays alive under the other pages: rebuilt, its list would load
         // again from the top and scroll down while the drawer closes onto it.
         ZStack {
-            // Values and the workspace's actions only, so a shell update
-            // that changes neither leaves Chat alone.
+            // A reference and a flag, no closures: a shell update that
+            // changes neither leaves Chat's body alone. Not `.equatable()`:
+            // that keeps iOS 26 from fading the rows under Chat's header.
             ChatScreen(
                 workspace: workspace,
                 // The same answer the server watch and push banners go by: a
                 // sheet, the drawer or a pushed page over Chat hides it.
                 visible: visibleChat == conciergeChatID
             )
-            .equatable()
             .opacity(section == .chat ? 1 : 0)
             .environment(\.offScreen, section != .chat || covered)
             .allowsHitTesting(section == .chat)

@@ -136,9 +136,13 @@ struct TaskChatScreen: View {
             alignTop: true,
             footer: store.running && store.loaded ? AnyView(runningLine(store)) : nil
         ) { row, previous in
-            TaskChatRow(row: row, info: store.info(for: row), briefID: briefID, agentName: agentName, store: store)
-                .equatable()
-                .shareSelectable(row, share: store.share, top: Self.spacing(row, after: previous, briefID: briefID), placement: isBrief(row, briefID) ? .corner : nil)
+            // A row that draws nothing takes no space either: a row view of
+            // its own would still take the spacing above it.
+            if TaskChatRow.draws(row, briefID: briefID) {
+                TaskChatRow(row: row, info: store.info(for: row), briefID: briefID, agentName: agentName, store: store)
+                    .equatable()
+                    .shareSelectable(row, share: store.share, top: Self.spacing(row, after: previous, briefID: briefID), placement: isBrief(row, briefID) ? .corner : nil)
+            }
         }
         .onTapGesture { composerFocused = false }
     }
@@ -189,7 +193,18 @@ private struct TaskChatRow: View, Equatable {
         a.row == b.row && a.info == b.info && a.briefID == b.briefID && a.agentName == b.agentName && a.store === b.store
     }
 
+    /// Whether a task chat draws the row at all: not the brief's time line,
+    /// nor the rows only a Concierge chat shows.
+    static func draws(_ row: TranscriptRow, briefID: String?) -> Bool {
+        switch row {
+        case .separator(let id, _): briefID.map { id != "sep-\($0)" } ?? true
+        case .taskAsk, .threadLabel, .sourceLabel, .sessionRenewal: false
+        default: true
+        }
+    }
+
     var body: some View {
+        let _ = PerfProbe.count("taskRowBody")
         let actions = store.actions
         switch row {
         case .separator(let id, let date):
