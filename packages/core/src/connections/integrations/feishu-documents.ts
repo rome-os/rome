@@ -104,6 +104,7 @@ function responseError(value: unknown): ProviderOperationError | CredentialRejec
   const code = parsed.success ? parsed.data.code : undefined;
   if (
     code === 10003 ||
+    code === 10014 ||
     code === 99991663 ||
     code === 99991664 ||
     code === 99991668 ||

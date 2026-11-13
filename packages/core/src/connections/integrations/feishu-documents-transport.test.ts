@@ -65,21 +65,28 @@ function json(response: ServerResponse, value: unknown) {
 }
 
 describe("Feishu document reads with the real SDK and loopback HTTP", () => {
-  for (const status of [200, 400]) {
-    it(`classifies a token credential rejection with HTTP ${status} without exposing provider text`, async () => {
-      const h = await fixture((_request, response) => {
-        response.writeHead(status, { "content-type": "application/json" });
-        response.end(JSON.stringify({ code: 10003, msg: "SYNTHETIC_PRIVATE_PROVIDER_ERROR" }));
+  for (const code of [10003, 10014]) {
+    for (const status of [200, 400]) {
+      it(`classifies token credential code ${code} with HTTP ${status} without exposing provider text`, async () => {
+        const h = await fixture((_request, response) => {
+          response.writeHead(status, { "content-type": "application/json" });
+          response.end(JSON.stringify({ code, msg: "SYNTHETIC_PRIVATE_PROVIDER_ERROR" }));
+        });
+        const actor = createFeishuDocumentActor({
+          ...material,
+          appId: `cli_rejected_${code}_${status}`,
+        });
+        try {
+          await expect(actor.invoke(call)).rejects.toEqual(
+            new CredentialRejected({ grant: "app" }),
+          );
+          expect(h.requests).toHaveLength(1);
+        } finally {
+          actor.stop?.();
+          await h.close();
+        }
       });
-      const actor = createFeishuDocumentActor({ ...material, appId: `cli_rejected_${status}` });
-      try {
-        await expect(actor.invoke(call)).rejects.toEqual(new CredentialRejected({ grant: "app" }));
-        expect(h.requests).toHaveLength(1);
-      } finally {
-        actor.stop?.();
-        await h.close();
-      }
-    });
+    }
   }
 
   it("bounds both a cold token POST and the document GET and isolates cache across actor epochs", async () => {
