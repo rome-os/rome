@@ -220,7 +220,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         await settle { !backend.sentThreads.isEmpty }
         #expect(backend.sentThreads == [target])
         // It failed: Retry goes to the same thread.
-        await settle { store.pending.first?.state == .failed }
+        await settle { store.pending.first?.state == .failed(.unreachable) }
         backend.sendSucceeds = true
         store.retry(store.pending[0].id)
         await settle { backend.sentThreads.count == 2 }

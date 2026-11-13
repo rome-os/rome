@@ -126,6 +126,7 @@ struct MainShell: View {
                     }
                 }
                 .environment(\.chatLinkOpener, openChatLink)
+                .environment(\.openUsage, { settingsPath = []; showSettings = true })
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)

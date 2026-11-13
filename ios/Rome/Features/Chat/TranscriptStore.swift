@@ -34,6 +34,9 @@ final class TranscriptStore {
     private(set) var stopped = false
     /// Bumps when a new message arrives, so the view can scroll or count it.
     private(set) var arrivals = 0
+    /// A short line about an action that failed (Stop, an answer), shown for a few seconds.
+    private(set) var notice: String?
+    @ObservationIgnored private var noticeWork: Task<Void, Never>?
 
     /// Approval records fetched from the server, by approval id.
     private(set) var approvals: [String: ApprovalRecord] = [:]
@@ -196,10 +199,11 @@ final class TranscriptStore {
     }
 
     /// Fetches the newest page without touching paging state.
-    func refreshLatest() async {
-        if let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) {
-            merge(page.messages)
-        }
+    @discardableResult
+    func refreshLatest() async -> Bool {
+        guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
+        merge(page.messages)
+        return true
     }
 
     /// Fetches the page before the oldest message held. It waits in
@@ -292,8 +296,11 @@ final class TranscriptStore {
 
     private func handle(_ event: LiveEvent) {
         switch event {
-        case .messageInsert(let message) where message.sessionId == sessionId:
-            let isNew = !messages.contains { $0.id == message.id }
+        case .messageInsert(var message) where message.sessionId == sessionId:
+            let held = messages.first { $0.id == message.id }
+            let isNew = held == nil
+            // A live insert leaves the mark out: keep the one already known.
+            if message.statusReaction == nil { message.statusReaction = held?.statusReaction }
             merge([message])
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
         case .sessionRunning(let id, let isRunning) where id == sessionId:
@@ -303,6 +310,10 @@ final class TranscriptStore {
             if !isRunning {
                 // The turn's trace summary and reply are final now.
                 Task { await reload() }
+            }
+        case .statusReaction(let id, let messageId, let reaction) where id == sessionId:
+            if let index = messages.firstIndex(where: { $0.id == messageId }) {
+                messages[index].statusReaction = reaction
             }
         case .messageThread(let id, let messageId, let root) where id == sessionId:
             if let index = messages.firstIndex(where: { $0.id == messageId }) {
@@ -461,13 +472,15 @@ final class TranscriptStore {
         }
     }
 
-    private func refreshRunning(hint: Bool? = nil) async {
+    /// `onFailure`: what to believe when the server cannot be asked.
+    private func refreshRunning(hint: Bool? = nil, onFailure: Bool? = nil) async {
         if hint == false {
             markIdle()
             return
         }
         guard let turns = try? await backend.activeTurns(sessionId: sessionId) else {
             if let hint { running = hint }
+            else if onFailure == false { markIdle() }
             return
         }
         guard !turns.isEmpty else {
@@ -534,21 +547,55 @@ final class TranscriptStore {
                     pending[index].state = .sent
                 }
                 if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: inputId) }
-                // The server does not announce the guardian's own input, so fetch it.
+                // The server does not announce the guardian's own input, so fetch it,
+                // and once more if that fetch fails.
                 Task {
                     try? await Task.sleep(for: .seconds(1.5))
-                    await self.refreshLatest()
+                    if await !self.refreshLatest() {
+                        try? await Task.sleep(for: .seconds(3))
+                        await self.refreshLatest()
+                    }
+                    // A turn that ended or never started (a model that could not
+                    // be reached) must not leave the typing dots on.
+                    if self.kind == .concierge { await self.refreshRunning() }
                 }
+                if kind == .concierge, turn.turnId == nil { await refreshRunning() }
                 if kind == .task {
                     markRunning()
                     if let turnId = turn.turnId { activeTurnId = turnId }
                 }
             } catch {
                 if let index = pending.firstIndex(where: { $0.id == inputId }) {
-                    pending[index].state = .failed
+                    pending[index].state = .failed(SendFailure(error))
                 }
-                if kind == .concierge { await refreshRunning() }
+                // Offline, the server cannot say; the message did not go, so nothing runs for it.
+                if kind == .concierge { await refreshRunning(onFailure: false) }
             }
+        }
+    }
+
+    /// Shows `text` for a few seconds.
+    private func say(_ text: String) {
+        notice = text
+        noticeWork?.cancel()
+        noticeWork = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
+    }
+
+    /// Rome's mark on a stored guardian message.
+    func statusMark(ofRow row: TranscriptRow) -> StatusMark? {
+        guard kind == .concierge, case .userText(_, _, _, nil) = row, let id = row.messageId else { return nil }
+        return message(id)?.statusReaction.flatMap(StatusMark.init(rawValue:))
+    }
+
+    /// The chat's newest page could not be read, and nothing offline explains it.
+    var loadFailed: Bool {
+        switch loadError {
+        case nil, .offline?, .unauthorized?, .conciergeOff?: return false
+        default: return true
         }
     }
 
@@ -560,6 +607,7 @@ final class TranscriptStore {
                 try await backend.interrupt(turnId: turnId)
             } catch {
                 stopping = false
+                say(String(localized: "Couldn't stop. Try again"))
                 return
             }
             // The socket usually announces that the turn ended. When that event
@@ -666,6 +714,7 @@ final class TranscriptStore {
                 markRunning()
             } catch {
                 localAnswers[part.toolUseId] = nil
+                say(String(localized: "Couldn't send your answer"))
             }
             answering.remove(part.toolUseId)
         }

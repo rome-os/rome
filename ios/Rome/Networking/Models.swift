@@ -40,6 +40,11 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var knowsThreads = false
     /// Who said a guardian-side message, when it was not simply the guardian.
     var sender: MessageSender? = nil
+    /// Where a guardian message stands with the agent: `failed` and `unknown`
+    /// mean it was not (or may not have been) handed over. Nil from older instances.
+    var inputState: String? = nil
+    /// Rome's mark on a guardian message in a Chat: `working` or `failed`.
+    var statusReaction: String? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -55,7 +60,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, sender
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, sender, inputState, statusReaction
     }
 }
 
@@ -89,6 +94,8 @@ extension ChatMessage {
         knowsThreads = container.contains(.chatThreadId)
         // An unknown shape never costs the message itself.
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
+        inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
+        statusReaction = (try? container.decodeIfPresent(String.self, forKey: .statusReaction)) ?? nil
     }
 
     /// Writes `chatThreadId` as null when the instance sent it as null, so a
@@ -104,6 +111,8 @@ extension ChatMessage {
         try container.encodeIfPresent(traceSummary, forKey: .traceSummary)
         if knowsThreads { try container.encode(chatThreadId, forKey: .chatThreadId) }
         try container.encodeIfPresent(sender, forKey: .sender)
+        try container.encodeIfPresent(inputState, forKey: .inputState)
+        try container.encodeIfPresent(statusReaction, forKey: .statusReaction)
     }
 
     /// The chat thread it is in, by its first message: its own id when alone.

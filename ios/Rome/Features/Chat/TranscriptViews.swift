@@ -77,14 +77,25 @@ struct UserBubble: View {
     let pending: PendingSend.State?
     var onRetry: () -> Void = {}
     var menu = BubbleMenu()
+    /// Rome's mark on the message: being worked on, or failed.
+    var mark: StatusMark? = nil
+
+    private var failure: SendFailure? {
+        if case .failed(let failure)? = pending { return failure }
+        return nil
+    }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
             HStack(alignment: .center, spacing: 8) {
-                if pending == .failed {
-                    Button(action: onRetry) { AlertGlyph(size: 18) }
-                        .frame(width: 28, height: 28)
-                        .accessibilityLabel("Not sent. Tap to retry.")
+                if let failure {
+                    if failure.retryable {
+                        Button(action: onRetry) { AlertGlyph(size: 18) }
+                            .frame(width: 28, height: 28)
+                            .accessibilityLabel(failure.line)
+                    } else {
+                        AlertGlyph(size: 18).frame(width: 28, height: 28)
+                    }
                 }
                 VStack(alignment: .trailing, spacing: 6) {
                     if !images.isEmpty {
@@ -100,19 +111,38 @@ struct UserBubble: View {
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: menu)
+                            // The mark hangs on the bubble's inner bottom corner.
+                            .overlay(alignment: .bottomLeading) {
+                                if let mark {
+                                    StatusMarkBadge(mark: mark).offset(x: -6, y: 11)
+                                }
+                            }
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
             }
-            if pending == .failed {
-                Button("Not sent · Tap to retry", action: onRetry)
-                    .romeFont(12, .medium)
-                    .foregroundStyle(Palette.destructive)
+            if let failure {
+                if failure.retryable {
+                    Button(failure.line, action: onRetry)
+                        .romeFont(12, .medium)
+                        .foregroundStyle(Palette.destructive)
+                } else {
+                    Text(failure.line)
+                        .romeFont(12, .medium)
+                        .foregroundStyle(Palette.destructive)
+                }
+            } else if pending == .notDelivered {
+                Text("Not delivered").romeFont(12, .medium).foregroundStyle(Palette.destructive)
+            } else if pending == .unconfirmed {
+                Text("Delivery unconfirmed · not sent again").romeFont(12, .medium).foregroundStyle(Palette.sub)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 56)
+        // Room for the mark that hangs below the bubble.
+        .padding(.bottom, mark == nil ? 0 : 12)
         .animation(.easeOut(duration: 0.2), value: pending)
+        .animation(.easeOut(duration: 0.15), value: mark)
     }
 }
 
@@ -511,6 +541,7 @@ enum TranscriptSpacing {
         if case .typing = row { return 14 }
         // Right under the message whose thread it counts.
         if case .threadReplies = row { return 4 }
+        if case .notice = row { return 14 }
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
         switch (row, previous) {

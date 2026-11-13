@@ -658,20 +658,3 @@ struct WebOnlyCard: View {
         .hairline(radius: Metrics.groupRadius)
     }
 }
-
-struct ErrorLine: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-            AlertGlyph(size: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-            Text(text)
-                .romeFont(15)
-                .lineSpacing(5)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(2)
-        .accessibilityElement(children: .combine)
-    }
-}

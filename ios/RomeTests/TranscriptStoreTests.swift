@@ -46,7 +46,13 @@ final class FakeBackend: RomeBackend {
         return page
     }
 
-    func activeTurns(sessionId: String) async throws -> [ActiveTurn] { turns }
+    /// Set, the active turns cannot be read.
+    var activeTurnsError: APIError?
+
+    func activeTurns(sessionId: String) async throws -> [ActiveTurn] {
+        if let activeTurnsError { throw activeTurnsError }
+        return turns
+    }
 
     func interrupt(turnId: String) async throws {
         interrupted.append(turnId)
@@ -180,8 +186,10 @@ final class FakeBackend: RomeBackend {
         sentFiles = files
         calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")
         if sendSucceeds { return CreatedTurn(turnId: "turn", inputId: inputId, disposition: "started") }
-        throw APIError.network
+        throw sendError
     }
+    /// What a send fails with when `sendSucceeds` is off.
+    var sendError: APIError = .network
     var answeredSessions: [String] = []
     /// What an answer fails with; nil lets it through.
     var answerError: APIError? = .network

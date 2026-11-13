@@ -26,7 +26,9 @@ enum MessagePart: Hashable, Sendable {
     /// The guardian's answer to an interactive card.
     case interactionResult(toolUseId: String, output: JSONValue)
     /// A turn that failed before it ran.
-    case error(String)
+    case error(TurnError)
+    /// A quiet line, such as the chat moving to another model (`quota_switch`).
+    case notice(String)
     /// Parts the web dashboard does not show in a transcript either (tool
     /// calls, thinking, usage, a reply's quote).
     case other(type: String)
@@ -43,8 +45,6 @@ enum MessagePart: Hashable, Sendable {
         case app(String)
         /// A turn's recap (`turn_recap`).
         case turnSummary
-        /// Chat moved to another model (`quota_switch`).
-        case modelSwitch(model: String)
         /// A part type this build does not know.
         case unknown
 
@@ -58,7 +58,6 @@ enum MessagePart: Hashable, Sendable {
                 if let appName, !appName.isEmpty { return String(localized: "A card from \(appName)") }
                 return String(localized: "An app card")
             case .turnSummary: return String(localized: "A turn summary")
-            case .modelSwitch(let model): return String(localized: "Switched to \(model)")
             case .unknown: return String(localized: "A card")
             }
         }
@@ -243,10 +242,15 @@ enum MessagePart: Hashable, Sendable {
         case "turn_recap":
             return .webOnly(.turnSummary)
         case "quota_switch":
-            guard let model = value["model"]?.string, !model.isEmpty else { return .webOnly(.unknown) }
-            return .webOnly(.modelSwitch(model: model))
+            guard let text = Self.modelSwitchText(value) else { return .webOnly(.unknown) }
+            return .notice(text)
         case "error":
-            return .error(value["error"]?.string ?? "")
+            return .error(TurnError(
+                text: value["error"]?.string ?? "",
+                code: value["code"]?.string,
+                provider: value["provider"]?.string,
+                reason: value["reason"]?.string
+            ))
         default:
             return hiddenTypes.contains(type) ? .other(type: type) : .webOnly(.unknown)
         }
@@ -359,6 +363,34 @@ enum MessagePart: Hashable, Sendable {
 }
 
 extension MessagePart {
+    /// The words for a chat that moved to another model: why, and to what.
+    static func modelSwitchText(_ value: JSONValue) -> String? {
+        guard let model = value["model"]?.string, !model.isEmpty else { return nil }
+        func name(_ provider: String?) -> String? {
+            switch provider {
+            case "openai": return "Codex"
+            case "anthropic": return "Claude"
+            default: return nil
+            }
+        }
+        func clean(_ id: String) -> String {
+            id.replacingOccurrences(of: #"\[.*\]$"#, with: "", options: .regularExpression)
+        }
+        let from = name(value["from"]?.string), to = name(value["to"]?.string)
+        let reason = value["reason"]?.string
+        if let from, let to, from != to {
+            switch reason {
+            case "login": return String(localized: "\(from) sign-in failed, switched to \(to)")
+            case "temporary": return String(localized: "\(from) is unavailable, switched to \(to)")
+            default: return String(localized: "\(from) ran out, switched to \(to)")
+            }
+        }
+        if let fromModel = value["fromModel"]?.string, !fromModel.isEmpty {
+            return String(localized: "\(clean(fromModel)) limit reached, switched to \(clean(model))")
+        }
+        return String(localized: "Switched to \(clean(model))")
+    }
+
     /// Whether the part shows something in a transcript.
     var isVisible: Bool {
         switch self {

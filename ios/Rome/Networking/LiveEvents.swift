@@ -9,6 +9,9 @@ enum LiveEvent: Sendable {
     case messageInsert(ChatMessage)
     /// A message was placed in a chat thread (`message_chat_thread`).
     case messageThread(sessionId: String, messageId: String, chatThreadId: String?)
+    /// Rome's mark on a guardian message changed (`message_status_reaction`).
+    /// Nil: it has none now.
+    case statusReaction(sessionId: String, messageId: String, reaction: String?)
     /// A Concierge chat's activity changed (`concierge_activity`). Nil: a
     /// state this build does not know, shown as no status line.
     /// `at`: when it took effect on the server, epoch milliseconds.
@@ -307,6 +310,9 @@ final class LiveEventsSocket: LiveEventSource {
         case "message_insert":
             guard let message = data.decoded(ChatMessage.self) else { return nil }
             return .messageInsert(message)
+        case "message_status_reaction":
+            guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
+            return .statusReaction(sessionId: id, messageId: message, reaction: data["statusReaction"]?.string)
         case "concierge_activity":
             guard let chatId = data["chatId"]?.string, let activity = data["activity"] else { return nil }
             return .conciergeActivity(chatId: chatId, activity: ConciergeActivity(json: activity), at: data["at"]?.number)

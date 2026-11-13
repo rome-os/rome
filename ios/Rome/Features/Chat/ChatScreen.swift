@@ -132,6 +132,11 @@ struct ChatScreen: View {
             }
             if store.loadError == .offline {
                 TopBanner(kind: .warning, text: String(localized: "No network connection"))
+            } else if store.loadFailed {
+                TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry")) { store.resync() }
+            }
+            if let notice = store.notice {
+                TopBanner(kind: .error, text: notice)
             }
             if offersPush {
                 PushPromptCard(
@@ -143,7 +148,7 @@ struct ChatScreen: View {
             }
         }
         // Below the header's status capsule, which hangs under the header row.
-        .padding(.top, model.accessNotice != nil || store.loadError == .offline || offersPush ? 10 + statusOverhang : 0)
+        .padding(.top, model.accessNotice != nil || store.loadError == .offline || store.loadFailed || store.notice != nil || offersPush ? 10 + statusOverhang : 0)
         .readableColumn()
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
@@ -235,7 +240,7 @@ struct ConciergeRow: View {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(reply: false))
+            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(reply: false), mark: store.statusMark(ofRow: row))
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: true))
         case .threadReplies(_, let messageId, let count, let guardian):
@@ -263,8 +268,10 @@ struct ConciergeRow: View {
             // In a thread a tap on a card stays on it, never closing the thread.
             InteractionRow(row: row, store: store)
                 .keepsTaps(inThread)
-        case .error(_, let text):
-            ErrorLine(text: text)
+        case .error(_, let error):
+            ErrorLine(error: error)
+        case .notice(_, let text):
+            NoticeLine(text: text)
         }
     }
 }

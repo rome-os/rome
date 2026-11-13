@@ -24,6 +24,8 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 **The server never announces the guardian's own message on `chat.session:<id>`.** A pending bubble waits for a fetch, not an event. `TranscriptStore` marks it sent when the POST returns and reloads the newest page.
 
+**A turn that fails in the middle leaves no reply, only its trace.** The instance stores a model error as a reply (an `error` part) only when the model could not be resolved before the turn ran. A failure after that (a provider limit, a crash) is in the trace message's `turnStatus: "error"` and `terminalError`, and in the guardian message's `statusReaction`. `TranscriptBuilder` draws a line from the trace unless a stored error part has the same turn, so a failure never shows twice and never shows nothing.
+
 **A stored `approval_card` part always says `pending`.** Only `GET /approvals/:id` knows whether it was answered, so a card shows its buttons only after that record arrives.
 
 **Pushing a second task chat over the first reuses the same view.** Its `@State` store keeps the first chat. The route destination sets `.id(chatId)`.

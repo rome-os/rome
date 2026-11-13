@@ -35,6 +35,21 @@ struct TaskChatScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .floatingTopBar { header }
+        .overlay(alignment: .top) {
+            VStack(spacing: 8) {
+                if store.loadError == .offline {
+                    TopBanner(kind: .warning, text: String(localized: "No network connection"))
+                } else if store.loadFailed {
+                    TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry")) { store.resync() }
+                }
+                if let notice = store.notice {
+                    TopBanner(kind: .error, text: notice)
+                }
+            }
+            .padding(.top, 62)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.loadFailed)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.notice)
+        }
         .background(Palette.bg.ignoresSafeArea())
         .composerDraft(workspace.drafts, chat: chatId, text: $draft, attachments: attachments, transcript: store)
         .toolbar(.hidden, for: .navigationBar)
@@ -174,8 +189,10 @@ struct TaskChatScreen: View {
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu(row))
         case .tools, .approval, .question, .webOnly, .routineDraft, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
-        case .error(_, let text):
-            ErrorLine(text: text)
+        case .error(_, let error):
+            ErrorLine(error: error)
+        case .notice(_, let text):
+            NoticeLine(text: text)
         case .taskCard(_, let id, let title, _):
             TaskCard(title: title) {}
         case .typing:

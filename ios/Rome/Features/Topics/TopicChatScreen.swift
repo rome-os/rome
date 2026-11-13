@@ -164,7 +164,7 @@ struct TopicChatScreen: View {
             // The chat is being started: the message waits as a pending bubble.
             ScrollView {
                 VStack(spacing: 8) {
-                    UserBubble(text: starting, images: startingImages.map(UserImage.local), pending: startFailed ? .failed : .sending) {
+                    UserBubble(text: starting, images: startingImages.map(UserImage.local), pending: startFailed ? .failed(.unknown) : .sending) {
                         send(text: starting, images: startingImages)
                     }
                 }

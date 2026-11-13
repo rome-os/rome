@@ -3,7 +3,17 @@ import Foundation
 /// A message the guardian sent that the server has not stored yet.
 struct PendingSend: Identifiable, Hashable, Sendable {
     /// `sent` means the server accepted it; the stored copy replaces it on the next load.
-    enum State: Hashable, Sendable { case sending, sent, failed }
+    enum State: Hashable, Sendable {
+        case sending, sent
+        case failed(SendFailure)
+        /// Stored, and the instance records it as never handed to an agent.
+        case notDelivered
+        /// Stored, and the instance cannot tell whether an agent took it.
+        case unconfirmed
+
+        /// The message is on the instance: its row is a stored message's.
+        var isStored: Bool { self == .notDelivered || self == .unconfirmed }
+    }
 
     let id: String
     let text: String
@@ -42,7 +52,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     case widgetUI(id: String, part: WidgetUIPart)
-    case error(id: String, text: String)
+    case error(id: String, error: TurnError)
+    /// A quiet line between messages, such as the chat moving to another model.
+    case notice(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
     /// Under an Agent message that ends a stretch of a chat thread, where the
     /// thread goes on beyond that stretch: how many replies it has.
@@ -54,7 +66,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _), .error(let id, _), .tools(let id, _, _),
+             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
              .threadReplies(let id, _, _, _):
             return id
         case .typing:
@@ -73,7 +85,7 @@ enum TranscriptRow: Identifiable, Hashable {
     var messageId: String? {
         switch self {
         case .userText(let id, _, _, let pending):
-            return pending == nil ? Self.message(ofPart: id) : nil
+            return pending == nil || pending?.isStored == true ? Self.message(ofPart: id) : nil
         case .agentText(let id, _, _, _, _):
             return Self.message(ofPart: id)
         case .threadReplies(_, let messageId, _, _):
@@ -125,16 +137,27 @@ enum TranscriptBuilder {
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
         let replies = options.showThreads ? threadLines(messages) : [:]
+        // The turns whose reply is an error part.
+        let storedErrors = Set(messages.compactMap { message -> String? in
+            guard !message.isTrace, let turn = message.turnId, message.parts.contains(where: { if case .error = $0 { true } else { false } }) else { return nil }
+            return turn
+        })
 
         // Messages come in the store's order, which follows the server's turns.
         for message in messages {
             if message.isTrace {
-                guard options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 else { continue }
-                entries.append(Entry(
-                    id: message.id, date: message.date, guardian: false,
-                    rows: [.tools(id: "tools-\(message.id)", traceMessageId: message.id, count: steps)],
-                    bubbleIndexes: []
-                ))
+                var rows: [TranscriptRow] = []
+                if options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 {
+                    rows.append(.tools(id: "tools-\(message.id)", traceMessageId: message.id, count: steps))
+                }
+                // A turn that failed mid-run leaves only its trace: the line says why.
+                // A turn that failed before it ran stored its error as a reply, which says it.
+                if let error = failure(of: message, storedErrors: storedErrors) {
+                    rows.append(.error(id: "failed-\(message.id)", error: error))
+                }
+                if !rows.isEmpty {
+                    entries.append(Entry(id: message.id, date: message.date, guardian: false, rows: rows, bubbleIndexes: []))
+                }
                 continue
             }
             var rows: [TranscriptRow] = []
@@ -146,7 +169,7 @@ enum TranscriptBuilder {
                     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                     if message.isUser {
                         let (body, uploads) = UploadLines.split(text)
-                        rows.append(.userText(id: id, text: body, images: uploads.map(UserImage.stored), pending: nil))
+                        rows.append(.userText(id: id, text: body, images: uploads.map(UserImage.stored), pending: PendingSend.State.stored(inputState: message.inputState)))
                     } else {
                         bubbles.append(rows.count)
                         rows.append(.agentText(id: id, text: text, long: long, forwardedFrom: forwarded, position: .single))
@@ -165,8 +188,10 @@ enum TranscriptBuilder {
                     rows.append(.connect(id: id, part: card, sessionId: message.sessionId))
                 case .widgetUI(let card):
                     rows.append(.widgetUI(id: id, part: card))
-                case .error(let text):
-                    rows.append(.error(id: id, text: text.isEmpty ? String(localized: "This turn did not finish") : text))
+                case .error(let error):
+                    rows.append(.error(id: id, error: error))
+                case .notice(let text):
+                    rows.append(.notice(id: id, text: text))
                 case .interactionResult, .other:
                     continue
                 }
@@ -240,6 +265,15 @@ enum TranscriptBuilder {
         }
         if options.typing { output.append(.typing) }
         return output
+    }
+
+    /// What a failed turn's trace says went wrong; nil for a turn that did not fail,
+    /// or one whose error is already a stored reply.
+    static func failure(of trace: ChatMessage, storedErrors: Set<String>) -> TurnError? {
+        guard trace.traceSummary?.turnStatus == "error" else { return nil }
+        if let turn = trace.turnId, storedErrors.contains(turn) { return nil }
+        let text = trace.traceSummary?.terminalError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return TurnError(text: text, fromTrace: true)
     }
 
     /// Where the "N replies" line goes, by message id, and its count
