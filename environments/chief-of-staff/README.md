@@ -33,9 +33,9 @@ ANTHROPIC_API_KEY=          # the model login: this, or the line below, not both
 CLAUDE_CODE_OAUTH_TOKEN=
 ```
 
-`up` stops and names the first required value missing. The fourth member token is optional: only `cos-env post --as member1:2` needs it, and everything else works without it.
+`up` stops and names the first required value missing. That makes five bots in total, and the run works with the first four. The fourth member token is optional: only `cos-env post --as member1:2` needs it, so without it K3's two-account check reports as not checked.
 
-The bots all join the test server with the permissions the Discord connect guide lists (View Channels, Send Messages, Read Message History). member1's bot reads and clears the chats, so it also needs Manage Messages and Manage Threads. The test server needs these text chats, each named in `team.env`:
+The bots all join the test server with the permissions the Discord connect guide lists (View Channels, Send Messages, Read Message History), with Message Content Intent turned on in the Developer Portal. Each member bot also needs Change Nickname, for `cos-env rename`. member1's bot reads and clears the chats, so it also needs Manage Messages and Manage Threads. The test server needs these text chats, each named in `team.env`:
 
 - `general`, `standup` — every member and the agent.
 - `leads` — member1, member2 and the agent only.
