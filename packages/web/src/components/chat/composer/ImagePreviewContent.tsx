@@ -7,16 +7,30 @@ import {
   type ImgHTMLAttributes,
   type ReactElement,
 } from "react";
-import { Download, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ControlledProps } from "react-medium-image-zoom";
+import { cn } from "@/lib/utils";
 import { IconButton } from "@/components/ui/icon-button";
+import { useDesktop } from "@/hooks/use-desktop";
+import type { ReplyPicture } from "@/lib/reply-pictures";
 
 export type PreviewContentProps = Parameters<NonNullable<ControlledProps["ZoomContent"]>>[0];
 type ModalImage = ReactElement<ImgHTMLAttributes<HTMLImageElement>>;
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 const SCALE_STEP = 0.25;
+// A swipe pages when it moves this far sideways, and mostly sideways.
+const SWIPE_DISTANCE = 50;
+const SWIPE_RATIO = 1.5;
+
+/**
+ * Space around an open picture. A phone gives it little, so a picture as wide
+ * as the column still opens larger than its thumbnail.
+ */
+export function viewerMargin(desktop: boolean): number {
+  return desktop ? 64 : 16;
+}
 
 export type ImagePreviewContentProps = PreviewContentProps & {
   /**
@@ -27,6 +41,12 @@ export type ImagePreviewContentProps = PreviewContentProps & {
   inReply?: boolean;
   /** What Download saves, when it is not the viewer's own image: the original of a thumbnail. */
   downloadSrc?: string;
+  /**
+   * The pictures of the picture's message that open a viewer, and this one's
+   * place among them. Read when the viewer opens and again at each page turn.
+   * With two or more, the viewer pages between them.
+   */
+  pictures?: () => { pictures: ReplyPicture[]; index: number };
 };
 
 /**
@@ -57,8 +77,24 @@ export function ImagePreviewContent({
   onUnzoom,
   inReply = false,
   downloadSrc,
+  pictures: readPictures,
 }: ImagePreviewContentProps) {
   const { t } = useTranslation("chat");
+  const desktop = useDesktop();
+  // The set of pictures as read when the viewer opened. `opened` is the one
+  // whose image the viewer grew from, and it is the one that shows through the
+  // library's own image. Every other page is drawn here from its original.
+  const [set, setSet] = useState<{ pictures: ReplyPicture[]; opened: number }>({
+    pictures: [],
+    opened: 0,
+  });
+  const [index, setIndex] = useState(0);
+  const read = useRef(readPictures);
+  read.current = readPictures;
+  const swipe = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const paging = inReply && set.pictures.length >= 2;
+  const paged = paging && index !== set.opened;
+  const current = paging ? set.pictures[index] : undefined;
   const [scale, setScale] = useState(MIN_SCALE);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const viewport = useRef<HTMLDivElement>(null);
@@ -81,6 +117,35 @@ export function ImagePreviewContent({
   };
 
   useEffect(() => {
+    if (modalState !== "LOADING" || !read.current) return;
+    const { pictures, index: opened } = read.current();
+    setSet({ pictures, opened });
+    setIndex(opened);
+  }, [modalState]);
+
+  // The neighbours load before they are asked for.
+  useEffect(() => {
+    if (!paging) return;
+    for (const neighbour of [index - 1, index + 1]) {
+      const src = set.pictures[neighbour]?.src;
+      if (src) new Image().src = src;
+    }
+  }, [paging, index, set]);
+
+  /** Pages by `delta`, stopping at the first and the last picture. */
+  const go = (delta: number) => {
+    // A message that streamed since the viewer opened may have more pictures.
+    const fresh = read.current?.();
+    const pictures = fresh && fresh.pictures.length > 0 ? fresh.pictures : set.pictures;
+    const opened = fresh && fresh.pictures.length > 0 ? fresh.index : set.opened;
+    const next = index + delta;
+    if (next < 0 || next >= pictures.length) return;
+    setSet({ pictures, opened });
+    setIndex(next);
+    reset();
+  };
+
+  useEffect(() => {
     if (modalState === "UNLOADED") {
       setScale(MIN_SCALE);
       setPan({ x: 0, y: 0 });
@@ -90,10 +155,12 @@ export function ImagePreviewContent({
 
   const active = modalState === "LOADED";
   const image = modalImage(img);
+  // Download saves the original of the picture shown, never a thumbnail.
+  const saveSrc = paged ? current?.src : (downloadSrc ?? image?.props.src);
   return (
     <div
       ref={viewport}
-      className="absolute inset-0 overflow-clip"
+      className={cn("absolute inset-0 overflow-clip", paging && "touch-none")}
       data-preview-state={modalState}
       data-preview-pannable={active && scale > MIN_SCALE}
       onClick={(event) => {
@@ -122,9 +189,15 @@ export function ImagePreviewContent({
         } else if (event.key === "0") {
           event.preventDefault();
           reset();
+        } else if (paging && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+          event.preventDefault();
+          go(event.key === "ArrowLeft" ? -1 : 1);
         }
       }}
       onPointerDown={(event) => {
+        if (paging && active && scale === MIN_SCALE && event.pointerType === "touch") {
+          swipe.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+        }
         if (!active || scale === MIN_SCALE || event.button !== 0) return;
         if (!(event.target instanceof HTMLImageElement)) return;
         event.preventDefault();
@@ -140,7 +213,9 @@ export function ImagePreviewContent({
       }}
       onPointerMove={(event) => {
         const start = drag.current;
-        const image = viewport.current?.querySelector("img");
+        const image =
+          viewport.current?.querySelector("img[data-preview-current]") ??
+          viewport.current?.querySelector("img");
         if (!start || start.pointerId !== event.pointerId || !image || !viewport.current) return;
         const imageBounds = image.getBoundingClientRect();
         const bounds = viewport.current.getBoundingClientRect();
@@ -152,11 +227,26 @@ export function ImagePreviewContent({
         });
       }}
       onPointerUp={(event) => {
+        const start = swipe.current;
+        if (start?.pointerId === event.pointerId) {
+          swipe.current = null;
+          const dx = event.clientX - start.x;
+          const dy = event.clientY - start.y;
+          if (
+            scale === MIN_SCALE &&
+            Math.abs(dx) > SWIPE_DISTANCE &&
+            Math.abs(dx) > SWIPE_RATIO * Math.abs(dy)
+          ) {
+            go(dx < 0 ? 1 : -1);
+            return;
+          }
+        }
         if (drag.current?.pointerId !== event.pointerId) return;
         drag.current = null;
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
       onPointerCancel={() => {
+        swipe.current = null;
         drag.current = null;
         suppressBackdropClick.current = false;
       }}
@@ -171,7 +261,36 @@ export function ImagePreviewContent({
         }}
         onDragStart={(event) => event.preventDefault()}
       >
-        {image && (inReply ? image : clipToThumbnail(image, modalState))}
+        {image &&
+          (inReply
+            ? cloneElement(image, {
+                "data-preview-current": paged ? undefined : "",
+                // The library's image keeps its place, hidden, so the viewer
+                // still closes on its transition.
+                style: { ...image.props.style, visibility: paged ? "hidden" : undefined },
+              } as ImgHTMLAttributes<HTMLImageElement>)
+            : clipToThumbnail(image, modalState))}
+        {paged && current && (
+          <div
+            className="absolute flex items-center justify-center"
+            style={{ inset: viewerMargin(desktop) }}
+          >
+            <img
+              key={`${index}:${current.src}`}
+              data-preview-current=""
+              src={current.src}
+              alt={current.alt}
+              draggable={false}
+              className={cn(
+                "max-h-full max-w-full object-contain transition-opacity",
+                modalState === "UNLOADING" ? "opacity-0" : "opacity-100",
+              )}
+              // The page leaves with the backdrop, not back to a thumbnail it
+              // did not come from.
+              style={{ transitionDuration: "var(--preview-return-duration, 280ms)" }}
+            />
+          </div>
+        )}
       </div>
       {/* Close comes first in the DOM, so it keeps the viewer's initial focus. */}
       <div className="absolute right-4 top-4 flex flex-row-reverse gap-2">
@@ -183,17 +302,44 @@ export function ImagePreviewContent({
           disabled={modalState === "UNLOADING"}
           className="rounded-full border-border bg-surface shadow-sm"
         />
-        {inReply && (downloadSrc ?? image?.props.src) && (
+        {inReply && saveSrc && (
           <IconButton
             data-preview-controls
             label={t("composer.downloadImage")}
             icon={<Download aria-hidden />}
-            onClick={() => downloadImage((downloadSrc ?? image?.props.src) as string)}
+            onClick={() => downloadImage(saveSrc)}
             disabled={modalState === "UNLOADING"}
             className="rounded-full border-border bg-surface shadow-sm"
           />
         )}
       </div>
+      {paging && (
+        <>
+          <output
+            data-preview-controls
+            aria-live="polite"
+            className="absolute left-4 top-4 flex h-[var(--control-h-md)] items-center rounded-full border border-border bg-surface px-3 text-ui tabular-nums text-foreground shadow-sm"
+          >
+            {t("composer.imageCounter", { current: index + 1, total: set.pictures.length })}
+          </output>
+          <IconButton
+            data-preview-controls
+            label={t("composer.previousImage")}
+            icon={<ChevronLeft aria-hidden />}
+            onClick={() => go(-1)}
+            disabled={!active || index === 0}
+            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full border-border bg-surface shadow-sm"
+          />
+          <IconButton
+            data-preview-controls
+            label={t("composer.nextImage")}
+            icon={<ChevronRight aria-hidden />}
+            onClick={() => go(1)}
+            disabled={!active || index === set.pictures.length - 1}
+            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full border-border bg-surface shadow-sm"
+          />
+        </>
+      )}
       <div
         data-preview-controls
         className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-surface p-2 text-foreground shadow-sm"
