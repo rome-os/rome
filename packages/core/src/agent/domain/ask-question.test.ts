@@ -213,10 +213,10 @@ describe("the question card described as data", () => {
     { id: "note", question: "Anything else?", type: "text", optional: true },
   ];
 
-  it("is a card every reader can draw, and only as one the agent waits on", () => {
+  it("is a card every client can draw, whose events are its own", () => {
     const ui = questionCardUi(questions);
-    expect(checkWidgetUi(ui, {}, { waits: true })).toEqual([]);
-    expect(checkWidgetUi(ui)).not.toEqual([]);
+    // Send and Dismiss are the card's own events, which core handles as its owner.
+    expect(checkWidgetUi(ui)).toEqual([]);
     expect(ui.data).toEqual({
       answers: [
         { values: ["Warm"], text: "" },

@@ -1,12 +1,21 @@
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { A2uiSurface } from "@a2ui/react/v0_9";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { widgetEventPath } from "@/lib/chat-api";
+import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
 import { fetchJson } from "@/lib/fetch-json";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
+import { WidgetHostContext } from "./turn-fields";
 import {
   ROME_WIDGET_CATALOG_ID,
   romeWidgetCatalog,
@@ -26,17 +35,12 @@ export interface WidgetUiCardProps {
   bind?: Record<string, string>;
   /** The widget's line, shown when the card's data cannot be read. */
   text: string;
-  /** Set for a card the agent waits on. Its `rome:answer` and `rome:dismiss`
-   *  buttons start a turn in the chat, which `onAnswer` sends and follows;
-   *  `result` is the stored answer once there is one, which locks the card. */
+  /** Set for a card the agent waits on. `result` is the stored answer once
+   *  there is one, which locks the card; `onSettled` hears what core said to
+   *  each event. */
   waiting?: {
     result?: Record<string, unknown>;
-    onAnswer: (
-      widgetId: string,
-      toolUseId: string,
-      name: string,
-      context: Record<string, unknown>,
-    ) => void | Promise<unknown>;
+    onSettled?: (outcome: WidgetEventOutcome) => void;
   };
 }
 
@@ -66,10 +70,6 @@ function withHostStrings(value: unknown, translate: (key: string) => string): un
     keys.map((k) => [k, k === "action" ? o[k] : withHostStrings(o[k], translate)]),
   );
 }
-
-/** Whether a press answers the interaction the agent waits on, so it starts
- *  a turn the chat follows. Where the press goes is core's to decide. */
-const startsATurn = (name: string) => name === "rome:answer" || name === "rome:dismiss";
 
 const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(appId)}/${path}`;
 
@@ -108,11 +108,16 @@ export function WidgetUiCard({
 }: WidgetUiCardProps) {
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
+  const [sendFailed, setSendFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const result = waiting?.result;
   const dismissed = result?.dismissed === true;
-  const locked = result !== undefined || sent;
+  const widgetHost = useContext(WidgetHostContext);
+  const widgetHostRef = useRef(widgetHost);
+  widgetHostRef.current = widgetHost;
+  // A view that only shows the chat sends nothing, so its cards stay locked.
+  const locked = result !== undefined || sent || widgetHost.readOnly === true;
   const waitingRef = useRef(waiting);
   waitingRef.current = waiting;
   // Buttons wait for the first read: a press before it would post a context
@@ -164,35 +169,35 @@ export function WidgetUiCard({
 
   const { processor, drawable } = useMemo(() => {
     const p = new MessageProcessor([romeWidgetCatalog], async (action) => {
-      // Core decides what every press means. A press that answers the agent
-      // starts a turn, which the chat sends so it can follow it.
-      const host = waitingRef.current;
-      if (host && startsATurn(action.name)) {
-        setSent(true);
-        // A send that fails unlocks the card, so the guardian can try again.
-        const sending = host.onAnswer(
-          widgetId,
-          toolUseId,
-          action.name,
-          (action.context ?? {}) as Record<string, unknown>,
-        );
-        await Promise.resolve(sending).catch(() => setSent(false));
-        return;
-      }
-      if (inFlight.current) return;
+      // Core decides what every event means; the card only sends it. A turn
+      // the event starts reaches the chat through live events.
+      if (inFlight.current || widgetHostRef.current.readOnly) return;
       inFlight.current = true;
       setBusy(true);
+      const host = waitingRef.current;
+      let outcome: WidgetEventOutcome = { ok: false, status: 0 };
       try {
-        await fetchJson<unknown>(widgetEventPath(widgetId), {
-          method: "POST",
-          json: { name: action.name, context: action.context ?? {} },
-          fallback: "The card's button failed",
+        outcome = await postWidgetEvent(widgetId, {
+          name: action.name,
+          context: action.context ?? {},
+          turn: widgetHostRef.current.turnFields(),
         });
-        await load(p);
-        setFailed(false);
+        if (!outcome.ok) throw new Error(`The widget's event failed: ${outcome.status}`);
+        // A card the agent waits on is answered once core takes the event; any
+        // other card reads its data again.
+        setSendFailed(false);
+        if (host) setSent(true);
+        else {
+          await load(p);
+          setFailed(false);
+        }
       } catch {
-        setFailed(true);
+        // A refused event says the send failed; a read after it says the data did.
+        if (outcome.ok) setFailed(true);
+        else setSendFailed(true);
       } finally {
+        host?.onSettled?.(outcome);
+        widgetHostRef.current.onSettled?.(outcome);
         inFlight.current = false;
         setBusy(false);
       }
@@ -287,12 +292,22 @@ export function WidgetUiCard({
       ) : drawable ? null : (
         undrawable
       )}
-      {waiting && locked ? (
+      {/* A view that only shows the chat locks an open card without sending
+          it, so it says how the card ended only when it did. */}
+      {waiting && (result !== undefined || sent) ? (
         <span className="text-aux text-muted-foreground">
-          {t(dismissed ? "questionCard.dismissed" : "questionCard.answered")}
+          {t(
+            result === undefined
+              ? "questionCard.sent"
+              : dismissed
+                ? "questionCard.dismissed"
+                : "questionCard.answered",
+          )}
         </span>
       ) : null}
-      {failed ? (
+      {sendFailed ? (
+        <span className="text-aux text-destructive">{t("stream.errors.sendFallback")}</span>
+      ) : failed ? (
         <span className="text-aux text-destructive">
           {t("appComponent.widgetUnavailable", { text })}
         </span>

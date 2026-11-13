@@ -5,18 +5,14 @@ import SwiftUI
 /// A card described as data, drawn natively. Google's A2UI engine reads the
 /// card, resolves its paths and keeps its data; `WidgetCatalog` draws it.
 /// Each `bind` is read from the app's API when the card appears, so it shows
-/// the app's data as it stands. A press goes to core, which calls the app; the
-/// card then reads every `bind` again, and nothing is said in the chat. On a
-/// card the agent waits on, `rome:answer` and `rome:dismiss` start a turn,
-/// which the chat sends so it can follow it.
+/// the app's data as it stands. Every event goes to core, which decides what it
+/// means; the card only sends it. A card the agent waits on is sent once core
+/// takes the event, and its turn reaches the chat with the next read.
 struct WidgetUICardView: View {
-    /// What a card the agent waits on needs: the stored answer once there is
-    /// one, which locks the card, and how to answer or dismiss it.
+    /// A card the agent waits on: the stored answer once there is one, which
+    /// locks the card.
     struct Waiting {
         let answered: Rome.JSONValue?
-        let sending: Bool
-        /// Sends a press that starts a turn: its event name and context.
-        let answer: (String, Rome.JSONValue) -> Void
     }
 
     let part: WidgetUIPart
@@ -26,7 +22,7 @@ struct WidgetUICardView: View {
     var press: (String, Rome.JSONValue) async throws -> Void = { _, _ in throw APIError.notFound }
     var waiting: Waiting? = nil
 
-    private var locked: Bool { waiting.map { $0.answered != nil || $0.sending } ?? false }
+    private var locked: Bool { waiting?.answered != nil || surface.sent }
 
     @StateObject private var surface = WidgetSurface()
 
@@ -47,8 +43,17 @@ struct WidgetUICardView: View {
                 Text(answered["dismissed"]?.bool == true ? "Dismissed" : "Answered")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
+            } else if surface.sent {
+                Text("Sent")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
             }
-            if surface.failed {
+            if surface.sendFailed {
+                Text("Couldn't send your answer. Your choices are kept")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if surface.failed {
                 Text("Could not read this card's data. \(part.text)")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.destructive)
@@ -62,15 +67,13 @@ struct WidgetUICardView: View {
         .padding(.top, 4)
         .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
         .task(id: part) {
-            surface.waiting = waiting
-            surface.locked = locked
+            surface.answered = waiting?.answered != nil
             surface.show(part, call: call, press: press)
             surface.showAnswered(waiting?.answered)
             await surface.load()
         }
-        .onChange(of: locked) { surface.locked = locked }
         .onChange(of: waiting?.answered) {
-            surface.waiting = waiting
+            surface.answered = waiting?.answered != nil
             surface.showAnswered(waiting?.answered)
         }
     }
@@ -83,12 +86,15 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var viewModel: SurfaceViewModel?
     @Published private(set) var loaded = false
     @Published private(set) var failed = false
+    /// Core did not take the last event the card sent.
+    @Published private(set) var sendFailed = false
     @Published private(set) var undrawable = false
     @Published private(set) var busy = false
     @Published private(set) var clears = WidgetClears()
-    /// How a card the agent waits on answers, and whether it is answered.
-    var waiting: WidgetUICardView.Waiting?
-    var locked = false
+    /// Set once core takes an event on a card the agent waits on.
+    @Published private(set) var sent = false
+    /// Whether the card the agent waits on is answered, as stored.
+    var answered = false
 
     private var processor: MessageProcessor?
     private var part: WidgetUIPart?
@@ -109,6 +115,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         self.send = press
         loaded = false
         failed = false
+        sendFailed = false
         // A stored part is read back as data, so it is checked again here.
         guard part.isDrawable else {
             undrawable = true
@@ -209,21 +216,20 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     nonisolated func handle(error: RendererError, from surfaceID: String) {}
 
     private func press(_ name: String, body: Rome.JSONValue) async {
-        // Core decides what every press means. A press that answers the agent
-        // starts a turn, which the chat sends so it can follow it.
-        if part?.waits == true, WidgetPaths.startsATurn(name) {
-            guard let waiting, !locked else { return }
-            waiting.answer(name, body)
-            return
-        }
-        guard let send, !busy else { return }
+        // Core decides what every event means; the card only sends it.
+        let waits = part?.waits == true
+        guard let send, !busy, !(waits && (answered || sent)) else { return }
         busy = true
         defer { busy = false }
         do {
             try await send(name, body)
-            await load()
+            // A card the agent waits on is sent; any other card reads its data
+            // again, and that read says whether the card's data failed.
+            sendFailed = false
+            failed = false
+            if waits { sent = true } else { await load() }
         } catch {
-            failed = true
+            sendFailed = true
         }
     }
 

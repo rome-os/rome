@@ -84,23 +84,6 @@ private func task(_ id: String, chat: String, status: String?, endReason: String
         return part
     }
 
-    /// A failed answer leaves the form as it was: nothing answered, a brief says so.
-    @Test func aFailedAnswerKeepsTheForm() async {
-        let backend = FakeBackend()
-        backend.answerError = .network
-        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
-        store.answer(widgetId: "m", toolUseId: part().toolUseId, name: "rome:answer", context: .object(["answers": .array([])]))
-        for _ in 0..<50 where store.notice == nil { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(store.localAnswers["q1"] == nil)
-        #expect(store.notice != nil)
-        #expect(!store.answering.contains("q1"))
-        // A sent answer is kept once the server has it.
-        backend.answerError = nil
-        store.answer(widgetId: "m", toolUseId: part().toolUseId, name: "rome:answer", context: .object(["answers": .array([])]))
-        for _ in 0..<50 where store.localAnswers["q1"] == nil { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(store.localAnswers["q1"] != nil)
-    }
-
     @Test func aSendThatFailedForGoodCanBeRemoved() async {
         let backend = FakeBackend()
         backend.sendError = .server(status: 409, message: "This chat is archived and read-only")

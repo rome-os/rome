@@ -138,7 +138,7 @@ struct TaskAskView: View {
         case .settled:
             if let outcome = question.outcome, let part {
                 SettledCard(title: title, outcome: SettledOutcome.answer(outcome.output)) {
-                    QuestionCardView(part: part, answered: outcome.output, sending: false) { _, _ in }
+                    QuestionCardView(part: part, answered: outcome.output) { _, _ in }
                 }
             } else {
                 SettledCard(title: title, outcome: question.outcome.map { SettledOutcome.answer($0.output) } ?? String(localized: "Answered"))
@@ -149,8 +149,8 @@ struct TaskAskView: View {
             }
         case .waiting, .expired:
             if let part {
-                QuestionCardView(part: part, answered: store.localAnswers[question.id], sending: store.answering.contains(question.id)) { name, context in
-                    store.answer(widgetId: part.ui?.widgetId ?? "", toolUseId: part.toolUseId, name: name, context: context, sessionId: chatId)
+                QuestionCardView(part: part, answered: nil) { name, context in
+                    try await store.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
                 }
                 .id(question.id)
                 .bubbleWidth()

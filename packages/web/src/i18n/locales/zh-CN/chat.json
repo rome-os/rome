@@ -437,6 +437,7 @@
     "stopGenerating": "停止生成"
   },
   "questionCard": {
+    "sent": "已发送",
     "optional": "可选",
     "addOwn": "添加自己的选项…",
     "typeOwn": "或输入自己的答案…",

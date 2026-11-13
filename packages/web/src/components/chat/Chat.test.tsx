@@ -1452,6 +1452,21 @@ describe("Chat turn poll", () => {
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
   });
 
+  it("reads the chat again when its topic says it stopped running", async () => {
+    const socket = await renderIdle();
+    const reads = rs.mocked(listSessionMessages).mock.calls.length;
+    act(() =>
+      socket.receive({
+        type: "event",
+        topic: sessionTopic,
+        event: "session_running",
+        data: { sessionId: "session-1", running: false },
+      }),
+    );
+    await flush();
+    expect(rs.mocked(listSessionMessages).mock.calls.length).toBe(reads + 1);
+  });
+
   it.each([
     false,
     true,

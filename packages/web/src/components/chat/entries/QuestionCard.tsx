@@ -1,5 +1,6 @@
 import { lazy, type ReactNode, Suspense } from "react";
 import { useTranslation } from "react-i18next";
+import type { WidgetEventOutcome } from "@/lib/chat-api";
 import { answerOutcome, SettledCard } from "./SettledCard";
 import { CardBoundary } from "./widget-ui/CardBoundary";
 import { isDrawableCard } from "./widget-ui/drawable";
@@ -19,13 +20,8 @@ export interface QuestionCardProps {
   props?: Record<string, unknown>;
   /** Prior submitted output when this instance already resolved. */
   result?: Record<string, unknown>;
-  /** Sends Send or Dismiss, which core turns into the answer. */
-  onAnswer: (
-    widgetId: string,
-    toolUseId: string,
-    name: string,
-    context: Record<string, unknown>,
-  ) => void;
+  /** Hears what core said to each of the card's events. */
+  onSettled?: (outcome: WidgetEventOutcome) => void;
   /** Shown at the top inside the card, such as the task it is for. */
   header?: ReactNode;
   /**
@@ -63,7 +59,7 @@ function WholeQuestionCard({
   ui,
   props,
   result,
-  onAnswer,
+  onSettled,
   header,
 }: Omit<QuestionCardProps, "settled">) {
   const line = <QuestionLine props={props} />;
@@ -78,7 +74,7 @@ function WholeQuestionCard({
           appId={appId}
           ui={ui as never}
           text=""
-          waiting={{ result, onAnswer }}
+          waiting={{ result, onSettled }}
         />
       </Suspense>
     </CardBoundary>

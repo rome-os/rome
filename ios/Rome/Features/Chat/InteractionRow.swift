@@ -61,11 +61,11 @@ struct InteractionRow: View {
             .bubbleWidth()
         case .question(_, let part, _, let answered?):
             SettledCard(title: SettledOutcome.title(part), outcome: SettledOutcome.answer(answered)) {
-                QuestionCardView(part: part, answered: answered, sending: false) { _, _ in }
+                QuestionCardView(part: part, answered: answered) { _, _ in }
             }
-        case .question(_, let part, let sessionId, let answered):
-            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { name, context in
-                store.answer(widgetId: part.ui?.widgetId ?? "", toolUseId: part.toolUseId, name: name, context: context, sessionId: sessionId)
+        case .question(_, let part, _, let answered):
+            QuestionCardView(part: part, answered: answered) { name, context in
+                try await store.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
             }
             .bubbleWidth()
         case .connect(let id, let part, let sessionId):

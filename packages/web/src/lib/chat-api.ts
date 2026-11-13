@@ -493,24 +493,25 @@ export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | 
 export const widgetEventPath = (widgetId: string) =>
   `/api/chat/widgets/${encodeURIComponent(widgetId)}/events`;
 
-/** The interaction result a widget's answer becomes, as the chat shows it
- *  before the server's copy arrives. */
-export const widgetAnswerOutput = (name: string, context: Record<string, unknown>) =>
-  name === "rome:dismiss" ? { dismissed: true } : context;
+/** What core said to an event: whether it took it, and its status when not. */
+export interface WidgetEventOutcome {
+  ok: boolean;
+  status: number;
+}
 
-/** An event that answers the agent waiting on a widget: it becomes a turn in
- *  the chat, read back like any other turn. `turn` carries the chat's own turn fields. */
-export async function postWidgetEventTurn(
+/** Sends an event a widget fired to core, which decides what it means. `turn`
+ *  is the chat's own turn fields, used only when the event starts a turn. */
+export async function postWidgetEvent(
   widgetId: string,
   body: { name: string; context?: unknown; turn?: Record<string, unknown> },
-): Promise<PostTurnResult> {
+): Promise<WidgetEventOutcome> {
   const res = await fetch(widgetEventPath(widgetId), {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...body, turn: { inputId: randomUUID(), ...body.turn } }),
   });
-  return parseTurnResponse(res);
+  return { ok: res.ok, status: res.status };
 }
 
 export async function postSessionTurnJson(

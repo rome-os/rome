@@ -199,10 +199,10 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(cards(session: "topic-1") == [.question(sessionId: "topic-1"), .approval, .webOnly])
     }
 
-    @Test func theAnswerGoesToTheQuestionsSession() async {
+    @Test func aWidgetsEventGoesToCoreByItsId() async {
         let backend = FakeBackend()
         let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
-        store.answer(widgetId: "m-q1", toolUseId: "q1", name: "rome:answer", context: .object(["answers": .array([])]))
+        try? await store.answerWidget(widgetId: "m-q1", name: "send", context: .object(["answers": .array([])]))
         for _ in 0..<20 where backend.answeredWidgets.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(backend.answeredWidgets == ["m-q1"])
     }

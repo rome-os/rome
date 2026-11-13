@@ -20,8 +20,8 @@ struct WidgetUIPart: Hashable, Sendable {
 
     /// The data model the card starts from.
     let data: JSONValue
-    /// Whether the agent waits on the card: its `rome:answer` and
-    /// `rome:dismiss` buttons answer the interaction.
+    /// Whether the agent waits on the card. Core decides what its events mean;
+    /// the card only sends them.
     let waits: Bool
 
     /// A `widget` part with `ui`.
@@ -53,25 +53,14 @@ struct WidgetUIPart: Hashable, Sendable {
     var isDrawable: Bool {
         guard WidgetPaths.appAPIPath(appId: appId, path: "x") != nil else { return false }
         let posts = components.compactMap { $0["action"]?["event"]?["name"]?.string }
-            .filter { !(waits && WidgetPaths.startsATurn($0)) }
+            // A card stored before its events were its own names them `rome:…`.
+            .filter { !(waits && $0.hasPrefix("rome:")) }
         return (Array(bind.values) + posts).allSatisfy(WidgetPaths.isAppPath)
     }
 }
 
 /// The paths a card reads and writes, and the images it loads.
 enum WidgetPaths {
-    /// Whether a press answers the interaction the agent waits on, so it starts
-    /// a turn the chat follows. Where the press goes is core's to decide.
-    static func startsATurn(_ name: String) -> Bool {
-        name == "rome:answer" || name == "rome:dismiss"
-    }
-
-    /// The interaction result a widget's answer becomes, as the chat shows it
-    /// before the server's copy arrives.
-    static func answerOutput(_ name: String, _ context: JSONValue) -> JSONValue {
-        name == "rome:dismiss" ? .object(["dismissed": .bool(true)]) : context
-    }
-
     /// Rome's own strings a card names with `{ string }`: the question card's labels.
     static func hostString(_ name: String) -> String {
         switch name {

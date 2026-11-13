@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { stopTask } from "@/components/concierge/send-task-action";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { Button } from "@/components/ui/button";
-import { postWidgetEventTurn, widgetAnswerOutput } from "@/lib/chat-api";
+import type { WidgetEventOutcome } from "@/lib/chat-api";
 import type { ApprovalCardStatus } from "@/lib/chat-types";
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { TaskApprovalOutcome, TaskCard } from "@rome/api-types/chat";
@@ -17,6 +17,7 @@ import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { isOpenWait } from "./live-task-cards";
 import { QuestionCard } from "./QuestionCard";
+import { WidgetHostContext } from "./widget-ui/turn-fields";
 import { answerOutcome, approvalOutcome, SettledCard } from "./SettledCard";
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
@@ -236,7 +237,6 @@ function FoldedAskCard({ card }: { card: AskedCard }) {
             result={
               card.outcome.kind === "answered" ? card.outcome.answer.output : { dismissed: true }
             }
-            onAnswer={() => {}}
             settled="full"
           />
         ) : undefined
@@ -367,6 +367,9 @@ function LiveTaskChatCard({
   );
 }
 
+/** A task chat's turn takes the task's own fields, so its card sends none. */
+const TASK_CHAT_HOST = { turnFields: () => ({}) };
+
 /**
  * The question or approval a task waits on its owner for, drawn from the card
  * Rome filled in, answerable here.
@@ -388,10 +391,6 @@ function WaitingTaskCard({
 }) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
-  const [submitted, setSubmitted] = useState<{
-    key: string;
-    output: Record<string, unknown>;
-  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const interaction =
@@ -408,28 +407,19 @@ function WaitingTaskCard({
     await onRefresh();
   }
 
-  async function answer(widgetId: string, name: string, context: Record<string, unknown>) {
-    if (!interaction || submitted?.key === interaction.key) return;
-    setSubmitted({ key: interaction.key, output: widgetAnswerOutput(name, context) });
-    setError(null);
-    try {
-      // This turn belongs to the task, never to the main Chat's stream state.
-      const result = await postWidgetEventTurn(widgetId, { name, context });
-      if (!result.ok) {
-        setError(
-          result.status === 400
-            ? t("concierge.taskCardAlreadyAnswered")
-            : result.message || t("stream.errors.sendFallback"),
-        );
-        setSubmitted(null);
-        setAttempt((value) => value + 1);
-      }
-    } catch {
-      setError(t("stream.errors.sendFallback"));
-      setSubmitted(null);
+  // Core takes the card's events; this hears what it said. A card already
+  // answered elsewhere refreshes and says so; a failure lets the guardian retry.
+  function settled(outcome: WidgetEventOutcome) {
+    if (outcome.ok) setError(null);
+    else {
+      setError(
+        outcome.status === 400
+          ? t("concierge.taskCardAlreadyAnswered")
+          : t("stream.errors.sendFallback"),
+      );
       setAttempt((value) => value + 1);
     }
-    await refresh();
+    void refresh();
   }
 
   const approvalCard = !!approval;
@@ -474,19 +464,20 @@ function WaitingTaskCard({
         />
       ) : interaction?.part.render?.builtin &&
         interaction.part.render.componentId === "question-card" ? (
-        <QuestionCard
-          widgetId={interaction.messageId}
-          key={`${interaction.key}:${attempt}`}
-          toolUseId={interaction.part.toolUseId}
-          appId="core"
-          ui={interaction.part.render.ui}
-          props={interaction.part.render.props}
-          result={submitted?.key === interaction.key ? submitted.output : undefined}
-          onAnswer={(widgetId, _toolUseId, name, context) => {
-            void answer(widgetId, name, context);
-          }}
-          header={header}
-        />
+        // The answer starts a turn in the task's chat, never with the turn
+        // fields of the chat this card is shown in.
+        <WidgetHostContext.Provider value={TASK_CHAT_HOST}>
+          <QuestionCard
+            widgetId={interaction.messageId}
+            key={`${interaction.key}:${attempt}`}
+            toolUseId={interaction.part.toolUseId}
+            appId="core"
+            ui={interaction.part.render.ui}
+            props={interaction.part.render.props}
+            onSettled={settled}
+            header={header}
+          />
+        </WidgetHostContext.Provider>
       ) : null}
     </div>
   );

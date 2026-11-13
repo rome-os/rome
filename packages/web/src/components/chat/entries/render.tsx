@@ -76,14 +76,6 @@ export interface RenderEntryOptions {
   ) => void | Promise<void>;
   /** Invoked when an inline app component dismisses without a result. */
   onDismissAppComponent?: (sessionId: string, toolUseId: string) => void | Promise<void>;
-  /** Invoked when a press on a widget the agent waits on answers it, as a turn. */
-  onAnswerWidget?: (
-    sessionId: string,
-    widgetId: string,
-    toolUseId: string,
-    name: string,
-    context: Record<string, unknown>,
-  ) => void | Promise<void>;
   /** Set by the chat transcript: each text block renders as its own bubble,
    * and every entry comes in once while `live` (its turn is running). */
   transcript?: { live: boolean };
@@ -103,7 +95,6 @@ export function renderSingleEntry(
     interactionResults,
     onSubmitAppComponent,
     onDismissAppComponent,
-    onAnswerWidget,
     transcript,
   } = options;
   // The blocks of one message all share its session; submissions/lookups use it.
@@ -116,12 +107,6 @@ export function renderSingleEntry(
     : () => {};
   // A widget is a message of its own, so the message's id is the widget's.
   const widgetId = messageId ?? "";
-  const answerWidget = (
-    id: string,
-    toolUseId: string,
-    name: string,
-    context: Record<string, unknown>,
-  ) => onAnswerWidget?.(sid, id, toolUseId, name, context);
   const dismiss = onDismissAppComponent
     ? (toolUseId: string) => onDismissAppComponent(sid, toolUseId)
     : () => {};
@@ -253,7 +238,6 @@ export function renderSingleEntry(
             ui={block.render.ui}
             props={block.render.props}
             result={resultFor(block.toolUseId)}
-            onAnswer={answerWidget}
           />
         );
       }

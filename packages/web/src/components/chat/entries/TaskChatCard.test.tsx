@@ -12,6 +12,7 @@ import { LatestTaskChatsContext, renderFlatEntries } from "./render";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import type { ChatEntry, ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { TaskChatCard } from "./TaskChatCard";
+import { WidgetHostContext } from "./widget-ui/turn-fields";
 import { questionCardRender } from "../../../../mock/fixtures/question-card";
 import type { TaskCard } from "@rome/api-types/chat";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
@@ -402,14 +403,21 @@ describe("TaskChatCard with its task", () => {
 });
 
 function show(isLatestForChat = true, as?: "task" | "ask", until?: number) {
+  // The Chat the card is shown in has turn fields of its own.
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/chat/main-chat"]}>
-        <Served isLatestForChat={isLatestForChat} as={as} until={until} />
+        <WidgetHostContext.Provider value={MAIN_CHAT_HOST}>
+          <Served isLatestForChat={isLatestForChat} as={as} until={until} />
+        </WidgetHostContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
+
+const MAIN_CHAT_HOST = {
+  turnFields: () => ({ personaId: "main-persona", workspace: { id: "main-ws" } }),
+};
 
 describe("TaskChatCard shown as one card or the other", () => {
   const expiredRow = {
@@ -878,7 +886,7 @@ describe("TaskChatCard", () => {
   it("allows a later question in the same mounted card to be answered", async () => {
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
-    await screen.findByText("Dismissed");
+    await screen.findByText("Sent");
     const nextQuestion = {
       ...question,
       toolUseId: "item_1",
@@ -895,7 +903,7 @@ describe("TaskChatCard", () => {
     await waitFor(() => expect(posts()).toHaveLength(2));
     expect(posts()[1][0]).toBe("/api/chat/widgets/next/events");
     expect(JSON.parse(String(posts()[1][1]?.body))).toMatchObject({
-      name: "rome:answer",
+      name: "send",
       context: { answers: [{ values: ["Yes"], text: "" }] },
     });
   });
@@ -909,11 +917,15 @@ describe("TaskChatCard", () => {
     const [url, init] = posts()[0];
     expect(url).toBe("/api/chat/widgets/ask/events");
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      name: "rome:answer",
+      name: "send",
       context: { answers: [{ values: ["Warm"], text: "" }] },
     });
+    // The turn is the task chat's, never with the Chat's persona or workspace.
+    const turn = JSON.parse(String(init?.body)).turn;
+    expect(turn.personaId).toBeUndefined();
+    expect(turn.workspace).toBeUndefined();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
-    expect(screen.getByText("Answered: Warm")).toBeTruthy();
+    expect(await screen.findByText("Sent")).toBeTruthy();
     expect(screen.getByRole("link").getAttribute("href")).toBe(`/chat/${chatId}`);
     await waitFor(() =>
       expect(
@@ -937,8 +949,8 @@ describe("TaskChatCard", () => {
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
-    expect(JSON.parse(String(posts()[0][1]?.body)).name).toBe("rome:dismiss");
-    expect(screen.getByText("Dismissed")).toBeTruthy();
+    expect(JSON.parse(String(posts()[0][1]?.body)).name).toBe("dismiss");
+    expect(await screen.findByText("Sent")).toBeTruthy();
   });
 
   it("shows an approval belonging to this task with the existing approval controls", async () => {

@@ -54,8 +54,6 @@ final class TranscriptStore {
     private(set) var resolvingApproval: [String: Bool] = [:]
     private(set) var approvalErrors: [String: String] = [:]
     /// Answers sent this session, before the server echoes them.
-    private(set) var localAnswers: [String: JSONValue] = [:]
-    private(set) var answering: Set<String> = []
     /// Each connect card's state, by row, kept while the card scrolls away.
     private(set) var connectPhases: [String: ConnectPhase] = [:]
     @ObservationIgnored private var connectRuns: [String: Task<Void, Never>] = [:]
@@ -98,11 +96,9 @@ final class TranscriptStore {
         share.chat = self
     }
 
-    /// Answers given to cards: stored ones, then those sent this session.
+    /// Answers given to cards, as stored.
     var answers: [String: JSONValue] {
-        var answers = TranscriptBuilder.answers(in: messages)
-        answers.merge(localAnswers) { stored, _ in stored }
-        return answers
+        TranscriptBuilder.answers(in: messages)
     }
 
     var rows: [TranscriptRow] {
@@ -913,31 +909,6 @@ final class TranscriptStore {
         }
     }
 
-    // MARK: Questions
-
-    /// Answers the agent waiting on a widget with an event, which starts a turn.
-    /// `widgetId` is the id of the message that holds the widget; `sessionId`
-    /// is the widget's chat, this one unless it says otherwise.
-    func answer(widgetId: String, toolUseId: String, name: String, context: JSONValue, sessionId: String? = nil) {
-        guard !answering.contains(toolUseId) else { return }
-        answering.insert(toolUseId)
-        // The form stays on screen, with the choices, until the server has the
-        // answer: a failure leaves it as it was, to send again.
-        Task {
-            do {
-                try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
-                let output = WidgetPaths.answerOutput(name, context)
-                localAnswers[toolUseId] = output
-                settle(kind: "question", id: toolUseId, outcome: .object(["kind": .string("answered"), "answer": .object(["text": .string(""), "output": output])]))
-                // An answer to a task's card wakes the task, not this chat.
-                if sessionId == nil || sessionId == self.sessionId { markRunning() }
-            } catch {
-                say(String(localized: "Couldn't send your answer. Your choices are kept"))
-            }
-            answering.remove(toolUseId)
-        }
-    }
-
     // MARK: Connect cards
 
     #if DEBUG
@@ -948,8 +919,15 @@ final class TranscriptStore {
     static func previewPhase(_ service: String) -> ConnectPhase? { nil }
     #endif
 
-    /// An event on a widget that calls its app, sent to core by the widget's id.
+    /// An event a widget fired, sent to core by the widget's id; core decides
+    /// what it means. What it changed, such as an answer and the turn it
+    /// starts, comes back with the next read: the server announces no message
+    /// of the guardian's own.
     func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
+        // Whatever core said, read the chat again: a card answered elsewhere
+        // shows its answer, and a turn the event started shows even if it
+        // ended before this chat saw it run.
+        defer { resync() }
         try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
     }
 

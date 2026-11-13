@@ -94,7 +94,7 @@ describe("a widget described as data", () => {
     expect(posts).toHaveLength(1);
     // The press goes to core, which calls the app.
     expect(String(posts[0]?.[0])).toBe("/api/chat/widgets/m-ui/events");
-    expect(JSON.parse(String(posts[0]?.[1]?.body))).toEqual({
+    expect(JSON.parse(String(posts[0]?.[1]?.body))).toMatchObject({
       name: "water",
       context: { date: "2026-11-11" },
     });

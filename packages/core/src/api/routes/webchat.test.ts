@@ -5179,7 +5179,7 @@ describe("Webchat API", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: "rome:answer",
+          name: "send",
           context: { answers: [{ values: ["Plain"], text: "" }] },
         }),
       });
@@ -5226,7 +5226,7 @@ describe("Webchat API", () => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: "rome:answer",
+            name: "send",
             context: { answers: [{ values: ["Plain"], text: "" }] },
           }),
         });
