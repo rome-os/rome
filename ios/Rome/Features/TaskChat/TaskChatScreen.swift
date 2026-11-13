@@ -189,6 +189,9 @@ struct TaskChatScreen: View {
             EmptyView()
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
+        case .automatedInput, .sessionRenewal:
+            // Only a Concierge chat draws its faint lines.
+            EmptyView()
         }
     }
 

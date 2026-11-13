@@ -151,6 +151,8 @@ describe("defer session continuity", () => {
     await runDefer(
       {
         kind: "event",
+        waitingFor: "the event",
+        deadlineMs: Date.UTC(2030, 0, 1),
         name: "CI on #12",
         note: "Check the run and tell the guardian.",
         event: { eventName: "github.check_suite", filter: [{ field: "pr", equals: "12" }] },

@@ -9,13 +9,14 @@ const log = createLogger("restart-marks");
 /**
  * Settles the status reactions a stopped Rome process left working, once at
  * startup, before any turn runs (docs/domains/chats.md#status-reaction). A
- * stopped process ends no turn, so no turn's end settles them: the work of
- * every turn this boot ended failed, unless startup continues that turn, whose
- * end then settles its chat's marks. Marks only show how work stands, so a
- * failure is logged and never stops boot. Answers how many changed.
+ * stopped process ends no turn, so no turn's end answers its messages: they
+ * are answered here, unless startup continues that turn, whose end then
+ * answers them. A task's mark follows its status, which a restart recomputes.
+ * Marks only show how work stands, so a failure is logged and never stops
+ * boot. Answers how many changed.
  */
 export async function settleMarksAfterRestart(
-  tasks: Pick<ConciergeTasksRepository, "failInterruptedReactions">,
+  tasks: Pick<ConciergeTasksRepository, "answerInterrupted" | "findBySession" | "setLastOutcome">,
   webchat: Pick<ChatsWebChatRepository, "canContinueAfterRestart" | "getRestartLastActivityAt">,
   ended: readonly InterruptedTurn[],
   now = Date.now(),
@@ -24,8 +25,17 @@ export async function settleMarksAfterRestart(
     const continuing = new Set(
       ended.filter((turn) => willContinueAfterRestart(turn, webchat, now)).map((t) => t.sessionId),
     );
-    const interrupted = new Set(ended.map((turn) => turn.sessionId));
-    return await tasks.failInterruptedReactions(continuing, interrupted);
+    // A task chat's turn the restart ended failed: startup never continues
+    // one, so its task ended failed, and the Concierge is told on catch-up.
+    let failed = 0;
+    for (const turn of ended) {
+      if (continuing.has(turn.sessionId)) continue;
+      const task = await tasks.findBySession(turn.sessionId);
+      if (!task) continue;
+      await tasks.setLastOutcome(task.id, "failed");
+      failed += 1;
+    }
+    return (await tasks.answerInterrupted(continuing)) + failed;
   } catch (error) {
     log.warn("failed to settle status reactions a stopped process left working", {
       error: error instanceof Error ? error.message : String(error),

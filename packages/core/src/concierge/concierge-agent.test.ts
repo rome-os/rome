@@ -65,7 +65,7 @@ describe("the Concierge agent", () => {
       "never the whole report, unless the guardian explicitly asks for the full text",
     );
     expect(concierge.systemPromptPrefix).toContain(
-      "A forwarded conclusion that asks the guardian something is such a message",
+      "Nor does a forwarded conclusion that asks the guardian something",
     );
     for (const obsolete of [
       "Long content the guardian asked for: `chat_forward`",
@@ -93,24 +93,17 @@ describe("the Concierge agent", () => {
       "`approval`",
       "`chat_card`",
       "Do not restate the question, options or approval",
-      "`messageId` returned by `chat_card` as the `needs_user` row anchor",
       "do not relay that answer",
       "instead type an answer in this chat",
       "pass it on with `chat_send`",
-      "turn_end ... by=guardian",
-      "update the row out of `needs_user`",
-      "even when you stay silent",
     ])
       expect(rule).toContain(text);
-    const taskListRule = concierge.systemPromptPrefix
-      .split("# Task list\n")[1]
-      .split("\n")
-      .find((line) => line.startsWith("- A delivered result"));
-    expect(taskListRule).toContain(
-      "`chat_card` first for task question cards or pending approvals",
-    );
-    expect(taskListRule).toContain("otherwise `say` or `chat_forward`");
-    expect(taskListRule).toContain("then write the row with the `messageId` it returned");
+    // Rome keeps the status; the prompt never asks for one by hand.
+    expect(concierge.systemPromptPrefix).not.toContain("needs_user");
+    const taskList = concierge.systemPromptPrefix.split("# Task list\n")[1];
+    expect(taskList).toContain("You never set a status");
+    // Only a card makes a task wait for the guardian.
+    expect(taskList).toContain("with a card, never in plain text");
   });
 
   it("can find and delete the routine that watches a task row", () => {
@@ -192,10 +185,12 @@ describe("the Concierge agent", () => {
       expect(section).toContain(text);
   });
 
-  it("names every defer for a row with task:<id> and reads its wake-ups and batches", () => {
+  it("links every defer for a task by its taskId and reads its wake-ups and batches", () => {
     const prompt = concierge.systemPromptPrefix;
     const section = prompt.slice(prompt.indexOf("# Task list"));
-    expect(section).toContain("name containing `task:<id>`");
+    expect(section).toContain("`defer` with its `taskId`");
+    expect(section).toContain("`deadline`");
+    expect(section).toContain("<task_review>");
     expect(section).toContain("`system:search_routine`");
     expect(section).toContain("`system:delete_routine`");
     expect(section).toContain("<task_events>");
@@ -203,11 +198,11 @@ describe("the Concierge agent", () => {
     expect(section).toContain('`Stop "Title"`');
     expect(section).toContain("`task_list`");
     expect(section).toContain("first 6 characters of the row id");
-    expect(section).toContain("`chat_stop`");
+    expect(section).toContain("`stop: true`");
     expect(section).toContain("`archived: true`");
     expect(section).toContain("ask which one in a single bubble");
     expect(prompt).not.toContain("task_action");
-    expect(section).toContain("ONE `task_upsert`");
+    expect(section).toContain("needs no write unless the summary changed");
     // The task list rules are one separate section after the existing ones.
     expect(prompt.indexOf("# Task list")).toBeGreaterThan(prompt.indexOf("# Interruptions"));
     expect(prompt.match(/# Task list/g)).toHaveLength(1);

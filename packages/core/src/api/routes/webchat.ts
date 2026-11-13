@@ -1,6 +1,7 @@
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
+  ChatPendingChecksResponse,
   ConciergeStatusReaction,
   MessageStatusReactionEvent,
 } from "@rome/api-types/concierge";
@@ -1053,7 +1054,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     // A status reaction is no message, so it only changes the bubble and
     // never pushes (docs/domains/chats.md#status-reaction).
-    const unsubscribeReaction = deps.concierge?.deps.tasks.repo.onReaction((target, reaction) => {
+    const unsubscribeReaction = deps.concierge?.deps.tasks.onReaction((target, reaction) => {
       if (target.chatId !== sessionId) return;
       const event: MessageStatusReactionEvent = {
         sessionId,
@@ -1484,10 +1485,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     messages: T[],
   ): Promise<(T & { statusReaction?: ConciergeStatusReaction })[]> => {
-    const repo = deps.concierge?.deps.tasks.repo;
+    const tasks = deps.concierge?.deps.tasks;
     const asked = messages.filter((message) => message.role === "user").map((m) => m.id);
-    if (!repo || asked.length === 0) return messages;
-    const reactions = await repo.reactionsOf(sessionId, asked);
+    if (!tasks || asked.length === 0) return messages;
+    const reactions = await tasks.reactionsOf(sessionId, asked);
     if (reactions.size === 0) return messages;
     return messages.map((message) => {
       const statusReaction = reactions.get(message.id);
@@ -2866,10 +2867,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
-    // The chat's row on the Concierge's todo list stays, unlinked, once the
-    // chat is gone; the Concierge hears of it quietly.
-    const taskId = (await deps.concierge?.taskOfChat(sessionId)) ?? null;
-    await deps.webchatRepo.deleteSession(sessionId);
+    // A task chat's task stops with it: its row is stopped and archived in
+    // the delete's own transaction, and the Concierge hears of it quietly.
+    let taskId: string | null = null;
+    if (deps.concierge) taskId = await deps.concierge.endTaskChat(sessionId, "deleted");
+    else await deps.webchatRepo.deleteSession(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
     if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
@@ -2902,16 +2904,47 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (body.archived && isMainConciergeChat(lookup.session)) {
       return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
     }
-    if (body.archived) {
-      await deps.webchatRepo.archiveSession(sessionId);
+    // A repeated archive changes nothing, so a topic chat is not retired twice.
+    if (body.archived && !lookup.session.archivedAt) {
+      // Archiving a task chat stops its task, in the archive's own transaction.
+      if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "archived");
+      else await deps.webchatRepo.archiveSession(sessionId);
       if (isConciergeChat(lookup.session)) await deps.concierge?.retireChat(sessionId, "archived");
-    } else {
+    } else if (!body.archived) {
       await deps.webchatRepo.unarchiveSession(sessionId);
+      await deps.concierge?.restoreTaskChat(sessionId);
     }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     return c.json(toWebchatSessionResponse(session, messageCount));
+  });
+
+  // The checks pending in a chat, which its owner can cancel there.
+  app.get("/chat/sessions/:id/checks", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const pending = (await deps.concierge?.deps.checks?.inChatForApi(sessionId)) ?? [];
+    // A check for a task names it, so the strip can say which task it is for.
+    const tasks = deps.concierge?.deps.tasks.repo;
+    const checks = await Promise.all(
+      pending.map(async (check) => ({
+        ...check,
+        taskTitle: check.taskId ? ((await tasks?.get(check.taskId))?.title ?? null) : null,
+      })),
+    );
+    return c.json({ checks } satisfies ChatPendingChecksResponse);
+  });
+
+  app.delete("/chat/sessions/:id/checks/:checkId", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    // One for a task tells the Concierge, as from the task's row.
+    const cancelled = await deps.concierge?.cancelCheckByOwner(sessionId, c.req.param("checkId"));
+    if (!cancelled) return c.json({ error: "No such check in this chat" }, 404);
+    return c.json({ ok: true });
   });
 
   app.patch("/chat/sessions/:id/pin", async (c) => {
@@ -4047,13 +4080,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
+    // Words typed into a task chat take a stopped task up again.
+    if (!conciergeHeader) {
+      await deps.concierge?.resumeTaskChat?.(sessionId).catch((error: unknown) =>
+        log.warn("failed to take a stopped task up again", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     // The Concierge reads which message this is, and the task it belongs to.
     if (conciergeHeader) {
       const line = chatThreadLine(
         inputId,
         targetRoot && threadTask ? { root: targetRoot, task: threadTask } : null,
       );
-      promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;
+      // Messages the owner stopped before an answer are named once, so this
+      // turn does not pick them up from the history.
+      const stopped = (await deps.concierge?.stoppedRequestLines(sessionId)) ?? "";
+      promptText = `${conciergeHeader}\n${stopped ? `${stopped}\n` : ""}${line}\n\n${noticedPrompt}`;
     }
 
     let agentSess;
@@ -4586,7 +4631,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // (docs/domains/chats.md#status-reaction).
         if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
           await deps.concierge?.deps.tasks.repo
-            .markTurnWorking(status.turnId, { chatId: sessionId, messageKey: status.inputId })
+            .takeMessage(status.turnId, { chatId: sessionId, messageKey: status.inputId })
             .catch((error: unknown) =>
               log.warn("failed to mark a status reaction", {
                 sessionId,

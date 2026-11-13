@@ -53,6 +53,10 @@ const server = {
   settings: {} as Record<string, unknown>,
 };
 const posts: Array<Record<string, unknown>> = [];
+/** The tasks a Stop press stopped directly. */
+const stops: string[] = [];
+/** The tasks whose checks a row's Cancel check cancelled. */
+const checkCancels: string[] = [];
 /** What a press on a topic chat's row posted to that chat. */
 const topicPosts: Array<Record<string, unknown>> = [];
 let postStatus = 200;
@@ -69,6 +73,16 @@ function mockServer() {
         headers: { "content-type": "application/json" },
       });
     if (url === "/api/settings") return json(server.settings);
+    const checks = url.match(/^\/api\/concierge\/tasks\/([^/]+)\/checks$/);
+    if (checks && init?.method === "DELETE") {
+      checkCancels.push(decodeURIComponent(checks[1]!));
+      return json({ ok: true });
+    }
+    const stop = url.match(/^\/api\/concierge\/tasks\/([^/]+)\/stop$/);
+    if (stop && init?.method === "POST") {
+      stops.push(decodeURIComponent(stop[1]!));
+      return json({ ok: true });
+    }
     if (url === "/api/concierge/session") return json({ id: "concierge", unread: 0 });
     if (url.startsWith("/api/concierge/tasks")) {
       return json({
@@ -138,6 +152,8 @@ beforeEach(() => {
   server.turns = [];
   server.settings = {};
   posts.length = 0;
+  stops.length = 0;
+  checkCancels.length = 0;
   postStatus = 200;
   toast.error.mockClear();
   FakeWebSocket.instances = [];
@@ -151,39 +167,49 @@ afterEach(() => {
 
 const groupButtons = () =>
   screen
-    .getAllByRole("button", { name: /^(Needs you|Doing|Up next|Watching|Done) \d/ })
+    .getAllByRole("button", { name: /^(Waiting for you|Active|Later|Ended) \d/ })
     .map((button) => button.textContent);
-/** Opens the Done group, which starts folded. */
+/** Opens the Ended group, which starts folded. */
 const openDone = async (user: ReturnType<typeof userEvent.setup>) =>
-  user.click(screen.getByRole("button", { name: /^Done \d/ }));
+  user.click(screen.getByRole("button", { name: /^Ended \d/ }));
 const item = (title: string) => screen.getByText(title).closest("li")!;
 
 describe("ConciergeTaskPanel", () => {
-  it("groups rows as Needs you, Doing, Up next, Watching, Done, and hides empty groups", async () => {
+  it("groups rows as Waiting for you, Active, Later, Ended, and hides empty groups", async () => {
     server.recent = [
       row("done", { title: "Shipped", completedAt: Date.now() - DAY }),
-      row("watching", { title: "CI run" }),
-      row("next", { title: "Second", rank: 2 }),
-      row("next", { title: "First", rank: 1 }),
+      row("watching", { title: "Second", status: "later", laterAt: Date.now() + 2 * DAY }),
+      row("watching", { title: "First", status: "later", laterAt: Date.now() + DAY }),
       row("doing", { title: "Fix flaky test" }),
       row("needs_user", { title: "Pick a budget" }),
     ];
     mockServer();
     renderPanel();
     await screen.findByText("Fix flaky test");
-    expect(groupButtons()).toEqual(["Needs you 1", "Doing 1", "Up next 2", "Watching 1", "Done 1"]);
-    const nextGroup = screen.getByRole("button", { name: /^Up next/ }).closest("section")!;
+    expect(groupButtons()).toEqual(["Waiting for you 1", "Active 1", "Later 2", "Ended 1"]);
+    const later = screen.getByRole("button", { name: /^Later/ }).closest("section")!;
     expect(
-      within(nextGroup)
+      within(later)
         .getAllByRole("listitem")
         .map((li) => li.textContent),
     ).toEqual([expect.stringContaining("First"), expect.stringContaining("Second")]);
     cleanup();
 
-    server.recent = [row("doing", { title: "Only doing" })];
+    server.recent = [row("doing", { title: "Only active" })];
     renderPanel();
-    await screen.findByText("Only doing");
-    expect(groupButtons()).toEqual(["Doing 1"]);
+    await screen.findByText("Only active");
+    expect(groupButtons()).toEqual(["Active 1"]);
+  });
+
+  it("groups a row by the status Rome sent, whatever its old state says", async () => {
+    server.recent = [
+      row("doing", { title: "Gave up", status: "ended", endReason: "failed" }),
+      row("done", { title: "Asks again", status: "needs_you" }),
+    ];
+    mockServer();
+    renderPanel();
+    await screen.findByText("Asks again");
+    expect(groupButtons()).toEqual(["Waiting for you 1", "Ended 1"]);
   });
 
   it("starts with the finished group folded, and any group folds and opens from its heading", async () => {
@@ -195,14 +221,14 @@ describe("ConciergeTaskPanel", () => {
     const user = userEvent.setup();
     renderPanel();
     await screen.findByText("Working");
-    const done = screen.getByRole("button", { name: /^Done \d/ });
+    const done = screen.getByRole("button", { name: /^Ended \d/ });
     expect(done.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Shipped")).toBeNull();
     await user.click(done);
     expect(done.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Shipped")).toBeTruthy();
 
-    const doing = screen.getByRole("button", { name: /^Doing\b/ });
+    const doing = screen.getByRole("button", { name: /^Active\b/ });
     await user.click(doing);
     expect(screen.queryByText("Working")).toBeNull();
     await user.click(doing);
@@ -231,39 +257,51 @@ describe("ConciergeTaskPanel", () => {
     mockServer();
     const empty = renderPanel();
     expect(
-      await screen.findByText("Tasks Milo is working on, planning, or watching appear here."),
+      await screen.findByText(
+        "Tasks Milo hands to other agents appear here, with what each one waits for.",
+      ),
     ).toBeTruthy();
     empty.unmount();
 
-    server.recent = [row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } })];
+    server.recent = [row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY })];
     const user = userEvent.setup();
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Stop" }));
-    await screen.findByText("Stopping…");
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
+    await user.click(await screen.findByRole("button", { name: "Archive" }));
+    await screen.findByText("Archiving…");
     server.messages = [consumed(posts[0].inputId)];
     expect(await screen.findByText("Milo did not change it", {}, { timeout: 4_000 })).toBeTruthy();
   });
 
-  it("shows one quiet line under the title: the summary, or what a watching or needs-you row waits for", async () => {
+  it("shows one quiet line under the title: why an ended task did not finish, then its summary", async () => {
     server.recent = [
       row("doing", { title: "Reading logs", summary: "Looking at the CI failure" }),
-      row("watching", { title: "CI run", summary: "ignored", waitingOn: "CI" }),
-      row("needs_user", {
-        title: "Budget call",
-        summary: "ignored",
-        waitingOn: "your budget call",
+      row("dropped", {
+        title: "Deploy",
+        status: "ended",
+        endReason: "failed",
+        summary: "The build broke",
+        completedAt: Date.now() - DAY,
       }),
-      row("watching", { title: "Bare watch", summary: "Checking hourly" }),
+      row("dropped", {
+        title: "Budget call",
+        status: "ended",
+        endReason: "no_response",
+        completedAt: Date.now() - DAY,
+      }),
+      row("done", { title: "Shipped", summary: "Merged", completedAt: Date.now() - DAY }),
       row("next", { title: "Planned" }),
     ];
     mockServer();
+    const user = userEvent.setup();
     renderPanel();
     await screen.findByText("Reading logs");
+    await openDone(user);
     expect(item("Reading logs").textContent).toContain("Looking at the CI failure");
-    expect(item("CI run").textContent).toContain("CI");
-    expect(item("CI run").textContent).not.toContain("ignored");
-    expect(item("Budget call").textContent).toContain("your budget call");
-    expect(item("Bare watch").textContent).toContain("Checking hourly");
+    expect(item("Deploy").textContent).toContain("Failed · The build broke");
+    expect(item("Budget call").textContent).toContain("No response");
+    expect(item("Shipped").textContent).toContain("Merged");
+    expect(item("Shipped").textContent).not.toContain("Done");
     expect(item("Planned").textContent).toBe("Planned");
   });
 
@@ -291,11 +329,16 @@ describe("ConciergeTaskPanel", () => {
     expect(screen.queryByText(/\.$/)).toBeNull();
   });
 
-  it("marks each state with its own glyph, and only the row that needs the guardian is amber", async () => {
+  it("marks each status and end reason with its own glyph, and only the row that needs the guardian is amber", async () => {
     server.recent = [
       row("needs_user", { title: "Blocked" }),
       row("doing", { title: "Busy" }),
-      row("next", { title: "Planned" }),
+      row("dropped", {
+        title: "Unanswered",
+        status: "ended",
+        endReason: "no_response",
+        completedAt: Date.now() - DAY,
+      }),
       row("watching", { title: "Watched" }),
       row("done", { title: "Shipped", completedAt: Date.now() - DAY }),
       row("dropped", { title: "Called off", completedAt: Date.now() - DAY }),
@@ -306,15 +349,16 @@ describe("ConciergeTaskPanel", () => {
     await screen.findByText("Busy");
     await openDone(user);
     const glyph = (title: string) => item(title).querySelector("svg")!;
-    const shapes = ["Blocked", "Busy", "Planned", "Watched", "Shipped", "Called off"].map((title) =>
-      glyph(title)
-        .getAttribute("class")
-        ?.split(" ")
-        .find((name) => name.startsWith("lucide-") && name !== "lucide"),
+    const shapes = ["Blocked", "Busy", "Unanswered", "Watched", "Shipped", "Called off"].map(
+      (title) =>
+        glyph(title)
+          .getAttribute("class")
+          ?.split(" ")
+          .find((name) => name.startsWith("lucide-") && name !== "lucide"),
     );
     expect(new Set(shapes).size).toBe(6);
     expect(glyph("Blocked").getAttribute("class")).toContain("text-warning");
-    for (const title of ["Busy", "Planned", "Watched", "Shipped", "Called off"]) {
+    for (const title of ["Busy", "Unanswered", "Watched", "Shipped", "Called off"]) {
       expect(glyph(title).getAttribute("class")).not.toContain("warning");
     }
   });
@@ -405,14 +449,15 @@ describe("ConciergeTaskPanel", () => {
   it("sends a topic chat's buttons to that chat", async () => {
     const topic = { id: "topic-1", name: "Calendar", main: false };
     server.recent = [
-      row("doing", { title: "Agenda", chat: { id: "c1", name: "c" }, conciergeChat: topic }),
+      row("done", { title: "Agenda", completedAt: Date.now() - DAY, conciergeChat: topic }),
     ];
     mockServer();
     topicPosts.length = 0;
     const user = userEvent.setup();
     renderPanel({ chatId: "topic-1" });
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     await screen.findByText("Agenda");
-    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await user.click(screen.getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(topicPosts).toHaveLength(1));
     expect(posts).toEqual([]);
   });
@@ -480,12 +525,11 @@ describe("ConciergeTaskPanel", () => {
     );
   });
 
-  it("offers Stop on a Doing row with a chat, Done on a Needs you row, Archive on Done rows, and nothing on the rest, as icon buttons", async () => {
+  it("offers Stop on an active row with a chat, Done on one waiting for the guardian, Archive on ended rows, and nothing on the rest, as icon buttons", async () => {
     server.recent = [
       row("doing", { title: "Running", chat: { id: "c1", name: "c" } }),
       row("doing", { title: "Chatless doing" }),
       row("needs_user", { title: "Blocked", chat: { id: "c2", name: "c" } }),
-      row("next", { title: "Planned" }),
       row("watching", { title: "Watched", chat: { id: "c3", name: "c" } }),
       row("done", { title: "Finished", completedAt: Date.now() - DAY }),
       row("dropped", { title: "Called off", completedAt: Date.now() - DAY }),
@@ -504,10 +548,34 @@ describe("ConciergeTaskPanel", () => {
     expect(buttonsOf("Running")).toEqual([["Stop", ""]]);
     expect(buttonsOf("Chatless doing")).toEqual([]);
     expect(buttonsOf("Blocked")).toEqual([["Done", ""]]);
-    expect(buttonsOf("Planned")).toEqual([]);
     expect(buttonsOf("Watched")).toEqual([]);
     expect(buttonsOf("Finished")).toEqual([["Archive", ""]]);
     expect(buttonsOf("Called off")).toEqual([["Archive", ""]]);
+  });
+
+  it("cancels a later row's checks from the row, with no message to the Concierge", async () => {
+    const task = {
+      ...row("watching", { title: "PR 42", chat: { id: "c3", name: "c" } }),
+      status: "later",
+      laterAt: Date.now() + 3 * 60_000,
+    };
+    server.recent = [
+      task,
+      { ...row("next", { title: "Someday" }), status: "later", laterAt: null },
+    ];
+    mockServer();
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(
+      await within(await screen.findByText("PR 42").then(() => item("PR 42"))).findByRole(
+        "button",
+        { name: "Cancel check" },
+      ),
+    );
+    await waitFor(() => expect(checkCancels).toEqual([task.id]));
+    expect(posts).toEqual([]);
+    // A later row with no check pending has nothing to cancel.
+    expect(within(item("Someday")).queryByRole("button", { name: "Cancel check" })).toBeNull();
   });
 
   it("keeps the action out of sight until the row is hovered or focused, and always on touch", async () => {
@@ -527,7 +595,7 @@ describe("ConciergeTaskPanel", () => {
     }
   });
 
-  it("sends Stop to the Concierge as a plain message with priority next, and waits for the row", async () => {
+  it("stops a task directly, with no message to the Concierge, and waits for the row", async () => {
     const task = row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } });
     server.recent = [task];
     mockServer();
@@ -535,10 +603,8 @@ describe("ConciergeTaskPanel", () => {
     const { socket } = renderPanel();
     await user.click(await screen.findByRole("button", { name: "Stop" }));
 
-    await waitFor(() => expect(posts).toHaveLength(1));
-    // The same words the guardian could type, as a plain message and nothing else.
-    expect(posts[0]).toMatchObject({ text: 'Stop "Fix flaky test"', priority: "next" });
-    expect(posts[0]).not.toHaveProperty("parts");
+    await waitFor(() => expect(stops).toEqual([task.id]));
+    expect(posts).toEqual([]);
     // The row says so quietly under its title, with no action to press again.
     const status = await screen.findByText("Stopping…");
     expect(item("Fix flaky test").contains(status)).toBe(true);
@@ -546,15 +612,17 @@ describe("ConciergeTaskPanel", () => {
       within(item("Fix flaky test")).queryByRole("button", { name: /Stop|Try again/ }),
     ).toBeNull();
 
-    // The Concierge stops it and writes the row: the pending state is gone.
+    // Rome stops it and tells the row: the pending state is gone.
     upsert(socket, {
       ...task,
       state: "dropped",
+      status: "ended",
+      endReason: "stopped",
       completedAt: Date.now(),
       updatedAt: task.updatedAt + 5_000,
     });
     await waitFor(() => expect(screen.queryByText("Stopping…")).toBeNull());
-    expect(screen.getByRole("button", { name: /^Done \d/ }).textContent).toBe("Done 1");
+    expect(screen.getByRole("button", { name: /^Ended \d/ }).textContent).toBe("Ended 1");
   });
 
   it("sends Archive the same way, and the row leaves the list when the Concierge archives it", async () => {
@@ -563,7 +631,7 @@ describe("ConciergeTaskPanel", () => {
     mockServer();
     const user = userEvent.setup();
     const { socket } = renderPanel();
-    await user.click(await screen.findByRole("button", { name: /^Done \d/ }));
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     await user.click(await screen.findByRole("button", { name: "Archive" }));
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toMatchObject({ text: 'Archive "Shipped"', priority: "next" });
@@ -657,32 +725,34 @@ describe("ConciergeTaskPanel", () => {
   });
 
   it("names the short id only when another open row has the same title", async () => {
-    const same = row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } });
-    const twin = row("doing", { title: "Fix flaky test", chat: { id: "c2", name: "c" } });
-    const alone = row("doing", { title: "Plan next week", chat: { id: "c3", name: "c" } });
+    const same = row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY });
+    const twin = row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY });
+    const alone = row("done", { title: "Plan next week", completedAt: Date.now() - DAY });
     server.recent = [same, twin, alone];
     mockServer();
     const user = userEvent.setup();
     renderPanel();
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     await screen.findByText("Plan next week");
-    const stops = screen.getAllByRole("button", { name: "Stop" });
+    const stops = screen.getAllByRole("button", { name: "Archive" });
     // Rows list by recency: press each row's own button and read what was sent.
     for (const stop of stops) await user.click(stop);
     await waitFor(() => expect(posts).toHaveLength(3));
     const texts = posts.map((post) => post.text);
-    expect(texts).toContain('Stop "Plan next week"');
-    expect(texts).toContain(`Stop "Fix flaky test" (task ${same.id.slice(0, 6)})`);
-    expect(texts).toContain(`Stop "Fix flaky test" (task ${twin.id.slice(0, 6)})`);
+    expect(texts).toContain('Archive "Plan next week"');
+    expect(texts).toContain(`Archive "Fix flaky test" (task ${same.id.slice(0, 6)})`);
+    expect(texts).toContain(`Archive "Fix flaky test" (task ${twin.id.slice(0, 6)})`);
   });
 
   it("says the Concierge didn't change the row when the turn that took the press in ends without a write, and lets the press repeat", async () => {
-    const task = row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } });
+    const task = row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY });
     server.recent = [task];
     mockServer();
     const user = userEvent.setup();
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Stop" }));
-    await screen.findByText("Stopping…");
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
+    await user.click(await screen.findByRole("button", { name: "Archive" }));
+    await screen.findByText("Archiving…");
     expect(typeof posts[0].inputId).toBe("string");
 
     server.messages = [consumed(posts[0].inputId)];
@@ -690,22 +760,23 @@ describe("ConciergeTaskPanel", () => {
     expect(await screen.findByText("Rome did not change it", {}, { timeout: 4_000 })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(posts).toHaveLength(2));
-    expect(await screen.findByText("Stopping…")).toBeTruthy();
+    expect(await screen.findByText("Archiving…")).toBeTruthy();
     expect(screen.queryByText("Rome did not change it")).toBeNull();
   });
 
   it("with two presses pending, a turn that ended handling only the first leaves the second pending", async () => {
     server.recent = [
-      row("doing", { title: "First task", chat: { id: "c1", name: "c" } }),
-      row("doing", { title: "Second task", chat: { id: "c2", name: "c" } }),
+      row("done", { title: "First task", completedAt: Date.now() - DAY }),
+      row("done", { title: "Second task", completedAt: Date.now() - DAY }),
     ];
     mockServer();
     const user = userEvent.setup();
     renderPanel();
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     const li = (title: string) => screen.getByText(title).closest("li")!;
     await screen.findByText("First task");
-    await user.click(within(li("First task")).getByRole("button", { name: "Stop" }));
-    await user.click(within(li("Second task")).getByRole("button", { name: "Stop" }));
+    await user.click(within(li("First task")).getByRole("button", { name: "Archive" }));
+    await user.click(within(li("Second task")).getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(posts).toHaveLength(2));
 
     // Turn 1 took the first press in and ended; turn 2 is queued and has not
@@ -717,19 +788,21 @@ describe("ConciergeTaskPanel", () => {
       await within(li("First task")).findByText("Rome did not change it", {}, { timeout: 4_000 }),
     ).toBeTruthy();
     expect(within(li("Second task")).queryByText("Rome did not change it")).toBeNull();
-    expect(within(li("Second task")).getByText("Stopping…")).toBeTruthy();
+    expect(within(li("Second task")).getByText("Archiving…")).toBeTruthy();
   });
 
   it("says the Concierge hasn't handled it after 60 s, with a retry", async () => {
-    const task = row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } });
+    const task = row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY });
     server.recent = [task];
     mockServer();
     const user = userEvent.setup({ advanceTimers: (ms) => rs.advanceTimersByTime(ms) });
     renderPanel();
-    const stop = await screen.findByRole("button", { name: "Stop" });
+    // Opened before the clock is faked, which this press's user needs.
+    await userEvent.setup().click(await screen.findByRole("button", { name: /^Ended \d/ }));
+    const stop = await screen.findByRole("button", { name: "Archive" });
     rs.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     await user.click(stop);
-    await screen.findByText("Stopping…");
+    await screen.findByText("Archiving…");
 
     act(() => {
       rs.advanceTimersByTime(PENDING_TIMEOUT_MS - 2_000);
@@ -744,12 +817,13 @@ describe("ConciergeTaskPanel", () => {
   });
 
   it("says so when the message could not be sent", async () => {
-    server.recent = [row("doing", { title: "Fix", chat: { id: "c1", name: "c" } })];
+    server.recent = [row("done", { title: "Fix", completedAt: Date.now() - DAY })];
     postStatus = 500;
     mockServer();
     const user = userEvent.setup();
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Stop" }));
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
+    await user.click(await screen.findByRole("button", { name: "Archive" }));
     expect(await screen.findByText("Could not send")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
@@ -763,8 +837,8 @@ describe("ConciergeTaskPanel", () => {
     mockServer();
     const user = userEvent.setup();
     renderPanel();
-    await screen.findByRole("button", { name: /^Done \d/ });
-    expect(screen.getByRole("button", { name: /^Done \d/ }).textContent).toBe("Done 3");
+    await screen.findByRole("button", { name: /^Ended \d/ });
+    expect(screen.getByRole("button", { name: /^Ended \d/ }).textContent).toBe("Ended 3");
     await openDone(user);
     expect(screen.getByText("Fresh")).toBeTruthy();
     expect(screen.queryByText("Stale")).toBeNull();
@@ -782,7 +856,7 @@ describe("ConciergeTaskPanel", () => {
     mockServer();
     const user = userEvent.setup();
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: /^Done \d/ }));
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     expect(await screen.findByRole("button", { name: "Show 1 older" })).toBeTruthy();
     expect(screen.queryByText("Long ago")).toBeNull();
   });
@@ -803,8 +877,11 @@ describe("ConciergeTaskPanel", () => {
     mockServer();
     const { socket } = renderPanel();
     await screen.findByText("Existing");
-    upsert(socket, row("needs_user", { title: "Fresh question", waitingOn: "an answer" }));
-    expect(await screen.findByRole("button", { name: /^Needs you\b/ })).toBeTruthy();
+    upsert(socket, row("needs_user", { title: "Fresh question", summary: "an answer" }));
+    expect(await screen.findByRole("button", { name: /^Waiting for you\b/ })).toBeTruthy();
     expect(screen.getByText("an answer")).toBeTruthy();
+    // A live row keeps the status Rome derived, over the state it carries.
+    upsert(socket, row("doing", { title: "Gave up", status: "ended", endReason: "failed" }));
+    expect(await screen.findByRole("button", { name: /^Ended \d/ })).toBeTruthy();
   });
 });

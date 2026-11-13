@@ -359,7 +359,17 @@ describe("live events WebSocket", () => {
       await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
     ).toMatchObject({
       event: "task_upsert",
-      data: { task: { id: row.id, title: "Fix flaky test", state: "doing", chat: null } },
+      // Rome derives the status: with no task chat started yet, the task is later.
+      data: {
+        task: {
+          id: row.id,
+          title: "Fix flaky test",
+          status: "later",
+          endReason: null,
+          state: "watching",
+          chat: null,
+        },
+      },
     });
   });
 

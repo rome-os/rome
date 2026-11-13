@@ -39,7 +39,8 @@ One [task](#task)'s conversation inside a [Concierge chat](#concierge-chat), whi
 - Any other message is in no chat thread: an owner's message typed in the chat, the Concierge's answer to one, and every message of a thread from before that no task has, which every client shows as in none.
 - A task moved to another Concierge chat leaves its thread behind, and starts a new one there the same way.
 - The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one task's thread on its own.
-- In the chat's timeline, every Concierge message in a task's thread shows the task's title under it, which opens the thread view. The owner's own messages show none, and neither does the thread view. A label shows no count.
+- In the chat's timeline, every Concierge message in a task's thread shows the task's title under it, one label per message, which opens the thread view: a plain message, a forwarded result and a task's question or approval card alike. A task card needs none, since it names its task. The label sits as close under a card as under a bubble and apart from the next message, and stays faint until it is pointed at or focused. A long title is cut short, and shows whole when pointed at. The owner's own messages show none, and neither does the thread view. A label shows no count.
+- Opening the thread view tints the whole message it opened from, every bubble of it. The view's header opens the task chat.
 - Only that label, or the quote in a reply that is in a task's thread, opens the thread view. The quote in any other reply goes to the original message and tints it. Reply on a message opens the reply bar alone. Reply inside an open thread view keeps it open. Closing the reply bar, or sending, closes an open view with it.
 
 ## Place
@@ -101,23 +102,13 @@ A chat forked from one turn of another chat, carrying that chat's history up to 
 
 A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) to show how the work it asked for stands: working, or failed. Work that finished shows none, since the reply says so. It takes the place of an acknowledgement from the Concierge.
 
-- Rome sets it, never the Concierge. A message has at most one, and a newer state replaces the older one.
-- A message gets one as soon as a Concierge turn takes it in: working, before the Concierge says or starts anything. Each message a turn takes gets its own.
-- The message's work is that turn and every task the Concierge starts for it or passes its words on to. The mark stays working while any of them works, and goes away once all are done. It turns failed only when one fails, and a failed mark stays, since a crash may leave no reply. A task that asks its owner a question is still working.
-- How the turn's end sets the reaction:
-  - It completes: done, which shows no mark once its tasks are done too.
-  - It fails with an error, or ends with no end of its own, as when the process dies: failed. When Rome starts again and continues that turn, the mark stays working until the continuation ends.
-  - Its owner stops it: stopped, which counts toward no reaction.
-  - A newer input supersedes it and the work carries into the next turn: still working, until that turn ends.
-- A task that ends keeps the message working until the Concierge says its result: until the turn that reports the task ends, a turn that says the result naming the task ends, or the Concierge marks the task done or drops it. Only then does it settle as the task ended. Until then the reply has not told the owner anything. A report turn that fails or is cut short keeps the mark working, since Rome hands the report over again, also after Rome restarts. The mark turns failed only once Rome gives up on the report.
-- How a task's end sets the reaction, the same way:
-  - It finishes, or the Concierge marks it done: done, which shows no mark.
-  - It fails with an error, or its turn ends with no end of its own, as when the process dies: failed.
-  - Its owner stops it, or the Concierge drops it: stopped. A stopped task counts toward no reaction, so a message whose only task was stopped has none, and the mark goes away. A task the Concierge drops after it failed shows no mark either.
-  - A newer input supersedes its turn and the work carries into the next turn: still working, until that turn ends.
-- A stopped task that is resumed or given more words is working again.
-- A message counts only the work not stopped: working while any of it works, then failed if any failed, else none. When all of it was stopped, it has none too.
-- The turn's part of the work is done as soon as the Concierge answers the message, though the turn runs on. A message with no task then shows no mark. The Concierge answers it when its answer names it, or when the message is the turn's only one and the answer names no task. A turn that holds several of its owner's messages and names none in an answer settles them only when it ends.
+- Rome derives it, never the Concierge, from two facts it keeps: which turn took the message and whether that turn answered it, and which tasks were made for the message (the ones it started, and the ones its words were passed on to). A message has at most one.
+- Working: the turn that took the message has not answered it, or a task made for it waits for its owner, is active or is checked later. A message gets it as soon as a Concierge turn takes it in, before the Concierge says or starts anything.
+- Failed: the turn that took it failed before it answered, by an error or a crash. A task made for it that ended failed shows it too, and so does a task whose result Rome gave up telling the Concierge, since its owner was never told. It shows only once none of its work is still open.
+- Otherwise none: a task that ended done, stopped or for no response shows no mark, and neither does a turn its owner stopped or a newer input took over.
+- A turn answers a message when it ends, or as soon as the Concierge answers it: when its answer names the message, or when the message is the turn's only one and the answer names no task. A message a newer input handed on to the next turn is that turn's, and waits for it. A turn that runs again, as after a usage limit, opens every message it holds again.
+- A task's result keeps the message working until a report of it to the Concierge runs to its end, also across a restart. A report that fails or is cut short runs again, even when the Concierge already said the result: a second report rather than a lost one. One the owner stops is not run again, and the message shows its owner was never told. A restart ends every message's turn it cut off as failed, unless it continues that turn, so no mark stays working past the process that set it. A task chat turn a restart ended failed.
+- Stopping a task that failed takes its mark away.
 - It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
 - A common chat has none, and neither does a task chat.
 
@@ -152,27 +143,41 @@ A Concierge chat its owner starts for one topic, such as the calendar or a proje
 
 - A topic chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. It starts on the model the main chat uses.
 - One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. One the Concierge starts with a name keeps it, and the main chat's name never changes on its own.
-- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows and tasks to its owner's main chat, and the Concierge says so there.
+- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows to its owner's main chat, and its tasks report there while it is archived or gone. The Concierge says so there.
 - An owner may have any number of topic chats.
 
 ## Task
 
-One piece of work the Concierge keeps on its owner's task list, with a title, a state and, while an agent works on it, a [task chat](#task-chat). It belongs to the Concierge chat it reports to.
+One piece of work the Concierge keeps on its owner's task list, with a title, a status and, while an agent works on it, a [task chat](#task-chat). It belongs to the Concierge chat it reports to.
 
-- Its states are planned (next), in progress (doing), waiting on something outside (watching), waiting on its owner (needs_user), done, and dropped, for work called off.
-- The Concierge **writes** a task: it creates it, moves it between states and marks it done or dropped. Starting a task chat for one makes it in progress. Nothing else sets a task's state.
+- Rome **derives** a task's status from facts it holds. The status is one of four, checked in this order:
+  - **Waiting for you**: its task chat has an unanswered question card or approval, opened less than a day ago.
+  - **Active**: a turn runs or is queued in its task chat, or its result waits for the Concierge to report it.
+  - **Later**: a check is scheduled for it and nothing runs, or the Concierge wrote it as a row and has not started its task chat yet. A row without a check shows no time. Starting its chat takes it from there, and stopping it ends it.
+  - **Ended**, with a reason: done, failed, stopped, or no response, when a wait went unanswered for a day.
+- A stopped task is always ended·stopped, whoever stopped it: the Concierge, its owner, or archiving or deleting its task chat. New words sent to it take it up again, whether the owner types them in its chat or the Concierge passes them on or starts its row: it is active once more, as when its owner answers an expired card. A task stopped by archiving or deleting its chat stays stopped.
+- A stop, an archive or a delete turns down the task chat's pending approvals, so nothing approved later runs for a task that ended. Archiving a task that is still open stops it. An ended task leaves the task list a week after it ended.
+- Its owner **stops** a task from its card or its row in the task list. Rome stops it at once, without a turn of the Concierge, which hears of it quietly. Stop in a Concierge chat ends only that chat's turn: the tasks it started keep running, and the header keeps showing them.
+- A message whose turn its owner stopped before an answer stays stopped: the next turn is told of it, and takes it up only when its owner asks again.
+- A wait nobody answers within a day ends the task for no response, and it waits for its owner no more. Its question card stays answerable, marked expired, and answering it takes the task up again. A pending approval is turned down, and the task chat's turn finishes as on any refusal. The Concierge hears of it quietly and asks nothing, and the next digest lists the task once. A task that ended for no response shows no ⚠️.
+- The Concierge **schedules a check** on a task with `defer`, for a time or for an event with a deadline. The task is later until the check is due. Its chat shows its checks folded to one line, how many and the soonest, which opens to the whole list, soonest first, each naming its task. Its owner cancels a check there, or cancels a task's checks from its row in the task list. Either leaves the task in place and tells the Concierge. Stopping or archiving the task cancels its checks, and a check of a stopped or archived task never wakes its chat. A task checked three times and still waiting comes up in the next digest, so the Concierge asks its owner rather than check again. So does a row the Concierge wrote a day ago or more with no task chat started and nothing scheduled, once: it stays later until then.
+- The status, the task list, the chat header and the status reactions all read the same derived result. Rome tells the task list again whenever a fact changes it. The state the Concierge used to write stays for apps from before, mapped from the status.
+- The Concierge **writes** a task: it creates it and names it. Starting a task chat for one makes it active.
 - Rome tells the Concierge what a task's chat does, and marks a task not synced when the Concierge never takes in what it was told.
 - A task has at most one [chat thread](#chat-thread), and its root is kept for good.
-- A task moves to its owner's main chat when its Concierge chat is archived or deleted. Its thread stays behind and is a task's no more, so its label goes.
-- A message a task works for shows a [status reaction](#status-reaction) until the Concierge says the task's result, marks it done, or drops it.
+- A task reports to its owner's main chat while its Concierge chat is archived or deleted. Nothing moves it: it reads as the main chat's, and as its own chat's again once that chat is unarchived. An open task's thread stays behind and is a task's no more, so its label goes and the task starts a new thread in the main chat. An ended task keeps its thread.
+- A task links one task chat in its life. A task whose task chat could not be started leaves no chat behind, and stays on the list as failed.
+- A message a task works for shows a [status reaction](#status-reaction) while the task is open, and until the Concierge reports its result.
 
 ## Task chat
 
 A chat the Concierge starts to hand one piece of work to another agent. It belongs to the Concierge chat that started it, and its result comes back there.
 
 - A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
+- Archiving a task chat stops its task: its running work stops, and its row is stopped and archived with the chat, so the task leaves the task list and the Concierge stops tracking it. Unarchiving the chat lists the row again, still stopped. A row archived before its chat stays archived. Deleting the chat stops and archives the row for good.
 - A task chat carries one piece of work. It gets no alerts and no digest.
 - A task chat is in the [chat list](#chat-list), under its project with the common chats, with a mark saying the Concierge started it. It also opens from its row in the task list and from its task card, and search finds it.
+- A task shows in a Concierge chat as one of two cards. Its **task card** names it with its status, a Stop and an Open: the Concierge shows it when it starts the task with a card, and when its owner looks for the task. Its **question or approval** shows alone, with no status, Stop or Open: the Concierge shows it while the task waits on its owner. Settled, it folds to a small card of what it asked and how it ended, and opens to the original. It ended answered (with a short answer), dismissed, approved, rejected, turned down when the wait ran out or the task was stopped, or waiting on a newer copy. An app's own card, such as a sign-in, opens the task chat to answer it. A question or approval in any chat, a common chat's or the main agent's included, folds the same way once settled. The Activity page shows approvals whole. An expired question folds to a small card of what it asked that opens to its form: it still takes an answer, and counts as waiting nowhere. A card from before shows the task card with the question or approval inside.
 
 ## Chat list
 

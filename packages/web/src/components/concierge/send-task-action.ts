@@ -33,6 +33,26 @@ export function pressText(
  * is `next`: the message joins a running turn or waits for it, and never cuts it
  * off. With `replyToMessageId` the message is a reply to that message.
  */
+/**
+ * Stops task `task` directly, as its owner asked from its row or card: Rome
+ * stops it at once, and the Concierge hears of it. The row's next write
+ * settles the press.
+ */
+export async function stopTask(
+  task: Pick<ConciergeTaskDto, "id" | "updatedAt" | "conciergeChat">,
+): Promise<void> {
+  beginPending(task.id, "stop", task.updatedAt, randomUUID(), task.conciergeChat.id);
+  try {
+    const response = await fetch(`/api/concierge/tasks/${encodeURIComponent(task.id)}/stop`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!response.ok) failPending(task.id);
+  } catch {
+    failPending(task.id);
+  }
+}
+
 export async function sendTaskAction(
   task: Pick<ConciergeTaskDto, "id" | "updatedAt" | "conciergeChat">,
   action: ConciergeTaskAction,

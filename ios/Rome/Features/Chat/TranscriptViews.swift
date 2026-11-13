@@ -553,6 +553,11 @@ enum TranscriptSpacing {
         if case .separator = previous { return 14 }
         if case .typing = row { return 14 }
         if case .notice = row { return 14 }
+        // A faint line stands apart, like a time separator.
+        switch (row, previous) {
+        case (.automatedInput, _), (.sessionRenewal, _), (_, .automatedInput), (_, .sessionRenewal): return 14
+        default: break
+        }
         // Tight under its own message, and apart from the next one.
         if case .threadLabel = row { return 3 }
         if case .threadLabel = previous { return row.isGuardian ? 18 : 14 }

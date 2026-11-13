@@ -288,6 +288,10 @@ struct ConciergeRow: View {
             ErrorLine(error: error)
         case .notice(_, let text):
             NoticeLine(text: text)
+        case .automatedInput(_, let source):
+            AutomatedInputLine(source: source)
+        case .sessionRenewal(_, let reason, let sessionId):
+            SessionRenewalLine(reason: reason, sessionId: sessionId, store: store)
         }
     }
 }

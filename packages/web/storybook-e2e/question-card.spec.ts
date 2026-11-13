@@ -15,6 +15,11 @@ for (const width of [375, 1440]) {
         await page.goto(
           `/iframe.html?id=dev-chat-entries--${story}&viewMode=story&globals=locale:${locale}`,
         );
+        // A resolved card folds to what it asked and how it ended; it opens
+        // to the whole card, read-only.
+        if (story === "resolved-question") {
+          await page.locator("[data-chat-settled-card] button").click();
+        }
         const fieldset = page.locator("fieldset");
         await expect(fieldset).toBeVisible();
         if (story === "wrapped-submission") {

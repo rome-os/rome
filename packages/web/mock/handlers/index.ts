@@ -18,6 +18,7 @@ import { http, HttpResponse } from "msw";
 import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
+  type ChatPendingChecksResponse,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
@@ -1290,6 +1291,10 @@ export const handlers = [
       },
     );
   }),
+  // Mock mode runs no turns, so no chat ever has a check scheduled.
+  http.get("/api/chat/sessions/:id/checks", () =>
+    HttpResponse.json({ checks: [] } satisfies ChatPendingChecksResponse),
+  ),
   http.get("/api/concierge/tasks", () =>
     HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
   ),

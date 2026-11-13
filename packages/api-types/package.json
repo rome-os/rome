@@ -10,6 +10,7 @@
     "./chat": "./src/chat.ts",
     "./concierge": "./src/concierge.ts",
     "./concierge-activity": "./src/concierge-activity.ts",
+    "./concierge-task-status": "./src/concierge-task-status.ts",
     "./computer-use": "./src/computer-use.ts",
     "./chat-settings": "./src/chat-settings.ts",
     "./trace-segments": "./src/trace-segments.ts",
