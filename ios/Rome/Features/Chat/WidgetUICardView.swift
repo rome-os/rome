@@ -19,12 +19,13 @@ struct WidgetUICardView: View {
     /// A read of the card's own app: method, path in its API, JSON body.
     let call: (String, String, Rome.JSONValue?) async throws -> ConnectReply
     /// A press on a button, sent to core: event name and context.
-    var press: (String, Rome.JSONValue) async throws -> Void = { _, _ in throw APIError.notFound }
+    var press: (String, Rome.JSONValue) async throws -> WidgetEventReply = { _, _ in throw APIError.notFound }
     var waiting: Waiting? = nil
 
     private var locked: Bool { waiting?.answered != nil || surface.sent }
 
     @StateObject private var surface = WidgetSurface()
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -63,7 +64,7 @@ struct WidgetUICardView: View {
         .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
         .task(id: part) {
             surface.answered = waiting?.answered != nil
-            surface.show(part, call: call, press: press)
+            surface.show(part, call: call, press: press, open: { openURL($0) })
             surface.showAnswered(waiting?.answered)
             await surface.load()
         }
@@ -92,7 +93,8 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     private var processor: MessageProcessor?
     private var part: WidgetUIPart?
     private var call: ((String, String, Rome.JSONValue?) async throws -> ConnectReply)?
-    private var send: ((String, Rome.JSONValue) async throws -> Void)?
+    private var send: ((String, Rome.JSONValue) async throws -> WidgetEventReply)?
+    private var open: (URL) -> Void = { _ in }
     /// Only the newest read writes the data: a slow read must not land after
     /// a newer one and put back an older value.
     private var reads = 0
@@ -100,8 +102,10 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     func show(
         _ part: WidgetUIPart,
         call: @escaping (String, String, Rome.JSONValue?) async throws -> ConnectReply,
-        press: @escaping (String, Rome.JSONValue) async throws -> Void = { _, _ in throw APIError.notFound }
+        press: @escaping (String, Rome.JSONValue) async throws -> WidgetEventReply = { _, _ in throw APIError.notFound },
+        open: @escaping (URL) -> Void = { _ in }
     ) {
+        self.open = open
         guard self.part != part else { return }
         self.part = part
         self.call = call
@@ -200,9 +204,11 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         busy = true
         defer { busy = false }
         do {
-            try await send(name, body)
-            // A card the agent waits on is sent; any other card reads its data again.
-            if waits { sent = true } else { await load() }
+            let reply = try await send(name, body)
+            // A link the reply names opens; a card core says is answered is
+            // sent, and any other card reads its data again.
+            if let url = reply.open { open(url) }
+            if waits && reply.answered { sent = true } else { await load() }
             failed = false
         } catch {
             failed = true

@@ -99,19 +99,45 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
       const handle = CORE_WIDGETS[widget.componentId ?? ""]?.[STORED_EVENT_NAMES[name] ?? name];
       if (!handle) return c.json({ error: "This widget declares no such event" }, 400);
       if (!widget.waits) return c.json({ error: "The agent does not wait on this widget" }, 400);
-      // The rest of the turn (persona, reasoning effort, workspace) is the
-      // chat's, which the client sends with every event.
-      const turn = isObject(body?.turn) ? body.turn : {};
-      return to(`/api/chat/sessions/${encodeURIComponent(widget.chatId)}/turns`, {
-        ...turn,
-        parts: [
-          { type: "interaction_result", toolUseId: widget.toolUseId, output: handle(context) },
-        ],
-      });
+      return answer(to, widget, handle(context), body?.turn);
     }
     if (!isWidgetAppPath(name)) return c.json({ error: "The event is not a path in the app" }, 400);
-    return to(`/api/apps/${encodeURIComponent(widget.appId)}/${name}`, context);
+    const reply = await to(`/api/apps/${encodeURIComponent(widget.appId)}/${name}`, context);
+    // An app's widget the agent waits on answers it when the app's reply says
+    // so; the answer is labelled as the app's, never as the guardian's words.
+    if (!widget.waits || !reply.ok) return reply;
+    const said = (await reply
+      .clone()
+      .json()
+      .catch(() => null)) as { answer?: unknown } | null;
+    if (said?.answer === undefined) return reply;
+    return answer(to, widget, { from: widget.appId, value: said.answer }, body?.turn);
   });
+
+  /**
+   * Answers the agent waiting on `widget` with `output`, as a turn in its chat
+   * that carries the chat's own turn fields (persona, reasoning effort,
+   * workspace), which the client sends with every event. The reply says
+   * `answered: true`, so a client locks the widget without knowing why.
+   */
+  async function answer(
+    to: (path: string, json: unknown) => Response | Promise<Response>,
+    widget: StoredWidget,
+    output: unknown,
+    turnFields: unknown,
+  ) {
+    const turn = isObject(turnFields) ? turnFields : {};
+    const res = await to(`/api/chat/sessions/${encodeURIComponent(widget.chatId)}/turns`, {
+      ...turn,
+      parts: [{ type: "interaction_result", toolUseId: widget.toolUseId, output }],
+    });
+    if (!res.ok) return res;
+    const turnReply = await res.json().catch(() => ({}));
+    return Response.json(
+      { ...(isObject(turnReply) ? turnReply : {}), answered: true },
+      { status: res.status },
+    );
+  }
 
   return app;
 }

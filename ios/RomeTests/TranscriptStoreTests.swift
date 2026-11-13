@@ -180,9 +180,10 @@ final class FakeBackend: RomeBackend {
 
     func pendingApprovals() async throws -> [PendingApproval] { pending }
 
-    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply {
         answeredWidgets.append(widgetId)
         if let answerError { throw answerError }
+        return WidgetEventReply(answered: true)
     }
     /// The chats marked read, in order.
     var reads: [String] = []

@@ -661,9 +661,10 @@ final class TranscriptStore {
     /// what it means. What it changed, such as an answer and the turn it
     /// starts, comes back with the next read: the server announces no message
     /// of the guardian's own.
-    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
-        try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply {
+        let reply = try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
         resync()
+        return reply
     }
 
     /// A widget's read of its own app, with this chat's backend.

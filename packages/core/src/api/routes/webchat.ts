@@ -457,7 +457,10 @@ function toolOutputObject(output: unknown): Record<string, unknown> | null {
 }
 
 type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-type ShownWidgetPart = OmitEach<Extract<MessagePart, { type: "widget" }>, "type" | "toolUseId">;
+type ShownWidgetPart = OmitEach<Extract<MessagePart, { type: "widget" }>, "type" | "toolUseId"> & {
+  /** The agent waits on the card until one of its events answers it. */
+  waits?: boolean;
+};
 
 /** A widget that does not wait, pulled from an action's tool_result
  * (`showWidget: true`, written by `actionToolOutput`), or null for any other
@@ -475,6 +478,7 @@ function readWidgetFromOutput(output: unknown): ShownWidgetPart | null {
       text: o.text,
       ui: o.ui as WidgetUi,
       ...(o.bind ? { bind: o.bind as Record<string, string> } : {}),
+      ...(o.waits === true ? { waits: true } : {}),
     };
   }
   if (typeof o.componentId !== "string") return null;
@@ -518,7 +522,7 @@ function trustedWidget(
   actionName: string | undefined,
   deps: Pick<ApiDeps, "appCatalog" | "actionRegistry">,
   sessionId: string,
-): WidgetPart | null {
+): WidgetPart | PendingInteractionPart | null {
   const widget = readWidgetFromOutput(msg.output);
   if (!widget) return null;
   const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
@@ -547,7 +551,18 @@ function trustedWidget(
     });
     return null;
   }
-  return { type: "widget", toolUseId: msg.toolUseId, ...widget };
+  if ("ui" in widget && widget.waits) {
+    // A described card the agent waits on is the same card as a pending
+    // interaction, so the chat waits on it and its answer resumes the agent.
+    return {
+      type: "pending_interaction",
+      toolUseId: msg.toolUseId,
+      appId: widget.appId,
+      render: { kind: "inline", ui: widget.ui, ...(widget.bind ? { bind: widget.bind } : {}) },
+    };
+  }
+  const { waits: _waits, ...shown } = widget;
+  return { type: "widget", toolUseId: msg.toolUseId, ...shown };
 }
 
 /** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or

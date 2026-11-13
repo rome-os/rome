@@ -42,7 +42,11 @@ interface Row {
 }
 
 /** The route with its messages, its chats (`private` = the guardian's own), and a caller. */
-function setup(rows: Record<string, Row>, caller: string | null = "guardian") {
+function setup(
+  rows: Record<string, Row>,
+  caller: string | null = "guardian",
+  appReply: unknown = { ok: true },
+) {
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
     webchatRepo: {
@@ -60,7 +64,9 @@ function setup(rows: Record<string, Row>, caller: string | null = "guardian") {
         body: await request.json(),
         cookie: request.headers.get("cookie"),
       });
-      return Response.json({ ok: true });
+      return Response.json(
+        new URL(request.url).pathname.startsWith("/api/apps/") ? appReply : { ok: true },
+      );
     },
   });
   const fire = (widgetId: string, body: unknown) =>
@@ -139,6 +145,63 @@ describe("an event on a widget", () => {
     });
     await fire("m1", { name: "send", context: { to: "team" } });
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/notes/send"]);
+  });
+
+  it("answers the agent waiting on an app's widget with the app's reply, labelled as the app's", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [{ id: "root", component: "Column", children: [] }, button("check", "check")],
+        },
+      },
+    };
+    const { fire, forwarded } = setup({ m4: { chatId: "c1", content: [connect] } }, "guardian", {
+      answer: { toolkit: "gmail", status: "connected" },
+    });
+    const res = await fire("m4", { name: "check", context: { toolkit: "gmail" } });
+    expect(await res.json()).toMatchObject({ answered: true });
+    expect(forwarded.map((f) => [f.url, f.body])).toEqual([
+      ["/api/apps/connector/check", { toolkit: "gmail" }],
+      [
+        "/api/chat/sessions/c1/turns",
+        {
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-connect",
+              output: { from: "connector", value: { toolkit: "gmail", status: "connected" } },
+            },
+          ],
+        },
+      ],
+    ]);
+  });
+
+  it("leaves the agent waiting when the app's reply does not answer", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("connect", "connect"),
+          ],
+        },
+      },
+    };
+    const { fire, forwarded } = setup({ m5: { chatId: "c1", content: [connect] } }, "guardian", {
+      open: "https://auth.example.com/authorize",
+    });
+    const res = await fire("m5", { name: "connect" });
+    expect(await res.json()).toEqual({ open: "https://auth.example.com/authorize" });
+    expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/connector/connect"]);
   });
 
   it("dismisses with the output every dismissal has", async () => {

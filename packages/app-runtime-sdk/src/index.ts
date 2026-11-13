@@ -327,6 +327,10 @@ export interface ShownUi {
   /** What the model reads, as for {@link ShownComponent.text}. Also the
    *  card's line for a reader that draws no card. */
   text: string;
+  /** True: the agent stops until the card answers it. The card's events go to
+   *  the app as usual; a reply of `{ answer: <value> }` answers the agent with
+   *  that value, labelled as the app's. Default false. */
+  waits?: boolean;
 }
 
 /** True only for Rome Core's default agent, in legacy or canonical form. */
@@ -1605,8 +1609,13 @@ export type MessagePart =
       appId: string;
       render: {
         kind: "inline";
-        componentId: string;
+        /** The component that draws the card. Absent for a card an app
+         *  described as data (`ui`), which every client draws itself. */
+        componentId?: string;
         props?: Record<string, unknown>;
+        /** For a card described as data: where its data model comes from, as
+         *  on a `widget` part. */
+        bind?: Record<string, string>;
         /** Host built-in component (e.g. the ask_question card): rendered by
          *  rome-web directly, with no owning app to validate. */
         builtin?: boolean;

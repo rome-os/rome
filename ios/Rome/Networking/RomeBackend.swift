@@ -55,7 +55,7 @@ protocol RomeBackend: AnyObject, Sendable {
     /// An event a widget fired, sent to core by the widget's id. Core decides
     /// what it means: its owner handles it, an app's widget by calling the app,
     /// and the question card by answering the agent.
-    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply
     func markRead(sessionId: String) async
     func sessions() async throws -> [ChatSession]
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
@@ -191,11 +191,12 @@ final class LiveBackend: RomeBackend {
         return try await client.getData(route, query: query, limit: APIClient.imageLimit)
     }
 
-    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
-        _ = try await client.post(
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply {
+        let data = try await client.post(
             "/chat/widgets/\(escape(widgetId))/events",
             json: .object(["name": .string(name), "context": context])
         )
+        return WidgetEventReply(json: (try? JSONDecoder().decode(JSONValue.self, from: data)) ?? .object([:]))
     }
 
     func markRead(sessionId: String) async {

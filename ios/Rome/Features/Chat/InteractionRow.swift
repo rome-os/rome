@@ -64,7 +64,7 @@ struct InteractionRow: View {
                 try await store.appCall(appId: part.appId, method: method, path: path, body: body)
             }, press: { name, context in
                 try await store.answerWidget(widgetId: part.widgetId, name: name, context: context)
-            })
+            }, waiting: part.waits ? .init(answered: store.answers[part.toolUseId]) : nil)
         case .webOnly(_, let kind, let done):
             WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)
         case .routineDraft(_, let part):

@@ -224,6 +224,10 @@ enum MessagePart: Hashable, Sendable {
                 part.ui = WidgetUIPart(interaction: value)
                 return .question(part)
             }
+            // An app's card described as data, which the agent waits on.
+            if render?["componentId"] == nil, let card = WidgetUIPart(interaction: value) {
+                return .widgetUI(card)
+            }
             return .webOnly(webOnlyKind(componentId: render?["componentId"]?.string, appId: value["appId"]?.string), toolUseId: value["toolUseId"]?.string)
         case "widget":
             // A widget that names a web component is drawn only on the web.

@@ -86,7 +86,7 @@ beforeEach(async () => {
       return Response.json(
         postStatus === 400
           ? { error: "No open suspension" }
-          : { turnId: "task-turn", streamId: "task-stream" },
+          : { turnId: "task-turn", streamId: "task-stream", answered: true },
         { status: postStatus },
       );
     }

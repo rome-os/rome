@@ -388,7 +388,7 @@ struct QuestionCardView: View {
     let part: MessagePart.QuestionPart
     let answered: JSONValue?
     /// Sends an event the card fired to core, which decides what it means.
-    let press: (String, JSONValue) async throws -> Void
+    let press: (String, JSONValue) async throws -> WidgetEventReply
 
     var body: some View {
         if let card = part.ui {

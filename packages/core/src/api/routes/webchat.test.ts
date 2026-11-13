@@ -5249,6 +5249,85 @@ describe("Webchat API", () => {
       });
     });
 
+    it("stores a described card the agent waits on as a pending interaction, which an answer resolves", async () => {
+      registerAppAction("show_today", "meals");
+      const ui = {
+        components: [
+          { id: "root", component: "Column", children: ["done"] },
+          {
+            id: "done",
+            component: "Button",
+            child: "done-label",
+            action: { event: { name: "done" } },
+          },
+          { id: "done-label", component: "Text", text: "Done" },
+        ],
+      };
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_use",
+          id: "tu-widget-waits",
+          tool: "execute_action",
+          input: { action_name: "show_today" },
+        };
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-widget-waits",
+          tool: "execute_action",
+          output: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                showWidget: true,
+                waits: true,
+                appId: "meals",
+                ui,
+                bind: { "/today": "days/2026-11-11" },
+                text: "Asking which meal to log.",
+              }),
+            },
+          ],
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "log my lunch" }),
+        }),
+      );
+      expect(await assistantPartsIn(sessionId)).toContainEqual({
+        type: "pending_interaction",
+        toolUseId: "tu-widget-waits",
+        appId: "meals",
+        render: { kind: "inline", ui, bind: { "/today": "days/2026-11-11" } },
+      });
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-widget-waits",
+              output: { from: "meals", value: { logged: "lunch" } },
+            },
+          ],
+        }),
+      });
+      expect(res.status).toBe(200);
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain("lunch");
+    });
+
     it("stores no widget for a component its app does not declare", async () => {
       registerAppAction("show_today", "meals");
       const ctl = mockScriptedManager();

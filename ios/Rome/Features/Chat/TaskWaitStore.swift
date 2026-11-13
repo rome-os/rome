@@ -107,10 +107,11 @@ final class TaskWaitStore {
     /// Sends an event the task's card fired to core. One the server already
     /// has refreshes the card and says so; a network failure lets the guardian
     /// try again. Either way the card stays usable, so the error is rethrown.
-    func answer(_ part: MessagePart.QuestionPart, key: String, name: String, context: JSONValue) async throws {
+    func answer(_ part: MessagePart.QuestionPart, key: String, name: String, context: JSONValue) async throws -> WidgetEventReply {
         error = nil
+        let reply: WidgetEventReply
         do {
-            try await backend.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
+            reply = try await backend.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
         } catch APIError.server(let status, _) where status == 400 {
             error = String(localized: "This card was already answered. The task has been refreshed.")
             await load()
@@ -120,6 +121,7 @@ final class TaskWaitStore {
             throw error
         }
         await load()
+        return reply
     }
 
     func resolve(approve: Bool) async {

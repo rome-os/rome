@@ -181,9 +181,10 @@ export function WidgetUiCard({
           turn: turnFieldsRef.current(),
         });
         if (!outcome.ok) throw new Error(`The widget's event failed: ${outcome.status}`);
-        // A card the agent waits on is answered once core takes the event; any
-        // other card reads its data again.
-        if (host) setSent(true);
+        // A link the reply names opens; a card core says is answered locks,
+        // and any other card reads its data again.
+        if (outcome.open) window.open(outcome.open, "_blank", "noopener,noreferrer");
+        if (outcome.answered) setSent(true);
         else await load(p);
         setFailed(false);
       } catch {

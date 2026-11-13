@@ -17,6 +17,7 @@ import Testing
         let surface = WidgetSurface()
         surface.show(part, call: { _, _, _ in ConnectReply(ok: true, body: body) }, press: { name, _ in
             posts.value.append(name)
+            return WidgetEventReply()
         })
         await surface.load()
         return surface
@@ -120,6 +121,8 @@ import Testing
         surface.answered = answered != nil
         surface.show(part, call: { _, _, _ in throw APIError.notFound }, press: { name, context in
             answers.value.append(.object(["name": .string(name), "context": context]))
+            // Core answered the agent waiting on the card.
+            return WidgetEventReply(answered: true)
         })
         surface.showAnswered(answered)
         await surface.load()
@@ -175,6 +178,35 @@ import Testing
         #expect(answers.value.first?["context"]?["answers"]?.array?.first?["values"] == .array([.string("高蛋白")]))
         // Core took it: the card is sent, and takes no second press.
         #expect(surface.sent)
+    }
+
+    @Test func anAppsCardTheAgentWaitsOnIsDrawnHere() {
+        let parsed = MessagePart.parse(#"""
+        [{"type":"pending_interaction","toolUseId":"tu-c","appId":"connector","render":{"kind":"inline","ui":{"components":[{"id":"root","component":"Text","text":"Connect Gmail"}]},"bind":{"/s":"status"}}}]
+        """#)
+        guard case .widgetUI(let card) = parsed.first else { Issue.record("not drawn natively"); return }
+        #expect(card.waits && card.appId == "connector" && card.bind == ["/s": "status"])
+    }
+
+    @Test func aReplyThatDoesNotAnswerOpensItsLinkAndLeavesTheCardUsable() async throws {
+        let surface = WidgetSurface()
+        let opened = Box<[URL]>([])
+        let connect = try #require(WidgetUIPart(interaction: JSONValue.object([
+            "type": .string("pending_interaction"), "toolUseId": .string("tu-c"), "appId": .string("connector"),
+            "render": .object(["kind": .string("inline"), "ui": .object(["components": .array([
+                .object(["id": .string("root"), "component": .string("Button"), "child": .string("l"),
+                         "action": .object(["event": .object(["name": .string("connect")])])]),
+                .object(["id": .string("l"), "component": .string("Text"), "text": .string("Connect")]),
+            ])])]),
+        ])))
+        surface.show(connect, call: { _, _, _ in ConnectReply(ok: true, body: .object([:])) }, press: { _, _ in
+            WidgetEventReply(open: URL(string: "https://auth.example.com/go"))
+        }, open: { opened.value.append($0) })
+        await surface.load()
+        surface.viewModel?.rootNode?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where opened.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(opened.value == [URL(string: "https://auth.example.com/go")!])
+        #expect(!surface.sent)
     }
 
     @Test func aCardCoreDidNotTakeStaysUsable() async throws {
