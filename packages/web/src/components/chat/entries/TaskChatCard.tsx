@@ -502,8 +502,7 @@ function WaitingTaskCard({
     await refresh();
   }
 
-  const approvalCard =
-    !!approval && (!interaction || Date.parse(approval.row.createdAt) > Date.parse(interaction.at));
+  const approvalCard = !!approval;
   const questionCard =
     !approvalCard &&
     !!interaction?.part.render?.builtin &&

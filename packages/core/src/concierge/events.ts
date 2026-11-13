@@ -3,6 +3,7 @@
 // (task-events.ts), and a Concierge turn that wrote text without speaking gets
 // one reminder turn.
 
+import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import { CONCIERGE_DONE_DAYS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import type { AgentTurnFailedBeforeStart, EndedAgentTurn, TurnListeners } from "../agent/index.js";
@@ -89,6 +90,14 @@ function answersCard(content: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** How an approval in a task chat was decided, as a task event says it. */
+function decisionOf(status: string | undefined, resolvedBy: string | null | undefined): string {
+  if (resolvedBy === RESOLVED_BY_EXPIRY) return "turned down: nobody answered in time";
+  if (resolvedBy === RESOLVED_BY_STOP) return "turned down: the task was stopped";
+  if (resolvedBy?.startsWith("rome:")) return "turned down by Rome";
+  return status === "approved" ? "approved by the guardian" : "rejected by the guardian";
 }
 
 /**
@@ -459,14 +468,34 @@ export function startConciergeEvents(
   // it down rather than the guardian answering. The turn that carries on from
   // it is the first to start after.
   const approvalAnswered = new Map<string, { at: number; byRome: boolean }>();
-  const onApprovalResolved = (approval: { payload: unknown; resolvedBy?: string | null }) => {
+  const onApprovalResolved = (approval: {
+    status?: string;
+    description?: string;
+    payload: unknown;
+    resolvedBy?: string | null;
+  }) => {
     const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
       ?.channelContext;
     if (typeof context?.threadId !== "string") return;
-    approvalAnswered.set(context.threadId, {
-      at: Date.now(),
-      byRome: approval.resolvedBy?.startsWith("rome:") === true,
-    });
+    const byRome = approval.resolvedBy?.startsWith("rome:") === true;
+    approvalAnswered.set(context.threadId, { at: Date.now(), byRome });
+    // The decision is news of its own: the task's last turn may have ended
+    // awaiting it, and no turn may follow, as after a rejection. It rides
+    // along with the turn that carries on, when one does.
+    const chatId = context.threadId;
+    void guard(
+      "approval decision event",
+      taskOf(chatId).then((taskId) => {
+        if (!taskId) return;
+        const description = excerpt(approval.description ?? "", DETAIL_EXCERPT_CHARS);
+        coalescer.mark({
+          taskId,
+          kind: "approval_decided",
+          urgent: false,
+          detail: `approval: ${description} — ${decisionOf(approval.status, approval.resolvedBy)}`,
+        });
+      }),
+    );
   };
 
   const onTaskChatTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {

@@ -549,7 +549,9 @@ describe("TaskChatCard width", () => {
     messages = [];
     show(true);
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/messages"))).toBe(true),
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
+        true,
+      ),
     );
     await screen.findByText("Draft email");
     expect(document.querySelector("[data-chat-task-open]")).toBeNull();

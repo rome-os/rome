@@ -3392,7 +3392,11 @@ describe("Concierge events", () => {
     });
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
-    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=concierge"');
+    // The decision rides along with the turn that carries on from it.
+    expect(s.backendTurns[0].prompt).toContain(
+      'changes="approval_decided, turn_end:completed by=concierge"',
+    );
+    expect(s.backendTurns[0].prompt).toContain("approved by the guardian");
 
     // Only that one turn: the guardian's next typed message is theirs again.
     s.messages.get(chatId)?.push({
@@ -3409,6 +3413,30 @@ describe("Concierge events", () => {
     });
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
+  });
+
+  it.each([
+    ["rejected", "guardian", "rejected by the guardian"],
+    ["approved", "guardian", "approved by the guardian"],
+    ["rejected", "rome:task-ended", "turned down: nobody answered in time"],
+  ])("tells the Concierge an approval was %s after its task's turn ended (%s)", async (status, resolvedBy, said) => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    // The task's turn ended awaiting the decision, and that was reported.
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    // The guardian decides on its card; no turn of the task follows.
+    s.resolveApproval({
+      status,
+      resolvedBy,
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+    });
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`approval: Send the invoice — ${said}`);
   });
 
   it("tells the Concierge of a pending approval in a task chat at once", async () => {
