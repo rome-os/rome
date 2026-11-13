@@ -3,7 +3,13 @@ import { actionExecutionContext } from "../../apps/actions/context.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { RoutinesRepository } from "./routines.js";
 
-const DAILY = { type: "schedule", localTime: "09:00", tzid: "UTC", rrule: "FREQ=DAILY" } as const;
+const DAILY = {
+  type: "schedule",
+  localTime: "09:00",
+  tzid: "UTC",
+  tzMode: "fixed",
+  rrule: "FREQ=DAILY",
+} as const;
 
 describe("the chat a routine works for", () => {
   let testDb: TestDb;

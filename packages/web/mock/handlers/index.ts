@@ -18,7 +18,6 @@ import { http, HttpResponse } from "msw";
 import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
-  type ChatPendingChecksResponse,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
@@ -65,6 +64,7 @@ import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser"
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
+import { chatWorkHandlers } from "./chat-work";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -1291,10 +1291,6 @@ export const handlers = [
       },
     );
   }),
-  // Mock mode runs no turns, so no chat ever has a check scheduled.
-  http.get("/api/chat/sessions/:id/checks", () =>
-    HttpResponse.json({ checks: [] } satisfies ChatPendingChecksResponse),
-  ),
   http.get("/api/concierge/tasks", () =>
     HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
   ),
@@ -1673,6 +1669,7 @@ export const handlers = [
   // orders its own routes internally, so they can be appended in any order —
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
+  ...chatWorkHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,

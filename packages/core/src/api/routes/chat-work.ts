@@ -78,7 +78,7 @@ export function subscribeChatWork(
 /**
  * A Concierge chat's Work tab: everything that runs for the chat, and what
  * its owner can do to each row. Every route is its owner's only: another
- * caller's chat, or an archived one, is not found. docs/domains/work.md
+ * caller's chat, or an archived one, is not found. docs/domains/chats.md#work
  */
 export function chatWorkRoutes(deps: ChatWorkApiDeps): Hono {
   const app = new Hono();

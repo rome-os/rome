@@ -19,7 +19,7 @@ import {
   CONCIERGE_LEADING_SLOT,
   CONCIERGE_TITLEBAR_SLOT,
 } from "@/components/concierge/ConciergeHeaderStatus";
-import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";
+import { ToolAgentContext, type ToolAgentHost } from "@/pages/free/tool-agent";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -56,8 +56,6 @@ const toast = rs.hoisted(() => ({
   dismiss: rs.fn(),
 }));
 rs.mock("sonner", () => ({ toast }));
-// The strip of scheduled checks reads its own query; PendingChecks.test.tsx covers it.
-rs.mock("./PendingChecks", () => ({ PendingChecks: () => null }));
 // How often the chat and its composer render: the chat calls this hook once
 // per render, and the composer stand-in counts its own.
 const renders = rs.hoisted(() => ({ chat: 0, composer: 0 }));
@@ -102,9 +100,9 @@ const mockConciergeActivity = rs.hoisted(() => rs.fn((): ConciergeActivity => ({
 rs.mock("@/components/concierge/use-concierge-activity", () => ({
   useConciergeActivity: mockConciergeActivity,
 }));
-const mockOpenTaskList = rs.hoisted(() => rs.fn());
-rs.mock("@/components/concierge/ConciergeTaskList", () => ({
-  useConciergeTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
+const mockOpenAgentPage = rs.hoisted(() => rs.fn());
+rs.mock("@/components/concierge/AgentPage", () => ({
+  useAgentPage: () => ({ open: mockOpenAgentPage, sheet: null }),
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -2215,7 +2213,7 @@ describe("Chat Concierge empty state", () => {
       seen.outlet = useSlotOutlet(CONCIERGE_LEADING_SLOT);
       return null;
     }
-    const tasksHost = (compact: boolean): ToolTasksHost => ({
+    const tasksHost = (compact: boolean): ToolAgentHost => ({
       active: false,
       compact,
       show: rs.fn(),
@@ -2224,7 +2222,7 @@ describe("Chat Concierge empty state", () => {
     const at = (compact: boolean, paneOpen: boolean) => (
       <SlotProvider>
         <ShellProbe />
-        <ToolTasksContext.Provider value={tasksHost(compact)}>
+        <ToolAgentContext.Provider value={tasksHost(compact)}>
           <ToolTraceContext.Provider
             value={{
               outlet: null,
@@ -2236,7 +2234,7 @@ describe("Chat Concierge empty state", () => {
           >
             <Chat sessionId="concierge" variant="concierge" />
           </ToolTraceContext.Provider>
-        </ToolTasksContext.Provider>
+        </ToolAgentContext.Provider>
       </SlotProvider>
     );
     const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>, { wrapper: withQueries() });
@@ -2339,7 +2337,7 @@ describe("Chat Concierge empty state", () => {
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    const tasksHost = (compact: boolean): ToolTasksHost => ({
+    const tasksHost = (compact: boolean): ToolAgentHost => ({
       active: false,
       compact,
       show: rs.fn(),
@@ -2354,7 +2352,7 @@ describe("Chat Concierge empty state", () => {
           <div data-testid="hang">
             <SlotOutlet name={CONCIERGE_TITLEBAR_SLOT} />
           </div>
-          <ToolTasksContext.Provider value={tasksHost(compact)}>
+          <ToolAgentContext.Provider value={tasksHost(compact)}>
             <ToolTraceContext.Provider
               value={{
                 outlet: null,
@@ -2366,7 +2364,7 @@ describe("Chat Concierge empty state", () => {
             >
               <Chat sessionId="concierge" variant="concierge" navbarSlot="titlebar" />
             </ToolTraceContext.Provider>
-          </ToolTasksContext.Provider>
+          </ToolAgentContext.Provider>
         </SlotProvider>
       </MemoryRouter>
     );
@@ -2429,7 +2427,7 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the task list from a plain Tasks item in a Concierge chat's menu", async () => {
+  it("opens the Agent page from the agent's logo in a Concierge chat's header, not its menu", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
@@ -2437,11 +2435,16 @@ describe("Chat Concierge empty state", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
-    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
-    const item = screen.getByRole("menuitem", { name: "concierge.tasks.title" });
-    expect(item.textContent).toBe("concierge.tasks.title");
-    await user.click(item);
-    expect(mockOpenTaskList).toHaveBeenCalledTimes(1);
+    // The header settles once the chat loads; press the button it settles on.
+    await screen.findByRole("button", { name: "concierge.agent.open" });
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole("button", { name: "concierge.agent.open" }));
+      expect(mockOpenAgentPage).toHaveBeenCalled();
+    });
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
+      "concierge.tasks.title",
+    );
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
@@ -2456,7 +2459,6 @@ describe("Chat Concierge empty state", () => {
     );
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      "concierge.tasks.title",
       "share.title",
     ]);
     await user.keyboard("{Escape}");

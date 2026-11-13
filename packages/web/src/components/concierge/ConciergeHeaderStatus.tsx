@@ -48,32 +48,56 @@ export function ConciergeHeaderStatus({
   name,
   activity,
   badge = true,
+  onOpenAgent,
 }: {
   name: ReactNode;
   activity: ConciergeActivity;
   /** Whether the mascot's badge shows. Without it the name tag takes the badge's row. */
   badge?: boolean;
+  /**
+   * Opens the Agent page. The badge is its button, or the name tag while the
+   * badge is gone.
+   */
+  onOpenAgent?: () => void;
 }) {
   const { t } = useTranslation("chat");
   const status = statusText(activity, t);
   const busy = activity.kind !== "idle";
+  const openLabel = typeof name === "string" ? t("concierge.agent.open", { name }) : undefined;
+  // A button where it opens the Agent page, else a plain box.
+  const Opener = onOpenAgent ? "button" : "div";
+  const opener = (here: boolean) =>
+    onOpenAgent && here
+      ? {
+          type: "button" as const,
+          onClick: onOpenAgent,
+          "aria-label": openLabel,
+          title: openLabel,
+        }
+      : {};
+  const focusRing =
+    "outline-none outline-2 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
   return (
     <div data-concierge-header-status data-activity={activity.kind} className="contents">
       {badge ? (
-        <div
+        <Opener
           data-concierge-header-badge
+          {...opener(true)}
           className={cn(
             "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
             FLOATING_SURFACE,
+            onOpenAgent && focusRing,
           )}
         >
           {/* About 60% of the badge, so the bob and the squash keep inside it. */}
           <RomeMascot alive={busy && activity.kind !== "needsYou"} className="h-6.5 w-auto" />
-        </div>
+        </Opener>
       ) : null}
-      <div
+      <Opener
         data-concierge-header-name
+        {...opener(!badge)}
         className={cn(
+          !badge && onOpenAgent && focusRing,
           badge ? "row-start-2 -mt-1" : "row-start-1",
           // Above the badge, so the tag covers the badge's edge, not the reverse.
           "pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2",
@@ -82,7 +106,7 @@ export function ConciergeHeaderStatus({
       >
         {/* Eight CJK characters at the tag's own size, then an ellipsis. */}
         <span className="max-w-[8em] truncate text-aux font-medium text-foreground">{name}</span>
-      </div>
+      </Opener>
       <div
         data-concierge-header-activity
         aria-live="polite"

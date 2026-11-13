@@ -68,6 +68,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - The guardian can start topic chats beside the Concierge's main chat. Each follow and each task reports to one Concierge chat, and a follow's alerts and digest go to that chat.
 - The dashboard's chat list opens with the main chat and its topic chats, then the common chats and task chats under Projects. Chat and the home page open the main chat, and only a common chat or a fork chat can be forked.
 - The guardian and every visitor on the dashboard allow-list each have their own Concierge, private to them, with their own follows, tasks, digest times, quiet hours and time zone. Memory is shared.
+- Each Concierge chat's Work tab lists its tasks, checks, follows and the routines that send into it, for its owner only. The dashboard has no other task panel or checks strip.
 - The grant names the account it reaches, by platform and the platform's own id.
 - At most one connection reaches an account across every kind of connection on its platform.
 - A fix that reaches another account ends the connection and starts a new one to that account, in one step, for every kind of connection, email, WhatsApp and the sign-ins such as GitHub included. The dashboard says so when the setup finishes.

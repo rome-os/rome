@@ -48,14 +48,6 @@
     "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",
     "openTaskChat": "Open",
     "tasks": {
-      "title": "Tasks",
-      "close": "Close tasks",
-      "groups": {
-        "needsYou": "Waiting for you",
-        "active": "Active",
-        "later": "Later",
-        "ended": "Ended"
-      },
       "ended": {
         "failed": "Failed",
         "stopped": "Stopped",
@@ -63,35 +55,8 @@
       },
       "expired": "Expired — answer to continue",
       "stop": "Stop",
-      "done": "Done",
-      "cancelCheck": "Cancel check",
-      "archive": "Archive",
-      "retry": "Try again",
-      "pending": {
-        "stop": "Stopping…",
-        "archive": "Archiving…",
-        "done": "Sending…"
-      },
-      "unchanged": "{{name}} did not change it",
-      "timeout": "{{name}} has not handled this yet",
-      "failed": "Could not send",
-      "notSynced": "Not synced",
       "sourceMissing": "Can't find the original message",
-      "findingMessage": "Finding message…",
-      "showMore": "Show {{count}} older",
-      "showLess": "Show less",
-      "openChat": "Open the chat for {{title}}",
-      "actionText": {
-        "stop": "Stop \"{{title}}\"",
-        "archive": "Archive \"{{title}}\"",
-        "done": "Done \"{{title}}\"",
-        "withId": "(task {{id}})"
-      },
-      "replyText": {
-        "done": "I've done this"
-      },
-      "emptyTitle": "No tasks yet",
-      "emptyDescription": "Tasks {{name}} hands to other agents appear here, with what each one waits for."
+      "findingMessage": "Finding message…"
     },
     "messageDetails": "Message details",
     "chooseFolder": "Choose folder…",
@@ -141,6 +106,107 @@
     "statusReaction": {
       "working": "Working on it",
       "failed": "Did not finish"
+    },
+    "agent": {
+      "title": "Agent",
+      "open": "Open {{name}}",
+      "close": "Close",
+      "tabsLabel": "Agent page",
+      "tabs": {
+        "work": "Work",
+        "uses": "Uses"
+      },
+      "uses": {
+        "brief": {
+          "title": "Daily brief",
+          "prompt": "Every weekday at 8am, send me a brief of today's calendar and important emails."
+        },
+        "price": {
+          "title": "Watch a price",
+          "prompt": "Tell me when the price of ___ drops below $___."
+        },
+        "urgent": {
+          "title": "Urgent emails only",
+          "prompt": "Check my inbox every hour and only ping me for urgent emails."
+        },
+        "app": {
+          "title": "Make an app",
+          "prompt": "Make an app to track my workouts, with a weekly chart."
+        },
+        "sleep": {
+          "title": "How I slept",
+          "prompt": "How did I sleep last night?"
+        },
+        "research": {
+          "title": "Research",
+          "prompt": "Compare the best noise-cancelling headphones under $300."
+        }
+      }
+    },
+    "work": {
+      "groups": {
+        "needs_you": "Needs you",
+        "active": "Active",
+        "later": "Later",
+        "on_its_own": "Running on its own",
+        "ended": "Ended"
+      },
+      "empty": "Nothing runs here yet.",
+      "loadFailed": "Failed to load work",
+      "task": {
+        "waitingAnswer": "Waiting for your answer",
+        "waitingApproval": "Waiting for your approval",
+        "running": "Running",
+        "checksIn": "Checks {{when}}",
+        "nextRun": "Next run {{when}}",
+        "notStarted": "Not started",
+        "repeats": "Repeats",
+        "ended": {
+          "done": "Done",
+          "failed": "Failed",
+          "stopped": "Stopped",
+          "no_response": "Ended · no response"
+        }
+      },
+      "schedule": {
+        "daily": "Daily at {{time}}",
+        "days": "{{days}} at {{time}}",
+        "once": "{{date}} at {{time}}",
+        "event": "When {{event}} arrives",
+        "manual": "Only when run by hand",
+        "other": "On a schedule"
+      },
+      "check": {
+        "waiting": "Waiting for {{what}}"
+      },
+      "follow": {
+        "digest": "Digest daily at {{times}}",
+        "unavailable": "Not available",
+        "off": "Off"
+      },
+      "routine": {
+        "paused": "Paused",
+        "lastFailed": "Last run failed"
+      },
+      "actions": {
+        "open": "Open the chat for {{title}}",
+        "stop": "Stop {{title}}",
+        "cancelCheck": "Cancel the check",
+        "skipRun": "Skip this run",
+        "unfollow": "Unfollow {{target}}",
+        "pause": "Pause {{name}}",
+        "resume": "Resume {{name}}",
+        "delete": "Delete {{name}}"
+      },
+      "failed": {
+        "stop": "Failed to stop the task",
+        "cancelCheck": "Failed to cancel the check",
+        "skipRun": "Failed to skip the run",
+        "unfollow": "Failed to unfollow",
+        "pause": "Failed to pause the routine",
+        "resume": "Failed to resume the routine",
+        "delete": "Failed to delete the routine"
+      }
     }
   },
   "reply": {
@@ -177,18 +243,6 @@
   "archived": {
     "readOnly": "This chat is archived and read-only.",
     "unarchive": "Unarchive"
-  },
-  "checks": {
-    "label": "Checks scheduled in this chat",
-    "timed": "{{name}} · {{when}}",
-    "waiting": "Waiting for {{what}} · checks {{when}}",
-    "cancel": "Cancel {{name}}",
-    "skip": "Skip the next run of {{name}}",
-    "loadFailed": "Failed to load scheduled checks",
-    "summary": "{{count}} checks · next: {{next}}",
-    "expand": "Show scheduled checks",
-    "collapse": "Hide scheduled checks",
-    "cancelFailed": "Failed to cancel the check"
   },
   "share": {
     "title": "Share chat",

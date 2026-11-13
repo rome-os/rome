@@ -2,7 +2,7 @@ import {
   ChevronDown,
   ExternalLink,
   LayoutGrid,
-  ListChecks,
+  Bot,
   ListTree,
   PanelRightClose,
   Plus,
@@ -38,8 +38,9 @@ import { WidgetPicker } from "./WidgetPicker";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
-import { ConciergeTaskPanel } from "@/components/concierge/ConciergeTaskPanel";
-import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
+import { AgentPage } from "@/components/concierge/AgentPage";
+import { useConciergeName } from "@/hooks/use-concierge";
+import { ToolAgentContext, type ToolAgentHost, type ToolAgentView } from "./tool-agent";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import {
   COMPACT_WIDTH,
@@ -56,8 +57,8 @@ const MIN_PANE_WIDTH = 360;
 const SEPARATOR_WIDTH = 1;
 // Tab value of the Trace tab. Widget ids are generated, so it cannot collide.
 const TRACE_TAB_ID = "__trace__";
-// Tab value of the Tasks tab, likewise.
-const TASKS_TAB_ID = "__tasks__";
+// Tab value of the Agent tab, likewise.
+const AGENT_TAB_ID = "__agent__";
 
 function readRatio() {
   try {
@@ -161,6 +162,7 @@ export function ToolWorkspace({
 }: ToolWorkspaceProps) {
   const { t } = useTranslation("common");
   const { t: tActivity } = useTranslation("activity");
+  const agentName = useConciergeName();
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [ratio, setRatio] = useState(readRatio);
@@ -189,13 +191,14 @@ export function ToolWorkspace({
   //   the store, because the user has moved on to the pane. The flag is then
   //   redundant and clears, so the app stays visible after the trace closes.
   //
-  // The Tasks tab is the same kind of tab: view state, never saved, at most one.
+  // The Agent tab is the same kind of tab: view state, never saved, at most one.
   // Selecting one built-in tab deselects the other. A built-in tab opened over
   // a collapsed pane holds it open with the same flag.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
   const [traceSelected, setTraceSelected] = useState(false);
-  const [tasksOpen, setTasksOpen] = useState(false);
-  const [tasksSelected, setTasksSelected] = useState(false);
+  const [agentView, setAgentView] = useState<ToolAgentView | null>(null);
+  const agentOpen = agentView !== null;
+  const [agentSelected, setAgentSelected] = useState(false);
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
@@ -205,7 +208,7 @@ export function ToolWorkspace({
   const reveal = useCallback(() => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
     setTraceSelected(true);
-    setTasksSelected(false);
+    setAgentSelected(false);
   }, []);
 
   const setTraceTab = useCallback(
@@ -242,13 +245,13 @@ export function ToolWorkspace({
   useEffect(() => {
     if (activations !== undefined) {
       setTraceSelected(false);
-      setTasksSelected(false);
+      setAgentSelected(false);
     }
   }, [activations]);
 
   function addAndShow(type: WidgetType, targetId?: string) {
     setTraceSelected(false);
-    setTasksSelected(false);
+    setAgentSelected(false);
     addWidget(type, targetId);
   }
 
@@ -257,36 +260,36 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const open = !view.collapsed || ((trace !== null || tasksOpen) && holdsOpen);
+  const open = !view.collapsed || ((trace !== null || agentOpen) && holdsOpen);
   const setPaneCollapsed = useCallback((collapsed: boolean) => {
     setHoldsOpen(false);
     latest.current.setCollapsed(collapsed);
   }, []);
 
   const traceActive = trace !== null && traceSelected;
-  const tasksActive = tasksOpen && tasksSelected;
-  const builtinActive = traceActive || tasksActive;
+  const agentActive = agentOpen && agentSelected;
+  const builtinActive = traceActive || agentActive;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
     [outlet, open, setPaneCollapsed, reveal, setTraceTab],
   );
   const sorted = [...placements].sort((a, b) => a.order - b.order);
-  const hasTabs = sorted.length > 0 || trace !== null || tasksOpen;
+  const hasTabs = sorted.length > 0 || trace !== null || agentOpen;
   const compact = width < COMPACT_WIDTH;
-  const showTasks = useCallback(() => {
+  const showAgent = useCallback((view: ToolAgentView) => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
-    setTasksOpen(true);
-    setTasksSelected(true);
+    setAgentView(view);
+    setAgentSelected(true);
     setTraceSelected(false);
   }, []);
-  const hideTasks = useCallback(() => {
-    setTasksOpen(false);
-    setTasksSelected(false);
+  const hideAgent = useCallback(() => {
+    setAgentView(null);
+    setAgentSelected(false);
     if (traceOwnerRef.current === null) setHoldsOpen(false);
   }, []);
-  const tasksHost = useMemo<ToolTasksHost>(
-    () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
-    [tasksActive, open, compact, showTasks, hideTasks],
+  const agentHost = useMemo<ToolAgentHost>(
+    () => ({ active: agentActive && open, compact, show: showAgent, hide: hideAgent }),
+    [agentActive, open, compact, showAgent, hideAgent],
   );
   const activeWidget = builtinActive
     ? undefined
@@ -327,13 +330,13 @@ export function ToolWorkspace({
   // them. The same `header` renders in the title bar, so both share this.
   const tabIds = [
     ...(trace ? [TRACE_TAB_ID] : []),
-    ...(tasksOpen ? [TASKS_TAB_ID] : []),
+    ...(agentOpen ? [AGENT_TAB_ID] : []),
     ...sorted.map((widget) => widget.id),
   ];
   const activeTabId = traceActive
     ? TRACE_TAB_ID
-    : tasksActive
-      ? TASKS_TAB_ID
+    : agentActive
+      ? AGENT_TAB_ID
       : (view.activeId ?? null);
   const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
   const hiddenCount = tabIds.length - shownIds.size;
@@ -357,13 +360,13 @@ export function ToolWorkspace({
               onClose={() => traceCloseRef.current?.()}
             />
           )}
-          {tasksOpen && shownIds.has(TASKS_TAB_ID) && (
+          {agentOpen && shownIds.has(AGENT_TAB_ID) && (
             <ToolTab
-              id={TASKS_TAB_ID}
-              label={t("chat.tasksTab")}
-              icon={<ListChecks className="size-3.5" />}
-              active={tasksActive}
-              onClose={hideTasks}
+              id={AGENT_TAB_ID}
+              label={agentName}
+              icon={<Bot className="size-3.5" />}
+              active={agentActive}
+              onClose={hideAgent}
             />
           )}
           {sorted
@@ -427,10 +430,10 @@ export function ToolWorkspace({
                 {tActivity("trace.drawer.title")}
               </DropdownMenuItem>
             )}
-            {tasksOpen && (
-              <DropdownMenuItem onSelect={() => pickTab(TASKS_TAB_ID)}>
-                <ListChecks className="size-3.5" />
-                {t("chat.tasksTab")}
+            {agentOpen && (
+              <DropdownMenuItem onSelect={() => pickTab(AGENT_TAB_ID)}>
+                <Bot className="size-3.5" />
+                {agentName}
               </DropdownMenuItem>
             )}
             {sorted.map((widget) => (
@@ -466,16 +469,16 @@ export function ToolWorkspace({
   function pickTab(id: string) {
     if (id === TRACE_TAB_ID) {
       setTraceSelected(true);
-      setTasksSelected(false);
+      setAgentSelected(false);
       return;
     }
-    if (id === TASKS_TAB_ID) {
-      setTasksSelected(true);
+    if (id === AGENT_TAB_ID) {
+      setAgentSelected(true);
       setTraceSelected(false);
       return;
     }
     setTraceSelected(false);
-    setTasksSelected(false);
+    setAgentSelected(false);
     selectTool(id);
   }
 
@@ -520,7 +523,7 @@ export function ToolWorkspace({
             flexShrink: 0,
           }}
         >
-          <ToolTasksContext.Provider value={tasksHost}>{children}</ToolTasksContext.Provider>
+          <ToolAgentContext.Provider value={agentHost}>{children}</ToolAgentContext.Provider>
         </div>
         {open && !compact && (
           <div
@@ -568,7 +571,7 @@ export function ToolWorkspace({
           />
         )}
         <Tabs
-          value={traceActive ? TRACE_TAB_ID : tasksActive ? TASKS_TAB_ID : (view.activeId ?? "")}
+          value={traceActive ? TRACE_TAB_ID : agentActive ? AGENT_TAB_ID : (view.activeId ?? "")}
           onValueChange={pickTab}
           activationMode="automatic"
           className="min-h-0 min-w-0 flex-1 gap-0 bg-background"
@@ -645,16 +648,22 @@ export function ToolWorkspace({
                 <div ref={setOutlet} className="flex h-full min-h-0 flex-col" />
               </TabsContent>
             )}
-            {tasksOpen && (
+            {agentOpen && (
               <TabsContent
-                value={TASKS_TAB_ID}
+                value={AGENT_TAB_ID}
                 forceMount
-                inert={!tasksActive}
-                aria-hidden={!tasksActive}
-                style={{ display: tasksActive ? undefined : "none" }}
+                inert={!agentActive}
+                aria-hidden={!agentActive}
+                style={{ display: agentActive ? undefined : "none" }}
                 className="absolute inset-0 overflow-hidden"
               >
-                <ConciergeTaskPanel />
+                {agentView ? (
+                  <AgentPage
+                    chatId={agentView.chatId}
+                    onUse={agentView.onUse}
+                    onClose={hideAgent}
+                  />
+                ) : null}
               </TabsContent>
             )}
           </div>

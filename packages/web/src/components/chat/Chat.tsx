@@ -24,7 +24,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
-  ListChecks,
   MoreHorizontal,
   PanelRightOpen,
   Share2,
@@ -138,9 +137,8 @@ import {
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
-import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
-import { PendingChecks } from "./PendingChecks";
-import { useToolTasks } from "@/pages/free/tool-tasks";
+import { useAgentPage } from "@/components/concierge/AgentPage";
+import { useToolAgent } from "@/pages/free/tool-agent";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -2250,7 +2248,10 @@ export function Chat({
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  const conciergeTaskList = useConciergeTaskList(concierge ? (mainSessionId ?? null) : null);
+  // The agent's logo in the header opens its Agent page: what runs for this chat.
+  const agentPage = useAgentPage(concierge ? (mainSessionId ?? null) : null, (prompt) =>
+    composerRef.current?.insertText(prompt),
+  );
   // A Concierge chat's header buttons sit on round badges like its pill, except
   // in the Mac app's title bar, where they are any chat's.
   const floating = concierge && !navbarSlot;
@@ -2268,6 +2269,7 @@ export function Chat({
       activity={conciergeActivity}
       // A chat with no messages yet draws its own large mascot.
       badge={!conciergeEmpty}
+      onOpenAgent={agentPage.open}
     />
   ) : null;
 
@@ -2312,12 +2314,6 @@ export function Chat({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {concierge ? (
-              <DropdownMenuItem onSelect={conciergeTaskList.open}>
-                <ListChecks className="size-4" />
-                {t("concierge.tasks.title")}
-              </DropdownMenuItem>
-            ) : null}
             <DropdownMenuItem onSelect={() => enterShareMode()}>
               <Share2 className="size-4" />
               {t("share.title", "Share chat")}
@@ -2373,7 +2369,7 @@ export function Chat({
   // messages under the gaps stay reachable. The thread view floats the same
   // header with its close button on the right.
   // A narrow workspace shows the open tool pane in place of the chat.
-  const toolTasksHost = useToolTasks();
+  const toolTasksHost = useToolAgent();
   const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
   const floatingHeader = (trailing: ReactNode) => (
     <div
@@ -2453,7 +2449,7 @@ export function Chat({
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
-      {conciergeTaskList.sheet}
+      {agentPage.sheet}
     </>
   ) : null;
 
@@ -2693,9 +2689,6 @@ export function Chat({
                   {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                   <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
-                    {mainSessionId && !isArchived ? (
-                      <PendingChecks chatId={mainSessionId} turnKey={displayedStreaming} />
-                    ) : null}
                     {isArchived ? (
                       <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                         <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>

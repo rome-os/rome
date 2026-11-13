@@ -2,7 +2,7 @@
 // from the reads that already decide it. Tasks bring their derived status,
 // checks and schedules come from the routines the Concierge made, follows
 // from the owner's following, and routines that send into the chat from
-// their `chat_id`. Nothing here decides a status. docs/domains/work.md
+// their `chat_id`. Nothing here decides a status. docs/domains/chats.md#work
 
 import {
   type ChatWorkCheckItem,

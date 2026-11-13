@@ -114,7 +114,13 @@ describe("/chats/:chatId/work", () => {
   const summary = (chatId: string, name: string) =>
     routines.create({
       name,
-      trigger: { type: "schedule", localTime: "09:00", tzid: "UTC", rrule: "FREQ=DAILY" },
+      trigger: {
+        type: "schedule",
+        localTime: "09:00",
+        tzid: "UTC",
+        tzMode: "fixed",
+        rrule: "FREQ=DAILY",
+      },
       actionName: "send_user_message",
       args: { sessionId: chatId, text: "Summarize my day." },
     });

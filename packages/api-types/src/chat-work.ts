@@ -1,6 +1,6 @@
 // Wire types of a Concierge chat's Work tab: everything that runs for the
 // chat, grouped. The server is packages/core/src/concierge/work.ts and the
-// clients are packages/web and the iOS app. docs/domains/work.md
+// clients are packages/web and the iOS app. docs/domains/chats.md#work
 
 import type { ChatPendingCheckDto, ConciergeFollowDto, ConciergeTaskDto } from "./concierge.js";
 import { type ConciergeTaskStatus, parseTaskStatus } from "./concierge-task-status.js";
