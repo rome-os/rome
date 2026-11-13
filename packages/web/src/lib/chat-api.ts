@@ -428,8 +428,16 @@ export async function updateSessionProject(
   return jsonOrThrow<ChatSession>(res);
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`/api/chat/sessions/${sessionId}`, {
+/**
+ * Deletes a chat. For a topic chat, `followsAndTasks: "stop"` ends its follows
+ * and stops its open tasks; without it they move to the main chat.
+ */
+export async function deleteSession(
+  sessionId: string,
+  options: { followsAndTasks?: "stop" } = {},
+): Promise<void> {
+  const query = options.followsAndTasks ? `?followsAndTasks=${options.followsAndTasks}` : "";
+  await fetch(`/api/chat/sessions/${sessionId}${query}`, {
     method: "DELETE",
     credentials: "include",
   });
