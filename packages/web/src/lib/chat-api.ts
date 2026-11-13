@@ -196,10 +196,16 @@ export interface ChatMessagePage {
  */
 export async function listSessionMessagePage(
   sessionId: string,
-  options: { limit: number; before?: string | null },
+  options: {
+    limit: number;
+    before?: string | null;
+    /** A message the page must reach, however far back: one read lands on it. */
+    through?: string;
+  },
 ): Promise<ChatMessagePage | null> {
   const params = new URLSearchParams({ limit: String(options.limit) });
   if (options.before) params.set("before", options.before);
+  if (options.through) params.set("through", options.through);
   const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
     credentials: "include",
   });
@@ -518,10 +524,8 @@ export async function postWidgetEvent(
     ok: true,
     status: res.status,
     answered: reply?.answered === true,
-    // Only an https link is opened: a reply never sends the guardian to the instance.
-    ...(typeof reply?.open === "string" && /^https:\/\/[^/]/.test(reply.open)
-      ? { open: reply.open }
-      : {}),
+    // Core vets the link it sends; the client opens it as given.
+    ...(typeof reply?.open === "string" ? { open: reply.open } : {}),
   };
 }
 
@@ -722,6 +726,8 @@ export interface CreateRoutinePayload {
    * (other prefixes belong to apps' managed routines). A repeat create with
    * the same key returns the routine that already holds it, not a duplicate. */
   key?: string;
+  /** The chat whose card turns it on. */
+  chatId?: string;
 }
 
 export interface CreateRoutineResult {

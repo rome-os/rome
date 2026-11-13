@@ -1,9 +1,23 @@
 // @rstest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
+import {
+  cleanup,
+  fireEvent,
+  render as renderView,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
+
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderView(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -19,6 +33,194 @@ function ok(json: unknown): Response {
 }
 
 describe("AI Tools refresh", () => {
+  it.each([
+    [true, "chatgpt", true],
+    [true, "apikey", false],
+    [true, undefined, false],
+    [false, "chatgpt", false],
+  ] as const)("limits ChatGPT credits controls to loggedIn=%s, authMode=%s", async (loggedIn, authMode, visible) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      if (String(input) === "/api/ai-tools/status")
+        return ok({
+          codex: {
+            loggedIn,
+            authMode,
+            usage: {
+              checkedAt: new Date().toISOString(),
+              source: "test",
+              fiveHour: { usedPercent: 100 },
+            },
+          },
+        });
+      if (String(input) === "/api/settings") return ok({ "aiTools.codex.allowCredits": true });
+      return ok({});
+    }) as typeof fetch);
+    render(<AiToolsPanel showUsage />);
+    await screen.findByRole("button", { name: "Refresh" });
+    await screen.findAllByText(loggedIn ? "Connected" : "Not connected");
+    if (visible) {
+      expect(await screen.findByRole("button", { name: "Settings" })).toBeTruthy();
+      expect(await screen.findByRole("group", { name: "ChatGPT credits" })).toBeTruthy();
+    } else {
+      expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+      expect(screen.queryByRole("group", { name: "ChatGPT credits" })).toBeNull();
+    }
+  });
+
+  it.each([
+    [false, { hasCredits: true, unlimited: false, balance: "125.75" }, undefined, null],
+    [
+      true,
+      { hasCredits: true, unlimited: false, balance: "12500.750000" },
+      undefined,
+      "12,501 credits remaining",
+    ],
+    [true, { hasCredits: false, unlimited: false, balance: "0" }, undefined, "0 credits remaining"],
+    [true, { hasCredits: true, unlimited: true }, undefined, "Unlimited"],
+    [true, { hasCredits: false, unlimited: false }, undefined, "No credits available"],
+    [true, { hasCredits: true, unlimited: false }, undefined, "Balance unavailable"],
+    [true, undefined, undefined, "Balance unavailable"],
+    [
+      true,
+      { hasCredits: true, unlimited: false, balance: "125.75" },
+      "Offline",
+      "Balance unavailable",
+    ],
+  ])("shows ChatGPT credit balance only when enabled=%s, credits=%s, error=%s", async (enabled, credits, error, expected) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status")
+        return ok({
+          codex: {
+            loggedIn: true,
+            authMode: "chatgpt",
+            usage: {
+              checkedAt: new Date().toISOString(),
+              source: "test",
+              fiveHour: { usedPercent: 100 },
+              credits,
+              error,
+            },
+          },
+        });
+      if (url === "/api/settings") return ok({ "aiTools.codex.allowCredits": enabled });
+      return ok({});
+    }) as typeof fetch);
+    render(<AiToolsPanel showUsage />);
+    await screen.findByRole("button", { name: "Settings" });
+    if (expected === null) {
+      expect(screen.queryByRole("group", { name: "ChatGPT credits" })).toBeNull();
+    } else {
+      const row = await screen.findByRole("group", { name: "ChatGPT credits" });
+      expect(within(row).getByText(expected)).toBeTruthy();
+      expect(within(row).queryByRole("progressbar")).toBeNull();
+    }
+  });
+
+  it("requires confirmation on every enable and keeps failed confirmation open", async () => {
+    const stored: Record<string, unknown> = {};
+    let fail = false;
+    const writes: unknown[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status")
+        return ok({ codex: { loggedIn: true, authMode: "chatgpt" } });
+      if (url === "/api/settings") {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(String(init.body));
+          writes.push(body);
+          if (fail)
+            return { ok: false, status: 500, json: async () => ({ error: "Failed" }) } as Response;
+          Object.assign(stored, body);
+          return ok({ ok: true });
+        }
+        return ok(stored);
+      }
+      return ok({});
+    }) as typeof fetch);
+    const view = render(<AiToolsPanel />);
+    const openCredits = async () => {
+      await userEvent.click(await screen.findByRole("button", { name: "Settings" }));
+      const item = await screen.findByRole("menuitemcheckbox", { name: "Allow credit usage" });
+      await waitFor(() => expect(item.getAttribute("aria-disabled")).not.toBe("true"));
+      await userEvent.click(item);
+    };
+    await openCredits();
+    const dialog = await screen.findByRole("dialog", { name: "Enable credit usage?" });
+    expect(within(dialog).getByText(/may spend credits immediately/)).toBeTruthy();
+    expect(
+      within(dialog).getByRole("link", { name: "View ChatGPT usage" }).getAttribute("href"),
+    ).toBe("https://chatgpt.com/settings/usage");
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(writes).toHaveLength(0);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(writes).toHaveLength(0);
+    await openCredits();
+    fail = true;
+    await userEvent.click(await screen.findByRole("button", { name: "Enable", exact: true }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(stored["aiTools.codex.allowCredits"]).toBeUndefined();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Enable", exact: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(stored).toEqual({ "aiTools.codex.allowCredits": true });
+    view.unmount();
+    render(<AiToolsPanel />);
+    await openCredits();
+    await waitFor(() => expect(stored["aiTools.codex.allowCredits"]).toBe(false));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const writesBeforeEnable = writes.length;
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Allow credit usage" }));
+    expect(await screen.findByRole("dialog", { name: "Enable credit usage?" })).toBeTruthy();
+    expect(stored["aiTools.codex.allowCredits"]).toBe(false);
+    expect(writes).toHaveLength(writesBeforeEnable);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(stored["aiTools.codex.allowCredits"]).toBe(false);
+    await openCredits();
+    await userEvent.click(await screen.findByRole("button", { name: "Enable", exact: true }));
+    await waitFor(() => expect(stored["aiTools.codex.allowCredits"]).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("keeps credits in the settings dropdown and preserves the value when saving fails", async () => {
+    let enabled = true;
+    let fail = true;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status")
+        return ok({ codex: { loggedIn: true, authMode: "chatgpt" } });
+      if (url === "/api/settings") {
+        if (init?.method === "PUT") {
+          if (fail)
+            return { ok: false, status: 500, json: async () => ({ error: "Failed" }) } as Response;
+          enabled = JSON.parse(String(init.body))["aiTools.codex.allowCredits"];
+          return ok({ ok: true });
+        }
+        return ok({ "aiTools.codex.allowCredits": enabled });
+      }
+      return ok({});
+    }) as typeof fetch);
+    render(<AiToolsPanel />);
+    expect(screen.queryByRole("menuitemcheckbox")).toBeNull();
+    const settingsButton = await screen.findByRole("button", { name: "Settings" });
+    await userEvent.click(settingsButton);
+    const toggle = await screen.findByRole("menuitemcheckbox", {
+      name: "Allow credit usage",
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(toggle.getAttribute("aria-disabled")).not.toBe("true"));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(toggle);
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menuitemcheckbox")).toBeNull());
+    expect(document.activeElement).toBe(settingsButton);
+  });
+
   it("shows pending state and replaces the displayed provider state", async () => {
     let resolveRefresh!: (response: Response) => void;
     const refreshResponse = new Promise<Response>((resolve) => {

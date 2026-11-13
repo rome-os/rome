@@ -57,7 +57,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(question.questions.first?.text == "Which?")
         #expect(parts[3] == .webOnly(.unknown, toolUseId: "app"))
         #expect(parts[4] == .other(type: "tool_use"))
-        #expect(parts[5] == .error("boom"))
+        #expect(parts[5] == .error(TurnError(text: "boom")))
     }
 
     @Test func actionNamesReadAsWords() {
@@ -129,6 +129,18 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         let answer = message("r", role: "user", [["type": "interaction_result", "toolUseId": "q1", "output": ["answers": [["questionId": "s", "value": "A"]]]]], at: 0)
         let answers = TranscriptBuilder.answers(in: [answer])
         #expect(answers["q1"]?["answers"]?.array?.first?["value"]?.string == "A")
+    }
+
+    /// A provider reuses tool-use ids across turns: an answer belongs to the
+    /// card before it, and a later card with the same id stays open.
+    @Test func anAnswerBelongsToTheCardBeforeIt() {
+        let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "appId": "connector", "render": ["kind": "inline", "ui": ["components": [["id": "root", "component": "Text", "text": "Connect"]]]]]
+        let first = message("c1", role: "assistant", [card], at: 0)
+        let result = message("r1", role: "user", [["type": "interaction_result", "toolUseId": "item_0", "output": ["from": "connector", "value": "ok"]]], at: 1)
+        let second = message("c2", role: "assistant", [card], at: 2)
+        let answers = TranscriptBuilder.answers(in: [first, result, second])
+        #expect(answers["c1"] != nil)
+        #expect(answers["c2"] == nil)
     }
 }
 

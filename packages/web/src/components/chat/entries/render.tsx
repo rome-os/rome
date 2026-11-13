@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useContext } from "react";
+import { useLiveTaskCard } from "./live-task-cards";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -36,11 +37,15 @@ export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntr
 
 function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat" }> }) {
   const latest = useContext(LatestTaskChatsContext);
+  // As a live event settled it since the message loaded.
+  const card = useLiveTaskCard(block.card);
   return (
     <TaskChatCard
       chatId={block.chatId}
       title={block.title}
       isLatestForChat={!latest || latest.get(block.chatId) === block}
+      show={block.show}
+      card={card}
     />
   );
 }
@@ -206,6 +211,7 @@ export function renderSingleEntry(
           // Parts can arrive unvalidated (e.g. via channels.send); a malformed
           // key falls back to the keyless card rather than failing every create.
           routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
+          chatId={sessionId}
         />
       );
     case "pending_interaction": {
@@ -239,7 +245,12 @@ export function renderSingleEntry(
       // any widget, and answered by one of its events, which core routes.
       if (block.render.ui && block.render.componentId === undefined) {
         return (
-          <CardBoundary key={`app-widget-${block.toolUseId}`} fallback={null}>
+          <CardBoundary
+            key={`app-widget-${block.toolUseId}`}
+            fallback={
+              block.text ? <p className="text-ui text-muted-foreground">{block.text}</p> : null
+            }
+          >
             <Suspense fallback={null}>
               <WidgetUiCard
                 widgetId={widgetId}
@@ -247,7 +258,7 @@ export function renderSingleEntry(
                 appId={block.appId}
                 ui={block.render.ui}
                 bind={block.render.bind}
-                text=""
+                text={block.text ?? ""}
                 waiting={{ result: resultFor(block.toolUseId) }}
               />
             </Suspense>

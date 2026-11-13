@@ -35,6 +35,10 @@ struct TaskChatScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .floatingTopBar { header }
+        .overlay(alignment: .top) {
+            TranscriptBanners(store: store)
+                .padding(.top, 62)
+        }
         .background(Palette.bg.ignoresSafeArea())
         .composerDraft(workspace.drafts, chat: chatId, text: $draft, attachments: attachments, transcript: store)
         .toolbar(.hidden, for: .navigationBar)
@@ -168,20 +172,25 @@ struct TaskChatScreen: View {
                 // The Concierge relays the guardian's words: their side, its name.
                 ConciergeBubble(name: message.sender?.name ?? model.workspace?.agentDisplayName ?? AgentName.fallback, text: text, menu: menu(row))
             } else {
-                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(row))
+                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(row))
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu(row))
         case .tools, .approval, .question, .webOnly, .routineDraft, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
-        case .error(_, let text):
-            ErrorLine(text: text)
-        case .taskCard(_, let id, let title, _):
+        case .error(_, let error):
+            ErrorLine(error: error)
+        case .notice(_, let text):
+            NoticeLine(text: text)
+        case .taskCard(_, let id, let title, _, _):
             TaskCard(title: title) {}
+        case .taskAsk, .threadLabel, .sourceLabel:
+            // Only a Concierge chat shows a task's question alone, or thread labels.
+            EmptyView()
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .threadReplies:
-            // Task chats have no chat threads.
+        case .sessionRenewal:
+            // Only a Concierge chat draws its faint lines.
             EmptyView()
         }
     }

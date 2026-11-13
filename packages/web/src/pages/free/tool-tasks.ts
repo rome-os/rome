@@ -15,8 +15,11 @@ export interface ToolTasksHost {
    * the caller opens the list another way.
    */
   compact: boolean;
-  /** Adds the tab and selects it. A collapsed pane shows it without saving a change to its state. */
-  show: () => void;
+  /**
+   * Adds the tab for Concierge chat `chatId`'s task list and selects it. A
+   * collapsed pane shows it without saving a change to its state.
+   */
+  show: (chatId: string) => void;
   /** Removes the tab. */
   hide: () => void;
 }

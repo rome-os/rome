@@ -20,6 +20,26 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
   },
 };
 
+/** Set on the env of a turn the widget route starts, which a client cannot
+ *  set: only this route answers an app's widget the agent waits on. */
+const WIDGET_EVENT = Symbol.for("rome.widget-event");
+
+/** Whether a request came through the widget route, from `c.env`. */
+export function cameThroughWidgetEvent(env: unknown): boolean {
+  return isObject(env) && (env as Record<symbol, unknown>)[WIDGET_EVENT] === true;
+}
+
+/** A link a client may open: https, or a page of this instance. */
+function vetLink(link: unknown, origin: string): string | undefined {
+  if (typeof link !== "string") return undefined;
+  try {
+    const url = new URL(link, origin);
+    return url.protocol === "https:" || url.origin === origin ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The names a question card stored before its events were its own. */
 const STORED_EVENT_NAMES: Record<string, string> = {
   "rome:answer": "send",
@@ -38,7 +58,7 @@ interface StoredWidget {
 }
 
 export interface WidgetEventDeps {
-  webchatRepo: Pick<WebChatRepository, "getMessageContent" | "sessionIdOfMessage" | "getSession">;
+  webchatRepo: Pick<WebChatRepository, "widgetMessage" | "getSession">;
   /** Hands a request to Rome's own API, as if the caller had sent it there.
    *  `env` is the incoming request's, so the caller resolves the same way. */
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
@@ -71,12 +91,17 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
 
     // The route checks the chat itself: it is under no chat's path, so no
     // other route's guard runs before it. Not found, to anyone who may not open it.
-    const chatId = await deps.webchatRepo.sessionIdOfMessage(widgetId);
+    // The chat and the widget come from one row, so the chat checked is the
+    // chat whose widget is pressed.
+    const message = await deps.webchatRepo.widgetMessage(widgetId);
     const owner = await callerOwner();
-    if (!chatId || !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
+    if (
+      !message ||
+      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), message.chatId, owner))
+    ) {
       return c.json({ error: "No widget with this id" }, 404);
     }
-    const widget = readWidget(chatId, await deps.webchatRepo.getMessageContent(widgetId));
+    const widget = readWidget(message.chatId, message.content);
     if (!widget) return c.json({ error: "No widget with this id" }, 404);
     if (!eventNames(widget.components).has(name)) {
       return c.json({ error: "This widget declares no such event" }, 400);
@@ -92,26 +117,31 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
           headers,
           body: JSON.stringify(json),
         }),
-        c.env,
+        { ...(isObject(c.env) ? c.env : {}), [WIDGET_EVENT]: true },
       );
 
     if (widget.appId === "core") {
       const handle = CORE_WIDGETS[widget.componentId ?? ""]?.[STORED_EVENT_NAMES[name] ?? name];
       if (!handle) return c.json({ error: "This widget declares no such event" }, 400);
       if (!widget.waits) return c.json({ error: "The agent does not wait on this widget" }, 400);
-      return answer(to, widget, handle(context), body?.turn);
+      return answer(to, widget, widgetId, handle(context), body?.turn);
     }
     if (!isWidgetAppPath(name)) return c.json({ error: "The event is not a path in the app" }, 400);
     const reply = await to(`/api/apps/${encodeURIComponent(widget.appId)}/${name}`, context);
+    if (!reply.ok) return reply;
+    const said = (await reply.json().catch(() => null)) as {
+      answer?: unknown;
+      open?: unknown;
+    } | null;
     // An app's widget the agent waits on answers it when the app's reply says
     // so; the answer is labelled as the app's, never as the guardian's words.
-    if (!widget.waits || !reply.ok) return reply;
-    const said = (await reply
-      .clone()
-      .json()
-      .catch(() => null)) as { answer?: unknown } | null;
-    if (said?.answer === undefined) return reply;
-    return answer(to, widget, { from: widget.appId, value: said.answer }, body?.turn);
+    if (widget.waits && said?.answer !== undefined) {
+      return answer(to, widget, widgetId, { from: widget.appId, value: said.answer }, body?.turn);
+    }
+    // Core writes what the client reads: whether the agent was answered and a
+    // link to open, never a field of the app's own.
+    const open = vetLink(said?.open, new URL(c.req.url).origin);
+    return c.json(open ? { open } : {});
   });
 
   /**
@@ -123,13 +153,18 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
   async function answer(
     to: (path: string, json: unknown) => Response | Promise<Response>,
     widget: StoredWidget,
+    widgetId: string,
     output: unknown,
     turnFields: unknown,
   ) {
     const turn = isObject(turnFields) ? turnFields : {};
     const res = await to(`/api/chat/sessions/${encodeURIComponent(widget.chatId)}/turns`, {
       ...turn,
-      parts: [{ type: "interaction_result", toolUseId: widget.toolUseId, output }],
+      // The message names the card pressed: a later card in the chat can
+      // reuse its tool-use id.
+      parts: [
+        { type: "interaction_result", toolUseId: widget.toolUseId, messageId: widgetId, output },
+      ],
     });
     if (!res.ok) return res;
     const turnReply = await res.json().catch(() => ({}));

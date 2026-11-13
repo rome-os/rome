@@ -23,6 +23,27 @@ export interface AgentPolicy {
    * never replaced. docs/concepts/sessions.md#setup
    */
   freshSessionOnSetupChange: boolean;
+  /**
+   * Whether a renewal starts the fresh session from a handoff: a note the
+   * retired session writes, at send time, of what was in progress, agreed and
+   * still open, with the chat's open tasks and its recent messages beside it.
+   * docs/concepts/sessions.md#handoff
+   */
+  handoffOnRenewal: boolean;
+  /**
+   * Whether the agent's `defer` checks on tasks, as the Concierge's does: it
+   * may name the task a check is for, and an event wait needs a label saying
+   * what it waits for and a deadline when it wakes anyway. Off, `defer` takes
+   * neither, as for every other agent.
+   */
+  taskChecks: boolean;
+  /**
+   * Whether the agent hands its work to other chats rather than doing it, as
+   * the Concierge does. Its prompt then leaves out what only an agent doing
+   * the work reads: the command line tools, and the runtime context beyond
+   * where memory and the docs are. Nor does it get `propose_routine`.
+   */
+  delegatesWork: boolean;
 }
 
 export function resolveAgentPolicy(agent: {
@@ -34,5 +55,8 @@ export function resolveAgentPolicy(agent: {
     autoTitle: agent.policy?.autoTitle ?? true,
     loadMemory: agent.policy?.loadMemory ?? agent.name === "main",
     freshSessionOnSetupChange: agent.policy?.freshSessionOnSetupChange ?? false,
+    handoffOnRenewal: agent.policy?.handoffOnRenewal ?? false,
+    taskChecks: agent.policy?.taskChecks ?? false,
+    delegatesWork: agent.policy?.delegatesWork ?? false,
   };
 }

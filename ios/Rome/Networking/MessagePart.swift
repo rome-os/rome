@@ -7,8 +7,12 @@ enum MessagePart: Hashable, Sendable {
     /// Markdown text. `long` messages read as a document; `forwardedFrom` marks a
     /// report forwarded word for word from a task chat.
     case text(String, long: Bool, forwardedFrom: ForwardedFrom?)
-    /// A card for a task chat the Concierge started.
-    case taskChat(chatId: String, title: String)
+    /// A card for a task chat the Concierge started. `show` says what it
+    /// draws: the task card, or the task's question or approval alone; nil
+    /// on a part from before, which draws the task card with its wait inside.
+    /// `card` is the question or approval, filled in by the instance for a
+    /// part that shows one.
+    case taskChat(chatId: String, title: String, show: TaskChatShow? = nil, card: TaskAskCard? = nil)
     /// An action paused for the guardian's approval.
     case approval(ApprovalPart)
     /// The agent asked the guardian a question (`ask_question`).
@@ -26,10 +30,22 @@ enum MessagePart: Hashable, Sendable {
     /// The guardian's answer to an interactive card.
     case interactionResult(toolUseId: String, output: JSONValue)
     /// A turn that failed before it ran.
-    case error(String)
+    case error(TurnError)
+    /// A quiet line, such as the chat moving to another model (`quota_switch`).
+    case notice(String)
+    /// The message a reply quotes (`reply_to`), drawn inside the reply's bubble.
+    case replyTo(ReplyQuote)
     /// Parts the web dashboard does not show in a transcript either (tool
     /// calls, thinking, usage, a reply's quote).
     case other(type: String)
+
+    /// What a `task_chat` part draws (`show` on the wire).
+    enum TaskChatShow: String, Hashable, Sendable {
+        /// The task card: its title, opening the task chat.
+        case task
+        /// The task's question or approval on its own.
+        case ask
+    }
 
     /// What a `.webOnly` row names, after the web component's own title.
     enum WebOnlyKind: Hashable, Sendable {
@@ -43,8 +59,6 @@ enum MessagePart: Hashable, Sendable {
         case app(String)
         /// A turn's recap (`turn_recap`).
         case turnSummary
-        /// Chat moved to another model (`quota_switch`).
-        case modelSwitch(model: String)
         /// A part type this build does not know.
         case unknown
 
@@ -58,7 +72,6 @@ enum MessagePart: Hashable, Sendable {
                 if let appName, !appName.isEmpty { return String(localized: "A card from \(appName)") }
                 return String(localized: "An app card")
             case .turnSummary: return String(localized: "A turn summary")
-            case .modelSwitch(let model): return String(localized: "Switched to \(model)")
             case .unknown: return String(localized: "A card")
             }
         }
@@ -73,6 +86,16 @@ enum MessagePart: Hashable, Sendable {
         "turn_start", "turn_end", "structured_output", "system_input", "plan_update",
         "subagent_start", "subagent_result", "reply_to", "handoff", "submission_card",
     ]
+
+    /// `reply_to`: what a reply quotes, as the server snapshotted it.
+    struct ReplyQuote: Hashable, Sendable {
+        let messageId: String
+        /// `guardian`, `agent` or `automated`.
+        let author: String?
+        /// An automated sender's name.
+        let name: String?
+        let text: String
+    }
 
     /// `routine_draft_card`: a routine Chat proposed, and the key it is created with.
     struct RoutineDraftPart: Hashable, Sendable {
@@ -212,7 +235,7 @@ enum MessagePart: Hashable, Sendable {
             ))
         case "task_chat":
             guard let chatId = value["chatId"]?.string else { return nil }
-            return .taskChat(chatId: chatId, title: value["title"]?.string ?? "")
+            return .taskChat(chatId: chatId, title: value["title"]?.string ?? "", show: value["show"]?.string.flatMap(TaskChatShow.init), card: TaskAskCard(json: value["card"]))
         case "approval_card":
             guard let approvalId = value["approvalId"]?.string else { return nil }
             return .approval(approval(value, id: approvalId))
@@ -242,10 +265,18 @@ enum MessagePart: Hashable, Sendable {
         case "turn_recap":
             return .webOnly(.turnSummary)
         case "quota_switch":
-            guard let model = value["model"]?.string, !model.isEmpty else { return .webOnly(.unknown) }
-            return .webOnly(.modelSwitch(model: model))
+            guard let text = Self.modelSwitchText(value) else { return .webOnly(.unknown) }
+            return .notice(text)
         case "error":
-            return .error(value["error"]?.string ?? "")
+            return .error(TurnError(
+                text: value["error"]?.string ?? "",
+                code: value["code"]?.string,
+                provider: value["provider"]?.string,
+                reason: value["reason"]?.string
+            ))
+        case "reply_to":
+            guard let messageId = value["messageId"]?.string else { return .other(type: type) }
+            return .replyTo(ReplyQuote(messageId: messageId, author: value["author"]?.string, name: value["name"]?.string, text: value["text"]?.string ?? ""))
         default:
             return hiddenTypes.contains(type) ? .other(type: type) : .webOnly(.unknown)
         }
@@ -334,13 +365,51 @@ enum MessagePart: Hashable, Sendable {
 }
 
 extension MessagePart {
+    /// The words for a chat that moved to another model: why, and to what,
+    /// as the dashboard's `ModelSwitchNotice` says them.
+    static func modelSwitchText(_ value: JSONValue) -> String? {
+        guard let model = value["model"]?.string, !model.isEmpty else { return nil }
+        func name(_ provider: String?) -> String? {
+            switch provider {
+            case "openai": return "Codex"
+            case "anthropic": return "Claude"
+            default: return nil
+            }
+        }
+        let fromProvider = value["from"]?.string, toProvider = value["to"]?.string
+        let reason = value["reason"]?.string
+        let toModel = ModelNames.display(model)
+        // Within one provider, or with no provider named, the model limit is what ran out.
+        if fromProvider != nil, fromProvider == toProvider || reason == "model_limit" {
+            let fromModel = ModelNames.display(value["fromModel"]?.string ?? "")
+            if !fromModel.isEmpty { return String(localized: "\(fromModel) limit reached, switched to \(toModel)") }
+        }
+        if let from = name(fromProvider), let to = name(toProvider) {
+            switch reason {
+            case "login": return String(localized: "\(from) sign-in failed, switched to \(to)")
+            case "temporary": return String(localized: "\(from) is temporarily unavailable, switched to \(to)")
+            case "model_limit":
+                let fromModel = ModelNames.display(value["fromModel"]?.string ?? "")
+                return String(localized: "\(fromModel) limit reached, switched to \(toModel)")
+            default: return String(localized: "\(from) quota ran out, switched to \(to)")
+            }
+        }
+        return String(localized: "Switched to \(toModel)")
+    }
+
     /// Whether the part shows something in a transcript.
     var isVisible: Bool {
         switch self {
         case .text(let text, _, _): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .other, .interactionResult: return false
+        case .other, .interactionResult, .replyTo: return false
         default: return true
         }
+    }
+
+    /// The quote of a reply part.
+    var replyQuote: ReplyQuote? {
+        if case .replyTo(let quote) = self { return quote }
+        return nil
     }
 
     /// The text of a text part.

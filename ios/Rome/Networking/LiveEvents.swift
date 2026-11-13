@@ -5,10 +5,23 @@ import UIKit
 enum LiveEvent: Sendable {
     /// A chat started or stopped running a turn (`chat.status`).
     case sessionRunning(sessionId: String, running: Bool)
+    /// How the running turn shows the typing dots (`message_writing` on
+    /// `chat.session:<id>`): `exact` while `writing`, or `simulated`.
+    case messageWriting(sessionId: String, turnId: String, mode: WritingMode, writing: Bool)
     /// A message was stored in a chat (`chat.session:<id>`).
     case messageInsert(ChatMessage)
-    /// A message was placed in a chat thread (`message_chat_thread`).
-    case messageThread(sessionId: String, messageId: String, chatThreadId: String?)
+    /// A message was placed in a chat thread (`message_chat_thread`), with
+    /// the title of the task the thread is.
+    case messageThread(sessionId: String, messageId: String, chatThreadId: String?, title: String? = nil)
+    /// A task left the chat and took its thread with it (`chat_thread_retired`):
+    /// its messages are in no thread now.
+    case threadRetired(sessionId: String, chatThreadId: String)
+    /// Rome's mark on a guardian message changed (`message_status_reaction`).
+    /// Nil: it has none now.
+    case statusReaction(sessionId: String, messageId: String, reaction: String?)
+    /// A task's question or approval that a card in the chat shows ended
+    /// (`chat_card_settled`): `card` replaces the card of every part that shows it.
+    case cardSettled(sessionId: String, card: JSONValue)
     /// A Concierge chat's activity changed (`concierge_activity`). Nil: a
     /// state this build does not know, shown as no status line.
     /// `at`: when it took effect on the server, epoch milliseconds.
@@ -19,10 +32,18 @@ enum LiveEvent: Sendable {
     case sessionName(sessionId: String, name: String)
     /// The Concierge wrote a task row (`concierge.tasks`).
     case taskUpsert(ConciergeTask)
+    /// Something a Concierge chat's task list holds changed
+    /// (`tasks_changed` on `chat.tasks:<chatId>`): read the list again.
+    case taskListChanged(chatId: String)
     /// Events may have been missed: the app came back to the foreground, or
     /// the socket came back after a drop. Listeners refetch what they show.
     case reconnected
 }
+
+/// How a turn shows the typing dots: `exact` where the provider says when
+/// it writes a message (the dots show while it does), `simulated` where it
+/// cannot (each new message waits behind the dots for a moment).
+enum WritingMode: String, Sendable { case exact, simulated }
 
 /// The source of live events. The real socket and the demo backend both implement it.
 @MainActor
@@ -48,6 +69,8 @@ enum LiveTopic {
     static let conciergeActivity = "concierge.activity"
     static let conciergeTasks = "concierge.tasks"
     static func chat(_ sessionId: String) -> String { "chat.session:\(sessionId)" }
+    /// A Concierge chat's task list, by the chat's server id.
+    static func chatTasks(_ chatId: String) -> String { "chat.tasks:\(chatId)" }
     /// Held for the one chat on screen; it carries no events.
     static func watch(_ chatId: String) -> String { "chat.watch:\(chatId)" }
 }
@@ -301,12 +324,25 @@ final class LiveEventsSocket: LiveEventSource {
         case "session_running":
             guard let id = data["sessionId"]?.string, let running = data["running"]?.bool else { return nil }
             return .sessionRunning(sessionId: id, running: running)
+        case "message_writing":
+            guard let id = data["sessionId"]?.string, let turn = data["turnId"]?.string,
+                  let mode = data["mode"]?.string.flatMap(WritingMode.init(rawValue:)) else { return nil }
+            return .messageWriting(sessionId: id, turnId: turn, mode: mode, writing: data["writing"]?.bool ?? false)
         case "session_name":
             guard let id = data["sessionId"]?.string, let name = data["name"]?.string else { return nil }
             return .sessionName(sessionId: id, name: name)
+        case "tasks_changed":
+            guard let id = data["chatId"]?.string else { return nil }
+            return .taskListChanged(chatId: id)
         case "message_insert":
             guard let message = data.decoded(ChatMessage.self) else { return nil }
             return .messageInsert(message)
+        case "message_status_reaction":
+            guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
+            return .statusReaction(sessionId: id, messageId: message, reaction: data["statusReaction"]?.string)
+        case "chat_card_settled":
+            guard let id = data["sessionId"]?.string, let card = data["card"], card["kind"]?.string != nil, card["id"]?.string != nil else { return nil }
+            return .cardSettled(sessionId: id, card: card)
         case "concierge_activity":
             guard let chatId = data["chatId"]?.string, let activity = data["activity"] else { return nil }
             return .conciergeActivity(chatId: chatId, activity: ConciergeActivity(json: activity), at: data["at"]?.number)
@@ -314,7 +350,10 @@ final class LiveEventsSocket: LiveEventSource {
             return .agentName(AgentName.display(data["agentName"]?.string))
         case "message_chat_thread":
             guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
-            return .messageThread(sessionId: id, messageId: message, chatThreadId: data["chatThreadId"]?.string)
+            return .messageThread(sessionId: id, messageId: message, chatThreadId: data["chatThreadId"]?.string, title: data["chatThreadTitle"]?.string)
+        case "chat_thread_retired":
+            guard let id = data["sessionId"]?.string, let root = data["chatThreadId"]?.string else { return nil }
+            return .threadRetired(sessionId: id, chatThreadId: root)
         case "task_upsert":
             guard let event = data.decoded(TaskUpsertEvent.self) else { return nil }
             return .taskUpsert(event.task)

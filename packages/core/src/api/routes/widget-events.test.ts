@@ -50,8 +50,8 @@ function setup(
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
     webchatRepo: {
-      sessionIdOfMessage: async (id) => rows[id]?.chatId ?? null,
-      getMessageContent: async (id) => (rows[id] ? JSON.stringify(rows[id].content) : null),
+      widgetMessage: async (id) =>
+        rows[id] ? { chatId: rows[id].chatId, content: JSON.stringify(rows[id].content) } : null,
       getSession: (async (id: string) =>
         id === "private"
           ? { id, agentName: "core:concierge", ownerKey: "guardian", triggerKind: null }
@@ -106,6 +106,7 @@ describe("an event on a widget", () => {
             {
               type: "interaction_result",
               toolUseId: "q1",
+              messageId: "m2",
               output: { answers: [{ values: ["Warm"], text: "" }] },
             },
           ],
@@ -131,11 +132,21 @@ describe("an event on a widget", () => {
           {
             type: "interaction_result",
             toolUseId: "q1",
+            messageId: "m3",
             output: { answers: [{ values: ["Warm"], text: "" }] },
           },
         ],
       },
-      { parts: [{ type: "interaction_result", toolUseId: "q1", output: { dismissed: true } }] },
+      {
+        parts: [
+          {
+            type: "interaction_result",
+            toolUseId: "q1",
+            messageId: "m3",
+            output: { dismissed: true },
+          },
+        ],
+      },
     ]);
   });
 
@@ -173,6 +184,7 @@ describe("an event on a widget", () => {
             {
               type: "interaction_result",
               toolUseId: "tu-connect",
+              messageId: "m4",
               output: { from: "connector", value: { toolkit: "gmail", status: "connected" } },
             },
           ],
@@ -204,11 +216,55 @@ describe("an event on a widget", () => {
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/connector/connect"]);
   });
 
+  it("writes what the client reads itself, never a field of the app's own", async () => {
+    const connect = {
+      type: "pending_interaction",
+      toolUseId: "tu-connect",
+      appId: "connector",
+      render: {
+        kind: "inline",
+        ui: {
+          components: [
+            { id: "root", component: "Column", children: [] },
+            button("connect", "connect"),
+          ],
+        },
+      },
+    };
+    const said = async (reply: unknown) => {
+      const { fire, forwarded } = setup(
+        { m6: { chatId: "c1", content: [connect] } },
+        "guardian",
+        reply,
+      );
+      const res = await fire("m6", { name: "connect" });
+      return { body: await res.json(), forwarded: forwarded.map((f) => f.url) };
+    };
+    // The app says it answered, but gave no answer: the agent still waits.
+    expect(await said({ answered: true, extra: 1 })).toEqual({
+      body: {},
+      forwarded: ["/api/apps/connector/connect"],
+    });
+    // A link opens only when it is https or a page of this instance.
+    expect((await said({ open: "http://evil.example/x" })).body).toEqual({});
+    expect((await said({ open: "javascript:alert(1)" })).body).toEqual({});
+    expect((await said({ open: "/settings/connections" })).body).toEqual({
+      open: "http://localhost/settings/connections",
+    });
+  });
+
   it("dismisses with the output every dismissal has", async () => {
     const { fire, forwarded } = setup({ m2: { chatId: "c1", content: [question] } });
     await fire("m2", { name: "rome:dismiss", context: { ignored: true } });
     expect(forwarded[0]?.body).toEqual({
-      parts: [{ type: "interaction_result", toolUseId: "q1", output: { dismissed: true } }],
+      parts: [
+        {
+          type: "interaction_result",
+          toolUseId: "q1",
+          messageId: "m2",
+          output: { dismissed: true },
+        },
+      ],
     });
   });
 
@@ -299,6 +355,47 @@ describe("an event on a widget, over the dashboard's own storage", () => {
           { type: "text", content: "and words" } as never,
         ]),
       ).rejects.toThrow();
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("finds no widget by a key two dashboard chats share, so no chat is checked for another's widget", async () => {
+    const { createTestDb } = await import("../../test/helpers.js");
+    const { TurnLinks } = await import("../../sessions/turn-links.js");
+    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
+      await repo.createSession("chat-1", "Mine");
+      await repo.createSession("chat-2", "Theirs");
+      const widget = JSON.stringify([mealWidget("item_0", "meals", "water")]);
+      await repo.addMessage("dup", "chat-1", "assistant", widget);
+      await repo.addMessage("dup", "chat-2", "assistant", widget);
+      expect(await repo.widgetMessage("dup")).toBeNull();
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("leaves a trace found by its own id when a dashboard line takes that id as its key", async () => {
+    const { createTestDb } = await import("../../test/helpers.js");
+    const { TurnLinks } = await import("../../sessions/turn-links.js");
+    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
+      await repo.createSession("private", "Private");
+      await repo.createSession("mine", "Mine");
+      await repo.addMessage("trace-1", "private", "trace", "[]");
+      // A client picks a user line's key, so it can pick a trace's id.
+      await repo.addMessage(
+        "trace-1",
+        "mine",
+        "user",
+        JSON.stringify([{ type: "text", content: "hi" }]),
+      );
+      expect(await repo.sessionIdOfMessage("trace-1")).toBe("private");
     } finally {
       testDb.close();
     }
