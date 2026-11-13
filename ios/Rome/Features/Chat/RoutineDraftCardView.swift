@@ -60,7 +60,8 @@ struct RoutineDraftCardView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 2)
             .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous))
-            if canTurnOn, let origin = model.webURL {
+            // Turning it on is not offered here yet; a routine already on opens in Routines.
+            if canTurnOn, status?.routineId != nil, let origin = model.webURL {
                 Button {
                     openInstancePage(RoutineCardText.destination(status, origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
                 } label: {

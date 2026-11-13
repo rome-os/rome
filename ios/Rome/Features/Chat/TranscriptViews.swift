@@ -511,27 +511,26 @@ struct TaskCard: View {
                 Text(verbatim: label)
                     .romeFont(CardScale.label)
                     .foregroundStyle(Palette.sub)
-                    // Room for Stop on the same line.
-                    .padding(.trailing, state?.stoppable == true ? 64 : 0)
+
                 HStack(spacing: 8) {
                     Text(title)
                         .romeFont(CardScale.body, .semibold)
                         .foregroundStyle(Palette.fg)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .romeFont(10)
-                        .foregroundStyle(Palette.sub.opacity(0.6))
                 }
             }
+            // Room for Stop on the right.
+            .padding(.trailing, state?.stoppable == true ? 58 : 0)
             .cardPadding()
             .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .softElevation(radius: Metrics.cardRadius)
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .overlay(alignment: .topTrailing) {
-            // Beside the card's own tap, so a press on Stop never opens the chat.
+        .overlay(alignment: .trailing) {
+            // On the right of the card, beside its own tap, so a press on Stop
+            // never opens the chat. A quiet button, not a row of its own.
             if state?.stoppable == true, let onStop {
                 Button(action: onStop) {
                     Text(stopping ? "Stopping…" : "Stop")
@@ -543,7 +542,6 @@ struct TaskCard: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(stopping)
-                .padding(.top, 10)
                 .padding(.trailing, 12)
             }
         }
