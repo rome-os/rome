@@ -382,6 +382,9 @@ final class TranscriptStore {
     /// thread still being looked up.
     var composerThread: ThreadTarget? { quote ?? reopening }
 
+    /// The reply bar shows for a reply to a message, not for a thread opened from its label.
+    var showsQuoteBar: Bool { quote != nil && quote?.bare != true }
+
     /// The quoted message, when it is held.
     var quotedMessage: ChatMessage? {
         quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
@@ -415,7 +418,7 @@ final class TranscriptStore {
     /// label: the message is tinted, and a send replies to it.
     func openThread(at messageId: String) {
         guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
-        open(anchor: anchor, older: [], replyTo: messageId)
+        open(anchor: anchor, older: [], replyTo: messageId, bare: true)
     }
 
     /// The quote in a reply was tapped. A reply in a task's thread opens
@@ -448,12 +451,12 @@ final class TranscriptStore {
         }
     }
 
-    private func open(anchor: ChatMessage, older: [ChatMessage], replyTo: String? = nil, tint target: String? = nil) {
+    private func open(anchor: ChatMessage, older: [ChatMessage], replyTo: String? = nil, tint target: String? = nil, bare: Bool = false) {
         thread?.stop()
         reopening = nil
         let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, older: older)
         thread = opened
-        quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: anchor.id)
+        quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: anchor.id, bare: bare ? true : nil)
         tint(target ?? anchor.id)
         opened.start()
     }
@@ -524,25 +527,6 @@ final class TranscriptStore {
         messages.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == root) }
     }
 
-    // MARK: Session renewals
-
-    /// The handoff each renewed session started from, by session id: nil
-    /// inside when it wrote none. Read once; a handoff never changes.
-    private(set) var handoffs: [String: String?] = [:]
-
-    /// Reads a renewed session's handoff, once. A failed read tries again
-    /// the next time its line shows.
-    func loadHandoff(_ renewedSession: String) async {
-        guard handoffs[renewedSession] == nil else { return }
-        let read: String?
-        do {
-            read = try await backend.renewalHandoff(sessionId: sessionId, renewedSession: renewedSession)
-        } catch {
-            return
-        }
-        let text = read?.trimmingCharacters(in: .whitespacesAndNewlines)
-        handoffs[renewedSession] = .some(text?.isEmpty == false ? text : nil)
-    }
 
     /// A stored message, by id.
     func message(_ id: String) -> ChatMessage? {
@@ -673,13 +657,6 @@ final class TranscriptStore {
                 if kind == .concierge { await refreshRunning(onFailure: false) }
             }
         }
-    }
-
-    /// The task a chat thread is, when it ended long ago: the task list
-    /// holds a month of ended tasks, so this asks for them all.
-    func endedTask(ofThread root: String) async -> ConciergeTask? {
-        let all = try? await backend.tasks(doneDays: 3650)
-        return all?.first { $0.threadRoot == root }
     }
 
     /// Shows `text` for a few seconds.

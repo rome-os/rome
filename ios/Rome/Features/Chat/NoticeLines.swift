@@ -20,72 +20,15 @@ enum NoticeCopy {
 
 
 /// A faint centered line where the chat's agent session was renewed, with
-/// why. When the renewal wrote a handoff for the new session, a tap opens it
-/// in a sheet; without one the line stays plain.
+/// why. Plain: not tappable.
 struct SessionRenewalLine: View {
     let reason: String
-    let sessionId: String?
-    let store: TranscriptStore
-
-    @State private var showsHandoff = false
-
-    private var handoff: String? { sessionId.flatMap { store.handoffs[$0] ?? nil } }
 
     var body: some View {
-        Group {
-            if let handoff {
-                Button { showsHandoff = true } label: {
-                    HStack(spacing: 3) {
-                        Text(verbatim: NoticeCopy.renewal(reason))
-                        Image(systemName: "chevron.right").romeFont(9, .semibold)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, -8)
-                .accessibilityHint(Text("Shows the summary carried over"))
-                .sheet(isPresented: $showsHandoff) { HandoffSheet(text: handoff) }
-            } else {
-                Text(verbatim: NoticeCopy.renewal(reason))
-            }
-        }
-        .romeFont(12)
-        .foregroundStyle(Palette.sub.opacity(0.75))
-        .lineLimit(1)
-        .frame(maxWidth: .infinity)
-        .task(id: sessionId) {
-            if let sessionId { await store.loadHandoff(sessionId) }
-        }
-    }
-}
-
-/// The summary a retired session wrote for the next one.
-struct HandoffSheet: View {
-    let text: String
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Summary carried over")
-                    .romeFont(17, .semibold)
-                Spacer()
-                SheetCloseButton { dismiss() }
-            }
-            ScrollView {
-                MarkdownText(source: text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        // The sheet is presented from the faint line, whose one line and quiet
-        // color it would inherit through the environment.
-        .lineLimit(nil)
-        .foregroundStyle(Palette.fg)
-        .padding(20)
-        .presentationDetents([.medium, .large])
-        .presentationBackground(Palette.sheet)
+        Text(verbatim: NoticeCopy.renewal(reason))
+            .romeFont(12)
+            .foregroundStyle(Palette.sub.opacity(0.75))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
     }
 }

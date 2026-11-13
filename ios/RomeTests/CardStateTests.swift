@@ -147,3 +147,48 @@ private func task(_ id: String, chat: String, status: String?, endReason: String
         #expect(store.pending.isEmpty)
     }
 }
+
+@MainActor
+@Suite struct ThreadViewShapeTests {
+    private func message(_ id: String, at seconds: TimeInterval, thread: String? = nil) -> ChatMessage {
+        let content = String(data: try! JSONSerialization.data(withJSONObject: [["type": "text", "content": "hi"]]), encoding: .utf8)!
+        var held = ChatMessage(id: id, sessionId: "concierge", role: "assistant", content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)), chatThreadId: thread, knowsThreads: true)
+        held.chatThreadTitle = thread == nil ? nil : "Book flights"
+        return held
+    }
+
+    private func chat() async -> (TranscriptStore, FakeBackend) {
+        let backend = FakeBackend()
+        backend.stored = [message("a1", at: 0, thread: "a1"), message("a2", at: 10, thread: "a1")]
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<60 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        return (store, backend)
+    }
+
+    /// Opened from its label, the thread shows no reply bar, and a send names the thread only.
+    @Test func aThreadOpenedFromItsLabelHasNoReplyBar() async {
+        let (store, _) = await chat()
+        store.openThread(at: "a2")
+        #expect(store.thread != nil)
+        #expect(!store.showsQuoteBar)
+        #expect(store.composerThread?.body == ["chatThread": .string("a2")])
+        store.closeThread()
+    }
+
+    /// Reply on a message inside the open view still quotes it.
+    @Test func replyInsideTheViewShowsTheBar() async {
+        let (store, _) = await chat()
+        store.openThread(at: "a2")
+        store.reply(to: "a2")
+        #expect(store.showsQuoteBar)
+        #expect(store.composerThread?.body == ["replyToMessageId": .string("a2"), "chatThread": .string("a2")])
+        store.closeThread()
+    }
+
+    /// A forwarded result draws as a plain bubble: nothing of its task above it.
+    @Test func aForwardedResultIsAPlainBubble() {
+        let parts = MessagePart.parse(#"[{"type":"text","content":"Done","forwardedFrom":{"chatId":"c1","title":"Book"}}]"#)
+        #expect(parts == [.text("Done", long: false, forwardedFrom: .init(chatId: "c1", title: "Book"))])
+    }
+}

@@ -2,21 +2,21 @@ import SwiftUI
 
 /// A task's chat thread over its chat: the chat stays behind it, blurred
 /// and dimmed, so the thread reads as part of the conversation. It covers
-/// the header and the transcript only: the chat's own composer and reply
-/// bar stay below it and send into the thread while it is open. Its header
-/// names the task and opens the task chat. A tap beside the messages, or
-/// the close button, closes it.
+/// the header and the transcript only: the chat's own composer stays below
+/// it and sends into the thread while it is open. A tap beside the
+/// messages, or the close button, closes it.
 struct ThreadOverlay: View {
     let thread: ThreadStore
     let chat: TranscriptStore
     let tasks: TasksStore
+    /// The chat's name and status, as its header shows them.
+    let name: String
+    var activity: ConciergeActivity? = nil
     let onOpenChat: (String, String) -> Void
     let onClose: () -> Void
 
     @State private var shown = false
     @State private var visibleHeight: CGFloat = 0
-    /// The task, when it ended before the task list reaches.
-    @State private var endedTask: ConciergeTask?
 
     var body: some View {
         let rows = thread.rows(answers: chat.answers)
@@ -72,11 +72,6 @@ struct ThreadOverlay: View {
         .onAppear {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { shown = true }
         }
-        .task(id: thread.root) {
-            if !tasks.tasks.contains(where: { $0.threadRoot == thread.root }) {
-                endedTask = await chat.endedTask(ofThread: thread.root)
-            }
-        }
     }
 
     /// A chat opened from a row inside the view: the view closes first, or the
@@ -88,45 +83,13 @@ struct ThreadOverlay: View {
         }
     }
 
-    /// The task the thread is: its row, by the thread's root.
-    private var task: ConciergeTask? {
-        tasks.tasks.first { $0.threadRoot == thread.root } ?? endedTask
-    }
-
-    /// The header row: the task's title and "Open task chat" in the middle,
-    /// which pushes the task chat, and the close button where the "…" sits.
+    /// The chat's own header, laid over it unchanged: the same identity in
+    /// the middle, still, and the close button where the "…" sits.
     private var header: some View {
-        let title = thread.title ?? task?.title ?? ""
-        let taskChat = task?.chat
-        return HStack(alignment: .center) {
-            // Where the drawer button sits below, so the middle stays centered.
+        HStack(alignment: .center) {
+            // Where the drawer button sits below, so the identity keeps its place.
             Color.clear.frame(width: 44, height: 44)
-            VStack(spacing: 1) {
-                Text(verbatim: title)
-                    .romeFont(15, .semibold)
-                    .foregroundStyle(Palette.fg)
-                    .lineLimit(1)
-                if let taskChat {
-                    Button {
-                        // The view sits over the chat, and would cover the
-                        // task chat pushed under it: it closes first.
-                        chat.closeThread()
-                        onOpenChat(taskChat.id, tasks.title(forChat: taskChat.id, fallback: title))
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text("Open task chat")
-                            Image(systemName: "chevron.right").romeFont(10, .semibold)
-                        }
-                        .romeFont(12, .medium)
-                        .foregroundStyle(Palette.sub)
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .accessibilityElement(children: .contain)
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, still: true) }
             GlassCircleButton(accessibilityLabel: "Close", action: close) {
                 Image(systemName: "xmark").romeFont(15, .semibold)
             }

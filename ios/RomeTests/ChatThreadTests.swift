@@ -217,7 +217,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let store = await chat(backend, [message("a1", "sure", at: 10, thread: "r", title: "T")])
         store.openThread(at: "a1")
         let target = store.composerThread!
-        #expect(target == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1"))
+        #expect(target == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1", bare: true))
         #expect(store.send("and then?", thread: target))
         await settle { !backend.sentThreads.isEmpty }
         #expect(backend.sentThreads == [target])

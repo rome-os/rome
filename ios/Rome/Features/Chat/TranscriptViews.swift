@@ -393,19 +393,7 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let forwardedFrom {
-                Button {
-                    onOpenChat(forwardedFrom.chatId, forwardedFrom.title)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrowshape.turn.up.right").romeFont(11, .semibold)
-                        Text("From “\(forwardedFrom.title)”").lineLimit(1)
-                    }
-                    .romeFont(12, .semibold)
-                    .foregroundStyle(Palette.sub)
-                }
-                .buttonStyle(.plain)
-            }
+            // A forwarded result is a plain bubble: the label under it names its task.
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
@@ -422,15 +410,10 @@ struct AgentBubble: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
-        .overlay(alignment: .leading) {
-            if forwardedFrom != nil {
-                Capsule().fill(Palette.sub.opacity(0.55)).frame(width: 3).padding(.vertical, 10).padding(.leading, 5)
-            }
-        }
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, forwardedFrom == nil ? 64 : 32)
+        .padding(.trailing, 64)
     }
 
     /// A small grey chevron, centred. Folded, its backdrop is the fade into
@@ -532,14 +515,13 @@ struct TaskCard: View {
                     .padding(.trailing, state?.stoppable == true ? 64 : 0)
                 HStack(spacing: 8) {
                     Text(title)
-                        .romeFont(CardScale.title, .semibold)
-                        .tracking(-0.3)
+                        .romeFont(CardScale.body, .semibold)
                         .foregroundStyle(Palette.fg)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
-                        .romeFont(12, .bold)
-                        .foregroundStyle(Palette.sub)
+                        .romeFont(10)
+                        .foregroundStyle(Palette.sub.opacity(0.6))
                 }
             }
             .cardPadding()

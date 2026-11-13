@@ -76,19 +76,4 @@ private func rows(_ messages: [ChatMessage], notices: Bool = true) -> [Transcrip
         #expect(activity?.isBusy == true)
     }
 
-    /// A handoff is read once; none written leaves the line plain, and a
-    /// failed read tries again.
-    @Test func theHandoffIsReadOnce() async {
-        let backend = FakeBackend()
-        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
-        await store.loadHandoff("s2")
-        #expect(store.handoffs["s2"] == nil && backend.handoffReads == ["s2"])
-        backend.handoffs = ["s2": "We agreed on dinner at 7.", "s3": String?.none]
-        await store.loadHandoff("s2")
-        await store.loadHandoff("s2")
-        #expect(store.handoffs["s2"] == .some("We agreed on dinner at 7."))
-        #expect(backend.handoffReads == ["s2", "s2"])
-        await store.loadHandoff("s3")
-        #expect(store.handoffs["s3"] == .some(nil))
-    }
 }

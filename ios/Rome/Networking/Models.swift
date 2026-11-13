@@ -138,6 +138,9 @@ struct ThreadTarget: Codable, Hashable, Sendable {
     var quote: Bool? = nil
     /// A message of the thread view the reply was sent from.
     var thread: String? = nil
+    /// Aimed at the thread only: opened from its label, with no message
+    /// replied to, so there is no reply bar and the send names no message.
+    var bare: Bool? = nil
 
     var isQuote: Bool { quote == true }
 
@@ -146,7 +149,8 @@ struct ThreadTarget: Codable, Hashable, Sendable {
     var threadMessage: String? { isQuote ? thread : messageId }
 
     var body: [String: JSONValue] {
-        var body: [String: JSONValue] = ["replyToMessageId": .string(messageId)]
+        var body: [String: JSONValue] = [:]
+        if bare != true { body["replyToMessageId"] = .string(messageId) }
         if let thread { body["chatThread"] = .string(thread) }
         return body
     }

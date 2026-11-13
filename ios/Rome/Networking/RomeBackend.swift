@@ -42,9 +42,6 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Every message of the chat thread `messageId` is in, oldest first.
     /// Only an instance with chat threads answers it.
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage]
-    /// The handoff a renewal started session `renewedSession` of chat
-    /// `sessionId` from; nil when none was written.
-    func renewalHandoff(sessionId: String, renewedSession: String) async throws -> String?
     /// A file in the chats' project folder, by its `/projects/…` path without the slash.
     func asset(path: String) async throws -> Data
     /// The same file shrunk to `width` (600 or 900) by an instance that can, and
@@ -61,8 +58,6 @@ protocol RomeBackend: AnyObject, Sendable {
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
     func interrupt(turnId: String) async throws
     func tasks() async throws -> [ConciergeTask]
-    /// The panel with the tasks that ended in the last `doneDays` days.
-    func tasks(doneDays: Int) async throws -> [ConciergeTask]
     /// Stops a task now, as its owner asked from its card.
     func stopTask(id: String) async throws
     func approval(id: String) async throws -> ApprovalRecord
@@ -158,10 +153,6 @@ final class LiveBackend: RomeBackend {
         return page.messages
     }
 
-    func renewalHandoff(sessionId: String, renewedSession: String) async throws -> String? {
-        let reply: JSONValue = try await client.get("/chat/sessions/\(escape(sessionId))/renewals/\(escape(renewedSession))")
-        return reply["handoff"]?.string
-    }
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]
@@ -225,18 +216,14 @@ final class LiveBackend: RomeBackend {
         try await client.post("/chat/turns/\(escape(turnId))/interrupt")
     }
 
-    func tasks() async throws -> [ConciergeTask] {
-        try await tasks(doneDays: 30)
-    }
-
     func stopTask(id: String) async throws {
         try await client.post("/concierge/tasks/\(escape(id))/stop")
     }
 
-    func tasks(doneDays: Int) async throws -> [ConciergeTask] {
+    func tasks() async throws -> [ConciergeTask] {
         let response: ConciergeTasksResponse = try await client.get(
             "/concierge/tasks",
-            query: [URLQueryItem(name: "doneDays", value: String(doneDays))]
+            query: [URLQueryItem(name: "doneDays", value: "30")]
         )
         return response.tasks
     }
@@ -412,8 +399,6 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
-    /// Demo data and test doubles keep no history of ended tasks.
-    func tasks(doneDays: Int) async throws -> [ConciergeTask] { try await tasks() }
     /// Demo data and test doubles stop nothing.
     func stopTask(id: String) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.
@@ -430,7 +415,6 @@ extension RomeBackend {
         try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
     }
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] { throw APIError.notFound }
-    func renewalHandoff(sessionId: String, renewedSession: String) async throws -> String? { nil }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     /// Stand-ins (demo, tests) are no guardian of a real instance.

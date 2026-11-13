@@ -39,8 +39,9 @@ struct InteractionRow: View {
             ToolSummary(count: count, calls: store.toolCalls[traceID]) { store.loadToolCalls(traceID) }
         case .approval(_, let part, _) where store.approvals[part.approvalId] != nil && SettledOutcome.folds(store.approvalStatus(part)):
             // Decided: folded to what it asked and how it ended, opening read only.
-            SettledCard(title: SettledOutcome.title(part), outcome: SettledOutcome.approval(store.approvalStatus(part), resolvedBy: store.approvals[part.approvalId]?.resolvedBy)) {
-                ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true) { _ in }
+            let outcome = SettledOutcome.approval(store.approvalStatus(part), resolvedBy: store.approvals[part.approvalId]?.resolvedBy)
+            SettledCard(title: SettledOutcome.title(part), outcome: outcome) {
+                ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true, settledLabel: outcome) { _ in }
             }
         case .approval(_, let part, _):
             ApprovalCardView(

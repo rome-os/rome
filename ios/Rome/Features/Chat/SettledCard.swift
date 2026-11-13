@@ -40,25 +40,24 @@ struct SettledCard<Full: View>: View {
                     }
                     HStack(spacing: 4) {
                         Text(verbatim: outcome)
-                            .romeFont(CardScale.body, .medium)
+                            .romeFont(CardScale.body)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(1)
                         if chevron || (full != nil && onOpen == nil) {
                             Image(systemName: open ? "chevron.up" : "chevron.right")
-                                .romeFont(11, .semibold)
-                                .foregroundStyle(Palette.sub)
+                                .romeFont(10)
+                                .foregroundStyle(Palette.sub.opacity(0.6))
                         }
                     }
                 }
                 .padding(.horizontal, CardScale.paddingH)
                 .padding(.vertical, 9)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                 .hairline(radius: Metrics.groupRadius)
                 .contentShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
             }
             .buttonStyle(PressScaleStyle(scale: 0.98))
-            .frame(maxWidth: 420, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isButton)
             if open, let full {
@@ -67,7 +66,9 @@ struct SettledCard<Full: View>: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        // Hugs its words, left under a Concierge bubble, never wider than one.
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 64)
     }
 }
 
@@ -141,7 +142,7 @@ struct TaskAskView: View {
                 SettledCard(title: ask.title, outcome: ask.outcome)
             case .approval(let part, _):
                 SettledCard(title: ask.title, outcome: ask.outcome) {
-                    ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true) { _ in }
+                    ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true, settledLabel: ask.outcome) { _ in }
                 }
             }
         } else if wait.settledRead.contains(shownAt) || wait.settledFailed.contains(shownAt) {

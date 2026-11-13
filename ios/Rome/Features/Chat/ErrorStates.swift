@@ -150,39 +150,48 @@ struct TurnError: Hashable, Sendable {
     var offersUsage: Bool { kind != .other }
 }
 
-/// An error the guardian can act on: a line with the cause, the next step,
-/// and where to look.
+/// An error the guardian can act on, as a compact card: a soft warning, the
+/// cause, the next step, and where to look.
 struct ErrorLine: View {
     let error: TurnError
     @Environment(\.openUsage) private var openUsage
     @Environment(\.isVisitor) private var isVisitor
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-            AlertGlyph(size: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .romeFont(14)
+                .foregroundStyle(Palette.warning)
+                .padding(.top, 2)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(error.title)
-                    .romeFont(15, error.kind == .other ? .regular : .medium)
-                    .lineSpacing(5)
+                    .romeFont(CardScale.body, .medium)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let hint = error.hint {
-                    Text(hint).romeFont(14).foregroundStyle(Palette.sub)
+                    Text(hint)
+                        .romeFont(CardScale.caption)
+                        .foregroundStyle(Palette.sub)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if error.offersUsage, !isVisitor, let openUsage {
                     Button(action: openUsage) {
                         Text("See usage")
-                            .romeFont(13, .semibold)
-                            .padding(.horizontal, 12)
-                            .frame(height: 30)
-                            .background(Palette.fill, in: Capsule())
+                            .romeFont(CardScale.caption, .semibold)
+                            .foregroundStyle(Palette.primaryText)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(PressScaleStyle())
-                    .padding(.top, 4)
+                    .buttonStyle(.plain)
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
         }
-        .padding(2)
+        .cardPadding()
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .softElevation(radius: Metrics.cardRadius)
+        // Content width, left, under the bubbles' reach.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 64)
         .accessibilityElement(children: .contain)
     }
 }

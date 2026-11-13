@@ -194,6 +194,8 @@ struct ApprovalCardView: View {
     var canResolve = true
     /// Drawn whole and read only, as a folded card opens: what it asked, no controls.
     var settled = false
+    /// How it ended, in the line above a settled card's title.
+    var settledLabel: String? = nil
     let onResolve: (Bool) -> Void
 
     private var title: String { part.title.flatMap { $0.isEmpty ? nil : $0 } ?? displayActionName(part.actionName) }
@@ -201,6 +203,8 @@ struct ApprovalCardView: View {
     var body: some View {
         Group {
             switch settled ? .pending : status {
+            case _ where settled:
+                settledCard
             case nil:
                 HStack(spacing: 10) {
                     Spinner(size: 16, color: Palette.sub)
@@ -226,6 +230,42 @@ struct ApprovalCardView: View {
             guard old == .pending else { return nil }
             return new == .rejected ? .impact(weight: .light) : .success
         }
+    }
+
+    /// An approval that no longer waits, opened read only: as an answered
+    /// question card draws itself, the outcome, what it asked, then its
+    /// details as a plain list.
+    private var settledCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(verbatim: settledLabel ?? String(localized: "Approval"))
+                .romeFont(CardScale.label)
+                .foregroundStyle(Palette.sub)
+            Text(title)
+                .romeFont(CardScale.title, .semibold)
+                .foregroundStyle(Palette.sub)
+                .lineSpacing(3)
+            let rows: [(label: String?, value: String)] =
+                ((part.summary ?? "").isEmpty ? [] : [(nil, part.summary ?? "")])
+                + part.fields.map { (Optional($0.label), $0.value) }
+            if !rows.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                        if index > 0 { OptionDivider() }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            if let label = row.label {
+                                Text(label).romeFont(CardScale.caption).foregroundStyle(Palette.sub).frame(width: 44, alignment: .leading)
+                            }
+                            Text(row.value).romeFont(CardScale.body).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(minHeight: CardScale.optionMinHeight, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .cardPadding()
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
+        .hairline(radius: Metrics.bigCardRadius)
+        .transition(.opacity)
     }
 
     private var pendingCard: some View {

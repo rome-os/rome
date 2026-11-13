@@ -3461,16 +3461,6 @@
         }
       }
     },
-    "Shows the summary carried over" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示带到新上下文的摘要"
-          }
-        }
-      }
-    },
     "Sign in again" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3757,16 +3747,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "帮我总结本周的 AI 新闻"
-          }
-        }
-      }
-    },
-    "Summary carried over" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "带到新上下文的摘要"
           }
         }
       }

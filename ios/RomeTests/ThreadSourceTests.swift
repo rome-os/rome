@@ -49,7 +49,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         let store = await chat(backend, [message("a1", at: 0, thread: "a1")])
         #expect(store.composerThread == nil)
         store.openThread(at: "a1")
-        #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1"))
+        #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1", bare: true))
         store.closeThread()
         #expect(store.composerThread == nil)
     }

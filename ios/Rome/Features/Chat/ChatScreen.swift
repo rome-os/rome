@@ -51,7 +51,7 @@ struct ChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
@@ -74,7 +74,7 @@ struct ChatScreen: View {
                 VStack(spacing: 10) {
                     // Inside the composer's inset, so the last message rests above it too.
                     UpdatePill(agentName: workspace.agentName)
-                    if store.quote != nil {
+                    if store.showsQuoteBar {
                         QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
@@ -295,7 +295,7 @@ struct ConciergeRow: View {
         case .notice(_, let text):
             NoticeLine(text: text)
         case .sessionRenewal(_, let reason, let sessionId):
-            SessionRenewalLine(reason: reason, sessionId: sessionId, store: store)
+            SessionRenewalLine(reason: reason)
         }
     }
 }
