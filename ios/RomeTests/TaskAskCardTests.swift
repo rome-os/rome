@@ -80,6 +80,33 @@ private func task(status: String, waitId: String?, endReason: String? = nil) -> 
         #expect(TaskAskMode.of(card: expired, latest: true, task: task(status: "ended", waitId: "q1", endReason: "no_response")) == .expired)
     }
 
+    /// Before the task list arrives, the newest card goes by its own word:
+    /// no "No longer waiting" that turns into a form a moment later.
+    @Test func beforeTheTasksArriveACardGoesByItsOwnState() throws {
+        let open = try #require(card(question()))
+        let expired = try #require(card(question(expired: true)))
+        #expect(TaskAskMode.of(card: open, latest: true, task: nil, tasksListed: false) == .waiting)
+        #expect(TaskAskMode.of(card: expired, latest: true, task: nil, tasksListed: false) == .expired)
+        #expect(TaskAskMode.of(card: open, latest: false, task: nil, tasksListed: false) == .open)
+    }
+
+    /// A card that stopped waiting re-reads the page once per task state,
+    /// however often it scrolls back into view.
+    @MainActor @Test func aCardReReadsOncePerChange() async {
+        let backend = FakeBackend()
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        let before = backend.newestFetches
+        store.recoverCard("q1|active|-")
+        for _ in 0..<50 where backend.newestFetches == before { try? await Task.sleep(for: .milliseconds(10)) }
+        store.recoverCard("q1|active|-")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(backend.newestFetches == before + 1)
+        store.recoverCard("q1|ended|-")
+        for _ in 0..<50 where backend.newestFetches == before + 1 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.newestFetches == before + 2)
+    }
+
     /// The newest card, with no outcome, of a task that needs the guardian
     /// and whose open wait is this card, takes the answer.
     @Test func theWaitingRule() throws {

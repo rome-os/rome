@@ -49,7 +49,7 @@ struct MainShell: View {
     /// The Agent page, opened from a chat header's mascot.
     @State private var agentPage: AgentRoute?
     /// The Agent page's last tab, kept while the instance is open.
-    @State private var agentTab: AgentTab = .uses
+    @State private var agentTab: AgentTab = .tasks
     /// Pages pushed inside the Agent page: a task chat from its Tasks, an app
     /// or another task chat linked from there. Back returns to the Tasks.
     @State private var agentPath: [Route] = []
@@ -60,6 +60,10 @@ struct MainShell: View {
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
+    /// Goes up with each widget link followed: a later one wins.
+    @State private var linkSerial = 0
+    /// A short notice after a widget link, such as an app that is gone.
+    @State private var linkNotice: String?
     /// "See usage" was pressed inside the Agent page: Settings opens as it closes.
     @State private var openUsageAfterCover = false
     @State private var settingsPath: [SettingsRoute] = []
@@ -154,9 +158,15 @@ struct MainShell: View {
                     // Into this chat's composer, unsent, as the page closes.
                     agentPage = nil
                     workspace.composerPrefills[route.composerKey] = prompt
-                }, onOpenTask: { task in
-                    guard let chat = task.chat else { return }
+                }, onOpenTask: { chat in
                     agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
+                }, onRespond: { messageId in
+                    // The page closes onto the chat it was opened from, at the card.
+                    agentPage = nil
+                    let chat = route.tasksChatId
+                    if workspace.isMainChat(chat) { show(.chat) } else if !chat.isEmpty { show(.topic(chat)) }
+                    let store = workspace.transcript(forChat: chat)
+                    Task { await store.revealCard(messageId) }
                 }, onClose: { agentPage = nil })
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in
@@ -237,27 +247,7 @@ struct MainShell: View {
         // built (a sign-in, a switch) waits for it.
         .onChange(of: model.widgetRequest, initial: true) {
             guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
-            agentPage = nil
-            showSettings = false
-            page = nil
-            settingsPage = nil
-            closeDrawer()
-            switch link {
-            case .app(_, let appId):
-                show(.apps)
-                // The list as the app knows it; the widget's copy names one
-                // not read yet.
-                let app = workspace.apps.first { $0.id == appId }
-                    ?? InstalledApp(id: appId, displayName: AppShelfStore.shared?.read()?.apps.first { $0.id == appId }?.name)
-                path = [.app(app)]
-            case .apps:
-                show(.apps)
-                path = []
-            case .newApp:
-                show(.chat)
-                path = []
-                workspace.composerPrefills[conciergeChatID] = AppIdea.own.prompt
-            }
+            Task { await follow(link) }
         }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
@@ -299,9 +289,64 @@ struct MainShell: View {
         #endif
     }
 
+    /// A tap on the widget: its app, Apps or Chat in front, nothing over it.
+    /// Everything presented closes first, the screens' own sheets and covers
+    /// included (a photo, a share sheet, a page from an app), and the link is
+    /// followed once they are gone, so the app never opens under one. A later
+    /// tap wins over one still on its way.
+    private func follow(_ link: WidgetLink) async {
+        linkSerial += 1
+        let mine = linkSerial
+        agentPage = nil
+        agentPath = []
+        agentLinkPage = nil
+        showSettings = false
+        page = nil
+        settingsPage = nil
+        closeDrawer()
+        Keyboard.dismiss()
+        await Presentations.dismissAll()
+        guard mine == linkSerial else { return }
+        switch link {
+        case .app(_, let appId):
+            show(.apps)
+            switch await WidgetApps.resolve(appId, in: workspace) {
+            case .found(let app):
+                guard mine == linkSerial else { return }
+                path = [.app(app)]
+            case .gone:
+                // Never a quiet nothing: the Apps grid, and why.
+                guard mine == linkSerial else { return }
+                path = []
+                say(String(localized: "App not found"))
+            }
+        case .apps:
+            show(.apps)
+            path = []
+        case .newApp:
+            show(.chat)
+            path = []
+            workspace.composerPrefills[conciergeChatID] = AppIdea.own.prompt
+        }
+    }
+
+    private func say(_ text: String) {
+        linkNotice = text
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if linkNotice == text { linkNotice = nil }
+        }
+    }
+
     /// Session expired, at the top of the page's column.
     @ViewBuilder
     private var banners: some View {
+        if let linkNotice {
+            TopBanner(kind: .error, text: linkNotice)
+                .readableColumn()
+                .padding(.top, 58)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
         if model.sessionExpired {
             TopBanner(kind: .error, text: String(localized: "Session expired"), actionTitle: String(localized: "Sign in again")) {
                 Task { await model.reauthenticate() }

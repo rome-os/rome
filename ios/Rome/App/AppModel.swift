@@ -432,6 +432,31 @@ final class Workspace {
         id == conciergeChatID || id == mainChatServerID || id == concierge.sessionId
     }
 
+    /// The server id of Concierge chat `id`, for its task list; nil for a
+    /// blank topic chat, which has none yet.
+    func serverChatId(_ id: String) -> String? {
+        if id.isEmpty { return nil }
+        return isMainChat(id) ? (mainChatServerID ?? conciergeChatID) : id
+    }
+
+    /// Each Concierge chat's task list once opened, kept so the Agent page
+    /// shows it at once the next time and reads it again behind.
+    @ObservationIgnored private var taskLists: [String: TaskListStore] = [:]
+
+    /// The task list of Concierge chat `id`; nil for a blank topic chat.
+    func taskList(forChat id: String) -> TaskListStore? {
+        guard let chatId = serverChatId(id) else { return nil }
+        if let held = taskLists[chatId] { return held }
+        let store = TaskListStore(chatId: chatId, backend: backend)
+        taskLists[chatId] = store
+        return store
+    }
+
+    /// The transcript of Concierge chat `id`: the main chat's or a topic chat's.
+    func transcript(forChat id: String) -> TranscriptStore {
+        isMainChat(id) ? concierge : topicStore(id)
+    }
+
     func enableConcierge() async {
         conciergeState = .loading
         do {

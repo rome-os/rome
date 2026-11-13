@@ -120,14 +120,23 @@ struct TaskAskView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The newest card of its task stopped waiting with no outcome held:
-        // `chat_card_settled` may have been missed, so read the page again once.
-        .task(id: mode == .open && latest ? card?.id : nil) {
-            if mode == .open, latest { store.resync() }
+        // `chat_card_settled` may have been missed, so read the page again,
+        // once for each change of the task.
+        .task(id: recovery) {
+            if let recovery { store.recoverCard(recovery) }
         }
     }
 
+    private var task: ConciergeTask? { tasks.task(forChat: chatId) }
+
     private var mode: TaskAskMode {
-        TaskAskMode.of(card: card, latest: latest, task: tasks.task(forChat: chatId))
+        TaskAskMode.of(card: card, latest: latest, task: task, tasksListed: tasks.listed)
+    }
+
+    /// The card and the task state it stopped waiting under, while a re-read may help.
+    private var recovery: String? {
+        guard mode == .open, latest, let id = card?.id else { return nil }
+        return [id, task?.status ?? "-", task?.waitId ?? "-"].joined(separator: "|")
     }
 
     @ViewBuilder
@@ -206,12 +215,15 @@ enum TaskAskMode: Equatable {
     case open
 
     /// The newest card of its task chat, with no outcome, whose task needs the
-    /// guardian and whose open wait is this card, takes the answer.
-    static func of(card: TaskAskCard?, latest: Bool, task: ConciergeTask?) -> TaskAskMode {
+    /// guardian and whose open wait is this card, takes the answer. Until the
+    /// task list has arrived, the newest card goes by what it says itself, so
+    /// nothing reads "No longer waiting" only because the tasks are not in yet.
+    static func of(card: TaskAskCard?, latest: Bool, task: ConciergeTask?, tasksListed: Bool = true) -> TaskAskMode {
         guard let card, let id = card.id else { return .settled }
         if card.settled { return .settled }
         // An older copy is never answerable, expired or not.
         guard latest else { return .open }
+        guard tasksListed else { return card.expired ? .expired : .waiting }
         // An expired card reopens only as its task's current wait.
         if card.expired { return task?.waitId == id ? .expired : .open }
         guard task?.status == "needs_you", task?.waitId == id else { return .open }

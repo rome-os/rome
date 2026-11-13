@@ -109,8 +109,8 @@ private func task(_ id: String, chat: String, status: String?, endReason: String
         let backend = FakeBackend()
         backend.stored = [message("a1", at: 0, thread: "a1"), message("a2", at: 10, thread: "a1")]
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
-        store.start()
-        for _ in 0..<60 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        // Read once, awaited: no polling that a slow simulator outlasts.
+        await store.reload()
         return (store, backend)
     }
 
@@ -124,13 +124,15 @@ private func task(_ id: String, chat: String, status: String?, endReason: String
         store.closeThread()
     }
 
-    /// Reply on a message inside the open view still quotes it.
+    /// Reply on a message inside the open view shows the bar, naming the
+    /// task, and sends to the thread without quoting the message.
     @Test func replyInsideTheViewShowsTheBar() async {
         let (store, _) = await chat()
         store.openThread(at: "a2")
+        #expect(store.thread != nil)
         store.reply(to: "a2")
-        #expect(store.showsQuoteBar)
-        #expect(store.composerThread?.body == ["replyToMessageId": .string("a2"), "chatThread": .string("a2")])
+        #expect(store.showsQuoteBar && store.threadReplyTitle == "Book flights")
+        #expect(store.composerThread?.body == ["chatThread": .string("a2")])
         store.closeThread()
     }
 
