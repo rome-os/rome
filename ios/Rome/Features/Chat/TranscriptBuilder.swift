@@ -56,7 +56,8 @@ enum TranscriptRow: Identifiable, Hashable {
     case webOnly(id: String, kind: MessagePart.WebOnlyKind, done: Bool = false)
     case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
-    case widgetUI(id: String, part: WidgetUIPart, sessionId: String)
+    /// `answered`: what answered the card, when the agent waits on it and it was.
+    case widgetUI(id: String, part: WidgetUIPart, sessionId: String, answered: JSONValue? = nil)
     case error(id: String, error: TurnError)
     /// A quiet line between messages, such as the chat moving to another model.
     case notice(id: String, text: String)
@@ -87,7 +88,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
+             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
              .threadLabel(let id, _, _), .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
             return id
         case .typing:
@@ -286,7 +287,7 @@ enum TranscriptBuilder {
                 case .widgetUI(let card):
                     var card = card
                     card.widgetId = message.id
-                    rows.append(.widgetUI(id: id, part: card, sessionId: message.sessionId))
+                    rows.append(.widgetUI(id: id, part: card, sessionId: message.sessionId, answered: card.waits ? answers[message.id] : nil))
                 case .error(let error):
                     rows.append(.error(id: id, error: error))
                 case .notice(let text):

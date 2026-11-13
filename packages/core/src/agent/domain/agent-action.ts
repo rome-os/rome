@@ -355,7 +355,8 @@ function shownUiOutput(widget: ShownUi, widgetsShow: boolean, appId?: string): u
     return {
       message:
         "The card could not be shown, because this conversation cannot show cards. " +
-        `Tell the guardian what it would have shown, in a message: ${text}`,
+        `Tell the guardian what it would have shown, in a message: ${text}` +
+        (widget.waits === true ? " Then wait for their reply before doing anything else." : ""),
     };
   }
   if (widget.waits === true) {

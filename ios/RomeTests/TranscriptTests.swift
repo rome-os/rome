@@ -133,6 +133,18 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 
     /// A provider reuses tool-use ids across turns: an answer belongs to the
     /// card before it, and a later card with the same id stays open.
+    /// An answer known only from older messages, as a thread's own older
+    /// page holds it, reaches the card's row.
+    @Test func aWaitingCardsRowCarriesItsAnswer() {
+        let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "appId": "connector", "render": ["kind": "inline", "ui": ["components": [["id": "root", "component": "Text", "text": "Connect"]]]]]
+        let output: JSONValue = .object(["from": .string("connector"), "value": .string("ok")])
+        let rows = TranscriptBuilder.rows(messages: [message("c1", role: "assistant", [card], at: 0)], pending: [], answers: ["c1": output], options: .init())
+        let answered = rows.compactMap { row -> JSONValue? in
+            if case .widgetUI(_, _, _, let answered) = row { return answered } else { return nil }
+        }
+        #expect(answered == [output])
+    }
+
     @Test func anAnswerBelongsToTheCardBeforeIt() {
         let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "appId": "connector", "render": ["kind": "inline", "ui": ["components": [["id": "root", "component": "Text", "text": "Connect"]]]]]
         let first = message("c1", role: "assistant", [card], at: 0)
