@@ -282,6 +282,13 @@ describe("TaskChatCard shown as one card or the other", () => {
       name: "Which tone?Expired · answer to continue",
     });
     expect(line.closest("[data-chat-settled-card]")).toBeTruthy();
+    // Its task is read from the whole list, so it stays expired once it is
+    // older than the panel's window of recent ended tasks.
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).startsWith("/api/concierge/tasks?doneDays=3650"),
+      ),
+    ).toBe(true);
     expect(screen.queryByRole("button", { name: "Warm" })).toBeNull();
     expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
     await userEvent.setup().click(line);
@@ -323,6 +330,38 @@ describe("TaskChatCard shown as one card or the other", () => {
     it("says an approval the guardian approved, under its title", async () => {
       allApprovals = [decided("executed", "dev")];
       expect((await folded("Approved")).textContent).toContain("Send the draft");
+    });
+
+    it("keeps showing the wait it was shown for after the task asks for another", async () => {
+      waiting = false;
+      allApprovals = [
+        { ...decided("executed", "dev"), createdAt: "2026-11-10T12:00:00Z" },
+        {
+          ...decided("rejected", "dev"),
+          id: "approval-2",
+          createdAt: "2026-11-10T13:00:00Z",
+          payload: {
+            ...approval().payload,
+            preview: { kind: "generic", title: "Book the hotel", summary: "" },
+          },
+        },
+      ];
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={["/chat/main-chat"]}>
+            <TaskChatCard
+              chatId={chatId}
+              title="Task"
+              isLatestForChat={false}
+              show="ask"
+              shownAt="2026-11-10T12:00:05Z"
+            />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      const card = (await screen.findByText("Approved")).closest("button")!;
+      expect(card.textContent).toContain("Send the draft");
+      expect(screen.queryByText("Book the hotel")).toBeNull();
     });
 
     it("says an approval the guardian rejected", async () => {

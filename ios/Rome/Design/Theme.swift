@@ -47,15 +47,8 @@ enum Palette {
     static let healthPink = dynamic(0xFF2D55, 0xFF375F)
 
     /// Letter tiles of apps with no icon, one per app by its name
-    /// (`AppTile.colorIndex`). White letters read on each, light and dark.
-    static let appTiles: [Color] = [
-        dynamic(0xD86F4C, 0xC4603F), // ember
-        dynamic(0x2E8F84, 0x2A8075), // teal
-        dynamic(0x3B74C9, 0x3768B5), // blue
-        dynamic(0x8460C8, 0x7655B4), // violet
-        dynamic(0x4E8B47, 0x467D40), // green
-        dynamic(0xC9506F, 0xB44864), // rose
-    ]
+    /// (`AppTile.colorIndex`), shared with the widget.
+    static let appTiles: [Color] = AppTile.colors
 
     /// The stacking game: its three block tiers from light to deep, the
     /// base's stone, the ground under it, and the dusk its page shifts to

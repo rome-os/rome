@@ -2947,7 +2947,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    const cancelled = await deps.concierge?.deps.checks?.cancel(sessionId, c.req.param("checkId"));
+    // One for a task tells the Concierge, as from the task's row.
+    const cancelled = await deps.concierge?.cancelCheckByOwner(sessionId, c.req.param("checkId"));
     if (!cancelled) return c.json({ error: "No such check in this chat" }, 404);
     return c.json({ ok: true });
   });

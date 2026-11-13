@@ -36,7 +36,7 @@ import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
-import type { ConciergeTasks } from "./tasks.js";
+import { type ConciergeTasks, stopHolds } from "./tasks.js";
 import type { TaskSchedules } from "./task-schedule.js";
 import { taskChatPlace } from "./task-chat.js";
 import type { TaskChecks } from "./task-checks.js";
@@ -69,6 +69,10 @@ export interface DigestTaskNotes {
   /** Rows a day old with no task chat started and nothing scheduled. */
   unstarted: string[];
 }
+
+/** How long a stopped task's failed approval turn-down waits to be tried again, doubling up to the most. */
+const STOP_RETRY_FIRST_MS = 30_000;
+const STOP_RETRY_MAX_MS = 60 * 60 * 1000;
 
 /** A task checked this many times and still waiting is flagged in the digest. */
 export const POSTPONED_CHECKS = 3;
@@ -247,6 +251,7 @@ export class ConciergeService {
   /** Per Concierge chat, the guardian messages superseded turns handed on. */
   private readonly handedOnPrompts = new Map<string, string[]>();
   /** Per Concierge turn, the tasks whose result it said. */
+  /** The tasks each Concierge turn said the news of, and which news. */
   private readonly relayedInTurn = new Map<string, Set<string>>();
   /** What each Concierge turn said, by its parts, task and answered messages: a repeat is the same message. */
   private readonly saidByKey = new Map<string, Map<string, string>>();
@@ -794,22 +799,9 @@ export class ConciergeService {
       const carried = await this.reportedTasksOf(prompt, params.threadId);
       if (carried.length > 0) this.carriedReports.set(params.threadId, carried);
     }
-    // The tasks this turn reported on have had their say: the messages they
-    // held working settle (docs/domains/chats.md#status-reaction). A turn
-    // cut short or failed is handed over again, so they wait for that one.
-    if (outcome === "completed" || outcome === "stopped") {
-      const reported = await this.reportedTasksOf(prompt, params.threadId);
-      if (reported.length > 0) {
-        // The Concierge has had their news: none of it is owed any more.
-        for (const taskId of reported) this.taskEvents?.settle(taskId);
-        await this.deps.tasks.repo.markReported(reported).catch((error: unknown) =>
-          log.warn("failed to settle reported results", {
-            chatId: params.threadId,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      }
-    }
+    // The tasks it reported on settle with the flush that carried them: the
+    // coalescer settles exactly the news a completed turn carried
+    // (docs/domains/chats.md#status-reaction).
     return outcome;
   }
 
@@ -823,11 +815,11 @@ export class ConciergeService {
   noteRelayed(turnId: string, chatId: string, taskId: string): void {
     const unseen = this.taskEvents?.unseen(taskId) === true;
     if (unseen && !this.carriedReports.get(chatId)?.includes(taskId)) return;
+    // Saying it settles nothing: the news stays until a report that carried
+    // it runs to its end, so a turn that fails after saying it loses none.
     const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
     tasks.add(taskId);
     this.relayedInTurn.set(turnId, tasks);
-    // Its news is said: a report a newer input cut short is not run again.
-    this.taskEvents?.settle(taskId);
   }
 
   /** The message Concierge turn `turnId` said as `key` already, if it did. */
@@ -916,13 +908,26 @@ export class ConciergeService {
       if (end === "deleted") await webchatRepo.deleteSession(chatId);
       return null;
     }
-    // Nothing approved later runs for a task that ends with its chat.
+    // Nothing approved later runs for a task that ends with its chat. Only
+    // a task still open stops: one that ended keeps how it ended.
     const linked = await this.deps.tasks.repo.findBySession(chatId);
-    if (linked && ownerOf(linked) === ownerOf(chat)) await this.turnDownForStop(chatId);
-    const row = await this.deps.tasks.repo.endWithChat(chatId, ownerOf(chat), end, (tx) =>
-      end === "archived"
-        ? webchatRepo.archiveSessionIn(tx, chatId)
-        : webchatRepo.deleteSessionIn(tx, chatId),
+    const owned = linked && ownerOf(linked) === ownerOf(chat) ? linked : null;
+    // Read before the turn-down: a task waiting on an approval is open, and
+    // turning the approval down would make it read ended.
+    const open = owned
+      ? (await this.deps.tasks.statusOf([owned], { asReported: true })).get(owned.id)?.status !==
+        "ended"
+      : false;
+    const row = await this.deps.tasks.repo.endWithChat(
+      chatId,
+      ownerOf(chat),
+      end,
+      (tx) =>
+        end === "archived"
+          ? webchatRepo.archiveSessionIn(tx, chatId)
+          : webchatRepo.deleteSessionIn(tx, chatId),
+      new Date(),
+      open,
     );
     // A task that ends with its chat has nothing left to check on.
     if (row) await this.cancelChecks(row.id);
@@ -937,6 +942,9 @@ export class ConciergeService {
         );
       }
     }
+    // Turned down once its work has stopped, so one its turn asked for while
+    // stopping is too.
+    if (owned) await this.turnDownForStop(chatId, Date.now());
     return row?.id ?? null;
   }
 
@@ -1066,12 +1074,11 @@ export class ConciergeService {
       this.taskEvents?.mark({ taskId, kind: "stopped_by_owner", urgent: false });
     const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
     if (!chatId) return 0;
-    // Nothing approved later runs for a stopped task.
-    await this.turnDownForStop(chatId);
-    if (!this.attached) return 0;
-    const { chats } = this.attached;
-    const turns = chats.activeTurns(chatId);
-    for (const turnId of turns) await chats.interruptTurn(turnId);
+    const turns = this.attached?.chats.activeTurns(chatId) ?? [];
+    for (const turnId of turns) await this.attached?.chats.interruptTurn(turnId);
+    // Nothing approved later runs for a stopped task: turned down once its
+    // work has stopped, so one its turn asked for while stopping is too.
+    await this.turnDownForStop(chatId, Date.now());
     return turns.length;
   }
 
@@ -1083,6 +1090,33 @@ export class ConciergeService {
     expire: ((chatId: string, turnDown: TurnDown) => Promise<number>) | null,
   ): void {
     this.approvalExpiry = expire;
+    // A stop a crash or a failure cut off before its approvals were turned
+    // down is finished now, so a stopped task never keeps one pending.
+    if (expire) void this.sweepStoppedApprovals();
+  }
+
+  /**
+   * An approval was asked for in task chat `chatId` while its task is
+   * stopped: everything pending there was the stopped work's, so it is
+   * turned down.
+   */
+  async turnDownWhileStopped(chatId: string): Promise<void> {
+    await this.turnDownForStop(chatId, Number.POSITIVE_INFINITY);
+  }
+
+  /** Turns down every approval still pending in a stopped task's chat. */
+  async sweepStoppedApprovals(): Promise<void> {
+    const chats = await this.deps.tasks.repo.stoppedTaskChats().catch((error: unknown) => {
+      log.warn("failed to read the stopped tasks' chats", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [] as { chatId: string; stoppedAt: number }[];
+    });
+    // Nothing runs for a stopped task at start: every approval pending in its
+    // chat was its stopped work's, one asked for while it stopped included.
+    for (const { chatId } of chats) {
+      await this.turnDownForStop(chatId, Number.POSITIVE_INFINITY);
+    }
   }
 
   /**
@@ -1094,20 +1128,36 @@ export class ConciergeService {
     return (await this.approvalExpiry?.(chatId, turnDown)) ?? 0;
   }
 
-  /** A task ended by a stop: nothing approved later runs for it, and no turn carries on. */
-  private async turnDownForStop(chatId: string): Promise<void> {
-    // The stop goes ahead whatever happens here.
-    await this.expireApprovals(chatId, {
-      until: Number.POSITIVE_INFINITY,
-      reason: "The task was stopped",
-      resolvedBy: RESOLVED_BY_STOP,
-      continueTurn: false,
-    }).catch((error: unknown) =>
+  /**
+   * A task ended by a stop: nothing approved later runs for it, and no turn
+   * carries on. The stop goes ahead whatever happens here; a failed turn-down
+   * is tried again, backing off, and the next start sweeps any left.
+   */
+  private async turnDownForStop(chatId: string, stoppedAt: number, failures = 0): Promise<void> {
+    // A retry after the task was taken up again turns down nothing: the
+    // approvals its new work asks for are its own.
+    if (failures > 0) {
+      const row = await this.deps.tasks.repo.findBySession(chatId);
+      if (row && (!stopHolds(row) || (row.stoppedAt?.getTime() ?? 0) > stoppedAt)) return;
+    }
+    try {
+      // Only approvals that began by the time its work stopped: they were the
+      // stopped work's.
+      await this.expireApprovals(chatId, {
+        until: stoppedAt,
+        reason: "The task was stopped",
+        resolvedBy: RESOLVED_BY_STOP,
+        continueTurn: false,
+      });
+    } catch (error) {
       log.warn("failed to turn down a stopped task chat's approvals", {
         chatId,
+        failures: failures + 1,
         error: error instanceof Error ? error.message : String(error),
-      }),
-    );
+      });
+      const wait = Math.min(STOP_RETRY_FIRST_MS * 2 ** failures, STOP_RETRY_MAX_MS);
+      setTimeout(() => void this.turnDownForStop(chatId, stoppedAt, failures + 1), wait).unref?.();
+    }
   }
 
   /** Cancels every check scheduled for task `taskId`, and its schedule, as when it is stopped or archived. */
@@ -1175,6 +1225,27 @@ export class ConciergeService {
    */
   takeQuietRun(chatId: string): boolean {
     return this.quietRuns.delete(chatId);
+  }
+
+  /**
+   * The owner cancelled check `checkId` of chat `chatId` from the chat's
+   * checks. One for a task tells the Concierge quietly, as cancelling from
+   * the task's row does. Answers whether there was such a check.
+   */
+  async cancelCheckByOwner(chatId: string, checkId: string): Promise<boolean> {
+    const checks = this.deps.checks;
+    if (!checks) return false;
+    const check = (await checks.inChat(chatId)).find((found) => found.id === checkId);
+    if (!(await checks.cancel(chatId, checkId))) return false;
+    if (check?.taskId) {
+      this.taskEvents?.mark({
+        taskId: check.taskId,
+        kind: "checks_cancelled_by_owner",
+        urgent: false,
+      });
+      await this.deps.tasks.taskChanged(check.taskId);
+    }
+    return true;
   }
 
   /**

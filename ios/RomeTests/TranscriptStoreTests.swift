@@ -135,7 +135,18 @@ final class FakeBackend: RomeBackend {
     var sentFiles: [OutgoingFile] = []
 
     func asset(path: String) async throws -> Data { throw APIError.notFound }
-    func apiFile(path: String, query: String?) async throws -> Data { throw APIError.notFound }
+    /// Files under `/api`, by path; any other path is not found.
+    var apiFiles: [String: Data] = [:]
+    /// The `/api` files asked for, in order.
+    var apiFileRequests: [String] = []
+    /// Runs inside a file request, before it answers.
+    var duringApiFile: (() async -> Void)?
+    func apiFile(path: String, query: String?) async throws -> Data {
+        apiFileRequests.append(path)
+        await duringApiFile?()
+        guard let data = apiFiles[path] else { throw APIError.notFound }
+        return data
+    }
     var origin: URL? { nil }
 
     /// Off, every send fails, as it always did here.

@@ -41,10 +41,12 @@ export function TaskChatCard(props: {
   title: string;
   isLatestForChat: boolean;
   show?: "task" | "ask";
+  /** When the message holding the card was said, as an ISO time. */
+  shownAt?: string;
 }) {
-  const { show, ...card } = props;
+  const { show, shownAt, ...card } = props;
   if (useContext(PublicTaskChatContext)) return <StaticTaskChatCard title={props.title} />;
-  if (show === "ask") return <TaskAskCard {...card} />;
+  if (show === "ask") return <TaskAskCard {...card} shownAt={shownAt} />;
   return <LiveTaskChatCard {...card} embedWait={show === undefined} />;
 }
 
@@ -59,14 +61,17 @@ export function TaskChatCard(props: {
 function TaskAskCard({
   chatId,
   isLatestForChat,
+  shownAt,
 }: {
   chatId: string;
   title: string;
   isLatestForChat: boolean;
+  shownAt?: string;
 }) {
   const { t } = useTranslation("chat");
   const { sessions, invalidate } = useChatSessions("all", "all");
-  const { tasks } = useConciergeTasks();
+  // The whole list: a card or thread outlives the panel's window of recent ended tasks.
+  const { tasks } = useConciergeTasks({ allDone: true });
   const [open, setOpen] = useState(false);
   const session = sessions?.find((candidate) => candidate.id === chatId);
   const task = tasks.find((candidate) => candidate.chat?.id === chatId);
@@ -93,7 +98,7 @@ function TaskAskCard({
     );
   }
   if (!session) return null;
-  return <FoldedAskCard chatId={chatId} />;
+  return <FoldedAskCard chatId={chatId} shownAt={shownAt} />;
 }
 
 /**
@@ -118,6 +123,35 @@ function ExpiredAskCard({ chatId, onOpen }: { chatId: string; onOpen: () => void
   );
 }
 
+/** Pages of a chat's messages fetched at most, going back to a card's time. */
+const PAGES_BACK = 5;
+
+/**
+ * Task chat `chatId`'s messages from now back to `until` and a little
+ * before, so the question open then and every answer since are in it. The
+ * newest page alone when `until` is not set.
+ */
+async function messagesBack(chatId: string, until: number): Promise<ChatMessage[]> {
+  // Pages hold whole turns; two cover the newest question.
+  if (!Number.isFinite(until)) {
+    return (await listSessionMessagePage(chatId, { limit: 2 }))?.messages ?? [];
+  }
+  const out: ChatMessage[] = [];
+  let before: string | null = null;
+  let crossed = false;
+  for (let page = 0; page < PAGES_BACK; page += 1) {
+    const got = await listSessionMessagePage(chatId, { limit: 2, before });
+    if (!got) break;
+    out.unshift(...got.messages);
+    const oldest = got.messages[0];
+    // One page past the card's time holds the question it showed.
+    if (crossed || !got.nextCursor || !oldest) break;
+    crossed = Date.parse(oldest.createdAt) <= until;
+    before = got.nextCursor;
+  }
+  return out;
+}
+
 const resultSchema = z.object({
   type: z.literal("interaction_result"),
   toolUseId: z.string(),
@@ -130,25 +164,31 @@ const resultSchema = z.object({
  * rejected, or turned down by Rome when the wait ran out; or still waiting
  * on a newer copy below). It opens to the original, read-only.
  */
-function FoldedAskCard({ chatId }: { chatId: string }) {
+function FoldedAskCard({ chatId, shownAt }: { chatId: string; shownAt?: string }) {
   const { t } = useTranslation("chat");
+  // The card shows the wait that was open when it was said: the newest
+  // question or approval that began by then, whatever the task asked later.
+  // A card with no time shows the chat's newest.
+  const until = shownAt ? Date.parse(shownAt) : Number.POSITIVE_INFINITY;
   const messages = useQuery({
-    queryKey: ["task-chat-cards", chatId],
-    queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
+    queryKey: ["task-chat-cards", chatId, shownAt ?? null],
+    queryFn: () => messagesBack(chatId, until),
   });
   const approvals = useApprovals();
   const approval = (approvals.data ?? [])
     .flatMap((row) => {
       const payload = approvalPayloadSchema.safeParse(row.payload);
-      return payload.success && payload.data.channelContext.threadId === chatId
+      return payload.success &&
+        payload.data.channelContext.threadId === chatId &&
+        Date.parse(row.createdAt) <= until
         ? [{ row, payload: payload.data }]
         : [];
     })
     .sort((a, b) => Date.parse(b.row.createdAt) - Date.parse(a.row.createdAt))[0];
-  // The latest question asked, and the latest answer, with when each came.
-  let answer: { at: string; toolUseId: string; output: Record<string, unknown> } | null = null;
+  // The question it showed, and the answers given, by question.
+  const answers = new Map<string, { at: string; output: Record<string, unknown> }>();
   let asked: { at: string; part: z.infer<typeof interactionSchema> } | null = null;
-  for (const message of messages.data?.messages ?? []) {
+  for (const message of messages.data ?? []) {
     let parts: unknown;
     try {
       parts = JSON.parse(message.content);
@@ -159,28 +199,27 @@ function FoldedAskCard({ chatId }: { chatId: string }) {
     for (const raw of parts) {
       const result = resultSchema.safeParse(raw);
       if (result.success) {
-        answer = {
+        answers.set(result.data.toolUseId, {
           at: message.createdAt,
-          toolUseId: result.data.toolUseId,
           output: result.data.output ?? {},
-        };
+        });
       }
       const interaction = interactionSchema.safeParse(raw);
-      if (interaction.success && interaction.data.type === "pending_interaction") {
+      if (
+        interaction.success &&
+        interaction.data.type === "pending_interaction" &&
+        Date.parse(message.createdAt) <= until &&
+        (!asked || Date.parse(message.createdAt) >= Date.parse(asked.at))
+      ) {
         asked = { at: message.createdAt, part: interaction.data };
       }
     }
   }
-  const lastQuestionAt = Math.max(
-    asked ? Date.parse(asked.at) : 0,
-    answer ? Date.parse(answer.at) : 0,
-  );
+  const answer = asked ? (answers.get(asked.part.toolUseId) ?? null) : null;
   const approvalIsLatest =
-    approval !== undefined && Date.parse(approval.row.createdAt) > lastQuestionAt;
-  const questionOpen =
-    !approvalIsLatest &&
-    asked !== null &&
-    (answer === null || Date.parse(asked.at) > Date.parse(answer.at));
+    approval !== undefined &&
+    (asked === null || Date.parse(approval.row.createdAt) > Date.parse(asked.at));
+  const questionOpen = !approvalIsLatest && asked !== null && answer === null;
   const props = asked?.part.render?.props;
   const questionTitle = (props?.questions as { question?: unknown }[] | undefined)?.[0]?.question as
     | string
@@ -222,11 +261,7 @@ function FoldedAskCard({ chatId }: { chatId: string }) {
           <QuestionCard
             toolUseId={asked.part.toolUseId}
             props={props}
-            result={
-              answer && answer.toolUseId === asked.part.toolUseId
-                ? answer.output
-                : { dismissed: true }
-            }
+            result={answer ? answer.output : { dismissed: true }}
             onSubmit={() => {}}
             onDismiss={() => {}}
             settled="full"
@@ -295,7 +330,8 @@ function LiveTaskChatCard({
         ? "failed"
         : "idle";
   // The card says what the task list says: its task's status, when it has one.
-  const { tasks } = useConciergeTasks();
+  // The whole list: a card or thread outlives the panel's window of recent ended tasks.
+  const { tasks } = useConciergeTasks({ allDone: true });
   const task = tasks.find((candidate) => candidate.chat?.id === chatId);
   const derived = task ? taskStatusOfDto(task) : null;
   // An archived task chat's task was stopped with it, and the list holds no

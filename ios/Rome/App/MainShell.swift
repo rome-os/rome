@@ -218,6 +218,33 @@ struct MainShell: View {
         .onChange(of: model.sessionExpired) { _, expired in if expired { agentPage = nil } }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
         .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
+        // A tap on the widget: its app, Apps or Chat in front, nothing over it.
+        // Taken on appear too: a link routed while this shell was being
+        // built (a sign-in, a switch) waits for it.
+        .onChange(of: model.widgetRequest, initial: true) {
+            guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
+            agentPage = nil
+            showSettings = false
+            page = nil
+            settingsPage = nil
+            closeDrawer()
+            switch link {
+            case .app(_, let appId):
+                show(.apps)
+                // The list as the app knows it; the widget's copy names one
+                // not read yet.
+                let app = workspace.apps.first { $0.id == appId }
+                    ?? InstalledApp(id: appId, displayName: AppShelfStore.shared?.read()?.apps.first { $0.id == appId }?.name)
+                path = [.app(app)]
+            case .apps:
+                show(.apps)
+                path = []
+            case .newApp:
+                show(.chat)
+                path = []
+                workspace.composerPrefills[conciergeChatID] = AppIdea.own.prompt
+            }
+        }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
             agentPage = nil

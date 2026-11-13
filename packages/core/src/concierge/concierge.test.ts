@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { RESOLVED_BY_EXPIRY } from "./approval-expiry.js";
+import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
 import { POSTPONED_CHECKS } from "./service.js";
 import type {
@@ -1520,10 +1520,120 @@ describe("Concierge tools", () => {
       (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
     );
     await s.service.endTaskChat(second.chatId, "archived");
+    // Only approvals that began by the stop.
     expect(turnedDown).toEqual([
-      [first.chatId, Number.POSITIVE_INFINITY, false],
-      [second.chatId, Number.POSITIVE_INFINITY, false],
+      [first.chatId, expect.any(Number), false],
+      [second.chatId, expect.any(Number), false],
     ]);
+    expect(turnedDown.every(([, until]) => Number.isFinite(until))).toBe(true);
+  });
+
+  it("turns down an approval the stopped task's turn asked for while it was being stopped", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === chatId ? ["t1"] : []);
+    let askedAt = 0;
+    s.chats.interruptTurn = async () => {
+      // The turn asks for an approval just before it stops.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      askedAt = Date.now();
+    };
+    const cutoffs: number[] = [];
+    s.service.attachApprovalExpiry(async (_chat, turnDown) => {
+      cutoffs.push(turnDown.until);
+      return 1;
+    });
+    await s.service.stopTask(taskId, "guardian");
+    expect(cutoffs).toHaveLength(1);
+    expect(cutoffs[0]).toBeGreaterThanOrEqual(askedAt);
+  });
+
+  it("turns down an approval a stopped task's work asks for after its interrupt was accepted", async () => {
+    const s = setup();
+    const stopped = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    const open = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    await s.service.stopTask(stopped.taskId, "guardian");
+    const turnedDown: [string, string][] = [];
+    s.service.attachApprovalExpiry(async (chat, turnDown) => {
+      turnedDown.push([chat, turnDown.resolvedBy]);
+      return 1;
+    });
+    await s.settle();
+    turnedDown.length = 0;
+    const ask = (chatId: string) =>
+      s.createApproval({
+        status: "pending",
+        description: "Send the booking email",
+        payload: { channelContext: { threadId: chatId } },
+      });
+    ask(stopped.chatId);
+    ask(open.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([[stopped.chatId, RESOLVED_BY_STOP]]);
+    // A chat still in use keeps its approvals: one whose row only was
+    // archived after its task ended, and one unarchived after its archive
+    // stopped the task.
+    await s.taskRepo.setLastOutcome(open.taskId, "succeeded", new Date(), { reported: false });
+    await s.taskRepo.upsertMany([{ id: open.taskId, archived: true }]);
+    const restored = JSON.parse(
+      (await s.tool("chat_start", { title: "Cars", brief: "Find a car" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === restored.chatId ? ["t1"] : []);
+    await s.service.endTaskChat(restored.chatId, "archived");
+    s.chats.activeTurns = () => [];
+    turnedDown.length = 0;
+    // Still archived: its approvals are the stopped work's.
+    ask(restored.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([[restored.chatId, RESOLVED_BY_STOP]]);
+    await s.service.restoreTaskChat(restored.chatId);
+    turnedDown.length = 0;
+    ask(open.chatId);
+    ask(restored.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([]);
+  });
+
+  it("drops a stop's turn-down retry once the task is taken up again", async () => {
+    const s = setup();
+    s.fakeTimers();
+    let calls = 0;
+    s.service.attachApprovalExpiry(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("database is locked");
+      return 1;
+    });
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(taskId, "guardian");
+    expect(calls).toBe(1);
+    // The owner types in the task chat before the retry: its new work's approvals are its own.
+    await s.service.resumeTaskChat(chatId);
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(calls).toBe(1);
+  });
+
+  it("turns down at start what a stopped task's chat still has pending", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    // Stopped before the approval handling was up, as across a crash.
+    await s.service.stopTask(taskId, "guardian");
+    const turnedDown: [string, string][] = [];
+    s.service.attachApprovalExpiry(async (chat, turnDown) => {
+      turnedDown.push([chat, turnDown.resolvedBy]);
+      return 1;
+    });
+    await s.settle();
+    expect(turnedDown).toEqual([[chatId, RESOLVED_BY_STOP]]);
   });
 
   it("lets a failed turn-down reach the expiry, and a stop go ahead anyway", async () => {
@@ -1564,6 +1674,22 @@ describe("Concierge tools", () => {
     expect(pending()).toContain(row!.id);
   });
 
+  it("tells the Concierge quietly when the owner cancels a task's check from the chat's checks", async () => {
+    const s = setup();
+    const [row] = await s.taskRepo.upsertMany([{ title: "PR 42", chatId: CONCIERGE_CHAT }]);
+    const pending = () =>
+      (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents.pending;
+    s.deps.checks = {
+      inChat: async () => [{ id: "r-1", name: "CI", at: 5, waitingFor: null, taskId: row!.id }],
+      cancel: async (_chat: string, id: string) => id === "r-1",
+      laterOf: async () => new Map(),
+    } as never;
+    expect(await s.service.cancelCheckByOwner(CONCIERGE_CHAT, "r-9")).toBe(false);
+    expect(pending()).not.toContain(row!.id);
+    expect(await s.service.cancelCheckByOwner(CONCIERGE_CHAT, "r-1")).toBe(true);
+    expect(pending()).toContain(row!.id);
+  });
+
   it("archiving a task that is still open stops it, and leaves an ended one's outcome alone", async () => {
     const s = setup();
     const { taskId } = JSON.parse(
@@ -1580,6 +1706,52 @@ describe("Concierge tools", () => {
     await s.taskRepo.setLastOutcome(done!.id, "succeeded", new Date(), { reported: false });
     await s.tool("task_upsert", { tasks: [{ id: done!.id, archived: true }] });
     expect((await s.taskRepo.get(done!.id))?.stoppedAt).toBeNull();
+  });
+
+  it("archiving a task chat that waits on an approval stops its task, though the approval is turned down first", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.taskRepo.setLastOutcome(taskId, "succeeded", new Date(), { reported: false });
+    const waiting = new Map([[chatId, Date.now()]]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      waitingSince: async (ids) => new Map([...waiting].filter(([id]) => ids.includes(id))),
+      reportPending: () => [],
+    });
+    s.service.attachApprovalExpiry(async (chat) => {
+      // Turned down: the chat waits on nothing any more.
+      waiting.delete(chat);
+      return 1;
+    });
+    await s.service.endTaskChat(chatId, "archived");
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ stopReason: "archived" });
+  });
+
+  it("archiving or deleting a task chat stops only an open task, and a finished one stays done", async () => {
+    const s = setup();
+    const open = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    const done = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    await s.taskRepo.setLastOutcome(done.taskId, "succeeded", new Date(), { reported: false });
+    s.chats.activeTurns = (chatId: string) => (chatId === open.chatId ? ["t1"] : []);
+    await s.service.endTaskChat(open.chatId, "archived");
+    await s.service.endTaskChat(done.chatId, "deleted");
+    expect(await s.taskRepo.get(open.taskId)).toMatchObject({ stopReason: "archived" });
+    expect(await s.taskRepo.get(done.taskId)).toMatchObject({
+      stoppedAt: null,
+      archivedAt: expect.any(Date),
+    });
+    const row = await s.taskRepo.get(done.taskId);
+    expect((await s.tasks.statusOf([row!])).get(done.taskId)).toMatchObject({
+      status: "ended",
+      endReason: "done",
+    });
   });
 
   it("takes a stopped task up again when its owner types in its chat, or the Concierge starts its row", async () => {
@@ -2955,6 +3127,92 @@ describe("Concierge events", () => {
     expect(s.backendTurns).toHaveLength(1);
     await rs.advanceTimersByTimeAsync(2 * RETRY_MS);
     expect(s.backendTurns).toHaveLength(1);
+  });
+
+  it("shows a result the guardian's Stop cut off before it was said as never told", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "stopped");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.reportGivenUp).toBe(true);
+    expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
+  });
+
+  it("still reports a result whose report failed after the Concierge edits the row meanwhile", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "failed");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    // In a turn of its own, the Concierge renames the row: it never got the result.
+    await s.tool("task_upsert", { tasks: [{ id: taskId, title: "Flights to Rome" }] });
+    s.onBackendTurn(() => "completed");
+    await rs.advanceTimersByTimeAsync(RETRY_MS + 1_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`id="${taskId}"`);
+  });
+
+  describe("a finished task leaves Active, whatever its report turn does", () => {
+    const outcomes = ["completed", "failed", "interrupted"] as const;
+    for (const outcome of outcomes) {
+      for (const edits of [false, true]) {
+        for (const says of [false, true]) {
+          it(`report ends ${outcome}${edits ? ", row edited mid-turn" : ""}${says ? ", result said mid-turn" : ""}`, async () => {
+            const s = setup();
+            const { chatId, taskId } = await startTask(s);
+            s.fakeTimers();
+            s.onBackendTurn(async () => {
+              if (edits) await s.taskRepo.upsertMany([{ id: taskId, note: "Edited" }]);
+              if (says) {
+                s.inTurn("report");
+                await s.tool("say", { text: "Three options found", task: taskId });
+              }
+              return outcome;
+            });
+            await finishTask(s, chatId);
+            await rs.advanceTimersByTimeAsync(2_000);
+            expect(s.backendTurns).toHaveLength(1);
+            // Every later report runs to its end.
+            s.onBackendTurn(() => "completed");
+            await rs.advanceTimersByTimeAsync(2 * RETRY_MS);
+            const reports = s.backendTurns.filter((turn) => turn.prompt.includes(`id="${taskId}"`));
+            expect(reports.length).toBeGreaterThan(0);
+            // A report that ran to its end carried it; none is left owed.
+            if (outcome !== "completed") expect(reports.length).toBeGreaterThan(1);
+            await s.settle();
+            const row = await s.taskRepo.get(taskId);
+            expect(row?.outcomeUnsaid).toBe(false);
+            expect((await s.tasks.statusOf([row!])).get(taskId)?.status).toBe("ended");
+          });
+        }
+      }
+    }
+  });
+
+  it("still reports a result whose report turn wrote the row and then failed", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    // The report turn renames the row, then fails before it says the result.
+    s.onBackendTurn(async () => {
+      await s.taskRepo.upsertMany([{ id: taskId, title: "Flights to Rome" }]);
+      return "failed" as const;
+    });
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    s.onBackendTurn(() => "completed");
+    await rs.advanceTimersByTimeAsync(RETRY_MS + 1_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`id="${taskId}"`);
+    // Once a report ran to its end, the result is said.
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.outcomeUnsaid).toBe(false);
   });
 
   it("hands a task's result over again when a newer message, not a Stop, cut the turn short", async () => {
@@ -4737,16 +4995,28 @@ describe("Concierge status reactions", () => {
     outcome: "completed" | "failed" | "interrupted" | "stopped" = "completed",
   ) => {
     const task = await s.taskRepo.findBySession(chatId);
-    // The event delivery took the task's news into this turn, as its flush does.
-    (
-      s.service as unknown as { taskEvents: { forget(taskId: string): void } | null }
-    ).taskEvents?.forget(task!.id);
     s.onBackendTurn(() => outcome);
     await s.service.systemTurnOutcome(
       CONCIERGE_CHAT,
       `<task_events>\n<task id="${task!.id}" title="Weather">\n</task>\n</task_events>`,
     );
     s.onBackendTurn(() => "completed");
+    // As the flush that carried the news settles it: only a report that ran
+    // to its end does, and its result is then said.
+    const events = (
+      s.service as unknown as {
+        taskEvents: { dirty: Map<string, unknown>; changed(): void } | null;
+      }
+    ).taskEvents;
+    if (outcome === "completed") {
+      events?.dirty.delete(task!.id);
+      events?.changed();
+      await s.taskRepo.markReported([task!.id]);
+    } else if (outcome === "stopped") {
+      events?.dirty.delete(task!.id);
+      await s.taskRepo.markGivenUp(task!.id);
+      events?.changed();
+    }
   };
   /** The task chat's turn ends `status`, and, unless it was stopped, the Concierge reports it. */
   const finishTask = async (
@@ -5439,7 +5709,7 @@ describe("Concierge status reactions", () => {
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
-    it("settles when another turn says the result, naming the task", async () => {
+    it("keeps working when another turn says the result, until a report that carried it ends", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
@@ -5447,13 +5717,15 @@ describe("Concierge status reactions", () => {
       s.inTurn("later");
       guardianSays(s, "g2", "later");
       await s.tool("say", { text: "Sunny all week", task: taskId });
-      expect(await reactionOf(s, "g1")).toBe("working");
       await s.finish({
         turnId: "later",
         agentName: "core:concierge",
         chatId: CONCIERGE_CHAT,
         text: "ok",
       });
+      // Saying it settles nothing: a report that carried it does.
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
@@ -5473,8 +5745,12 @@ describe("Concierge status reactions", () => {
       const { chatId, taskId } = await started(s);
       await finishTask(s, chatId, "completed", { reported: false });
       const coalescer = (
-        s.service as unknown as { taskEvents: { deps: { giveUp: (id: string) => void } } }
+        s.service as unknown as {
+          taskEvents: { dirty: Map<string, unknown>; deps: { giveUp: (id: string) => void } };
+        }
       ).taskEvents;
+      // As the coalescer does when a Stop ended the turn that carried it.
+      coalescer.dirty.delete(taskId);
       coalescer.deps.giveUp(taskId);
       await s.settle();
       // Its owner was never told, whatever the task's outcome.
@@ -5482,7 +5758,7 @@ describe("Concierge status reactions", () => {
       expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
     });
 
-    it("runs no report again that a turn which took it over said", async () => {
+    it("reports again a result a turn that took the report over said, so none is lost", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
@@ -5504,9 +5780,44 @@ describe("Concierge status reactions", () => {
         chatId: CONCIERGE_CHAT,
         text: "",
       });
+      // Saying it settled nothing: the cut-short report runs again, to its end.
       await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
-      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns).toHaveLength(2);
+      expect(s.backendTurns[1]?.prompt).toContain(taskId);
       expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("keeps a task's news that came after the turn said its result, with the result it brought", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.fakeTimers();
+      s.onBackendTurn(() => "interrupted");
+      replies(s, chatId);
+      guardianTyped(s, chatId);
+      await finishTask(s, chatId, "completed", { reported: false });
+      await rs.advanceTimersByTimeAsync(60_000);
+      s.onBackendTurn(() => "completed");
+      s.inTurn("takeover");
+      guardianSays(s, "g2", "takeover");
+      await s.tool("say", { text: "Sunny all week", task: taskId });
+      // The task chat gives a new result before the Concierge's turn ends.
+      await s.taskRepo.setLastOutcome(taskId, "succeeded");
+      const coalescer = (
+        s.service as unknown as {
+          taskEvents: { mark: (change: unknown) => void; pending: string[] };
+        }
+      ).taskEvents;
+      coalescer.mark({ taskId, kind: "turn_end:completed by=system", urgent: true });
+      await s.finish({
+        turnId: "takeover",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      await s.settle();
+      expect(coalescer.pending).toContain(taskId);
+      expect((await s.taskRepo.get(taskId))?.outcomeUnsaid).toBe(true);
     });
 
     it("keeps a report the Concierge never got, though a turn names its task, and reports it again", async () => {
@@ -5616,7 +5927,7 @@ describe("Concierge status reactions", () => {
       expect(s.backendTurns.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("runs no report again for two tasks a takeover turn said, after their batch was cut short", async () => {
+    it("reports again two tasks a takeover turn said, after their batch was cut short", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const weather = await started(s, { title: "Weather" });
@@ -5645,9 +5956,11 @@ describe("Concierge status reactions", () => {
         chatId: CONCIERGE_CHAT,
         text: "",
       });
-      expect(await reactionOf(s, "g1")).toBeNull();
       await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
-      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns).toHaveLength(2);
+      expect(s.backendTurns[1]?.prompt).toContain(weather.taskId);
+      expect(s.backendTurns[1]?.prompt).toContain(traffic.taskId);
+      expect(await reactionOf(s, "g1")).toBeNull();
     });
 
     it("clears a stopped task at once, with nothing to report", async () => {

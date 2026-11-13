@@ -62,6 +62,7 @@ describe("TaskSchedules", () => {
       activate: async (routine: { id: string }) => void active.add(routine.id),
       deactivate: async (id: string) => void active.delete(id),
       onChange: () => () => {},
+      setFireGate: () => {},
     };
     schedules = new TaskSchedules({
       routines,

@@ -13,8 +13,12 @@
 //
 // At most one flush runs, at least 10 s after the last one started. A flush
 // reads the rows from the database when it builds, so delivering a row twice
-// is harmless. A turn that ran to its end settles what it carried: Rome keeps
-// each task's status, so the Concierge owes no write. A row whose turn did
+// is harmless. A turn that ran to its end settles exactly the news it
+// carried, and its results count as said: Rome keeps each task's status, so
+// the Concierge owes no write. Nothing else settles a row: not a write of
+// it, not a say before the turn ends, not a failure or a newer message. News
+// that came after the build waits for its own turn, and a second report is
+// better than a lost one. A row whose turn did
 // not run to its end, such as when the Concierge is out of quota, is tried
 // again RETRY_MS later. A row whose turn a newer message cut short is tried
 // again with the next flush, once the turn that took it over no longer
@@ -76,6 +80,8 @@ export interface TaskEventDeps {
   deliver(delivery: TaskEventDelivery): Promise<"completed" | "stopped" | "interrupted" | "failed">;
   /** The turn that carried the row was stopped by the guardian: its news is not handed over again. */
   giveUp(taskId: string): void;
+  /** A report turn that carried these rows' news ran to its end: their results are said. */
+  reported?(taskIds: string[]): void;
   /**
    * Whether a Concierge turn that took a cut-short report over still runs
    * with this row's news, which it may say itself. Such a row waits for it.
@@ -86,6 +92,11 @@ export interface TaskEventDeps {
 interface Dirty {
   /** When the first change since the last settled flush arrived; a change after a build restarts it. */
   since: number;
+  /**
+   * Goes up with every change, and is new for a new entry: what a turn
+   * carried or said is forgotten only while it is still all there is.
+   */
+  version: number;
   changes: TaskChange[];
   urgent: boolean;
   /** Every change needs no word: the row waits for another one's flush. */
@@ -102,6 +113,7 @@ interface Dirty {
 
 export class TaskEventCoalescer {
   private dirty = new Map<string, Dirty>();
+  private versions = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing = false;
   private lastFlushStartedAt = Number.NEGATIVE_INFINITY;
@@ -150,6 +162,7 @@ export class TaskEventCoalescer {
     const entry = this.dirty.get(change.taskId);
     if (!entry) {
       this.dirty.set(change.taskId, {
+        version: ++this.versions,
         since: now,
         changes: [change],
         urgent: change.urgent,
@@ -159,11 +172,13 @@ export class TaskEventCoalescer {
       // Everything the entry holds went into a payload already. This change
       // came after the build, so it is a new round, and a write that settles
       // the old round must not clear it.
+      entry.version = ++this.versions;
       entry.since = now;
       entry.changes = [change];
       entry.urgent = change.urgent;
       entry.passive = change.passive === true;
     } else {
+      entry.version = ++this.versions;
       entry.changes.push(change);
       entry.urgent ||= change.urgent;
       entry.passive &&= change.passive === true;
@@ -172,15 +187,6 @@ export class TaskEventCoalescer {
     }
     this.arm();
     this.changed();
-  }
-
-  /** The Concierge wrote the row. Clears its mark unless a change came after the build. */
-  settle(taskId: string): void {
-    const entry = this.dirty.get(taskId);
-    if (entry && entry.builtAt !== undefined && entry.since <= entry.builtAt) {
-      this.dirty.delete(taskId);
-      this.changed();
-    }
   }
 
   /**
@@ -211,11 +217,6 @@ export class TaskEventCoalescer {
     const settled = this.passiveOf(taskIds);
     for (const taskId of settled) this.dirty.delete(taskId);
     if (settled.length > 0) this.changed();
-  }
-
-  /** Drops a row's mark, such as when its row is gone. */
-  forget(taskId: string): void {
-    if (this.dirty.delete(taskId)) this.changed();
   }
 
   /** The rows waiting for a flush. */
@@ -285,7 +286,7 @@ export class TaskEventCoalescer {
     const carried = new Map(
       taken.map(([taskId, entry]) => [
         taskId,
-        { entry, changes: entry.changes, urgent: entry.urgent },
+        { entry, changes: entry.changes, urgent: entry.urgent, version: entry.version },
       ]),
     );
     // Rows whose turn ran to its end.
@@ -351,17 +352,18 @@ export class TaskEventCoalescer {
     superseded: Set<string>,
     stopped: Set<string>,
     completed: Set<string>,
-    carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean }>,
+    carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean; version: number }>,
   ): void {
+    const reported: string[] = [];
     for (const taskId of taskIds) {
       const entry = this.dirty.get(taskId);
       if (!entry) continue;
       if (notRun.has(taskId) || superseded.has(taskId)) {
         // The turn did not run to its end: the changes stay, later ones join
-        // them, a write still settles them, and the attempt does not count.
+        // them, and the attempt does not count.
         const before = carried.get(taskId);
-        // A write settled the row while the turn ran and a later change
-        // started afresh: the failed turn carried none of it.
+        // Not the entry the turn carried, as when its row went and came back:
+        // the failed turn carried none of it.
         if (before && entry !== before.entry) continue;
         if (before && entry.changes !== before.changes) {
           // A change while the turn ran started a new round: the carried
@@ -386,9 +388,18 @@ export class TaskEventCoalescer {
         // A change came after the build: it waits for its own flush.
         entry.builtAt = undefined;
       } else if (completed.has(taskId)) {
-        // The turn ran to its end with the row's news: one delivery is enough.
-        this.dirty.delete(taskId);
+        // The turn ran to its end with the row's news: one delivery is
+        // enough, for exactly the version it carried.
+        const before = carried.get(taskId);
+        if (before && entry === before.entry && entry.version === before.version) {
+          this.dirty.delete(taskId);
+          reported.push(taskId);
+        }
       }
+    }
+    if (reported.length > 0) {
+      this.changed();
+      this.deps.reported?.(reported);
     }
   }
 }

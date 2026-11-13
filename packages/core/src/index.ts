@@ -71,7 +71,11 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { Channel, ChatStopHandler } from "@rome-os/app-runtime";
+import type { Channel, ChannelsService, ChatStopHandler } from "@rome-os/app-runtime";
+import { conciergeChatGuard } from "./concierge/automated-input.js";
+import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
+import { actionExecutionContext } from "./apps/actions/context.js";
+import { isConciergeChat } from "./webchat/privacy.js";
 
 const log = createLogger("startup");
 
@@ -1442,12 +1446,33 @@ async function main() {
   // What apps get of the chat settings, with the chat ids an app built for
   // SDK 0.7 reads.
   const appChatSettings = legacyChatIdSettings(chatSettings);
+  // Only the Concierge writes in a Concierge chat. An app's action sending
+  // there, as a task chat's agent or a routine may, wakes the Concierge with
+  // a quiet system turn instead (docs/architecture/concierge.md).
+  const intoConciergeChat = conciergeChatGuard({
+    isConciergeChat: async (chatId) => isConciergeChat(await webchatRepo.getSession(chatId)),
+    senderOf: async (agentName) =>
+      (agentName
+        ? await resolveAutomatedSender({ agentLoader, appCatalog, settingsRepo }, agentName)
+        : null) ?? { sourceType: null, name: null },
+    runSystemTurn: (chatId, prompt, options) => concierge.runSystemTurn(chatId, prompt, options),
+  });
+  const appChannelsService: ChannelsService = {
+    ...channelsService,
+    send: async (target, chatId, message) =>
+      (await intoConciergeChat(
+        target,
+        chatId,
+        message,
+        actionExecutionContext.getStore()?.agentName,
+      )) ?? channelsService.send(target, chatId, message),
+  };
   const appActionDeps = {
     agentRunner,
     resolveOneOffDate: (trigger: Trigger) =>
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
-    channelsService: legacyChatIdChannelsService(channelsService),
+    channelsService: legacyChatIdChannelsService(appChannelsService),
     chatSettings: appChatSettings,
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
@@ -2066,7 +2091,12 @@ async function main() {
         connectionRegistry,
         emailConnectionId: () => emailConnection(connectionRegistry, channelOf)?.id,
       }),
-      ...chatWorkerCalls({ channelsService, chatSettings, agentNames: agentNameResolver }),
+      ...chatWorkerCalls({
+        channelsService,
+        chatSettings,
+        agentNames: agentNameResolver,
+        intoConciergeChat,
+      }),
       ...sessionWorkerCalls({
         backendTurnRunner,
         notify: notifyClient,
