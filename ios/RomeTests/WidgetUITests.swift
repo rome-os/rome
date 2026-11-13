@@ -264,7 +264,7 @@ import Testing
         let rows = TranscriptBuilder.rows(messages: [held(DemoBackend.mealCard, "m-meal"), held(DemoBackend.dinnerQuestion, "m-dinner")], pending: [], answers: [:], options: .init())
         let ids = rows.compactMap { row -> String? in
             switch row {
-            case .widgetUI(_, let part, _): part.widgetId
+            case .widgetUI(_, let part, _, _): part.widgetId
             case .question(_, let part, _, _): part.ui?.widgetId
             default: nil
             }

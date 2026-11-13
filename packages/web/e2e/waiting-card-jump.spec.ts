@@ -129,8 +129,9 @@ for (const viewport of [
           await expect(page.getByText("Skipped for now", { exact: true })).toBeVisible();
         } else {
           await page.getByRole("button", { name: "Dismiss", exact: true }).click();
-          // Core took the dismissal; the stored answer arrives with the next read.
-          await expect(page.getByText("Sent", { exact: true })).toBeVisible();
+          // Core took the dismissal, and the chat reads it back: the card folds
+          // to how it ended.
+          await expect(page.getByText("Dismissed", { exact: true })).toBeVisible();
         }
         await expect(page.locator("[data-chat-pending-card]")).toHaveCount(0);
         await page.locator("[data-chat-transcript]").evaluate((el) => {

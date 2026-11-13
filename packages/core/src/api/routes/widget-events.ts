@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { currentChatOwner } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
+import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 
 /** What core's own widget makes of one of its events: the output that answers
  *  the agent waiting on it. */
@@ -140,7 +141,8 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     }
     // Core writes what the client reads: whether the agent was answered and a
     // link to open, never a field of the app's own.
-    const open = vetLink(said?.open, new URL(c.req.url).origin);
+    // The origin the guardian reached Rome at, which a relative link joins.
+    const open = vetLink(said?.open, getExternalRequestOrigin(c.req.raw).origin);
     return c.json(open ? { open } : {});
   });
 

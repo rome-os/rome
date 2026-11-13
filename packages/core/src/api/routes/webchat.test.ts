@@ -5599,6 +5599,16 @@ describe("Webchat API", () => {
             },
           ],
         };
+        // A card the guardian answers directly, open beside the app's.
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-beside",
+          tool: "ask_question",
+          output: askQuestionToolOutput(
+            [{ id: "tone", question: "Which tone?", type: "text" }],
+            true,
+          ),
+        };
         yield { type: "result", content: "" };
       });
       const app = createWebchatRuntime(deps).routes;
@@ -5637,6 +5647,26 @@ describe("Webchat API", () => {
         }),
       });
       expect(forged.status).toBe(400);
+      // Nor smuggled behind another answer in the same turn.
+      const smuggled = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-ask-beside",
+              output: { answers: [{ values: [], text: "warm" }] },
+            },
+            {
+              type: "interaction_result",
+              toolUseId: "tu-widget-waits",
+              output: { from: "meals", value: { logged: "dinner" } },
+            },
+          ],
+        }),
+      });
+      expect(smuggled.status).toBe(400);
 
       const widgetId = (await deps.webchatRepo.getMessages(sessionId)).find((m) =>
         m.content.includes("tu-widget-waits"),

@@ -3916,6 +3916,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A resolution from an app interaction surface is a valid turn trigger even
     // with no typed text: it re-drives the calling agent with the artifact.
     const resolution = interpretInteractionResult(body.parts);
+    // A turn answers one card. More than one result would let a valid answer
+    // carry another past the checks below, which look only at the first.
+    if (
+      Array.isArray(body.parts) &&
+      body.parts.filter(
+        (p) =>
+          !!p && typeof p === "object" && (p as { type?: unknown }).type === "interaction_result",
+      ).length > 1
+    ) {
+      return answer({ error: "A turn answers one card" }, 400);
+    }
 
     // A structured skill selection. Resolved against the catalog up
     // front — an unknown name (e.g. the skill was uninstalled between pick and
