@@ -506,8 +506,15 @@ enum TranscriptBuilder {
                     open[card.toolUseId] = message.id
                 case .webOnly(_, let toolUseId?) where !message.isUser:
                     open[toolUseId] = message.id
-                case .interactionResult(let toolUseId, let output) where message.isUser:
-                    answers[open.removeValue(forKey: toolUseId) ?? toolUseId] = output
+                case .interactionResult(let toolUseId, let output, let cardId) where message.isUser:
+                    // A result that names its card's message answers that card,
+                    // whatever order the reads put them in.
+                    if let cardId {
+                        answers[cardId] = output
+                        if open[toolUseId] == cardId { open[toolUseId] = nil }
+                    } else {
+                        answers[open.removeValue(forKey: toolUseId) ?? toolUseId] = output
+                    }
                 default:
                     break
                 }
