@@ -52,7 +52,9 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
   const { data: fetched } = useQuery({
     queryKey: ["chat-list-route-session", openId],
     queryFn: () => getSession(openId as string),
-    // A chat the open page is already fetching shares that request.
+    // The open chat reads its session through `getSession` outside React Query,
+    // so this read is separate unless the two overlap, and then `getSession`
+    // joins them.
     enabled: openId !== null && openId !== mainChatId && known === null,
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,

@@ -530,10 +530,15 @@ export function RecentChats({
     { message_insert: { schema: z.unknown(), fn: recountConciergeChats } },
     { enabled: hasConcierge && mode === "chat", onReconnect: recountConciergeChats },
   );
-  // The chat on screen reads what arrives, so its unread count is stale.
-  const conciergeUnread = conciergeChats.some(
-    (chat) => chat.unread > 0 && chat.id !== activeSessionId,
-  );
+  // The chat on screen reads what arrives, so its unread count is stale. A task
+  // chat is Concierge's too, and one that waits for the guardian needs a look.
+  const conciergeUnread =
+    conciergeChats.some((chat) => chat.unread > 0 && chat.id !== activeSessionId) ||
+    sessions.some(
+      (s) =>
+        chatKind(s, conciergeChatId) === "task" &&
+        chatRowStatus(s, s.id === activeSessionId) === "waiting",
+    );
   const chatReplying = sessions.some(
     (s) => s.running && isProjectChat(chatKind(s, conciergeChatId)),
   );

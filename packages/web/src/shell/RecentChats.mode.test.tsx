@@ -39,6 +39,9 @@ interface Row {
   name: string;
   activityAt?: string;
   running?: boolean;
+  awaitingGuardian?: boolean;
+  lastTurnFailed?: boolean;
+  unread?: boolean;
   agentName?: string;
   triggerKind?: string;
   parentSessionId?: string;
@@ -432,11 +435,38 @@ describe("the dots on the switch", () => {
       const view = open("/chat/mine");
       await screen.findByRole("link", { name: "My chat" });
       const dot = within(radio("Concierge")).getByRole("img", {
-        name: "Unread Concierge messages",
+        name: "Unread Concierge messages or a task waiting for you",
       });
       expect(dot.className).toContain("bg-destructive");
       view.unmount();
     }
+  });
+
+  it("puts the red dot on Concierge in Chat mode while a task chat waits for the guardian", async () => {
+    seedChatListMode({ mode: "chat" });
+    concierge.chats = unreadChats(0, 0);
+    serve([task("t1", "Book flights", { awaitingGuardian: true }), chat("mine", "My chat")]);
+    open("/chat/mine");
+    await screen.findByRole("link", { name: "My chat" });
+    const dot = await within(radio("Concierge")).findByRole("img", {
+      name: /Unread Concierge messages or a task waiting for you/,
+    });
+    expect(dot.className).toContain("bg-destructive");
+  });
+
+  it("ignores a task chat that failed, finished with new replies or is running", async () => {
+    seedChatListMode({ mode: "chat" });
+    concierge.chats = unreadChats(0, 0);
+    serve([
+      task("t1", "Failed one", { lastTurnFailed: true }),
+      task("t2", "Done one", { unread: true }),
+      task("t3", "Running one", { running: true }),
+      chat("mine", "My chat"),
+    ]);
+    open("/chat/mine");
+    await screen.findByRole("link", { name: "My chat" });
+    await act(async () => {});
+    expect(screen.queryByRole("img", { name: /Unread Concierge/ })).toBeNull();
   });
 
   it("shows no dot when nothing is unread, nor on the Chat segment", async () => {
@@ -457,7 +487,7 @@ describe("the dots on the switch", () => {
     const dot = await within(radio("Chat")).findByRole("img", { name: "A chat is replying" });
     expect(dot.className).toContain("bg-primary");
     // Concierge's own unread dot belongs to the other mode.
-    expect(screen.queryByRole("img", { name: "Unread Concierge messages" })).toBeNull();
+    expect(screen.queryByRole("img", { name: /Unread Concierge messages/ })).toBeNull();
   });
 
   it("ignores a task chat or a topic chat that is replying", async () => {

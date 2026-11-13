@@ -57,7 +57,7 @@
     "modeChat": "Chat",
     "modeConcierge": "Concierge",
     "modeChatReplying": "A chat is replying",
-    "modeConciergeUnread": "Unread Concierge messages",
+    "modeConciergeUnread": "Unread Concierge messages or a task waiting for you",
     "topicChatActions": "Actions for {{name}}",
     "topicChatUnread_one": "{{name}}, {{label}} unread message",
     "topicChatUnread_other": "{{name}}, {{label}} unread messages",
