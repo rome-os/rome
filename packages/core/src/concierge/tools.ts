@@ -32,6 +32,13 @@ import {
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
 import { CONCLUSION_MAX_CHARS, conclusionOf, withoutMarkers } from "./conclusion.js";
 import { automatedSource } from "../webchat/automated-source.js";
+import { ownerOf } from "../webchat/owner.js";
+import {
+  parseTaskSchedule,
+  SCHEDULE_REPORTS,
+  SCHEDULE_WEEKDAYS,
+  type TaskScheduleView,
+} from "./task-schedule.js";
 
 const log = createLogger("concierge-tools");
 const runTool = romeToolRunner(log);
@@ -99,7 +106,17 @@ function statusOf(
 }
 
 /** A row as the Concierge reads it: compact, with no empty fields. Rome derives its status. */
-function compactTask({ row }: ConciergeTaskWithChat, status: TaskStatusView | undefined) {
+/**
+ * A row as `task_list` answers it: its id, title, status, task chat and
+ * schedule, and with `details` also what the Concierge wrote on it and its
+ * schedule's brief.
+ */
+function compactTask(
+  { row }: ConciergeTaskWithChat,
+  status: TaskStatusView | undefined,
+  details: boolean,
+  schedule?: TaskScheduleView | null,
+) {
   return {
     id: row.id,
     title: row.title,
@@ -108,12 +125,56 @@ function compactTask({ row }: ConciergeTaskWithChat, status: TaskStatusView | un
     ...(finiteOrNull(status?.laterAt ?? null) !== null
       ? { laterAt: new Date(status?.laterAt as number).toISOString() }
       : {}),
-    ...(row.summary ? { summary: row.summary } : {}),
-    ...(row.note ? { note: row.note } : {}),
     ...(row.sessionId ? { chatId: row.sessionId } : {}),
-    updatedAt: row.updatedAt.toISOString(),
+    ...(schedule
+      ? {
+          schedule: {
+            at: schedule.at,
+            ...(schedule.days ? { days: schedule.days } : {}),
+            report: schedule.report,
+            ...(details ? { brief: schedule.brief } : {}),
+            ...(schedule.nextRunAt
+              ? { nextRunAt: new Date(schedule.nextRunAt).toISOString() }
+              : {}),
+          },
+        }
+      : {}),
+    ...(details
+      ? {
+          ...(row.summary ? { summary: row.summary } : {}),
+          ...(row.note ? { note: row.note } : {}),
+          updatedAt: row.updatedAt.toISOString(),
+        }
+      : {}),
   };
 }
+
+/** The `schedule` parameter of chat_start and task_upsert. */
+const SCHEDULE_PARAMETER = {
+  type: ["object", "null"],
+  description:
+    "Run this task again and again: at each time, Rome sends `brief` into the task's own task chat, without a turn of yours, and the result comes back to you as any task's does. Between runs the task is later. On task_upsert, null removes the schedule.",
+  required: ["at"],
+  properties: {
+    at: { type: "string", description: 'Local time in the guardian\'s zone, "HH:MM".' },
+    days: {
+      type: "array",
+      items: { type: "string", enum: [...SCHEDULE_WEEKDAYS] },
+      description: "The weekdays it runs on. Leave out for every day.",
+    },
+    report: {
+      type: "string",
+      enum: [...SCHEDULE_REPORTS],
+      description:
+        "every_run: each run's result is reported to you. when_it_matters: a run that finishes with nothing to ask goes to the next digest as <ran_on_schedule>; a question, an approval or a failure still comes to you.",
+    },
+    brief: {
+      type: "string",
+      description:
+        "What each run asks the task chat, standing on its own. chat_start uses its own brief when you leave it out; task_upsert keeps the one the schedule has.",
+    },
+  },
+} as const;
 
 function refusal(result: Exclude<SendResult, { ok: true }>): string {
   if ("error" in result) return result.error;
@@ -917,6 +978,11 @@ export async function buildConciergeTools(
                     "Stop the task: its task chat's running work stops, and it ends stopped. Only when the guardian calls it off.",
                 },
                 archived: { type: "boolean", description: "Archive the row, or bring it back." },
+                schedule: {
+                  ...SCHEDULE_PARAMETER,
+                  description:
+                    "Add, change or remove (null) the task's repeating schedule. Only a task with a task chat, that is not stopped.",
+                },
                 messageId: {
                   type: "string",
                   description:
@@ -935,6 +1001,7 @@ export async function buildConciergeTools(
           }
           const writes: ConciergeTaskWrite[] = [];
           const stops: string[] = [];
+          const schedules: Array<{ taskId: string; raw: unknown }> = [];
           for (const [index, raw] of args.tasks.entries()) {
             if (!raw || typeof raw !== "object")
               throw new Error(`tasks[${index}] must be an object`);
@@ -944,9 +1011,54 @@ export async function buildConciergeTools(
             );
             writes.push(write);
             if (stop && write.id) stops.push(write.id);
+            const scheduleRaw = (raw as Record<string, unknown>).schedule;
+            if (scheduleRaw !== undefined) {
+              if (!write.id) {
+                throw new Error(
+                  `tasks[${index}].schedule needs the id of a task with a task chat. Start a scheduled task with chat_start and schedule.`,
+                );
+              }
+              if (stop) throw new Error(`tasks[${index}] cannot both stop and schedule the task`);
+              schedules.push({ taskId: write.id, raw: scheduleRaw });
+            }
           }
+          // Checked before anything is written, so a refusal changes nothing.
+          const scheduleWrites = await Promise.all(
+            schedules.map(async ({ taskId, raw }) => {
+              const row = await tasks.repo.get(taskId);
+              if (!row?.sessionId) {
+                throw new Error(
+                  `Task ${taskId} has no task chat to run in. Start it with chat_start and schedule.`,
+                );
+              }
+              if (row.stoppedAt) {
+                throw new Error(
+                  `Task ${taskId} is stopped. Take it up again with chat_send first.`,
+                );
+              }
+              if (!service.deps.schedules) throw new Error("Rome cannot schedule tasks here");
+              const kept = raw === null ? null : await service.deps.schedules.of(taskId);
+              const schedule = parseTaskSchedule(raw, kept?.brief);
+              // A changed schedule keeps the skill its runs were started with.
+              if (schedule && kept?.skill) schedule.skill = kept.skill;
+              return { row, schedule };
+            }),
+          );
           const rows = await tasks.repo.upsertMany(writes);
           for (const taskId of stops) await stopTask(taskId);
+          for (const { row, schedule } of scheduleWrites) {
+            if (schedule === null) await service.deps.schedules?.remove(row.id);
+            else {
+              await service.deps.schedules?.set(
+                {
+                  id: row.id,
+                  title: rows.find((written) => written.id === row.id)?.title ?? row.title,
+                  owner: ownerOf(row),
+                },
+                schedule,
+              );
+            }
+          }
           // Archiving a task that is still open stops it, so nothing runs
           // hidden; an archived task has nothing left to check on.
           for (const write of writes) {
@@ -985,19 +1097,30 @@ export async function buildConciergeTools(
     {
       name: "task_list",
       description:
-        "List your task list with each task's status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Ended rows only with includeDone. Check it before you start a task, so you do not start one twice.",
+        "List your task list: each task's id, title, task chat and status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Ended rows only with includeDone. Check it before you start a task, so you do not start one twice.",
       inputSchema: {
         type: "object",
         properties: {
           includeDone: { type: "boolean", description: "Also list ended rows." },
+          details: {
+            type: "boolean",
+            description:
+              "Also answer each row's summary, the note you wrote for your later self, and when it last changed.",
+          },
         },
       },
       handler: (input) =>
-        runTool("task_list", input, async (args) => ({
-          tasks: (await ownRows(args.includeDone === true)).map((task) =>
-            compactTask(task, task.status),
-          ),
-        })),
+        runTool("task_list", input, async (args) => {
+          const rows = await ownRows(args.includeDone === true);
+          const schedules = await Promise.all(
+            rows.map((task) => service.deps.schedules?.of(task.row.id) ?? null),
+          );
+          return {
+            tasks: rows.map((task, index) =>
+              compactTask(task, task.status, args.details === true, schedules[index]),
+            ),
+          };
+        }),
     },
     {
       name: "chat_start",
@@ -1042,6 +1165,7 @@ export async function buildConciergeTools(
             description:
               "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on, or the task is for one from an earlier turn: the task's results join that message's chat thread and it shows the task working. Without it, with several, nothing is marked.",
           },
+          schedule: SCHEDULE_PARAMETER,
           card: {
             type: "boolean",
             description:
@@ -1064,6 +1188,15 @@ export async function buildConciergeTools(
           }
           const taskId = optionalString(args, "taskId");
           const messageId = optionalString(args, "messageId");
+          // A scheduled task runs first at its time, not now.
+          const schedule =
+            args.schedule === undefined || args.schedule === null
+              ? null
+              : parseTaskSchedule(args.schedule, brief);
+          // Each run sends the brief with the skill the first send would have.
+          if (schedule && skill) schedule.skill = skill.name;
+          if (schedule && !service.deps.schedules)
+            throw new Error("Rome cannot schedule tasks here");
           if (taskId) {
             const planned = await requireTaskRow(taskId);
             await requireRowHere(taskId, "Start a task here without taskId instead.");
@@ -1135,7 +1268,16 @@ export async function buildConciergeTools(
                   },
             ]);
             const started = task.id;
-            await sendMarked(started, start?.answered, () => sendInput(chatId, brief, skill?.name));
+            if (schedule) {
+              await service.deps.schedules?.set(
+                { id: started, title, owner: await ownerHere() },
+                schedule,
+              );
+            } else {
+              await sendMarked(started, start?.answered, () =>
+                sendInput(chatId, brief, skill?.name),
+              );
+            }
             // A planned row that was stopped is taken up again by its start.
             if (taskId) await tasks.repo.resume(taskId);
           } catch (error) {
@@ -1170,6 +1312,16 @@ export async function buildConciergeTools(
             log.warn("task chat title too long to name the chat", { chatId });
           }
           if (args.card === true) await showCard(chatId, title, "task");
+          if (schedule) {
+            const view = await service.deps.schedules?.of(task.id);
+            return {
+              chatId,
+              taskId: task.id,
+              scheduled: view?.nextRunAt
+                ? `First run ${new Date(view.nextRunAt).toISOString()}. Nothing runs before then.`
+                : "Scheduled.",
+            };
+          }
           return { chatId, taskId: task.id };
         }),
     },
@@ -1284,26 +1436,36 @@ export async function buildConciergeTools(
     {
       name: "chat_list",
       description:
-        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), newest first, each with the Concierge chat it came from and its status. chat_read reads any of them.",
+        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), newest first, each with the id of the Concierge chat it came from and its status. Only the task chats of tasks that have not ended, unless you pass includeEnded or a status. chat_read reads any of them.",
       inputSchema: {
         type: "object",
-        properties: { status: { type: "string", enum: [...TASK_STATUSES] } },
+        properties: {
+          status: { type: "string", enum: [...TASK_STATUSES] },
+          includeEnded: {
+            type: "boolean",
+            description:
+              "Also list the task chats of ended tasks, such as one to send a follow-up into.",
+          },
+        },
       },
       handler: (input) =>
         runTool("chat_list", input, async (args) => {
           const wanted = TASK_STATUSES.find((status) => status === args.status);
+          const everyTask = wanted !== undefined || args.includeEnded === true;
           const { chats } = service.dashboard;
           const { chatId: here } = currentTurn();
           const owner = await ownerHere();
           const all = (await webchatRepo.listSessions("all")).filter(
             (chat) => privateOwnerOf(chat) === owner,
           );
+          const rows = (await ownRows(true)).filter(({ row }) => row.sessionId);
           // The Concierge chat each task chat came from, by its task row.
           const cameFrom = new Map(
-            (await ownRows(true)).flatMap(({ row, conciergeChat }) =>
-              row.sessionId
-                ? [[row.sessionId, { chatId: conciergeChat.id, title: conciergeChat.name }]]
-                : [],
+            rows.map(({ row, conciergeChat }) => [row.sessionId as string, conciergeChat.id]),
+          );
+          const ended = new Set(
+            rows.flatMap(({ row, status }) =>
+              status?.status === "ended" ? [row.sessionId as string] : [],
             ),
           );
           const taskChats = all
@@ -1315,7 +1477,8 @@ export async function buildConciergeTools(
               ...(cameFrom.has(chat.id) ? { from: cameFrom.get(chat.id) } : {}),
               status: statusOf(chats.isRunning(chat.id), chat),
             }))
-            .filter((chat) => !wanted || chat.status === wanted);
+            .filter((chat) => !wanted || chat.status === wanted)
+            .filter((chat) => everyTask || chat.status === "running" || !ended.has(chat.chatId));
           const conciergeChats = wanted
             ? []
             : (await service.listChats(owner))

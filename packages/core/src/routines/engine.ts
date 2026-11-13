@@ -127,15 +127,20 @@ export class RoutineEngine {
       });
       return;
     }
-    await provider.activate(routine, async (payload) => {
-      // A trigger fire ignores the dispatch outcome (it's surfaced via the run
-      // record); only the manual runNow() path reads the return value.
-      try {
-        await this.dispatch(routine, payload);
-      } finally {
-        this.changed(routine.id);
-      }
-    });
+    await provider.activate(
+      routine,
+      async (payload) => {
+        // A trigger fire ignores the dispatch outcome (it's surfaced via the run
+        // record); only the manual runNow() path reads the return value.
+        try {
+          await this.dispatch(routine, payload);
+        } finally {
+          this.changed(routine.id);
+        }
+      },
+      // A schedule stores its next run after the fire: told again then.
+      () => this.changed(routine.id),
+    );
     this.changed(routine.id);
   }
 

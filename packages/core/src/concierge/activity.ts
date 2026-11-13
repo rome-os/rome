@@ -103,6 +103,8 @@ export class ConciergeActivityTracker {
   /** The Concierge chat each task row was last read in, so a move refreshes both chats. */
   private chatOfTask = new Map<string, string>();
   private subscribers = new Set<OwnerEmit>();
+  /** The chats whose session is being renewed, with how many renewals of each run. */
+  private tidyingChats = new Map<string, number>();
   private stopped = false;
   private recheck: ReturnType<typeof setInterval>;
 
@@ -137,6 +139,7 @@ export class ConciergeActivityTracker {
     const waits = (id: string) => began(since.get(id));
     const running = this.sources.isBusy(chatId);
     return conciergeActivity({
+      tidying: this.tidyingChats.has(chatId),
       awaitingGuardian: waits(chatId),
       turn: { running, tool: running ? this.sources.openTool(chatId) : null },
       reportPending: rows.some((row) => pending.has(row.id)),
@@ -178,6 +181,23 @@ export class ConciergeActivityTracker {
       again: false,
     });
     return shown;
+  }
+
+  /**
+   * Runs `work` while `chatId` shows it is tidying up its context: its session
+   * is being renewed, and the handoff for the new one written.
+   */
+  async tidying<T>(chatId: string, work: () => Promise<T>): Promise<T> {
+    this.tidyingChats.set(chatId, (this.tidyingChats.get(chatId) ?? 0) + 1);
+    void this.refresh(chatId);
+    try {
+      return await work();
+    } finally {
+      const left = (this.tidyingChats.get(chatId) ?? 1) - 1;
+      if (left > 0) this.tidyingChats.set(chatId, left);
+      else this.tidyingChats.delete(chatId);
+      void this.refresh(chatId);
+    }
   }
 
   /**
@@ -373,6 +393,7 @@ export class ConciergeActivityTracker {
     for (const state of this.chats.values()) this.clearTimer(state);
     this.chats.clear();
     this.chatOfTask.clear();
+    this.tidyingChats.clear();
     this.subscribers.clear();
   }
 }

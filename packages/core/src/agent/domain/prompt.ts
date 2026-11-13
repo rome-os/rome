@@ -181,6 +181,8 @@ export function buildContinuationBlock(input: {
   previousModel?: string;
   /** The agent may call `system:fetch_channel_history`. */
   canReadHistory: boolean;
+  /** What a renewal's handoff adds, from `handoffSections`, one string per line. */
+  handoff?: readonly string[];
 }): string {
   const open = input.previousModel
     ? `<continuation previous_model="${xmlAttr(input.previousModel)}">`
@@ -193,6 +195,7 @@ export function buildContinuationBlock(input: {
       `When the conversation needs them, read them with \`${FETCH_CHANNEL_HISTORY_ACTION}\`, passing this thread's channel and thread id. To page back, pass limit, then the nextCursor it returns as cursor.`,
     );
   }
+  if (input.handoff) lines.push(...input.handoff);
   return `${open}\n${lines.join("\n")}\n</continuation>`;
 }
 
@@ -215,4 +218,48 @@ export function buildDeviceFolderBlock(
     `Run programs there with \`rome-node device run ${xmlEscape(folder.deviceId)} exec\` and cwd set to that folder.`,
     "</device_folder>",
   ].join("\n");
+}
+
+/** The header blocks an input opens with, by name, as {@link withoutRepeatedHeaders} last kept them. */
+export type SentHeaders = ReadonlyMap<string, string>;
+
+/**
+ * `prompt` without the header blocks it opens with that equal the ones the
+ * thread already read: a block named in `names` that starts the prompt,
+ * either one self-closing tag on its own line (`<concierge_chat … />`) or an
+ * element to its closing tag (`<workspace_context>…</workspace_context>`).
+ * Only the run of such blocks at the very start counts. Returns the prompt and
+ * the headers the thread will have read once it reads it.
+ */
+export function withoutRepeatedHeaders(
+  prompt: string,
+  names: readonly string[],
+  sent: SentHeaders,
+): { prompt: string; headers: Map<string, string> } {
+  const headers = new Map(sent);
+  const kept: string[] = [];
+  let rest = prompt;
+  for (;;) {
+    const trimmed = rest.replace(/^\s+/, "");
+    const name = names.find((candidate) => trimmed.startsWith(`<${candidate}`));
+    const after = name ? trimmed.charAt(name.length + 1) : "";
+    if (!name || !(after === " " || after === ">" || after === "/")) break;
+    const lineEnd = trimmed.indexOf("\n");
+    const firstLine = lineEnd === -1 ? trimmed : trimmed.slice(0, lineEnd);
+    let end: number;
+    if (firstLine.trimEnd().endsWith("/>")) {
+      end = firstLine.length;
+    } else {
+      const close = trimmed.indexOf(`</${name}>`);
+      if (close === -1) break;
+      end = close + name.length + 3;
+    }
+    const block = trimmed.slice(0, end);
+    if (sent.get(name) !== block) kept.push(block);
+    headers.set(name, block);
+    rest = trimmed.slice(end);
+  }
+  if (rest === prompt) return { prompt, headers };
+  const body = rest.replace(/^\s+/, "");
+  return { prompt: kept.length > 0 ? `${kept.join("\n")}\n\n${body}` : body, headers };
 }

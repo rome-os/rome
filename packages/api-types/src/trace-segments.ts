@@ -213,6 +213,16 @@ export interface TraceSystemInputEvent extends TraceEventBase {
   type: "system_input";
   label: string;
   content: string;
+  /** Set when the input came from a routine, an app or another agent sent
+   *  into a Concierge chat. The chat shows a faint line naming it. */
+  source?: SystemInputSource;
+}
+
+/** Who sent the input a system turn ran on, when something sent it into a chat. */
+export interface SystemInputSource {
+  type: "routine" | "app" | "agent" | "automation";
+  /** The routine's, app's or agent's name, when it has one. */
+  name: string | null;
 }
 
 export interface TracePlanUpdateEvent extends TraceEventBase {
@@ -301,6 +311,9 @@ export interface TraceSummary {
   /** Set when the turn is the first of a session that replaced the chat's
    *  earlier one, so the chat can show where its session changed. */
   sessionRenewal?: TraceSessionRenewal;
+  /** Set when the turn ran on an input a routine, an app or another agent sent
+   *  into the chat, so the chat can show who sent it in its place. */
+  automatedInput?: SystemInputSource;
 }
 
 export interface TraceSnapshot {
