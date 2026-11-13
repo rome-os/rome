@@ -40,20 +40,19 @@ type Translate = ReturnType<typeof useTranslation<"chat">>["t"];
 const stateLine = (...parts: Array<string | null | undefined | false>) =>
   parts.filter(Boolean).join(" · ");
 
-/** A row's one button: always shown, or only on hover and focus (always on a touch screen). */
+/** A row's button, shown on hover and focus, and always on a touch screen. */
 interface RowButton {
   label: string;
   text: string;
   onPress: () => void;
-  shown: "always" | "hover";
-  pending: boolean;
 }
 
 /**
  * A row of the task list, the same for every kind: a mark, the title with a
  * small link to its task chat when it has one, and one line of state and time
- * under it. The right side holds a button only, never information. The row
- * itself does nothing when pressed.
+ * under it. The right side holds buttons only, never information, and they
+ * show on hover; a pending row keeps them shown and disabled. The row itself
+ * does nothing when pressed.
  */
 function Row({
   glyph,
@@ -62,7 +61,8 @@ function Row({
   state,
   tone,
   dimmed,
-  button,
+  buttons = [],
+  pending = false,
   onNavigate,
 }: {
   glyph: ReactNode;
@@ -71,7 +71,9 @@ function Row({
   state: string;
   tone?: "warning" | "destructive";
   dimmed?: boolean;
-  button?: RowButton | null;
+  buttons?: RowButton[];
+  /** A press is under way: the buttons stay shown and take no other. */
+  pending?: boolean;
   onNavigate?: () => void;
 }) {
   return (
@@ -117,22 +119,27 @@ function Row({
           </div>
         ) : null}
       </div>
-      {button ? (
-        <Button
-          variant={button.shown === "always" ? "outline" : "ghost"}
-          size="xs"
-          aria-label={button.label}
-          disabled={button.pending}
-          onClick={button.onPress}
+      {buttons.length > 0 ? (
+        <span
           className={cn(
-            "shrink-0",
-            button.shown === "hover" &&
-              !button.pending &&
-              "touch-show opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100",
+            "flex shrink-0 items-center gap-1",
+            !pending &&
+              "touch-show opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100",
           )}
         >
-          {button.text}
-        </Button>
+          {buttons.map((button) => (
+            <Button
+              key={button.text}
+              variant="ghost"
+              size="xs"
+              aria-label={button.label}
+              disabled={pending}
+              onClick={button.onPress}
+            >
+              {button.text}
+            </Button>
+          ))}
+        </span>
       ) : null}
     </li>
   );
@@ -193,24 +200,22 @@ function TaskRow({
   const { t, i18n } = useTranslation("chat");
   const { task } = item;
   const status = taskStatusOfDto(task);
-  const button: RowButton | null =
-    status.status === "needs_you"
-      ? {
-          label: t("concierge.taskList.actions.respondTo", { title: task.title }),
-          text: t("concierge.taskList.actions.respond"),
-          onPress: () => onPress("respond"),
-          shown: "always",
-          pending: pending !== undefined,
-        }
-      : status.status === "active"
-        ? {
-            label: t("concierge.taskList.actions.stopTask", { title: task.title }),
-            text: t("concierge.taskList.actions.stop"),
-            onPress: () => onPress("stop"),
-            shown: "hover",
-            pending: pending !== undefined,
-          }
-        : null;
+  // Respond only where a card waits on its owner; Stop on every task that has not ended.
+  const buttons: RowButton[] = [];
+  if (status.status === "needs_you") {
+    buttons.push({
+      label: t("concierge.taskList.actions.respondTo", { title: task.title }),
+      text: t("concierge.taskList.actions.respond"),
+      onPress: () => onPress("respond"),
+    });
+  }
+  if (status.status !== "ended") {
+    buttons.push({
+      label: t("concierge.taskList.actions.stopTask", { title: task.title }),
+      text: t("concierge.taskList.actions.stop"),
+      onPress: () => onPress("stop"),
+    });
+  }
   return (
     <Row
       glyph={<TaskGlyph status={status} />}
@@ -226,7 +231,8 @@ function TaskRow({
       state={taskState(item, t, now, i18n.language, pending)}
       tone={status.status === "needs_you" && !pending ? "warning" : undefined}
       dimmed={status.status === "ended"}
-      button={button}
+      buttons={buttons}
+      pending={pending !== undefined}
       onNavigate={onNavigate}
     />
   );
@@ -327,12 +333,12 @@ function LoadingRows() {
 }
 
 /**
- * The status a pressed task's row waits for before it lets go of its pending
- * look: a stop is done once the task ended; a respond when the jump lands.
+ * Whether a pressed task's row can let go of its pending look: a stop once
+ * the task reads as ended; a respond only when its jump lands.
  */
 function settled(item: TaskListTaskItem | undefined, action: "stop" | "respond"): boolean {
   if (!item) return true;
-  return action === "stop" && taskStatusOfDto(item.task).status !== "active";
+  return action === "stop" && taskStatusOfDto(item.task).status === "ended";
 }
 
 /**

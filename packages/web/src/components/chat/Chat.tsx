@@ -2357,17 +2357,21 @@ export function Chat({
   // The name the header shows for the Concierge, which a share of this chat
   // labels its turns by too.
   const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
-  const conciergeStatus = concierge ? (
-    <ConciergeHeaderStatus
-      // Every Concierge chat, main or topic, goes by the Concierge's name
-      // here; a topic chat's own name is in the chat list.
-      name={conciergeDisplayName}
-      activity={conciergeActivity}
-      // A chat with no messages yet draws its own large mascot.
-      badge={!conciergeEmpty}
-      onOpenTasks={taskList.open}
-    />
-  ) : null;
+  // A blank topic chat, before its first message, shows nothing in the
+  // header: its empty state speaks for it, and it has no tasks yet.
+  const blankTopicChat = conciergeEmpty && !isMainChat;
+  const conciergeStatus =
+    concierge && !blankTopicChat ? (
+      <ConciergeHeaderStatus
+        // Every Concierge chat, main or topic, goes by the Concierge's name
+        // here; a topic chat's own name is in the chat list.
+        name={conciergeDisplayName}
+        activity={conciergeActivity}
+        // A chat with no messages yet draws its own large mascot.
+        badge={!conciergeEmpty}
+        onOpenTasks={taskList.open}
+      />
+    ) : null;
 
   const navbarTitle = (
     <div className="flex min-w-0 flex-1 items-center gap-2">

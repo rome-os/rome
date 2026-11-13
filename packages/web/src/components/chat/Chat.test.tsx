@@ -2449,13 +2449,13 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(seen.outlet).toBe(true));
   });
 
-  it("leaves the mascot's badge out while the chat has no messages, which draws its own", async () => {
+  it("leaves the mascot's badge out while the main chat has no messages, which draws its own", async () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    renderChat(<Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />);
     await screen.findByRole("region", { name: "concierge.empty.title" });
     const header = document.querySelector<HTMLElement>("[data-concierge-header]")!;
     expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
@@ -2464,6 +2464,40 @@ describe("Chat Concierge empty state", () => {
     expect(name.className).toContain("row-start-1");
     expect(within(name).getByText("Rome")).toBeTruthy();
     expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
+  });
+
+  it("shows neither the mascot nor the name in a blank topic chat, and both once it has a message", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(
+      <Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    const header = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-concierge-header]");
+      if (!found) throw new Error("no header");
+      return found;
+    });
+    await waitFor(() => expect(rs.mocked(listSessionMessages)).toHaveBeenCalled());
+    expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
+    expect(header.querySelector("[data-concierge-header-name]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "concierge.taskList.open" })).toBeNull();
+    view.unmount();
+
+    rs.mocked(listSessionMessages).mockResolvedValueOnce([
+      {
+        id: "m-1",
+        sessionId: "topic-1",
+        role: "user" as const,
+        content: "hello",
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ]);
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await screen.findByTestId("user-row");
+    expect(await screen.findByRole("button", { name: "concierge.taskList.open" })).toBeTruthy();
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
@@ -2633,6 +2667,16 @@ describe("Chat Concierge empty state", () => {
       pinnedAgentMention: null,
       archivedAt: null,
     });
+    // A topic chat with a message: a blank one shows no header.
+    rs.mocked(listSessionMessages).mockResolvedValueOnce([
+      {
+        id: "m-1",
+        sessionId: "topic-1",
+        role: "user" as const,
+        content: "hello",
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     // The header settles once the chat loads; press the button it settles on.
     await screen.findByRole("button", { name: "concierge.taskList.open" });

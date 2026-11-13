@@ -74,7 +74,7 @@ beforeEach(() => {
       taskItem(task("Review PRs", "active")),
       taskItem(task("Morning brief", "later", { chat: null }), {
         schedule: { at: "08:00", days: null },
-        check: { id: "run-1", at: NOW + HOUR, recurring: true },
+        check: { id: "run-1", at: NOW + HOUR + 30_000, recurring: true },
       }),
       taskItem(task("Old work", "ended")),
     ],
@@ -153,9 +153,21 @@ describe("TaskList", () => {
     expect(within(rowOf("Morning brief")).getByText(/^Daily at .* · in 1 hr$/)).toBeTruthy();
     expect(within(rowOf("Morning brief")).queryByLabelText("Repeats")).toBeNull();
     expect(within(rowOf("Daily summary")).getByText(/Paused · Last run failed/)).toBeTruthy();
-    // Only Respond and Stop are buttons; later and running-on-its-own rows have none.
-    expect(within(rowOf("Morning brief")).queryByRole("button")).toBeNull();
-    expect(within(rowOf("Daily summary")).queryByRole("button")).toBeNull();
+    // Respond and Stop where a card waits; Stop on any task not ended; nothing else.
+    const names = (title: string) =>
+      within(rowOf(title))
+        .queryAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"));
+    expect(names("Pick a hotel")).toEqual(["Respond to Pick a hotel", "Stop Pick a hotel"]);
+    expect(names("Review PRs")).toEqual(["Stop Review PRs"]);
+    expect(names("Morning brief")).toEqual(["Stop Morning brief"]);
+    expect(names("Daily summary")).toEqual([]);
+    // They show on hover and focus only.
+    const buttons = within(rowOf("Pick a hotel")).getByRole("button", {
+      name: "Respond to Pick a hotel",
+    }).parentElement as HTMLElement;
+    expect(buttons.className).toContain("opacity-0");
+    expect(buttons.className).toContain("group-hover/row:opacity-100");
   });
 
   it("links to a task's chat beside its title only when it has one, and the row itself opens nothing", async () => {
@@ -192,10 +204,16 @@ describe("TaskList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Respond to Pick a hotel" }));
     expect(jumps).toEqual(["card-message"]);
     expect(within(rowOf("Pick a hotel")).getByText("Opening…")).toBeTruthy();
+    // Pending: both buttons stay shown and take no other press.
+    const row = rowOf("Pick a hotel");
     expect(
-      (screen.getByRole("button", { name: "Respond to Pick a hotel" }) as HTMLButtonElement)
-        .disabled,
+      within(row)
+        .getAllByRole("button")
+        .every((b) => (b as HTMLButtonElement).disabled),
     ).toBe(true);
+    expect(
+      within(row).getByRole("button", { name: "Stop Pick a hotel" }).parentElement?.className,
+    ).not.toContain("opacity-0");
     await act(async () => land(true));
     expect(
       within(rowOf("Pick a hotel")).getByText("Waiting for your approval · 1 hr ago"),
@@ -225,6 +243,16 @@ describe("TaskList", () => {
       data: { chatId: "concierge" },
     });
     await waitFor(() => expect(screen.queryByText("Stopping…")).toBeNull());
+  });
+
+  it("stops a scheduled task between runs, pending until it ends", async () => {
+    renderList();
+    await screen.findByRole("region", { name: "Later" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop Morning brief" }));
+    expect(within(rowOf("Morning brief")).getByText("Stopping…")).toBeTruthy();
+    expect(
+      requests.filter((request) => request.method === "POST").map((request) => request.url),
+    ).toEqual(["/api/chats/concierge/tasks/Morning%20brief/stop"]);
   });
 
   it("shows the newest ended rows first, a page at a time", async () => {
