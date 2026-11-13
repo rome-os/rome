@@ -108,7 +108,10 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
   app.get("/chats/:chatId/tasks", async (c) => {
     const at = await gate(c);
     if (at instanceof Response) return at;
-    return c.json((await at.list.read(at.chatId, at.owner)) satisfies TaskListResponse);
+    const endedBefore = c.req.query("endedBefore") || undefined;
+    return c.json(
+      (await at.list.read(at.chatId, at.owner, { endedBefore })) satisfies TaskListResponse,
+    );
   });
 
   // The same `tasks_changed` events as the `chat.tasks:<chatId>` topic of the

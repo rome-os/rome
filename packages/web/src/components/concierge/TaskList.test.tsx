@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { type TaskListParts, groupTaskList } from "@rome/api-types/task-list";
+import { type TaskListParts, groupTaskList, pageTaskList } from "@rome/api-types/task-list";
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import { chatTasksTopicName } from "@rome/api-types/live-events";
 import i18n from "@/i18n";
@@ -98,8 +98,16 @@ beforeEach(() => {
       const method = init?.method ?? "GET";
       requests.push({ method, url: String(input) });
       if (method === "GET" && readGate) await readGate;
+      const endedBefore = new URL(String(input), "http://rome.test").searchParams.get(
+        "endedBefore",
+      );
       const body =
-        method === "GET" ? { chatId: "concierge", groups: groupTaskList(parts) } : { ok: true };
+        method === "GET"
+          ? {
+              chatId: "concierge",
+              groups: pageTaskList(groupTaskList(parts), endedBefore ?? undefined),
+            }
+          : { ok: true };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -313,19 +321,23 @@ describe("TaskList", () => {
     ).toEqual(["/api/chats/concierge/tasks/Morning%20brief/stop"]);
   });
 
-  it("shows the newest ended rows first, a page at a time", async () => {
+  it("reads the newest ended rows first, and older ones a page at a time from the server", async () => {
     parts.tasks = Array.from({ length: ENDED_PAGE + 5 }, (_, index) =>
       taskItem(task(`Ended ${index}`, "ended", { completedAt: NOW - index * 1000 })),
     );
     renderList();
     const ended = await screen.findByRole("region", { name: "Ended" });
-    fireEvent.click(within(ended).getByRole("button", { name: /Ended/ }));
+    // The heading counts every ended row, though one page was read.
+    fireEvent.click(within(ended).getByRole("button", { name: `Ended ${ENDED_PAGE + 5}` }));
     expect(within(ended).getAllByRole("listitem")).toHaveLength(ENDED_PAGE + 1);
     expect(within(ended).getByText("Ended 0")).toBeTruthy();
     expect(within(ended).queryByText(`Ended ${ENDED_PAGE}`)).toBeNull();
     fireEvent.click(within(ended).getByRole("button", { name: "Show 5 more" }));
-    expect(within(ended).getByText(`Ended ${ENDED_PAGE + 4}`)).toBeTruthy();
+    expect(await within(ended).findByText(`Ended ${ENDED_PAGE + 4}`)).toBeTruthy();
     expect(within(ended).queryByRole("button", { name: /Show .* more/ })).toBeNull();
+    expect(requests.map((request) => request.url)).toContain(
+      `/api/chats/concierge/tasks?endedBefore=${encodeURIComponent(`${NOW - (ENDED_PAGE - 1) * 1000}_Ended ${ENDED_PAGE - 1}`)}`,
+    );
   });
 
   it("says nothing runs here when the chat has none", async () => {

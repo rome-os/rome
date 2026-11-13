@@ -3,6 +3,7 @@ import {
   type TaskListParts,
   type TaskListResponse,
   groupTaskList,
+  pageTaskList,
 } from "@rome/api-types/task-list";
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import { legacyTaskState, taskStatus } from "@rome/api-types/concierge-task-status";
@@ -154,11 +155,14 @@ const notFound = (what: string) =>
   HttpResponse.json({ error: `No such ${what} in this chat` }, { status: 404 });
 
 export const taskListHandlers = [
-  http.get("/api/chats/:chatId/tasks", ({ params }) => {
+  http.get("/api/chats/:chatId/tasks", ({ params, request }) => {
     const chatId = String(params.chatId);
     return HttpResponse.json({
       chatId,
-      groups: groupTaskList(partsOf(chatId)),
+      groups: pageTaskList(
+        groupTaskList(partsOf(chatId)),
+        new URL(request.url).searchParams.get("endedBefore") ?? undefined,
+      ),
     } satisfies TaskListResponse);
   }),
   // Held open without events: the tab reads again after its own actions.

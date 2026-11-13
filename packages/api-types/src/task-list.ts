@@ -105,9 +105,17 @@ export type TaskListItem =
 export interface TaskListGroup {
   key: TaskListGroupKey;
   items: TaskListItem[];
+  /** Ended only: how many ended rows there are in all, of which `items` is one page. */
+  total?: number;
+  /** Ended only: the cursor of the next page (`?endedBefore=`), or null after the last. */
+  nextCursor?: string | null;
 }
 
-/** `GET /api/chats/:chatId/tasks`: the groups that have rows, in order. */
+/**
+ * `GET /api/chats/:chatId/tasks`: the groups that have rows, in order. Ended
+ * holds its newest {@link TASK_LIST_ENDED_PAGE} rows; `?endedBefore=<cursor>`
+ * answers the ended group alone, its next page from that cursor.
+ */
 export interface TaskListResponse {
   chatId: string;
   groups: TaskListGroup[];
@@ -172,9 +180,60 @@ const SORTERS: Record<TaskListGroupKey, (a: TaskListItem, b: TaskListItem) => nu
           : a.kind === "routine" && b.kind === "routine"
             ? byNullableAsc(a.nextRunAt, b.nextRunAt) || a.name.localeCompare(b.name)
             : 0,
-  // The latest to end first.
-  ended: (a, b) => (a.kind === "task" && b.kind === "task" ? endedAt(b.task) - endedAt(a.task) : 0),
+  // The latest to end first; one id before another when both ended at once.
+  ended: (a, b) =>
+    a.kind === "task" && b.kind === "task"
+      ? endedAt(b.task) - endedAt(a.task) || a.task.id.localeCompare(b.task.id)
+      : 0,
 };
+
+/** How many ended rows a read of the task list holds, and each "Show more" adds. */
+export const TASK_LIST_ENDED_PAGE = 20;
+
+const cursorOf = (item: TaskListItem): string =>
+  item.kind === "task" ? `${endedAt(item.task)}_${item.task.id}` : "";
+
+/** Whether ended row `item` comes after `cursor` in the ended group's order. */
+function afterCursor(item: TaskListItem, cursor: string): boolean {
+  if (item.kind !== "task") return false;
+  const split = cursor.indexOf("_");
+  const at = Number(cursor.slice(0, split));
+  const id = cursor.slice(split + 1);
+  const ended = endedAt(item.task);
+  return ended < at || (ended === at && item.task.id.localeCompare(id) > 0);
+}
+
+/**
+ * The groups as one read answers them: the ended group cut to one page, with
+ * its total and the next page's cursor. From `endedBefore` on, the ended
+ * group's page from that cursor alone.
+ */
+export function pageTaskList(groups: TaskListGroup[], endedBefore?: string): TaskListGroup[] {
+  const ended = groups.find((group) => group.key === "ended");
+  if (endedBefore !== undefined) {
+    if (!ended) return [];
+    const rest = ended.items.filter((item) => afterCursor(item, endedBefore));
+    const items = rest.slice(0, TASK_LIST_ENDED_PAGE);
+    return [
+      {
+        key: "ended",
+        items,
+        total: ended.items.length,
+        nextCursor: rest.length > items.length ? cursorOf(items.at(-1)!) : null,
+      },
+    ];
+  }
+  return groups.map((group) => {
+    if (group.key !== "ended") return group;
+    const items = group.items.slice(0, TASK_LIST_ENDED_PAGE);
+    return {
+      key: "ended",
+      items,
+      total: group.items.length,
+      nextCursor: group.items.length > items.length ? cursorOf(items.at(-1)!) : null,
+    };
+  });
+}
 
 /**
  * The rows in their groups, in order, with empty groups left out. A task is

@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import {
   TASK_LIST_CHANGED_EVENT,
+  TASK_LIST_ENDED_PAGE,
   type TaskListCheckItem,
   type TaskListFollowItem,
   type TaskListGroupKey,
@@ -42,7 +43,7 @@ const listUrl = (chatId: string) => `/api/chats/${encodeURIComponent(chatId)}/ta
 const changedSchema = z.object({ chatId: z.string() });
 
 /** How many ended rows show at first, and how many more each "Show more" adds. */
-export const ENDED_PAGE = 20;
+export const ENDED_PAGE = TASK_LIST_ENDED_PAGE;
 
 type Translate = ReturnType<typeof useTranslation<"chat">>["t"];
 
@@ -429,7 +430,9 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [endedOpen, setEndedOpen] = useState(false);
-  const [endedShown, setEndedShown] = useState(ENDED_PAGE);
+  // Older ended rows "Show more" read, past the first page, and the next page's cursor.
+  const [older, setOlder] = useState<{ items: TaskListItem[]; cursor: string | null } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [pending, setPending] = useState<ReadonlyMap<string, "stop" | "respond">>(new Map());
   const { data, isError } = useQuery({
     queryKey: chatTaskListKey(chatId),
@@ -514,6 +517,23 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
       </p>
     );
   }
+  const showMore = (cursor: string) => {
+    setLoadingMore(true);
+    fetchJson<TaskListResponse>(`${listUrl(chatId)}?endedBefore=${encodeURIComponent(cursor)}`, {
+      fallback: t("concierge.taskList.loadFailed"),
+    })
+      .then(
+        (page) => {
+          const ended = page.groups.find((group) => group.key === "ended");
+          setOlder((current) => ({
+            items: [...(current?.items ?? []), ...(ended?.items ?? [])],
+            cursor: ended?.nextCursor ?? null,
+          }));
+        },
+        (error: Error) => toast.error(error.message),
+      )
+      .finally(() => setLoadingMore(false));
+  };
   const row = (item: TaskListItem) => {
     switch (item.kind) {
       case "task":
@@ -542,8 +562,17 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
           const folds = group.key === "ended";
           const open = !folds || endedOpen;
           const heading = t(`concierge.taskList.groups.${group.key satisfies TaskListGroupKey}`);
-          const items = folds ? group.items.slice(0, endedShown) : group.items;
-          const more = group.items.length - items.length;
+          // The first page, then the older pages read since, each row once.
+          const firstPage = new Set(group.items.map(itemKey));
+          const items = folds
+            ? [
+                ...group.items,
+                ...(older?.items ?? []).filter((item) => !firstPage.has(itemKey(item))),
+              ]
+            : group.items;
+          const total = group.total ?? items.length;
+          const cursor = older ? older.cursor : (group.nextCursor ?? null);
+          const more = folds && cursor ? total - items.length : 0;
           return (
             <section key={group.key} aria-label={heading} data-task-list-group={group.key}>
               {folds ? (
@@ -557,8 +586,7 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
                     className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")}
                     aria-hidden
                   />
-                  {heading}{" "}
-                  <span className="tabular-nums text-subtle-foreground">{group.items.length}</span>
+                  {heading} <span className="tabular-nums text-subtle-foreground">{total}</span>
                 </button>
               ) : (
                 <h3 className="mb-2 px-3 text-aux font-medium text-muted-foreground">{heading}</h3>
@@ -570,7 +598,8 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
                     <li>
                       <button
                         type="button"
-                        onClick={() => setEndedShown((shown) => shown + ENDED_PAGE)}
+                        disabled={loadingMore}
+                        onClick={() => cursor && showMore(cursor)}
                         className="flex min-h-10 w-full items-center justify-center text-aux text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
                       >
                         {t("concierge.taskList.showMore", { count: Math.min(more, ENDED_PAGE) })}

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
-import type { TaskListFollowItem, TaskListResponse } from "@rome/api-types/task-list";
+import {
+  TASK_LIST_ENDED_PAGE,
+  type TaskListFollowItem,
+  type TaskListResponse,
+} from "@rome/api-types/task-list";
 import type { ConciergeService } from "../../concierge/service.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
@@ -181,6 +185,32 @@ describe("/chats/:chatId/tasks", () => {
       check: { id: "on-flights", at: IN_AN_HOUR, recurring: false },
       schedule: null,
     });
+  });
+
+  it("answers the newest ended rows and their count, and older ones from a cursor", async () => {
+    const made = await tasks.upsertMany(
+      Array.from({ length: TASK_LIST_ENDED_PAGE + 3 }, (_, index) => ({ title: `Old ${index}` })),
+    );
+    for (const task of made) await tasks.stop(task.id, "guardian");
+
+    const first = (await read("concierge")).groups.find((group) => group.key === "ended")!;
+    expect(first.items).toHaveLength(TASK_LIST_ENDED_PAGE);
+    expect(first.total).toBe(TASK_LIST_ENDED_PAGE + 3);
+    expect(first.nextCursor).toBeTruthy();
+
+    const res = await app().request(
+      `/chats/concierge/tasks?endedBefore=${encodeURIComponent(first.nextCursor!)}`,
+      guardian,
+    );
+    const next = ((await res.json()) as TaskListResponse).groups;
+    expect(next.map((group) => group.key)).toEqual(["ended"]);
+    expect(next[0]!.items).toHaveLength(3);
+    expect(next[0]!.nextCursor).toBeNull();
+    // Every ended row once, across the two pages.
+    const ids = [...first.items, ...next[0]!.items].map((item) =>
+      item.kind === "task" ? item.task.id : "",
+    );
+    expect(new Set(ids).size).toBe(TASK_LIST_ENDED_PAGE + 3);
   });
 
   it("shows a guardian and a visitor each only their own chat's work", async () => {

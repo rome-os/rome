@@ -13,6 +13,7 @@ import {
   type TaskListTaskItem,
   type TaskListTrigger,
   groupTaskList,
+  pageTaskList,
 } from "@rome/api-types/task-list";
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
@@ -49,9 +50,9 @@ const NOT_A_CHAT_ROUTINE = new Set([
 ]);
 
 export interface ChatTaskListDeps {
-  /** One owner's task rows, every open one and the ended ones of the last week. */
+  /** One chat's task rows of its owner, every open one and the ended ones of the last week. */
   tasks: {
-    listForPanel(owner: ConciergeOwner): Promise<ConciergeTaskDto[]>;
+    listForChatPanel(owner: ConciergeOwner, chatId: string): Promise<ConciergeTaskDto[]>;
     repo: {
       onChange(
         listener: (task: { owner: string; conciergeChat: { id: string } }) => void,
@@ -100,14 +101,17 @@ export class ChatTaskList {
   constructor(private readonly deps: ChatTaskListDeps) {}
 
   /** Everything that runs for Concierge chat `chatId` of owner `owner`, grouped. */
-  async read(chatId: string, owner: ConciergeOwner): Promise<TaskListResponse> {
-    const [tasks, checks, follows, routines] = await Promise.all([
-      this.deps.tasks.listForPanel(owner),
+  async read(
+    chatId: string,
+    owner: ConciergeOwner,
+    page: { endedBefore?: string } = {},
+  ): Promise<TaskListResponse> {
+    const [mine, checks, follows, routines] = await Promise.all([
+      this.deps.tasks.listForChatPanel(owner, chatId),
       this.deps.checks?.inChatForApi(chatId) ?? Promise.resolve([]),
       this.followsIn(chatId, owner),
       this.routinesIn(chatId),
     ]);
-    const mine = tasks.filter((task) => task.conciergeChat.id === chatId);
     const [schedules, cards] = await Promise.all([
       this.schedulesOf(mine.map((task) => task.id)),
       this.cardMessagesOf(chatId, mine),
@@ -129,7 +133,10 @@ export class ChatTaskList {
       .map((check) => ({ kind: "check", check: { ...check, taskTitle: null } }));
     return {
       chatId,
-      groups: groupTaskList({ tasks: taskItems, checks: checkItems, follows, routines }),
+      groups: pageTaskList(
+        groupTaskList({ tasks: taskItems, checks: checkItems, follows, routines }),
+        page.endedBefore,
+      ),
     };
   }
 
