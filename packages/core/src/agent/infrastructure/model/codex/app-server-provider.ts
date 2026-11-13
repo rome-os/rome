@@ -775,6 +775,10 @@ export class CodexAppServerProvider implements ModelProvider {
         }
         return;
       }
+      if (item.type === "contextCompaction") {
+        if (lifecycle === "completed") turnSink.push({ type: "model_context_compacted" });
+        return;
+      }
       const turnImageTraceCtx = activeTurn?.imageTraceCtx ?? imageTraceCtx;
       if (isAgentMessageItem(item)) {
         if (lifecycle !== "completed") return;

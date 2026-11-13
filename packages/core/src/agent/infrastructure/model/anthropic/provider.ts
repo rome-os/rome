@@ -737,6 +737,11 @@ export class AnthropicProvider implements ModelProvider {
             isAssistantMessage(message) ||
             isUserMessage(message);
           if (sdkTurnOwner === "sdk" && turnFrame && !romeReplay) continue;
+          if (message.type === "system" && message.subtype === "compact_boundary") {
+            // The SDK compacted the thread: what it read before may be gone.
+            yield { type: "model_context_compacted" };
+            continue;
+          }
           if (isPartialAssistantMessage(message)) {
             // Deltas of in-flight blocks. Each complete block still arrives
             // on its own assistant message, so this is purely additive for

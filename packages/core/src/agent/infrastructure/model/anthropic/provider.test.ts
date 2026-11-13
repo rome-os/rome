@@ -311,6 +311,27 @@ describe("AnthropicProvider", () => {
       ]);
     });
 
+    it("reports a compaction the SDK made partway through a turn", async () => {
+      scripted(async function* (sent) {
+        const prompt = await sent();
+        yield { ...prompt, isReplay: true };
+        yield {
+          type: "system",
+          subtype: "compact_boundary",
+          compact_metadata: { trigger: "auto", pre_tokens: 180_000 },
+        };
+        yield say("Done", prompt.uuid);
+        yield result("Done", [prompt.uuid], "human");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "go on", inputId: p });
+      const turn = await nextTurn(session.events[Symbol.asyncIterator]());
+      await session.close();
+
+      expect(turn.filter((m) => m.type === "model_context_compacted")).toHaveLength(1);
+      expect(turn.at(-1)).toMatchObject({ type: "result", content: "Done" });
+    });
+
     it("keeps a turn the SDK starts while idle out of Rome's next turn", async () => {
       scripted(async function* (sent) {
         const first = await sent();

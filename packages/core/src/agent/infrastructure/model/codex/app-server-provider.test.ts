@@ -593,6 +593,34 @@ describe("CodexAppServerProvider", () => {
     expect(closeMock).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a compaction of the thread partway through a turn", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thread-compact" } };
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        const at = { threadId: "thread-compact", turnId: "turn-compact" };
+        n("turn/started", { threadId: "thread-compact", turn: { id: "turn-compact" } });
+        n("item/started", { item: { type: "contextCompaction", id: "compact-1" }, ...at });
+        n("item/completed", { item: { type: "contextCompaction", id: "compact-1" }, ...at });
+        n("turn/completed", {
+          threadId: "thread-compact",
+          turn: { id: "turn-compact", status: "completed" },
+        });
+      }
+      return {};
+    });
+    const provider = new CodexAppServerProvider();
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "go on" });
+    const messages = await collected;
+
+    expect(messages.filter((message) => message.type === "model_context_compacted")).toHaveLength(
+      1,
+    );
+    await session.close();
+  });
+
   it("maps dynamic tool results into app-server responses and Rome tool traces", async () => {
     let dynamicResponse: unknown;
     requestMock.mockImplementation(async (method: string) => {

@@ -172,6 +172,7 @@ export type {
   ModelSession,
   ModelSessionEvent,
   ModelSessionParams,
+  ModelContextCompactedEvent,
   ModelTurnStartedEvent,
   ModelUserInput,
   ProviderId,

@@ -51,6 +51,7 @@ import {
 import { Session, type SessionKind } from "../domain/session.js";
 import {
   type ModelSessionEvent,
+  type ModelContextCompactedEvent,
   type ModelTurnStartedEvent,
   type ModelPosition,
   type ModelProvider,
@@ -1956,6 +1957,8 @@ interface TurnSink {
   carriesHandoff?: boolean;
   /** The headers the thread has read once this turn returns a result. */
   sentHeaders?: Map<string, string>;
+  /** The provider compacted the thread while the turn ran. */
+  contextCompacted?: boolean;
   /** Prompt that opened the turn; carried on the turn_start event. */
   userPrompt: string;
   /** Guards the one-turn_start-per-stream invariant across error paths. */
@@ -2052,7 +2055,9 @@ function toolResultSuspendsTurn(output: unknown): boolean {
  * Take the provider's facts off a model event. They stay in the run and never
  * reach the wire, the trace or app hooks.
  */
-function splitProviderFacts(event: Exclude<ModelSessionEvent, ModelTurnStartedEvent>): {
+function splitProviderFacts(
+  event: Exclude<ModelSessionEvent, ModelTurnStartedEvent | ModelContextCompactedEvent>,
+): {
   msg: AgentEvent;
   reasoningEffort?: string;
   position?: ModelPosition;
@@ -2221,7 +2226,7 @@ class AgentSessionImpl implements AgentSession {
   private readonly turnMutex = new Mutex();
   private readonly inputs = new AgentInputQueue(
     (input, options) => this.startTurn(input, options),
-    () => this.modelSession,
+    () => this.steering(),
     (error) =>
       this.log.warn("conversational input dispatch failed", {
         sessionId: this.sessionId,
@@ -2278,6 +2283,23 @@ class AgentSessionImpl implements AgentSession {
   }
 
   /** The header blocks the current thread has read, by name. */
+  /**
+   * The model session as steering reaches it. A steered input goes to the
+   * provider whole, outside the turn's headers, and may yet be put back for
+   * a later turn, so the record of what the thread read goes as it leaves.
+   */
+  private steering(): Pick<ModelSession, "steerUserInput"> {
+    const session = this.modelSession;
+    if (!session.steerUserInput) return {};
+    return {
+      steerUserInput: (input) => {
+        this.sentHeaders = new Map();
+        if (this.currentSink) this.currentSink.sentHeaders = new Map();
+        return session.steerUserInput!(input);
+      },
+    };
+  }
+
   get readHeaders(): SentHeaders {
     return this.sentHeaders;
   }
@@ -2502,6 +2524,10 @@ class AgentSessionImpl implements AgentSession {
           sink.modelTurnId = event.modelTurnId;
           continue;
         }
+        if (event.type === "model_context_compacted") {
+          sink.contextCompacted = true;
+          continue;
+        }
         const { msg, reasoningEffort, position } = splitProviderFacts(event);
         if (msg.type === "input_status") {
           await this.inputs.observe(msg, sink.turnId);
@@ -2631,14 +2657,14 @@ class AgentSessionImpl implements AgentSession {
             if (sink.carriesHandoff) this.handoff = undefined;
             if (sink.sentHeaders) this.sentHeaders = sink.sentHeaders;
             const used = outbound.accounting?.context?.usedTokens;
-            // Less context than the turn before means the provider compacted
-            // the thread, which may have dropped the headers it read.
-            if (used !== undefined) {
-              if (this.lastContextTokens !== undefined && used < this.lastContextTokens) {
-                this.sentHeaders = new Map();
-              }
-              this.lastContextTokens = used;
-            }
+            // A compaction, which the provider reports, or less context than
+            // the turn before, may have dropped the headers the thread read.
+            const shrank =
+              used !== undefined &&
+              this.lastContextTokens !== undefined &&
+              used < this.lastContextTokens;
+            if (sink.contextCompacted || shrank) this.sentHeaders = new Map();
+            if (used !== undefined) this.lastContextTokens = used;
             if (this.contextLimitTokens && used !== undefined && used >= this.contextLimitTokens) {
               this.onContextFull?.();
             }
@@ -3264,6 +3290,7 @@ class AgentSessionImpl implements AgentSession {
                 forkModelTurnId = event.modelTurnId;
                 continue;
               }
+              if (event.type === "model_context_compacted") continue;
               const { msg, reasoningEffort } = splitProviderFacts(event);
               if (msg.type === "result" || msg.type === "error") {
                 forkReasoningEffort = reasoningEffort;
@@ -3687,6 +3714,9 @@ class AgentSessionImpl implements AgentSession {
         const kept = withoutRepeatedHeaders(userPrompt, stickyHeaders, this.sentHeaders);
         userPrompt = kept.prompt;
         sink.sentHeaders = kept.headers;
+        // Until the turn returns a result, the thread is known to have read
+        // none: a turn that fails or is cut off may or may not have read its input.
+        this.sentHeaders = new Map();
       }
       let unseenMessageIds: number[] = [];
       // The agent catches up on the messages said where its session stands

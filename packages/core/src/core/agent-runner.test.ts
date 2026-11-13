@@ -2753,6 +2753,70 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("sends a header again after a steered input carried another one (A, steered B, then A)", async () => {
+      const prompts: string[] = [];
+      const steered: string[] = [];
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const provider: ModelProvider = {
+        id: "anthropic",
+        builtinTools: new Set(),
+        async openSession(params) {
+          const model = createSessionFromRun(
+            "anthropic",
+            async function* ({ prompt }) {
+              prompts.push(prompt);
+              if (prompts.length === 1) await firstGate;
+              yield { type: "result", content: "ok" };
+            },
+            params,
+          );
+          return {
+            ...model,
+            // A provider takes the input and runs it while the turn goes on.
+            async sendUserInput(input) {
+              void model.sendUserInput(input);
+            },
+            async steerUserInput(input) {
+              steered.push(input.text);
+              releaseFirst();
+              return "accepted" as const;
+            },
+          };
+        },
+      };
+      const manager = createSessions(
+        {
+          ...managerDeps(createTestModelResolver({ providers: [provider] })),
+          stickyHeaders: ["workspace_context"],
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.open({
+        agentName: "test-main",
+        channelThreadKey: "webchat:steered-headers",
+      });
+      const A = "<workspace_context>A</workspace_context>";
+      const B = "<workspace_context>B</workspace_context>";
+
+      const first = session.submit({ prompt: `${A}\n\none` }, { priority: "next" });
+      const firstMessages = collectMessages((await first.turn).events());
+      await rs.waitFor(() => expect(prompts).toHaveLength(1));
+      const second = session.submit({ prompt: `${B}\n\ntwo` }, { priority: "next" });
+      expect(second.landed).toBe("steered");
+      await rs.waitFor(() => expect(steered).toHaveLength(1));
+      await firstMessages;
+      const third = session.submit({ prompt: `${A}\n\nthree` }, { priority: "next" });
+      await collectMessages((await third.turn).events());
+
+      expect(steered[0]).toContain(B);
+      // The thread last read B, so A goes again.
+      expect(prompts.at(-1)).toContain(A);
+      await manager.shutdown();
+    });
+
     it("starts each after input's turn of its own behind the running turn, which a now input supersedes", async () => {
       const prompts: string[] = [];
       const cancels = rs.fn();
@@ -3970,6 +4034,66 @@ describe("AgentRunner", () => {
           false,
           true,
         ]);
+      });
+
+      it("sends the headers again after a compaction the provider reported partway through a turn", async () => {
+        const provider = threadedProvider(3);
+        const result = (usedTokens: number) => ({
+          type: "result" as const,
+          content: "ok",
+          accounting: {
+            provider: "mock",
+            model: "mock",
+            usage: {
+              inputTokens: usedTokens,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            context: { usedTokens },
+            costUsd: 0,
+          },
+        });
+        provider["responses"][0] = [result(120_000)];
+        // Compacted partway through, then grew past where the last turn ended.
+        provider["responses"][1] = [
+          { type: "model_context_compacted" } as unknown as AgentEvent,
+          result(130_000),
+        ];
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        for (const text of ["one", "two", "three"]) {
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="Main"/>\n\n${text}`,
+              channelThreadKey: key,
+            }),
+          );
+        }
+        const prompts = provider.calls.map((call) => call.prompt);
+        expect(prompts.map((prompt) => prompt.includes("<concierge_chat"))).toEqual([
+          true,
+          false,
+          true,
+        ]);
+      });
+
+      it("sends the headers again after a turn that did not return a result", async () => {
+        const provider = threadedProvider(3);
+        provider["responses"][1] = [{ type: "error", error: "provider failed" }];
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        for (const name of ["Main", "Home", "Main"]) {
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="${name}"/>\n\nhi`,
+              channelThreadKey: key,
+            }),
+          );
+        }
+        const prompts = provider.calls.map((call) => call.prompt);
+        // The failed turn may or may not have read "Home", so "Main" goes again.
+        expect(prompts[2]).toContain('<concierge_chat id="c1" name="Main"/>');
       });
 
       it("sends the headers after a compaction even when the session closes before its next input", async () => {
