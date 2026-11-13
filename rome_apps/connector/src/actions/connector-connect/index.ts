@@ -19,6 +19,7 @@ import {
 } from "../../shared.js";
 import { ensureComposioWebhookRegistered } from "../../api/composio-webhook.js";
 import { SettingsStore } from "../../api/settings-store.js";
+import { connectWidget } from "../../connect-widget.js";
 
 const log = createAppLogger("connector_connect");
 
@@ -113,19 +114,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             error: `Toolkit "${toolkit}" has ${existing.ids.length} active managed connections — resolve the duplicate in Settings › Connections before reconnecting.`,
           };
         }
-        // Not connected: render the inline connect card. It drives the OAuth
-        // round-trip from the browser (provisioning the managed auth config and
-        // opening the authorize tab via the `connectors` endpoint), then resumes
-        // the agent once the toolkit reports ACTIVE. The round-trip is
-        // request-host-coupled, so it must originate in the component, not here.
-        return {
-          status: "pending_interaction",
-          interaction: {
-            appId: "connector",
-            promptText: `To connect ${toolkit}, open Settings › Connections and click Connect for "${toolkit}" to authorize.`,
-            render: { kind: "inline", componentId: "connect-card", props: { toolkit } },
-          },
-        };
+        // Not connected: show the connect card. Its presses go to this app's
+        // API through core, which starts the OAuth and checks the connection;
+        // the app's reply answers the agent once the toolkit is connected.
+        return { status: "show_widget", widget: connectWidget(toolkit) };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("connector add failed", { toolkit, error: message });

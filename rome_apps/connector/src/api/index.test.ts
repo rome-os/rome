@@ -21,6 +21,7 @@ const mocks = rs.hoisted(() => ({
     defaultProject: rs.fn(),
     ensureAuthConfig: rs.fn(),
     ensureConnection: rs.fn(),
+    findActiveConnectedAccount: rs.fn(),
     listConnectedAccounts: rs.fn(),
     ping: rs.fn(),
     webhookSubscriptionExists: rs.fn(),
@@ -265,6 +266,66 @@ describe("connector API webhook self-healing", () => {
       "connectors.start: webhook registration failed; continuing OAuth",
       expect.objectContaining({ provider: "notion", error: "relay unavailable" }),
     );
+  });
+});
+
+describe("connector API connect card", () => {
+  beforeEach(() => {
+    rs.resetAllMocks();
+    mocks.readSessionApiKey.mockResolvedValue("test-api-key");
+    mocks.ensureWebhookRegistered.mockResolvedValue(undefined);
+    mocks.client.ensureAuthConfig.mockResolvedValue("auth-config-1");
+  });
+
+  const press = async (event: string, toolkit = "notion") =>
+    createApiHandler(context()).handle(request(`connect-card/${event}`, "POST", { toolkit }));
+
+  it("opens Composio's authorization page on Connect, without answering the agent", async () => {
+    mocks.client.ensureConnection.mockResolvedValue({
+      kind: "redirect",
+      url: "https://platform.composio.dev/connect",
+    });
+    const response = await press("connect");
+    await expect(response.json()).resolves.toEqual({
+      open: "https://platform.composio.dev/connect",
+    });
+  });
+
+  it("answers the agent on Connect when the toolkit is connected already", async () => {
+    mocks.client.ensureConnection.mockResolvedValue({ kind: "existing" });
+    const response = await press("connect");
+    await expect(response.json()).resolves.toEqual({
+      answer: { toolkit: "notion", status: "connected" },
+    });
+  });
+
+  it("answers the agent on Check only once the toolkit is connected", async () => {
+    mocks.client.findActiveConnectedAccount.mockResolvedValueOnce({ kind: "none" });
+    await expect((await press("check")).json()).resolves.toEqual({ ok: true });
+    mocks.client.findActiveConnectedAccount.mockResolvedValueOnce({ kind: "ok", id: "ca_1" });
+    await expect((await press("check")).json()).resolves.toEqual({
+      answer: { toolkit: "notion", status: "connected" },
+    });
+  });
+
+  it("answers that the guardian declined on Dismiss", async () => {
+    await expect((await press("dismiss")).json()).resolves.toEqual({
+      answer: { toolkit: "notion", dismissed: true },
+    });
+  });
+
+  it("refuses a Rome-managed toolkit, so the card cannot start a second connection", async () => {
+    const response = await press("connect", "github");
+    expect(response.status).toBe(409);
+    expect(mocks.client.ensureConnection).not.toHaveBeenCalled();
+  });
+
+  it("says on the card whether the toolkit is connected yet", async () => {
+    mocks.client.findActiveConnectedAccount.mockResolvedValue({ kind: "none" });
+    const response = await createApiHandler(context()).handle(request("connect-card/notion"));
+    await expect(response.json()).resolves.toEqual({
+      note: expect.stringContaining("isn't connected yet"),
+    });
   });
 });
 

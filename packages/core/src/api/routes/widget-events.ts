@@ -135,15 +135,30 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     }
     if (!isWidgetAppPath(name)) return c.json({ error: "The event is not a path in the app" }, 400);
     const reply = await to(`/api/apps/${encodeURIComponent(widget.appId)}/${name}`, context);
-    if (!reply.ok) return reply;
     const said = (await reply.json().catch(() => null)) as {
       answer?: unknown;
       open?: unknown;
+      error?: unknown;
+      message?: unknown;
     } | null;
+    // A refusal tells the guardian why, in the app's words, under the field
+    // every client reads.
+    if (!reply.ok) {
+      const why = [said?.message, said?.error].find((v) => typeof v === "string" && v !== "");
+      return c.json({ error: why ?? "The app could not do that." }, reply.status as never);
+    }
     // An app's widget the agent waits on answers it when the app's reply says
     // so; the answer is labelled as the app's, never as the guardian's words.
     if (widget.waits && said?.answer !== undefined) {
-      return answer(to, widget, widgetId, { from: widget.appId, value: said.answer }, body?.turn);
+      // An answer that declines is a dismissal, as every dismissal is read.
+      const declined = isObject(said.answer) && said.answer.dismissed === true;
+      return answer(
+        to,
+        widget,
+        widgetId,
+        { ...(declined ? { dismissed: true } : {}), from: widget.appId, value: said.answer },
+        body?.turn,
+      );
     }
     // Core writes what the client reads: whether the agent was answered and a
     // link to open, never a field of the app's own.

@@ -108,7 +108,8 @@ export function WidgetUiCard({
 }: WidgetUiCardProps) {
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
-  const [sendFailed, setSendFailed] = useState(false);
+  // A refused event, with why when core says.
+  const [sendFailed, setSendFailed] = useState<string | false>(false);
   const [blockedLink, setBlockedLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -202,7 +203,7 @@ export function WidgetUiCard({
       } catch {
         // A refused event says the send failed; a read after it says the data did.
         if (outcome.ok) setFailed(true);
-        else setSendFailed(true);
+        else setSendFailed(outcome.error ?? "");
       } finally {
         host?.onSettled?.(outcome);
         widgetHostRef.current.onSettled?.(outcome);
@@ -324,8 +325,10 @@ export function WidgetUiCard({
           {t("appComponent.widgetOpenLink")}
         </a>
       ) : null}
-      {sendFailed ? (
-        <span className="text-aux text-destructive">{t("stream.errors.sendFallback")}</span>
+      {sendFailed !== false ? (
+        <span className="text-aux text-destructive">
+          {sendFailed || t("stream.errors.sendFallback")}
+        </span>
       ) : failed ? (
         <span className="text-aux text-destructive">
           {t("appComponent.widgetUnavailable", { text })}
