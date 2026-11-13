@@ -36,6 +36,20 @@ final class TaskListStore {
         self.backend = backend
     }
 
+    /// The page opened: listen for changes and read the list now. The read
+    /// is the store's own, so no view going away can cancel it. A list read
+    /// before shows at once; a tab that failed shows its spinner again while
+    /// this read runs, so "Failed to load tasks" only ever follows a read
+    /// that failed.
+    func open() {
+        start()
+        if groups.isEmpty, loadFailed {
+            loadFailed = false
+            loaded = false
+        }
+        Task { await load() }
+    }
+
     /// Listens for changes, and reads the list the first time.
     func start() {
         guard tokens.isEmpty else { return }
@@ -53,6 +67,7 @@ final class TaskListStore {
     func load() async {
         reads += 1
         let mine = reads
+        taskListLog.notice("read \(mine) of \(self.chatId, privacy: .public)")
         do {
             let list = try await backend.taskList(chatId: chatId)
             // A newer read already put its list up: this older one gives way.
@@ -64,13 +79,13 @@ final class TaskListStore {
             // A stop shows its effect once the task reads as ended.
             stopping = stopping.filter { id in task(id).map { !TaskListWords.isEnded($0.task) } ?? false }
         } catch is CancellationError {
-            // A read the screen gave up on says nothing about the list.
-            taskListLog.notice("read cancelled")
+            // A read given up on says nothing about the list.
+            taskListLog.notice("read \(mine) cancelled")
         } catch {
-            taskListLog.error("read failed: \(String(describing: error), privacy: .public)")
+            taskListLog.error("read \(mine) of \(self.chatId, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             // What is shown stays. Only with no list at all, and no other read
             // on its way that could still bring one, does the tab say it failed.
-            guard applied == 0, mine == reads else { return }
+            guard groups.isEmpty, applied == 0, mine == reads else { return }
             loadFailed = true
             loaded = true
         }

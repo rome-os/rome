@@ -71,9 +71,7 @@ struct AgentPage: View {
             // The list as it was last read shows at once, and is read again.
             guard let store = workspace.taskList(forChat: route.tasksChatId) else { return }
             taskList = store
-            let fresh = !store.loaded
-            store.start()
-            if !fresh { await store.load() }
+            store.open()
         }
         .onDisappear { taskList?.stop() }
         .readableColumn()

@@ -161,8 +161,11 @@ final class FakeBackend: RomeBackend {
     /// What a Stop from the task list fails with; nil lets it through.
     var stopListedError: APIError?
     var stoppedFromList: [String] = []
+    /// Set, every task list read throws it (a cancellation, say).
+    var taskListError: Error?
     func taskList(chatId: String) async throws -> TaskListResponse {
         taskListReads += 1
+        if let taskListError { throw taskListError }
         guard let list = taskLists[chatId] else { throw APIError.notFound }
         return list
     }

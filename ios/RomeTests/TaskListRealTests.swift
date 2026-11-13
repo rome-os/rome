@@ -59,4 +59,44 @@ private let realList = #"""
         await store.load()
         #expect(store.groups.count == 3 && !store.loadFailed)
     }
+
+    /// Open, close, open again: each open reads the list, the list read
+    /// before shows at once, and nothing reads as failed.
+    @MainActor @Test func openCloseReopenReadsAgain() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try JSONDecoder().decode(TaskListResponse.self, from: Data(realList.utf8))
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        store.open()
+        for _ in 0..<100 where store.groups.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.groups.count == 3 && !store.loadFailed)
+        store.stop()
+        let before = backend.taskListReads
+        store.open()
+        // Shown at once from the last read, and read again.
+        #expect(store.groups.count == 3 && !store.loadFailed)
+        for _ in 0..<100 where backend.taskListReads == before { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.taskListReads > before && !store.loadFailed)
+        store.stop()
+    }
+
+    /// The failure shows only after a read that failed, never after one
+    /// that was given up on; reopening a failed tab tries again visibly.
+    @MainActor @Test func theFailureFollowsOnlyAFailedRead() async throws {
+        let backend = FakeBackend()
+        backend.taskListError = CancellationError()
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        await store.load()
+        #expect(!store.loadFailed)
+        backend.taskListError = APIError.server(status: 500, message: nil)
+        await store.load()
+        #expect(store.loadFailed && store.groups.isEmpty)
+        // Reopened: the spinner, not the old failure, while the new read runs.
+        backend.taskListError = nil
+        backend.taskLists["concierge"] = try JSONDecoder().decode(TaskListResponse.self, from: Data(realList.utf8))
+        store.open()
+        #expect(!store.loadFailed && !store.loaded)
+        for _ in 0..<100 where store.groups.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.groups.count == 3 && !store.loadFailed)
+        store.stop()
+    }
 }

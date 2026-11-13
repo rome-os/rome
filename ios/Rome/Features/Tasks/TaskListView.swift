@@ -41,13 +41,15 @@ struct TaskListView: View {
 
     @ViewBuilder
     private func content(now: Date) -> some View {
-        if let store, !store.loaded {
+        // A list read once stays up whatever a later read does; the failure
+        // shows only when no list ever arrived.
+        if let store, !store.loaded, store.groups.isEmpty {
             VStack {
                 Spacer()
                 Spinner(size: 20, color: Palette.sub)
                 Spacer()
             }
-        } else if let store, store.loadFailed {
+        } else if let store, store.loadFailed, store.groups.isEmpty {
             VStack {
                 Spacer()
                 Text("Failed to load tasks")
@@ -57,9 +59,12 @@ struct TaskListView: View {
             }
         } else if let store, !store.groups.isEmpty {
             ScrollView {
-                VStack(spacing: 18) {
+                // Leading: a folded group, its header alone, keeps to the left
+                // edge instead of centering on its own line.
+                VStack(alignment: .leading, spacing: 18) {
                     ForEach(store.groups) { group in
                         section(group, store: store, now: now)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(.horizontal, 16)
