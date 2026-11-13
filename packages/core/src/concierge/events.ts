@@ -369,7 +369,7 @@ export function startConciergeEvents(
     }
     // What this turn said settles no news: a report that carries it does,
     // once it runs to its end. Its record of what it said is done with.
-    service.takeRelayed(event.turn.turnId);
+    service.forgetTurn(event.turn.turnId);
     // Finish callbacks run before the backend promise settles. Capture them
     // synchronously so a recovery cannot start a second chain or a reminder.
     const active = recoveriesRunning.get(chatId);

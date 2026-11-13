@@ -107,6 +107,11 @@ describe("messageStatusReaction", () => {
       messageStatusReaction({ answered: true, tasks: [{ ...lost, endReason: "stopped" }] }),
     ).toBeNull();
   });
+
+  it("shows none for a task that ended for no response, even when its report was lost", () => {
+    const lost = { status: "ended" as const, reportLost: true, endReason: "no_response" as const };
+    expect(messageStatusReaction({ answered: true, tasks: [lost] })).toBeNull();
+  });
 });
 
 describe("legacyTaskState", () => {

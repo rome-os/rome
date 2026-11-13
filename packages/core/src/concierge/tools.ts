@@ -768,7 +768,7 @@ export async function buildConciergeTools(
     if (repeated) return repeated;
     const id = await addMessage(parts, await placementFor(answers, taskId ? { taskId } : {}));
     service.keepSaid(turnId, key, id);
-    if (taskId) service.noteRelayed(turnId, chatId, taskId);
+    if (taskId) service.noteSaid(taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
     const answered = answers ?? (await certainlyAnswered(taskId));
@@ -811,7 +811,7 @@ export async function buildConciergeTools(
       await placementFor(answers, { taskId: task?.id ?? null }),
     );
     // Only a result the guardian was shown counts as said.
-    if (task) service.noteRelayed(turnId, chatId, task.id);
+    if (task) service.noteSaid(task.id);
     noteAnswers(id, answers);
     // Forwarded text is the task's, not the Concierge's, and so are a task's
     // title and chat name, which can come from its output: none becomes the

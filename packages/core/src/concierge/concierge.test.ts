@@ -1550,6 +1550,25 @@ describe("Concierge tools", () => {
     expect(cutoffs[0]).toBeGreaterThanOrEqual(askedAt);
   });
 
+  it("still turns down a stopped task's approvals when stopping one of its turns throws", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === chatId ? ["t1", "t2"] : []);
+    const interrupted: string[] = [];
+    s.chats.interruptTurn = async (turnId: string) => {
+      interrupted.push(turnId);
+      // The turn ended on its own meanwhile: the backend answers 409.
+      if (turnId === "t1") throw new Error("409 turn not running");
+    };
+    const turnedDown: string[] = [];
+    s.service.attachApprovalExpiry(async (chat) => (turnedDown.push(chat), 1));
+    expect(await s.service.stopTask(taskId, "guardian")).toBe(2);
+    expect(interrupted).toEqual(["t1", "t2"]);
+    expect(turnedDown).toEqual([chatId]);
+  });
+
   it("turns down an approval a stopped task's work asks for after its interrupt was accepted", async () => {
     const s = setup();
     const stopped = JSON.parse(
@@ -3120,6 +3139,26 @@ describe("Concierge events", () => {
     await s.settle();
     expect((await s.taskRepo.get(taskId))?.reportGivenUp).toBe(true);
     expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
+  });
+
+  it("counts a result the report turn said before the guardian's Stop as said, not as never told", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(async () => {
+      s.inTurn("report");
+      await s.tool("say", { text: "Three options found", task: taskId });
+      return "stopped" as const;
+    });
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await s.settle();
+    const row = await s.taskRepo.get(taskId);
+    expect(row?.reportGivenUp).toBe(false);
+    expect(row?.outcomeUnsaid).toBe(false);
+    expect(
+      (await s.tasks.listForPanel()).find((each) => each.id === taskId)?.notSynced,
+    ).toBeFalsy();
   });
 
   it("still reports a result whose report failed after the Concierge edits the row meanwhile", async () => {

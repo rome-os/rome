@@ -243,9 +243,6 @@ export class ConciergeService {
   private readonly carriedReports = new Map<string, readonly string[]>();
   /** Per Concierge chat, the guardian messages superseded turns handed on. */
   private readonly handedOnPrompts = new Map<string, string[]>();
-  /** Per Concierge turn, the tasks whose result it said. */
-  /** The tasks each Concierge turn said the news of, and which news. */
-  private readonly relayedInTurn = new Map<string, Set<string>>();
   /** What each Concierge turn said, by its parts, task and answered messages: a repeat is the same message. */
   private readonly saidByKey = new Map<string, Map<string, string>>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
@@ -799,20 +796,13 @@ export class ConciergeService {
   }
 
   /**
-   * Task `taskId`'s result was said in Concierge turn `turnId` of chat
-   * `chatId`, as by `say` naming it. It counts only when the Concierge had
-   * the task's news: news a failed or cut-short turn never brought it stays
-   * to be reported, and the messages it holds stay working, unless this turn
-   * took that report over.
+   * Task `taskId`'s result was said, as by `say` naming it. Saying it settles
+   * nothing: the news stays until a report that carried it runs to its end.
+   * Only a Stop of that report turn reads it, so the result is not shown as
+   * never told.
    */
-  noteRelayed(turnId: string, chatId: string, taskId: string): void {
-    const unseen = this.taskEvents?.unseen(taskId) === true;
-    if (unseen && !this.carriedReports.get(chatId)?.includes(taskId)) return;
-    // Saying it settles nothing: the news stays until a report that carried
-    // it runs to its end, so a turn that fails after saying it loses none.
-    const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
-    tasks.add(taskId);
-    this.relayedInTurn.set(turnId, tasks);
+  noteSaid(taskId: string): void {
+    this.taskEvents?.said(taskId);
   }
 
   /** The message Concierge turn `turnId` said as `key` already, if it did. */
@@ -820,19 +810,16 @@ export class ConciergeService {
     return this.saidByKey.get(turnId)?.get(key);
   }
 
-  /** Concierge turn `turnId` said message `id` as `key`; forgotten with its relayed tasks. */
+  /** Concierge turn `turnId` said message `id` as `key`; forgotten once the turn ends. */
   keepSaid(turnId: string, key: string, id: string): void {
     const said = this.saidByKey.get(turnId) ?? new Map<string, string>();
     said.set(key, id);
     this.saidByKey.set(turnId, said);
   }
 
-  /** The tasks whose result Concierge turn `turnId` said, forgotten once read. */
-  takeRelayed(turnId: string): string[] {
-    const tasks = this.relayedInTurn.get(turnId);
-    this.relayedInTurn.delete(turnId);
+  /** Forgets what Concierge turn `turnId` said, once it ended. */
+  forgetTurn(turnId: string): void {
     this.saidByKey.delete(turnId);
-    return tasks ? [...tasks] : [];
   }
 
   /**
@@ -1068,7 +1055,16 @@ export class ConciergeService {
     const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
     if (!chatId) return 0;
     const turns = this.attached?.chats.activeTurns(chatId) ?? [];
-    for (const turnId of turns) await this.attached?.chats.interruptTurn(turnId);
+    // One turn that will not stop, as one that ended meanwhile, stops neither
+    // the others nor the turn-down below.
+    for (const turnId of turns) {
+      await this.attached?.chats.interruptTurn(turnId).catch((error: unknown) =>
+        log.warn("failed to stop a stopped task's turn", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     // Nothing approved later runs for a stopped task: turned down once its
     // work has stopped, so one its turn asked for while stopping is too.
     await this.turnDownForStop(chatId, Date.now());
