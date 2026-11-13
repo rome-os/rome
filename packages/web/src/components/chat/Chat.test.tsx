@@ -796,6 +796,56 @@ describe("Chat unread divider", () => {
     expect(unreadFrom()).toBe("a3");
   });
 
+  it("gives no divider to a live reply to a turn that an older page then loads", async () => {
+    const observers: Array<() => void> = [];
+    class FakeObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        observers.push(() =>
+          callback([{ isIntersecting: true } as IntersectionObserverEntry], this as never),
+        );
+      }
+      observe() {}
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+      disconnect() {}
+    }
+    rs.stubGlobal("IntersectionObserver", FakeObserver);
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    const inTurn = (id: string, minute: number, turnId: string) => ({
+      ...agentMessage(id, minute),
+      turnId,
+    });
+    // Everything is read at open. Turn A is on an older page and is still running.
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({
+        messages: [inTurn("b1", 5, "turn-b"), inTurn("c1", 6, "turn-c")],
+        nextCursor: "c1",
+      })
+      .mockResolvedValueOnce({
+        messages: [inTurn("a1", 0, "turn-a"), inTurn("a2", 9, "turn-a")],
+        nextCursor: null,
+      });
+    renderChat(
+      <Chat
+        sessionId="concierge"
+        variant="concierge"
+        loadReadMark={() => Promise.resolve("2026-10-27T12:07:30.000Z")}
+      />,
+    );
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      MockEventSource.instances[0]?.emit("message_insert", inTurn("a2", 9, "turn-a"));
+    });
+    await act(async () => observers.at(-1)?.());
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+    await act(idle);
+    expect(unreadFrom()).toBe("");
+  });
+
   it("does not mark the chat read when it closes while the read mark is pending", async () => {
     const { loadReadMark, answer } = deferredMark();
     const { unmount } = renderChat(

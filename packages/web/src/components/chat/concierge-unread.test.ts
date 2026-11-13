@@ -330,6 +330,27 @@ describe("useUnreadAtOpen", () => {
     expect([...result.current.unread!.memberIds].sort()).toEqual(["a1", "a3"]);
   });
 
+  it("keeps a live reply out of an older page that holds its turn", async () => {
+    const { result } = renderHook(() => useUnreadAtOpen({ chatId: "c", loadReadMark: read }));
+    await act(async () => {});
+    // All read at open. Turn A is on an older page and still running.
+    const opening = [
+      guardian("uB", "2026-10-27T12:05:00.000Z", "turn-b"),
+      agent("aB1", "2026-10-27T12:06:00.000Z", { turnId: "turn-b" }),
+    ];
+    act(() => result.current.noteOpened(opening));
+    const live = agent("aA2", "2026-10-27T12:12:00.000Z", { turnId: "turn-a" });
+    act(() => result.current.noteLive(live.id));
+    const loaded = mergeFetchedChatMessages(mergeChatMessage(opening, live), [
+      guardian("uA", "2026-10-27T12:00:00.000Z", "turn-a"),
+      agent("aA1", "2026-10-27T12:01:00.000Z", { turnId: "turn-a" }),
+      live,
+    ]);
+    act(() => result.current.noteOlder([loaded[0], loaded[1], live]));
+    expect([...result.current.unread!.memberIds].sort()).toEqual(["aA1", "aB1", "uA", "uB"]);
+    expect(summarizeUnread(loaded, result.current.unread!, false)).toBeNull();
+  });
+
   it("has no unread state for a chat with no read mark or no opening history", async () => {
     const none = renderHook(() =>
       useUnreadAtOpen({ chatId: "c", loadReadMark: () => Promise.resolve(null) }),

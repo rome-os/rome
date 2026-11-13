@@ -84,7 +84,9 @@ const MARK_WAIT_MS = 2000;
  * Two things fix `unread`, even once the chat is marked read: the read mark,
  * and which messages can be unread. Those are the messages the chat opened
  * with, which `noteOpened` reports, and the ones older pages bring, which
- * `noteOlder` reports. Messages that arrive live are never unread.
+ * `noteOlder` reports, minus any that `noteLive` saw arrive live, since an older
+ * page can hold a live reply to one of its turns. Messages that arrive live are
+ * never unread.
  */
 export function useUnreadAtOpen({
   chatId,
@@ -99,6 +101,8 @@ export function useUnreadAtOpen({
   noteOpened: (messages: ChatMessage[]) => void;
   /** Reports the messages of an older page that loaded. */
   noteOlder: (messages: ChatMessage[]) => void;
+  /** Reports a message that arrived live. It never becomes unread. */
+  noteLive: (messageId: string) => void;
   /**
    * Resolves once the read mark is known, or after {@link MARK_WAIT_MS}. Null
    * when none is on the way. Await it before marking the chat read.
@@ -137,9 +141,17 @@ export function useUnreadAtOpen({
       ),
     [],
   );
+  const liveIds = useRef(new Set<string>());
+  const noteLive = useCallback((id: string) => void liveIds.current.add(id), []);
   const noteOlder = useCallback(
     (messages: ChatMessage[]) =>
-      setOlderIds((current) => new Set([...current, ...messages.map((message) => message.id)])),
+      setOlderIds(
+        (current) =>
+          new Set([
+            ...current,
+            ...messages.map((message) => message.id).filter((id) => !liveIds.current.has(id)),
+          ]),
+      ),
     [],
   );
   const pendingMark = useCallback(() => request.current, []);
@@ -148,5 +160,5 @@ export function useUnreadAtOpen({
       watermark && openIds ? { watermark, memberIds: new Set([...openIds, ...olderIds]) } : null,
     [watermark, openIds, olderIds],
   );
-  return { unread, noteOpened, noteOlder, pendingMark };
+  return { unread, noteOpened, noteOlder, noteLive, pendingMark };
 }
