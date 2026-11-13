@@ -220,6 +220,7 @@ import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
 import { TaskChecks } from "./concierge/task-checks.js";
+import { registerTaskRunAction, TaskSchedules } from "./concierge/task-schedule.js";
 import { turnDownApprovals } from "./concierge/approval-expiry.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
@@ -1174,7 +1175,21 @@ async function main() {
   // Whether the guardian is at a web dashboard, from the same socket; while
   // they are, the Concierge pushes nothing to the phone.
   const dashboardActivity = new DashboardActivity();
-  const concierge = new ConciergeService({
+  // Each task's repeating schedule. A run acts in its owner's zone, which
+  // following keeps; before following starts it is the guardian's.
+  const taskSchedules = new TaskSchedules({
+    routines: routinesRepo,
+    routineEngine,
+    timezoneOf: async (owner): Promise<string> => {
+      try {
+        return await concierge.following.timezone(owner);
+      } catch {
+        return resolveGuardianTimezone(settingsRepo);
+      }
+    },
+  });
+  const conciergeTasksRepo = new ConciergeTasksRepository(db);
+  const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
     owners: createConciergeOwners({
@@ -1189,11 +1204,18 @@ async function main() {
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
     // Created before the routine engine runs any wake-up, which it reads.
-    checks: new TaskChecks({ routines: routinesRepo, routineEngine }),
-    tasks: new ConciergeTasks(
-      new ConciergeTasksRepository(db),
-      config.conciergeTaskWaitExpiryMinutes * 60_000,
-    ),
+    checks: new TaskChecks({
+      routines: routinesRepo,
+      routineEngine,
+      schedules: taskSchedules,
+      // A schedule names only its task: the chat it reports to comes from the row.
+      placeOf: async (taskId) => {
+        const found = await conciergeTasksRepo.getWithChat(taskId);
+        return found ? { chatId: found.conciergeChat.id, owner: found.owner } : null;
+      },
+    }),
+    schedules: taskSchedules,
+    tasks: new ConciergeTasks(conciergeTasksRepo, config.conciergeTaskWaitExpiryMinutes * 60_000),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,
@@ -1350,6 +1372,7 @@ async function main() {
   });
 
   registerShowFileAction(actionRegistry);
+  registerTaskRunAction(actionRegistry, concierge);
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),

@@ -285,6 +285,8 @@ export interface ConciergeFollowing {
   ): Promise<ConciergeFollowRules>;
   /** Keeps a visitor's time zone, as their browser reports it. The guardian's is their own setting. */
   setTimezone(owner: ConciergeOwner, timezone: string): Promise<void>;
+  /** Where an owner is: their time zone, else the guardian's. */
+  timezone(owner: ConciergeOwner): Promise<string>;
   /** Subscribes every follow again, for one whose subscription another app removed. */
   reconcile(): Promise<void>;
   /**
@@ -1289,6 +1291,7 @@ export function startConciergeFollowing(
       return next;
     },
 
+    timezone: (owner) => timezoneOf(owner),
     async setTimezone(owner, timezone) {
       if (owner === GUARDIAN_OWNER) return;
       const stored = await readStored();

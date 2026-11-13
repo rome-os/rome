@@ -182,6 +182,7 @@
     "timed": "{{name}} · {{when}}",
     "waiting": "Waiting for {{what}} · checks {{when}}",
     "cancel": "Cancel {{name}}",
+    "skip": "Skip the next run of {{name}}",
     "loadFailed": "Failed to load scheduled checks",
     "summary": "{{count}} checks · next: {{next}}",
     "expand": "Show scheduled checks",
@@ -636,6 +637,15 @@
       "idle": "after a quiet period",
       "daily": "daily reset",
       "working_dir": "working folder gone"
+    }
+  },
+  "automatedInput": {
+    "named": "{{kind}} · {{name}}",
+    "kinds": {
+      "routine": "Routine",
+      "app": "App",
+      "agent": "Agent",
+      "automation": "Automation"
     }
   },
   "routineCard": {

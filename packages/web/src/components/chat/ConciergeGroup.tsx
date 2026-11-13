@@ -208,11 +208,12 @@ export const ConciergeGroup = memo(function ConciergeGroup({
       {group.entries.map((entry) => {
         const bubble = (
           <>
-            {entry.message.sender?.kind === "automated" ? (
+            {entry.message.sender?.kind === "automated" && entry.message.sender.onBehalfOf ? (
+              // Sent for the guardian, so it stays with their messages and names its source.
               <div
                 key={entry.message.id}
                 data-timeline-anchor={entry.message.id}
-                className="w-full self-start"
+                className="w-full"
               >
                 <UserMessage msg={entry.message} />
               </div>

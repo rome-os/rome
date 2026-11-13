@@ -1,3 +1,4 @@
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { QuotaSwitchPart } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { userMessageText } from "@/components/chat/chat-view";
@@ -28,6 +29,8 @@ export type ConciergeItem =
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
   /** Faint line where the chat's agent session was renewed, for `reason`. */
   | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
+  /** Faint line naming the routine, app or agent whose input a turn ran on. */
+  | { kind: "automated"; key: string; source: SystemInputSource }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -157,6 +160,13 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
   if (a.kind === "renewal") return b.kind === "renewal" && a.key === b.key && a.reason === b.reason;
+  if (a.kind === "automated")
+    return (
+      b.kind === "automated" &&
+      a.key === b.key &&
+      a.source.type === b.source.type &&
+      a.source.name === b.source.name
+    );
   if (a.kind === "notice")
     return (
       b.kind === "notice" &&
@@ -195,6 +205,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
     | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
+    | { kind: "automated"; key: string; source: SystemInputSource }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
@@ -227,7 +238,18 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   let automaticModel: string | undefined;
   for (const row of rows) {
     if (row.kind === "user") {
-      if (isRenderable(row.message)) add(row.message, "guardian");
+      // A Concierge chat holds no automated messages: one from before that
+      // rule shows as the line a newer one gets. One said on the owner's
+      // behalf is theirs, and stays their bubble.
+      const sender = row.message.sender;
+      if (sender?.kind === "automated" && !sender.onBehalfOf) {
+        slots.push({
+          kind: "automated",
+          key: row.message.id,
+          source: { type: sender.sourceType ?? "automation", name: sender.name },
+        });
+        group = null;
+      } else if (isRenderable(row.message)) add(row.message, "guardian");
     } else if (row.kind === "agent") {
       for (const message of row.messages) {
         // Only a Concierge chat's transcript is grouped here, and any of them may switch.
@@ -248,6 +270,9 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
         chatId: row.chatId,
         renewedSessionId: row.renewedSessionId,
       });
+      group = null;
+    } else if (row.kind === "automated_input") {
+      slots.push({ kind: "automated", key: row.key, source: row.source });
       group = null;
     } else if (row.kind === "model_switch") {
       if (row.model === automaticModel) {
@@ -274,7 +299,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   for (const slot of slots) {
     if (slot.kind === "separator") {
       items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
-    } else if (slot.kind === "notice" || slot.kind === "renewal") {
+    } else if (slot.kind === "notice" || slot.kind === "renewal" || slot.kind === "automated") {
       items.push(slot);
     } else {
       const entries = slot.messages.map((message) =>

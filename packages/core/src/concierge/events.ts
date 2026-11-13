@@ -538,10 +538,16 @@ export function startConciergeEvents(
     // as Concierge's account. The guardian answering the task's own card or
     // approval carries on what the Concierge started, so it counts as the
     // Concierge's too. Only the guardian's typed words are their own turn.
+    // A scheduled run that reports only when it matters reads as the
+    // system's, like any scheduled turn: one with nothing to ask goes to
+    // the digest rather than a report of its own.
+    const quietRun =
+      userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id) && service.takeQuietRun(chatId);
     const started =
-      carriesApproval ||
-      userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id || answersCard(row.content));
-    const by = started ? "concierge" : userRows.length > 0 ? "guardian" : "system";
+      !quietRun &&
+      (carriesApproval ||
+        userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id || answersCard(row.content)));
+    const by = started ? "concierge" : quietRun || userRows.length === 0 ? "system" : "guardian";
     // The guardian's own words reach the chat through the user-input path, which
     // announces nothing, so they are read from the rows of the turn they started.
     const words = userRows.map((row) => userText(row.content)).join(" | ");
