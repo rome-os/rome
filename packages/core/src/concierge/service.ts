@@ -607,9 +607,10 @@ export class ConciergeService {
   /**
    * Ends the follows and stops the open tasks of topic chat `chatId`, before
    * {@link retireChat} runs, so it finds nothing to move and posts no notice.
-   * A task with a task chat ends as archiving that chat ends it, so its row
-   * does not land on the main chat's panel. One that fails to end is logged
-   * and left for `retireChat` to move.
+   * A task with a task chat ends as archiving that chat ends it; one with
+   * none is stopped and its row archived. Either way no row lands on the main
+   * chat's panel. One that fails to end is logged and left for `retireChat`
+   * to move.
    */
   async endChatWork(chatId: string): Promise<void> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
@@ -629,7 +630,10 @@ export class ConciergeService {
     for (const task of openTasks) {
       try {
         const ended = task.sessionId ? await this.endTaskChat(task.sessionId, "archived") : null;
-        if (!ended) await this.stopTask(task.id, "guardian");
+        if (!ended) {
+          await this.stopTask(task.id, "guardian");
+          await this.deps.tasks.repo.archive(task.id);
+        }
       } catch (error) {
         failed("task", error);
       }

@@ -4957,7 +4957,10 @@ describe("Concierge chats", () => {
         stopReason: "archived",
         archivedAt: expect.any(Date),
       });
-      expect(await s.taskRepo.get(looseId)).toMatchObject({ stopReason: "guardian" });
+      expect(await s.taskRepo.get(looseId)).toMatchObject({
+        stopReason: "guardian",
+        archivedAt: expect.any(Date),
+      });
       // Ended·stopped, not open, and the finished one is as it was.
       const status = await s.tasks.statusOf(
         [(await s.taskRepo.get(running.taskId))!, (await s.taskRepo.get(looseId))!],
@@ -4972,6 +4975,20 @@ describe("Concierge chats", () => {
       expect(await s.service.followsAndTasksOf(TOPIC_CHAT, "guardian")).toMatchObject({
         openTasks: [],
       });
+    });
+
+    it("leaves neither kind of stopped task on the main chat's task panel", async () => {
+      const { s, running, looseId, oldId } = await withWork();
+      await s.service.endChatWork(TOPIC_CHAT);
+      await s.storedChats.deleteSession(TOPIC_CHAT);
+      await s.service.retireChat(TOPIC_CHAT, "deleted");
+      const panel = await s.tasks.listForPanel();
+      const ids = panel.map((row) => row.id);
+      // The task with a task chat and the one with none are both gone from it.
+      expect(ids).not.toContain(running.taskId);
+      expect(ids).not.toContain(looseId);
+      // A task that had already finished is untouched, and reads as the main chat's.
+      expect(panel.find((row) => row.id === oldId)?.conciergeChat.main).toBe(true);
     });
 
     it('leaves the main chat no "chat retired" notice once everything ended', async () => {
