@@ -155,6 +155,22 @@ final class FakeBackend: RomeBackend {
     }
     var origin: URL? { nil }
 
+    /// The task list each read answers, by chat; a missing one fails.
+    var taskLists: [String: TaskListResponse] = [:]
+    var taskListReads = 0
+    /// What a Stop from the task list fails with; nil lets it through.
+    var stopListedError: APIError?
+    var stoppedFromList: [String] = []
+    func taskList(chatId: String) async throws -> TaskListResponse {
+        taskListReads += 1
+        guard let list = taskLists[chatId] else { throw APIError.notFound }
+        return list
+    }
+    func stopListedTask(chatId: String, taskId: String) async throws {
+        stoppedFromList.append(taskId)
+        if let stopListedError { throw stopListedError }
+    }
+
     /// Off, every send fails, as it always did here.
     var sendSucceeds = false
 

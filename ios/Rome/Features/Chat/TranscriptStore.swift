@@ -490,6 +490,26 @@ final class TranscriptStore {
         return { [weak self] in self?.jump(to: original) }
     }
 
+    /// Brings the message with a task's card into view and tints it. One not
+    /// held yet comes in one read that reaches down to it; one not found
+    /// says so briefly.
+    func revealCard(_ messageId: String) async {
+        if message(messageId) == nil,
+           let page = try? await backend.messages(sessionId: sessionId, through: messageId, limit: Self.pageSize) {
+            // From the newest down past the card, so no gap opens above what is held.
+            merge(page.messages)
+            if message(messageId) != nil {
+                cursor = page.nextCursor
+                hasOlder = page.nextCursor != nil
+            }
+        }
+        guard message(messageId) != nil else {
+            say(String(localized: "Could not find the card"))
+            return
+        }
+        jump(to: messageId)
+    }
+
     /// Brings a held message into view and tints it for a moment.
     func jump(to messageId: String) {
         jumpTarget = messageId

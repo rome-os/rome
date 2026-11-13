@@ -36,6 +36,8 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Deletes a chat for good; a Concierge topic chat retires with it.
     func deleteChat(_ id: String) async throws
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
+    /// The newest page, reaching down to `through` and two turns past it.
+    func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
     /// A send from a chat thread: it lands in that thread.
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn
@@ -60,6 +62,11 @@ protocol RomeBackend: AnyObject, Sendable {
     func tasks() async throws -> [ConciergeTask]
     /// Stops a task now, as its owner asked from its card.
     func stopTask(id: String) async throws
+    /// `GET /chats/:chatId/tasks`: the Concierge chat's task list, by the
+    /// chat's server id.
+    func taskList(chatId: String) async throws -> TaskListResponse
+    /// Stops a task from its chat's task list; a scheduled one loses its schedule.
+    func stopListedTask(chatId: String, taskId: String) async throws
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
@@ -160,6 +167,11 @@ final class LiveBackend: RomeBackend {
         return try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: query)
     }
 
+    func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
+        let query = [URLQueryItem(name: "limit", value: String(limit)), URLQueryItem(name: "through", value: through)]
+        return try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: query)
+    }
+
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, thread: nil)
     }
@@ -218,6 +230,14 @@ final class LiveBackend: RomeBackend {
 
     func stopTask(id: String) async throws {
         try await client.post("/concierge/tasks/\(escape(id))/stop")
+    }
+
+    func taskList(chatId: String) async throws -> TaskListResponse {
+        try await client.get("/chats/\(escape(chatId))/tasks")
+    }
+
+    func stopListedTask(chatId: String, taskId: String) async throws {
+        try await client.post("/chats/\(escape(chatId))/tasks/\(escape(taskId))/stop")
     }
 
     func tasks() async throws -> [ConciergeTask] {
@@ -401,6 +421,12 @@ enum ToolCallExtractor {
 extension RomeBackend {
     /// Demo data and test doubles stop nothing.
     func stopTask(id: String) async throws { throw APIError.notFound }
+    /// Demo data and test doubles hold every message in the newest page.
+    func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
+        try await messages(sessionId: sessionId, before: nil, limit: limit)
+    }
+    func taskList(chatId: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
+    func stopListedTask(chatId: String, taskId: String) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.
     func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
     /// Demo data and test doubles belong to no account.

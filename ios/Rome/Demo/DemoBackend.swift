@@ -321,6 +321,60 @@ final class DemoBackend: RomeBackend {
         return tasks
     }
 
+    /// The demo's task list: its tasks in the groups their status gives
+    /// them, with a schedule, a lone check, a follow and a routine.
+    func taskList(chatId: String) async throws -> TaskListResponse {
+        try await pause(0.2)
+        let nowMs = Date.now.timeIntervalSince1970 * 1000
+        let chat = chatId == conciergeChatID ? nil : chatId
+        var groups: [TaskListGroup.Key: [TaskListItem]] = [:]
+        for task in tasks where task.archivedAt == nil && task.conciergeChat?.id == chat {
+            let status = TaskListWords.status(task)
+            // Where Respond goes: the message of this chat with the card it waits on.
+            let card = task.waitId.flatMap { wait in
+                messages[chatId]?.first { message in
+                    message.parts.contains { if case .taskChat(_, _, _, let card) = $0 { return card?.id == wait } else { return false } }
+                }?.id
+            }
+            var task = task
+            if status == "needs_you" { task.waitingSince = task.updatedAt }
+            let item = TaskListItem.Task(
+                task: task,
+                schedule: task.id == "t7" ? .init(at: "09:00", days: nil) : nil,
+                check: task.dueAt.map { .init(id: "check-\(task.id)", at: $0, recurring: task.id == "t7") },
+                cardMessageId: status == "needs_you" ? card : nil
+            )
+            let key: TaskListGroup.Key = switch status {
+            case "needs_you": .needsYou
+            case "later": .later
+            case "ended": .ended
+            default: .active
+            }
+            groups[key, default: []].append(.task(item))
+        }
+        if chat == nil {
+            groups[.later, default: []].append(.check(.init(check: .init(id: "check-flight", name: "看看机票有没有降价", at: nowMs + 3 * 3_600_000, waitingFor: nil))))
+            groups[.onItsOwn, default: []] += [
+                .follow(.init(source: "github", label: "GitHub", target: "rome-os/rome", state: "active", digestTimes: ["09:00", "18:00"])),
+                .routine(.init(id: "r-summary", name: "每日总结", trigger: .init(type: "schedule", localTime: "21:00", rrule: "FREQ=DAILY"), enabled: true, nextRunAt: nowMs + 5 * 3_600_000, lastRun: nil)),
+            ]
+        }
+        let order: [TaskListGroup.Key] = [.needsYou, .active, .later, .onItsOwn, .ended]
+        return TaskListResponse(chatId: chatId, groups: order.compactMap { key in groups[key].map { TaskListGroup(key: key, items: $0) } })
+    }
+
+    /// Stops a demo task: it ends as stopped, and its list reads again.
+    func stopListedTask(chatId: String, taskId: String) async throws {
+        try await pause(0.4)
+        guard let index = tasks.firstIndex(where: { $0.id == taskId }) else { throw APIError.notFound }
+        tasks[index].status = "ended"
+        tasks[index].endReason = "stopped"
+        tasks[index].state = .dropped
+        tasks[index].completedAt = Date.now.timeIntervalSince1970 * 1000
+        tasks[index].updatedAt = tasks[index].completedAt!
+        bus.emit(LiveTopic.chatTasks(chatId), .taskListChanged(chatId: chatId))
+    }
+
     func approval(id: String) async throws -> ApprovalRecord {
         try await pause(0.2)
         return approvals[id] ?? ApprovalRecord(id: id, status: "pending")

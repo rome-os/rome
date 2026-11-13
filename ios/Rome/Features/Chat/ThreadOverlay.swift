@@ -168,19 +168,22 @@ struct QuoteBar: View {
     }
 }
 
-/// Under a Concierge message in a task's chat thread: `↳ <task title>`,
-/// faint and on one line, cut with "…". A tap opens the thread view.
+/// Under a Concierge message in a task's chat thread: a small light arrow
+/// and the task's title, faint and on one line, cut with "…". A tap opens
+/// the thread view. A source label has no mark, so the two read apart.
 struct ThreadLabelLine: View {
     let title: String
     let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(spacing: 3) {
-                Text(verbatim: "↳").accessibilityHidden(true)
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.turn.down.right")
+                    .romeFont(9, .light)
+                    .accessibilityHidden(true)
                 Text(verbatim: title).lineLimit(1).truncationMode(.tail)
+                    .romeFont(12)
             }
-            .romeFont(12)
             .foregroundStyle(Palette.sub.opacity(0.75))
             .padding(.horizontal, 6)
             .padding(.vertical, 8)

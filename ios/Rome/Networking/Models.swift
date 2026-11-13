@@ -446,10 +446,15 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     /// a card (`{kind:"card", id, messageId, render, since}`) or an approval
     /// (`{kind:"approval", id, since}`). Null when nothing waits.
     var openWait: JSONValue?
+    /// While it needs its owner: since when, epoch ms.
+    var waitingSince: Double?
+    /// A later task with no check: when it is due, epoch ms.
+    var laterAt: Double?
 
     private enum CodingKeys: String, CodingKey {
         case id, title, state, summary, waitingOn, dueAt, rank, chat, conciergeChat, sourceMessageId
         case createdAt, updatedAt, completedAt, archivedAt, notSynced, threadRoot, status, endReason, openWait
+        case waitingSince, laterAt
     }
 
     init(id: String, title: String, state: TaskState, summary: String? = nil, waitingOn: String? = nil, dueAt: Double? = nil, rank: Double? = nil, chat: LinkedChat? = nil, conciergeChat: ConciergeChat? = nil, sourceMessageId: String? = nil, createdAt: Double, updatedAt: Double, completedAt: Double? = nil, archivedAt: Double? = nil, notSynced: Bool? = nil, threadRoot: String? = nil, status: String? = nil, endReason: String? = nil, openWait: JSONValue? = nil) {
@@ -496,6 +501,8 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         endReason = try c.decodeIfPresent(String.self, forKey: .endReason)
         // A shape this build cannot read drops only the wait, never the task.
         openWait = (try? c.decodeIfPresent(JSONValue.self, forKey: .openWait)) ?? nil
+        waitingSince = try? c.decodeIfPresent(Double.self, forKey: .waitingSince)
+        laterAt = try? c.decodeIfPresent(Double.self, forKey: .laterAt)
     }
 }
 

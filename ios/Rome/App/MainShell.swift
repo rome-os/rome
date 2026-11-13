@@ -49,7 +49,7 @@ struct MainShell: View {
     /// The Agent page, opened from a chat header's mascot.
     @State private var agentPage: AgentRoute?
     /// The Agent page's last tab, kept while the instance is open.
-    @State private var agentTab: AgentTab = .uses
+    @State private var agentTab: AgentTab = .tasks
     /// Pages pushed inside the Agent page: a task chat from its Tasks, an app
     /// or another task chat linked from there. Back returns to the Tasks.
     @State private var agentPath: [Route] = []
@@ -154,9 +154,15 @@ struct MainShell: View {
                     // Into this chat's composer, unsent, as the page closes.
                     agentPage = nil
                     workspace.composerPrefills[route.composerKey] = prompt
-                }, onOpenTask: { task in
-                    guard let chat = task.chat else { return }
+                }, onOpenTask: { chat in
                     agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
+                }, onRespond: { messageId in
+                    // The page closes onto the chat it was opened from, at the card.
+                    agentPage = nil
+                    let chat = route.tasksChatId
+                    if workspace.isMainChat(chat) { show(.chat) } else if !chat.isEmpty { show(.topic(chat)) }
+                    let store = workspace.transcript(forChat: chat)
+                    Task { await store.revealCard(messageId) }
                 }, onClose: { agentPage = nil })
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in

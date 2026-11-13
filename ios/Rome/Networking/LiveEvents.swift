@@ -29,6 +29,9 @@ enum LiveEvent: Sendable {
     case sessionName(sessionId: String, name: String)
     /// The Concierge wrote a task row (`concierge.tasks`).
     case taskUpsert(ConciergeTask)
+    /// Something a Concierge chat's task list holds changed
+    /// (`tasks_changed` on `chat.tasks:<chatId>`): read the list again.
+    case taskListChanged(chatId: String)
     /// Events may have been missed: the app came back to the foreground, or
     /// the socket came back after a drop. Listeners refetch what they show.
     case reconnected
@@ -58,6 +61,8 @@ enum LiveTopic {
     static let conciergeActivity = "concierge.activity"
     static let conciergeTasks = "concierge.tasks"
     static func chat(_ sessionId: String) -> String { "chat.session:\(sessionId)" }
+    /// A Concierge chat's task list, by the chat's server id.
+    static func chatTasks(_ chatId: String) -> String { "chat.tasks:\(chatId)" }
     /// Held for the one chat on screen; it carries no events.
     static func watch(_ chatId: String) -> String { "chat.watch:\(chatId)" }
 }
@@ -314,6 +319,9 @@ final class LiveEventsSocket: LiveEventSource {
         case "session_name":
             guard let id = data["sessionId"]?.string, let name = data["name"]?.string else { return nil }
             return .sessionName(sessionId: id, name: name)
+        case "tasks_changed":
+            guard let id = data["chatId"]?.string else { return nil }
+            return .taskListChanged(chatId: id)
         case "message_insert":
             guard let message = data.decoded(ChatMessage.self) else { return nil }
             return .messageInsert(message)

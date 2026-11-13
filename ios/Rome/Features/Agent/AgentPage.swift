@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// The Agent page's tabs; it opens on Uses.
-enum AgentTab: Hashable { case uses, tasks }
+/// The Agent page's tabs; it opens on Tasks.
+enum AgentTab: Hashable { case tasks, uses }
 
 /// The Agent page as opened from one chat's header: which chat's tasks it
 /// lists, which composer a picked prompt goes to, and the avatar it grows
@@ -27,8 +27,11 @@ struct AgentPage: View {
     @Binding var tab: AgentTab
     /// A prompt was picked: the page closes and it goes in the composer.
     let onUse: (String) -> Void
-    /// A task with its own chat was tapped: the chat opens inside the page.
-    let onOpenTask: (ConciergeTask) -> Void
+    /// A task's chat was asked for: it opens inside the page.
+    let onOpenTask: (ConciergeTask.LinkedChat) -> Void
+    /// Respond on a task that needs the guardian: the page closes and the
+    /// chat shows the message with the card it waits on.
+    let onRespond: (_ messageId: String) -> Void
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
@@ -38,6 +41,8 @@ struct AgentPage: View {
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
     /// The stacking game, opened from the big mascot over this page.
     @State private var game: StackGameLaunch?
+    /// The chat's task list, listened to while the page is open.
+    @State private var taskList: TaskListStore?
 
     static let discSize: CGFloat = 96
 
@@ -45,8 +50,8 @@ struct AgentPage: View {
         VStack(spacing: 0) {
             header
             Picker(selection: $tab) {
-                Text("Uses").tag(AgentTab.uses)
                 Text("Tasks").tag(AgentTab.tasks)
+                Text("Uses").tag(AgentTab.uses)
             } label: {
                 EmptyView()
             }
@@ -59,9 +64,18 @@ struct AgentPage: View {
             case .uses:
                 uses
             case .tasks:
-                TasksList(store: workspace.tasks, chatId: route.tasksChatId, onOpen: onOpenTask)
+                TaskListView(store: taskList, onRespond: respond, onOpenChat: onOpenTask)
             }
         }
+        .task(id: route.tasksChatId) {
+            // The list as it was last read shows at once, and is read again.
+            guard let store = workspace.taskList(forChat: route.tasksChatId) else { return }
+            taskList = store
+            let fresh = !store.loaded
+            store.start()
+            if !fresh { await store.load() }
+        }
+        .onDisappear { taskList?.stop() }
         .readableColumn()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.bg.ignoresSafeArea())
@@ -76,6 +90,18 @@ struct AgentPage: View {
             StackGameScreen(launch: launch) { game = nil }
                 .environment(model)
                 .presentationBackground(Palette.bg)
+        }
+    }
+
+    /// To the card in the chat; with no message of this chat showing it,
+    /// to the task chat that holds it.
+    private func respond(_ item: TaskListItem.Task) {
+        if let messageId = item.cardMessageId {
+            onRespond(messageId)
+        } else if let chat = item.task.chat {
+            onOpenTask(chat)
+        } else {
+            taskList?.fail(String(localized: "Could not find the card"))
         }
     }
 
