@@ -412,8 +412,7 @@ struct AgentBubble: View {
         .background(Palette.bubble, in: shape)
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, 64)
+        .bubbleWidth()
     }
 
     /// A small grey chevron, centred. Folded, its backdrop is the fade into
@@ -517,7 +516,6 @@ struct TaskCard: View {
                         .romeFont(CardScale.body, .semibold)
                         .foregroundStyle(Palette.fg)
                         .multilineTextAlignment(.leading)
-                    Spacer(minLength: 0)
                 }
             }
             // Room for Stop on the right.
@@ -545,8 +543,7 @@ struct TaskCard: View {
                 .padding(.trailing, 12)
             }
         }
-        .containerRelativeFrame(.horizontal) { width, _ in (Metrics.column(width) - 32) * 0.82 }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .bubbleWidth()
         .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
     }
 }

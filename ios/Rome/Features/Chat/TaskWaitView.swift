@@ -37,6 +37,7 @@ struct TaskWaitView: View {
                     Task { await store.answer(part, key: key, answers: answers) }
                 }
                 .id(key)
+                .bubbleWidth()
             case .approval(let approval):
                 ApprovalCardView(
                     part: approval.part,
@@ -49,6 +50,7 @@ struct TaskWaitView: View {
                     Task { await store.resolve(approve: approve) }
                 }
                 .id(approval.id)
+                .bubbleWidth()
             case .elsewhere:
                 // An app's own card, such as a sign-in, is answered in its task chat.
                 SettledCard(title: nil, outcome: String(localized: "Open the task chat to answer"), chevron: true, onOpen: onOpenChat)

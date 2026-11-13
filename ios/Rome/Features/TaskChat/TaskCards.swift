@@ -375,6 +375,7 @@ struct ApprovalCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
@@ -419,6 +420,7 @@ struct ApprovalCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
@@ -514,6 +516,7 @@ struct QuestionCardView: View {
                 PrimaryButton(title: "Submit", loading: sending, disabled: !complete, inCard: true) { submit() }
             }
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
@@ -637,6 +640,7 @@ struct QuestionCardView: View {
                 }
             }
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)

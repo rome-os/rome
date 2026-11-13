@@ -66,9 +66,8 @@ struct SettledCard<Full: View>: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        // Hugs its words, left under a Concierge bubble, never wider than one.
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, 64)
+        // Hugs its words, left, never wider than a bubble.
+        .bubbleWidth()
     }
 }
 

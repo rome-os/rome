@@ -189,9 +189,7 @@ struct ErrorLine: View {
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .softElevation(radius: Metrics.cardRadius)
-        // Content width, left, under the bubbles' reach.
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, 64)
+        .bubbleWidth()
         .accessibilityElement(children: .contain)
     }
 }

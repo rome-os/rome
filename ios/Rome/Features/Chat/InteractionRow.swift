@@ -56,6 +56,7 @@ struct InteractionRow: View {
             }
             // The record is the guardian's to read: a visitor would only get 403s.
             .onAppear { if !isVisitor { store.watchApproval(part.approvalId) } }
+            .bubbleWidth()
         case .question(_, let part, _, let answered?):
             SettledCard(title: SettledOutcome.title(part), outcome: SettledOutcome.answer(answered)) {
                 QuestionCardView(part: part, answered: answered, sending: false) { _ in }
@@ -64,20 +65,25 @@ struct InteractionRow: View {
             QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { answers in
                 store.answer(part, answers: answers, sessionId: sessionId)
             }
+            .bubbleWidth()
         case .connect(let id, let part, let sessionId):
             ConnectCardView(part: part, phase: store.connectPhases[id] ?? TranscriptStore.previewPhase(part.service) ?? .idle) {
                 store.connect(part, rowId: id, chatId: sessionId)
             }
             .task(id: id) { await store.checkConnected(part, rowId: id) }
+            .bubbleWidth()
         case .widgetUI(_, let part):
             WidgetUICardView(part: part) { method, path, body in
                 try await store.appCall(appId: part.appId, method: method, path: path, body: body)
             }
+            .bubbleWidth()
         case .webOnly(_, let kind, let done):
             WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)
+                .bubbleWidth()
         case .routineDraft(_, let part):
             RoutineDraftCardView(part: part, status: store.routineStatus(part), canTurnOn: !isVisitor, sessionId: store.sessionId)
                 .task { if !isVisitor { await store.loadRoutines() } }
+                .bubbleWidth()
         default:
             EmptyView()
         }
