@@ -756,8 +756,12 @@ describe("MessageList model switch notice", () => {
 });
 
 describe("a turn that failed, read back after a reload", () => {
-  const renderFailed = (summary: Partial<NonNullable<ChatMessage["traceSummary"]>>) => {
+  const renderFailed = (
+    summary: Partial<NonNullable<ChatMessage["traceSummary"]>>,
+    before: ChatMessage[] = [],
+  ) => {
     const messages: ChatMessage[] = [
+      ...before,
       {
         id: "trace-failed",
         sessionId: "s-1",
@@ -813,6 +817,43 @@ describe("a turn that failed, read back after a reload", () => {
       "/settings/ai-tools",
     );
     expect(screen.queryByText(/credit balance is 0/)).toBeNull();
+  });
+
+  it("puts the guidance in the row's body, below its one-line trace header", () => {
+    renderFailed({ terminalErrorCode: "credits_used_up" });
+    const header = screen.getByRole("button", { name: /Error/ }).closest(".h-5");
+    expect(header).not.toBeNull();
+    expect(header?.contains(screen.getByText("Rome credits used up"))).toBe(false);
+  });
+
+  it("shows the guidance once for a turn whose error is stored as its own message", () => {
+    renderFailed(
+      {
+        terminalError: "Claude is not signed in",
+        terminalErrorCode: "model_provider_unavailable",
+        terminalErrorProvider: "anthropic",
+        terminalErrorReason: "not_logged_in",
+      },
+      [
+        {
+          id: "a-failed",
+          sessionId: "s-1",
+          turnId: "turn-failed",
+          role: "assistant",
+          content: JSON.stringify([
+            {
+              type: "error",
+              error: "Claude is not signed in",
+              code: "model_provider_unavailable",
+              provider: "anthropic",
+              reason: "not_logged_in",
+            },
+          ]),
+          createdAt: "2026-06-13T00:00:00.000Z",
+        },
+      ],
+    );
+    expect(screen.getAllByText("Claude is not signed in")).toHaveLength(1);
   });
 
   it("keeps the raw text for an error with no guidance, or from an older server", () => {
