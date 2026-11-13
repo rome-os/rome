@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./bootstrap": "./src/bootstrap.ts",
     "./chat": "./src/chat.ts",
+    "./chat-work": "./src/chat-work.ts",
     "./concierge": "./src/concierge.ts",
     "./concierge-activity": "./src/concierge-activity.ts",
     "./concierge-task-status": "./src/concierge-task-status.ts",

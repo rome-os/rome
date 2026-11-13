@@ -113,7 +113,7 @@ function datedOneOffError(trigger: {
 
 /** Whether a dated one-off can still fire. A stored tzid Intl rejects makes the
  * parse throw rather than return NaN, so that counts as unparseable too. */
-function datedOneOffState(trigger: {
+export function datedOneOffState(trigger: {
   date?: string;
   localTime: string;
   tzid: string;
