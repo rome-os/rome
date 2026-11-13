@@ -4,8 +4,8 @@ import { createChannelsService } from "./accounts-service.js";
 import { conciergeChatGuard } from "../concierge/automated-input.js";
 import { createTestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { webchatChannel } from "../webchat/dashboard-account.js";
-import { isConciergeChat } from "../webchat/privacy.js";
+import { refuseAnotherOwnersChat, webchatChannel } from "../webchat/dashboard-account.js";
+import { isConciergeChat, TASK_CHAT_TRIGGER_KIND } from "../webchat/privacy.js";
 
 function makeCalls(overrides: Partial<ChatWorkerCallsDeps> = {}) {
   return chatWorkerCalls({
@@ -72,6 +72,12 @@ describe("channels.send into a Concierge chat", () => {
       "core:concierge",
     );
     await repo.createSession("plain", "Plans");
+    // The guardian's task chat, where the main agent sends from.
+    await repo.createSession("task-1", "Flights");
+    await repo.setSessionTrigger("task-1", {
+      triggerKind: TASK_CHAT_TRIGGER_KIND,
+      triggerName: null,
+    });
     const runSystemTurn = rs.fn(async () => true);
     const channelsService = createChannelsService({
       channels: () => [],
@@ -85,6 +91,7 @@ describe("channels.send into a Concierge chat", () => {
       agentNames: {} as never,
       intoConciergeChat: conciergeChatGuard({
         isConciergeChat: async (chatId) => isConciergeChat(await repo.getSession(chatId)),
+        refuseAnotherOwnersChat: (chatId) => refuseAnotherOwnersChat(repo, chatId),
         senderOf: async (agentName) => ({
           sourceType: agentName ? "agent" : null,
           name: agentName === "core:main" ? "Milo" : null,
@@ -107,8 +114,37 @@ describe("channels.send into a Concierge chat", () => {
           },
         },
       );
-    return { testDb, repo, runSystemTurn, send };
+    return { testDb, repo, runSystemTurn, send, calls };
   };
+
+  it("refuses a send into another owner's Concierge chat, as the chat refuses any send", async () => {
+    const { testDb, repo, runSystemTurn, calls } = await setup();
+    const sendAs = (callerActionContext: Record<string, unknown>) =>
+      calls["channels.send"](
+        { channel: "webchat", chatId: "concierge", message: { text: "Wire the money." } },
+        { callerActionContext },
+      );
+    try {
+      // A visitor's agent, and an app action no person ran from a common chat.
+      await expect(
+        sendAs({
+          actor: { kind: "visitor", userId: "v1", via: "cookie" },
+          channelContext: { channel: "webchat", threadId: "plain" },
+          agentName: "core:main",
+        }),
+      ).rejects.toThrow("No dashboard chat concierge");
+      await expect(
+        sendAs({
+          channelContext: { channel: "webchat", threadId: "plain" },
+          agentName: "core:main",
+        }),
+      ).rejects.toThrow("No dashboard chat concierge");
+      expect(runSystemTurn).not.toHaveBeenCalled();
+      expect(await repo.getMessages("concierge")).toEqual([]);
+    } finally {
+      testDb.close();
+    }
+  });
 
   it("wakes the Concierge with a task chat's send, and writes no line for it", async () => {
     const { testDb, repo, runSystemTurn, send } = await setup();

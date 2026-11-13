@@ -96,19 +96,18 @@ export function chatWorkerCalls(
         SendParams,
         params,
       );
-      // Only the Concierge writes in a Concierge chat: another agent's or an
-      // app's send there wakes it instead.
-      const taken = await deps.intoConciergeChat?.(
-        channel,
-        chatId,
-        message,
-        caller?.callerActionContext?.agentName,
-      );
-      if (taken) return taken;
       // The dashboard chat writes only where the calling action's person may.
-      return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), () =>
-        channelsService.send(channel, chatId as ChatId, message),
-      );
+      return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), async () => {
+        // Only the Concierge writes in a Concierge chat: another agent's or an
+        // app's send there wakes it instead, once the caller may write there.
+        const taken = await deps.intoConciergeChat?.(
+          channel,
+          chatId,
+          message,
+          caller?.callerActionContext?.agentName,
+        );
+        return taken ?? (await channelsService.send(channel, chatId as ChatId, message));
+      });
     },
     "channels.query": async (params, caller) => {
       const { channel, chatId, since, after, limit } = parseWorkerCallParams(

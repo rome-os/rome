@@ -39,19 +39,39 @@ function attr(value: string): string {
 }
 
 /**
- * The Concierge's input for an automated send: the text, fenced so it reads
- * as the source's and not the owner's. A closing tag inside the text cannot
- * end the block early.
+ * Whether the chat's owner set the input up: their own routine, or a send on
+ * their behalf. Only such input is a request; an app's, another agent's or an
+ * automation's is information the Concierge judges.
  */
-export function automatedInputPrompt(source: SystemInputSource, text: string): string {
+export function fromOwner(source: SystemInputSource, onBehalf: boolean): boolean {
+  return onBehalf || source.type === "routine";
+}
+
+/**
+ * The Concierge's input for an automated send: the text, fenced so it reads
+ * as the source's and not the owner's, and marked when the owner set it up. A
+ * closing tag inside the text cannot end the block early.
+ */
+export function automatedInputPrompt(
+  source: SystemInputSource,
+  text: string,
+  owner = false,
+): string {
   const name = source.name ? ` name="${attr(source.name)}"` : "";
+  const marked = owner ? ' from_owner="true"' : "";
   const body = text.replace(/<\/automated_input>/gi, "</automated_input_>");
-  return `<automated_input source="${source.type}"${name}>\n${body}\n</automated_input>`;
+  return `<automated_input source="${source.type}"${name}${marked}>\n${body}\n</automated_input>`;
 }
 
 /** What the guard needs from Rome: which chats are Concierge chats, who an agent is, and a system turn. */
 export interface ConciergeChatGuardDeps {
   isConciergeChat: (chatId: string) => Promise<boolean>;
+  /**
+   * Throws when the calling action's person or chat may not write into
+   * `chatId`, as the webchat channel does for any send. Checked before a
+   * send turns into a turn, so a chat its caller may not open stays closed.
+   */
+  refuseAnotherOwnersChat: (chatId: string) => Promise<void>;
   /** The sender an agent's account names, by agent id; anonymous when no agent sent it. */
   senderOf: (agentName: string | undefined) => Promise<AutomatedInputSender>;
   runSystemTurn: (
@@ -91,6 +111,7 @@ export function conciergeChatGuard(deps: ConciergeChatGuardDeps) {
         .flatMap((part) => (part.type === "text" ? [part.content] : []))
         .join("\n\n")
         .trim();
+    await deps.refuseAnotherOwnersChat(chatId);
     if (!text) throw new Error("A Concierge chat takes only text from another agent or an app");
     const source = automatedInputSource(await deps.senderOf(agentName));
     void deps
