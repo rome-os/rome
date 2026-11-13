@@ -8,16 +8,18 @@ set -euo pipefail
 
 usage() {
   die "usage:
+  cos-env seed <dir>
   cos-env post --as <member> --chat <name> [--thread <id>] [--mention-agent] <text>
   cos-env dm --as <member> <text>
   cos-env read --chat <name> [--thread <id>] [--since <message id>]
+  cos-env read --dm <member> [--since <message id>]
   cos-env rename --as <member> <display name>
-  cos-env rome stop|start|restart
+  cos-env rome stop|start|restart|renew-session --chat <name>
   cos-env reset
   cos-env version"
 }
 
-as="" chat="" thread="" since="" mention=0
+as="" chat="" dm="" thread="" since="" mention=0
 args=()
 command="${1:-}"
 [ -n "$command" ] || usage
@@ -26,6 +28,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --as) as="${2:?--as needs a member}" && shift 2 ;;
     --chat) chat="${2:?--chat needs a chat name}" && shift 2 ;;
+    --dm) dm="${2:?--dm needs a member}" && shift 2 ;;
     --thread) thread="${2:?--thread needs a thread id}" && shift 2 ;;
     --since) since="${2:?--since needs a message id}" && shift 2 ;;
     --mention-agent) mention=1 && shift ;;
@@ -34,36 +37,48 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Runs a Discord command as a member's bot.
-as_member() {
-  [ -n "$as" ] || usage
-  local var
-  var="$(member_token_var "$as")"
-  COS_TOKEN="${!var}" discord "$@"
+# A member as --as or --dm names it: one of the team's members, or member1:2,
+# member1's second account.
+check_member() {
+  local member="$1" known
+  [ "$member" = "member1:2" ] && return
+  for known in "${MEMBERS[@]}"; do [ "$member" = "$known" ] && return; done
+  die "no member \"$member\". Members: ${MEMBERS[*]} member1:2"
 }
 
 case "$command" in
+  seed)
+    [ ${#args[@]} -eq 1 ] || usage
+    cmd_seed "${args[0]}"
+    ;;
   post)
-    [ -n "$chat" ] && [ ${#args[@]} -gt 0 ] || usage
+    [ -n "$as" ] && [ -n "$chat" ] && [ ${#args[@]} -gt 0 ] || usage
+    check_member "$as"
     load_secrets
-    as_member post "$chat" "$thread" "$mention" "${args[*]}"
+    discord post "$as" "$chat" "$thread" "$mention" "${args[*]}"
     ;;
   dm)
-    [ ${#args[@]} -gt 0 ] || usage
+    [ -n "$as" ] && [ ${#args[@]} -gt 0 ] || usage
+    check_member "$as"
     load_secrets
-    as_member dm "${args[*]}"
+    discord post "$as" "$COS_DM_CHAT_PREFIX${as%%:*}" "" 0 "${args[*]}"
     ;;
   read)
+    if [ -n "$dm" ]; then
+      check_member "$dm"
+      chat="$COS_DM_CHAT_PREFIX${dm%%:*}"
+    fi
     [ -n "$chat" ] || usage
     load_secrets
     discord read "$chat" "$thread" "$since"
     ;;
   rename)
-    [ ${#args[@]} -gt 0 ] || usage
+    [ -n "$as" ] && [ ${#args[@]} -gt 0 ] || usage
+    check_member "$as"
     load_secrets
-    as_member rename "${args[*]}"
+    discord rename "$as" "${args[*]}"
     ;;
-  rome) cos_rome "${args[0]:-}" ;;
+  rome) cos_rome "${args[0]:-}" ${chat:+--chat "$chat"} ;;
   reset) cmd_reset ;;
   version) cos_version ;;
   *) usage ;;

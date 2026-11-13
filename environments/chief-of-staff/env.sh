@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The chief of staff environment: a Rome container of its own, built from this
-# checkout, connected to a test Discord server through the agent's Discord bot,
-# with bots that play the team.
+# checkout, connected to a test Discord server through the agent's Discord bot.
+# The team members are webhook authors that a second bot, the driver, runs.
 #
 #   environments/chief-of-staff/env.sh up [--no-build]  # start, or bring up to date
 #   environments/chief-of-staff/env.sh reset            # wipe Rome and the test chats, start again
@@ -10,6 +10,8 @@
 #
 # The verifier drives it through cos-env only. See README.md.
 set -euo pipefail
+# The state file holds the members' webhook tokens, so nothing here is readable by others.
+umask 077
 
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$ENV_DIR" rev-parse --show-toplevel)"
@@ -84,9 +86,7 @@ load_from_1password() {
 
 # Reads the secrets into the environment from the 1Password vault when the
 # devbox holds a service account token, otherwise from the secrets file, and
-# stops naming the first one missing. The fourth member token is optional: it
-# is the second account of member1, and only `--as member1:2` needs it. Values
-# are never echoed.
+# stops naming the first one missing. Values are never echoed.
 load_secrets() {
   local source
   if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ -s "$OP_TOKEN_FILE" ]; then
@@ -102,7 +102,7 @@ load_secrets() {
     die "no secrets: put a 1Password service account token in $OP_TOKEN_FILE, or write $SECRETS_FILE. README.md lists what either holds."
   fi
   local name
-  for name in COS_DISCORD_SERVER_ID COS_AGENT_BOT_TOKEN COS_MEMBER_1_BOT_TOKEN COS_MEMBER_2_BOT_TOKEN COS_MEMBER_3_BOT_TOKEN; do
+  for name in COS_DISCORD_SERVER_ID COS_AGENT_BOT_TOKEN COS_DRIVER_BOT_TOKEN; do
     [ -n "${!name:-}" ] || die "$source does not set $name"
   done
   if [ -n "${ANTHROPIC_API_KEY:-}" ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
@@ -112,25 +112,27 @@ load_secrets() {
     die "$source sets no model login: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
 }
 
-# The bot token behind a member name. member1..3 are the three accounts;
-# <member>:2 is that member's second account, the fourth bot.
-member_token() {
-  case "$1" in
-    member1) printf '%s' "$COS_MEMBER_1_BOT_TOKEN" ;;
-    member2) printf '%s' "$COS_MEMBER_2_BOT_TOKEN" ;;
-    member3) printf '%s' "$COS_MEMBER_3_BOT_TOKEN" ;;
-    *:2)
-      [ -n "${COS_MEMBER_4_BOT_TOKEN:-}" ] ||
-        die "no second account: $SECRETS_FILE sets no COS_MEMBER_4_BOT_TOKEN. Only \"--as $1\" needs it."
-      [ "$1" = "member1:2" ] || die "the only second account is member1:2, not \"$1\""
-      printf '%s' "$COS_MEMBER_4_BOT_TOKEN"
-      ;;
-    *) die "no member named \"$1\". Members: ${MEMBERS[*]} (and member1:2 with a fourth token)" ;;
-  esac
+# The members a chat holds, by the chat's name: the ones team.env lists for a
+# shared chat, the one member of a private chat, and member1's second account
+# wherever member1 is.
+chat_members() {
+  local chat="$1" var members=()
+  if [[ "$chat" == "$COS_DM_CHAT_PREFIX"* ]]; then
+    members=("${chat#"$COS_DM_CHAT_PREFIX"}")
+  else
+    var="COS_CHAT_MEMBERS_${chat//-/_}"
+    read -r -a members <<<"${!var:-}"
+  fi
+  local member
+  for member in "${members[@]}"; do
+    printf '%s\n' "$member"
+    [ "$member" != member1 ] || printf '%s\n' "member1:2"
+  done
 }
 
+# Runs the Discord helper as the driver bot.
 discord() {
-  COS_STATE="$STATE_FILE" COS_READER_TOKEN="$COS_MEMBER_1_BOT_TOKEN" node "$ENV_DIR/discord.mjs" "$@"
+  COS_STATE="$STATE_FILE" COS_TOKEN="${COS_TOKEN:-$COS_DRIVER_BOT_TOKEN}" node "$ENV_DIR/discord.mjs" "$@"
 }
 
 # One field of the JSON on stdin, by a dotted path. Prints nothing when absent.
@@ -274,21 +276,21 @@ all_chat_names() {
 }
 
 # Writes the bots' and chats' Discord ids, which every later command reads.
+# Keeps the webhooks, display names and connection an earlier run recorded.
 write_discord_state() {
-  local agent members="" member id chats names
+  local agent driver chats names
   agent="$(COS_TOKEN="$COS_AGENT_BOT_TOKEN" discord whoami)"
-  for member in "${MEMBERS[@]}"; do
-    id="$(COS_TOKEN="$(member_token "$member")" discord whoami | json id)"
-    members+="${members:+,}\"$member\":{\"id\":\"$id\"}"
-  done
-  if [ -n "${COS_MEMBER_4_BOT_TOKEN:-}" ]; then
-    id="$(COS_TOKEN="$COS_MEMBER_4_BOT_TOKEN" discord whoami | json id)"
-    members+=",\"member1:2\":{\"id\":\"$id\"}"
-  fi
+  driver="$(discord whoami)"
   mapfile -t names < <(all_chat_names)
-  chats="$(COS_TOKEN="$COS_MEMBER_1_BOT_TOKEN" discord chats "${names[@]}")"
-  printf '{"agent":%s,"members":{%s},"chats":%s,"dmPrefix":"%s"}\n' \
-    "$agent" "$members" "$chats" "$COS_DM_CHAT_PREFIX" >"$STATE_FILE"
+  chats="$(discord chats "${names[@]}")"
+  node -e '
+    const fs = require("fs");
+    const [file, agent, driver, chats, dmPrefix] = process.argv.slice(1);
+    let old = {};
+    try { old = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+    const s = { ...old, agent: JSON.parse(agent), driver: JSON.parse(driver), chats: JSON.parse(chats), dmPrefix };
+    fs.writeFileSync(file, JSON.stringify(s) + "\n", { mode: 0o600 });' \
+    "$STATE_FILE" "$agent" "$driver" "$chats" "$COS_DM_CHAT_PREFIX"
 }
 
 state() { json "$1" <"$STATE_FILE"; }
@@ -333,7 +335,7 @@ set_chat() {
     "$(state connection)" "$(state "chats.$name")" "$patch" | api PATCH /chat-settings >/dev/null
 }
 
-# Every test chat hears every bot message, since the members are bots. Every
+# Every test chat hears every bot message, since webhook authors count as bots. Every
 # other chat setting keeps Rome's default.
 let_chats_hear_bots() {
   local name
@@ -393,7 +395,13 @@ cmd_reset() {
   claim_ownership
   load_secrets
   write_discord_state
+  log "deleting the members' webhooks ..."
+  discord delete-webhooks
   clear_chats
+  node -e '
+    const fs = require("fs"); const f = process.argv[1];
+    const s = JSON.parse(fs.readFileSync(f, "utf8")); delete s.members; delete s.connection;
+    fs.writeFileSync(f, JSON.stringify(s) + "\n", { mode: 0o600 });' "$STATE_FILE"
   log "wiping Rome's home, memory and chats ..."
   remove_rome
   cmd_up --no-build
@@ -401,10 +409,14 @@ cmd_reset() {
 
 cmd_down() {
   claim_ownership
+  if [ -f "$STATE_FILE" ] && (load_secrets) 2>/dev/null; then
+    load_secrets
+    discord delete-webhooks || log "could not delete the members' webhooks; the next seed replaces them"
+  fi
   remove_rome
   docker image rm "$IMAGE" >/dev/null 2>&1 || true
   rm -rf "$RUN_DIR"
-  log "removed. The secrets file stays in $SECRETS_FILE, and the test chats keep their messages until the next reset."
+  log "removed. The test chats keep their messages until the next reset."
 }
 
 # Replaces one of the agent app's documents (roster or goals) with the markdown
@@ -418,10 +430,13 @@ put_document() {
     die "Rome refused to write the $document document. Is the $COS_AGENT_APP app in this checkout?"
 }
 
-# Links each member's Discord account to a person, sets their server display
-# names, and hands the agent the roster and goals. team.json maps each member to
-# a person: { "member1": { "displayName": "...", "bondLevel": "..." }, ... }. The
-# roster and goals are markdown the agent reads through its own documents.
+# Gives each member a webhook in each chat it is in, links all of a member's
+# webhooks to one person, sets the names the members post under, and hands the
+# agent the roster and goals. team.json maps each member to a person:
+# { "member1": { "displayName": "...", "bondLevel": "..." }, ... }. member1:2,
+# member1's second account, belongs to member1's person and posts under the same
+# name until renamed. The roster and goals are markdown the agent reads through
+# its own documents.
 cmd_seed() {
   local dir="${1:?usage: cos-env seed <dir>}"
   mkdir -p "$RUN_DIR"
@@ -431,25 +446,31 @@ cmd_seed() {
   for file in team.json roster.md goals.md; do
     [ -f "$dir/$file" ] || die "$dir has no $file"
   done
-  local member display bond person person1=""
+  local chat members plan="" member display bond accounts
+  log "making the members' webhooks ..."
+  while IFS= read -r chat; do
+    members="$(chat_members "$chat" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))')"
+    plan+="${plan:+,}\"$chat\":$members"
+  done < <(all_chat_names)
+  printf '{%s}' "$plan" | discord webhooks
   for member in "${MEMBERS[@]}"; do
     display="$(json "$member.displayName" <"$dir/team.json")"
     bond="$(json "$member.bondLevel" <"$dir/team.json")"
     [ -n "$display" ] || die "team.json has no displayName for $member"
+    # Every webhook of the member, its second account's included, is one of its accounts.
+    accounts="$(node -e '
+      const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const member = process.argv[2];
+      const ids = Object.values(s.webhooks).flatMap((hooks) =>
+        Object.entries(hooks).filter(([m]) => m.split(":")[0] === member).map(([, h]) => h.id));
+      process.stdout.write(JSON.stringify(ids.map((id) => ({ channel: "discord", channelUserId: id }))));' \
+      "$STATE_FILE" "$member")"
     log "linking $member to $display ..."
-    person="$(printf '{"displayName":"%s","bondLevel":"%s","accounts":[{"channel":"discord","channelUserId":"%s"}]}' \
-      "$display" "${bond:-other}" "$(state "members.$member.id")" | api POST /people | json id)"
-    [ -n "$person" ] || die "Rome did not create a person for $display"
-    [ "$member" = "member1" ] && person1="$person"
-    COS_TOKEN="$(member_token "$member")" discord rename "$display"
+    printf '{"displayName":"%s","bondLevel":"%s","accounts":%s}' "$display" "${bond:-other}" "$accounts" |
+      api POST /people >/dev/null || die "Rome did not create a person for $display"
+    discord rename "$member" "$display"
+    [ "$member" != member1 ] || discord rename "member1:2" "$display"
   done
-  # The second account belongs to the same person as member1, so attribution
-  # finds them under one person however they post.
-  if [ -n "${COS_MEMBER_4_BOT_TOKEN:-}" ]; then
-    log "linking member1's second account to $person1 ..."
-    printf '{"channel":"discord","channelUserId":"%s"}' "$(state "members.member1:2.id")" |
-      api POST "/people/$person1/accounts" >/dev/null
-  fi
   log "handing the roster and goals to the agent ..."
   put_document roster "$dir/roster.md"
   put_document goals "$dir/goals.md"
