@@ -2,19 +2,6 @@ import SwiftUI
 
 /// The words of a Concierge chat's faint lines.
 enum NoticeCopy {
-    /// "Routine · Daily summary", or the kind alone when the source has no name.
-    static func automated(_ source: TraceSummary.InputSource) -> String {
-        let kind: String
-        switch source.type {
-        case "routine": kind = String(localized: "Routine")
-        case "app": kind = String(localized: "App")
-        case "agent": kind = String(localized: "Agent")
-        default: kind = String(localized: "Automation")
-        }
-        guard let name = source.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return kind }
-        return "\(kind) · \(name)"
-    }
-
     /// "Context tidied up · conversation got long". A reason this build does
     /// not know shows as it came.
     static func renewal(_ reason: String) -> String {
@@ -31,20 +18,6 @@ enum NoticeCopy {
     }
 }
 
-/// A faint centered line where a routine, an app or another agent sent
-/// something into a Concierge chat: only who sent it. What it sent is the
-/// Concierge's input and stays in the turn's trace. Not tappable.
-struct AutomatedInputLine: View {
-    let source: TraceSummary.InputSource
-
-    var body: some View {
-        Text(verbatim: NoticeCopy.automated(source))
-            .romeFont(12)
-            .foregroundStyle(Palette.sub.opacity(0.75))
-            .lineLimit(1)
-            .frame(maxWidth: .infinity)
-    }
-}
 
 /// A faint centered line where the chat's agent session was renewed, with
 /// why. When the renewal wrote a handoff for the new session, a tap opens it

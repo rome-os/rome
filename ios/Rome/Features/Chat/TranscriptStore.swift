@@ -618,6 +618,12 @@ final class TranscriptStore {
         return true
     }
 
+    /// Removes a send that failed for good, and the draft kept for it.
+    func removePending(_ id: String) {
+        pending.removeAll { $0.id == id }
+        if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: id) }
+    }
+
     func retry(_ id: String) {
         guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
         pending[index].state = .sending
@@ -809,14 +815,15 @@ final class TranscriptStore {
         guard !answering.contains(part.toolUseId) else { return }
         let output: JSONValue = .object(["answers": .array(answers)])
         answering.insert(part.toolUseId)
-        localAnswers[part.toolUseId] = output
+        // The form stays on screen, with the choices, until the server has the
+        // answer: a failure leaves it as it was, to send again.
         Task {
             do {
                 try await backend.answer(sessionId: sessionId ?? self.sessionId, toolUseId: part.toolUseId, output: output)
+                localAnswers[part.toolUseId] = output
                 markRunning()
             } catch {
-                localAnswers[part.toolUseId] = nil
-                say(String(localized: "Couldn't send your answer"))
+                say(String(localized: "Couldn't send your answer. Your choices are kept"))
             }
             answering.remove(part.toolUseId)
         }

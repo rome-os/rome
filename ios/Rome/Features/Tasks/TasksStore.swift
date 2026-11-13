@@ -250,4 +250,58 @@ final class TasksStore {
     func task(forChat chatId: String) -> ConciergeTask? {
         tasks.first { $0.chat?.id == chatId }
     }
+
+    // MARK: Task cards
+
+    /// Tasks being stopped from a card, by id.
+    private(set) var stopping: Set<String> = []
+
+    /// What a task card says: the word after "Task chat ·", and whether Stop
+    /// shows. The task's own status when the list has it, else the chat's
+    /// flags, as the web card does (`TaskChatCard.tsx`).
+    func cardState(forChat chatId: String) -> TaskCardState {
+        let session = chats[chatId]
+        if let task = task(forChat: chatId) {
+            let open = task.status != "ended"
+            let word: String
+            switch (task.status, task.endReason) {
+            case ("ended", "failed"?): word = String(localized: "Failed")
+            case ("ended", "stopped"?): word = String(localized: "Stopped")
+            case ("ended", "no_response"?): word = String(localized: "No response")
+            case ("ended", _): word = String(localized: "Done")
+            case ("needs_you", _): word = String(localized: "Needs you")
+            case ("active", _): word = String(localized: "Working")
+            case ("later", _): word = String(localized: "Later")
+            default: word = Self.chatWord(session)
+            }
+            return TaskCardState(word: word, stoppable: task.status != nil && open, taskId: task.id)
+        }
+        // An archived task chat's task was stopped with it, and the list holds no row for it.
+        if session?.archivedAt != nil { return TaskCardState(word: String(localized: "Stopped"), stoppable: false, taskId: nil) }
+        return TaskCardState(word: Self.chatWord(session), stoppable: false, taskId: nil)
+    }
+
+    private static func chatWord(_ session: ChatSession?) -> String {
+        if session?.running == true { return String(localized: "Working") }
+        if session?.awaitingGuardian == true { return String(localized: "Needs you") }
+        if session?.lastTurnFailed == true { return String(localized: "Stopped with an error") }
+        return String(localized: "Done")
+    }
+
+    /// Stops the task of a card. The task's next row from the instance settles the card.
+    func stopTask(id: String) {
+        guard !stopping.contains(id) else { return }
+        stopping.insert(id)
+        Task {
+            try? await backend.stopTask(id: id)
+            stopping.remove(id)
+        }
+    }
+}
+
+/// How a task card reads: "Task chat · <word>", and Stop while the task is open.
+struct TaskCardState: Equatable {
+    var word: String
+    var stoppable: Bool
+    var taskId: String?
 }

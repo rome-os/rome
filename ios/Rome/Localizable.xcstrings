@@ -31,12 +31,12 @@
         }
       }
     },
-    "%@ is unavailable, switched to %@" : {
+    "%@ is temporarily unavailable, switched to %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 暂不可用，已切换到 %@"
+            "value" : "%@ 暂时不可用，已切换到 %@"
           }
         }
       }
@@ -71,7 +71,7 @@
         }
       }
     },
-    "%@ ran out, switched to %@" : {
+    "%@ quota ran out, switched to %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -1111,6 +1111,16 @@
         }
       }
     },
+    "Copy text" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制文字"
+          }
+        }
+      }
+    },
     "Could not check the connection" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1211,6 +1221,16 @@
         }
       }
     },
+    "Could not start the chat · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法开始聊天 · %@"
+          }
+        }
+      }
+    },
     "Could not start the update" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1287,6 +1307,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法发送你的回答"
+          }
+        }
+      }
+    },
+    "Couldn't send your answer. Your choices are kept" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法发送回答，你的选择已保留"
           }
         }
       }
@@ -1859,6 +1889,16 @@
         }
       }
     },
+    "Later" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "稍后"
+          }
+        }
+      }
+    },
     "Light" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2189,16 +2229,6 @@
         }
       }
     },
-    "No longer waiting" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不再等待"
-          }
-        }
-      }
-    },
     "No matching messages" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2225,6 +2255,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有网络连接"
+          }
+        }
+      }
+    },
+    "No response" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无回应"
           }
         }
       }
@@ -3671,6 +3711,16 @@
         }
       }
     },
+    "Stopped with an error" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出错已停止"
+          }
+        }
+      }
+    },
     "Stopping a task" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3817,6 +3867,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "任务说明 · 来自 Chat"
+          }
+        }
+      }
+    },
+    "Task chat · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务聊天 · %@"
           }
         }
       }

@@ -129,7 +129,7 @@ final class TaskWaitStore {
         var crossed = false
         var reached = false
         for _ in 0..<Self.pagesBack {
-            guard let page = try? await backend.messages(sessionId: chatId, before: before, limit: 2) else { break }
+            guard let page = try? await backend.messages(sessionId: chatId, before: before, limit: Self.settledPageSize) else { break }
             reached = true
             held.insert(contentsOf: page.messages, at: 0)
             // One page past the card's time holds the question it showed.
@@ -153,19 +153,26 @@ final class TaskWaitStore {
 
     /// Pages of a task chat read at most, going back to a card's time.
     nonisolated static let pagesBack = 5
+    /// Messages in each page of that read.
+    nonisolated static let settledPageSize = 20
 
     /// The newest question or approval the task asked by `until`, with the
     /// answer given to it since. Results close only cards before them, as
     /// a later turn can reuse a tool-call id.
     nonisolated static func asked(messages: [ChatMessage], until: Date) -> SettledAsk? {
         var asked: (kind: SettledAsk.Kind, date: Date)?
-        var answers: [String: (output: JSONValue, date: Date)] = [:]
+        // Every answer and every asking of a tool-call id, in order: a later
+        // turn can reuse an id, so a question takes the first answer after it
+        // and before its id is asked again.
+        var answers: [String: [(output: JSONValue, date: Date)]] = [:]
+        var askings: [String: [Date]] = [:]
         for message in messages where message.role == "assistant" || message.role == "user" {
             for part in message.parts {
                 switch part {
                 case .interactionResult(let toolUseId, let output):
-                    answers[toolUseId] = (output, message.date)
+                    answers[toolUseId, default: []].append((output, message.date))
                 case .question(let question) where message.date <= until:
+                    askings[question.toolUseId, default: []].append(message.date)
                     if asked.map({ message.date >= $0.date }) ?? true {
                         asked = (.question(question, answer: nil), message.date)
                     }
@@ -179,9 +186,10 @@ final class TaskWaitStore {
             }
         }
         guard let asked else { return nil }
-        if case .question(let question, _) = asked.kind,
-           let answer = answers[question.toolUseId], answer.date >= asked.date {
-            return SettledAsk(kind: .question(question, answer: answer.output))
+        if case .question(let question, _) = asked.kind {
+            let next = askings[question.toolUseId]?.first { $0 > asked.date }
+            let answer = answers[question.toolUseId]?.first { $0.date >= asked.date && $0.date < (next ?? .distantFuture) }
+            if let answer { return SettledAsk(kind: .question(question, answer: answer.output)) }
         }
         return SettledAsk(kind: asked.kind)
     }

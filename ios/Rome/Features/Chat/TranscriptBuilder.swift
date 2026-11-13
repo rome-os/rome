@@ -65,9 +65,6 @@ enum TranscriptRow: Identifiable, Hashable {
     /// Under a Concierge message in a task's chat thread: `↳ <task title>`,
     /// which opens the thread view (docs/domains/chats.md#chat-thread).
     case threadLabel(id: String, messageId: String, title: String)
-    /// A faint centered line in a Concierge chat where a routine, an app or
-    /// another agent sent something in: who sent it. Not tappable.
-    case automatedInput(id: String, source: TraceSummary.InputSource)
     /// A faint centered line where the chat's agent session was renewed,
     /// with why; `sessionId` is the new session, whose handoff a tap opens.
     case sessionRenewal(id: String, reason: String, sessionId: String?)
@@ -78,7 +75,7 @@ enum TranscriptRow: Identifiable, Hashable {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
              .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
-             .threadLabel(let id, _, _), .automatedInput(let id, _), .sessionRenewal(let id, _, _):
+             .threadLabel(let id, _, _), .sessionRenewal(let id, _, _):
             return id
         case .typing:
             return "typing"
@@ -197,13 +194,10 @@ enum TranscriptBuilder {
         // Messages come in the store's order, which follows the server's turns.
         for (position, message) in messages.enumerated() {
             notices(for: message)
-            // A Concierge chat holds no automated messages: one from before
-            // that rule draws as the line a newer one gets. One said on the
-            // owner's behalf is theirs, and stays their bubble.
-            if options.showNotices, let source = Self.automatedSource(message) {
-                entries.append(Entry(id: message.id, date: message.date, guardian: false, rows: [.automatedInput(id: "automated-\(message.id)", source: source)], bubbleIndexes: [], notice: true))
-                continue
-            }
+            // A Concierge chat holds no automated messages: one from before that
+            // rule, said on the owner's behalf or not, draws nothing. What the
+            // Concierge answers it with shows as it always did.
+            if options.showNotices, Self.isAutomated(message) { continue }
             if message.isTrace {
                 var rows: [TranscriptRow] = []
                 if options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 {
@@ -387,24 +381,19 @@ enum TranscriptBuilder {
         return labels
     }
 
-    /// The lines a turn's trace summary asks for: the renewed session first,
-    /// then who sent the input it ran on.
+    /// The lines a turn's trace summary asks for: the session it renewed.
     static func noticeRows(turn: String, summary: TraceSummary) -> [TranscriptRow] {
         var rows: [TranscriptRow] = []
         if let renewal = summary.sessionRenewal, let reason = renewal.reason, !reason.isEmpty {
             rows.append(.sessionRenewal(id: "renewal-\(turn)", reason: reason, sessionId: renewal.sessionId))
         }
-        if let source = summary.automatedInput {
-            rows.append(.automatedInput(id: "automated-\(turn)", source: source))
-        }
         return rows
     }
 
-    /// The source of an automated message from before Concierge chats held
-    /// none; nil for any other message, an on-behalf one included.
-    static func automatedSource(_ message: ChatMessage) -> TraceSummary.InputSource? {
-        guard message.isUser, let sender = message.sender, sender.kind == "automated", sender.onBehalfOf == nil else { return nil }
-        return TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
+    /// A message a routine, an app or an agent sent in, in the guardian's
+    /// name or its own.
+    static func isAutomated(_ message: ChatMessage) -> Bool {
+        message.isUser && message.sender?.kind == "automated"
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

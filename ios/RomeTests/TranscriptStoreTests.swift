@@ -218,11 +218,16 @@ final class FakeBackend: RomeBackend {
     /// The chats marked read, in order.
     var reads: [String] = []
     func markRead(sessionId: String) async { reads.append(sessionId) }
-    func sessions() async throws -> [ChatSession] { [] }
+    /// The chats and tasks the lists hold.
+    var sessionRows: [ChatSession] = []
+    var taskRows: [ConciergeTask] = []
+    var stoppedTasks: [String] = []
+    func sessions() async throws -> [ChatSession] { sessionRows }
     func tasks() async throws -> [ConciergeTask] {
         taskFetches += 1
-        return []
+        return taskRows
     }
+    func stopTask(id: String) async throws { stoppedTasks.append(id) }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
     func resolveApproval(id: String, approve: Bool) async throws { throw APIError.network }
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }

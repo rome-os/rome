@@ -97,9 +97,9 @@ private func message(
             if case .notice(let text)? = MessagePart.parse(json([part])).first { return text }
             return nil
         }
-        #expect(text(["type": "quota_switch", "from": "openai", "to": "anthropic", "reason": "quota", "model": "claude-sonnet-5-5"]) == "Codex ran out, switched to Claude")
+        #expect(text(["type": "quota_switch", "from": "openai", "to": "anthropic", "reason": "quota", "model": "claude-sonnet-5-5"]) == "Codex quota ran out, switched to Claude")
         #expect(text(["type": "quota_switch", "from": "anthropic", "to": "openai", "reason": "login", "model": "gpt-6"]) == "Claude sign-in failed, switched to Codex")
-        #expect(text(["type": "quota_switch", "from": "anthropic", "to": "anthropic", "reason": "model_limit", "fromModel": "claude-opus-5-5[1m]", "model": "claude-sonnet-5-5"]) == "claude-opus-5-5 limit reached, switched to claude-sonnet-5-5")
+        #expect(text(["type": "quota_switch", "from": "anthropic", "to": "anthropic", "reason": "model_limit", "fromModel": "claude-opus-5-5[1m]", "model": "claude-sonnet-5-5"]) == "Opus 5.5 limit reached, switched to Sonnet 5.5")
         #expect(text(["type": "quota_switch", "model": "gpt-6"]) == "Switched to gpt-6")
     }
 }

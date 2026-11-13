@@ -75,6 +75,8 @@ struct UserBubble: View {
     var images: [UserImage] = []
     let pending: PendingSend.State?
     var onRetry: () -> Void = {}
+    /// Removes a send that cannot go through; nil leaves it out.
+    var onDelete: (() -> Void)? = nil
     var menu = BubbleMenu()
     /// Rome's mark on the message: being worked on, or failed.
     var mark: StatusMark? = nil
@@ -140,9 +142,18 @@ struct UserBubble: View {
                         .romeFont(12, .medium)
                         .foregroundStyle(Palette.destructive)
                 } else {
-                    Text(failure.line)
+                    // A refusal stays a refusal: the text can be kept, or the send removed.
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(failure.line)
+                            .romeFont(12, .medium)
+                            .foregroundStyle(Palette.destructive)
+                        HStack(spacing: 14) {
+                            Button("Copy text") { UIPasteboard.general.string = text }
+                            if let onDelete { Button("Delete", role: .destructive, action: onDelete) }
+                        }
                         .romeFont(12, .medium)
-                        .foregroundStyle(Palette.destructive)
+                        .foregroundStyle(Palette.sub)
+                    }
                 }
             } else if pending == .notDelivered {
                 Text("Not delivered").romeFont(12, .medium).foregroundStyle(Palette.destructive)
@@ -500,14 +511,25 @@ struct CopyButton: View {
 /// title. Its status is left out, since progress is not reported accurately.
 struct TaskCard: View {
     let title: String
+    /// How the task stands, as "Task chat · <word>"; nil keeps the bare "Task".
+    var state: TaskCardState? = nil
+    var stopping = false
+    var onStop: (() -> Void)? = nil
     let action: () -> Void
+
+    /// The line above the title.
+    private var label: String {
+        state.map { String(localized: "Task chat · \($0.word)") } ?? String(localized: "Task")
+    }
 
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Task")
+                Text(verbatim: label)
                     .romeFont(CardScale.label)
                     .foregroundStyle(Palette.sub)
+                    // Room for Stop on the same line.
+                    .padding(.trailing, state?.stoppable == true ? 64 : 0)
                 HStack(spacing: 8) {
                     Text(title)
                         .romeFont(CardScale.title, .semibold)
@@ -526,9 +548,26 @@ struct TaskCard: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
+        .overlay(alignment: .topTrailing) {
+            // Beside the card's own tap, so a press on Stop never opens the chat.
+            if state?.stoppable == true, let onStop {
+                Button(action: onStop) {
+                    Text(stopping ? "Stopping…" : "Stop")
+                        .romeFont(12, .semibold)
+                        .foregroundStyle(Palette.sub)
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .background(Palette.fill, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(stopping)
+                .padding(.top, 10)
+                .padding(.trailing, 12)
+            }
+        }
         .containerRelativeFrame(.horizontal) { width, _ in (Metrics.column(width) - 32) * 0.82 }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("Task, \(title)")
+        .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
     }
 }
 
@@ -555,7 +594,7 @@ enum TranscriptSpacing {
         if case .notice = row { return 14 }
         // A faint line stands apart, like a time separator.
         switch (row, previous) {
-        case (.automatedInput, _), (.sessionRenewal, _), (_, .automatedInput), (_, .sessionRenewal): return 14
+        case (.sessionRenewal, _), (_, .sessionRenewal): return 14
         default: break
         }
         // Tight under its own message, and apart from the next one.

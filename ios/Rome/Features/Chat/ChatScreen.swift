@@ -243,7 +243,7 @@ struct ConciergeRow: View {
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
             let quote = quote(id)
-            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(reply: false),
+            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: { store.removePending(id) }, menu: menu(reply: false),
                        mark: store.statusMark(ofRow: row), reservesMark: true,
                        quote: quote, onQuote: quote.flatMap { inThread ? nil : store.quoteAction(reply: row.messageId ?? "", original: $0.messageId) })
         case .agentText(_, let text, _, let forwardedFrom, let position):
@@ -258,7 +258,13 @@ struct ConciergeRow: View {
         case .taskCard(_, let chatId, let title, let latest, let embedsWait):
             let name = tasks.title(forChat: chatId, fallback: title)
             VStack(alignment: .leading, spacing: 8) {
-                TaskCard(title: name) {
+                let state = tasks.cardState(forChat: chatId)
+                TaskCard(
+                    title: name,
+                    state: state,
+                    stopping: state.taskId.map { tasks.stopping.contains($0) } ?? false,
+                    onStop: state.taskId.map { id in { tasks.stopTask(id: id) } }
+                ) {
                     onOpenChat(chatId, name)
                 }
                 // The newest card from before `show` of a task that waits on
@@ -288,8 +294,6 @@ struct ConciergeRow: View {
             ErrorLine(error: error)
         case .notice(_, let text):
             NoticeLine(text: text)
-        case .automatedInput(_, let source):
-            AutomatedInputLine(source: source)
         case .sessionRenewal(_, let reason, let sessionId):
             SessionRenewalLine(reason: reason, sessionId: sessionId, store: store)
         }

@@ -33,48 +33,37 @@ private func rows(_ messages: [ChatMessage], notices: Bool = true) -> [Transcrip
         #expect(odd.totalSteps == 1 && odd.automatedInput == nil && odd.sessionRenewal == nil)
     }
 
-    /// A turn that ran on automated input shows one line where it starts,
-    /// before what the Concierge says, wherever its trace sits.
-    @Test func automatedInputStandsBeforeItsTurn() {
+    /// A routine's, an app's or an agent's input draws no line of its own.
+    @Test func automatedInputDrawsNothing() {
         let summary = TraceSummary(automatedInput: .init(type: "routine", name: "Daily summary"))
         let built = rows([
             text("q", role: "user", turn: "t0", at: 0), text("a", turn: "t0", at: 5),
             text("r", turn: "t1", at: 60), trace(turn: "t1", at: 61, summary),
         ])
-        let ids = built.map(\.id)
-        #expect(ids.firstIndex(of: "automated-t1")! == ids.firstIndex(of: "r:0")! - 1)
-        // A turn the Concierge answered with silence still shows it.
+        #expect(built.map(\.id).filter { !$0.hasPrefix("sep") } == ["q:0", "a:0", "r:0"])
+        // A turn the Concierge answered with silence shows nothing either.
         let silent = rows([text("q", role: "user", turn: "t0", at: 0), trace(turn: "t1", at: 60, summary)])
-        #expect(silent.contains(.automatedInput(id: "automated-t1", source: .init(type: "routine", name: "Daily summary"))))
-        // Task chats and the thread view show none.
-        #expect(!rows([text("r", turn: "t1", at: 60), trace(turn: "t1", at: 61, summary)], notices: false).contains { if case .automatedInput = $0 { true } else { false } })
+        #expect(silent.map(\.id).filter { !$0.hasPrefix("sep") } == ["q:0"])
     }
 
-    /// An automated message from before draws as the same line; one sent on
-    /// the owner's behalf stays their bubble.
-    @Test func anOldAutomatedMessageIsALine() {
+    /// An automated message from before, said on the owner's behalf or not, is not drawn in a Concierge chat.
+    @Test func anOldAutomatedMessageIsNotDrawn() {
         let routine = MessageSender(kind: "automated", sourceType: "agent", name: "Flint")
         let onBehalf = MessageSender(kind: "automated", sourceType: "routine", name: "Daily", onBehalfOf: .init(kind: "guardian", name: "Lin"))
-        let built = rows([text("old", role: "user", turn: "t0", at: 0, sender: routine), text("mine", role: "user", turn: "t1", at: 60, sender: onBehalf)])
-        #expect(built.contains(.automatedInput(id: "automated-old", source: .init(type: "agent", name: "Flint"))))
-        #expect(built.contains { if case .userText(let id, _, _, _) = $0 { id == "mine:0" } else { false } })
-        // An unknown source reads as an automation.
-        let unknown = MessageSender(kind: "automated", sourceType: nil, name: nil)
-        #expect(TranscriptBuilder.automatedSource(text("x", role: "user", turn: "t", at: 0, sender: unknown)) == .init(type: "automation", name: nil))
+        let built = rows([text("old", role: "user", turn: "t0", at: 0, sender: routine), text("mine", role: "user", turn: "t1", at: 60, sender: onBehalf), text("real", role: "user", turn: "t2", at: 120)])
+        #expect(built.map(\.id).filter { !$0.hasPrefix("sep") } == ["real:0"])
         // In a task chat the Concierge's own messages stay bubbles.
-        #expect(!rows([text("old", role: "user", turn: "t0", at: 0, sender: routine)], notices: false).contains { if case .automatedInput = $0 { true } else { false } })
+        let task = rows([text("old", role: "user", turn: "t0", at: 0, sender: routine)], notices: false)
+        #expect(task.contains { if case .userText(let id, _, _, _) = $0 { id == "old:0" } else { false } })
     }
 
     @Test func aRenewalStandsBeforeItsTurnFirst() {
         let summary = TraceSummary(sessionRenewal: .init(reason: "context", sessionId: "s2"), automatedInput: .init(type: "agent", name: "Flint"))
         let ids = rows([text("q", role: "user", turn: "t1", at: 0), trace(turn: "t1", at: 5, summary)]).map(\.id)
-        #expect(Array(ids.drop { $0.hasPrefix("sep") }) == ["renewal-t1", "automated-t1", "q:0"])
+        #expect(Array(ids.drop { $0.hasPrefix("sep") }) == ["renewal-t1", "q:0"])
     }
 
     @Test func theLinesReadAsTheBoardsSay() {
-        #expect(NoticeCopy.automated(.init(type: "routine", name: "Daily summary")) == "Routine · Daily summary")
-        #expect(NoticeCopy.automated(.init(type: "agent", name: nil)) == "Agent")
-        #expect(NoticeCopy.automated(.init(type: "something", name: " ")) == "Automation")
         #expect(NoticeCopy.renewal("context") == "Context tidied up · conversation got long")
         #expect(NoticeCopy.renewal("setup") == "Context tidied up · setup updated")
         #expect(NoticeCopy.renewal("later") == "Context tidied up · later")

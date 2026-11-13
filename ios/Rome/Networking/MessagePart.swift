@@ -388,7 +388,8 @@ enum MessagePart: Hashable, Sendable {
 }
 
 extension MessagePart {
-    /// The words for a chat that moved to another model: why, and to what.
+    /// The words for a chat that moved to another model: why, and to what,
+    /// as the dashboard's `ModelSwitchNotice` says them.
     static func modelSwitchText(_ value: JSONValue) -> String? {
         guard let model = value["model"]?.string, !model.isEmpty else { return nil }
         func name(_ provider: String?) -> String? {
@@ -398,22 +399,25 @@ extension MessagePart {
             default: return nil
             }
         }
-        func clean(_ id: String) -> String {
-            id.replacingOccurrences(of: #"\[.*\]$"#, with: "", options: .regularExpression)
-        }
-        let from = name(value["from"]?.string), to = name(value["to"]?.string)
+        let fromProvider = value["from"]?.string, toProvider = value["to"]?.string
         let reason = value["reason"]?.string
-        if let from, let to, from != to {
+        let toModel = ModelNames.display(model)
+        // Within one provider, or with no provider named, the model limit is what ran out.
+        if fromProvider != nil, fromProvider == toProvider || reason == "model_limit" {
+            let fromModel = ModelNames.display(value["fromModel"]?.string ?? "")
+            if !fromModel.isEmpty { return String(localized: "\(fromModel) limit reached, switched to \(toModel)") }
+        }
+        if let from = name(fromProvider), let to = name(toProvider) {
             switch reason {
             case "login": return String(localized: "\(from) sign-in failed, switched to \(to)")
-            case "temporary": return String(localized: "\(from) is unavailable, switched to \(to)")
-            default: return String(localized: "\(from) ran out, switched to \(to)")
+            case "temporary": return String(localized: "\(from) is temporarily unavailable, switched to \(to)")
+            case "model_limit":
+                let fromModel = ModelNames.display(value["fromModel"]?.string ?? "")
+                return String(localized: "\(fromModel) limit reached, switched to \(toModel)")
+            default: return String(localized: "\(from) quota ran out, switched to \(to)")
             }
         }
-        if let fromModel = value["fromModel"]?.string, !fromModel.isEmpty {
-            return String(localized: "\(clean(fromModel)) limit reached, switched to \(clean(model))")
-        }
-        return String(localized: "Switched to \(clean(model))")
+        return String(localized: "Switched to \(toModel)")
     }
 
     /// Whether the part shows something in a transcript.

@@ -113,7 +113,8 @@ struct TaskAskView: View {
                 TaskWaitView(store: wait, session: session, onOpenChat: onOpenChat, note: expired ? "Expired — answer to continue" : nil)
             case .settled:
                 folded
-                    .task(id: "\(chatId)|\(shownAt.timeIntervalSince1970)|\(session?.activityAt ?? "")") {
+                    // Read again only when the task's wait changed, not on every bit of its activity.
+                    .task(id: "\(chatId)|\(shownAt.timeIntervalSince1970)|\(TaskWaitView.waits(session))|\(tasks.task(forChat: chatId)?.status ?? "")|\(tasks.task(forChat: chatId)?.endReason ?? "")") {
                         await wait.loadSettled(until: shownAt)
                     }
             }
@@ -145,7 +146,7 @@ struct TaskAskView: View {
             }
         } else if wait.settledRead.contains(shownAt) || wait.settledFailed.contains(shownAt) {
             // The card could not be found, or read: a plain line holds its place.
-            SettledCard(title: nil, outcome: String(localized: "No longer waiting"))
+            SettledCard(title: nil, outcome: String(localized: "Answered"))
         } else {
             // Its place is held while the task chat is read, so nothing
             // below jumps when it lands; the read runs from here.
