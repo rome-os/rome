@@ -2,15 +2,17 @@
 // dashboard and the iOS app can both draw it natively. The shape is a subset
 // of A2UI v0.9 (https://a2ui.org): a flat list of components that name their
 // children by id, values that are literals or `{ path }` JSON Pointers into a
-// data model, and buttons that dispatch an event. Rome adds two things A2UI
-// leaves to the host: the data model is filled from the app's own API
-// (`bind`), and a button's event is a POST to that API.
+// data model, and buttons that dispatch an event. Rome adds what A2UI leaves
+// to the host: the data model is filled from the app's own API (`bind`), a
+// button's event is a POST to that API or answers the turn that waits on the
+// card, and a text may name one of Rome's own strings, which each reader
+// translates.
 
 import { z } from "zod";
 
 /** The components a described card may use. `Text`, `Image`, `Row`,
- *  `Column`, `List` and `Button` are A2UI's basic catalog; `Stat` and
- *  `Progress` are Rome's. */
+ *  `Column`, `List`, `Button`, `ChoicePicker` and `TextField` are A2UI's
+ *  basic catalog; `Stat` and `Progress` are Rome's. */
 export const WIDGET_UI_COMPONENTS = [
   "Text",
   "Stat",
@@ -20,7 +22,27 @@ export const WIDGET_UI_COMPONENTS = [
   "Image",
   "Progress",
   "Button",
+  "ChoicePicker",
+  "TextField",
 ] as const;
+
+/** Rome's own strings a card may name with `{ string }`. Each reader shows
+ *  them in the guardian's language. */
+export const WIDGET_UI_STRINGS = [
+  "send",
+  "dismiss",
+  "typeOwn",
+  "addOwn",
+  "typeAnswer",
+  "optional",
+] as const;
+
+export type WidgetUiStringName = (typeof WIDGET_UI_STRINGS)[number];
+
+/** Button events Rome handles itself rather than posting to the app. Only a
+ *  card the agent waits on may use them: `rome:answer` sends the card's
+ *  `context` as the guardian's answer, `rome:dismiss` declines it. */
+export const WIDGET_UI_HOST_EVENTS = ["rome:answer", "rome:dismiss"] as const;
 
 export type WidgetUiComponentName = (typeof WIDGET_UI_COMPONENTS)[number];
 
@@ -30,7 +52,7 @@ export interface WidgetUiPath {
   path: string;
 }
 
-export type WidgetUiString = string | WidgetUiPath;
+export type WidgetUiString = string | WidgetUiPath | { string: WidgetUiStringName };
 export type WidgetUiNumber = number | WidgetUiPath;
 
 /** Either fixed child ids, or one child drawn once per element of the array
@@ -41,7 +63,8 @@ export type WidgetUiChildren = string[] | { componentId: string; path: string };
  * A button's event. `name` is a path in the app's own API, relative to
  * `/api/apps/<appId>/`, such as `"meals/42/eaten"`. A press POSTs `context`,
  * with its paths read, as the JSON body, then reads every `bind` again. A
- * press says nothing in the chat and does not wake the agent.
+ * press says nothing in the chat and does not wake the agent. On a card the
+ * agent waits on, `name` may instead be one of {@link WIDGET_UI_HOST_EVENTS}.
  */
 export interface WidgetUiAction {
   /** Each `context` value is a literal string, number or boolean, a list, or
@@ -54,6 +77,21 @@ export type WidgetUiContextValue = string | number | boolean | unknown[] | Widge
 interface Common {
   id: string;
 }
+
+/**
+ * A rule an input or a button must pass, as A2UI's `checks`. Only two of
+ * A2UI's functions are allowed, since every reader evaluates them itself:
+ * `required` (a non-empty string or list at `args.value`) and `or` (any of
+ * `args.values`). A button whose checks fail is disabled.
+ */
+export interface WidgetUiCheck {
+  condition: WidgetUiCondition;
+  message: string;
+}
+
+export type WidgetUiCondition =
+  | { call: "required"; args: { value: WidgetUiPath } }
+  | { call: "or"; args: { values: WidgetUiCondition[] } };
 
 export type WidgetUiComponent =
   | (Common & {
@@ -111,6 +149,31 @@ export type WidgetUiComponent =
       child: string;
       action: WidgetUiAction;
       variant?: "default" | "primary" | "borderless";
+      checks?: WidgetUiCheck[];
+    })
+  | (Common & {
+      component: "ChoicePicker";
+      label?: WidgetUiString;
+      /** `mutuallyExclusive` (default) picks one, `multipleSelection` any. */
+      variant?: "mutuallyExclusive" | "multipleSelection";
+      /** `description` is Rome's: a line under the option's label. */
+      options: { label: WidgetUiString; value: string; description?: WidgetUiString }[];
+      /** The picked values, a list of strings the picker writes to. */
+      value: WidgetUiPath;
+      /** Rome's: a value a pick empties, so the last of two inputs edited
+       *  wins, such as the "type your own" text beside a single choice. */
+      clears?: WidgetUiPath;
+    })
+  | (Common & {
+      component: "TextField";
+      label: WidgetUiString;
+      /** The text, which the field writes to. */
+      value: WidgetUiPath;
+      variant?: "shortText" | "longText";
+      /** Rome's: shown in the empty field. */
+      placeholder?: WidgetUiString;
+      /** Rome's: a value typing empties, as for `ChoicePicker`. */
+      clears?: WidgetUiPath;
     });
 
 /**
@@ -123,10 +186,30 @@ export type WidgetUiComponent =
  */
 export interface WidgetUi {
   components: WidgetUiComponent[];
+  /** The data model the card starts from, before any `bind` is read. */
+  data?: Record<string, unknown>;
 }
 
 const PathSchema = z.object({ path: z.string() }).strict();
-const Str = z.union([z.string(), PathSchema]);
+const Str = z.union([
+  z.string(),
+  PathSchema,
+  z.object({ string: z.enum(WIDGET_UI_STRINGS) }).strict(),
+]);
+const ConditionSchema: z.ZodType<WidgetUiCondition> = z.lazy(() =>
+  z.union([
+    z
+      .object({ call: z.literal("required"), args: z.object({ value: PathSchema }).strict() })
+      .strict(),
+    z
+      .object({
+        call: z.literal("or"),
+        args: z.object({ values: z.array(ConditionSchema).min(1) }).strict(),
+      })
+      .strict(),
+  ]),
+);
+const Checks = z.array(z.object({ condition: ConditionSchema, message: z.string() }).strict());
 const Num = z.union([z.number(), PathSchema]);
 const Children = z.union([
   z.array(z.string()),
@@ -219,11 +302,41 @@ const ComponentSchema = z.discriminatedUnion("component", [
         })
         .strict(),
       variant: z.enum(["default", "primary", "borderless"]).optional(),
+      checks: Checks.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
+      component: z.literal("ChoicePicker"),
+      label: Str.optional(),
+      variant: z.enum(["mutuallyExclusive", "multipleSelection"]).optional(),
+      options: z
+        .array(z.object({ label: Str, value: z.string(), description: Str.optional() }).strict())
+        .min(1),
+      value: PathSchema,
+      clears: PathSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
+      component: z.literal("TextField"),
+      label: Str,
+      value: PathSchema,
+      variant: z.enum(["shortText", "longText"]).optional(),
+      placeholder: Str.optional(),
+      clears: PathSchema.optional(),
     })
     .strict(),
 ]);
 
-const WidgetUiSchema = z.object({ components: z.array(ComponentSchema).min(1) }).strict();
+const WidgetUiSchema = z
+  .object({
+    components: z.array(ComponentSchema).min(1),
+    data: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
 
 /** An app API path a card may GET or POST, such as `days/2026-11-11`:
  *  `/`-separated segments of letters, digits and `-_.~`, none of them `.` or
@@ -239,9 +352,14 @@ export function isWidgetAppPath(path: string): boolean {
  * Checks a described card and its bindings. Returns the problems, or an empty
  * list when every reader can draw it: known components only, unique ids, a
  * `"root"`, every child id present, no cycle, and every API path inside the
- * app. A card with problems shows nowhere.
+ * app. `waits` says the agent waits on the card, which allows the
+ * {@link WIDGET_UI_HOST_EVENTS}. A card with problems shows nowhere.
  */
-export function checkWidgetUi(ui: unknown, bind: unknown = {}): string[] {
+export function checkWidgetUi(
+  ui: unknown,
+  bind: unknown = {},
+  options: { waits?: boolean } = {},
+): string[] {
   const parsed = WidgetUiSchema.safeParse(ui);
   if (!parsed.success) {
     return parsed.error.issues.map((i) => `ui.${i.path.join(".")}: ${i.message}`);
@@ -258,10 +376,14 @@ export function checkWidgetUi(ui: unknown, bind: unknown = {}): string[] {
     for (const child of childIds(c)) {
       if (!byId.has(child)) problems.push(`"${c.id}" names a child "${child}" that does not exist`);
     }
-    if (c.component === "Button" && !isWidgetAppPath(c.action.event.name)) {
-      problems.push(
-        `"${c.id}" posts to "${c.action.event.name}", which is not a path in the app's API`,
-      );
+    if (c.component === "Button") {
+      const name = c.action.event.name;
+      const hostEvent = (WIDGET_UI_HOST_EVENTS as readonly string[]).includes(name);
+      if (hostEvent && !options.waits) {
+        problems.push(`"${c.id}" sends "${name}", which only a card the agent waits on may send`);
+      } else if (!hostEvent && !isWidgetAppPath(name)) {
+        problems.push(`"${c.id}" posts to "${name}", which is not a path in the app's API`);
+      }
     }
   }
   if (problems.length === 0 && hasCycle(byId)) problems.push("the components contain a cycle");

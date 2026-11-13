@@ -1,4 +1,5 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
+import { askQuestionToolOutput, type Question, questionCardUi } from "../../agent/index.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5070,6 +5071,106 @@ describe("Webchat API", () => {
         .flatMap((m) => JSON.parse(m.content) as Array<Record<string, unknown>>);
     }
 
+    it("stores what a described question card sends as the answers the card has always sent", async () => {
+      const questions: Question[] = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ];
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-ui",
+          tool: "ask_question",
+          output: askQuestionToolOutput(questions, true),
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me write" }),
+        }),
+      );
+      const card = await findCard(sessionId, "tu-ask-ui");
+      // Core builds the description from the questions; the tool result has none.
+      expect((card as { render?: { ui?: unknown } }).render?.ui).toEqual(questionCardUi(questions));
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-ask-ui",
+              output: { answers: [{ values: ["Plain"], text: "" }] },
+            },
+          ],
+        }),
+      });
+      expect(res.status).toBe(200);
+
+      const answers = { answers: [{ questionId: "tone", value: "Plain" }] };
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-ask-ui",
+        output: { ...answers, card: [{ values: ["Plain"], text: "" }] },
+      });
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").not.toContain('"card"');
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
+    });
+
+    it("keeps what a described question card holds beside answers a reader sent in their own shape", async () => {
+      const questions: Question[] = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ];
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-old",
+          tool: "ask_question",
+          output: askQuestionToolOutput(questions, true),
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me write" }),
+        }),
+      );
+      expect(await findCard(sessionId, "tu-ask-old")).toBeDefined();
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const answers = { answers: [{ questionId: "tone", value: "Plain" }] };
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [{ type: "interaction_result", toolUseId: "tu-ask-old", output: answers }],
+        }),
+      });
+
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-ask-old",
+        output: { ...answers, card: [{ values: ["Plain"], text: "" }] },
+      });
+    });
+
     it("closes an open question card when the guardian types a reply instead", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(askQuestionEvents("tu-ask-typed"));
@@ -7778,7 +7879,7 @@ describe("Webchat API", () => {
       await deps.webchatRepo.createSession(sessionId, "Deferred Question");
       const { runtime } = createWebchatRuntime(deps);
       const toolUseId = "deferred-ask-1";
-      const questions = [
+      const questions: Question[] = [
         {
           id: "scope",
           question: "Which scope?",
@@ -7827,6 +7928,7 @@ describe("Webchat API", () => {
           componentId: "question-card",
           props: { questions },
           builtin: true,
+          ui: questionCardUi(questions),
         },
       });
       expect(assistantParts).toContainEqual({

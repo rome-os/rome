@@ -12,6 +12,7 @@ import { LatestTaskChatsContext, renderFlatEntries } from "./render";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import type { ChatEntry, ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { TaskChatCard } from "./TaskChatCard";
+import { questionCardRender } from "../../../../mock/fixtures/question-card";
 import type { TaskCard } from "@rome/api-types/chat";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { cardKey, LiveTaskCardsProvider } from "./live-task-cards";
@@ -29,16 +30,9 @@ const question: TranscriptPart = {
   type: "pending_interaction",
   toolUseId: "item_0",
   appId: "core",
-  render: {
-    kind: "inline",
-    builtin: true,
-    componentId: "question-card",
-    props: {
-      questions: [
-        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
-      ],
-    },
-  },
+  render: questionCardRender([
+    { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+  ]),
 };
 const message = (
   id: string,
@@ -868,10 +862,7 @@ describe("TaskChatCard", () => {
         {
           ...question,
           toolUseId: "item_1",
-          render: {
-            ...question.render,
-            props: { questions: [{ id: "next", question: "Next question?", type: "text" }] },
-          },
+          render: questionCardRender([{ id: "next", question: "Next question?", type: "text" }]),
         },
       ]),
     ];
@@ -891,12 +882,9 @@ describe("TaskChatCard", () => {
     const nextQuestion = {
       ...question,
       toolUseId: "item_1",
-      render: {
-        ...question.render,
-        props: {
-          questions: [{ id: "next", question: "Next question?", type: "single", options: ["Yes"] }],
-        },
-      },
+      render: questionCardRender([
+        { id: "next", question: "Next question?", type: "single", options: ["Yes"] },
+      ]),
     };
     messages = [message("next", [nextQuestion])];
     await act(async () => {
@@ -907,7 +895,7 @@ describe("TaskChatCard", () => {
     await waitFor(() => expect(posts()).toHaveLength(2));
     expect(JSON.parse(String(posts()[1][1]?.body)).parts[0]).toMatchObject({
       toolUseId: "item_1",
-      output: { answers: [{ questionId: "next", value: "Yes" }] },
+      output: { answers: [{ values: ["Yes"], text: "" }] },
     });
   });
 
@@ -924,7 +912,7 @@ describe("TaskChatCard", () => {
         {
           type: "interaction_result",
           toolUseId: "item_0",
-          output: { answers: [{ questionId: "tone", value: "Warm" }] },
+          output: { answers: [{ values: ["Warm"], text: "" }] },
         },
       ],
     });
@@ -1027,10 +1015,7 @@ describe("TaskChatCard", () => {
       message("second", [
         {
           ...question,
-          render: {
-            ...question.render,
-            props: { questions: [{ id: "again", question: "Ask again?", type: "text" }] },
-          },
+          render: questionCardRender([{ id: "again", question: "Ask again?", type: "text" }]),
         },
       ]),
     ];

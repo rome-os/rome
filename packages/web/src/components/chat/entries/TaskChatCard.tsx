@@ -229,6 +229,8 @@ function FoldedAskCard({ card }: { card: AskedCard }) {
         ) : card.outcome && card.render?.componentId === "question-card" ? (
           <QuestionCard
             toolUseId={card.id}
+            appId="core"
+            ui={card.render.ui}
             props={card.render.props}
             result={
               card.outcome.kind === "answered" ? card.outcome.answer.output : { dismissed: true }
@@ -476,6 +478,8 @@ function WaitingTaskCard({
         <QuestionCard
           key={`${interaction.key}:${attempt}`}
           toolUseId={interaction.part.toolUseId}
+          appId="core"
+          ui={interaction.part.render.ui}
           props={interaction.part.render.props}
           result={submitted?.key === interaction.key ? submitted.output : undefined}
           onSubmit={(toolUseId, output) => {

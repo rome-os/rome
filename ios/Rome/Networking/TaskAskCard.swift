@@ -127,7 +127,7 @@ struct TaskAskCard: Hashable, Sendable {
     /// nil for an app's own card, which is answered in its task chat.
     var questionPart: MessagePart.QuestionPart? {
         guard case .question(let question) = kind, question.render?["componentId"]?.string == "question-card" else { return nil }
-        let part: JSONValue = .object(["type": .string("pending_interaction"), "toolUseId": .string(question.id), "render": question.render ?? .null])
+        let part: JSONValue = .object(["type": .string("pending_interaction"), "toolUseId": .string(question.id), "appId": .string("core"), "render": question.render ?? .null])
         guard let data = try? JSONEncoder().encode(JSONValue.array([part])),
               let content = String(data: data, encoding: .utf8),
               case .question(let form)? = MessagePart.parse(content).first

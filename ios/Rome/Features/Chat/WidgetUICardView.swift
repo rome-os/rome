@@ -6,11 +6,25 @@ import SwiftUI
 /// card, resolves its paths and keeps its data; `WidgetCatalog` draws it.
 /// Each `bind` is read from the app's API when the card appears, so it shows
 /// the app's data as it stands. A button POSTs its context to the app's API
-/// and reads every `bind` again; nothing is said in the chat.
+/// and reads every `bind` again; nothing is said in the chat. On a card the
+/// agent waits on, `rome:answer` and `rome:dismiss` answer the interaction
+/// instead.
 struct WidgetUICardView: View {
+    /// What a card the agent waits on needs: the stored answer once there is
+    /// one, which locks the card, and how to answer or dismiss it.
+    struct Waiting {
+        let answered: Rome.JSONValue?
+        let sending: Bool
+        let answer: (Rome.JSONValue) -> Void
+        let dismiss: () -> Void
+    }
+
     let part: WidgetUIPart
     /// A call on the card's own app: method, path in its API, JSON body.
     let call: (String, String, Rome.JSONValue?) async throws -> ConnectReply
+    var waiting: Waiting? = nil
+
+    private var locked: Bool { waiting.map { $0.answered != nil || $0.sending } ?? false }
 
     @StateObject private var surface = WidgetSurface()
 
@@ -19,11 +33,18 @@ struct WidgetUICardView: View {
             if let viewModel = surface.viewModel {
                 Surface(viewModel: viewModel, catalog: WidgetCatalog.catalog)
                     .environment(\.widgetBusy, surface.busy || !surface.loaded)
+                    .environment(\.widgetLocked, locked)
+                    .environment(\.widgetClears, surface.clears)
             } else if surface.undrawable {
                 Text("Could not show this card. \(part.text)")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.destructive)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let answered = waiting?.answered {
+                Text(answered["dismissed"]?.bool == true ? "Dismissed" : "Answered")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
             }
             if surface.failed {
                 Text("Could not read this card's data. \(part.text)")
@@ -39,8 +60,16 @@ struct WidgetUICardView: View {
         .padding(.top, 4)
         .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
         .task(id: part) {
+            surface.waiting = waiting
+            surface.locked = locked
             surface.show(part, call: call)
+            surface.showAnswered(waiting?.answered)
             await surface.load()
+        }
+        .onChange(of: locked) { surface.locked = locked }
+        .onChange(of: waiting?.answered) {
+            surface.waiting = waiting
+            surface.showAnswered(waiting?.answered)
         }
     }
 }
@@ -54,6 +83,10 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var failed = false
     @Published private(set) var undrawable = false
     @Published private(set) var busy = false
+    @Published private(set) var clears = WidgetClears()
+    /// How a card the agent waits on answers, and whether it is answered.
+    var waiting: WidgetUICardView.Waiting?
+    var locked = false
 
     private var processor: MessageProcessor?
     private var part: WidgetUIPart?
@@ -76,13 +109,63 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         let processor = MessageProcessor(catalogs: [WidgetCatalog.catalog], actionHandler: self)
         self.processor = processor
         let surfaceId = Rome.JSONValue.string(part.toolUseId)
+        var targets: [String: String] = [:]
+        let components = part.components.map { component -> Rome.JSONValue in
+            guard case .object(var fields) = Self.withHostStrings(component) else { return component }
+            if let id = fields["id"]?.string, let target = fields["clears"]?["path"]?.string { targets[id] = target }
+            fields["clears"] = nil
+            return .object(fields)
+        }
         let created = send("createSurface", [
             "surfaceId": surfaceId, "catalogId": .string(WidgetCatalog.id),
         ]) && send("updateComponents", [
-            "surfaceId": surfaceId, "components": .array(part.components),
-        ])
+            "surfaceId": surfaceId, "components": .array(components),
+        ]) && (part.data.object ?? [:]).allSatisfy { key, value in
+            // A key is one JSON Pointer token: `~` and `/` are escaped.
+            let token = key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
+            return send("updateDataModel", ["surfaceId": surfaceId, "path": .string("/\(token)"), "value": value])
+        }
         viewModel = created ? processor.surfaceGroupModel.surfacesMap[part.toolUseId] : nil
         undrawable = viewModel == nil
+        clears = WidgetClears(targets: targets) { [weak self] path, list in
+            self?.viewModel?.dataModel.set(path, value: list ? .array([]) : .string(""))
+        }
+    }
+
+    /// An answered card shows what the guardian sent, which core keeps as
+    /// `card`. A dismissed card was never answered, so it shows nothing
+    /// picked rather than its defaults.
+    func showAnswered(_ answered: Rome.JSONValue?) {
+        guard let part, viewModel != nil else { return }
+        let dismissed = answered?["dismissed"]?.bool == true
+        guard let card = answered?["card"] ?? Self.sentCard(answered) ?? (dismissed ? .array([]) : nil) else { return }
+        _ = send("updateDataModel", ["surfaceId": .string(part.toolUseId), "path": .string("/answers"), "value": card])
+    }
+
+    /// What the card sent, before core has stored it as `card`: answers in the
+    /// card's own shape (`values` and `text`, no `questionId`).
+    static func sentCard(_ answered: Rome.JSONValue?) -> Rome.JSONValue? {
+        guard let answers = answered?["answers"]?.array, !answers.isEmpty,
+              answers.allSatisfy({ $0["questionId"] == nil && $0["values"] != nil })
+        else { return nil }
+        return .array(answers)
+    }
+
+    /// The card's components with each `{ string }` replaced by Rome's own
+    /// string in the guardian's language. A button's `action` is the app's
+    /// data, not something shown, so it is sent as written, as the web does.
+    static func withHostStrings(_ value: Rome.JSONValue) -> Rome.JSONValue {
+        switch value {
+        case .object(let fields):
+            if fields.count == 1, let name = fields["string"]?.string { return .string(WidgetPaths.hostString(name)) }
+            return .object(Dictionary(uniqueKeysWithValues: fields.map { key, field in
+                (key, key == "action" ? field : withHostStrings(field))
+            }))
+        case .array(let items):
+            return .array(items.map(withHostStrings))
+        default:
+            return value
+        }
     }
 
     func load() async {
@@ -118,6 +201,11 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     nonisolated func handle(error: RendererError, from surfaceID: String) {}
 
     private func press(_ name: String, body: Rome.JSONValue) async {
+        if WidgetPaths.answersTheCard(name) {
+            guard part?.waits == true, let waiting, !locked else { return }
+            if name == "rome:dismiss" { waiting.dismiss() } else { waiting.answer(body) }
+            return
+        }
         guard let call, !busy, WidgetPaths.isAppPath(name) else { return }
         busy = true
         defer { busy = false }

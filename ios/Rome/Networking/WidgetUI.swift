@@ -14,16 +14,33 @@ struct WidgetUIPart: Hashable, Sendable {
     /// JSON Pointer in the card's data model → GET path in the app's API.
     let bind: [String: String]
 
+    /// The data model the card starts from.
+    let data: JSONValue
+    /// Whether the agent waits on the card: its `rome:answer` and
+    /// `rome:dismiss` buttons answer the interaction.
+    let waits: Bool
+
+    /// A `widget` part with `ui`.
     init?(json value: JSONValue) {
-        guard let toolUseId = value["toolUseId"]?.string,
-              let appId = value["appId"]?.string,
-              let components = value["ui"]?["components"]?.array,
+        self.init(toolUseId: value["toolUseId"]?.string, appId: value["appId"]?.string, ui: value["ui"], text: value["text"]?.string, bind: value["bind"], waits: false)
+    }
+
+    /// A card the agent waits on, described as data: a `pending_interaction`
+    /// part whose `render.ui` is set.
+    init?(interaction value: JSONValue) {
+        self.init(toolUseId: value["toolUseId"]?.string, appId: value["appId"]?.string, ui: value["render"]?["ui"], text: nil, bind: nil, waits: true)
+    }
+
+    private init?(toolUseId: String?, appId: String?, ui: JSONValue?, text: String?, bind: JSONValue?, waits: Bool) {
+        guard let toolUseId, let appId, let components = ui?["components"]?.array,
               components.contains(where: { $0["id"]?.string == "root" }) else { return nil }
         self.toolUseId = toolUseId
         self.appId = appId
-        self.text = value["text"]?.string ?? ""
+        self.text = text ?? ""
         self.components = components
-        self.bind = (value["bind"]?.object ?? [:]).compactMapValues(\.string)
+        self.bind = (bind?.object ?? [:]).compactMapValues(\.string)
+        self.data = ui?["data"] ?? .object([:])
+        self.waits = waits
     }
 
     /// Whether this app may draw the card and call the app with it. A stored
@@ -32,12 +49,32 @@ struct WidgetUIPart: Hashable, Sendable {
     var isDrawable: Bool {
         guard WidgetPaths.appAPIPath(appId: appId, path: "x") != nil else { return false }
         let posts = components.compactMap { $0["action"]?["event"]?["name"]?.string }
+            .filter { !(waits && WidgetPaths.answersTheCard($0)) }
         return (Array(bind.values) + posts).allSatisfy(WidgetPaths.isAppPath)
     }
 }
 
 /// The paths a card reads and writes, and the images it loads.
 enum WidgetPaths {
+    /// Whether a button's event answers the card the agent waits on, rather
+    /// than posting to the app.
+    static func answersTheCard(_ name: String) -> Bool {
+        name == "rome:answer" || name == "rome:dismiss"
+    }
+
+    /// Rome's own strings a card names with `{ string }`: the question card's labels.
+    static func hostString(_ name: String) -> String {
+        switch name {
+        case "send": String(localized: "Send")
+        case "dismiss": String(localized: "Dismiss")
+        case "typeOwn": String(localized: "Or type your own…")
+        case "addOwn": String(localized: "Add your own…")
+        case "typeAnswer": String(localized: "Type your answer…")
+        case "optional": String(localized: "optional")
+        default: ""
+        }
+    }
+
     /// An app API path a card may use, such as `days/2026-11-11`:
     /// `/`-separated segments of letters, digits and `-_.~`, none of them `.`
     /// or `..`. Anything else, such as `%2e%2e` or a backslash, could resolve

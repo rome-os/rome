@@ -39,7 +39,8 @@
     "./node-console": "./src/node-console.ts",
     "./wechat-app": "./src/wechat-app.ts",
     "./live-events": "./src/live-events.ts",
-    "./app-connection-access": "./src/app-connection-access.ts"
+    "./app-connection-access": "./src/app-connection-access.ts",
+    "./question-card": "./src/question-card.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

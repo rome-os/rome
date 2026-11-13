@@ -288,12 +288,20 @@ final class DemoBackend: RomeBackend {
 
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
         try await pause(0.4)
-        let part: JSONValue = .object(["type": .string("interaction_result"), "toolUseId": .string(toolUseId), "output": output])
+        // Core keeps what a described card sent as `card`, beside the answers.
+        var stored = output
+        if case .object(var object) = output, let sent = object["answers"], sent.array?.first?["questionId"] == nil {
+            object["card"] = sent
+            stored = .object(object)
+        }
+        let part: JSONValue = .object(["type": .string("interaction_result"), "toolUseId": .string(toolUseId), "output": stored])
         insert(sessionId, ChatMessage(id: nextID(), sessionId: sessionId, role: "user", content: json([part]), createdAt: RomeDate.string(.now)))
         setRunning(sessionId, "turn-\(nextID())")
         Task {
             try? await pause(3)
-            let reply = toolUseId == "q-hk" ? "好，我查一下海口明天的天气。" : "好的，只看国内产品。我整理好表格后告诉你。"
+            let reply = toolUseId == "q-hk" ? "好，我查一下海口明天的天气。"
+                : toolUseId == "q-dinner" ? "好，晚饭按你选的来，我列三个做法。"
+                : "好的，只看国内产品。我整理好表格后告诉你。"
             insert(sessionId, agent(reply, at: .now, session: sessionId))
             setRunning(sessionId, nil)
         }
@@ -477,6 +485,14 @@ final class DemoBackend: RomeBackend {
 
     private var glasses = 3
 
+    /// An `ask_question` card as core stores it: the question card's props,
+    /// with the same card described as data in `render.ui`.
+    static let dinnerQuestion: JSONValue = try! JSONDecoder().decode(JSONValue.self, from: Data(#"{"type":"pending_interaction","toolUseId":"q-dinner","appId":"core","render":{"kind":"inline","componentId":"question-card","props":{"questions":[{"id":"dinner","question":"晚饭想吃哪种？","type":"single","options":["高蛋白","清淡一点"],"optionDescriptions":{"高蛋白":"鸡胸肉、豆腐、鸡蛋"},"freeText":true},{"id":"avoid","question":"有不想吃的吗？","type":"multi","options":["辣","海鲜","乳制品"],"optional":true}]},"builtin":true,"ui":{"components":[{"id":"q0-text","component":"Text","text":"晚饭想吃哪种？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"高蛋白","value":"高蛋白","description":"鸡胸肉、豆腐、鸡蛋"},{"label":"清淡一点","value":"清淡一点"}],"value":{"path":"/answers/0/values"},"clears":{"path":"/answers/0/text"}},{"id":"q0-own","component":"TextField","label":"晚饭想吃哪种？","value":{"path":"/answers/0/text"},"variant":"shortText","placeholder":{"string":"typeOwn"},"clears":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick","q0-own"]},{"id":"q1-text","component":"Text","text":"有不想吃的吗？","variant":"h5"},{"id":"q1-optional","component":"Text","text":{"string":"optional"},"variant":"caption"},{"id":"q1-title","component":"Row","children":["q1-text","q1-optional"]},{"id":"q1-pick","component":"ChoicePicker","variant":"multipleSelection","options":[{"label":"辣","value":"辣"},{"label":"海鲜","value":"海鲜"},{"label":"乳制品","value":"乳制品"}],"value":{"path":"/answers/1/values"}},{"id":"q1","component":"Column","children":["q1-title","q1-pick"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"rome:answer","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"or","args":{"values":[{"call":"required","args":{"value":{"path":"/answers/0/values"}}},{"call":"required","args":{"value":{"path":"/answers/0/text"}}}]}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"rome:dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","q1","actions"]}],"data":{"answers":[{"values":[],"text":""},{"values":[],"text":""}]}}}}"#.utf8))
+
+    /// The question cards core describes from the demo's questions
+    /// (`questionCardUi`), by tool use id, and the card an answer to `q-login`
+    /// is shown as (`questionCardFromAnswers`).
+    static let questionCards: JSONValue = try! JSONDecoder().decode(JSONValue.self, from: Data(#"{"q-hk":{"components":[{"id":"q0-text","component":"Text","text":"你是想查海口明天的天气，还是了解海口这座城市？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"查明天的天气","value":"查明天的天气"},{"label":"了解这座城市","value":"了解这座城市"}],"value":{"path":"/answers/0/values"},"clears":{"path":"/answers/0/text"}},{"id":"q0-own","component":"TextField","label":"你是想查海口明天的天气，还是了解海口这座城市？","value":{"path":"/answers/0/text"},"variant":"shortText","placeholder":{"string":"typeOwn"},"clears":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick","q0-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"rome:answer","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"or","args":{"values":[{"call":"required","args":{"value":{"path":"/answers/0/values"}}},{"call":"required","args":{"value":{"path":"/answers/0/text"}}}]}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"rome:dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-mail":{"components":[{"id":"q0-text","component":"Text","text":"摘要里要包括哪些？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"multipleSelection","options":[{"label":"需要我回复的","value":"需要我回复的","description":"别人在等你答复的邮件"},{"label":"账单和收据","value":"账单和收据"},{"label":"新闻简报","value":"新闻简报","description":"订阅的周报和新闻"}],"value":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick"]},{"id":"q1-text","component":"Text","text":"几点发给你？","variant":"h5"},{"id":"q1-title","component":"Row","children":["q1-text"]},{"id":"q1-own","component":"TextField","label":"几点发给你？","value":{"path":"/answers/1/text"},"variant":"longText","placeholder":{"string":"typeAnswer"}},{"id":"q1","component":"Column","children":["q1-title","q1-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"rome:answer","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"required","args":{"value":{"path":"/answers/0/values"}}},"message":""},{"condition":{"call":"required","args":{"value":{"path":"/answers/1/text"}}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"rome:dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","q1","actions"]}],"data":{"answers":[{"values":["需要我回复的"],"text":""},{"values":[],"text":"每天早上 8 点"}]}},"q-1":{"components":[{"id":"q0-text","component":"Text","text":"调研范围只看国内产品，还是包括海外？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"只看国内","value":"只看国内"},{"label":"包括海外","value":"包括海外"}],"value":{"path":"/answers/0/values"},"clears":{"path":"/answers/0/text"}},{"id":"q0-own","component":"TextField","label":"调研范围只看国内产品，还是包括海外？","value":{"path":"/answers/0/text"},"variant":"shortText","placeholder":{"string":"typeOwn"},"clears":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick","q0-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"rome:answer","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"or","args":{"values":[{"call":"required","args":{"value":{"path":"/answers/0/values"}}},{"call":"required","args":{"value":{"path":"/answers/0/text"}}}]}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"rome:dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-login":{"components":[{"id":"q0-text","component":"Text","text":"深色模式下按钮用珊瑚色，还是用中性色？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"珊瑚色","value":"珊瑚色"},{"label":"中性色","value":"中性色"}],"value":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"rome:answer","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"required","args":{"value":{"path":"/answers/0/values"}}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"rome:dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-login-card":[{"values":["珊瑚色"],"text":""}]}"#.utf8))
 
     static let mealCard: JSONValue = {
         func c(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
@@ -801,6 +817,7 @@ final class DemoBackend: RomeBackend {
             user("m1", "我今天吃了多少？", at: at(12, 40), session: "topic-meals"),
             parts([Self.mealCard], at: at(12, 41), session: "topic-meals"),
             agent("到现在 1,240 千卡，离目标还差 760。晚饭可以吃点蛋白质多的。", at: at(12, 41).addingTimeInterval(2), session: "topic-meals"),
+            parts([Self.dinnerQuestion], at: at(12, 41).addingTimeInterval(3), session: "topic-meals"),
         ]
 
         // Concierge, as on the design's Chat board.
@@ -848,8 +865,8 @@ final class DemoBackend: RomeBackend {
             renewed,
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),
             parts([.object([
-                "type": .string("pending_interaction"), "toolUseId": .string("q-hk"),
-                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
+                "type": .string("pending_interaction"), "toolUseId": .string("q-hk"), "appId": .string("core"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "ui": Self.questionCards["q-hk"] ?? .null, "props": .object(["questions": .array([
                     .object(["id": .string("intent"), "question": .string("你是想查海口明天的天气，还是了解海口这座城市？"), "type": .string("single"), "options": .array([.string("查明天的天气"), .string("了解这座城市")]), "freeText": .bool(true)]),
                 ])])]),
             ])], at: at(9, 52).addingTimeInterval(20), session: conciergeChatID),
@@ -962,8 +979,8 @@ final class DemoBackend: RomeBackend {
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),
             parts([.object([
-                "type": .string("pending_interaction"), "toolUseId": .string("q-mail"),
-                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
+                "type": .string("pending_interaction"), "toolUseId": .string("q-mail"), "appId": .string("core"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "ui": Self.questionCards["q-mail"] ?? .null, "props": .object(["questions": .array([
                     .object(["id": .string("what"), "question": .string("摘要里要包括哪些？"), "type": .string("multi"),
                              "options": .array([.string("需要我回复的"), .string("账单和收据"), .string("新闻简报")]),
                              "defaults": .array([.string("需要我回复的")]),
@@ -996,8 +1013,8 @@ final class DemoBackend: RomeBackend {
             trace(steps: 5, at: at(9, 11), session: research),
             parts([.object(["type": .string("pending_interaction"), "toolUseId": .string("app-1"), "appId": .string("showcases"), "render": .object(["componentId": .string("pricing-table")])])], at: at(9, 14), session: research),
             parts([.object([
-                "type": .string("pending_interaction"), "toolUseId": .string("q-1"),
-                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
+                "type": .string("pending_interaction"), "toolUseId": .string("q-1"), "appId": .string("core"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "ui": Self.questionCards["q-1"] ?? .null, "props": .object(["questions": .array([
                     .object(["id": .string("scope"), "question": .string("调研范围只看国内产品，还是包括海外？"), "type": .string("single"), "options": .array([.string("只看国内"), .string("包括海外")]), "freeText": .bool(true)]),
                 ])])]),
             ])], at: at(9, 15), session: research),
@@ -1041,12 +1058,12 @@ final class DemoBackend: RomeBackend {
             user("l1", "登录页的按钮间距不对，深色模式下也看不清，修一下。", at: at(10, 0, daysAgo: 3), session: "chat-login"),
             trace(steps: 7, at: at(10, 2, daysAgo: 3), session: "chat-login"),
             parts([.object([
-                "type": .string("pending_interaction"), "toolUseId": .string("q-login"),
-                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
+                "type": .string("pending_interaction"), "toolUseId": .string("q-login"), "appId": .string("core"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "ui": Self.questionCards["q-login"] ?? .null, "props": .object(["questions": .array([
                     .object(["id": .string("color"), "question": .string("深色模式下按钮用珊瑚色，还是用中性色？"), "type": .string("single"), "options": .array([.string("珊瑚色"), .string("中性色")])]),
                 ])])]),
             ])], at: at(10, 10, daysAgo: 3), session: "chat-login"),
-            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("q-login"), "output": .object(["answers": .array([.object(["questionId": .string("color"), "value": .string("珊瑚色")])])])])], at: at(10, 12, daysAgo: 3), session: "chat-login", role: "user"),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("q-login"), "output": .object(["answers": .array([.object(["questionId": .string("color"), "value": .string("珊瑚色")])]), "card": Self.questionCards["q-login-card"] ?? .null])])], at: at(10, 12, daysAgo: 3), session: "chat-login", role: "user"),
             parts([.object([
                 "type": .string("approval_card"), "approvalId": .string("ap-login"), "actionName": .string("coding:deploy_preview"), "status": .string("pending"),
                 "preview": .object(["kind": .string("generic"), "title": .string("发布预览环境"), "summary": .string("")]),

@@ -64,8 +64,8 @@ struct InteractionRow: View {
                 QuestionCardView(part: part, answered: answered, sending: false) { _ in }
             }
         case .question(_, let part, let sessionId, let answered):
-            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { answers in
-                store.answer(part, answers: answers, sessionId: sessionId)
+            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { output in
+                store.answer(toolUseId: part.toolUseId, output: output, sessionId: sessionId)
             }
             .bubbleWidth()
         case .connect(let id, let part, let sessionId):

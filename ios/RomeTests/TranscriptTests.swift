@@ -54,7 +54,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(approval.title == "发送邮件")
         #expect(approval.fields == [.init(label: "收件人", value: "x@y.z")])
         guard case .question(let question) = parts[2] else { Issue.record("no question"); return }
-        #expect(question.questions.first?.options == ["A", "B"])
+        #expect(question.questions.first?.text == "Which?")
         #expect(parts[3] == .webOnly(.unknown, toolUseId: "app"))
         #expect(parts[4] == .other(type: "tool_use"))
         #expect(parts[5] == .error(TurnError(text: "boom")))
@@ -202,35 +202,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
     @Test func theAnswerGoesToTheQuestionsSession() async {
         let backend = FakeBackend()
         let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
-        let part = MessagePart.QuestionPart(toolUseId: "q1", questions: [.init(id: "s", text: "Which?", multi: false, freeTextOnly: false, options: ["A"])])
-        store.answer(part, answers: QuestionAnswers.answers(part.questions, choices: ["s": ["A"]], typed: [:]), sessionId: "topic-1")
-        for _ in 0..<20 where backend.answeredSessions.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(backend.answeredSessions == ["topic-1"])
-    }
-
-    /// A lone optional question shows its send arrow while blank, and the
-    /// arrow sends `{answers: []}`; a required one shows it only once typed.
-    @Test func aBlankOptionalQuestionHasItsSendArrow() {
-        var question = MessagePart.QuestionPart.Question(id: "s", text: "Anything else?", multi: false, freeTextOnly: true, options: [])
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: [:]) == nil)
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "  "]) == nil)
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "No"]) == [.object(["questionId": .string("s"), "value": .string("No")])])
-        question.optional = true
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: [:]) == [])
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "No"]) == [.object(["questionId": .string("s"), "value": .string("No")])])
-    }
-
-    /// A card of only optional questions goes out blank: `{answers: []}`.
-    @Test func anAllOptionalCardCanBeSentBlank() async {
-        let backend = FakeBackend()
-        let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
-        var question = MessagePart.QuestionPart.Question(id: "s", text: "Anything else?", multi: false, freeTextOnly: true, options: [])
-        question.optional = true
-        let part = MessagePart.QuestionPart(toolUseId: "q1", questions: [question])
-        #expect(QuestionAnswers.complete(part.questions, choices: [:], typed: [:]))
-        let answers = QuestionAnswers.answers(part.questions, choices: [:], typed: [:])
-        #expect(answers.isEmpty)
-        store.answer(part, answers: answers, sessionId: "topic-1")
+        store.answer(toolUseId: "q1", output: .object(["answers": .array([])]), sessionId: "topic-1")
         for _ in 0..<20 where backend.answeredSessions.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(backend.answeredSessions == ["topic-1"])
     }

@@ -149,8 +149,8 @@ struct TaskAskView: View {
             }
         case .waiting, .expired:
             if let part {
-                QuestionCardView(part: part, answered: store.localAnswers[question.id], sending: store.answering.contains(question.id)) { answers in
-                    store.answer(part, answers: answers, sessionId: chatId)
+                QuestionCardView(part: part, answered: store.localAnswers[question.id], sending: store.answering.contains(question.id)) { output in
+                    store.answer(toolUseId: part.toolUseId, output: output, sessionId: chatId)
                 }
                 .id(question.id)
                 .bubbleWidth()

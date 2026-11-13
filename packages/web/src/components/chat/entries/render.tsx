@@ -14,6 +14,7 @@ import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
 import { CardBoundary } from "./widget-ui/CardBoundary";
+import { isDrawableCard } from "./widget-ui/drawable";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentCallView } from "./SubagentCallView";
 import { TaskChatCard } from "./TaskChatCard";
@@ -226,6 +227,8 @@ export function renderSingleEntry(
           <QuestionCard
             key={`question-card-${block.toolUseId}`}
             toolUseId={block.toolUseId}
+            appId={block.appId}
+            ui={block.render.ui}
             props={block.render.props}
             result={resultFor(block.toolUseId)}
             onSubmit={submit}
