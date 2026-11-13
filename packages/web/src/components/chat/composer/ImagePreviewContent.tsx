@@ -13,7 +13,12 @@ import type { ControlledProps } from "react-medium-image-zoom";
 import { cn } from "@/lib/utils";
 import { IconButton } from "@/components/ui/icon-button";
 import { useDesktop } from "@/hooks/use-desktop";
-import type { ReplyPicture } from "@/lib/reply-pictures";
+import {
+  placeOf,
+  type ReplyPicture,
+  samePictures,
+  VIEWER_PICTURE_ATTR,
+} from "@/lib/reply-pictures";
 
 export type PreviewContentProps = Parameters<NonNullable<ControlledProps["ZoomContent"]>>[0];
 type ModalImage = ReactElement<ImgHTMLAttributes<HTMLImageElement>>;
@@ -43,10 +48,11 @@ export type ImagePreviewContentProps = PreviewContentProps & {
   downloadSrc?: string;
   /**
    * The pictures of the picture's message that open a viewer, and this one's
-   * place among them. Read when the viewer opens and again at each page turn.
-   * With two or more, the viewer pages between them.
+   * place among them, and the message's root. Read when the viewer opens, and
+   * again whenever the root's pictures change while it is open. With two or
+   * more, the viewer pages between them.
    */
-  pictures?: () => { pictures: ReplyPicture[]; index: number };
+  pictures?: () => { pictures: ReplyPicture[]; index: number; root: Element | null };
 };
 
 /**
@@ -81,20 +87,25 @@ export function ImagePreviewContent({
 }: ImagePreviewContentProps) {
   const { t } = useTranslation("chat");
   const desktop = useDesktop();
-  // The set of pictures as read when the viewer opened. `opened` is the one
-  // whose image the viewer grew from, and it is the one that shows through the
-  // library's own image. Every other page is drawn here from its original.
-  const [set, setSet] = useState<{ pictures: ReplyPicture[]; opened: number }>({
-    pictures: [],
-    opened: 0,
-  });
-  const [index, setIndex] = useState(0);
+  // The pictures of the message, kept in step with it while the viewer is open.
+  // The page shown is found in them by its address, so a list that grows or
+  // shrinks under the viewer never skips or repeats a picture. `hint` is the
+  // last place it was found, for a picture listed twice.
+  const [group, setGroup] = useState<ReplyPicture[]>([]);
+  const [view, setView] = useState({ src: "", hint: 0 });
   const read = useRef(readPictures);
   read.current = readPictures;
   const swipe = useRef<{ pointerId: number; x: number; y: number } | null>(null);
-  const paging = inReply && set.pictures.length >= 2;
-  const paged = paging && index !== set.opened;
-  const current = paging ? set.pictures[index] : undefined;
+  // The fingers down on the viewer. A second one ends the swipe, and no swipe
+  // starts again until every finger is up.
+  const touches = useRef(new Set<number>());
+  const multiTouch = useRef(false);
+  const paging = inReply && group.length >= 2;
+  const index = paging ? placeOf(group, view.src, view.hint) : 0;
+  const current = paging ? group[index] : undefined;
+  // Only the picture the viewer grew from shows through the library's own
+  // image. Every other page is drawn here from its original.
+  const paged = paging && current?.src !== downloadSrc;
   const [scale, setScale] = useState(MIN_SCALE);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const viewport = useRef<HTMLDivElement>(null);
@@ -116,32 +127,54 @@ export function ImagePreviewContent({
     setPan({ x: 0, y: 0 });
   };
 
+  const viewerOpen = modalState !== "UNLOADED";
   useEffect(() => {
-    if (modalState !== "LOADING" || !read.current) return;
-    const { pictures, index: opened } = read.current();
-    setSet({ pictures, opened });
-    setIndex(opened);
-  }, [modalState]);
+    if (!viewerOpen || !read.current) return;
+    touches.current.clear();
+    multiTouch.current = false;
+    const first = read.current();
+    setGroup(first.pictures);
+    setView({ src: first.pictures[first.index]?.src ?? "", hint: first.index });
+    if (!first.root) return;
+    // A message that streams while the viewer is open gains pictures, and one
+    // may fail to load and leave. Read the root again whenever its marks move.
+    const observer = new MutationObserver(() => {
+      const next = read.current?.().pictures;
+      if (!next) return;
+      setGroup((prev) => (samePictures(prev, next) ? prev : next));
+      setView((prev) => {
+        const at = placeOf(next, prev.src, prev.hint);
+        const src = next[at]?.src ?? prev.src;
+        return src === prev.src && at === prev.hint ? prev : { src, hint: at };
+      });
+    });
+    observer.observe(first.root, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [VIEWER_PICTURE_ATTR, "data-viewer-src"],
+    });
+    return () => observer.disconnect();
+  }, [viewerOpen]);
 
   // The neighbours load before they are asked for.
   useEffect(() => {
     if (!paging) return;
     for (const neighbour of [index - 1, index + 1]) {
-      const src = set.pictures[neighbour]?.src;
+      const src = group[neighbour]?.src;
       if (src) new Image().src = src;
     }
-  }, [paging, index, set]);
+  }, [paging, index, group]);
 
   /** Pages by `delta`, stopping at the first and the last picture. */
   const go = (delta: number) => {
-    // A message that streamed since the viewer opened may have more pictures.
-    const fresh = read.current?.();
-    const pictures = fresh && fresh.pictures.length > 0 ? fresh.pictures : set.pictures;
-    const opened = fresh && fresh.pictures.length > 0 ? fresh.index : set.opened;
-    const next = index + delta;
-    if (next < 0 || next >= pictures.length) return;
-    setSet({ pictures, opened });
-    setIndex(next);
+    // Read the message again, so the step starts from what it holds now.
+    const pictures = read.current?.().pictures ?? group;
+    const at = placeOf(pictures, view.src, view.hint);
+    const next = at + delta;
+    if (at < 0 || next < 0 || next >= pictures.length) return;
+    setGroup((prev) => (samePictures(prev, pictures) ? prev : pictures));
+    setView({ src: pictures[next]?.src ?? "", hint: next });
     reset();
   };
 
@@ -154,6 +187,46 @@ export function ImagePreviewContent({
   }, [modalState]);
 
   const active = modalState === "LOADED";
+
+  // Keys go through the document, as the library's Escape does. A focused button
+  // that turns disabled at the end of the pictures hands its focus to the page,
+  // and a key handler on the viewer would then hear nothing.
+  const onKey = useRef<(event: KeyboardEvent) => void>(() => {});
+  onKey.current = (event) => {
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      (target.isContentEditable || target.matches("input, textarea, select"))
+    ) {
+      return;
+    }
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      changeScale(SCALE_STEP);
+    } else if (event.key === "-") {
+      event.preventDefault();
+      changeScale(-SCALE_STEP);
+    } else if (event.key === "0") {
+      event.preventDefault();
+      reset();
+    } else if (
+      paging &&
+      (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      go(event.key === "ArrowLeft" ? -1 : 1);
+    }
+  };
+  useEffect(() => {
+    if (!active) return;
+    const listener = (event: KeyboardEvent) => onKey.current(event);
+    document.addEventListener("keydown", listener, true);
+    return () => document.removeEventListener("keydown", listener, true);
+  }, [active]);
+
   const image = modalImage(img);
   // Download saves the original of the picture shown, never a thumbnail.
   const saveSrc = paged ? current?.src : (downloadSrc ?? image?.props.src);
@@ -178,25 +251,16 @@ export function ImagePreviewContent({
           changeScale(event.deltaY < 0 ? SCALE_STEP : -SCALE_STEP);
         }
       }}
-      onKeyDown={(event) => {
-        if (!active) return;
-        if (event.key === "+" || event.key === "=") {
-          event.preventDefault();
-          changeScale(SCALE_STEP);
-        } else if (event.key === "-") {
-          event.preventDefault();
-          changeScale(-SCALE_STEP);
-        } else if (event.key === "0") {
-          event.preventDefault();
-          reset();
-        } else if (paging && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-          event.preventDefault();
-          go(event.key === "ArrowLeft" ? -1 : 1);
-        }
-      }}
       onPointerDown={(event) => {
-        if (paging && active && scale === MIN_SCALE && event.pointerType === "touch") {
-          swipe.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+        if (event.pointerType === "touch") {
+          touches.current.add(event.pointerId);
+          if (touches.current.size > 1) {
+            // A second finger is a pinch, not a swipe.
+            multiTouch.current = true;
+            swipe.current = null;
+          } else if (!multiTouch.current && paging && active && scale === MIN_SCALE) {
+            swipe.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+          }
         }
         if (!active || scale === MIN_SCALE || event.button !== 0) return;
         if (!(event.target instanceof HTMLImageElement)) return;
@@ -227,6 +291,10 @@ export function ImagePreviewContent({
         });
       }}
       onPointerUp={(event) => {
+        if (event.pointerType === "touch") {
+          touches.current.delete(event.pointerId);
+          if (touches.current.size === 0) multiTouch.current = false;
+        }
         const start = swipe.current;
         if (start?.pointerId === event.pointerId) {
           swipe.current = null;
@@ -245,7 +313,11 @@ export function ImagePreviewContent({
         drag.current = null;
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(event) => {
+        if (event.pointerType === "touch") {
+          touches.current.delete(event.pointerId);
+          if (touches.current.size === 0) multiTouch.current = false;
+        }
         swipe.current = null;
         drag.current = null;
         suppressBackdropClick.current = false;
@@ -320,7 +392,7 @@ export function ImagePreviewContent({
             aria-live="polite"
             className="absolute left-4 top-4 flex h-[var(--control-h-md)] items-center rounded-full border border-border bg-surface px-3 text-ui tabular-nums text-foreground shadow-sm"
           >
-            {t("composer.imageCounter", { current: index + 1, total: set.pictures.length })}
+            {t("composer.imageCounter", { current: index + 1, total: group.length })}
           </output>
           <IconButton
             data-preview-controls
@@ -335,7 +407,7 @@ export function ImagePreviewContent({
             label={t("composer.nextImage")}
             icon={<ChevronRight aria-hidden />}
             onClick={() => go(1)}
-            disabled={!active || index === set.pictures.length - 1}
+            disabled={!active || index === group.length - 1}
             className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full border-border bg-surface shadow-sm"
           />
         </>

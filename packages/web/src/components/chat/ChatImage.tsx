@@ -59,6 +59,10 @@ export function ZoomableImage({
   const { t } = useTranslation("chat");
   const desktop = useDesktop();
   const trigger = useRef<HTMLImageElement>(null);
+  // One component for the picture's whole life, so a re-render, or a message
+  // that moves its pictures while it streams, never remounts an open viewer.
+  const latestSrc = useRef(src);
+  latestSrc.current = src;
   const ZoomContent = useMemo(
     () =>
       function ReplyImagePreviewContent(props: PreviewContentProps) {
@@ -66,12 +70,12 @@ export function ZoomableImage({
           <ImagePreviewContent
             {...props}
             inReply
-            downloadSrc={src}
+            downloadSrc={latestSrc.current}
             pictures={() => replyPictures(trigger.current)}
           />
         );
       },
-    [src],
+    [],
   );
   const marked = isValidElement(children)
     ? cloneElement(children as ReactElement<Record<string, unknown>>, {

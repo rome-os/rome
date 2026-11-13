@@ -53,8 +53,9 @@ function Messages({ texts }: { texts: string[] }) {
     <I18nextProvider i18n={i18n}>
       <ThemeProvider>
         <MemoryRouter>
-          {texts.map((text) => (
-            <ChatMarkdown key={text}>{text}</ChatMarkdown>
+          {texts.map((text, index) => (
+            // Keyed by place, so a message that streams more text stays mounted.
+            <ChatMarkdown key={index}>{text}</ChatMarkdown>
           ))}
         </MemoryRouter>
       </ThemeProvider>
@@ -304,6 +305,192 @@ describe("paging a reply's pictures in the viewer", () => {
     });
     expect(opened.style.visibility).not.toBe("hidden");
     expect(counter()).toBe("1 / 4");
+  });
+});
+
+describe("a reply that streams while the viewer is open", () => {
+  const A = "![A](https://example.com/a.jpg)";
+  const B = "![B](https://example.com/b.jpg)";
+  const C = "![C](https://example.com/c.jpg)";
+  const text = (...parts: string[]) => parts.join("\n\n");
+
+  async function stream(view: ReturnType<typeof render>, ...parts: string[]) {
+    await act(async () => {
+      view.rerender(<Messages texts={[text(...parts)]} />);
+    });
+  }
+
+  it("pages once a second picture arrives in a reply that opened with one", async () => {
+    const view = render(<Messages texts={[A]} />);
+    await openFrom("A");
+    expect(counter()).toBeUndefined();
+    expect(within(dialog()).queryByRole("button", { name: "Next picture" })).toBeNull();
+    await stream(view, A, B);
+    expect(counter()).toBe("1 / 2");
+    expect(button("Next picture").disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(button("Next picture"));
+    });
+    expect(shown()).toBe("/b.jpg");
+    expect(counter()).toBe("2 / 2");
+  });
+
+  it("enables Next, and updates the counter, when a picture arrives after the last one", async () => {
+    const view = render(<Messages texts={[text(A, B)]} />);
+    await openFrom("B");
+    expect(counter()).toBe("2 / 2");
+    expect(button("Next picture").disabled).toBe(true);
+    await stream(view, A, B, C);
+    expect(counter()).toBe("2 / 3");
+    expect(button("Next picture").disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(button("Next picture"));
+    });
+    expect(shown()).toBe("/c.jpg");
+    expect(counter()).toBe("3 / 3");
+  });
+
+  it("keeps the shown picture, and its neighbours, when one arrives before it", async () => {
+    const view = render(<Messages texts={[text(A, B)]} />);
+    await openFrom("B");
+    await stream(view, A, "![N](https://example.com/n.jpg)", B);
+    // B is still the page, now third, and Previous reaches the new picture, not A.
+    expect(counter()).toBe("3 / 3");
+    await act(async () => {
+      fireEvent.click(button("Previous picture"));
+    });
+    expect(shown()).toBe("/n.jpg");
+    expect(counter()).toBe("2 / 3");
+  });
+
+  it("keeps the viewer mounted while the message streams", async () => {
+    const view = render(<Messages texts={[text(A, B)]} />);
+    const { opened } = await openFrom("A");
+    await stream(view, A, B, C);
+    expect(opened.isConnected).toBe(true);
+    expect(dialog()).toBeTruthy();
+  });
+
+  it("stops watching the message once the viewer closes", async () => {
+    const observe = rs.spyOn(MutationObserver.prototype, "disconnect");
+    const view = render(<Messages texts={[text(A, B)]} />);
+    const { opened } = await openFrom("A");
+    await act(async () => {
+      fireEvent.click(button("Close"));
+    });
+    await act(async () => {
+      fireEvent.transitionEnd(opened, { propertyName: "transform" });
+    });
+    expect(observe).toHaveBeenCalled();
+    await stream(view, A, B, C);
+    expect(document.querySelector("dialog[open]")).toBeNull();
+  });
+});
+
+describe("the keys of a paging viewer", () => {
+  it("keep paging after the button that was focused turns disabled", async () => {
+    render(<Messages texts={[MIXED]} />);
+    await openFrom("Three");
+    // Click Next to the end. The focused button turns disabled, and the browser
+    // hands its focus to the page.
+    const next = button("Next picture");
+    next.focus();
+    await act(async () => {
+      fireEvent.click(next);
+    });
+    expect(counter()).toBe("4 / 4");
+    expect(next.disabled).toBe(true);
+    // jsdom leaves focus on a disabled button, so hand it to the page as Chromium does.
+    await act(async () => {
+      document.body.tabIndex = -1;
+      document.body.focus();
+    });
+    expect(document.activeElement).toBe(document.body);
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    });
+    expect(counter()).toBe("3 / 4");
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    });
+    expect(counter()).toBe("4 / 4");
+  });
+
+  it("zoom with + - and 0 whichever element has the focus", async () => {
+    render(<Messages texts={[MIXED]} />);
+    await openFrom("One");
+    const zoom = () => within(dialog()).getByLabelText("Zoom").textContent;
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "+" });
+    });
+    expect(zoom()).toBe("125%");
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "0" });
+    });
+    expect(zoom()).toBe("100%");
+  });
+
+  it("leave a text field's arrow keys to the field, and a modified arrow to the browser", async () => {
+    render(<Messages texts={[MIXED]} />);
+    await openFrom("One");
+    const field = document.createElement("input");
+    document.body.append(field);
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "ArrowRight" });
+      fireEvent.keyDown(document.body, { key: "ArrowRight", altKey: true });
+    });
+    field.remove();
+    expect(counter()).toBe("1 / 4");
+  });
+});
+
+describe("a pinch in a paging viewer", () => {
+  const touch = (target: Element, type: "Down" | "Up", id: number, x: number) =>
+    fireEvent[`pointer${type}` as "pointerDown"](target, {
+      pointerId: id,
+      pointerType: "touch",
+      clientX: x,
+      clientY: 300,
+    });
+
+  it("never turns the page, even when either finger travels far", async () => {
+    render(<Messages texts={[MIXED]} />);
+    const { opened } = await openFrom("Two");
+    await act(async () => {
+      touch(opened, "Down", 1, 300);
+      touch(opened, "Down", 2, 340);
+      // The pinch ends with the second finger far from where it began.
+      touch(opened, "Up", 2, 100);
+      touch(opened, "Up", 1, 300);
+    });
+    expect(counter()).toBe("2 / 4");
+    await act(async () => {
+      touch(opened, "Down", 4, 300);
+      touch(opened, "Down", 5, 340);
+      // And with the first finger far from where it began.
+      touch(opened, "Up", 4, 100);
+      touch(opened, "Up", 5, 340);
+    });
+    expect(counter()).toBe("2 / 4");
+  });
+
+  it("ignores a finger that lands while another is still down, until all are up", async () => {
+    render(<Messages texts={[MIXED]} />);
+    const { opened } = await openFrom("Two");
+    await act(async () => {
+      touch(opened, "Down", 1, 300);
+      touch(opened, "Down", 2, 340);
+      touch(opened, "Up", 2, 340);
+      // One finger is left, and it travels far.
+      touch(opened, "Up", 1, 100);
+    });
+    expect(counter()).toBe("2 / 4");
+    // With every finger up, a single-finger swipe pages again.
+    await act(async () => {
+      touch(opened, "Down", 3, 300);
+      touch(opened, "Up", 3, 100);
+    });
+    expect(counter()).toBe("3 / 4");
   });
 });
 
