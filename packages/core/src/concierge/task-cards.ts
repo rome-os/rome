@@ -11,6 +11,7 @@ import type {
   TaskChatWaitedOn,
   TaskQuestionOutcome,
 } from "@rome/api-types/chat";
+import type { ConciergeOpenWait } from "@rome/api-types/concierge";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
 import type { AskedApproval, AskedQuestion, TaskChatCards } from "../webchat/repository.js";
@@ -41,17 +42,27 @@ function showsAsk(part: Record<string, unknown>): part is {
   return part.type === "task_chat" && typeof part.chatId === "string" && part.show !== "task";
 }
 
+/** Whether the item an ask card's part names is the wait `wait`. */
+function showsWait(waitedOn: TaskChatWaitedOn, wait: ConciergeOpenWait): boolean {
+  return wait.kind === "approval"
+    ? waitedOn.kind === "approval" && waitedOn.id === wait.id
+    : waitedOn.kind === "question" &&
+        waitedOn.id === wait.id &&
+        waitedOn.messageId === wait.messageId;
+}
+
 /**
- * For each task chat in `waits`, the newest of `messages` that shows its
- * question or approval card as the wait it now holds: a card said no earlier
- * than the wait's own second, since an earlier one shows what it asked
- * before. A task chat no such message shows is left out, and its owner
- * answers in the task chat. `messages` come in the order said.
+ * For each task chat in `waits`, the newest of `messages` that shows the
+ * question or approval card of the wait it now holds. A card names what it
+ * shows; one from before names nothing and shows what was asked by its time,
+ * so it counts when said no earlier than the wait's own second. A task chat
+ * no such message shows is left out, and its owner answers in the task chat.
+ * `messages` come in the order said.
  */
 export function cardMessagesOf(
   messages: readonly { id: string; content: string; createdAt: Date }[],
-  /** Each waiting task chat, and when its open wait began, epoch milliseconds. */
-  waits: ReadonlyMap<string, number>,
+  /** Each waiting task chat, and the wait it holds now. */
+  waits: ReadonlyMap<string, ConciergeOpenWait>,
 ): Map<string, string> {
   const found = new Map<string, string>();
   for (const message of messages) {
@@ -66,9 +77,10 @@ export function cardMessagesOf(
     if (!Array.isArray(parts)) continue;
     for (const part of parts) {
       if (!part || typeof part !== "object" || !showsAsk(part as Record<string, unknown>)) continue;
-      const { chatId } = part as { chatId: string };
-      const since = waits.get(chatId);
-      if (since !== undefined && said >= since) found.set(chatId, message.id);
+      const { chatId, waitedOn } = part as { chatId: string; waitedOn?: TaskChatWaitedOn };
+      const wait = waits.get(chatId);
+      if (!wait) continue;
+      if (waitedOn ? showsWait(waitedOn, wait) : said >= wait.since) found.set(chatId, message.id);
     }
   }
   return found;

@@ -140,7 +140,7 @@ export class ChatTaskList {
     const waits = new Map(
       tasks.flatMap((task) =>
         task.status === "needs_you" && task.chat && task.openWait
-          ? [[task.chat.id, task.openWait.since] as const]
+          ? [[task.chat.id, task.openWait] as const]
           : [],
       ),
     );

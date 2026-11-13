@@ -256,6 +256,26 @@ describe("/chats/:chatId/tasks", () => {
       said("later-task-card", since + 3_000, "task"),
     ];
     expect(await respondTo()).toBe("new-ask");
+
+    // A card that names what it shows counts by that alone, whenever it was said.
+    const naming = (id: string, at: number, approval: string) => ({
+      id,
+      content: JSON.stringify([
+        {
+          type: "task_chat",
+          chatId: "task-chat",
+          title: "Flights",
+          show: "ask",
+          waitedOn: { kind: "approval", id: approval },
+        },
+      ]),
+      createdAt: new Date(at),
+    });
+    cardMessages.concierge = [
+      naming("names-it", since - 5_000, "a1"),
+      naming("names-another", since + 5_000, "a0"),
+    ];
+    expect(await respondTo()).toBe("names-it");
   });
 
   it("opens the change stream for the chat's owner only", async () => {
