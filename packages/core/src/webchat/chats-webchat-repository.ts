@@ -22,6 +22,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
+import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
@@ -695,6 +696,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     content: string,
     turnId: string | null = null,
   ) {
+    assertWidgetAloneInContent(content);
     const standing = role === "user" || role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.addMessage(id, sessionId, role, content, turnId);
     this.say(standing, id, role as "user" | "assistant", partsOf(content), turnId);
@@ -708,6 +710,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     id?: string,
     chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
+    assertWidgetAlone(parts);
     const standing = role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.insertBackendMessage(sessionId, turnId, role, parts, id);
     const key = id ?? randomUUID();
@@ -727,6 +730,30 @@ export class ChatsWebChatRepository extends WebChatRepository {
 
   override async getMessages(sessionId: string) {
     return this.selectLines([sessionId]);
+  }
+
+  /** A dashboard line's session, by the id clients know it by (its key):
+   *  the session whose turn said it, else the one standing in its chat. A
+   *  line said before the switch is still in the session's own table. */
+  override async sessionIdOfMessage(messageId: string): Promise<string | null> {
+    const [row] = this.db.all<{ session_id: string | null }>(sql`
+      SELECT COALESCE(l.session_id, s.id) AS session_id
+      FROM chat_messages m
+      LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.role = 'answer'
+      LEFT JOIN rome_sessions s ON s.chat_id = m.chat_id AND s.thread_id IS m.thread_id
+      WHERE m.key = ${messageId}
+      ORDER BY s.created_at
+      LIMIT 1
+    `);
+    return row?.session_id ?? (await super.sessionIdOfMessage(messageId));
+  }
+
+  /** A dashboard line's parts, by its key, else a row of the session's own table. */
+  override async getMessageContent(id: string) {
+    const [row] = this.db.all<{ parts: string | null }>(sql`
+      SELECT parts FROM chat_messages WHERE key = ${id} LIMIT 1
+    `);
+    return row?.parts ?? (await super.getMessageContent(id));
   }
 
   /** The newest `options.limit` turn groups of a session, as
