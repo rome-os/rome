@@ -341,7 +341,7 @@ function LiveTaskChatCard({
             className="shrink-0"
             onClick={() =>
               void stopTask(task).then((ok) => {
-                if (!ok) toast.error(t("concierge.work.failed.stop"));
+                if (!ok) toast.error(t("concierge.taskList.failed.stop"));
               })
             }
           >

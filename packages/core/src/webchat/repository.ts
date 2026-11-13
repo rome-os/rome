@@ -323,7 +323,16 @@ export interface MessagePageOptions {
   limit: number;
   /** Return only groups strictly older than this cursor. */
   before?: MessagePageCursor | null;
+  /**
+   * A message the page must reach: the page holds every group down to the one
+   * with this message, and a few older ones, so one read lands on it however
+   * far back it is. A message the chat does not hold changes nothing.
+   */
+  through?: string;
 }
+
+/** How many groups older than a `through` message a page holds, so it opens with some context. */
+export const THROUGH_CONTEXT_GROUPS = 2;
 
 function traceReadFields(archivedSessionIds: string[]) {
   const archived = archivedSessionIds.length
@@ -2400,6 +2409,9 @@ export class WebChatRepository {
    */
   async getMessagesPage(sessionId: string, options: MessagePageOptions) {
     const before = options.before;
+    const limit = options.through
+      ? Math.max(options.limit, await this.groupsThrough(sessionId, before, options.through))
+      : options.limit;
     const groups = await this.db.all<{ key: string; startedAt: number }>(sql`
       SELECT key, startedAt FROM (
         SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
@@ -2410,9 +2422,9 @@ export class WebChatRepository {
       )
       ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
       ORDER BY startedAt DESC, key DESC
-      LIMIT ${options.limit + 1}
+      LIMIT ${limit + 1}
     `);
-    const pageGroups = groups.slice(0, options.limit);
+    const pageGroups = groups.slice(0, limit);
     if (pageGroups.length === 0) return { rows: [], nextCursor: null };
     const keys = pageGroups.map((group) => group.key);
     const rows = await this.selectMessages(
@@ -2425,10 +2437,61 @@ export class WebChatRepository {
     return {
       rows,
       nextCursor:
-        groups.length > options.limit && oldest
+        groups.length > limit && oldest
           ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
           : null,
     };
+  }
+
+  /**
+   * How many groups a page from `before` must hold to reach the group of
+   * message `through`, with {@link THROUGH_CONTEXT_GROUPS} older ones. Zero
+   * when the chat does not hold that message, or it is not older than `before`.
+   */
+  protected async groupsThrough(
+    sessionId: string,
+    before: MessagePageCursor | null | undefined,
+    through: string,
+  ): Promise<number> {
+    const [row] = await this.db.all<{ n: number }>(sql`
+      WITH g AS (
+        SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
+               MIN(${romeAgentMessages.createdAt}) AS startedAt
+        FROM ${romeAgentMessages}
+        WHERE ${romeAgentMessages.sessionId} = ${sessionId}
+        GROUP BY key
+      ),
+      t AS (
+        SELECT g.key, g.startedAt FROM g
+        WHERE g.key = (
+          SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})
+          FROM ${romeAgentMessages}
+          WHERE ${romeAgentMessages.sessionId} = ${sessionId} AND ${romeAgentMessages.id} = ${through}
+        )
+      )
+      SELECT count(*) AS n FROM g, t
+      WHERE (g.startedAt, g.key) >= (t.startedAt, t.key)
+      ${before ? sql`AND (g.startedAt, g.key) < (${before.startedAt}, ${before.key})` : sql``}
+    `);
+    const n = row?.n ?? 0;
+    return n === 0 ? 0 : n + THROUGH_CONTEXT_GROUPS;
+  }
+
+  /**
+   * The assistant messages of chat `sessionId` that hold a task chat part,
+   * in the order they were said: where a task's card can show.
+   */
+  async taskChatPartMessages(
+    sessionId: string,
+  ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
+    const rows = await this.selectMessages(
+      and(
+        eq(romeAgentMessages.sessionId, sessionId),
+        eq(romeAgentMessages.role, "assistant"),
+        like(romeAgentMessages.content, '%"task_chat"%'),
+      ),
+    );
+    return rows.map(({ id, content, createdAt }) => ({ id, content, createdAt }));
   }
 
   private selectMessages(where: SQL | undefined) {

@@ -137,8 +137,8 @@ import {
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
-import { useAgentPage } from "@/components/concierge/AgentPage";
-import { useToolAgent } from "@/pages/free/tool-agent";
+import { useTaskList } from "@/components/concierge/TaskListPane";
+import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -189,8 +189,6 @@ import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
 const TIMELINE_JUMP_OFFSET_PX = 24;
-/** How many older pages a jump to a Concierge message loads before it gives up. */
-const MAX_JUMP_PAGES = 20;
 
 // Chat Component
 
@@ -824,8 +822,9 @@ export function Chat({
     [scrollerEl, floorEl, landOn, jumpToMessage],
   );
 
-  // A row of the task panel points to a Concierge message that may sit pages
-  // above the loaded ones, so the jump pages older history in until it renders.
+  // Respond in the Tasks panel points to a Concierge message that may sit
+  // pages above the loaded ones, so the jump reads from the oldest loaded
+  // turn down through that message in one page, then lands on it.
   const olderRef = useRef({ hasOlder, loadOlder });
   olderRef.current = { hasOlder, loadOlder };
   const shownCountRef = useRef(0);
@@ -834,34 +833,31 @@ export function Chat({
   }, [displayMessages]);
   const findingMessageRef = useRef(false);
   const showSourceMessage = useCallback(
-    async (messageId: string) => {
+    async (messageId: string): Promise<boolean> => {
       const scroller = scrollerEl;
-      if (!scroller || !mainSessionId || findingMessageRef.current) return;
+      if (!scroller || !mainSessionId || findingMessageRef.current) return false;
       if (findMessageAnchor(scroller, messageId)) {
         jumpToMessage(messageId);
-        return;
+        return true;
       }
       findingMessageRef.current = true;
       const loading = toast.loading(t("concierge.tasks.findingMessage"));
       try {
-        let stalled = 0;
-        for (let page = 0; page < MAX_JUMP_PAGES; page++) {
-          if (!olderRef.current.hasOlder(mainSessionId)) break;
+        if (olderRef.current.hasOlder(mainSessionId)) {
           const before = shownCountRef.current;
-          await olderRef.current.loadOlder(mainSessionId);
+          await olderRef.current.loadOlder(mainSessionId, { through: messageId });
           // The page lands in state first and renders a moment later.
           for (let wait = 0; wait < 40 && shownCountRef.current === before; wait++) {
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
+          await new Promise((resolve) => requestAnimationFrame(resolve));
           if (findMessageAnchor(scroller, messageId)) {
             jumpToMessage(messageId);
-            return;
+            return true;
           }
-          // A page that fails to load changes nothing; two in a row end the search.
-          stalled = shownCountRef.current === before ? stalled + 1 : 0;
-          if (stalled >= 2) break;
         }
         toast.error(t("concierge.tasks.sourceMissing"));
+        return false;
       } finally {
         toast.dismiss(loading);
         findingMessageRef.current = false;
@@ -871,7 +867,7 @@ export function Chat({
   );
   useEffect(() => {
     if (!concierge) return;
-    return onConciergeJump((messageId) => void showSourceMessage(messageId));
+    return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
   const displayedMessageIds = useMemo(
@@ -2248,10 +2244,8 @@ export function Chat({
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  // The agent's logo in the header opens its Agent page: what runs for this chat.
-  const agentPage = useAgentPage(concierge ? (mainSessionId ?? null) : null, (prompt) =>
-    composerRef.current?.insertText(prompt),
-  );
+  // The agent's logo in the header opens the chat's task list: what runs for it.
+  const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
   // A Concierge chat's header buttons sit on round badges like its pill, except
   // in the Mac app's title bar, where they are any chat's.
   const floating = concierge && !navbarSlot;
@@ -2269,7 +2263,7 @@ export function Chat({
       activity={conciergeActivity}
       // A chat with no messages yet draws its own large mascot.
       badge={!conciergeEmpty}
-      onOpenAgent={agentPage.open}
+      onOpenTasks={taskList.open}
     />
   ) : null;
 
@@ -2369,7 +2363,7 @@ export function Chat({
   // messages under the gaps stay reachable. The thread view floats the same
   // header with its close button on the right.
   // A narrow workspace shows the open tool pane in place of the chat.
-  const toolTasksHost = useToolAgent();
+  const toolTasksHost = useToolTasks();
   const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
   const floatingHeader = (trailing: ReactNode) => (
     <div
@@ -2449,7 +2443,7 @@ export function Chat({
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
-      {agentPage.sheet}
+      {taskList.sheet}
     </>
   ) : null;
 

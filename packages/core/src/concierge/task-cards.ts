@@ -34,6 +34,41 @@ function showsAsk(part: Record<string, unknown>): part is { type: "task_chat"; c
   return part.type === "task_chat" && typeof part.chatId === "string" && part.show !== "task";
 }
 
+/**
+ * For each of `chatIds`, the newest of `messages` that shows that task chat's
+ * question or approval card, else the newest that shows its task card. A
+ * task chat no message shows is left out. `messages` come in the order said.
+ */
+export function cardMessagesOf(
+  messages: readonly { id: string; content: string }[],
+  chatIds: readonly string[],
+): Map<string, string> {
+  const wanted = new Set(chatIds);
+  const ask = new Map<string, string>();
+  const task = new Map<string, string>();
+  for (const message of messages) {
+    let parts: unknown;
+    try {
+      parts = JSON.parse(message.content);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      if (!part || typeof part !== "object") continue;
+      const { type, chatId } = part as Record<string, unknown>;
+      if (type !== "task_chat" || typeof chatId !== "string" || !wanted.has(chatId)) continue;
+      (showsAsk(part as Record<string, unknown>) ? ask : task).set(chatId, message.id);
+    }
+  }
+  return new Map(
+    chatIds.flatMap((chatId) => {
+      const id = ask.get(chatId) ?? task.get(chatId);
+      return id ? [[chatId, id] as const] : [];
+    }),
+  );
+}
+
 /** The answer a question card sent, as one line: its answers' values. */
 function answerText(output: Record<string, unknown>): string {
   const answers = Array.isArray(output.answers) ? output.answers : [];

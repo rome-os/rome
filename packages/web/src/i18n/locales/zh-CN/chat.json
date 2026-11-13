@@ -107,43 +107,10 @@
       "working": "正在处理",
       "failed": "未完成"
     },
-    "agent": {
-      "title": "Agent",
-      "open": "打开 {{name}}",
-      "close": "关闭",
-      "tabsLabel": "Agent 页面",
-      "tabs": {
-        "work": "工作",
-        "uses": "用法"
-      },
-      "uses": {
-        "brief": {
-          "title": "每日简报",
-          "prompt": "每个工作日早上 8 点，给我发一份今天的日程和重要邮件简报。"
-        },
-        "price": {
-          "title": "盯一个价格",
-          "prompt": "___ 的价格低于 ___ 元时告诉我。"
-        },
-        "urgent": {
-          "title": "只看紧急邮件",
-          "prompt": "每小时查一次收件箱，只在有紧急邮件时提醒我。"
-        },
-        "app": {
-          "title": "做一个应用",
-          "prompt": "做一个记录我健身的应用，带每周图表。"
-        },
-        "sleep": {
-          "title": "我睡得怎么样",
-          "prompt": "我昨晚睡得怎么样？"
-        },
-        "research": {
-          "title": "调研",
-          "prompt": "比较 2000 元以内最好的降噪耳机。"
-        }
-      }
-    },
-    "work": {
+    "taskList": {
+      "title": "任务",
+      "close": "关闭任务",
+      "open": "打开任务",
       "groups": {
         "needs_you": "需要你",
         "active": "进行中",
@@ -152,20 +119,22 @@
         "ended": "已结束"
       },
       "empty": "这里还没有在运行的事。",
-      "loadFailed": "工作加载失败",
+      "loading": "正在加载任务",
+      "loadFailed": "任务加载失败",
+      "showMore": "再显示 {{count}} 条",
       "task": {
         "waitingAnswer": "等你回答",
         "waitingApproval": "等你批准",
         "running": "运行中",
         "checksIn": "{{when}}检查",
-        "nextRun": "下次运行 {{when}}",
         "notStarted": "未开始",
-        "repeats": "重复",
+        "stopping": "正在停止…",
+        "opening": "正在打开…",
         "ended": {
           "done": "已完成",
           "failed": "失败",
           "stopped": "已停止",
-          "no_response": "已结束 · 无回应"
+          "no_response": "无回应"
         }
       },
       "schedule": {
@@ -189,23 +158,14 @@
         "lastFailed": "上次运行失败"
       },
       "actions": {
-        "open": "打开「{{title}}」的聊天",
-        "stop": "停止「{{title}}」",
-        "cancelCheck": "取消这次检查",
-        "skipRun": "跳过这次运行",
-        "unfollow": "取消关注 {{target}}",
-        "pause": "暂停「{{name}}」",
-        "resume": "恢复「{{name}}」",
-        "delete": "删除「{{name}}」"
+        "respond": "去处理",
+        "respondTo": "处理「{{title}}」",
+        "stop": "停止",
+        "stopTask": "停止「{{title}}」",
+        "openChat": "打开「{{title}}」的聊天"
       },
       "failed": {
-        "stop": "停止任务失败",
-        "cancelCheck": "取消检查失败",
-        "skipRun": "跳过运行失败",
-        "unfollow": "取消关注失败",
-        "pause": "暂停例行任务失败",
-        "resume": "恢复例行任务失败",
-        "delete": "删除例行任务失败"
+        "stop": "停止任务失败"
       }
     }
   },

@@ -24,7 +24,7 @@ import {
   type ConciergeFollowOptionDto,
   type ConciergeFollowRules,
 } from "@rome/api-types/concierge";
-import type { ChatWorkFollowItem } from "@rome/api-types/chat-work";
+import type { TaskListFollowItem } from "@rome/api-types/task-list";
 import type { ConnectionView } from "../api/routes/connections.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { Action } from "../apps/actions/types.js";
@@ -311,7 +311,7 @@ export interface ConciergeFollowing {
    * owner's digest times, read without asking the sources again. A follow of
    * a chat that is archived or gone counts as its owner's main chat's.
    */
-  followsIn?(chatId: string, owner: ConciergeOwner): Promise<ChatWorkFollowItem[]>;
+  followsIn?(chatId: string, owner: ConciergeOwner): Promise<TaskListFollowItem[]>;
   /** Calls `listener` whenever a follow or the rules are written. Returns the unsubscribe. */
   onChange?(listener: () => void): () => void;
 }
@@ -1381,7 +1381,7 @@ export function startConciergeFollowing(
     async followsIn(chatId, owner) {
       const [stored, sources] = await Promise.all([readStored(), readSources().catch(() => [])]);
       const { digestTimes } = rulesOf(stored, owner);
-      const items: ChatWorkFollowItem[] = [];
+      const items: TaskListFollowItem[] = [];
       for (const follow of followsOf(stored, owner)) {
         if ((await chatRefOf(follow.chat, owner)).id !== chatId) continue;
         const source = sources.find((s) => s.source === follow.source);

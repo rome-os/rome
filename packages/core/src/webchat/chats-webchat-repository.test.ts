@@ -171,6 +171,33 @@ describe("ChatsWebChatRepository", () => {
     expect(older.nextCursor).toBeNull();
   });
 
+  it("reaches an old message in one page, with two older turns for context", async () => {
+    await repo.createSession("chat-1", "Plans");
+    for (let turn = 1; turn <= 8; turn++) {
+      await repo.addMessage(`in-${turn}`, "chat-1", "user", text(`Q${turn}`), `turn-${turn}`);
+      await repo.addMessage(`out-${turn}`, "chat-1", "assistant", text(`A${turn}`), `turn-${turn}`);
+    }
+    const turnsOf = (rows: { id: string }[]) =>
+      [...new Set(rows.map((line) => line.id.split("-")[1]))].map(Number);
+
+    const page = await repo.getMessagesPage("chat-1", { limit: 1, through: "out-5" });
+    expect(turnsOf(page.rows)).toEqual([3, 4, 5, 6, 7, 8]);
+    expect(page.nextCursor).not.toBeNull();
+
+    // From the oldest page held, it brings only what lies between.
+    const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
+    const between = await repo.getMessagesPage("chat-1", {
+      limit: 1,
+      before: newest.nextCursor,
+      through: "in-4",
+    });
+    expect(turnsOf(between.rows)).toEqual([2, 3, 4, 5, 6]);
+
+    // A message the chat does not hold pages as usual.
+    const plain = await repo.getMessagesPage("chat-1", { limit: 1, through: "elsewhere" });
+    expect(turnsOf(plain.rows)).toEqual([8]);
+  });
+
   // A subagent, fork or action run stands in no chat, so its prompts and
   // answers are its own.
   it("keeps the lines of a session in no chat as its own", async () => {

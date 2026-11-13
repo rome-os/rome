@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
-import { describeRoutineTrigger, describeTaskSchedule, formatClock } from "./work";
+import { describeRoutineTrigger, describeTaskSchedule, formatClock } from "./task-list-words";
 
 /** Says the key and its options, so a test reads what was chosen. */
 const t = (key: string, options?: Record<string, unknown>) =>
-  `${key.replace("concierge.work.schedule.", "")}${options ? ` ${JSON.stringify(options)}` : ""}`;
+  `${key.replace("concierge.taskList.schedule.", "")}${options ? ` ${JSON.stringify(options)}` : ""}`;
 
 describe("formatClock", () => {
   it("writes a stored time of day as the locale does", () => {

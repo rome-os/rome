@@ -36,6 +36,7 @@ import {
   type MessagePageOptions,
   type StoredWebchatHistoryMessage,
   type StoredWebchatMessage,
+  THROUGH_CONTEXT_GROUPS,
   type TraceBatch,
   WebChatRepository,
 } from "./repository.js";
@@ -735,6 +736,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
    *  WebChatRepository pages them, over the lines where it stands too. */
   override async getMessagesPage(sessionId: string, options: MessagePageOptions) {
     const before = options.before;
+    const limit = options.through
+      ? Math.max(options.limit, await this.groupsThrough(sessionId, before, options.through))
+      : options.limit;
     const groups = this.db.all<{ key: string; startedAt: number }>(sql`
       SELECT key, startedAt FROM (
         SELECT COALESCE(turn_id, id) AS key, MIN(created_at) AS startedAt
@@ -743,9 +747,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
       )
       ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
       ORDER BY startedAt DESC, key DESC
-      LIMIT ${options.limit + 1}
+      LIMIT ${limit + 1}
     `);
-    const pageGroups = groups.slice(0, options.limit);
+    const pageGroups = groups.slice(0, limit);
     if (pageGroups.length === 0) return { rows: [], nextCursor: null };
     const keys = JSON.stringify(pageGroups.map((group) => group.key));
     const rows = this.selectLines(
@@ -756,10 +760,35 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return {
       rows,
       nextCursor:
-        groups.length > options.limit && oldest
+        groups.length > limit && oldest
           ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
           : null,
     };
+  }
+
+  protected override async groupsThrough(
+    sessionId: string,
+    before: MessagePageCursor | null | undefined,
+    through: string,
+  ): Promise<number> {
+    const [row] = this.db.all<{ n: number }>(sql`
+      WITH g AS (
+        SELECT COALESCE(turn_id, id) AS key, MIN(created_at) AS startedAt
+        FROM ${sessionLines([sessionId])}
+        GROUP BY key
+      ),
+      t AS (
+        SELECT g.key, g.startedAt FROM g
+        WHERE g.key = (
+          SELECT COALESCE(turn_id, id) FROM ${sessionLines([sessionId])} WHERE id = ${through}
+        )
+      )
+      SELECT count(*) AS n FROM g, t
+      WHERE (g.startedAt, g.key) >= (t.startedAt, t.key)
+      ${before ? sql`AND (g.startedAt, g.key) < (${before.startedAt}, ${before.key})` : sql``}
+    `);
+    const n = row?.n ?? 0;
+    return n === 0 ? 0 : n + THROUGH_CONTEXT_GROUPS;
   }
 
   override async getMessagesBatch(sessionIds: string[]) {
@@ -1034,6 +1063,15 @@ export class ChatsWebChatRepository extends WebChatRepository {
     });
     this.emitRooted(standing.sessionId, root);
     return at;
+  }
+
+  override async taskChatPartMessages(
+    sessionId: string,
+  ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
+    return this.selectLines(
+      [sessionId],
+      sql`WHERE role = 'assistant' AND content LIKE '%"task_chat"%'`,
+    ).map(({ id, content, createdAt }) => ({ id, content, createdAt }));
   }
 
   private selectLines(

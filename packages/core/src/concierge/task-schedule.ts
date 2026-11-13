@@ -205,7 +205,7 @@ export class TaskSchedules {
     const id = existing
       ? existing.id
       : await this.deps.routines.create({
-          // The Work tab names the run by it.
+          // The task list names the run by it.
           name: task.title,
           key,
           trigger,

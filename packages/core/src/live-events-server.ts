@@ -6,7 +6,7 @@
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: the
 // guardian gets every topic, and a visitor on the dashboard allow-list gets
 // every topic but `apps.catalog`. `concierge.tasks` and `concierge.activity`
-// carry the caller's own Concierge rows and chats, `chat.work:<id>` only the
+// carry the caller's own Concierge rows and chats, `chat.tasks:<id>` only the
 // caller's own Concierge chat, and another owner's Concierge or task chat is
 // not found.
 //
@@ -27,7 +27,7 @@ import {
   CHAT_SESSION_TOPIC_PREFIX,
   CHAT_STATUS_TOPIC,
   CHAT_WATCH_TOPIC_PREFIX,
-  CHAT_WORK_TOPIC_PREFIX,
+  CHAT_TASKS_TOPIC_PREFIX,
   CONCIERGE_TASKS_TOPIC,
   LIVE_EVENTS_CLIENT_HEADER,
   liveEventsClientMessageSchema,
@@ -61,9 +61,9 @@ export interface LiveEventSources {
   /** Emits `concierge_activity` for each of one owner's Concierge chats, then for every change. */
   subscribeConciergeActivity(owner: string, emit: LiveEventEmit): Unsubscribe;
   /** Resolves false unless the id names one of the owner's own Concierge chats. */
-  hasChatWork(chatId: string, owner: string): Promise<boolean>;
-  /** Emits `work_changed` whenever one Concierge chat's Work tab may have changed. */
-  subscribeChatWork(chatId: string, owner: string, emit: LiveEventEmit): Unsubscribe;
+  hasChatTasks(chatId: string, owner: string): Promise<boolean>;
+  /** Emits `tasks_changed` whenever one Concierge chat's task list may have changed. */
+  subscribeChatTasks(chatId: string, owner: string, emit: LiveEventEmit): Unsubscribe;
 }
 
 export const MAX_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -83,7 +83,7 @@ type Topic =
   | { kind: "concierge.tasks" }
   | { kind: "concierge.activity" }
   | { kind: "chat.session"; sessionId: string }
-  | { kind: "chat.work"; sessionId: string }
+  | { kind: "chat.tasks"; sessionId: string }
   | { kind: "chat.watch"; sessionId: string };
 
 function parseTopic(topic: string): Topic | null {
@@ -95,9 +95,9 @@ function parseTopic(topic: string): Topic | null {
     const sessionId = topic.slice(CHAT_SESSION_TOPIC_PREFIX.length);
     if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.session", sessionId };
   }
-  if (topic.startsWith(CHAT_WORK_TOPIC_PREFIX)) {
-    const sessionId = topic.slice(CHAT_WORK_TOPIC_PREFIX.length);
-    if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.work", sessionId };
+  if (topic.startsWith(CHAT_TASKS_TOPIC_PREFIX)) {
+    const sessionId = topic.slice(CHAT_TASKS_TOPIC_PREFIX.length);
+    if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.tasks", sessionId };
   }
   if (topic.startsWith(CHAT_WATCH_TOPIC_PREFIX)) {
     const sessionId = topic.slice(CHAT_WATCH_TOPIC_PREFIX.length);
@@ -174,8 +174,8 @@ export function attachLiveEventsServer(
     // activity frames count for nothing.
     const activity = phone ? undefined : dashboardActivity?.open(owner);
     const exists = async (topic: Topic): Promise<boolean> =>
-      topic.kind === "chat.work"
-        ? sources.hasChatWork(topic.sessionId, owner)
+      topic.kind === "chat.tasks"
+        ? sources.hasChatTasks(topic.sessionId, owner)
         : topic.kind === "chat.session" || topic.kind === "chat.watch"
           ? sources.hasChatSession(topic.sessionId, owner)
           : true;
@@ -192,8 +192,8 @@ export function attachLiveEventsServer(
           return sources.subscribeConciergeActivity(owner, emit);
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
-        case "chat.work":
-          return sources.subscribeChatWork(topic.sessionId, owner, emit);
+        case "chat.tasks":
+          return sources.subscribeChatTasks(topic.sessionId, owner, emit);
         case "chat.watch":
           // The chat on its person's phone: what the Concierge says there is
           // read on the phone, so it is not pushed to it. A dashboard's watch

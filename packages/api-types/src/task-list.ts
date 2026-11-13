@@ -1,16 +1,17 @@
-// Wire types of a Concierge chat's Work tab: everything that runs for the
-// chat, grouped. The server is packages/core/src/concierge/work.ts and the
-// clients are packages/web and the iOS app. docs/domains/chats.md#work
+// Wire types of a Concierge chat's task list, the Tasks panel: everything
+// that runs for the chat, grouped. The server is
+// packages/core/src/concierge/task-list.ts and the clients are packages/web
+// and the iOS app. docs/domains/chats.md#task-list
 
 import type { ChatPendingCheckDto, ConciergeFollowDto, ConciergeTaskDto } from "./concierge.js";
 import { type ConciergeTaskStatus, parseTaskStatus } from "./concierge-task-status.js";
 
-/** The groups, in the order the tab shows them. */
-export const CHAT_WORK_GROUPS = ["needs_you", "active", "later", "on_its_own", "ended"] as const;
-export type ChatWorkGroupKey = (typeof CHAT_WORK_GROUPS)[number];
+/** The groups, in the order the panel shows them. */
+export const TASK_LIST_GROUPS = ["needs_you", "active", "later", "on_its_own", "ended"] as const;
+export type TaskListGroupKey = (typeof TASK_LIST_GROUPS)[number];
 
 /** A task's repeating schedule, as its row shows it. */
-export interface ChatWorkSchedule {
+export interface TaskListSchedule {
   /** Local time in its owner's zone, `HH:mm`. */
   at: string;
   /** The weekdays it runs on (`mon` … `sun`); null for every day. */
@@ -18,30 +19,36 @@ export interface ChatWorkSchedule {
 }
 
 /** A check pending on a task's row: a wake-up, or its schedule's next run. */
-export interface ChatWorkTaskCheck {
+export interface TaskListTaskCheck {
   id: string;
   /** When it is due, epoch milliseconds; null for an event wait with no deadline. */
   at: number | null;
-  /** The schedule's next run: cancelling it skips that one run. */
+  /** The schedule's next run, not a wake-up. */
   recurring: boolean;
 }
 
 /** A task, with its schedule and its soonest check on its own row. */
-export interface ChatWorkTaskItem {
+export interface TaskListTaskItem {
   kind: "task";
   task: ConciergeTaskDto;
-  schedule: ChatWorkSchedule | null;
-  check: ChatWorkTaskCheck | null;
+  schedule: TaskListSchedule | null;
+  check: TaskListTaskCheck | null;
+  /**
+   * While it needs its owner: the message of this Concierge chat that shows
+   * its question or approval card (else its task card), where Respond goes.
+   * Null when no message of this chat shows it, and for any other status.
+   */
+  cardMessageId: string | null;
 }
 
 /** A one-off wake-up of the chat (`defer`) that no task of this chat has. */
-export interface ChatWorkCheckItem {
+export interface TaskListCheckItem {
   kind: "check";
   check: ChatPendingCheckDto;
 }
 
 /** A followed target whose alerts and digest come to this chat. */
-export interface ChatWorkFollowItem {
+export interface TaskListFollowItem {
   kind: "follow";
   /** The service, as the following list names it, such as `github`. */
   source: string;
@@ -54,7 +61,7 @@ export interface ChatWorkFollowItem {
 }
 
 /** What fires a routine, as its row says it. */
-export type ChatWorkTrigger =
+export type TaskListTrigger =
   | {
       type: "schedule";
       /** `HH:mm` in `tzid`. */
@@ -68,11 +75,11 @@ export type ChatWorkTrigger =
   | { type: "manual" };
 
 /** A routine that sends into this chat, such as an older daily summary. */
-export interface ChatWorkRoutineItem {
+export interface TaskListRoutineItem {
   kind: "routine";
   id: string;
   name: string;
-  trigger: ChatWorkTrigger;
+  trigger: TaskListTrigger;
   /** Off while paused. */
   enabled: boolean;
   /** When it fires next, epoch milliseconds; null when it has no time. */
@@ -82,51 +89,43 @@ export interface ChatWorkRoutineItem {
     status: "success" | "error" | "running" | "pending_approval" | "cancelled";
     firedAt: number;
   } | null;
-  /** An app keeps it: only that app can delete it. */
-  managed: boolean;
 }
 
-export type ChatWorkItem =
-  | ChatWorkTaskItem
-  | ChatWorkCheckItem
-  | ChatWorkFollowItem
-  | ChatWorkRoutineItem;
+export type TaskListItem =
+  | TaskListTaskItem
+  | TaskListCheckItem
+  | TaskListFollowItem
+  | TaskListRoutineItem;
 
-export interface ChatWorkGroup {
-  key: ChatWorkGroupKey;
-  items: ChatWorkItem[];
+export interface TaskListGroup {
+  key: TaskListGroupKey;
+  items: TaskListItem[];
 }
 
-/** `GET /api/chats/:chatId/work`: the groups that have rows, in order. */
-export interface ChatWorkResponse {
+/** `GET /api/chats/:chatId/tasks`: the groups that have rows, in order. */
+export interface TaskListResponse {
   chatId: string;
-  groups: ChatWorkGroup[];
-}
-
-/** `POST /api/chats/:chatId/work/follows/unfollow`. */
-export interface ChatWorkUnfollowRequest {
-  source: string;
-  target: string;
+  groups: TaskListGroup[];
 }
 
 /**
- * Event on the `chat.work:<chatId>` live topic: something its Work tab lists
- * changed (a task's status, a check, a routine, a follow). Read the tab again.
+ * Event on the `chat.tasks:<chatId>` live topic: something its task list holds
+ * changed (a task's status, a check, a routine, a follow). Read the list again.
  */
-export const CHAT_WORK_CHANGED_EVENT = "work_changed";
-export interface ChatWorkChangedEvent {
+export const TASK_LIST_CHANGED_EVENT = "tasks_changed";
+export interface TaskListChangedEvent {
   chatId: string;
 }
 
 /** What the server gathers for one chat, before grouping. */
-export interface ChatWorkParts {
-  tasks: ChatWorkTaskItem[];
-  checks: ChatWorkCheckItem[];
-  follows: ChatWorkFollowItem[];
-  routines: ChatWorkRoutineItem[];
+export interface TaskListParts {
+  tasks: TaskListTaskItem[];
+  checks: TaskListCheckItem[];
+  follows: TaskListFollowItem[];
+  routines: TaskListRoutineItem[];
 }
 
-const GROUP_OF_STATUS: Record<ConciergeTaskStatus, ChatWorkGroupKey> = {
+const GROUP_OF_STATUS: Record<ConciergeTaskStatus, TaskListGroupKey> = {
   needs_you: "needs_you",
   active: "active",
   later: "later",
@@ -138,7 +137,7 @@ const byNullableAsc = (a: number | null, b: number | null) =>
   a === b ? 0 : a === null ? 1 : b === null ? -1 : a - b;
 
 /** When a later row runs next: its check, else the task's later time. */
-const laterOf = (item: ChatWorkItem): number | null => {
+const laterOf = (item: TaskListItem): number | null => {
   if (item.kind === "task") return item.check?.at ?? item.task.laterAt ?? null;
   if (item.kind === "check") return item.check.at;
   return null;
@@ -146,7 +145,7 @@ const laterOf = (item: ChatWorkItem): number | null => {
 
 const endedAt = (task: ConciergeTaskDto) => task.completedAt ?? task.updatedAt;
 
-const SORTERS: Record<ChatWorkGroupKey, (a: ChatWorkItem, b: ChatWorkItem) => number> = {
+const SORTERS: Record<TaskListGroupKey, (a: TaskListItem, b: TaskListItem) => number> = {
   // The oldest wait first: it ends soonest.
   needs_you: (a, b) =>
     a.kind === "task" && b.kind === "task"
@@ -177,9 +176,9 @@ const SORTERS: Record<ChatWorkGroupKey, (a: ChatWorkItem, b: ChatWorkItem) => nu
  * in the group of its status, a check is later, and follows and routines run
  * on their own. An archived task is in none.
  */
-export function groupChatWork(parts: ChatWorkParts): ChatWorkGroup[] {
-  const groups = new Map<ChatWorkGroupKey, ChatWorkItem[]>();
-  const add = (key: ChatWorkGroupKey, item: ChatWorkItem) =>
+export function groupTaskList(parts: TaskListParts): TaskListGroup[] {
+  const groups = new Map<TaskListGroupKey, TaskListItem[]>();
+  const add = (key: TaskListGroupKey, item: TaskListItem) =>
     groups.set(key, [...(groups.get(key) ?? []), item]);
   for (const item of parts.tasks) {
     if (item.task.archivedAt !== null) continue;
@@ -188,7 +187,7 @@ export function groupChatWork(parts: ChatWorkParts): ChatWorkGroup[] {
   for (const item of parts.checks) add("later", item);
   for (const item of parts.follows) add("on_its_own", item);
   for (const item of parts.routines) add("on_its_own", item);
-  return CHAT_WORK_GROUPS.flatMap((key) => {
+  return TASK_LIST_GROUPS.flatMap((key) => {
     const items = groups.get(key);
     return items ? [{ key, items: [...items].sort(SORTERS[key]) }] : [];
   });

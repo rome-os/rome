@@ -107,43 +107,10 @@
       "working": "Working on it",
       "failed": "Did not finish"
     },
-    "agent": {
-      "title": "Agent",
-      "open": "Open {{name}}",
-      "close": "Close",
-      "tabsLabel": "Agent page",
-      "tabs": {
-        "work": "Work",
-        "uses": "Uses"
-      },
-      "uses": {
-        "brief": {
-          "title": "Daily brief",
-          "prompt": "Every weekday at 8am, send me a brief of today's calendar and important emails."
-        },
-        "price": {
-          "title": "Watch a price",
-          "prompt": "Tell me when the price of ___ drops below $___."
-        },
-        "urgent": {
-          "title": "Urgent emails only",
-          "prompt": "Check my inbox every hour and only ping me for urgent emails."
-        },
-        "app": {
-          "title": "Make an app",
-          "prompt": "Make an app to track my workouts, with a weekly chart."
-        },
-        "sleep": {
-          "title": "How I slept",
-          "prompt": "How did I sleep last night?"
-        },
-        "research": {
-          "title": "Research",
-          "prompt": "Compare the best noise-cancelling headphones under $300."
-        }
-      }
-    },
-    "work": {
+    "taskList": {
+      "title": "Tasks",
+      "close": "Close tasks",
+      "open": "Open tasks",
       "groups": {
         "needs_you": "Needs you",
         "active": "Active",
@@ -152,20 +119,22 @@
         "ended": "Ended"
       },
       "empty": "Nothing runs here yet.",
-      "loadFailed": "Failed to load work",
+      "loading": "Loading tasks",
+      "loadFailed": "Failed to load tasks",
+      "showMore": "Show {{count}} more",
       "task": {
         "waitingAnswer": "Waiting for your answer",
         "waitingApproval": "Waiting for your approval",
         "running": "Running",
         "checksIn": "Checks {{when}}",
-        "nextRun": "Next run {{when}}",
         "notStarted": "Not started",
-        "repeats": "Repeats",
+        "stopping": "Stopping…",
+        "opening": "Opening…",
         "ended": {
           "done": "Done",
           "failed": "Failed",
           "stopped": "Stopped",
-          "no_response": "Ended · no response"
+          "no_response": "No response"
         }
       },
       "schedule": {
@@ -189,23 +158,14 @@
         "lastFailed": "Last run failed"
       },
       "actions": {
-        "open": "Open the chat for {{title}}",
-        "stop": "Stop {{title}}",
-        "cancelCheck": "Cancel the check",
-        "skipRun": "Skip this run",
-        "unfollow": "Unfollow {{target}}",
-        "pause": "Pause {{name}}",
-        "resume": "Resume {{name}}",
-        "delete": "Delete {{name}}"
+        "respond": "Respond",
+        "respondTo": "Respond to {{title}}",
+        "stop": "Stop",
+        "stopTask": "Stop {{title}}",
+        "openChat": "Open the chat for {{title}}"
       },
       "failed": {
-        "stop": "Failed to stop the task",
-        "cancelCheck": "Failed to cancel the check",
-        "skipRun": "Failed to skip the run",
-        "unfollow": "Failed to unfollow",
-        "pause": "Failed to pause the routine",
-        "resume": "Failed to resume the routine",
-        "delete": "Failed to delete the routine"
+        "stop": "Failed to stop the task"
       }
     }
   },

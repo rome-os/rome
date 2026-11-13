@@ -19,11 +19,11 @@ export const CONCIERGE_ACTIVITY_TOPIC = "concierge.activity";
 export const APP_CATALOG_TOPIC = "apps.catalog";
 export const CHAT_SESSION_TOPIC_PREFIX = "chat.session:";
 /**
- * One of the caller's own Concierge chats' Work tab. Its only event is
- * `work_changed` (`ChatWorkChangedEvent`), whenever something the tab lists
+ * One of the caller's own Concierge chats' task list. Its only event is
+ * `tasks_changed` (`TaskListChangedEvent`), whenever something the list holds
  * changes; another owner's chat is not found.
  */
-export const CHAT_WORK_TOPIC_PREFIX = "chat.work:";
+export const CHAT_TASKS_TOPIC_PREFIX = "chat.tasks:";
 /**
  * The chat the phone app has on screen, for the guardian or a visitor signed
  * in on it. It carries no events: the phone holds it for that one chat, and
@@ -45,9 +45,9 @@ export function chatSessionTopicName(sessionId: string): string {
   return `${CHAT_SESSION_TOPIC_PREFIX}${sessionId}`;
 }
 
-/** The topic carrying one Concierge chat's Work tab changes. */
-export function chatWorkTopicName(chatId: string): string {
-  return `${CHAT_WORK_TOPIC_PREFIX}${chatId}`;
+/** The topic carrying one Concierge chat's task list changes. */
+export function chatTasksTopicName(chatId: string): string {
+  return `${CHAT_TASKS_TOPIC_PREFIX}${chatId}`;
 }
 
 /** The topic the phone holds for the chat on its screen. */

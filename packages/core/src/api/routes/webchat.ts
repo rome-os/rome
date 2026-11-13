@@ -1555,7 +1555,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // `limit` and `before` page the list by turn, newest first, and wrap it as
   // `{ messages, nextCursor }`; a request with neither keeps the bare array of
-  // the whole session.
+  // the whole session. `through` names a message the page must reach, so one
+  // read lands on an old message, such as the card a task's Respond opens.
   const encodeMessageCursor = (cursor: MessagePageCursor): string =>
     Buffer.from(JSON.stringify([cursor.startedAt, cursor.key])).toString("base64url");
   const decodeMessageCursor = (raw: string): MessagePageCursor | null => {
@@ -1589,7 +1590,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
-    if (limitParam === undefined && beforeParam === undefined) {
+    const throughParam = c.req.query("through");
+    if (limitParam === undefined && beforeParam === undefined && throughParam === undefined) {
       const messages = await deps.webchatRepo.getMessages(sessionId);
       return c.json(await enrichStoredMessages(sessionId, messages));
     }
@@ -1601,7 +1603,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
-    const page = await deps.webchatRepo.getMessagesPage(sessionId, { limit, before });
+    if (throughParam !== undefined && !throughParam) {
+      return c.json({ error: "through must name a message" }, 400);
+    }
+    const page = await deps.webchatRepo.getMessagesPage(sessionId, {
+      limit,
+      before,
+      ...(throughParam ? { through: throughParam } : {}),
+    });
     return c.json({
       messages: await enrichStoredMessages(sessionId, page.rows),
       nextCursor: page.nextCursor ? encodeMessageCursor(page.nextCursor) : null,

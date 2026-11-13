@@ -39,7 +39,7 @@ import { send } from "../chats/send.js";
 import { ownPlatforms } from "../webchat/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
-import { chatWorkRoutes, ownsConciergeChat, subscribeChatWork } from "./routes/chat-work.js";
+import { chatTaskListRoutes, ownsConciergeChat, subscribeChatTasks } from "./routes/task-list.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
 import { uptimeRoutes } from "./routes/uptime.js";
@@ -196,7 +196,7 @@ export function buildApp(
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
   api.route("/", conciergeRoutes(deps));
-  api.route("/", chatWorkRoutes(deps));
+  api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
@@ -377,9 +377,10 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
           subscribeConciergeActivity: (owner, emit) =>
             deps.concierge?.activity?.subscribe(owner, emit) ?? (() => {}),
-          hasChatWork: async (chatId, owner) =>
+          hasChatTasks: async (chatId, owner) =>
             deps.concierge ? ownsConciergeChat(deps.concierge, chatId, owner) : false,
-          subscribeChatWork: (chatId, owner, emit) => subscribeChatWork(deps, chatId, owner, emit),
+          subscribeChatTasks: (chatId, owner, emit) =>
+            subscribeChatTasks(deps, chatId, owner, emit),
         },
         deps.phoneWatching,
         deps.dashboardActivity,

@@ -64,7 +64,7 @@ import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser"
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
-import { chatWorkHandlers } from "./chat-work";
+import { taskListHandlers } from "./task-list";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -1669,7 +1669,7 @@ export const handlers = [
   // orders its own routes internally, so they can be appended in any order —
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
-  ...chatWorkHandlers,
+  ...taskListHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,

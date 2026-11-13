@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
-import type { ChatWorkFollowItem, ChatWorkResponse } from "@rome/api-types/chat-work";
+import type { TaskListFollowItem, TaskListResponse } from "@rome/api-types/task-list";
 import type { ConciergeService } from "../../concierge/service.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
@@ -16,7 +16,7 @@ import {
 import { sessionActorMiddleware } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
-import { chatWorkRoutes } from "./chat-work.js";
+import { chatTaskListRoutes } from "./task-list.js";
 
 const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
 const visitorCookie = (accountId: string, email: string) => ({
@@ -37,18 +37,20 @@ const OWNERS: Record<string, string> = {
 
 const IN_AN_HOUR = Date.now() + 60 * 60 * 1000;
 
-describe("/chats/:chatId/work", () => {
+describe("/chats/:chatId/tasks", () => {
   let testDb: TestDb;
   let tasks: ConciergeTasksRepository;
   let routines: RoutinesRepository;
   let calls: string[];
-  let follows: Record<string, ChatWorkFollowItem[]>;
+  let follows: Record<string, TaskListFollowItem[]>;
   let checks: Record<string, Array<{ id: string; at: number | null; taskId: string | null }>>;
+  let cardMessages: Record<string, Array<{ id: string; content: string }>>;
+  let taskSource: ConciergeTasks | null;
 
   const app = () => {
     const concierge = {
       deps: {
-        tasks: new ConciergeTasks(tasks),
+        tasks: taskSource ?? new ConciergeTasks(tasks),
         checks: {
           inChatForApi: async (chatId: string) =>
             (checks[chatId] ?? []).map((check) => ({
@@ -60,10 +62,6 @@ describe("/chats/:chatId/work", () => {
       },
       following: {
         followsIn: async (chatId: string) => follows[chatId] ?? [],
-        unfollow: async (source: string, target: string, owner: string) => {
-          calls.push(`unfollow ${source} ${target} ${owner}`);
-          return { removed: true };
-        },
       },
       conciergeChat: async (chatId: string) =>
         OWNERS[chatId] ? { id: chatId, name: chatId, main: true } : null,
@@ -72,31 +70,25 @@ describe("/chats/:chatId/work", () => {
         calls.push(`stop ${taskId} ${by}`);
         return 0;
       },
-      cancelCheckByOwner: async (chatId: string, checkId: string) => {
-        const found = (checks[chatId] ?? []).some((check) => check.id === checkId);
-        if (found) calls.push(`cancel ${chatId} ${checkId}`);
-        return found;
-      },
     } as unknown as ConciergeService;
-    const routineEngine = {
-      activate: async (routine: { id: string }) => void calls.push(`activate ${routine.id}`),
-      deactivate: async (id: string) => void calls.push(`deactivate ${id}`),
-      onChange: () => () => {},
-    } as unknown as ApiDeps["routineEngine"];
+    const routineEngine = { onChange: () => () => {} } as unknown as ApiDeps["routineEngine"];
     return new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
       "/",
-      chatWorkRoutes({
+      chatTaskListRoutes({
         concierge,
         dashboardAccessState,
         routinesRepo: routines,
         routineRunsRepo: new RoutineRunsRepository(testDb.db),
         routineEngine,
+        webchatRepo: {
+          taskChatPartMessages: async (chatId: string) => cardMessages[chatId] ?? [],
+        } as unknown as ApiDeps["webchatRepo"],
       }),
     );
   };
   const read = async (chatId: string, as = guardian) =>
-    (await (await app().request(`/chats/${chatId}/work`, as)).json()) as ChatWorkResponse;
-  const kindsIn = (work: ChatWorkResponse) =>
+    (await (await app().request(`/chats/${chatId}/tasks`, as)).json()) as TaskListResponse;
+  const kindsIn = (work: TaskListResponse) =>
     Object.fromEntries(
       work.groups.map((group) => [
         group.key,
@@ -132,6 +124,8 @@ describe("/chats/:chatId/work", () => {
     calls = [];
     follows = {};
     checks = {};
+    cardMessages = {};
+    taskSource = null;
     const chats = new ChatsWebChatRepository(testDb.db);
     await chats.createSession(
       "ann-main",
@@ -195,86 +189,58 @@ describe("/chats/:chatId/work", () => {
       on_its_own: ["routine Ann summary"],
     });
     // Another person's chat does not exist to the caller.
-    expect((await app().request("/chats/ann-main/work", guardian)).status).toBe(404);
-    expect((await app().request("/chats/concierge/work", ann)).status).toBe(404);
-    expect((await app().request("/chats/concierge/work", appUser)).status).toBe(401);
-    expect((await app().request("/chats/concierge/work")).status).toBe(401);
+    expect((await app().request("/chats/ann-main/tasks", guardian)).status).toBe(404);
+    expect((await app().request("/chats/concierge/tasks", ann)).status).toBe(404);
+    expect((await app().request("/chats/concierge/tasks", appUser)).status).toBe(401);
+    expect((await app().request("/chats/concierge/tasks")).status).toBe(401);
   });
 
   it("shows an empty tab with no groups", async () => {
     expect(await read("concierge")).toEqual({ chatId: "concierge", groups: [] });
   });
 
-  it("pauses, resumes and deletes a routine of the chat for its owner only", async () => {
-    const id = await summary("concierge", "Daily summary");
-    const post = (path: string, as = guardian, method = "POST") =>
-      app().request(`/chats/${path}`, { ...as, method });
+  it("stops a task of the chat for its owner only", async () => {
+    const [flights] = await tasks.upsertMany([{ title: "Flights" }]);
+    const stop = (chatId: string, as = guardian) =>
+      app().request(`/chats/${chatId}/tasks/${flights!.id}/stop`, { ...as, method: "POST" });
 
-    // Ann reaches it neither through her chat nor through the guardian's.
-    expect((await post(`ann-main/work/routines/${id}/pause`, ann)).status).toBe(404);
-    expect((await post(`concierge/work/routines/${id}/pause`, ann)).status).toBe(404);
-    expect((await post(`concierge/work/routines/${id}`, ann, "DELETE")).status).toBe(404);
-    expect((await routines.findById(id))?.enabled).toBe(true);
-
-    expect((await post(`concierge/work/routines/${id}/pause`)).status).toBe(200);
-    expect((await routines.findById(id))?.enabled).toBe(false);
-    const paused = (await read("concierge")).groups[0]!.items[0];
-    expect(paused).toMatchObject({ kind: "routine", enabled: false, nextRunAt: null });
-
-    expect((await post(`concierge/work/routines/${id}/resume`)).status).toBe(200);
-    expect((await routines.findById(id))?.enabled).toBe(true);
-    expect(calls).toEqual([`deactivate ${id}`, `deactivate ${id}`, `activate ${id}`]);
-
-    expect((await post(`concierge/work/routines/${id}`, guardian, "DELETE")).status).toBe(200);
-    expect(await routines.findById(id)).toBeNull();
-    expect(await read("concierge")).toEqual({ chatId: "concierge", groups: [] });
+    expect((await stop("concierge", ann)).status).toBe(404);
+    expect((await stop("ann-main", ann)).status).toBe(404);
+    expect(calls).toEqual([]);
+    expect((await stop("concierge")).status).toBe(200);
+    expect(calls).toEqual([`stop ${flights!.id} guardian`]);
   });
 
-  it("stops a task, cancels a check and unfollows for the chat's owner only", async () => {
-    const [flights] = await tasks.upsertMany([{ title: "Flights" }]);
-    checks.concierge = [{ id: "lone", at: IN_AN_HOUR, taskId: null }];
-    follows.concierge = [
-      {
-        kind: "follow",
-        source: "github",
-        label: "GitHub",
-        target: "rome-os/rome",
-        state: "active",
-        digestTimes: [],
-      },
+  it("points a task that needs its owner at the message that shows its card", async () => {
+    await new ChatsWebChatRepository(testDb.db).createSession("task-chat", "Flights");
+    await tasks.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const part = (show?: string) =>
+      JSON.stringify([{ type: "task_chat", chatId: "task-chat", title: "Flights", show }]);
+    cardMessages.concierge = [
+      { id: "task-card", content: part("task") },
+      { id: "old-ask", content: part() },
+      { id: "new-ask", content: part("ask") },
+      { id: "later-task-card", content: part("task") },
     ];
-    const post = (path: string, as = guardian, init: RequestInit = { method: "POST" }) =>
-      app().request(`/chats/${path}`, { ...as, ...init });
-    const unfollow = (chatId: string, as = guardian) =>
-      post(`${chatId}/work/follows/unfollow`, as, {
-        method: "POST",
-        body: JSON.stringify({ source: "github", target: "rome-os/rome" }),
-        headers: { ...as.headers, "content-type": "application/json" },
-      });
-
-    expect((await post(`concierge/work/tasks/${flights!.id}/stop`, ann)).status).toBe(404);
-    expect((await post(`ann-main/work/tasks/${flights!.id}/stop`, ann)).status).toBe(404);
-    expect((await post("concierge/work/checks/lone", ann, { method: "DELETE" })).status).toBe(404);
-    expect((await post("ann-main/work/checks/lone", ann, { method: "DELETE" })).status).toBe(404);
-    expect((await unfollow("concierge", ann)).status).toBe(404);
-    expect((await unfollow("ann-main", ann)).status).toBe(404);
-    expect(calls).toEqual([]);
-
-    expect((await post(`concierge/work/tasks/${flights!.id}/stop`)).status).toBe(200);
-    expect((await post("concierge/work/checks/lone", guardian, { method: "DELETE" })).status).toBe(
-      200,
-    );
-    expect((await unfollow("concierge")).status).toBe(200);
-    expect(calls).toEqual([
-      `stop ${flights!.id} guardian`,
-      "cancel concierge lone",
-      "unfollow github rome-os/rome guardian",
-    ]);
+    const tasksWith = new ConciergeTasks(tasks);
+    // The task chat waits on its owner: an approval opened a minute ago.
+    tasksWith.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async () =>
+        new Map([
+          ["task-chat", [{ kind: "approval" as const, id: "a1", since: Date.now() - 60_000 }]],
+        ]),
+      reportPending: () => [],
+    });
+    taskSource = tasksWith;
+    const [item] = (await read("concierge")).groups[0]!.items;
+    expect(item).toMatchObject({ kind: "task", cardMessageId: "new-ask" });
   });
 
   it("opens the change stream for the chat's owner only", async () => {
-    expect((await app().request("/chats/concierge/work/events", ann)).status).toBe(404);
-    const stream = await app().request("/chats/concierge/work/events", guardian);
+    expect((await app().request("/chats/concierge/tasks/events", ann)).status).toBe(404);
+    const stream = await app().request("/chats/concierge/tasks/events", guardian);
     expect(stream.status).toBe(200);
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
     await stream.body?.cancel();

@@ -1213,7 +1213,7 @@ export const routines = sqliteTable(
 
     // The chat the routine works for: the webchat chat whose turn created it,
     // else the chat its args send into. Null for a routine of no one chat, such
-    // as the Concierge's follows and digests. A chat's Work tab reads it.
+    // as the Concierge's follows and digests. A chat's task list reads it.
     chatId: text("chat_id"),
 
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),

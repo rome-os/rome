@@ -19,7 +19,7 @@ import {
   CONCIERGE_LEADING_SLOT,
   CONCIERGE_TITLEBAR_SLOT,
 } from "@/components/concierge/ConciergeHeaderStatus";
-import { ToolAgentContext, type ToolAgentHost } from "@/pages/free/tool-agent";
+import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -100,9 +100,9 @@ const mockConciergeActivity = rs.hoisted(() => rs.fn((): ConciergeActivity => ({
 rs.mock("@/components/concierge/use-concierge-activity", () => ({
   useConciergeActivity: mockConciergeActivity,
 }));
-const mockOpenAgentPage = rs.hoisted(() => rs.fn());
-rs.mock("@/components/concierge/AgentPage", () => ({
-  useAgentPage: () => ({ open: mockOpenAgentPage, sheet: null }),
+const mockOpenTaskList = rs.hoisted(() => rs.fn());
+rs.mock("@/components/concierge/TaskListPane", () => ({
+  useTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -2213,7 +2213,7 @@ describe("Chat Concierge empty state", () => {
       seen.outlet = useSlotOutlet(CONCIERGE_LEADING_SLOT);
       return null;
     }
-    const tasksHost = (compact: boolean): ToolAgentHost => ({
+    const tasksHost = (compact: boolean): ToolTasksHost => ({
       active: false,
       compact,
       show: rs.fn(),
@@ -2222,7 +2222,7 @@ describe("Chat Concierge empty state", () => {
     const at = (compact: boolean, paneOpen: boolean) => (
       <SlotProvider>
         <ShellProbe />
-        <ToolAgentContext.Provider value={tasksHost(compact)}>
+        <ToolTasksContext.Provider value={tasksHost(compact)}>
           <ToolTraceContext.Provider
             value={{
               outlet: null,
@@ -2234,7 +2234,7 @@ describe("Chat Concierge empty state", () => {
           >
             <Chat sessionId="concierge" variant="concierge" />
           </ToolTraceContext.Provider>
-        </ToolAgentContext.Provider>
+        </ToolTasksContext.Provider>
       </SlotProvider>
     );
     const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>, { wrapper: withQueries() });
@@ -2337,7 +2337,7 @@ describe("Chat Concierge empty state", () => {
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    const tasksHost = (compact: boolean): ToolAgentHost => ({
+    const tasksHost = (compact: boolean): ToolTasksHost => ({
       active: false,
       compact,
       show: rs.fn(),
@@ -2352,7 +2352,7 @@ describe("Chat Concierge empty state", () => {
           <div data-testid="hang">
             <SlotOutlet name={CONCIERGE_TITLEBAR_SLOT} />
           </div>
-          <ToolAgentContext.Provider value={tasksHost(compact)}>
+          <ToolTasksContext.Provider value={tasksHost(compact)}>
             <ToolTraceContext.Provider
               value={{
                 outlet: null,
@@ -2364,7 +2364,7 @@ describe("Chat Concierge empty state", () => {
             >
               <Chat sessionId="concierge" variant="concierge" navbarSlot="titlebar" />
             </ToolTraceContext.Provider>
-          </ToolAgentContext.Provider>
+          </ToolTasksContext.Provider>
         </SlotProvider>
       </MemoryRouter>
     );
@@ -2427,7 +2427,7 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the Agent page from the agent's logo in a Concierge chat's header, not its menu", async () => {
+  it("opens the task list from the agent's logo in a Concierge chat's header, not its menu", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
@@ -2436,10 +2436,10 @@ describe("Chat Concierge empty state", () => {
     });
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     // The header settles once the chat loads; press the button it settles on.
-    await screen.findByRole("button", { name: "concierge.agent.open" });
+    await screen.findByRole("button", { name: "concierge.taskList.open" });
     await waitFor(() => {
-      fireEvent.click(screen.getByRole("button", { name: "concierge.agent.open" }));
-      expect(mockOpenAgentPage).toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "concierge.taskList.open" }));
+      expect(mockOpenTaskList).toHaveBeenCalled();
     });
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
@@ -2773,7 +2773,7 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
 
     expect(scrollTo).toHaveBeenCalledOnce();
     expect(anchor("m-2")?.hasAttribute("data-timeline-landed")).toBe(true);
@@ -2795,20 +2795,22 @@ describe("Chat Concierge jump to a message", () => {
     Object.defineProperty(scroller, "scrollTop", { value: 1000, configurable: true });
     anchor("m-2")!.getBoundingClientRect = () => ({ top: 500 }) as DOMRect;
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000 + 500 - 112 - 24, behavior: "auto" });
   });
 
-  it("pages older history in until the message renders, says so meanwhile, then jumps", async () => {
+  it("reads from the oldest loaded turn through the message in one page, says so meanwhile, then jumps", async () => {
     rs.mocked(listSessionMessagePage)
       .mockResolvedValueOnce({ messages: [message(5), message(6)], nextCursor: "c1" })
-      .mockResolvedValueOnce({ messages: [message(3), message(4)], nextCursor: "c2" })
-      .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+      .mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3), message(4)],
+        nextCursor: null,
+      });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-1"));
+    act(() => void requestConciergeJump("m-1"));
 
     await waitFor(() => expect(anchor("m-1")?.hasAttribute("data-timeline-landed")).toBe(true));
     expect(toast.loading).toHaveBeenCalledWith("concierge.tasks.findingMessage");
@@ -2816,8 +2818,7 @@ describe("Chat Concierge jump to a message", () => {
     expect(toast.error).not.toHaveBeenCalled();
     expect(rs.mocked(listSessionMessagePage).mock.calls.map((call) => call[1])).toEqual([
       { limit: expect.any(Number) },
-      { limit: expect.any(Number), before: "c1" },
-      { limit: expect.any(Number), before: "c2" },
+      { limit: expect.any(Number), before: "c1", through: "m-1" },
     ]);
     expect(scrollTo).toHaveBeenCalledOnce();
   });
@@ -2833,32 +2834,26 @@ describe("Chat Concierge jump to a message", () => {
     anchor("m-1")!.addEventListener(HOLD_STICK_EVENT, () => order.push("hold"));
     scrollTo.mockImplementation(() => order.push("scroll"));
 
-    act(() => requestConciergeJump("m-1"));
+    act(() => void requestConciergeJump("m-1"));
 
     expect(order).toEqual(["hold", "scroll"]);
   });
 
-  it("gives up after 20 older pages and says it can't find the message", async () => {
-    // The newest page and 20 older ones, each with a page behind it.
-    for (let page = 1; page <= 21; page++) {
-      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
-        messages: [message(1000 - page)],
-        nextCursor: `c${page}`,
-      });
-    }
+  it("says it can't find a message the one read does not bring", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [message(9)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [message(8)], nextCursor: "c2" });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(1));
 
-    act(() => requestConciergeJump("m-missing"));
+    act(() => void requestConciergeJump("m-missing"));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"), {
-      timeout: 10_000,
-    });
-    // The newest page, then 20 older ones.
-    expect(listSessionMessagePage).toHaveBeenCalledTimes(21);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
+    // The newest page, then one read through the message.
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
     expect(scrollTo).not.toHaveBeenCalled();
     expect(toast.dismiss).toHaveBeenCalledWith("finding");
-  }, 15_000);
+  });
 
   it("says it can't find a message when all the history is loaded and it is not there", async () => {
     rs.mocked(listSessionMessagePage)
@@ -2867,7 +2862,7 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-gone"));
+    act(() => void requestConciergeJump("m-gone"));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
     expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
@@ -2882,7 +2877,7 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(rows()).toBe(1));
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(scrollTo).not.toHaveBeenCalled();
