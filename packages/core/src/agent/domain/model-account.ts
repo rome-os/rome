@@ -60,6 +60,13 @@ export interface ModelAccountUsage {
   fiveHour?: ModelUsageWindow;
   sevenDay?: ModelUsageWindow;
   error?: string;
+  /** Live Codex credit availability, excluding workspace spending limits. */
+  creditsAvailable?: boolean;
+  credits?: {
+    hasCredits: boolean;
+    unlimited: boolean;
+    balance?: string;
+  };
 }
 
 /** How the guardian authorizes Rome: in a browser, or by typing a device code. */

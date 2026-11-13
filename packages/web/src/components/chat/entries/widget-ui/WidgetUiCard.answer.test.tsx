@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import "@/i18n";
 import { parseEntries } from "../parse-entries";
 import { renderFlatEntries } from "../render";
+import { READ_ONLY_WIDGET_HOST, WidgetHostContext } from "./turn-fields";
 import { WidgetUiCard } from "./WidgetUiCard";
 
 afterEach(() => {
@@ -168,6 +169,47 @@ describe("a question card described as data", () => {
     expect((screen.getByRole("button", { name: /Warm/ }) as HTMLButtonElement).disabled).toBe(
       false,
     );
+  });
+
+  it("says the send failed, not that the card's data could not be read", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 500 }));
+    render(<WidgetUiCard widgetId="m1" toolUseId="q1" appId="core" ui={ui} text="" waiting={{}} />);
+    const send = await screen.findByRole("button", { name: "Send" });
+    fireEvent.click(screen.getByRole("button", { name: /Plain/ }));
+    await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(send);
+    expect(await screen.findByText("Failed to send message.")).toBeTruthy();
+    expect(screen.queryByText(/Could not read this card/)).toBeNull();
+  });
+
+  it("tells the view what core said, so the view reads the chat again", async () => {
+    captureEvents();
+    const heard: number[] = [];
+    render(
+      <WidgetHostContext.Provider
+        value={{ turnFields: () => ({}), onSettled: (outcome) => heard.push(outcome.status) }}
+      >
+        <WidgetUiCard widgetId="m1" toolUseId="q1" appId="core" ui={ui} text="" waiting={{}} />
+      </WidgetHostContext.Provider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(heard).toEqual([200]));
+  });
+
+  it("sends nothing from a view that only shows the chat", async () => {
+    const events = captureEvents();
+    render(
+      <WidgetHostContext.Provider value={READ_ONLY_WIDGET_HOST}>
+        <WidgetUiCard widgetId="m1" toolUseId="q1" appId="core" ui={ui} text="" waiting={{}} />
+      </WidgetHostContext.Provider>,
+    );
+    // The card shows, locked: there is nothing to press.
+    expect(await screen.findByText("Which tone?")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    // Nothing was sent, so it does not say so.
+    expect(screen.queryByText("Sent")).toBeNull();
+    expect(events).toEqual([]);
   });
 
   it("shows an answered card read-only with what was sent", async () => {

@@ -46,7 +46,13 @@ final class FakeBackend: RomeBackend {
         return page
     }
 
-    func activeTurns(sessionId: String) async throws -> [ActiveTurn] { turns }
+    /// Set, the active turns cannot be read.
+    var activeTurnsError: APIError?
+
+    func activeTurns(sessionId: String) async throws -> [ActiveTurn] {
+        if let activeTurnsError { throw activeTurnsError }
+        return turns
+    }
 
     func interrupt(turnId: String) async throws {
         interrupted.append(turnId)
@@ -135,7 +141,18 @@ final class FakeBackend: RomeBackend {
     var sentFiles: [OutgoingFile] = []
 
     func asset(path: String) async throws -> Data { throw APIError.notFound }
-    func apiFile(path: String, query: String?) async throws -> Data { throw APIError.notFound }
+    /// Files under `/api`, by path; any other path is not found.
+    var apiFiles: [String: Data] = [:]
+    /// The `/api` files asked for, in order.
+    var apiFileRequests: [String] = []
+    /// Runs inside a file request, before it answers.
+    var duringApiFile: (() async -> Void)?
+    func apiFile(path: String, query: String?) async throws -> Data {
+        apiFileRequests.append(path)
+        await duringApiFile?()
+        guard let data = apiFiles[path] else { throw APIError.notFound }
+        return data
+    }
     var origin: URL? { nil }
 
     /// Off, every send fails, as it always did here.
@@ -152,6 +169,7 @@ final class FakeBackend: RomeBackend {
     /// Runs inside a thread read, before it answers.
     var duringThreadRead: (() async -> Void)?
 
+
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
         threadReads.append(messageId)
         await duringThreadRead?()
@@ -167,10 +185,18 @@ final class FakeBackend: RomeBackend {
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         sentFiles = files
+        sentInputIds.append(inputId)
         calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")
-        if sendSucceeds { return CreatedTurn(turnId: "turn", inputId: inputId, disposition: "started") }
-        throw APIError.network
+        if sendSucceeds { return CreatedTurn(turnId: sendTurnId, inputId: inputId, disposition: "started") }
+        throw sendError
     }
+    /// The input id of each send, in order.
+    var sentInputIds: [String] = []
+    /// What a send fails with when `sendSucceeds` is off.
+    var sendError: APIError = .network
+    /// The turn a successful send starts; nil is a send that started none.
+    var sendTurnId: String? = "turn"
+    var answeredSessions: [String] = []
     var answeredWidgets: [String] = []
     /// What an answer fails with; nil lets it through.
     var answerError: APIError? = .network
@@ -188,13 +214,29 @@ final class FakeBackend: RomeBackend {
     /// The chats marked read, in order.
     var reads: [String] = []
     func markRead(sessionId: String) async { reads.append(sessionId) }
-    func sessions() async throws -> [ChatSession] { [] }
+    /// The chats and tasks the lists hold.
+    var sessionRows: [ChatSession] = []
+    var taskRows: [ConciergeTask] = []
+    var stoppedTasks: [String] = []
+    func sessions() async throws -> [ChatSession] { sessionRows }
     func tasks() async throws -> [ConciergeTask] {
         taskFetches += 1
-        return []
+        return taskRows
+    }
+    /// What a stop on a task fails with; nil lets it through.
+    var stopError: APIError?
+    func stopTask(id: String) async throws {
+        if let stopError { throw stopError }
+        stoppedTasks.append(id)
     }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
-    func resolveApproval(id: String, approve: Bool) async throws { throw APIError.network }
+    /// What a decision on an approval fails with; nil lets it through.
+    var resolveError: APIError? = .network
+    var resolved: [String] = []
+    func resolveApproval(id: String, approve: Bool) async throws {
+        if let resolveError { throw resolveError }
+        resolved.append(id)
+    }
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }
     func aiTools() async throws -> AIToolsStatus { throw APIError.network }
     func setConciergeEnabled(_ enabled: Bool) async throws {}

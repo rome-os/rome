@@ -199,12 +199,13 @@ struct OutgoingFile: Encodable, Equatable, Sendable {
 }
 
 /// The server stores no attachment part: it appends one Markdown line per
-/// file to the guardian's text, `- File 1: [photo-1.jpg](</projects/…>)`, and
-/// keeps the file in the chat's project folder. This splits those lines off.
+/// file to the guardian's text, `- File 1: [photo-1.jpg](</api/assets/…>)`, and
+/// keeps the file in its asset store. Older messages link under `/projects/…`.
+/// This splits those lines off.
 enum UploadLines {
     struct Upload: Hashable, Sendable {
         let name: String
-        /// `/projects/…`, served by `GET /api/projects/asset?path=projects/…`.
+        /// `/api/assets/<id>.<ext>`, or `/projects/…` for an older message.
         let linkPath: String
 
         var isImage: Bool {
@@ -216,13 +217,33 @@ enum UploadLines {
             let path = linkPath.hasPrefix("/") ? String(linkPath.dropFirst()) : linkPath
             return path.removingPercentEncoding ?? path
         }
+
+        /// Where the bytes come from: the instance's own `/api/assets/…` route as
+        /// written, or the projects asset route for an older `/projects/…` link.
+        var source: ImageSource {
+            linkPath.hasPrefix(UploadLines.assetsPrefix)
+                ? .instance(path: String(linkPath.dropFirst(4)), query: nil)
+                : .asset(path: assetPath)
+        }
+    }
+
+    nonisolated static let assetsPrefix = "/api/assets/"
+
+    /// What the server stores a file as: 32 hex digits, a dot, a short extension.
+    nonisolated(unsafe) private static let assetName = try! NSRegularExpression(pattern: #"^[0-9a-f]{32}\.[a-z0-9]{1,8}$"#)
+
+    nonisolated private static func isUploadLink(_ link: Substring) -> Bool {
+        if link.hasPrefix("/projects/") { return true }
+        guard link.hasPrefix(assetsPrefix) else { return false }
+        let name = String(link.dropFirst(assetsPrefix.count))
+        return assetName.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
     }
 
     nonisolated(unsafe) private static let line = try! NSRegularExpression(pattern: #"^- File \d+: \[(.*)\]\(<(.+)>\)$"#)
 
     /// The text the guardian wrote, and the files listed after it.
-    /// Only the server's own list counts: lines linking under /projects/, at
-    /// the very end, with a blank line (or nothing) before them.
+    /// Only the server's own list counts: lines linking under /api/assets/ or
+    /// /projects/, at the very end, with a blank line (or nothing) before them.
     nonisolated static func split(_ text: String) -> (text: String, uploads: [Upload]) {
         var lines = text.components(separatedBy: "\n")
         var uploads: [Upload] = []
@@ -231,7 +252,7 @@ enum UploadLines {
             guard let match = line.firstMatch(in: last, range: range),
                   let name = Range(match.range(at: 1), in: last),
                   let link = Range(match.range(at: 2), in: last),
-                  last[link].hasPrefix("/projects/")
+                  isUploadLink(last[link])
             else { break }
             uploads.insert(Upload(name: String(last[name]).replacingOccurrences(of: "\\", with: ""), linkPath: String(last[link])), at: 0)
             lines.removeLast()

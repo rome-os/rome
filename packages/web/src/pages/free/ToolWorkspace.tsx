@@ -38,7 +38,7 @@ import { WidgetPicker } from "./WidgetPicker";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
-import { ConciergeTaskPanel } from "@/components/concierge/ConciergeTaskPanel";
+import { TaskList } from "@/components/concierge/TaskList";
 import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import {
@@ -194,7 +194,9 @@ export function ToolWorkspace({
   // a collapsed pane holds it open with the same flag.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
   const [traceSelected, setTraceSelected] = useState(false);
-  const [tasksOpen, setTasksOpen] = useState(false);
+  // The Concierge chat whose task list the tab shows; null while it is not open.
+  const [tasksChatId, setTasksChatId] = useState<string | null>(null);
+  const tasksOpen = tasksChatId !== null;
   const [tasksSelected, setTasksSelected] = useState(false);
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
@@ -273,14 +275,14 @@ export function ToolWorkspace({
   const sorted = [...placements].sort((a, b) => a.order - b.order);
   const hasTabs = sorted.length > 0 || trace !== null || tasksOpen;
   const compact = width < COMPACT_WIDTH;
-  const showTasks = useCallback(() => {
+  const showTasks = useCallback((chatId: string) => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
-    setTasksOpen(true);
+    setTasksChatId(chatId);
     setTasksSelected(true);
     setTraceSelected(false);
   }, []);
   const hideTasks = useCallback(() => {
-    setTasksOpen(false);
+    setTasksChatId(null);
     setTasksSelected(false);
     if (traceOwnerRef.current === null) setHoldsOpen(false);
   }, []);
@@ -654,7 +656,11 @@ export function ToolWorkspace({
                 style={{ display: tasksActive ? undefined : "none" }}
                 className="absolute inset-0 overflow-hidden"
               >
-                <ConciergeTaskPanel />
+                {tasksChatId ? (
+                  <div className="h-full overflow-y-auto pb-safe">
+                    <TaskList chatId={tasksChatId} />
+                  </div>
+                ) : null}
               </TabsContent>
             )}
           </div>

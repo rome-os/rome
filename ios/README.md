@@ -18,10 +18,10 @@ Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local
 
 ### On a physical iPhone
 
-Signing is automatic, so Xcode must have an Apple ID for that team under Xcode → Settings → Accounts. A development certificate in the keychain is not enough: without the account the build fails with "No Accounts". `xcrun devicectl list devices` gives the phone's identifier; the phone needs Developer Mode on.
+Signing is automatic and authenticates with the team's App Store Connect API key, so it works without an Apple ID in Xcode. Command-line builds often cannot see Xcode's signed-in account, even right after signing in, and then fail with "No Accounts". Keep the key's arguments in a shell array (see "Signing with the API key"). `xcrun devicectl list devices` gives the phone's identifier; the phone needs Developer Mode on.
 
 ```bash
-xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates build
+xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates -allowProvisioningDeviceRegistration "${ASC_KEY[@]}" build
 ```
 
 ```bash
@@ -49,30 +49,34 @@ TestFlight ships under Rome's own Apple Developer team, not a personal one. The 
 1. Archive (local only, safe to run):
 
    ```bash
-   xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/rome-archive/Rome.xcarchive -allowProvisioningUpdates DEVELOPMENT_TEAM=<ROME_TEAM_ID> CURRENT_PROJECT_VERSION=$(date -u +%Y%m%d%H%M) archive
+   xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/rome-archive/Rome.xcarchive -allowProvisioningUpdates "${ASC_KEY[@]}" DEVELOPMENT_TEAM=<ROME_TEAM_ID> CURRENT_PROJECT_VERSION=$(date -u +%Y%m%d%H%M) archive
    ```
 
 2. Upload to App Store Connect. **This publishes a build: run it only with the lead's go.** `Config/ExportOptions.plist` uses the `app-store-connect` method with the `upload` destination, so exporting is the upload:
 
    ```bash
-   xcodebuild -exportArchive -archivePath /tmp/rome-archive/Rome.xcarchive -exportOptionsPlist Config/ExportOptions.plist -exportPath /tmp/rome-archive/export -allowProvisioningUpdates
+   xcodebuild -exportArchive -archivePath /tmp/rome-archive/Rome.xcarchive -exportOptionsPlist Config/ExportOptions.plist -exportPath /tmp/rome-archive/export -allowProvisioningUpdates "${ASC_KEY[@]}"
    ```
 
-   Xcode needs an Apple ID in Rome's team signed in under Xcode → Settings → Accounts, with the App Manager role or higher. The App Store Connect app record for `cc.romeos.mobile` must exist first.
-
-   That sign-in can lapse without warning. The export then fails with "No Accounts". To export without it, use a team App Store Connect API key instead. Add these to both the archive and the export command:
-
-   ```bash
-   -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8 -authenticationKeyID <KEY_ID> -authenticationKeyIssuerID <ISSUER_ID>
-   ```
-
-   The key needs the Admin role, because the export creates or uses the cloud-managed distribution certificate. Its `.p8` stays outside every repository, at that path with mode 600. App Store Connect offers the file for download only once.
+   The App Store Connect app record for `cc.romeos.mobile` must exist first.
 
    No certificate needs to be on the Mac beforehand. The first archive creates an Apple Development certificate for the team in the keychain, and the export signs with the team's Apple Distribution certificate, which Xcode keeps in the cloud. The upload ends with "Uploaded package is processing"; App Store Connect then processes the build before TestFlight lists it.
 
    The archive is signed with the development profile, so its app reads `aps-environment` = `development` even in Release. The export re-signs it with `production`. To check that before uploading, export once with `destination` set to `export` in a copy of `ExportOptions.plist`, then read the entitlements of the app in the `.ipa`.
 
 3. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
+
+### Signing with the API key
+
+Every signed build passes a team App Store Connect API key. Keep its arguments in a shell array, so zsh hands each one to `xcodebuild` as a separate argument:
+
+```bash
+ASC_KEY=(-authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8" -authenticationKeyID <KEY_ID> -authenticationKeyIssuerID <ISSUER_ID>)
+```
+
+A path with `~` inside quotes is not expanded, and the arguments joined into one string reach `xcodebuild` as one; both fail with "Authentication failed". The key needs the Admin role, because the export creates or uses the cloud-managed distribution certificate. Its `.p8` stays outside every repository, at that path with mode 600. App Store Connect offers the file for download only once. A build with `ASC_KEY` unset in the shell signs with Xcode's account instead, so a personal Apple ID still works wherever `xcodebuild` can see it, and the Admin key is needed only on the Mac that ships builds.
+
+The key registers bundle ids, devices (with `-allowProvisioningDeviceRegistration`, as in the phone build) and profiles, but cannot create an App Group. A new group is made once on the Apple Developer site (Identifiers → App Groups) and ticked under App Groups on each App ID that uses it. `group.cc.romeos.mobile` and `group.cc.romeos.mobile.dev` already exist, on the app's and the widget's App IDs.
 
 To check a Release build without signing: `xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -derivedDataPath /tmp/rome-release CODE_SIGNING_ALLOWED=NO build`.
 
@@ -92,6 +96,12 @@ xcrun simctl push booted cc.romeos.mobile.dev push.json
 
 While the app is open the push shows no banner; the chat updates from live events. A tap opens the instance named in `rome.instanceId`, then its Concierge.
 
+## Apps widget
+
+`RomeWidget` is a small home-screen widget: a 2×2 grid of the open instance's apps. The app writes the apps list and small icons to the App Group (`group.<bundle id>`, `ROME_APP_GROUP` in `Config/Base.xcconfig`) whenever it loads the list, and records each app it opens. The widget only reads that copy. It never calls the network or holds the session. A tap opens `rome://app/<instanceId>/<appId>` (`rome-dev://` for Debug), and the app switches instance first when it has to, as a tapped push does.
+
+Device and TestFlight builds sign the widget as `<bundle id>.widget` with the App Group on both IDs, so both must exist on Rome's team. The Simulator needs neither. To try it there, run with `ROME_DEMO=1`, go home, long-press, then choose Edit → Add Widget → Rome Dev.
+
 ## Debug modes
 
 Debug builds read these environment variables (set them in the scheme's Run options):
@@ -102,8 +112,16 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | `ROME_DEMO=update` | Opens the demo data on a Rome below the app's minimum version, so the update page covers the app; "Update now" finishes after a few seconds. |
 | `ROME_DEMO=update-offered` | Opens the demo data on a Rome behind its latest release but new enough for the app: the banner and the drawer's line offer the update. |
 | `ROME_DEMO=visitor` | Opens the demo data as a dashboard visitor of a shared Rome. |
-| `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid. |
+| `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid and the widget. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |
+
+**A chat with every card state.** To look at the app's cards and lines against a dev stack, fill a chat with copies of the main Chat's cards (tasks, questions and approvals in every state the stack holds, forwarded results, a connect card, model switches and stored model errors). Test data only, on a dev stack, never a real instance. Make a chat (`POST /api/concierge/chats` with a name such as `zz-all-card-states`), then run the script inside the dev container, never from the host:
+
+```bash
+docker exec -i rome-rome-1 python3 - <chat id> < ios/Tools/card-states-chat.py
+```
+
+Lines that come from a turn's trace (a renewal, a failed turn) and thread labels are not copied: for those, read the demo data (`ROME_DEMO=1`) or the main Chat.
 
 The stacking game ("Build Rome") opens from the update page while a Rome upgrades, or with ten quick taps on the big mascot of the Agent page (a tap on a chat header's mascot opens it). To reach the update entry without a real upgrade, launch with `ROME_DEMO=update` and tap "Update now": the demo upgrade runs for about 8 seconds, and "Play a game" shows under its status line. The best score stays on the device, across sign-out.
 
