@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "77b00f4d-857a-4636-9cb0-2eee964d3a30",
-  "prevId": "1dec0208-2b07-48f3-8da8-8f3edf7826db",
+  "id": "0bf0473f-8d02-48cf-8a45-f37c4351a4f9",
+  "prevId": "b3bb0907-2c02-47e9-ac60-2c38ea7de629",
   "tables": {
     "account_profiles": {
       "name": "account_profiles",
@@ -751,20 +751,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
         "idx_approvals_thread": {
           "name": "idx_approvals_thread",
           "columns": [
-            "thread_id"
+            "json_extract(\"payload\", '$.channelContext.threadId')"
           ],
           "isUnique": false
         }
@@ -4695,6 +4688,14 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {}
+    "indexes": {
+      "idx_approvals_thread": {
+        "columns": {
+          "json_extract(\"payload\", '$.channelContext.threadId')": {
+            "isExpression": true
+          }
+        }
+      }
+    }
   }
 }
