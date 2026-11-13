@@ -16,6 +16,7 @@ import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { isOpenWait } from "./live-task-cards";
 import { QuestionCard } from "./QuestionCard";
+import { WidgetHostContext } from "./widget-ui/turn-fields";
 import { answerOutcome, approvalOutcome, SettledCard } from "./SettledCard";
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
@@ -361,6 +362,9 @@ function LiveTaskChatCard({
   );
 }
 
+/** A task chat's turn takes the task's own fields, so its card sends none. */
+const TASK_CHAT_HOST = { turnFields: () => ({}) };
+
 /**
  * The question or approval a task waits on its owner for, drawn from the card
  * Rome filled in, answerable here.
@@ -455,16 +459,20 @@ function WaitingTaskCard({
         />
       ) : interaction?.part.render?.builtin &&
         interaction.part.render.componentId === "question-card" ? (
-        <QuestionCard
-          widgetId={interaction.messageId}
-          key={`${interaction.key}:${attempt}`}
-          toolUseId={interaction.part.toolUseId}
-          appId="core"
-          ui={interaction.part.render.ui}
-          props={interaction.part.render.props}
-          onSettled={settled}
-          header={header}
-        />
+        // The answer starts a turn in the task's chat, never with the turn
+        // fields of the chat this card is shown in.
+        <WidgetHostContext.Provider value={TASK_CHAT_HOST}>
+          <QuestionCard
+            widgetId={interaction.messageId}
+            key={`${interaction.key}:${attempt}`}
+            toolUseId={interaction.part.toolUseId}
+            appId="core"
+            ui={interaction.part.render.ui}
+            props={interaction.part.render.props}
+            onSettled={settled}
+            header={header}
+          />
+        </WidgetHostContext.Provider>
       ) : null}
     </div>
   );

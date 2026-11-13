@@ -104,7 +104,10 @@ import { useDesktop } from "@/hooks/use-desktop";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
-import { WidgetTurnFieldsContext } from "@/components/chat/entries/widget-ui/turn-fields";
+import {
+  type WidgetHost,
+  WidgetHostContext,
+} from "@/components/chat/entries/widget-ui/turn-fields";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions, type ChatVariant } from "@/components/chat/MessageList";
@@ -2078,6 +2081,21 @@ export function Chat({
     return turn;
   }, [workspaceContextRegistry]);
 
+  // A widget's event may start a turn that ends before the poll sees it run,
+  // and the guardian's own answer is never announced: read the chat again.
+  const widgetHost = useMemo<WidgetHost>(
+    () => ({
+      turnFields: widgetTurnFields,
+      onSettled: () => {
+        const sid = mainSessionIdRef.current;
+        if (!sid) return;
+        resyncSessionMessages(sid);
+        kickTurnPoll();
+      },
+    }),
+    [widgetTurnFields, resyncSessionMessages, kickTurnPoll],
+  );
+
   const handleDismissAppComponent = useCallback(
     async (sessionId: string, toolUseId: string) => {
       await handleSubmitAppComponent(sessionId, toolUseId, { dismissed: true });
@@ -2567,7 +2585,7 @@ export function Chat({
   );
 
   const page = (
-    <WidgetTurnFieldsContext.Provider value={widgetTurnFields}>
+    <WidgetHostContext.Provider value={widgetHost}>
       <TooltipProvider delayDuration={150}>
         {sessionEventIds.map((sid) => (
           <ChatSessionEvents
@@ -2984,7 +3002,7 @@ export function Chat({
           />
         </div>
       </TooltipProvider>
-    </WidgetTurnFieldsContext.Provider>
+    </WidgetHostContext.Provider>
   );
 
   return (

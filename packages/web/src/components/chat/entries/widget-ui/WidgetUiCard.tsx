@@ -15,7 +15,7 @@ import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
 import { fetchJson } from "@/lib/fetch-json";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
-import { WidgetTurnFieldsContext } from "./turn-fields";
+import { WidgetHostContext } from "./turn-fields";
 import {
   ROME_WIDGET_CATALOG_ID,
   romeWidgetCatalog,
@@ -108,16 +108,18 @@ export function WidgetUiCard({
 }: WidgetUiCardProps) {
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
+  const [sendFailed, setSendFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const result = waiting?.result;
   const dismissed = result?.dismissed === true;
-  const locked = result !== undefined || sent;
+  const widgetHost = useContext(WidgetHostContext);
+  const widgetHostRef = useRef(widgetHost);
+  widgetHostRef.current = widgetHost;
+  // A view that only shows the chat sends nothing, so its cards stay locked.
+  const locked = result !== undefined || sent || widgetHost.readOnly === true;
   const waitingRef = useRef(waiting);
   waitingRef.current = waiting;
-  const turnFields = useContext(WidgetTurnFieldsContext);
-  const turnFieldsRef = useRef(turnFields);
-  turnFieldsRef.current = turnFields;
   // Buttons wait for the first read: a press before it would post a context
   // whose paths are not loaded yet.
   const [ready, setReady] = useState(false);
@@ -169,7 +171,7 @@ export function WidgetUiCard({
     const p = new MessageProcessor([romeWidgetCatalog], async (action) => {
       // Core decides what every event means; the card only sends it. A turn
       // the event starts reaches the chat through live events.
-      if (inFlight.current) return;
+      if (inFlight.current || widgetHostRef.current.readOnly) return;
       inFlight.current = true;
       setBusy(true);
       const host = waitingRef.current;
@@ -178,18 +180,24 @@ export function WidgetUiCard({
         outcome = await postWidgetEvent(widgetId, {
           name: action.name,
           context: action.context ?? {},
-          turn: turnFieldsRef.current(),
+          turn: widgetHostRef.current.turnFields(),
         });
         if (!outcome.ok) throw new Error(`The widget's event failed: ${outcome.status}`);
         // A card the agent waits on is answered once core takes the event; any
         // other card reads its data again.
+        setSendFailed(false);
         if (host) setSent(true);
-        else await load(p);
-        setFailed(false);
+        else {
+          await load(p);
+          setFailed(false);
+        }
       } catch {
-        setFailed(true);
+        // A refused event says the send failed; a read after it says the data did.
+        if (outcome.ok) setFailed(true);
+        else setSendFailed(true);
       } finally {
         host?.onSettled?.(outcome);
+        widgetHostRef.current.onSettled?.(outcome);
         inFlight.current = false;
         setBusy(false);
       }
@@ -295,7 +303,9 @@ export function WidgetUiCard({
           )}
         </span>
       ) : null}
-      {failed ? (
+      {sendFailed ? (
+        <span className="text-aux text-destructive">{t("stream.errors.sendFallback")}</span>
+      ) : failed ? (
         <span className="text-aux text-destructive">
           {t("appComponent.widgetUnavailable", { text })}
         </span>

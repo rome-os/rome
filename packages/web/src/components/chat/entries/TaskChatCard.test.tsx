@@ -12,6 +12,7 @@ import { LatestTaskChatsContext, renderFlatEntries } from "./render";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import type { ChatEntry, ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { TaskChatCard } from "./TaskChatCard";
+import { WidgetHostContext } from "./widget-ui/turn-fields";
 import { questionCardRender } from "../../../../mock/fixtures/question-card";
 import type { TaskCard } from "@rome/api-types/chat";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
@@ -402,14 +403,21 @@ describe("TaskChatCard with its task", () => {
 });
 
 function show(isLatestForChat = true, as?: "task" | "ask", until?: number) {
+  // The Chat the card is shown in has turn fields of its own.
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/chat/main-chat"]}>
-        <Served isLatestForChat={isLatestForChat} as={as} until={until} />
+        <WidgetHostContext.Provider value={MAIN_CHAT_HOST}>
+          <Served isLatestForChat={isLatestForChat} as={as} until={until} />
+        </WidgetHostContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
+
+const MAIN_CHAT_HOST = {
+  turnFields: () => ({ personaId: "main-persona", workspace: { id: "main-ws" } }),
+};
 
 describe("TaskChatCard shown as one card or the other", () => {
   const expiredRow = {
@@ -912,6 +920,8 @@ describe("TaskChatCard", () => {
       name: "send",
       context: { answers: [{ values: ["Warm"], text: "" }] },
     });
+    // The turn is the task chat's, never with the Chat's persona or workspace.
+    expect(JSON.parse(String(init?.body)).turn).toEqual({});
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(await screen.findByText("Sent")).toBeTruthy();
     expect(screen.getByRole("link").getAttribute("href")).toBe(`/chat/${chatId}`);
