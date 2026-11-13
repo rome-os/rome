@@ -244,7 +244,7 @@ extension TranscriptRow {
     /// so a tint leaves it out.
     var ownMessageId: String? {
         switch self {
-        case .separator, .typing, .tools, .threadLabel: return nil
+        case .separator, .typing, .tools, .threadLabel, .sourceLabel: return nil
         default: return messageId ?? Self.message(ofPart: id)
         }
     }

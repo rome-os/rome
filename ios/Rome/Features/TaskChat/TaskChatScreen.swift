@@ -184,7 +184,7 @@ struct TaskChatScreen: View {
             NoticeLine(text: text)
         case .taskCard(_, let id, let title, _, _):
             TaskCard(title: title) {}
-        case .taskAsk, .threadLabel:
+        case .taskAsk, .threadLabel, .sourceLabel:
             // Only a Concierge chat shows a task's question alone, or thread labels.
             EmptyView()
         case .typing:

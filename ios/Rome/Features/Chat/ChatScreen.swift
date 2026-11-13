@@ -252,6 +252,8 @@ struct ConciergeRow: View {
             if !inThread {
                 ThreadLabelLine(title: title) { store.openThread(at: messageId) }
             }
+        case .sourceLabel(_, let text):
+            if !inThread { SourceLabelLine(text: text) }
         case .taskCard(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             // Archived or deleted from this app.
             EmptyView()
@@ -272,7 +274,8 @@ struct ConciergeRow: View {
                 // (rome-os/rome#1949).
                 if latest, embedsWait, !inThread, TaskWaitView.waits(tasks.chats[chatId]), let workspace = model.workspace {
                     TaskWaitView(store: workspace.taskWait(chatId), session: tasks.chats[chatId], onOpenChat: { onOpenChat(chatId, name) },
-                                 note: tasks.task(forChat: chatId).map { $0.status == "ended" && $0.endReason == "no_response" } == true ? "Expired — answer to continue" : nil)
+                                 note: tasks.task(forChat: chatId).map { $0.status == "ended" && $0.endReason == "no_response" } == true ? "Expired — answer to continue" : nil,
+                                 waitKey: tasks.task(forChat: chatId)?.openWait.map { "\($0)" } ?? "")
                 }
             }
         case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):

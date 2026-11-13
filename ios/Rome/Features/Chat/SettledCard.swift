@@ -109,9 +109,9 @@ struct TaskAskView: View {
                 SettledCard(title: expiredTitle, outcome: String(localized: "Expired · answer to continue"), chevron: true) {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { openedExpired = true }
                 }
-                .task(id: chatId) { await wait.load() }
+                .task(id: "\(chatId)|\(tasks.task(forChat: chatId)?.openWait.map { "\($0)" } ?? "")") { await wait.load() }
             case .waiting(let expired):
-                TaskWaitView(store: wait, session: session, onOpenChat: onOpenChat, note: expired ? "Expired — answer to continue" : nil)
+                TaskWaitView(store: wait, session: session, onOpenChat: onOpenChat, note: expired ? "Expired — answer to continue" : nil, waitKey: tasks.task(forChat: chatId)?.openWait.map { "\($0)" } ?? "")
             case .settled:
                 folded
                     // Read again only when the task's wait changed, not on every bit of its activity.

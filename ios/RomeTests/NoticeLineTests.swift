@@ -40,10 +40,58 @@ private func rows(_ messages: [ChatMessage], notices: Bool = true) -> [Transcrip
             text("q", role: "user", turn: "t0", at: 0), text("a", turn: "t0", at: 5),
             text("r", turn: "t1", at: 60), trace(turn: "t1", at: 61, summary),
         ])
-        #expect(built.map(\.id).filter { !$0.hasPrefix("sep") } == ["q:0", "a:0", "r:0"])
+        #expect(built.map(\.id).filter { !$0.hasPrefix("sep") } == ["q:0", "a:0", "r:0", "source-r"])
         // A turn the Concierge answered with silence shows nothing either.
         let silent = rows([text("q", role: "user", turn: "t0", at: 0), trace(turn: "t1", at: 60, summary)])
         #expect(silent.map(\.id).filter { !$0.hasPrefix("sep") } == ["q:0"])
+    }
+
+    private func labels(_ built: [TranscriptRow]) -> [String] {
+        built.compactMap { if case .sourceLabel(_, let text) = $0 { text } else { nil } }
+    }
+
+    /// Each reply of a turn the Concierge began on its own says where it came from.
+    @Test func everyReplyOfAnUnpromptedTurnIsLabelled() {
+        let summary = TraceSummary(automatedInput: .init(type: "routine", name: "Daily summary"))
+        let built = rows([text("a", turn: "t1", at: 60), text("b", turn: "t1", at: 61), trace(turn: "t1", at: 62, summary), text("q", role: "user", turn: "t2", at: 120), text("c", turn: "t2", at: 125)])
+        #expect(labels(built) == ["Routine · Daily summary", "Routine · Daily summary"])
+        // A turn that said nothing shows nothing, and a task chat draws none.
+        #expect(labels(rows([trace(turn: "t1", at: 62, summary)])).isEmpty)
+        #expect(labels(rows([text("a", turn: "t1", at: 60), trace(turn: "t1", at: 62, summary)], notices: false)).isEmpty)
+    }
+
+    @Test func theLabelsReadAsTheBoardsSay() {
+        func label(_ type: String, _ name: String?) -> String { SourceCopy.label(.init(type: type, name: name)) }
+        #expect(label("routine", "Daily") == "Routine · Daily")
+        #expect(label("app", "Habits") == "App · Habits")
+        #expect(label("agent", nil) == "Agent")
+        #expect(label("following", "Gmail") == "Following · Gmail")
+        #expect(label("digest", nil) == "Following · digest")
+        #expect(label("digest", "x") == "Following · digest")
+        // A kind this build does not know reads as an automation, and still decodes.
+        #expect(label("brand-new", nil) == "Automation")
+        #expect(label("routine", "  ") == "Routine")
+    }
+
+    /// In a task's thread only its own label shows.
+    @Test func aTaskThreadMessageKeepsOnlyItsThreadLabel() {
+        let summary = TraceSummary(automatedInput: .init(type: "agent", name: "Flint"))
+        var inThread = text("a", turn: "t1", at: 60)
+        inThread.chatThreadId = "r"
+        inThread.chatThreadTitle = "Book flights"
+        inThread.knowsThreads = true
+        let options = TranscriptBuilder.Options(showThreads: true, showNotices: true)
+        let built = TranscriptBuilder.rows(messages: [inThread, trace(turn: "t1", at: 61, summary)], pending: [], answers: [:], options: options)
+        #expect(labels(built).isEmpty)
+        #expect(built.contains { if case .threadLabel = $0 { true } else { false } })
+    }
+
+    /// An automated message from before marks its turn, and is not drawn.
+    @Test func anOldAutomatedMessageLabelsItsTurn() {
+        let routine = MessageSender(kind: "automated", sourceType: "routine", name: "Daily")
+        let built = rows([text("old", role: "user", turn: "t0", at: 0, sender: routine), text("a", turn: "t0", at: 5)])
+        #expect(built.map(\.id).filter { !$0.hasPrefix("sep") } == ["a:0", "source-a"])
+        #expect(labels(built) == ["Routine · Daily"])
     }
 
     /// An automated message from before, said on the owner's behalf or not, is not drawn in a Concierge chat.

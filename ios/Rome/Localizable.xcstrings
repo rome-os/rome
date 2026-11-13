@@ -1601,6 +1601,26 @@
         }
       }
     },
+    "Following" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关注"
+          }
+        }
+      }
+    },
+    "Following · digest" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关注 · 摘要"
+          }
+        }
+      }
+    },
     "For everyday wellness, not medical advice." : {
       "localizations" : {
         "zh-Hans" : {

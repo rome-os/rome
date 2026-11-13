@@ -440,6 +440,88 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     var status: String?
     /// Why an ended task ended: `done`, `failed`, `stopped` or `no_response`.
     var endReason: String?
+    /// What the task chat waits on its owner for, as the server sends it:
+    /// a card (`{kind:"card", id, messageId, render, since}`) or an approval
+    /// (`{kind:"approval", id, since}`). Null when nothing waits.
+    var openWait: JSONValue?
+    /// The instance sent `openWait`, null included: it names the wait, so the
+    /// task chat need not be read for it. An older instance leaves it out.
+    var knowsOpenWait = false
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, state, summary, waitingOn, dueAt, rank, chat, conciergeChat, sourceMessageId
+        case createdAt, updatedAt, completedAt, archivedAt, notSynced, threadRoot, status, endReason, openWait
+    }
+
+    init(id: String, title: String, state: TaskState, summary: String? = nil, waitingOn: String? = nil, dueAt: Double? = nil, rank: Double? = nil, chat: LinkedChat? = nil, conciergeChat: ConciergeChat? = nil, sourceMessageId: String? = nil, createdAt: Double, updatedAt: Double, completedAt: Double? = nil, archivedAt: Double? = nil, notSynced: Bool? = nil, threadRoot: String? = nil, status: String? = nil, endReason: String? = nil, openWait: JSONValue? = nil, knowsOpenWait: Bool = false) {
+        self.id = id
+        self.title = title
+        self.state = state
+        self.summary = summary
+        self.waitingOn = waitingOn
+        self.dueAt = dueAt
+        self.rank = rank
+        self.chat = chat
+        self.conciergeChat = conciergeChat
+        self.sourceMessageId = sourceMessageId
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
+        self.archivedAt = archivedAt
+        self.notSynced = notSynced
+        self.threadRoot = threadRoot
+        self.status = status
+        self.endReason = endReason
+        self.openWait = openWait
+        self.knowsOpenWait = knowsOpenWait
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        state = try c.decode(TaskState.self, forKey: .state)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        waitingOn = try c.decodeIfPresent(String.self, forKey: .waitingOn)
+        dueAt = try c.decodeIfPresent(Double.self, forKey: .dueAt)
+        rank = try c.decodeIfPresent(Double.self, forKey: .rank)
+        chat = try c.decodeIfPresent(LinkedChat.self, forKey: .chat)
+        conciergeChat = try c.decodeIfPresent(ConciergeChat.self, forKey: .conciergeChat)
+        sourceMessageId = try c.decodeIfPresent(String.self, forKey: .sourceMessageId)
+        createdAt = try c.decode(Double.self, forKey: .createdAt)
+        updatedAt = try c.decode(Double.self, forKey: .updatedAt)
+        completedAt = try c.decodeIfPresent(Double.self, forKey: .completedAt)
+        archivedAt = try c.decodeIfPresent(Double.self, forKey: .archivedAt)
+        notSynced = try c.decodeIfPresent(Bool.self, forKey: .notSynced)
+        threadRoot = try c.decodeIfPresent(String.self, forKey: .threadRoot)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        endReason = try c.decodeIfPresent(String.self, forKey: .endReason)
+        knowsOpenWait = c.contains(.openWait)
+        // A shape this build cannot read drops only the wait, never the task.
+        openWait = (try? c.decodeIfPresent(JSONValue.self, forKey: .openWait)) ?? nil
+    }
+}
+
+extension ConciergeTask {
+    /// What a task chat waits for, read from `openWait`.
+    enum OpenWait: Equatable {
+        /// A card by its tool-use id, the message holding it, and how it renders.
+        case card(id: String, messageId: String, render: JSONValue?, since: Double)
+        case approval(id: String, since: Double)
+    }
+
+    /// The typed wait; nil when nothing waits or the shape is not known.
+    var wait: OpenWait? {
+        guard let openWait, let kind = openWait["kind"]?.string, let id = openWait["id"]?.string else { return nil }
+        let since = openWait["since"]?.number ?? 0
+        switch kind {
+        case "card":
+            guard let messageId = openWait["messageId"]?.string else { return nil }
+            return .card(id: id, messageId: messageId, render: openWait["render"], since: since)
+        case "approval": return .approval(id: id, since: since)
+        default: return nil
+        }
+    }
 }
 
 struct ConciergeTasksResponse: Codable, Sendable {

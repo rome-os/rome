@@ -164,6 +164,25 @@ if task:
     for show in ("task", "ask"):
         once("app-ask-" + show, [{"type": "task_chat", "chatId": task[0], "title": task[1], "show": show}])
 
+# Replies the Concierge began on its own: an automated message from before
+# marks its turn (it is not drawn), and the reply under it says where it came from.
+for kind, name in (("agent:core:main", "Flint"), ("routine:zz-routine", "Daily summary"), ("app:habits", "Habits")):
+    key = "zz-other-source-" + kind
+    if db.execute("select 1 from chat_messages where chat_id=? and key=?", (cid, key)).fetchone():
+        continue
+    turn = str(uuid.uuid4())
+    newest = max(newest, db.execute("select coalesce(max(said_at),0) from chat_messages where chat_id=?", (cid,)).fetchone()[0]) + 60
+    sent = db.execute(
+        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at,chat_thread_id,chat_thread_settled) values(?,?,?,?,?,?,?,?,?,?,?,0)",
+        (cid, key, None, "automated::0::" + kind, None, name, "", json.dumps([{"type": "text", "content": "A scheduled check."}]), None, newest, None),
+    ).lastrowid
+    reply = db.execute(
+        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at,chat_thread_id,chat_thread_settled) values(?,?,?,?,?,?,?,?,?,?,?,0)",
+        (cid, key + "-reply", None, "agent:core:concierge", "core:concierge", None, "", json.dumps([{"type": "text", "content": "Nothing needs you today."}]), None, newest + 1, None),
+    ).lastrowid
+    db.execute("insert or ignore into agent_turn_messages(message_id,session_id,turn_id,role,input_state) values(?,?,?,?,?)", (sent, chat_key, turn, "prompt", "consumed"))
+    db.execute("insert or ignore into agent_turn_messages(message_id,session_id,turn_id,role,input_state) values(?,?,?,?,?)", (reply, chat_key, turn, "answer", None))
+
 # A chat sees lines said since it was made.
 first = db.execute("select min(said_at) from chat_messages where chat_id=?", (cid,)).fetchone()[0]
 db.execute("update rome_sessions set created_at=? where id=?", (first - 3600, chat_key))

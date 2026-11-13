@@ -581,7 +581,9 @@ enum TranscriptSpacing {
         }
         // Tight under its own message, and apart from the next one.
         if case .threadLabel = row { return 3 }
+        if case .sourceLabel = row { return 3 }
         if case .threadLabel = previous { return row.isGuardian ? 18 : 14 }
+        if case .sourceLabel = previous { return row.isGuardian ? 18 : 14 }
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
         switch (row, previous) {

@@ -30,10 +30,33 @@ final class TaskWaitStore {
 
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private var loads = 0
+    /// The task's row, which names what it waits for (`openWait`).
+    @ObservationIgnored private let task: @MainActor () -> ConciergeTask?
 
-    init(chatId: String, backend: RomeBackend) {
+    init(chatId: String, backend: RomeBackend, task: @escaping @MainActor () -> ConciergeTask? = { nil }) {
         self.chatId = chatId
         self.backend = backend
+        self.task = task
+    }
+
+    /// The card a task's `openWait` names, with no page of the task chat read:
+    /// a question by the questions its render carries, an approval by its
+    /// pending record, any other card as one answered in the task chat. Nil
+    /// when nothing waits; `.keep` when an approval cannot be read now.
+    static func card(openWait wait: ConciergeTask.OpenWait?, approvals: [PendingApproval]?) -> Update {
+        switch wait {
+        case nil:
+            return .set(nil)
+        case .card(let id, let messageId, let render, _)?:
+            guard render?["componentId"]?.string == "question-card" else { return .set(.elsewhere) }
+            let part: JSONValue = .object(["type": .string("pending_interaction"), "toolUseId": .string(id), "render": render ?? .null])
+            let content = (try? String(data: JSONEncoder().encode(JSONValue.array([part])), encoding: .utf8)) ?? "[]"
+            guard case .question(let question)? = MessagePart.parse(content).first else { return .set(.elsewhere) }
+            return .set(.question(question, key: "\(messageId):\(id)"))
+        case .approval(let id, _)?:
+            guard let approvals else { return .keep }
+            return .set(approvals.first { $0.id == id }.map(Card.approval))
+        }
     }
 
     /// Reads the task's last two turns and the pending approvals, once per
@@ -43,6 +66,22 @@ final class TaskWaitStore {
     func load() async {
         loads += 1
         let mine = loads
+        // A server that names the wait says it: no page of the task chat is read.
+        if let row = task(), row.knowsOpenWait {
+            var pending: [PendingApproval]?
+            if case .approval? = row.wait { pending = try? await backend.pendingApprovals() }
+            guard mine == loads else { return }
+            if case .set(let next) = Self.card(openWait: row.wait, approvals: pending) {
+                card = next
+                if case .approval(let approval)? = card {
+                    approvalRecord = try? await backend.approval(id: approval.id)
+                } else {
+                    approvalRecord = nil
+                }
+            }
+            loaded = true
+            return
+        }
         async let page = try? backend.messages(sessionId: chatId, before: nil, limit: 2)
         async let approvals = try? backend.pendingApprovals()
         let messages = await page?.messages

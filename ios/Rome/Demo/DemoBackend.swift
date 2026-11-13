@@ -785,6 +785,17 @@ final class DemoBackend: RomeBackend {
         routineRun.traceSummary?.automatedInput = TraceSummary.InputSource(type: "routine", name: "每日摘要")
         var routineAnswer = agent("今天的摘要：两个任务在等你，一个在跑。", at: at(9, 58).addingTimeInterval(5))
         routineAnswer.turnId = "turn-routine"
+        // What the Concierge follows speaks on its own too: an important event, and the digest.
+        var followRun = trace(steps: 0, at: at(10, 5), session: conciergeChatID)
+        followRun.turnId = "turn-follow"
+        followRun.traceSummary?.automatedInput = TraceSummary.InputSource(type: "following", name: "Gmail")
+        var followAnswer = agent("出版社回信了，说书稿下周一前可以看。", at: at(10, 5).addingTimeInterval(5))
+        followAnswer.turnId = "turn-follow"
+        var digestRun = trace(steps: 0, at: at(10, 20), session: conciergeChatID)
+        digestRun.turnId = "turn-digest"
+        digestRun.traceSummary?.automatedInput = TraceSummary.InputSource(type: "digest", name: nil)
+        var digestAnswer = agent("今天的摘要：三封邮件，一个日程。", at: at(10, 20).addingTimeInterval(5))
+        digestAnswer.turnId = "turn-digest"
         // Each task's messages are in its chat thread, labelled with the
         // task: a task card when it starts, its question or approval on its
         // own when it asks. The login task's cards are settled and fold; the
@@ -821,6 +832,10 @@ final class DemoBackend: RomeBackend {
             ])], at: at(9, 53), session: conciergeChatID),
             routineRun,
             routineAnswer,
+            followRun,
+            followAnswer,
+            digestRun,
+            digestAnswer,
         ]
         approvals["ap-cal"] = ApprovalRecord(id: "ap-cal", status: "pending")
 

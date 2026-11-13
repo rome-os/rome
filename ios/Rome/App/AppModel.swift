@@ -241,7 +241,7 @@ final class Workspace {
     /// What a waiting task chat asks, for its card in the main Chat.
     func taskWait(_ chatId: String) -> TaskWaitStore {
         if let store = taskWaits[chatId] { return store }
-        let store = TaskWaitStore(chatId: chatId, backend: backend)
+        let store = TaskWaitStore(chatId: chatId, backend: backend, task: { [weak self] in self?.tasks.task(forChat: chatId) })
         taskWaits[chatId] = store
         return store
     }

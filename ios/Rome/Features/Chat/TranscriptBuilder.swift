@@ -65,6 +65,9 @@ enum TranscriptRow: Identifiable, Hashable {
     /// Under a Concierge message in a task's chat thread: `↳ <task title>`,
     /// which opens the thread view (docs/domains/chats.md#chat-thread).
     case threadLabel(id: String, messageId: String, title: String)
+    /// Under a Concierge reply to nobody's message: where its turn came from
+    /// ("Routine · Daily summary"). Faint, not tappable.
+    case sourceLabel(id: String, text: String)
     /// A faint centered line where the chat's agent session was renewed,
     /// with why; `sessionId` is the new session, whose handoff a tap opens.
     case sessionRenewal(id: String, reason: String, sessionId: String?)
@@ -75,7 +78,7 @@ enum TranscriptRow: Identifiable, Hashable {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
              .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
-             .threadLabel(let id, _, _), .sessionRenewal(let id, _, _):
+             .threadLabel(let id, _, _), .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
             return id
         case .typing:
             return "typing"
@@ -191,6 +194,20 @@ enum TranscriptBuilder {
             }
         }
 
+        // The turns the Concierge began on its own, with where each came from:
+        // by the turn's trace, or, from before, by an automated message that began it.
+        var unprompted: [String: TraceSummary.InputSource] = [:]
+        if options.showNotices {
+            for message in messages {
+                guard let turn = message.turnId else { continue }
+                if message.isTrace, let source = message.traceSummary?.automatedInput { unprompted[turn] = source }
+            }
+            for message in messages where Self.isAutomated(message) {
+                guard let turn = message.turnId, unprompted[turn] == nil, let sender = message.sender else { continue }
+                unprompted[turn] = TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
+            }
+        }
+
         // Messages come in the store's order, which follows the server's turns.
         for (position, message) in messages.enumerated() {
             notices(for: message)
@@ -256,6 +273,9 @@ enum TranscriptBuilder {
             }
             if !rows.isEmpty, let title = labels[message.id] {
                 rows.append(.threadLabel(id: "label-\(message.id)", messageId: message.id, title: title))
+            } else if !rows.isEmpty, !message.isUser, let turn = message.turnId, let source = unprompted[turn] {
+                // One label a message; a task's thread shows only its own.
+                rows.append(.sourceLabel(id: "source-\(message.id)", text: SourceCopy.label(source)))
             }
             if !rows.isEmpty {
                 entries.append(Entry(id: message.id, date: message.date, guardian: message.isUser, rows: rows, bubbleIndexes: bubbles))

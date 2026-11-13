@@ -10,6 +10,8 @@ struct TaskWaitView: View {
     var onOpenChat: () -> Void = {}
     /// A line above the card: an expired question says it still takes an answer.
     var note: LocalizedStringKey? = nil
+    /// What the task's row says it waits for: a change reads the card again.
+    var waitKey = ""
     @Environment(\.isVisitor) private var isVisitor
 
     /// Only a task that waits on the guardian and is not running shows a card.
@@ -55,7 +57,7 @@ struct TaskWaitView: View {
             }
         }
         // The task's state moved (it ran, stopped, or asks again): read it again.
-        .task(id: "\(session?.running ?? false)|\(session?.awaitingGuardian ?? false)|\(session?.activityAt ?? "")") {
+        .task(id: "\(session?.running ?? false)|\(session?.awaitingGuardian ?? false)|\(session?.activityAt ?? "")|\(waitKey)") {
             await store.load()
         }
     }

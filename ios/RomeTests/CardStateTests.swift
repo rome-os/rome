@@ -192,3 +192,61 @@ private func task(_ id: String, chat: String, status: String?, endReason: String
         #expect(parts == [.text("Done", long: false, forwardedFrom: .init(chatId: "c1", title: "Book"))])
     }
 }
+
+
+@MainActor
+@Suite struct OpenWaitTests {
+    private func decode(_ extra: String) throws -> ConciergeTask {
+        let json = #"{"id":"t","title":"T","state":"needs_user","createdAt":1,"updatedAt":2\#(extra)}"#
+        return try JSONDecoder().decode(ConciergeTask.self, from: Data(json.utf8))
+    }
+
+    @Test func theWaitIsReadAsSent() throws {
+        let card = try decode(#","openWait":{"kind":"card","id":"q1","messageId":"m1","render":{"componentId":"question-card","builtin":true,"props":{"questions":[{"id":"q","question":"Pick","type":"single","options":["A","B"]}]}},"since":5}"#)
+        #expect(card.knowsOpenWait)
+        guard case .card(let id, let messageId, let render, let since)? = card.wait else { Issue.record("no card"); return }
+        #expect(id == "q1" && messageId == "m1" && render?["componentId"]?.string == "question-card" && since == 5)
+        let approval = try decode(#","openWait":{"kind":"approval","id":"ap","since":7}"#)
+        #expect(approval.wait == .approval(id: "ap", since: 7))
+        // Null says nothing waits; absent says the server does not tell.
+        let none = try decode(#","openWait":null"#)
+        #expect(none.knowsOpenWait && none.wait == nil)
+        let older = try decode("")
+        #expect(!older.knowsOpenWait && older.wait == nil)
+        // A shape this build does not know drops the wait, never the task.
+        let odd = try decode(#","openWait":{"kind":"portal"}"#)
+        #expect(odd.knowsOpenWait && odd.wait == nil)
+    }
+
+    @Test func aQuestionCardComesFromItsRender() throws {
+        let task = try decode(#","openWait":{"kind":"card","id":"q1","messageId":"m1","render":{"componentId":"question-card","builtin":true,"props":{"questions":[{"id":"q","question":"Pick","type":"single","options":["A","B"]}]}},"since":5}"#)
+        guard case .set(.question(let question, let key)?) = TaskWaitStore.card(openWait: task.wait, approvals: nil) else { Issue.record("no question"); return }
+        #expect(question.toolUseId == "q1" && question.questions.first?.options == ["A", "B"] && key == "m1:q1")
+        // Another app's card is answered in the task chat, and nothing waiting clears the card.
+        let app = try decode(#","openWait":{"kind":"card","id":"x","messageId":"m2","render":{"componentId":"streak"},"since":5}"#)
+        #expect(TaskWaitStore.card(openWait: app.wait, approvals: nil) == .set(.elsewhere))
+        #expect(TaskWaitStore.card(openWait: nil, approvals: nil) == .set(nil))
+        // An approval the pending list cannot give now keeps the card shown.
+        let approval = try decode(#","openWait":{"kind":"approval","id":"ap","since":7}"#)
+        #expect(TaskWaitStore.card(openWait: approval.wait, approvals: nil) == .keep)
+        #expect(TaskWaitStore.card(openWait: approval.wait, approvals: []) == .set(nil))
+    }
+
+    /// The wait the server names is drawn with no page of the task chat read.
+    @Test func theCardLoadsWithoutPaging() async throws {
+        let backend = FakeBackend()
+        var row = try decode(#","openWait":{"kind":"card","id":"q1","messageId":"m1","render":{"componentId":"question-card","props":{"questions":[{"id":"q","question":"Pick","type":"single","options":["A"]}]}},"since":5}"#)
+        row.chat = .init(id: "chat", name: "T")
+        let store = TaskWaitStore(chatId: "chat", backend: backend, task: { row })
+        await store.load()
+        #expect(store.card != nil && backend.newestFetches == 0)
+        // Nothing waiting: the card goes, still with no page read.
+        row.openWait = .null
+        await store.load()
+        #expect(store.card == nil && backend.newestFetches == 0)
+        // A server before `openWait` is asked the old way.
+        let older = TaskWaitStore(chatId: "chat", backend: backend, task: { try? self.decode("") })
+        await older.load()
+        #expect(backend.newestFetches == 1)
+    }
+}
