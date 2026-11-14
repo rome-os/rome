@@ -40,15 +40,11 @@ function describe(
   t: (key: string, options?: Record<string, string>) => string,
 ): string {
   const place = info.place;
-  if (info.via === "rome-cloud") {
-    return place
-      ? t("system.voiceInput.placeViaRomeCloud", { provider: place.provider, host: place.host })
-      : info.placeUnknown === "rome-cloud-not-configured"
-        ? t("system.voiceInput.romeCloudNotConfigured")
-        : info.placeUnknown === "rome-cloud-signed-out"
-          ? t("system.voiceInput.romeCloudSignedOut")
-          : t("system.voiceInput.romeCloudUnreachable");
-  }
-  // The instance's own provider always has a place.
-  return place ? t("system.voiceInput.place", { provider: place.provider, host: place.host }) : "";
+  if (place)
+    return t("system.voiceInput.placeViaRomeCloud", { provider: place.provider, host: place.host });
+  return info.placeUnknown === "rome-cloud-not-configured"
+    ? t("system.voiceInput.romeCloudNotConfigured")
+    : info.placeUnknown === "rome-cloud-signed-out"
+      ? t("system.voiceInput.romeCloudSignedOut")
+      : t("system.voiceInput.romeCloudUnreachable");
 }

@@ -360,7 +360,7 @@ export const settingsHandlers = [
   }),
   // Mock mode has no dictation socket, so it reports no transcription provider.
   http.get("/api/voice-input", () =>
-    HttpResponse.json({ available: false, via: null, place: null } satisfies VoiceInputInfo),
+    HttpResponse.json({ available: false, place: null } satisfies VoiceInputInfo),
   ),
   http.get("/api/computer-use", () =>
     HttpResponse.json({

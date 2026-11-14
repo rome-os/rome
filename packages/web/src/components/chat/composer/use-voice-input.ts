@@ -178,9 +178,9 @@ export function useVoiceInput({
 
   return {
     /**
-     * False hides the voice control: the instance is neither signed in to
-     * Rome Cloud nor has its own provider, or this is the desktop app, which
-     * cannot open the microphone yet.
+     * False hides the voice control: the instance is not signed in to Rome
+     * Cloud, Rome Cloud does not allow the account, or this is the desktop
+     * app, which cannot open the microphone yet.
      */
     available: Boolean(info.data?.available) && !isElectronShell(),
     state,

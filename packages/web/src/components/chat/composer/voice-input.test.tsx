@@ -127,7 +127,6 @@ function mockFetch(info: VoiceInputInfo) {
 
 const SONIOX: VoiceInputInfo = {
   available: true,
-  via: "rome-cloud",
   place: { provider: "Soniox", host: "stt-rt.soniox.com" },
 };
 
@@ -162,8 +161,8 @@ async function startListening() {
 }
 
 describe.each(["chat", "concierge"] as const)("voice input in the %s message field", (kind) => {
-  it("has no voice control without Rome Cloud or the instance's own provider", async () => {
-    renderComposer(kind, { available: false, via: null, place: null });
+  it("has no voice control while Rome Cloud provides no voice input", async () => {
+    renderComposer(kind, { available: false, place: null });
     await waitFor(() =>
       expect(globalThis.fetch).toHaveBeenCalledWith("/api/voice-input", expect.anything()),
     );

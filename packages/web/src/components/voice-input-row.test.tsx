@@ -33,7 +33,6 @@ describe("the voice input row in Settings", () => {
   it("names the provider and host and says Rome Cloud provides it", async () => {
     const text = await rowText({
       available: true,
-      via: "rome-cloud",
       place: { provider: "Soniox", host: "stt-rt.soniox.com" },
     });
     expect(text).toContain("Voice input");
@@ -45,7 +44,6 @@ describe("the voice input row in Settings", () => {
   it("says Rome Cloud cannot be reached rather than naming a provider", async () => {
     const text = await rowText({
       available: true,
-      via: "rome-cloud",
       place: null,
       placeUnknown: "rome-cloud-unreachable",
     });
@@ -56,7 +54,6 @@ describe("the voice input row in Settings", () => {
   it("asks the guardian to sign in again when Rome Cloud does not accept this Rome", async () => {
     const text = await rowText({
       available: true,
-      via: "rome-cloud",
       place: null,
       placeUnknown: "rome-cloud-signed-out",
     });
@@ -64,6 +61,6 @@ describe("the voice input row in Settings", () => {
   });
 
   it("says nothing about voice input where there is none, such as an account Rome Cloud does not allow", async () => {
-    expect(await rowText({ available: false, via: null, place: null })).toBe("");
+    expect(await rowText({ available: false, place: null })).toBe("");
   });
 });
