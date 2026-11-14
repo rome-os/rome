@@ -9,15 +9,14 @@ A local Rome Cloud, run from a Rome Cloud checkout, that creates each new Rome a
 - Creating a Rome, including the warm pool, and the progress shown while it boots.
 - Opening the Rome from the Rome Cloud dashboard, and the Rome's sign-in through Rome Cloud.
 - The Rome's first screen after sign-in.
-- With `walk-cards`: a card the agent waits on. The agent shows core's connect card, the guardian presses it, and the agent's next turn carries the answer. Connect then goes through GitHub's authorization page to a connected GitHub, and I've authorized answers the agent. For each other test OAuth app that is set, Connect opens that provider's authorization page.
+- With `walk-cards`: a card the agent waits on. The agent shows core's connect card, the guardian presses it, and the agent's next turn carries the answer. For each test OAuth app that is set, Connect opens that provider's authorization page.
 
 ## Differences from production
 
 - **Dev sign-in replaces Google, Microsoft and email.** Get started signs you in as `dev@rome.localhost` with no prompt, so the real sign-in screens are not tested. To sign up as someone else, open `/api/auth/dev/start?email=<address>` first.
 - **A model login of its own, not Rome credits.** With `ANTHROPIC_API_KEY` set, every new Rome runs on that key, and `walk-cards` and `models` send all three model tiers to `claude-haiku-5-5` (`ONBOARDING_MODEL` picks another). Production runs each tier on its own model, on Rome credits or the guardian's own login. Without the key, the new Rome says that no AI provider is available.
 - **Test OAuth apps, not Rome's central ones.** Rome Cloud connects GitHub, Slack and Shopify through test apps registered to this environment's address, owned by test accounts. The central apps' own settings, such as their scopes and Shopify's review, are not tested. A provider without a test app cannot be connected here.
-- **GitHub is a fake GitHub unless a test GitHub app is set.** A WireMock container at `https://onboarding-github.romeos.dev` (`fake-github/mappings/`) answers GitHub's authorization page with an Authorize button for the account `rome-test`, its token exchange, and the profile Rome Cloud reads. Rome Cloud is pointed at it with `GITHUB_WEB_ORIGIN` and `GITHUB_API_ORIGIN`. A connected fake GitHub answers nothing else, so an agent that then calls GitHub's API gets errors. Set `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` to use real GitHub instead.
-- **Signing in at a real provider is a person's step.** `walk-cards` stops at each provider's authorization page. Finish a connection by hand: sign in there as the test account, then press I've authorized on the card.
+- **Signing in at the provider is a person's step.** `walk-cards` stops at each provider's authorization page. Finish a connection by hand: sign in there as the test account, then press I've authorized on the card.
 - **The cloud sign-in gate is forced on** in every new Rome, because there is no Statsig key. The rollout of that gate is not tested.
 - **Each Rome is a container on this machine, not a VM.** Rome Cloud's Docker provider runs it in Docker-in-Docker, so VM provisioning, upgrades over SSH and host-level setup are not tested.
 - **No telemetry, mail, relay or push.** Their settings point at addresses that do not resolve.
@@ -39,7 +38,7 @@ Run them from the repository root inside `nix develop`.
 
 Rome Cloud is served at `https://onboarding-pantheon.romeos.dev`, and each Rome at `https://<address>.romeos.dev`.
 
-`ROME_CLOUD_REF` picks the Rome Cloud commit, `origin/main` by default. The fake GitHub needs a Rome Cloud with `GITHUB_WEB_ORIGIN`, which is `origin/claude/github-origin-setting` until it merges. `ROME_CLOUD_DIR` runs an existing Rome Cloud checkout as it is, and Rome Cloud's dev server reloads on each edit there. A committed change to Rome code is picked up by the next `up` or `walk`, which rebuild the image when it was built from another commit. An uncommitted change needs `up`, which always rebuilds.
+`ROME_CLOUD_REF` picks the Rome Cloud commit, `origin/main` by default. `ROME_CLOUD_DIR` runs an existing Rome Cloud checkout as it is, and Rome Cloud's dev server reloads on each edit there. A committed change to Rome code is picked up by the next `up` or `walk`, which rebuild the image when it was built from another commit. An uncommitted change needs `up`, which always rebuilds.
 
 ## Secrets
 

@@ -43,12 +43,6 @@ PG_VOLUME="rome-env-${NAME}-pg"
 CLOUD="rome-env-${NAME}-cloud"
 ROUTER="rome-env-${NAME}-router"
 WALKER="rome-env-${NAME}-walk"
-# A stand-in GitHub, used when no test GitHub app is set. The browser reaches it
-# through the tunnel; Rome Cloud calls its API on the network.
-FAKE_GITHUB="rome-env-${NAME}-github"
-FAKE_GITHUB_HOST="${NAME}-github"
-FAKE_GITHUB_ORIGIN="https://${FAKE_GITHUB_HOST}.${DOMAIN}"
-WIREMOCK_IMAGE="wiremock/wiremock:3.13.1"
 RUNNER_IMAGE="rome-env-${NAME}-runner"
 ENV_FILE="$STATE_DIR/cloud.env"
 # The model login and the test OAuth apps, one KEY=value per line, mode 600.
@@ -177,11 +171,10 @@ instance_env() {
   printf '%s' "$entries"
 }
 
-# The kinds Connect can reach a provider for, comma-separated, such as
-# github,slack: GitHub always, through the fake GitHub when it has no test app.
+# The kinds whose test OAuth app is set, comma-separated, such as github,slack.
 test_apps() {
-  local provider id kinds=(github)
-  for provider in SLACK SHOPIFY; do
+  local provider id kinds=()
+  for provider in GITHUB SLACK SHOPIFY; do
     id="${provider}_OAUTH_CLIENT_ID"
     [ -z "${!id:-}" ] || kinds+=("${provider,,}")
   done
@@ -190,12 +183,8 @@ test_apps() {
 }
 
 # Rome Cloud's settings for the test OAuth apps, for each provider whose id and
-# secret are both set. Without a test GitHub app, GitHub is the fake GitHub.
+# secret are both set.
 oauth_apps() {
-  if [ -z "${GITHUB_OAUTH_CLIENT_ID:-}${GITHUB_OAUTH_CLIENT_SECRET:-}" ]; then
-    printf 'GITHUB_OAUTH_CLIENT_ID=fake\nGITHUB_OAUTH_CLIENT_SECRET=fake\n'
-    printf 'GITHUB_WEB_ORIGIN=%s\nGITHUB_API_ORIGIN=http://%s:8080/api\n' "$FAKE_GITHUB_ORIGIN" "$FAKE_GITHUB"
-  fi
   local provider id secret
   for provider in GITHUB SLACK SHOPIFY; do
     id="${provider}_OAUTH_CLIENT_ID"
@@ -273,20 +262,12 @@ start_cloud() {
     "$RUNNER_IMAGE" node_modules/.bin/next dev --port 3100 --hostname 0.0.0.0 >/dev/null
 }
 
-start_fake_github() {
-  docker rm -f "$FAKE_GITHUB" >/dev/null 2>&1 || true
-  docker run -d --name "$FAKE_GITHUB" --network "$NETWORK" --restart unless-stopped --memory 512m \
-    -v "$ENV_DIR/fake-github:/home/wiremock:ro" \
-    "$WIREMOCK_IMAGE" --global-response-templating --disable-banner >/dev/null
-}
-
 # Routes <slug>.rome.localhost to the Rome container Rome Cloud named rome-vm-<slug>.
 # Priority 1 lets every other stack's own Host rule win.
 start_router() {
   docker rm -f "$ROUTER" >/dev/null 2>&1 || true
   docker run -d --name "$ROUTER" --network "$NETWORK" --restart unless-stopped --memory 256m \
-    -e "ROME_DOMAIN=$DOMAIN" -e "FAKE_GITHUB_HOST=$FAKE_GITHUB_HOST" -e "FAKE_GITHUB=$FAKE_GITHUB" \
-    -v "$ENV_DIR/router.Caddyfile:/etc/caddy/Caddyfile:ro" \
+    -e "ROME_DOMAIN=$DOMAIN" -v "$ENV_DIR/router.Caddyfile:/etc/caddy/Caddyfile:ro" \
     --label traefik.enable=true --label "traefik.docker.network=$NETWORK" \
     --label "traefik.http.routers.${ROUTER}.rule=HostRegexp(\`^[a-z0-9-]+\\.rome\\.localhost$\`)" \
     --label "traefik.http.routers.${ROUTER}.priority=1" \
@@ -359,7 +340,6 @@ cmd_up() {
   start_database
   log "migrating the database ..."
   in_runner "cd packages/pantheon && node_modules/.bin/drizzle-kit migrate --config drizzle.config.ts >/dev/null"
-  start_fake_github
   start_cloud
   start_router
   wait_for_cloud
@@ -393,7 +373,6 @@ cmd_walk() {
   docker run --rm --init --name "$WALKER" --memory 2g --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -e "CLOUD_ORIGIN=$CLOUD_ORIGIN" -e "ROME_DOMAIN=$DOMAIN" -e OUT=/out \
     -e "CARDS=$cards" -e "MODEL=${ONBOARDING_MODEL:-$DEFAULT_MODEL}" -e "TEST_APPS=$(test_apps)" \
-    -e "FAKE_GITHUB_ORIGIN=$([ -n "${GITHUB_OAUTH_CLIENT_ID:-}" ] || echo "$FAKE_GITHUB_ORIGIN")" \
     -v "$STATE_DIR/walk:/out" -v "$ENV_DIR:/walk:ro" -w /tmp \
     "$PLAYWRIGHT_IMAGE" bash -c "npm install --silent --no-save playwright@1.62.1 >/dev/null 2>&1 && cp /walk/*.mjs . && node walk.mjs"
   log "walk passed on Rome $(image_sha) and Rome Cloud $(git -C "$ROME_CLOUD_DIR" rev-parse --short HEAD). Screenshots: $STATE_DIR/walk"
@@ -403,7 +382,7 @@ cmd_down() {
   claim_ownership
   docker rm -f "$CLOUD" >/dev/null 2>&1 || true
   remove_romes
-  docker rm -f "$ROUTER" "$PG" "$FAKE_GITHUB" >/dev/null 2>&1 || true
+  docker rm -f "$ROUTER" "$PG" >/dev/null 2>&1 || true
   docker volume rm "$PG_VOLUME" >/dev/null 2>&1 || true
   rm -f "$ENV_FILE" "$OWNER_FILE"
   log "removed. The Rome Cloud checkout stays in $ROME_CLOUD_DIR"

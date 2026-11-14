@@ -1,4 +1,0 @@
-{
-  "request": { "method": "DELETE", "urlPathPattern": "/api/applications/[^/]+/grant" },
-  "response": { "status": 204 }
-}
