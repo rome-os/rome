@@ -22,10 +22,43 @@ struct WidgetUICardView: View {
     var press: (String, Rome.JSONValue) async throws -> WidgetEventReply = { _, _ in throw APIError.notFound }
     var waiting: Waiting? = nil
 
-    private var locked: Bool { waiting?.answered != nil || surface.sent }
+    /// Used where no list keeps the card's surface.
+    @StateObject private var own = WidgetSurface()
+    @Environment(\.widgetSurfaces) private var kept
 
-    @StateObject private var surface = WidgetSurface()
+    var body: some View {
+        WidgetCardBody(part: part, call: call, press: press, waiting: waiting, surface: kept?.surface(for: part.toolUseId) ?? own)
+    }
+}
+
+/// Cards whose surfaces outlive their views. A list that rebuilds a row
+/// scrolled away (a reused cell) would otherwise lose the guardian's unsent
+/// answers, and a sent card would unlock again.
+@MainActor
+final class WidgetSurfaces {
+    private var surfaces: [String: WidgetSurface] = [:]
+
+    func surface(for id: String) -> WidgetSurface {
+        if let surface = surfaces[id] { return surface }
+        let surface = WidgetSurface()
+        surfaces[id] = surface
+        return surface
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var widgetSurfaces: WidgetSurfaces? = nil
+}
+
+private struct WidgetCardBody: View {
+    let part: WidgetUIPart
+    let call: (String, String, Rome.JSONValue?) async throws -> ConnectReply
+    let press: (String, Rome.JSONValue) async throws -> WidgetEventReply
+    let waiting: WidgetUICardView.Waiting?
+    @ObservedObject var surface: WidgetSurface
     @Environment(\.openURL) private var openURL
+
+    private var locked: Bool { waiting?.answered != nil || surface.sent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

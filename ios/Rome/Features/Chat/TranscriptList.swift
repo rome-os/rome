@@ -228,6 +228,8 @@ private final class RowBox {
 private final class CellContext {
     var environment = EnvironmentValues()
     var footer: AnyView?
+    /// Cards' surfaces, kept while their cells are reused for other rows.
+    @ObservationIgnored let surfaces = WidgetSurfaces()
 }
 
 private struct ChatCollection<Row: View>: UIViewRepresentable {
@@ -376,7 +378,10 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         return UIHostingConfiguration {
             // A row that grows past its cell without telling it reports
             // the size it took.
+            // A reused cell starts the new row's state fresh: before iOS 18
+            // a hosting configuration kept the old row's state.
             content
+                .id(id)
                 .onGeometryChange(for: CGSize.self) { $0.size } action: { [weak cell] size in
                     cell?.measured(size)
                 }
@@ -674,6 +679,7 @@ private struct RowHost: View {
         build(box.row, box.previous)
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()
+            .environment(\.widgetSurfaces, cells.surfaces)
             .environment(\.self, cells.environment)
     }
 }
