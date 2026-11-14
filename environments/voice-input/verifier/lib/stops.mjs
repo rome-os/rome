@@ -199,9 +199,10 @@ export async function openAnotherChat(page) {
 
 /**
  * Whether the words heard before the stop are in the field: at most one in ten of them may be
- * wrong, since the transcriber may still correct words it had not finalised.
+ * wrong, since the transcriber may still correct words it had not finalised. The last word may
+ * have been cut while arriving, so the field finishing it counts as keeping it.
  */
 export function wordsKept(before, after, language) {
-  const found = errorsWithin(before, after, language);
+  const found = errorsWithin(before, after, language, { lastCut: true });
   return { ...found, kept: found.of > 0 && found.wrong <= Math.floor(found.of / 10) };
 }

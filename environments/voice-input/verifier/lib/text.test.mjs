@@ -77,4 +77,18 @@ describe("errorsWithin", () => {
   it("counts every token of a missing sentence", () => {
     assert.equal(errorsWithin("明天开会", "今天天气很好", "zh").wrong >= 3, true);
   });
+  it("takes a cut last word as kept when the text finishes it", () => {
+    const before = "Remind me to call the dent";
+    const after = "Remind me to call the dentist tomorrow";
+    assert.equal(errorsWithin(before, after, "en").wrong, 1);
+    assert.equal(errorsWithin(before, after, "en", { lastCut: true }).wrong, 0);
+  });
+  it("still counts a cut last word the text does not finish", () => {
+    const found = errorsWithin("call the dent", "call the doctor", "en", { lastCut: true });
+    assert.equal(found.wrong, 1);
+  });
+  it("finishes only the last word", () => {
+    const found = errorsWithin("the dent call", "the dentist call", "en", { lastCut: true });
+    assert.equal(found.wrong, 1);
+  });
 });
