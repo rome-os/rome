@@ -1,6 +1,18 @@
 import type { RomeTool, TurnFacts, WidgetDrawing } from "../agent/index.js";
 import { parseShareLocationInput, shareLocationToolOutput } from "../webchat/location-card.js";
 
+/**
+ * Whether the guardian's own message started the running turn: the guardian,
+ * proven by their signed-in session. A turn something else started (a
+ * followed event, a routine, a task's result, another agent) acts for the
+ * guardian only by loopback, so its card never shares by itself.
+ */
+export function startedByGuardian(turn: TurnFacts): boolean {
+  // The actor is a SessionActor, which says how guardianship was proven.
+  const actor = turn.actor() as { kind: string; via?: string } | undefined;
+  return actor?.kind === "guardian" && actor.via === "cookie";
+}
+
 /** Whether the running turn is read by the guardian alone. */
 export type PrivateTurn = (turn: TurnFacts) => Promise<boolean>;
 
@@ -53,7 +65,14 @@ export function shareLocationTools(input: {
           );
         }
         return {
-          content: [{ type: "text", text: JSON.stringify(shareLocationToolOutput(parsed.reason)) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                shareLocationToolOutput(parsed.reason, startedByGuardian(input.turn)),
+              ),
+            },
+          ],
         };
       },
     },

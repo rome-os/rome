@@ -41,10 +41,14 @@ export type LocationAnswer =
 
 /**
  * The card described as data: a title, the agent's reason, and Not now and
+ * Share. `autoShare` marks a card a client may answer by itself where the
+ * device already allows the position; core sets it only for a turn the
+ * guardian's own message started, and a card without it always waits for
  * Share.
  */
-export function locationCardUi(reason: string): WidgetUi {
+export function locationCardUi(reason: string, autoShare = false): WidgetUi {
   return {
+    ...(autoShare ? { data: { autoShare: true } } : {}),
     components: [
       { id: "root", component: "Column", children: ["title", "reason", "actions"] },
       { id: "title", component: "Text", text: "Share your location?", variant: "h5" },
@@ -68,6 +72,11 @@ export function locationCardUi(reason: string): WidgetUi {
       { id: "share-label", component: "Text", text: "Share" },
     ],
   };
+}
+
+/** Whether a share-location card may answer by itself: core marked it so. */
+export function mayAutoShare(ui: { data?: Record<string, unknown> } | undefined): boolean {
+  return ui?.data?.autoShare === true;
 }
 
 /** Whether a card's components hold the share-location card's Share. */

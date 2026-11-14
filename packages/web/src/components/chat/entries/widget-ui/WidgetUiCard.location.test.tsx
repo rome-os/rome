@@ -12,6 +12,8 @@ afterEach(() => {
 });
 
 const ui = locationCardUi("To find coffee near you") as never;
+/** The card core shows for a turn the guardian's own message started. */
+const autoUi = locationCardUi("To find coffee near you", true) as never;
 
 /** The browser's geolocation, answering every read with `answer`. */
 function stubGeolocation(answer: { fix?: GeolocationPosition; error?: number }) {
@@ -118,7 +120,14 @@ describe("the share-location card where the browser already decided", () => {
     });
     const events = captureEvents();
     render(
-      <WidgetUiCard widgetId="auto-1" toolUseId="l1" appId="core" ui={ui} text="" waiting={{}} />,
+      <WidgetUiCard
+        widgetId="auto-1"
+        toolUseId="l1"
+        appId="core"
+        ui={autoUi}
+        text=""
+        waiting={{}}
+      />,
     );
     await waitFor(() => expect(events).toHaveLength(1));
     expect(events[0]).toMatchObject({
@@ -126,6 +135,19 @@ describe("the share-location card where the browser already decided", () => {
       context: { latitude: 1, longitude: 2, accuracy: 9, timestamp: 5 },
     });
     expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+  });
+
+  it("waits for Share on a card core did not mark, though the site may read the position", async () => {
+    stubPermission("granted");
+    const read = stubGeolocation({ error: 2 });
+    const events = captureEvents();
+    render(
+      <WidgetUiCard widgetId="auto-3" toolUseId="l1" appId="core" ui={ui} text="" waiting={{}} />,
+    );
+    expect(await screen.findByRole("button", { name: "Share" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+    expect(read).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
   });
 
   it("says the browser refuses, and keeps Not now", async () => {

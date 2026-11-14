@@ -16,6 +16,12 @@ enum LocationCard {
         part.components.contains { $0["action"]?["event"]?["name"]?.string == shareEvent }
     }
 
+    /// Whether core marked the card as one the app may answer by itself where
+    /// it already may read the position (`autoShare` in the card's data).
+    nonisolated static func mayAutoShare(_ part: WidgetUIPart) -> Bool {
+        part.data["autoShare"]?.bool == true
+    }
+
     /// How an answered card ended: shared, with how precise the position
     /// was, or not shared (declined, or skipped by a message).
     nonisolated static func outcome(_ answered: JSONValue) -> String {

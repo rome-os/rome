@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { locationAnswerPrompt, sharedLocationAnswer } from "./location-card.js";
+import { mayAutoShare } from "@rome/api-types/location-card";
+import {
+  locationAnswerPrompt,
+  locationCardUiFromProps,
+  sharedLocationAnswer,
+} from "./location-card.js";
 
 describe("the share-location answer", () => {
   it("keeps a position and rounds its accuracy", () => {
@@ -44,5 +49,15 @@ describe("the share-location answer", () => {
     const prompt = locationAnswerPrompt({ status: "declined", dismissed: true });
     expect(prompt).toContain("Don't show the card again for it");
     expect(prompt).toContain("when a later message again needs where they are now");
+  });
+});
+
+describe("the card a stored share-location card draws", () => {
+  it("marks it to share by itself only when its props say so", () => {
+    expect(
+      mayAutoShare(locationCardUiFromProps({ reason: "r", autoShare: true }) ?? undefined),
+    ).toBe(true);
+    // An older card, or one a turn the guardian did not start showed, waits for Share.
+    expect(mayAutoShare(locationCardUiFromProps({ reason: "r" }) ?? undefined)).toBe(false);
   });
 });

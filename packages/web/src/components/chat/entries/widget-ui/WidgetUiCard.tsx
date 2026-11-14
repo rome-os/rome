@@ -12,7 +12,7 @@ import {
 } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { isLocationCard, SHARE_LOCATION_EVENT } from "@rome/api-types/location-card";
+import { isLocationCard, mayAutoShare, SHARE_LOCATION_EVENT } from "@rome/api-types/location-card";
 import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
 import { formatAccuracy, geolocationPermission, readDevicePosition } from "@/lib/device-location";
 import { fetchJson } from "@/lib/fetch-json";
@@ -122,10 +122,13 @@ export function WidgetUiCard({
   const widgetHost = useContext(WidgetHostContext);
   const widgetHostRef = useRef(widgetHost);
   widgetHostRef.current = widgetHost;
-  // A share-location card the browser may already read answers itself:
-  // while that is decided and done it shows no buttons.
+  // A share-location card core marked for it, which the browser may already
+  // read, answers itself: while that is decided and done it shows no
+  // buttons. Core marks only a card the guardian's own message asked for.
+  const autoShare = mayAutoShare(ui as { data?: Record<string, unknown> });
   const [autoSharing, setAutoSharing] = useState(
     () =>
+      autoShare &&
       waiting !== undefined &&
       result === undefined &&
       widgetHost.readOnly !== true &&
@@ -306,8 +309,9 @@ export function WidgetUiCard({
 
   useEffect(() => () => processor.dispose(), [processor]);
 
-  // A share-location card answers itself where the browser already lets this
-  // site read the position, and only in the tab the guardian is looking at.
+  // A share-location card core marked answers itself where the browser
+  // already lets this site read the position, and only in the tab the
+  // guardian is looking at; an unmarked one waits for Share.
   // Where the browser refuses, the card says so and Not now declines.
   useEffect(() => {
     if (!locationCard || !answerable) {
@@ -319,7 +323,7 @@ export function WidgetUiCard({
     void geolocationPermission().then((permission) => {
       if (!live) return;
       if (permission === "denied") setSendFailed(t("locationCard.denied"));
-      if (permission !== "granted" || autoShared.has(widgetId)) {
+      if (!autoShare || permission !== "granted" || autoShared.has(widgetId)) {
         setAutoSharing(false);
         return;
       }
@@ -337,7 +341,7 @@ export function WidgetUiCard({
       live = false;
       stopWaiting();
     };
-  }, [locationCard, answerable, widgetId, fire, t]);
+  }, [locationCard, answerable, autoShare, widgetId, fire, t]);
 
   const surface = drawable ? processor.model.surfacesMap.get(toolUseId) : undefined;
   const undrawable = (

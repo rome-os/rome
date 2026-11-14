@@ -309,10 +309,13 @@ final class WidgetSurface: ObservableObject, ActionHandling {
 
     private var autoKey: String { "\(part?.widgetId ?? "")/\(part?.toolUseId ?? "")" }
 
-    /// An open share-location card the agent waits on.
+    /// An open share-location card the agent waits on, which core marked as
+    /// one that may answer itself: core marks only a card the guardian's own
+    /// message asked for, so an unmarked card always waits for Share.
     private var mayShareItself: Bool {
         guard let part else { return false }
         return part.waits && !answered && !sent && LocationCard.isLocationCard(part)
+            && LocationCard.mayAutoShare(part)
     }
 
     /// Answers an open share-location card at once where the app may already

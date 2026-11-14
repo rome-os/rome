@@ -2,18 +2,20 @@ import { describe, expect, it } from "@rstest/core";
 import type { TurnFacts } from "../agent/index.js";
 import { shareLocationTools } from "./share-location-tool.js";
 
-const turn = {} as TurnFacts;
+const turnStartedBy = (actor?: { kind: string; userId?: string; via?: string }) =>
+  ({ actor: () => actor }) as unknown as TurnFacts;
 
 const call = async (
   input: {
     widgets?: "card" | "plain_text";
     hasSpeaker?: boolean;
     privateTurn?: (turn: TurnFacts) => Promise<boolean>;
+    turn?: TurnFacts;
   },
   args: unknown = { reason: "To find coffee near you" },
 ) => {
   const [tool] = shareLocationTools({
-    turn,
+    turn: input.turn ?? turnStartedBy(),
     widgets: input.widgets ?? "card",
     hasSpeaker: input.hasSpeaker ?? true,
     privateTurn: input.privateTurn,
@@ -34,6 +36,25 @@ describe("share_location", () => {
         props: { reason: "To find coffee near you" },
         builtin: true,
       },
+    });
+  });
+
+  it("lets the card share by itself only in a turn the guardian's own message started", async () => {
+    const props = async (turn: TurnFacts) => {
+      const { result } = await call({ privateTurn: async () => true, turn });
+      return JSON.parse(result.content[0]!.text).render.props;
+    };
+    expect(await props(turnStartedBy({ kind: "guardian", userId: "g", via: "cookie" }))).toEqual({
+      reason: "To find coffee near you",
+      autoShare: true,
+    });
+    // A followed event, a routine or a task's result acts for the guardian by loopback.
+    expect(await props(turnStartedBy({ kind: "guardian", userId: "g", via: "loopback" }))).toEqual({
+      reason: "To find coffee near you",
+    });
+    expect(await props(turnStartedBy())).toEqual({ reason: "To find coffee near you" });
+    expect(await props(turnStartedBy({ kind: "visitor" }))).toEqual({
+      reason: "To find coffee near you",
     });
   });
 

@@ -31,11 +31,16 @@ export function parseShareLocationInput(
  * on the card; `builtin: true` marks it as core's own, which the drain checks
  * against the tool that emitted it.
  */
-export function shareLocationToolOutput(reason: string): unknown {
+export function shareLocationToolOutput(reason: string, autoShare = false): unknown {
   return {
     pendingInteraction: true,
     appId: "core",
-    render: { kind: "inline", componentId: LOCATION_CARD_ID, props: { reason }, builtin: true },
+    render: {
+      kind: "inline",
+      componentId: LOCATION_CARD_ID,
+      props: autoShare ? { reason, autoShare: true } : { reason },
+      builtin: true,
+    },
     message:
       "The card asking for the guardian's location has been shown. Whether they shared it or " +
       "not arrives as the next turn's prompt — do not call any further tools or send another " +
@@ -46,8 +51,8 @@ export function shareLocationToolOutput(reason: string): unknown {
 /** The card described as data, for the reason a stored card's props give, or
  *  null when they give none. */
 export function locationCardUiFromProps(props: unknown): WidgetUi | null {
-  const reason = (props as { reason?: unknown } | null)?.reason;
-  return typeof reason === "string" ? locationCardUi(reason) : null;
+  const { reason, autoShare } = (props ?? {}) as { reason?: unknown; autoShare?: unknown };
+  return typeof reason === "string" ? locationCardUi(reason, autoShare === true) : null;
 }
 
 /**

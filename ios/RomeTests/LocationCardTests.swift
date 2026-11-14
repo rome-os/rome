@@ -20,19 +20,19 @@ import Testing
         }
     }
 
-    private func card(_ id: String = "l1") throws -> WidgetUIPart {
-        let parsed = MessagePart.parse(JSONValue.array([DemoBackend.locationCard(id, reason: "To find coffee near you")]).prettyText)
+    private func card(_ id: String = "l1", autoShare: Bool = false) throws -> WidgetUIPart {
+        let parsed = MessagePart.parse(JSONValue.array([DemoBackend.locationCard(id, reason: "To find coffee near you", autoShare: autoShare)]).prettyText)
         guard case .widgetUI(let part) = parsed.first else { throw CardError.notACard }
         return part
     }
 
     private enum CardError: Error { case notACard }
 
-    private func surface(_ locator: StubLocator, sent: Box<[JSONValue]>, card id: String = "l1", active: Bool = true) async throws -> WidgetSurface {
+    private func surface(_ locator: StubLocator, sent: Box<[JSONValue]>, card id: String = "l1", active: Bool = true, autoShare: Bool = true) async throws -> WidgetSurface {
         let surface = WidgetSurface()
         surface.locator = locator
         surface.appActive = { active }
-        surface.show(try card(id), call: { _, _, _ in throw APIError.notFound }, press: { name, context in
+        surface.show(try card(id, autoShare: autoShare), call: { _, _, _ in throw APIError.notFound }, press: { name, context in
             sent.value.append(.object(["name": .string(name), "context": context]))
             return WidgetEventReply(answered: true)
         })
@@ -110,6 +110,15 @@ import Testing
         // Drawn again, it sends no second share.
         await surface.shareIfAllowed()
         #expect(sent.value.count == 1)
+    }
+
+    @Test func aCardCoreDidNotMarkWaitsForShareThoughTheAppMayLocate() async throws {
+        let sent = Box<[JSONValue]>([])
+        let surface = try await surface(StubLocator(.success(fix), permission: .granted), sent: sent, card: "auto-unmarked", autoShare: false)
+        #expect(!surface.autoSharing)
+        await surface.shareIfAllowed()
+        #expect(sent.value.isEmpty)
+        #expect(!surface.sent)
     }
 
     @Test func onlyTheAppInFrontAnswersByItself() async throws {
