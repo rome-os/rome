@@ -103,14 +103,30 @@ async function handle(req, res, statePath, script) {
     return send(
       200,
       "text/html; charset=utf-8",
-      page(state.variant, voiceOffered(state), chatPath?.[1] ?? CHATS[0]),
+      page(state.variant, voiceOffered(state), chatPath?.[1] ?? CHATS[0], state.lang),
     );
   if (req.method === "GET" && url.pathname === "/settings")
     return send(
       200,
       "text/html; charset=utf-8",
-      `<main><h1>Settings</h1><p>Voice input: ${PLACE.provider}, ${PLACE.host}</p></main>`,
+      `<main><h1>Settings</h1><p>Voice input: ${PLACE.provider}, ${PLACE.host}</p>
+<label id="lang">Language</label>
+<button role="combobox" aria-labelledby="lang">${state.lang === "zh" ? "中文" : "English"}</button>
+<div role="listbox" hidden><div role="option" data-lang="en">English</div><div role="option" data-lang="zh">中文</div></div>
+<script>
+const box = document.querySelector("[role=listbox]");
+document.querySelector("[role=combobox]").onclick = () => (box.hidden = false);
+for (const o of box.children)
+  o.onclick = () => fetch("/api/settings/lang", { method: "POST", body: o.dataset.lang });
+</script></main>`,
     );
+  if (req.method === "POST" && url.pathname === "/api/settings/lang") {
+    const lang = await readBody(req);
+    updateState(statePath, (s) => {
+      s.lang = lang;
+    });
+    return send(204, "text/plain", "");
+  }
   if (req.method === "GET" && url.pathname === "/api/voice-input")
     return send(
       200,
@@ -243,7 +259,7 @@ function garble(text) {
     .join("");
 }
 
-function page(variant, gate, chat) {
+function page(variant, gate, chat, lang) {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Chat</title></head>
 <body>
@@ -259,7 +275,9 @@ function page(variant, gate, chat) {
 <script>
 const variant = ${JSON.stringify(variant)};
 const NOTICES = ${JSON.stringify(NOTICES)};
-const words = NOTICES[(navigator.languages[0] ?? navigator.language).startsWith("zh") ? "zh" : "en"];
+// Like the dashboard: the guardian's language setting, else the browser's.
+const lang = ${JSON.stringify(lang ?? null)} ?? ((navigator.languages[0] ?? navigator.language).startsWith("zh") ? "zh" : "en");
+const words = NOTICES[lang];
 let chat = ${JSON.stringify(chat)};
 const form = document.getElementById("composer");
 const field = form.querySelector("textarea");

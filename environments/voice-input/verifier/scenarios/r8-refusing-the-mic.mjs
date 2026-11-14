@@ -50,12 +50,48 @@ export default {
     const mic = setMessages(ctx.script, "B")[0].path;
     const checks = [];
     for (const language of Object.keys(WORDS)) {
-      checks.push(required(await firstUse(ctx, mic, language)));
-      checks.push(...(await refused(ctx, mic, language)).map(required));
+      // The dashboard's language is the guardian's setting on the instance, so the Chinese half
+      // sets it in Settings, as a guardian does, and sets it back to English afterwards.
+      let set = null;
+      try {
+        if (language !== "en") set = await setGuardianLanguage(ctx, mic, language);
+        checks.push(required(await firstUse(ctx, mic, language)));
+        checks.push(...(await refused(ctx, mic, language)).map(required));
+      } catch (error) {
+        checks.push(required(check(`${language}`, "not_checked", `run broke: ${error.message}`)));
+      } finally {
+        if (set) await setGuardianLanguage(ctx, mic, "en").catch(() => {});
+      }
+      if (set) checks.push(check(`${language}: how the language was set`, "info", set));
     }
     return ruleResult(checks);
   },
 };
+
+/** The Settings page's language options, by the language they put the dashboard in. */
+const LANGUAGE_OPTIONS = { en: /^English$/, "zh-CN": /中文/ };
+
+/**
+ * Sets the guardian's language the way a guardian does: Settings, the Language row, pick the
+ * language. Resolves to a line for the report saying so.
+ */
+async function setGuardianLanguage(ctx, mic, language) {
+  const opened = await openPage(ctx.env, { mic, path: "/settings", language });
+  try {
+    const { page } = opened;
+    const row = page.getByRole("combobox", { name: /^(Language|语言)$/ });
+    await row.waitFor({ state: "visible", timeout: 15000 });
+    await row.click();
+    const option = page.getByRole("option", { name: LANGUAGE_OPTIONS[language] }).first();
+    const name = (await option.textContent()).trim();
+    await option.click();
+    // The setting is stored on the instance; give the save a moment to land.
+    await page.waitForTimeout(1500);
+    return `the guardian's language was set to "${name}" in Settings, the Language row, and set back to English afterwards`;
+  } finally {
+    await opened.close();
+  }
+}
 
 /** With the permission unset, starting gives the reason while the browser's prompt is open. */
 async function firstUse(ctx, mic, language) {

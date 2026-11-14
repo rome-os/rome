@@ -5,6 +5,8 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 export function emptyState(variant = "good") {
   return {
     variant,
+    // The guardian's language setting on the instance, which the dashboard follows.
+    lang: "en",
     transcriber: { mode: "real", text: "", error: false },
     mic: null,
     nextId: 1,
