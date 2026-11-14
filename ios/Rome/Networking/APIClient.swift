@@ -163,6 +163,47 @@ final class APIClient: Sendable {
         try await send(request(path, query: query, method: "DELETE"))
     }
 
+    /// A request whose status the caller reads itself, for personal-data sync,
+    /// which tells a missing route, a rate limit and a refused batch apart.
+    /// A 401 renews the session and goes once more, as every request does;
+    /// one that stays 401 throws `unauthorized`. A lost network throws as
+    /// the other calls do.
+    func raw(_ method: String, _ path: String, json body: Data? = nil, retried: Bool = false) async throws -> RawReply {
+        var request = request(path, method: method)
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            switch error.code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed: throw APIError.offline
+            case .cancelled: throw CancellationError()
+            default: throw APIError.network
+            }
+        }
+        guard let http = response as? HTTPURLResponse else { throw APIError.network }
+        if http.statusCode == 401 {
+            if !retried, let renew, await renew() { return try await raw(method, path, json: body, retried: true) }
+            throw APIError.unauthorized
+        }
+        let retryAfter = (http.value(forHTTPHeaderField: "Retry-After")).flatMap(TimeInterval.init)
+        return RawReply(status: http.statusCode, data: data, retryAfter: retryAfter)
+    }
+
+    struct RawReply: Sendable {
+        let status: Int
+        let data: Data
+        /// Seconds, from a 429's `Retry-After`.
+        let retryAfter: TimeInterval?
+
+        /// The body's `error` code, when it is JSON with one.
+        var errorCode: String? { (try? JSONDecoder().decode(JSONValue.self, from: data))?["error"]?.string }
+    }
+
     /// A request to an `/api/…` path on this instance that answers any status
     /// with its JSON body. The session cookie goes only here: the URL is built
     /// on the instance's origin, never taken whole from a server's answer.

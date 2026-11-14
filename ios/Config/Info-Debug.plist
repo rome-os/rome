@@ -10,7 +10,7 @@
 	<!-- Debug builds only. Same as Rome/Info.plist, plus plain HTTP to a Rome
 	     on this Mac or the LAN (ROME_LOCAL_*). Keep the two in step. -->
 	<key>NSHealthShareUsageDescription</key>
-	<string>When your Rome asks, Rome sends the Health data you allow to your Rome and its AI model. Rome never changes your Health data.</string>
+	<string>Rome syncs the Health data you allow, such as summaries of your steps, sleep and heart rate, to your own Rome so your Agent can answer questions about your health. You can pause syncing or delete the uploaded data at any time in Settings.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Rome saves photos from a chat to your library when you ask it to.</string>
 	<!-- Debug builds only: the -RomeSeedHealth launch argument writes test data

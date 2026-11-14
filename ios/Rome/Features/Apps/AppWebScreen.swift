@@ -72,7 +72,7 @@ struct AppWebScreen: View {
             GlassCircleButton(accessibilityLabel: "Close", action: { dismiss() }) {
                 Image(systemName: "xmark").romeFont(15, .semibold)
             }
-            PlainHeaderTitle(title: Text(verbatim: app.name))
+            PlainHeaderTitle(title: Text(verbatim: app.name), size: PlainHeaderTitle.secondarySize)
             Menu {
                 Button { failed = false; reloads += 1 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")

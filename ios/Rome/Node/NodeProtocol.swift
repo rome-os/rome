@@ -109,11 +109,13 @@ final class NodeSession: Sendable {
 }
 
 /// Answers requests: `system.info` always, anything else after it is written
-/// in the audit log, and not at all when it cannot be.
+/// in the audit log, and not at all when it cannot be. The capability the
+/// action's prefix names runs it, once its state is on.
 struct NodeExecutor: Sendable {
     let name: @Sendable () async -> String
     let audit: NodeAuditing
-    let health: HealthActions
+    let registry: NodeCapabilityRegistry
+    var device = DeviceKind.iPhone
     var now: @Sendable () -> Date = { Date() }
 
     /// The reply to one inbound text frame, or nil when there is nothing to answer.
@@ -130,10 +132,16 @@ struct NodeExecutor: Sendable {
         guard let seq = await audit.begin(requestId: request.id, from: request.from, action: request.action, args: request.args) else {
             return .failed(
                 code: "audit_unavailable",
-                message: "This \(health.device.name) could not record the request in its audit log, so it did not run it. Free some storage on the \(health.device.name) and try again."
+                message: "This \(device.name) could not record the request in its audit log, so it did not run it. Free some storage on the \(device.name) and try again."
             )
         }
-        let result = await health.run(request.action, args: request.args)
+        let result: NodeActionResult
+        if let capability = registry.capability(for: request.action), capability.handles(request.action) {
+            let state = await capability.state()
+            result = state == .on ? await capability.run(request.action, args: request.args) : capability.refusal(state, device: device)
+        } else {
+            result = .failed(code: "unsupported_action", message: "This \(device.name) does not support this action.")
+        }
         let duration = Int(now().timeIntervalSince(started) * 1000)
         switch result {
         case .ok(let value, let count):
@@ -145,12 +153,16 @@ struct NodeExecutor: Sendable {
         return result
     }
 
+    /// `actions` and `usage` stay the flat lists they have always been, for
+    /// `rome-node device describe` and the Agent's habits; `capabilities` adds
+    /// each one's state.
     private func info() async -> NodeActionResult {
         .ok(.object([
             "name": .string(await name()),
             "platform": .string("ios"),
-            "actions": .array(HealthActions.actions.map(JSONValue.string)),
-            "usage": .object(HealthActions.usage(health.device).mapValues(JSONValue.string)),
+            "actions": .array(registry.actions.map(JSONValue.string)),
+            "usage": .object(registry.usage.mapValues(JSONValue.string)),
+            "capabilities": await registry.info(),
             "audit": await audit.status().json,
         ]), count: nil)
     }

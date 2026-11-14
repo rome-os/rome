@@ -537,8 +537,11 @@ lets one computer connect to several accounts.
 
 ## iPhone
 
-The native iOS app (`ios/`) connects the iPhone as a device, with Apple Health
-as its first capability. It needs no server change: the app's own Rome Cloud
+The native iOS app (`ios/`) connects the iPhone as a device. What Rome can do
+with it is a list of capabilities: Apple Health, read live, and Device status.
+Health also reaches Rome without this connection: the app pushes it to the
+personal-data store in the background ([personal-data.md](personal-data.md)), and an agent
+reads it there first. It needs no server change: the app's own Rome Cloud
 sign-in (a `romemob_` token and its device session) is the device identity,
 exactly as for the Mac app. Gateway and Cloud already accept it, and the iPhone
 shows up in `rome-node device` and Settings → Devices with `platform: "ios"`.
@@ -562,9 +565,17 @@ unreadable while the phone is locked. When the app leaves the front, requests
 under way finish their replies, then the connection closes. Signing out
 disconnects. A device that is not connected answers `target_unavailable`.
 
-`system.info` returns `{name, platform: "ios", actions, usage, audit}`. `usage`
-holds each action's argument help, which is how an agent learns them from
-`rome-node device describe`. The actions are read-only:
+`system.info` returns `{name, platform: "ios", actions, usage, capabilities, audit}`.
+`actions` and `usage` are flat across every capability. `usage` holds each
+action's argument help, which is how an agent learns them from
+`rome-node device describe`. `capabilities` lists each one as `{prefix, title,
+state, personal, actions}`, where `state` is `off`, `needs_permission` or `on`
+and `personal` marks the guardian's personal data (Health is, Device status is
+not). The phone routes an action by its prefix, the text before the first dot.
+An action of a capability that is off fails with `<prefix>_off`, one that lacks
+iOS access with `<prefix>_no_permission`. Both are recorded in the audit log, and
+the message tells the agent that the user must change it on the phone. The
+actions are read-only:
 
 - `health.stats` — aggregates over a window: `types` (or `type`), `start`, `end`
   (ISO 8601 with or without an offset, where no offset means the phone's time
@@ -580,6 +591,12 @@ holds each action's argument help, which is how an agent learns them from
 - `health.samples` — raw records of one `type`, newest first by default: `limit`
   (1 to 1000, default 100), `order`, `cursor` (the previous reply's `nextCursor`),
   `sources`, `includeMetadata`, `activity`.
+- `device.status` — no arguments: `batteryLevel` (0 to 1, left out while iOS
+  cannot tell), `batteryState` (`charging`, `unplugged`, `full`, `unknown`),
+  `lowPowerMode`, `network` (`wifi`, `cellular`, `wired`, `none`, `other`),
+  `expensive`, `constrained`, `thermalState`, `osVersion` and `appVersion`. It
+  reads no Wi-Fi name, which would need location access. Its own switch, Settings
+  → iPhone use → Device status, is off by default.
 
 ```sh
 rome-node device run <iphone> health.stats --args '{"types":["stepCount","sleep","restingHeartRate","workouts"]}'
@@ -593,32 +610,37 @@ denied, so a type the user did not allow looks like a type with no data. The
 allow-list has 28 types, which `system.info` names. Any other type is
 `unsupported_type`. Errors: `invalid_args`, `unsupported_type`, `health_unavailable`
 (no HealthKit on this device), `health_locked` (the phone is locked),
-`health_off`, `unsupported_action`, `audit_unavailable`, `busy`, and `health_failed`
+`health_off`, `health_no_permission` (the switch is on, but iOS was never asked),
+`device_off`, `unsupported_action`, `audit_unavailable`, `busy`, and `health_failed`
 for anything else. The phone answers at most 4 requests at once. Another request
 gets `busy` before it is recorded or Health is read, and `system.info` is always
 answered.
 
-**Settings → Apple Health** is a row that shows On or Off and opens the
-Apple Health page. The switch ("Allow Rome to read Health") is on that page and is
-off by default. Health values go to the user's Rome and to the AI model behind it,
-so the page shows what the Rome can do with Health as three short chats, each with
-a request and the Rome's answer in the app's own chat bubbles, and where the data
-goes: from the iPhone to the Rome and on to its AI model provider. Three short
-promises follow. Health is read only when the Rome asks and is never changed. Rome
-never sells it, uses it for ads, or uses it to train AI models, and the user's AI
-provider's terms apply to what it receives. Results can stay in the
-Rome's chats and memory. A link opens the privacy policy. The choice is kept across launches, and the row and the
-switch are dimmed while the phone is off limits (the page still opens). While the
-switch is off, `health.stats` and `health.samples`
-fail with `health_off` before Health is touched, and are still recorded in the
-audit log. The error and the `usage` text in `system.info` tell the agent that the
-user must turn the switch on, on the phone. `system.info` still lists the actions,
-so an agent can explain. Turning the switch on while iOS has never been asked shows
-the system's access sheet at once. Once iOS has been asked it shows nothing more.
+**Settings → Apple Health** is a row that shows On, Off or Needs
+sign-in and opens the Apple Health page. Its switch, **Sync with Rome**, belongs to
+the Rome open now and is off by default on each Rome. It decides the background
+sync to that Rome, and the live `health.*` actions, which fail with `health_off`
+while it is off. A live request does not say which Rome sent it, so the live
+actions follow the switch of the Rome open on the phone, whichever Rome asks. Turning it
+on while iOS has never been asked shows the system's access sheet at once, then
+starts the history backfill. A line under the switch says how the sync stands,
+with Sync now at its end. One line of promises follows: Health is read only, never
+sold or used for ads or training, and can be deleted at any time, with a link to
+the privacy policy. **Sync history** lists the syncs of the last 30 days by day,
+with Delete uploaded data, and the page shows what the Rome can do with Health as
+three short chats. A build before sync
+had its own "Allow Rome to read Health" switch under iPhone use. That consent did
+not cover uploading history, so sync starts off.
 
-The system sheet's text (`NSHealthShareUsageDescription`) says the same: when the
-Rome asks, the Health data the user allows is sent to the Rome and its AI model, and
-the app never changes Health data. The app asks only to read, and Release builds
+**Settings → iPhone use** holds the switch "Can Rome use this iPhone", a line
+with the device's name and whether Rome can reach it now, and **What Rome can
+do**: one row per capability with its state, each opening a page that says what
+it reads, what leaves the phone and what to ask. Health's page has no switch of
+its own: it points to Apple Health's.
+
+The system sheet's text (`NSHealthShareUsageDescription`) says the same: the
+Health data the user allows is kept up to date on the Rome, and the app never
+changes Health data. The app asks only to read, and Release builds
 hold no write permission.
 
 The phone is a device only while the app is past its sign-in screen. If the app
@@ -637,8 +659,9 @@ read, the window, how many, or why it failed), without ids or JSON. The log keep
 `from`, but Rome Cloud gives a Rome's caller no name the phone could look up, so
 the rows do not name the Rome that asked.
 
-Signing out, and a sign-in to Rome Cloud, empty the log and turn both switches off
-again, so nothing of one account carries over to the next.
+Signing out, and a sign-in to Rome Cloud, empty the log and turn every switch off
+again, Sync with Rome included, so nothing of one account carries over to the
+next. The Health data already on the Rome stays there until Delete uploaded data.
 
 ## Binary frames
 

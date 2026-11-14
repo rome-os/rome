@@ -197,7 +197,7 @@ final class FakeAudit: NodeAuditing, @unchecked Sendable {
 
 @Suite struct NodeExecutorTests {
     private func executor(_ health: FakeHealth, _ audit: NodeAuditing) -> NodeExecutor {
-        NodeExecutor(name: { "Ray's iPhone" }, audit: audit, health: HealthFixtures.actions(health))
+        NodeExecutor(name: { "Ray's iPhone" }, audit: audit, registry: .testing(HealthFixtures.actions(health)))
     }
 
     private func envelope(_ action: String, _ args: String? = nil) -> String {
@@ -215,10 +215,10 @@ final class FakeAudit: NodeAuditing, @unchecked Sendable {
         #expect(sent["to"]?.string == "inst-1")
         #expect(result["name"]?.string == "Ray's iPhone")
         #expect(result["platform"]?.string == "ios")
-        #expect(result["actions"]?.array?.compactMap(\.string) == ["system.info", "health.stats", "health.samples"])
+        #expect(result["actions"]?.array?.compactMap(\.string) == ["system.info", "health.stats", "health.samples", "device.status"])
         #expect(result["audit"] == parseJSON(#"{"state":"ok"}"#))
         let usage = try #require(result["usage"]?.object)
-        #expect(Set(usage.keys) == ["system.info", "health.stats", "health.samples"])
+        #expect(Set(usage.keys) == ["system.info", "health.stats", "health.samples", "device.status"])
         #expect(usage["health.stats"]?.string?.contains("stepCount") == true)
         // Binary frames are not offered.
         #expect(result["frameVersion"] == nil)
@@ -247,7 +247,7 @@ final class FakeAudit: NodeAuditing, @unchecked Sendable {
         let health = FakeHealth()
         var actions = HealthFixtures.actions(health)
         actions.enabled.set(false)
-        let executor = NodeExecutor(name: { "iPhone" }, audit: audit, health: actions)
+        let executor = NodeExecutor(name: { "iPhone" }, audit: audit, registry: .testing(actions))
         let sent = try reply(await executor.respond(to: envelope("health.stats", #"{"type":"stepCount"}"#), session: NodeSession()))
         #expect(sent["payload"]?["error"]?["code"]?.string == "health_off")
         #expect(audit.begun.count == 1)
@@ -256,7 +256,7 @@ final class FakeAudit: NodeAuditing, @unchecked Sendable {
         #expect(health.reads == 0 && health.accessRequests == 0)
         // system.info still lists the actions, so an agent can explain.
         let info = try reply(await executor.respond(to: envelope("system.info"), session: NodeSession()))
-        #expect(info["payload"]?["result"]?["actions"]?.array?.count == 3)
+        #expect(info["payload"]?["result"]?["actions"]?.array?.count == 4)
     }
 
     @Test func aRequestTheLogCannotRecordDoesNotRun() async throws {
@@ -307,7 +307,7 @@ final class FakeAudit: NodeAuditing, @unchecked Sendable {
         health.quantities["stepCount"] = [123_456]
         health.sampleStore = [HealthFixtures.sample("secret-sample-id", "2026-11-09T10:00:00Z", value: 98_765)]
         let audit = NodeAuditLog(url: folder.log)
-        let executor = NodeExecutor(name: { "iPhone" }, audit: audit, health: HealthFixtures.actions(health))
+        let executor = NodeExecutor(name: { "iPhone" }, audit: audit, registry: .testing(HealthFixtures.actions(health)))
         let stats = try reply(await executor.respond(to: envelope("health.stats", #"{"type":"stepCount"}"#), session: NodeSession()))
         let samples = try reply(await executor.respond(to: envelope("health.samples", #"{"type":"heartRate"}"#), session: NodeSession()))
         // The caller got the values...

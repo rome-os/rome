@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Before launch ends, so the tap that launched the app is delivered.
         UNUserNotificationCenter.current().delegate = self
         observeForeground()
+        // HealthKit may have launched the app in the background to deliver:
+        // its observers must be listening before this returns.
+        model.health.launch()
         return true
     }
 
@@ -72,7 +75,9 @@ extension AppDelegate: @preconcurrency UNUserNotificationCenterDelegate {
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        if let target = PushTarget(userInfo: response.notification.request.content.userInfo) {
+        if HealthSettings.isSyncNotice(response.notification.request.content.userInfo) {
+            model.openHealthHistory()
+        } else if let target = PushTarget(userInfo: response.notification.request.content.userInfo) {
             Task { await model.openFromPush(target) }
         }
         completionHandler()

@@ -10,7 +10,7 @@
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Rome only reads the Health data you allow. It never writes to Apple Health.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>When your Rome asks, Rome sends the Health data you allow to your Rome and its AI model. Rome never changes your Health data.</string>
+	<string>Rome syncs the Health data you allow, such as summaries of your steps, sleep and heart rate, to your own Rome so your Agent can answer questions about your health. You can pause syncing or delete the uploaded data at any time in Settings.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Rome saves photos from a chat to your library when you ask it to.</string>
 	<key>NSCameraUsageDescription</key>

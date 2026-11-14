@@ -20,19 +20,19 @@
       }
     },
     "NSHealthShareUsageDescription" : {
-      "comment" : "Asked before the first Apple Health read an instance requests",
+      "comment" : "Asked when Health sync is first turned on",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "When your Rome asks, Rome sends the Health data you allow to your Rome and its AI model. Rome never changes your Health data."
+            "value" : "Rome syncs the Health data you allow, such as summaries of your steps, sleep and heart rate, to your own Rome so your Agent can answer questions about your health. You can pause syncing or delete the uploaded data at any time in Settings."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当你的 Rome 提出请求时，Rome 会把你允许的健康数据发送给你的 Rome 及其 AI 模型。Rome 不会更改你的健康数据。"
+            "value" : "Rome 会把你允许的健康数据（例如步数、睡眠和心率的汇总）同步到你自己的 Rome，让你的 Agent 能回答与你健康有关的问题。你可以随时在设置中暂停同步，或删除已上传的数据。"
           }
         }
       }

@@ -691,10 +691,15 @@ struct DrawerPageHeader: View {
 /// the end, centered between the side buttons.
 struct PlainHeaderTitle: View {
     let title: Text
+    /// 15 on a first-level page's header, `secondarySize` on a second-level page's.
+    var size: CGFloat = 15
+
+    /// A second-level page's title (DESIGN.md rule 12).
+    static let secondarySize: CGFloat = 17
 
     var body: some View {
         title
-            .romeFont(15, .semibold)
+            .romeFont(size, .semibold)
             .foregroundStyle(Palette.fg)
             .lineLimit(1)
             .truncationMode(.tail)
