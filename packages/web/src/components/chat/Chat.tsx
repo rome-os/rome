@@ -2632,6 +2632,7 @@ export function Chat({
   const threadRootOfView = threadView
     ? (chatThreads.taskThreads.get(threadView) ?? threadView)
     : null;
+
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
@@ -2989,7 +2990,10 @@ export function Chat({
                     <>
                       {threadRootOfView ? (
                         <OpenThreadTaskChat
+                          sessionId={mainSessionId}
+                          messageId={threadView}
                           threadRoot={threadRootOfView}
+                          messages={displayMessages}
                           size={floating ? "md" : "sm"}
                           className={actionBadge}
                         />

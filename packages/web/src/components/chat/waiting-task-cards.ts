@@ -1,19 +1,33 @@
-import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { TaskCard } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
-import { cardKey, isOpenWait } from "./entries/live-task-cards";
+import { cardKey } from "./entries/live-task-cards";
 
 /**
- * The messages of a Concierge chat whose task card holds what its task waits
- * on its owner for, read from the server's facts alone: the task's open wait
- * (its `openWait`, while it needs its owner) and the card Rome filled in. Only
+ * Whether a question or approval card waits on its owner now, read from the
+ * card alone: it has no outcome, its wait did not run out, and its task did not
+ * end with it open (`closed`, which Rome fills in from the task).
+ */
+export function cardWaits(
+  card: TaskCard | undefined,
+): card is Exclude<TaskCard, { kind: "unavailable" }> {
+  return (
+    card !== undefined &&
+    card.kind !== "unavailable" &&
+    !card.outcome &&
+    !(card.kind === "question" && card.expired) &&
+    card.closed !== true
+  );
+}
+
+/**
+ * The messages of a Concierge chat whose card waits on its owner, read from
+ * the cards Rome filled in and the live events that settled them since. Only
  * the newest card of each task chat counts, as only that one takes an answer.
  * A card still mounting counts as soon as its message is here.
  */
 export function waitingTaskCardMessages(
   messages: readonly ChatMessage[],
-  tasks: readonly ConciergeTaskDto[],
   /** Cards live events settled since the messages loaded. */
   live: ReadonlyMap<string, TaskCard> = new Map(),
 ): Set<string> {
@@ -26,14 +40,9 @@ export function waitingTaskCardMessages(
     }
   }
   const waiting = new Set<string>();
-  for (const [chatId, { messageId, card }] of newest) {
+  for (const { messageId, card } of newest.values()) {
     if (!card || card.kind === "unavailable") continue;
-    const now = live.get(cardKey(card)) ?? card;
-    if (now.kind === "unavailable" || now.outcome) continue;
-    const task = tasks.find((candidate) => candidate.chat?.id === chatId);
-    const wait = task?.openWait;
-    if (task?.status !== "needs_you" || !isOpenWait(wait, now)) continue;
-    waiting.add(messageId);
+    if (cardWaits(live.get(cardKey(card)) ?? card)) waiting.add(messageId);
   }
   return waiting;
 }

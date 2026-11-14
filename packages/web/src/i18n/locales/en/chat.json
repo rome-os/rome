@@ -45,6 +45,7 @@
       "approved": "Approved",
       "rejected": "Rejected",
       "waitingBelow": "Waiting: answer the card below",
+      "closed": "Closed: the task ended",
       "turnedDown": "Turned down: no answer within a day",
       "turnedDownStopped": "Turned down: task stopped",
       "openToAnswer": "Open the task chat to answer"

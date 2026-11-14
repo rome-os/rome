@@ -113,6 +113,8 @@ export type TaskCard =
       /** Nobody answered it in time: the task ended for no response, yet it takes an answer still. */
       expired: boolean;
       outcome?: TaskQuestionOutcome;
+      /** See {@link TaskCardClosed}. */
+      closed?: TaskCardClosed;
     }
   | {
       kind: "approval";
@@ -124,8 +126,21 @@ export type TaskCard =
       preview?: unknown;
       since: number;
       outcome?: TaskApprovalOutcome;
+      /** See {@link TaskCardClosed}. */
+      closed?: TaskCardClosed;
     }
   | { kind: "unavailable" };
+
+/**
+ * `closed` on a question or approval card: true when its task ended (done,
+ * failed, stopped, or no response) while the card had no `outcome`, so it
+ * waits on no one and takes no answer. False while the task runs, and once
+ * the card has an outcome, which says how it ended. An `expired` question is
+ * never closed: it still takes an answer. A task that starts again opens its
+ * card again. Absent from servers before it. A card that waits for its owner
+ * is one with no `outcome`, not `expired`, and not `closed`.
+ */
+export type TaskCardClosed = boolean;
 
 /**
  * Live event `chat_card_settled`: a task's question or approval that a card

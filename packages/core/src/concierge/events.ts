@@ -858,6 +858,12 @@ export function startConciergeEvents(
       heldSummaries.delete(row.id);
     }),
     tasks.onStatus(onTaskStatus),
+    // A task that ended closes the cards it still had open; one that starts again opens them.
+    tasks.onEnded((row) => {
+      if (row.sessionId) {
+        void guard("task cards closed", service.cardSettled(row.sessionId, "openCards"));
+      }
+    }),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
     approvals.onResolved(onApprovalResolved),
     // An answer or a dismissal of a card settles it.

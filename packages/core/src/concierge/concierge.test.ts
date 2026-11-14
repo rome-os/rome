@@ -3651,6 +3651,24 @@ describe("Concierge events", () => {
     ]);
   });
 
+  it("closes the cards a task left open once it ends, and tells the chat showing them", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    const question = { id: "ask-1", messageId: "m1", render: null, since: Date.now() };
+    (s.deps.webchatRepo as { taskCardsOf: unknown }).taskCardsOf = async () =>
+      new Map([[chatId, { questions: [question], approvals: [] }]]);
+    const events: { card: { id: string; closed?: boolean } }[] = [];
+    s.service.onCardSettled((event) => events.push(event as never));
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await s.settle();
+    expect(events.map((event) => [event.card.id, event.card.closed])).toContainEqual([
+      "ask-1",
+      true,
+    ]);
+  });
+
   it("tells the Concierge of a pending approval in a task chat at once", async () => {
     const s = setup();
     const { chatId } = await startTask(s);

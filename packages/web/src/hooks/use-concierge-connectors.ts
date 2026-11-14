@@ -6,14 +6,14 @@ import type {
 } from "@rome/api-types/concierge";
 import { fetchJson } from "@/lib/fetch-json";
 
-export const CONCIERGE_CONNECTORS_QUERY_KEY = ["concierge-connectors"] as const;
+const CONCIERGE_CONNECTORS_QUERY_KEY = ["concierge-connectors"] as const;
 
 /**
  * Reading the list asks every service whether it works, about a second when
  * nothing is cached on the server. A minute is fresh enough to dim a follow
  * row; a connect card that just connected reads again (`refreshConciergeConnectors`).
  */
-export const CONCIERGE_CONNECTORS_STALE_MS = 60_000;
+const CONCIERGE_CONNECTORS_STALE_MS = 60_000;
 
 export const conciergeConnectorsQuery = {
   queryKey: CONCIERGE_CONNECTORS_QUERY_KEY,

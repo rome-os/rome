@@ -1,7 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
 import type { TaskChatCards } from "../webchat/repository.js";
-import { cardAt, settledCard, type TaskCardSources, withTaskCards } from "./task-cards.js";
+import {
+  cardAt,
+  openCards,
+  settledCard,
+  type TaskCardSources,
+  withTaskCards,
+} from "./task-cards.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const T = Date.UTC(2026, 10, 12, 9);
@@ -84,6 +90,7 @@ describe("cardAt", () => {
       preview: { kind: "generic", title: "Send it", summary: "" },
       since: T + DAY,
       outcome: { kind: "turned_down", reason: "no_response" },
+      closed: false,
     });
   });
 
@@ -184,6 +191,7 @@ describe("withTaskCards", () => {
       id: "older",
       title: "Pay the bill",
       since: T,
+      closed: false,
     });
   });
 
@@ -265,5 +273,73 @@ describe("settledCard", () => {
       outcome: { kind: "answered" },
     });
     expect(await settledCard(read, "task-1", { kind: "question", id: "nope" })).toBeNull();
+  });
+});
+
+describe("a card whose task ended", () => {
+  /** A task chat with one open question, one answered, one open approval and one decided. */
+  const open = (): TaskChatCards => ({
+    questions: [
+      { id: "q1", messageId: "m1", render, since: T, output: { answers: [] } },
+      { id: "q2", messageId: "m2", render, since: T + DAY },
+    ],
+    approvals: [
+      {
+        id: "a1",
+        status: "pending",
+        resolvedBy: null,
+        description: "Send",
+        payload: {},
+        since: T + DAY,
+      },
+      {
+        id: "a2",
+        status: "approved",
+        resolvedBy: null,
+        description: "Post",
+        payload: {},
+        since: T,
+      },
+    ],
+  });
+  const row = (ended: boolean, expired = false) =>
+    ({
+      sessionId: "task-1",
+      ownerKey: "guardian",
+      endedAt: ended ? new Date(T + 2 * DAY) : null,
+      expiredWaitAt: expired ? new Date(T + DAY) : null,
+    }) as ConciergeTaskRow;
+  const closedOf = async (r: ConciergeTaskRow) => {
+    const { read } = sources(new Map([["task-1", open()]]), [r]);
+    return Object.fromEntries(
+      (await openCards(read, "task-1", { approvals: true })).map((card) => [card.id, card.closed]),
+    );
+  };
+
+  it("closes every card still open once its task ended, and opens them if it starts again", async () => {
+    expect(await closedOf(row(true))).toEqual({ q2: true, a1: true });
+    expect(await closedOf(row(false))).toEqual({ q2: false, a1: false });
+  });
+
+  it("leaves a card with an outcome, and an expired question, not closed", async () => {
+    const { read } = sources(new Map([["task-1", open()]]), [row(true)]);
+    expect(await settledCard(read, "task-1", { kind: "question", id: "q1" })).toMatchObject({
+      closed: false,
+    });
+    expect(await settledCard(read, "task-1", { kind: "approval", id: "a2" })).toMatchObject({
+      closed: false,
+    });
+    // A question nobody answered in time still takes an answer.
+    expect(await closedOf(row(true, true))).toEqual({ q2: false, a1: true });
+  });
+
+  it("fills `closed` into the cards a page hands out", async () => {
+    const { read } = sources(new Map([["task-1", open()]]), [row(true)]);
+    const [filled] = await withTaskCards(
+      read,
+      [message("c1", T + DAY + 1_000, [{ ...ask(), waitedOn: { kind: "approval", id: "a1" } }])],
+      "guardian",
+    );
+    expect(JSON.parse(filled!.content)[0].card).toMatchObject({ id: "a1", closed: true });
   });
 });

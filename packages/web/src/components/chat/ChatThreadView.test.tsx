@@ -16,7 +16,7 @@ import {
 } from "@/test/fake-websocket";
 import { MemoryRouter } from "react-router-dom";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
-import { ChatThreadView, chatThreadQueryKey } from "./ChatThreadView";
+import { ChatThreadView, chatThreadQueryKey, taskChatOfThread } from "./ChatThreadView";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import { buildRows } from "./chat-view";
 import type { BlockActions } from "./MessageList";
@@ -647,5 +647,27 @@ describe("ChatThreadView", () => {
     await screen.findByText("Which day?");
     await waitFor(() => expect(tops.at(-1)).toBe(1150));
     rs.restoreAllMocks();
+  });
+});
+
+describe("taskChatOfThread", () => {
+  const said = (id: string, parts: unknown[], chatThreadId: string | null = "root") =>
+    ({
+      id,
+      sessionId: "concierge",
+      role: "assistant",
+      content: JSON.stringify(parts),
+      createdAt: "2026-11-10T12:00:00Z",
+      chatThreadId,
+    }) as never;
+
+  it("takes the task chat a card in the thread names, with no task list", () => {
+    const messages = [
+      said("other", [{ type: "task_chat", chatId: "elsewhere", title: "B" }], "other-root"),
+      said("root", [{ type: "text", text: "On it." }], null),
+      said("card", [{ type: "task_chat", chatId: "task-chat", title: "A", show: "ask" }]),
+    ];
+    expect(taskChatOfThread(messages, "root")).toBe("task-chat");
+    expect(taskChatOfThread(messages, "no-thread")).toBeNull();
   });
 });
