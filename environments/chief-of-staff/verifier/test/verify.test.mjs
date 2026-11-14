@@ -124,6 +124,12 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     );
   });
 
+  it("does not pass K7 on silence alone", async () => {
+    const { report } = await runAgainst("silent", { rules: ["K7"] });
+    assert.deepEqual(statuses(report), { K7: "not_checked" });
+    assert.match(report.results[0].reason, /no answer to any of the 2 probes/);
+  });
+
   it("refuses a dirty tree unless allowed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cos-verify-dirty-"));
     const env = {
