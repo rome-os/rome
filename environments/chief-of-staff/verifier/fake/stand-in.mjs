@@ -70,7 +70,9 @@ function answer(state, message, breaks) {
         who(state, m, breaks) === person,
     );
     if (said.length === 0) return `I have no record of what ${commit[1]} committed to this week.`;
-    return said.map((m) => `- ${m.text} (${link(m)})`).join("\n");
+    // "unlinked" cites each message by where it was said, without a link to it.
+    const cite = (m) => (breaks === "unlinked" ? `said in ${m.chat}` : link(m));
+    return said.map((m) => `- ${m.text} (${cite(m)})`).join("\n");
   }
 
   const sheet = k5.find((q) => q.q === text);

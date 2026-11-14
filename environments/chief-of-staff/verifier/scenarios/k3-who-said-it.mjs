@@ -170,6 +170,8 @@ export default {
           ),
     ];
     const result = ruleResult(checks);
+    // K5 checks that these answers, which cite messages, link them.
+    ctx.memo.K3 = { answers: [...answers, privateAnswer] };
     result.answers = [...answers, privateAnswer].map((a) => ({
       about: team.members[a.member].name,
       questionId: a.questionId,

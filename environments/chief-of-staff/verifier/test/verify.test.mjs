@@ -177,6 +177,16 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.ok(report.stoppedByEnvoy.every((s) => s.kind === "statement" && !s.scored));
   });
 
+  it("holds K5 at waiting on a decision when the K3 answers cite messages without links", async () => {
+    const { report } = await runAgainst("fail-unlinked", { rules: ["K3", "K5"] });
+    assert.deepEqual(statuses(report), { K3: "pass", K5: "waits_on_design" });
+    const leg = report.results
+      .find((r) => r.rule === "K5")
+      .checks.find((c) => c.name === "a message source is linked");
+    assert.match(leg.detail, /waits on a decision: whether the agent is given links/);
+    assert.equal(report.summary.agentFailures, 0);
+  });
+
   it("posts a question again when Rome restarted while it waited", async () => {
     const { report, outDir } = await runAgainst("good", {
       rules: ["A1"],

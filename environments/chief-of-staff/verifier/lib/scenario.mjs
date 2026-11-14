@@ -114,6 +114,17 @@ export function ruleResult(checks) {
   };
 }
 
+/** A check that failed only for want of a decision outside the agent: it does not count as the agent's failure. */
+export function waitsOnDecision(check, decision) {
+  return check.status === "fail"
+    ? {
+        ...check,
+        status: "waits_on_design",
+        detail: `${check.detail} (waits on a decision: ${decision})`,
+      }
+    : check;
+}
+
 /** A check the rules require: when it comes back not checked, the rule cannot pass. */
 export function required(check) {
   return { ...check, required: true };

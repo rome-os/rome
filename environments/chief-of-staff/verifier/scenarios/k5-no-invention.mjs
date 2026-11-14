@@ -1,5 +1,5 @@
-import { namesSource } from "../lib/checks.mjs";
-import { ask, check, ruleResult } from "../lib/scenario.mjs";
+import { hasLink, namesSource } from "../lib/checks.mjs";
+import { ask, check, ruleResult, waitsOnDecision } from "../lib/scenario.mjs";
 import { goalsSheet, rosterSheet } from "../lib/seed.mjs";
 
 export default {
@@ -90,6 +90,28 @@ export default {
             "every known answer links its source or names the document and entry",
             evidence,
           );
-    return ruleResult([{ ...inventionCheck, answers }, sourceCheck]);
+    return ruleResult([{ ...inventionCheck, answers }, sourceCheck, messageLinkCheck(ctx)]);
   },
 };
+
+const MESSAGE_LINKS = "whether the agent is given links to the messages it cites (a core change)";
+
+/**
+ * R4's K5 asks that a source that is a message be a link to it. The K3 answers each cite
+ * the messages a commitment was said in, so they carry this check. Until the agent can be
+ * given message links, a missing link waits on that decision rather than failing.
+ */
+function messageLinkCheck(ctx) {
+  const name = "a message source is linked";
+  const replies = (ctx.memo.K3?.answers ?? []).filter((a) => a.reply);
+  if (replies.length === 0)
+    return check(name, "not_checked", "no K3 answer citing a message to check");
+  const evidence = replies.flatMap((a) => [a.questionId, a.reply.id]);
+  const unlinked = replies.filter((a) => !hasLink(a.reply.text)).map((a) => a.reply.id);
+  return unlinked.length > 0
+    ? waitsOnDecision(
+        check(name, "fail", `no message link in ${unlinked.join(", ")}`, evidence),
+        MESSAGE_LINKS,
+      )
+    : check(name, "pass", "every K3 answer links the messages it cites", evidence);
+}
