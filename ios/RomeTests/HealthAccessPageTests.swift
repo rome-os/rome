@@ -9,8 +9,14 @@ import Testing
         #expect(HealthRowState(status: .off).value == "Off")
     }
 
-    @Test func thePrivacyPolicyIsOnRomesSiteOverHTTPS() {
-        #expect(HealthAccessScreen.privacyURL.absoluteString == "https://romeos.cc/privacy")
+    @Test func thePromisesLineLinksThePrivacyPolicyOverHTTPS() throws {
+        let catalog = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().appending(path: "Rome/Localizable.xcstrings"))
+        let strings = try #require(parseJSON(String(decoding: catalog, as: UTF8.self))["strings"]?.object)
+        let key = try #require(strings.keys.first { $0.hasPrefix("Read only · ") })
+        #expect(key.hasSuffix("[Privacy Policy](https://romeos.cc/privacy)"))
+        let chinese = try #require(strings[key]?["localizations"]?["zh-Hans"]?["stringUnit"]?["value"]?.string)
+        #expect(chinese.hasSuffix("[隐私政策](https://romeos.cc/privacy)"))
     }
 
     @Test func theHealthPinkIsOnlyDefinedOnce() throws {

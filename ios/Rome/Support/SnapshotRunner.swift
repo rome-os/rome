@@ -206,10 +206,9 @@ enum SnapshotRunner {
             await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health, .syncHistory]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            // The Apple Health page is longer than a screen: its top, the data flow, and its end.
+            // The Apple Health page is longer than a screen: its top and its end.
             model.debugHealthScroll = nil
             await capture("14-health-access", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
-            await capture("15-health-access-data", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "where" }
             await capture("16-health-access-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
             model.debugHealthScroll = nil
             model.debugCommand = .settings(nil)

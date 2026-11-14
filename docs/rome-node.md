@@ -622,15 +622,12 @@ the Rome open now, is off by default on each Rome, and decides both ways Health
 reaches that Rome: the background sync, and the
 live `health.*` actions, which fail with `health_off` while it is off. Turning it
 on while iOS has never been asked shows the system's access sheet at once, then
-starts the history backfill. Health values go to the user's Rome and to the AI
-model behind it, so the page shows what the Rome can do with Health as three short
-chats, and where the data goes: from the iPhone to the Rome and on to its AI model
-provider. Four short promises follow. Health is kept up to date on the Rome, read
-only and never changed. Rome never sells it, uses it for ads, or uses it to train
-AI models, and the user's AI provider's terms apply to what it receives. The user
-can delete what was sent. Results can stay in the Rome's chats and memory. A line
-under the switch says how the sync stands, with Sync now at its end, and **Sync
-history** lists the syncs of the last 30 days by day, with Delete uploaded data. A build before sync
+starts the history backfill. A line under the switch says how the sync stands,
+with Sync now at its end. One line of promises follows: Health is read only, never
+sold or used for ads or training, and can be deleted at any time, with a link to
+the privacy policy. **Sync history** lists the syncs of the last 30 days by day,
+with Delete uploaded data, and the page shows what the Rome can do with Health as
+three short chats. A build before sync
 had its own "Allow Rome to read Health" switch under iPhone use. That consent did
 not cover uploading history, so sync starts off.
 

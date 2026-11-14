@@ -56,14 +56,11 @@ struct HealthStatusLine: Equatable {
     }
 }
 
-/// Settings → Apple Health: Sync with Rome, how it stands, its history, and
-/// where the data goes: to the Rome and the AI model behind it.
+/// Settings → Apple Health: Sync with Rome, how it stands, what Rome
+/// promises about the data, its history, and what Rome can do with it.
 struct HealthAccessScreen: View {
-    static let privacyURL = URL(string: "https://romeos.cc/privacy")!
-
     let onHistory: () -> Void
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         let health = model.health
@@ -73,16 +70,7 @@ struct HealthAccessScreen: View {
                     header
                     toggleCard(health)
                     capabilities
-                    dataFlow
-                    Button { openURL(Self.privacyURL) } label: {
-                        Text("Privacy Policy")
-                            .romeFont(16, .medium)
-                            .foregroundStyle(Palette.primaryText)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressScaleStyle())
-                    .id("end")
+                        .id("end")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
@@ -90,9 +78,9 @@ struct HealthAccessScreen: View {
             }
             .softTopScrollEdge()
             #if DEBUG
-            // The snapshot runner reads a long page in parts.
+            // The snapshot runner reads the page's end too.
             .onChange(of: model.debugHealthScroll) { _, id in
-                if let id { proxy.scrollTo(id, anchor: id == "end" ? .bottom : .top) }
+                if let id { proxy.scrollTo(id, anchor: .bottom) }
             }
             #endif
         }
@@ -140,6 +128,13 @@ struct HealthAccessScreen: View {
                 if let text = line.text {
                     HealthStatusRow(line: line, text: text, running: health.activity.running)
                 }
+                // What Rome promises about Health, in one line, with the policy behind it.
+                Text("Read only · Never sold or used for ads or training · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)")
+                    .romeFont(13)
+                    .foregroundStyle(Palette.sub)
+                    .tint(Palette.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
                 SettingsGroup {
                     Button(action: onHistory) {
                         PlainRow(title: "Sync history") {
@@ -175,27 +170,6 @@ struct HealthAccessScreen: View {
         }
     }
 
-    private var dataFlow: some View {
-        SettingsGroup(header: "Where your data goes") {
-            HStack(alignment: .top, spacing: 4) {
-                FlowNode(symbol: model.node.device.symbol, label: model.node.device.thisDevice)
-                FlowArrow()
-                FlowNode(symbol: "server.rack", label: "Your Rome")
-                FlowArrow()
-                FlowNode(symbol: "sparkle", label: "Your AI model provider")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 16)
-            .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(model.node.device.dataFlowLabel)
-            Promise(text: "Kept up to date on your Rome. Read only, never changed.")
-            Promise(text: "Rome never sells it, uses it for ads, or uses it to train AI models. Your AI provider's terms apply to what it receives.")
-            Promise(text: "You can delete what was sent.")
-            Promise(text: "Results can stay in your Rome's chats and memory.", last: true)
-        }
-        .id("where")
-    }
 }
 
 /// The sync's status under the switch, with Sign in or Retry when it needs one.
@@ -288,62 +262,3 @@ private struct CapabilityRow: View {
     }
 }
 
-/// A stop on the way the data takes: a symbol over a label that wraps rather than cuts.
-private struct FlowNode: View {
-    let symbol: String
-    let label: LocalizedStringKey
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: symbol)
-                .romeFont(26)
-                .foregroundStyle(Palette.fg)
-                .frame(height: 32)
-            Text(label)
-                .romeFont(12)
-                .foregroundStyle(Palette.sub)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .top)
-    }
-}
-
-private struct FlowArrow: View {
-    var body: some View {
-        Image(systemName: "chevron.right")
-            .romeFont(12, .semibold)
-            .foregroundStyle(Palette.sub.opacity(0.45))
-            .frame(height: 32)
-            .accessibilityHidden(true)
-    }
-}
-
-/// One commitment, with a check.
-private struct Promise: View {
-    let text: LocalizedStringKey
-    var last = false
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: "checkmark")
-                .romeFont(14, .bold)
-                .foregroundStyle(Palette.primary)
-                .frame(width: 22)
-                .accessibilityHidden(true)
-            Text(text)
-                .romeFont(15)
-                .foregroundStyle(Palette.fg)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) {
-            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
-        }
-        .accessibilityElement(children: .combine)
-    }
-}

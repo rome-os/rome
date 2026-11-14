@@ -2071,16 +2071,6 @@
         }
       }
     },
-    "Kept up to date on your Rome. Read only, never changed." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在你的 Rome 上保持最新。只读，从不更改。"
-          }
-        }
-      }
-    },
     "Language" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3101,16 +3091,6 @@
         }
       }
     },
-    "Privacy Policy" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "隐私政策"
-          }
-        }
-      }
-    },
     "Puts it in the message box." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3127,6 +3107,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已读取"
+          }
+        }
+      }
+    },
+    "Read only · Never sold or used for ads or training · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只读 · 不出售，不用于广告或训练 · 随时可删除 · [隐私政策](https://romeos.cc/privacy)"
           }
         }
       }
@@ -3445,16 +3435,6 @@
         }
       }
     },
-    "Results can stay in your Rome's chats and memory." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "结果可能保留在你的 Rome 的聊天和记忆中。"
-          }
-        }
-      }
-    },
     "Retry" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3501,16 +3481,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome Cloud 登录已过期"
-          }
-        }
-      }
-    },
-    "Rome never sells it, uses it for ads, or uses it to train AI models. Your AI provider's terms apply to what it receives." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 绝不出售这些数据，也不会将其用于广告或训练 AI 模型。你的 AI 服务商收到的数据适用其自身条款。"
           }
         }
       }
@@ -4525,46 +4495,6 @@
         }
       }
     },
-    "This iPad" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 iPad"
-          }
-        }
-      }
-    },
-    "This iPad, your Rome, your AI model provider" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 iPad、你的 Rome、你的 AI 模型服务商"
-          }
-        }
-      }
-    },
-    "This iPhone" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 iPhone"
-          }
-        }
-      }
-    },
-    "This iPhone, your Rome, your AI model provider" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 iPhone、你的 Rome、你的 AI 模型服务商"
-          }
-        }
-      }
-    },
     "This model is unavailable" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5213,16 +5143,6 @@
         }
       }
     },
-    "Where your data goes" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的数据去向"
-          }
-        }
-      }
-    },
     "Why have I felt so tired lately?" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5293,16 +5213,6 @@
         }
       }
     },
-    "You can delete what was sent." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你可以删除已发送的数据。"
-          }
-        }
-      }
-    },
     "You no longer have access to this Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5313,32 +5223,12 @@
         }
       }
     },
-    "Your AI model provider" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的 AI 模型服务商"
-          }
-        }
-      }
-    },
     "Your Agents can no longer read it. Things they already wrote in chats or memory stay. Sync turns off." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Agent 将无法再读取这些数据。它们已写入聊天或记忆中的内容会保留。同步将关闭。"
-          }
-        }
-      }
-    },
-    "Your Rome" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的 Rome"
           }
         }
       }

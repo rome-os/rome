@@ -41,19 +41,4 @@ enum DeviceKind: Sendable, Equatable {
         case .iPad: return "Can Rome use this iPad"
         }
     }
-
-    /// The first stop of "Where your data goes".
-    var thisDevice: LocalizedStringKey {
-        switch self {
-        case .iPhone: return "This iPhone"
-        case .iPad: return "This iPad"
-        }
-    }
-
-    var dataFlowLabel: LocalizedStringKey {
-        switch self {
-        case .iPhone: return "This iPhone, your Rome, your AI model provider"
-        case .iPad: return "This iPad, your Rome, your AI model provider"
-        }
-    }
 }
