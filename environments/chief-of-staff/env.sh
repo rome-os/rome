@@ -409,7 +409,7 @@ clear_chats() {
   local name
   while IFS= read -r name; do
     log "clearing #$name on Discord ..."
-    discord clear "$(state "chats.$name")"
+    COS_AGENT_TOKEN="$COS_AGENT_BOT_TOKEN" discord clear "$(state "chats.$name")"
   done < <(all_chat_names)
 }
 

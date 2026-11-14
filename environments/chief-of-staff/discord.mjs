@@ -14,6 +14,8 @@ import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 const API = "https://discord.com/api/v10";
 // Discord error codes this script reacts to.
 const UNKNOWN_CHANNEL = 10003;
+const UNKNOWN_WEBHOOK = 10015;
+const MISSING_PERMISSIONS = 50013;
 // The Discord message types a person writes: a plain message and a reply.
 const DEFAULT_MESSAGE = 0;
 const REPLY_MESSAGE = 19;
@@ -209,6 +211,66 @@ async function deleteWebhooks(bot, driverId, chatIds) {
   }
 }
 
+// Deletes every message in a channel, in bulk where the driver may, else each
+// as its author. `parent` is the chat a thread sits in, null for a chat.
+// Answers how many messages nobody here may delete.
+async function deleteMessages(s, bot, channelId, parent) {
+  const twoWeeksAgo = Date.now() - 13.5 * 24 * 3600 * 1000;
+  const skipped = new Set();
+  let bulk = true;
+  for (;;) {
+    const page = (await discord(bot, "GET", `/channels/${channelId}/messages?limit=100`)).filter(
+      (m) => !skipped.has(m.id),
+    );
+    if (page.length === 0) break;
+    // Bulk delete takes 2 to 100 messages younger than two weeks.
+    const recent = page.filter((m) => Date.parse(m.timestamp) > twoWeeksAgo).map((m) => m.id);
+    if (bulk && recent.length >= 2) {
+      try {
+        await discord(bot, "POST", `/channels/${channelId}/messages/bulk-delete`, {
+          messages: recent,
+        });
+        continue;
+      } catch (error) {
+        if (error.code !== MISSING_PERMISSIONS) throw error;
+        bulk = false;
+      }
+    }
+    for (const message of page) {
+      if (!(await deleteAsAuthor(s, bot, channelId, parent, message))) skipped.add(message.id);
+    }
+  }
+  return skipped.size;
+}
+
+// Deletes one message as the driver, or as its author when the driver may not.
+// Answers false when nobody here may delete it.
+async function deleteAsAuthor(s, bot, channelId, parent, message) {
+  const path = `/channels/${channelId}/messages/${message.id}`;
+  const attempts = [() => discord(bot, "DELETE", path)];
+  if (message.author.id === s.agent.id && process.env.COS_AGENT_TOKEN) {
+    attempts.push(() => discord(process.env.COS_AGENT_TOKEN, "DELETE", path));
+  }
+  const hook = Object.values(s.webhooks ?? {})
+    .flatMap((hooks) => Object.values(hooks))
+    .find((h) => h.id === message.webhook_id);
+  if (hook) {
+    const thread = parent ? `?thread_id=${channelId}` : "";
+    attempts.push(() =>
+      discord(null, "DELETE", `/webhooks/${hook.id}/${hook.token}/messages/${message.id}${thread}`),
+    );
+  }
+  for (const attempt of attempts) {
+    try {
+      await attempt();
+      return true;
+    } catch (error) {
+      if (error.code !== MISSING_PERMISSIONS && error.code !== UNKNOWN_WEBHOOK) throw error;
+    }
+  }
+  return false;
+}
+
 const commands = {
   // Prints the bot's user id and username, which also checks the token.
   async whoami() {
@@ -330,29 +392,29 @@ const commands = {
     saveState(s);
   },
 
-  // Deletes every thread under the chat and every message in it.
+  // Deletes every thread under the chat and every message in it. Without
+  // Manage Messages and Manage Threads, each message is deleted by whoever
+  // wrote it (the agent's bot, the driver, or a member's webhook), and what
+  // nobody here can delete is left with a warning rather than failing.
   async clear(id) {
+    const s = state();
     const bot = token("COS_TOKEN");
     const server = token("COS_DISCORD_SERVER_ID");
+    const left = { messages: 0, threads: 0 };
     for (const threadId of await threadsOf(bot, server, id)) {
-      await discord(bot, "DELETE", `/channels/${threadId}`);
+      try {
+        await discord(bot, "DELETE", `/channels/${threadId}`);
+      } catch (error) {
+        if (error.code !== MISSING_PERMISSIONS) throw error;
+        left.messages += await deleteMessages(s, bot, threadId, id);
+        left.threads += 1;
+      }
     }
-    const twoWeeksAgo = Date.now() - 13.5 * 24 * 3600 * 1000;
-    for (;;) {
-      const page = await discord(bot, "GET", `/channels/${id}/messages?limit=100`);
-      if (page.length === 0) break;
-      // Bulk delete takes 2 to 100 messages younger than two weeks. Older ones,
-      // and a lone message, go one at a time.
-      const recent = page.filter((m) => Date.parse(m.timestamp) > twoWeeksAgo).map((m) => m.id);
-      const old = page.filter((m) => !recent.includes(m.id)).map((m) => m.id);
-      if (recent.length >= 2) {
-        await discord(bot, "POST", `/channels/${id}/messages/bulk-delete`, { messages: recent });
-      } else {
-        old.push(...recent);
-      }
-      for (const message of old) {
-        await discord(bot, "DELETE", `/channels/${id}/messages/${message}`);
-      }
+    left.messages += await deleteMessages(s, bot, id, null);
+    if (left.messages || left.threads) {
+      process.stderr.write(
+        `cos-env: left ${left.messages} messages and ${left.threads} threads in #${chatNameById(s, id) ?? id} that the driver may not delete. Give it Manage Messages and Manage Threads.\n`,
+      );
     }
   },
 };
