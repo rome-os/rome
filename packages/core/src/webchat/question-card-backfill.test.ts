@@ -68,6 +68,31 @@ describe("describeQuestionCards", () => {
     expect(changed.map((m) => m.id)).toEqual(["3"]);
   });
 
+  it("leaves an app's card named question-card alone", () => {
+    const appCard = {
+      ...card("t1"),
+      appId: "polls",
+      render: { ...card("t1").render, builtin: undefined },
+    };
+    expect(describeQuestionCards([{ id: "1", parts: [appCard] }])).toEqual([]);
+  });
+
+  it("leaves an answer it cannot read as it is", () => {
+    const multi = [{ id: "q1", question: "Which?", type: "multi", options: ["Red", "Blue"] }];
+    const multiCard = {
+      ...card("t1"),
+      render: { ...card("t1").render, props: { questions: multi } },
+    };
+    const changed = describeQuestionCards([
+      { id: "1", parts: [multiCard] },
+      {
+        id: "2",
+        parts: [answer("t1", { answers: [{ questionId: "q1", value: "Blue", values: "Blue" }] })],
+      },
+    ]);
+    expect(changed.map((m) => m.id)).toEqual(["1"]);
+  });
+
   it("skips a card whose questions do not parse", () => {
     const broken = { ...card("t1"), render: { componentId: "question-card", props: { nope: 1 } } };
     expect(describeQuestionCards([{ id: "1", parts: [broken] }])).toEqual([]);
@@ -90,16 +115,22 @@ describe("backfillQuestionCards", () => {
     const said = (key: string, at: number, parts: unknown[]) =>
       db.run(sql`INSERT INTO "chat_messages" ("chat_id", "key", "text", "parts", "said_at")
         VALUES (1, ${key}, '', ${JSON.stringify(parts)}, ${at})`);
-    said("m1", 1, [card("t1")]);
-    said("m2", 2, [answer("t1", { answers: [{ questionId: "q1", value: "Red" }] })]);
+    // Said in the same second; the answer's id sorts first as text.
+    db.run(sql`INSERT INTO "chat_messages" ("id", "chat_id", "key", "text", "parts", "said_at")
+      VALUES (9, 1, 'm1', '', ${JSON.stringify([card("t1")])}, 1)`);
+    db.run(sql`INSERT INTO "chat_messages" ("id", "chat_id", "key", "text", "parts", "said_at")
+      VALUES (10, 1, 'm2', '',
+        ${JSON.stringify([answer("t1", { answers: [{ questionId: "q1", value: "Red" }] })])}, 1)`);
     db.run(sql`INSERT INTO "rome_agent_messages" ("id", "session_id", "role", "content", "created_at")
       VALUES ('a1', 's1', 'assistant', ${JSON.stringify([card("t9")])}, 0)`);
 
     expect(backfillQuestionCards(db)).toBe(3);
+    // It runs once: a card stored later is left to the code that stores it.
+    said("m3", 3, [card("t2")]);
     expect(backfillQuestionCards(db)).toBe(0);
 
     const stored = db
-      .all<{ parts: string }>(sql`SELECT "parts" FROM "chat_messages" ORDER BY "said_at"`)
+      .all<{ parts: string }>(sql`SELECT "parts" FROM "chat_messages" ORDER BY "id"`)
       .map((r) => JSON.parse(r.parts));
     expect(stored[0][0].render.ui).toEqual(questionCardUi(questions as never));
     expect(stored[1][0].output.card).toEqual([{ values: ["Red"], text: "" }]);

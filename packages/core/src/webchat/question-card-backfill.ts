@@ -3,7 +3,8 @@
 // iOS app draw them as a line of text. This backfill gives each one the card
 // described from its questions (`render.ui`), and each answer to one the card
 // the guardian would have sent (`card`), so readers draw them as any card.
-// It runs at startup and touches only cards that have no description yet.
+// It runs once, at startup: a `settings` key records the run, since every
+// card stored from then on carries its description.
 
 import { sql } from "drizzle-orm";
 import {
@@ -23,8 +24,11 @@ export interface StoredMessage {
   parts: unknown[];
 }
 
+/** Set in `settings` once the backfill has run. */
+const DONE_KEY = "backfill.questionCardsDescribed";
+
 interface Store {
-  /** The chats (or sessions) holding a question card with no description. */
+  /** The chats (or sessions) holding a question card. */
   pending: ReturnType<typeof sql>;
   /** Every message of one chat, in the order it was said. */
   messages: (chat: string | number) => ReturnType<typeof sql>;
@@ -32,31 +36,35 @@ interface Store {
 }
 
 const CARD = '%"componentId":"question-card"%';
-const DESCRIBED = '%"ui":%';
 
 const STORES: Store[] = [
   {
     pending: sql`SELECT DISTINCT "chat_id" AS "chat" FROM "chat_messages"
-      WHERE "parts" LIKE ${CARD} AND "parts" NOT LIKE ${DESCRIBED}`,
+      WHERE "parts" LIKE ${CARD}`,
     messages: (chat) => sql`SELECT CAST("id" AS TEXT) AS "id", "parts" FROM "chat_messages"
-      WHERE "chat_id" = ${chat} ORDER BY "said_at", "id"`,
+      WHERE "chat_id" = ${chat} ORDER BY "said_at", "chat_messages"."id"`,
     update: (id, parts) =>
       sql`UPDATE "chat_messages" SET "parts" = ${parts} WHERE "id" = ${Number(id)}`,
   },
   {
     pending: sql`SELECT DISTINCT "session_id" AS "chat" FROM "rome_agent_messages"
-      WHERE "content" LIKE ${CARD} AND "content" NOT LIKE ${DESCRIBED}`,
+      WHERE "role" = 'assistant' AND "content" LIKE ${CARD}`,
     messages: (chat) => sql`SELECT "id", "content" AS "parts" FROM "rome_agent_messages"
-      WHERE "session_id" = ${chat} ORDER BY "created_at", "rowid"`,
+      WHERE "session_id" = ${chat} AND "role" IN ('assistant', 'user') ORDER BY "created_at", "rowid"`,
     update: (id, parts) =>
       sql`UPDATE "rome_agent_messages" SET "content" = ${parts} WHERE "id" = ${id}`,
   },
 ];
 
 /** Describe every stored question card that has no description, and the
- *  answers to them, in one transaction. Answers how many messages changed. */
+ *  answers to them, in one transaction, unless that has run before. Answers
+ *  how many messages changed. */
 export function backfillQuestionCards(db: DrizzleDb): number {
   const changed = db.transaction((tx) => {
+    const [done] = tx.all<{ n: number }>(
+      sql`SELECT count(*) AS "n" FROM "settings" WHERE "key" = ${DONE_KEY}`,
+    );
+    if (done && done.n > 0) return 0;
     let count = 0;
     for (const store of STORES) {
       for (const { chat } of tx.all<{ chat: string | number }>(store.pending)) {
@@ -67,6 +75,8 @@ export function backfillQuestionCards(db: DrizzleDb): number {
         }
       }
     }
+    tx.run(sql`INSERT INTO "settings" ("key", "value", "updated_at")
+      VALUES (${DONE_KEY}, 'true', ${Math.floor(Date.now() / 1000)})`);
     return count;
   });
   if (changed > 0) log.info("described stored question cards", { messages: changed });
@@ -96,7 +106,13 @@ export function describeQuestionCards(messages: readonly StoredMessage[]): Store
     const parts = message.parts.map((part) => {
       if (!isObject(part) || typeof part.toolUseId !== "string") return part;
       const render = isObject(part.render) ? part.render : undefined;
-      if (part.type === "pending_interaction" && render?.componentId === "question-card") {
+      // Core's own question card only: an app may name a card the same.
+      if (
+        part.type === "pending_interaction" &&
+        part.appId === "core" &&
+        render?.builtin === true &&
+        render.componentId === "question-card"
+      ) {
         const parsed = parseAskQuestionInput(render.props);
         if (!parsed.ok) return part;
         open.set(part.toolUseId, parsed.questions);
@@ -111,7 +127,7 @@ export function describeQuestionCards(messages: readonly StoredMessage[]): Store
         if (!questions || !output || output.card !== undefined || output.dismissed === true) {
           return part;
         }
-        const card = questionCardFromAnswers(questions, output);
+        const card = cardFromAnswers(questions, output);
         if (!card) return part;
         touched = true;
         return { ...part, output: { ...output, card } };
@@ -121,6 +137,17 @@ export function describeQuestionCards(messages: readonly StoredMessage[]): Store
     if (touched) changed.push({ id: message.id, parts });
   }
   return changed;
+}
+
+/** What the card would have sent for an answer, or null for an answer stored
+ *  in a shape it cannot read: one bad answer leaves that answer as it is
+ *  rather than stopping Rome from starting. */
+function cardFromAnswers(questions: readonly Question[], output: unknown) {
+  try {
+    return questionCardFromAnswers(questions, output);
+  } catch {
+    return null;
+  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
