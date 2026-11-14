@@ -52,6 +52,26 @@ describe("PersonalDataRepository", () => {
     expect(second.response).toMatchObject({ inserted: 0, updated: 1, unchanged: 1 });
   });
 
+  it("stores one bucket per hour whatever key the sender spells it with", () => {
+    ingest(batch("b-1", { upserts: [stepHour(NOV_10, 812)] }));
+    const respelled = { ...stepHour(NOV_10, 900), key: "steps-hour-one" };
+    const { response } = ingest(batch("b-2", { upserts: [respelled] }));
+    expect(response).toMatchObject({ inserted: 0, updated: 1 });
+    expect(
+      testDb.db
+        .select()
+        .from(personalDataPoints)
+        .all()
+        .map((row) => row.value),
+    ).toEqual([900]);
+    const deleted = ingest(
+      batch("b-3", {
+        deletes: [{ key: `stepCount:hour:${new Date(NOV_10).toISOString().replace(".000", "")}` }],
+      }),
+    );
+    expect(deleted.response).toMatchObject({ deleted: 1 });
+  });
+
   it("deletes by key, and counts a missing key as unchanged", () => {
     ingest(batch("b-1", { upserts: [weight(NOV_10, 70.2, "w1")] }));
     const deleted = ingest(batch("b-2", { deletes: [{ key: "bodyMass:w1" }, { key: "nope" }] }));

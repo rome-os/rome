@@ -43,6 +43,11 @@ export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
 
   app.post("/personal-data/ingest", async (c) => {
     const receivedAt = now();
+    // Only JSON, so a browser cannot send a batch from another page without
+    // a CORS preflight.
+    if (!c.req.header("content-type")?.toLowerCase().startsWith("application/json")) {
+      return c.json({ error: "unsupported_media_type" }, 415);
+    }
     const declared = Number(c.req.header("content-length") ?? 0);
     if (declared > MAX_BATCH_BYTES) return c.json({ error: "too_large" }, 413);
     const text = await readCapped(c.req.raw, MAX_BATCH_BYTES);

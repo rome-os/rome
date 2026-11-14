@@ -187,8 +187,9 @@ export interface ActionRunContext {
   channelContext?: ThreadContext;
   /**
    * Who can read what the calling turn says. A personal-data action runs only
-   * when it is `private`; absent, it is refused. Read on the call it is given
-   * to and never inherited, so a nested call reads no personal data.
+   * when the call itself is given `private`; absent, it is refused. A nested
+   * call inherits it for the turns it starts, never for this check, so a
+   * nested call reads no personal data.
    * Domain: docs/domains/participation.md#audience.
    */
   audience?: "private" | "shared";
@@ -305,6 +306,9 @@ interface ActionEngineOptions {
    * worker. Trust never comes from the action's own manifest. Absent, every
    * root takes a worker as before. */
   isFirstPartyAction?: (actionName: string) => boolean;
+  /** Main-only: who can read a chat. A first-party root run given a chat and
+   *  no audience, such as the inbox's message handler, takes the chat's. */
+  placeAudience?: (context: ThreadContext) => Promise<"private" | "shared">;
 }
 
 /** The arguments as an execution record keeps them, without the values a root run omits. */
@@ -434,6 +438,7 @@ export class ActionEngine {
   private actionSubprocessRunner: ActionSubprocessRunner | null;
   private actionWorkerFork: ActionEngineOptions["actionWorkerFork"];
   private isFirstPartyAction: ActionEngineOptions["isFirstPartyAction"];
+  private placeAudience: ActionEngineOptions["placeAudience"];
   private onWorkerInterrupted: ActionEngineOptions["onWorkerInterrupted"];
   private onApprovalCreated: ActionEngineOptions["onApprovalCreated"];
   private clock: Clock;
@@ -470,6 +475,7 @@ export class ActionEngine {
     this.actionSubprocessRunner = options?.actionSubprocessRunner ?? null;
     this.actionWorkerFork = options?.actionWorkerFork;
     this.isFirstPartyAction = options?.isFirstPartyAction;
+    this.placeAudience = options?.placeAudience;
     this.workerWarmPoolSize =
       this.processRole === "main"
         ? Math.max(0, Math.floor(options?.workerWarmPoolSize ?? DEFAULT_WORKER_WARM_POOL_SIZE))
@@ -695,6 +701,14 @@ export class ActionEngine {
     if (!actor && isReplay && context?.replayRootExecutionId) {
       const priorRoot = await this.executionsRepo.findById(context.replayRootExecutionId);
       actor = (priorRoot?.actor as SessionActor | null | undefined) ?? undefined;
+    }
+    if (
+      context?.audience === undefined &&
+      context?.channelContext &&
+      this.placeAudience &&
+      this.isTrustedForAudience(action.config.name)
+    ) {
+      context = { ...context, audience: await this.placeAudience(context.channelContext) };
     }
     if (actor && context?.actor !== actor) {
       context = { ...(context ?? {}), actor };
@@ -955,6 +969,7 @@ export class ActionEngine {
       // accountable for every hop underneath it.
       actor: parentStore?.actor ?? context?.actor,
       channelContext: context?.channelContext ?? parentStore?.channelContext,
+      audience: context?.audience ?? parentStore?.audience,
       sharedContext: mergeSharedContext(parentStore?.sharedContext, context?.sharedContext),
       sessionId: context?.sessionId ?? parentStore?.sessionId,
       turnId: context?.turnId ?? parentStore?.turnId,
@@ -1151,6 +1166,7 @@ export class ActionEngine {
       parentExecutionId: invocation.parentId,
       parentActionName: invocation.context?.parentActionName,
       channelContext: invocation.context?.channelContext,
+      audience: invocation.context?.audience,
       sharedContext: invocation.context?.sharedContext,
       sessionId: invocation.context?.sessionId,
       turnId: invocation.context?.turnId,
@@ -1844,6 +1860,16 @@ export class ActionEngine {
       return replayContext.getStore()?.coordinationRoot ? "in_process" : "subprocess";
     }
     return action.config.cancellable ? "subprocess" : "in_process";
+  }
+
+  /** Whether a root run's chat is trusted to say who reads it: only a
+   *  first-party action's caller names a chat main believes. */
+  private isTrustedForAudience(actionName: string): boolean {
+    try {
+      return this.isFirstPartyAction?.(actionName) === true;
+    } catch {
+      return false;
+    }
   }
 
   /** Whether a root runs in main: a first-party coordination action that is

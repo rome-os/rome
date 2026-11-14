@@ -82,6 +82,15 @@ describe("/personal-data routes", () => {
     expect(sources.sources[0]).toMatchObject({ source: "apple_health", origin: { id: ORIGIN } });
   });
 
+  it("refuses a body that is not sent as JSON", async () => {
+    const response = await send("/personal-data/ingest", {
+      method: "POST",
+      body: JSON.stringify(batch("b-1")),
+      headers: { "content-type": "text/plain" },
+    });
+    expect(response.status).toBe(415);
+  });
+
   it("refuses a bad envelope whole", async () => {
     expect((await ingest({ ...batch("b-1"), version: 2 })).status).toBe(400);
     expect((await ingest({ ...batch("b-1"), source: "fitbit" })).status).toBe(400);

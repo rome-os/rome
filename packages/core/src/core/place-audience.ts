@@ -8,7 +8,8 @@ import type { ConnectionKindOfChannel } from "../db/repositories/channel-records
 import { type ChatPrivacyRow, privateOwnerOf } from "../webchat/privacy.js";
 import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
 
-/** Who can read the chat a thread context names. */
+/** Who can read the chat a thread context names: who it is said in, and who
+ *  can read it where Rome records it. */
 export type PlaceAudience = (context: ThreadContext | undefined) => Promise<Audience>;
 
 export interface PlaceAudienceDeps {
@@ -45,6 +46,10 @@ export function placeAudience(deps: PlaceAudienceDeps): PlaceAudience {
       return dashboardChatAudience(chat, deps.visitorsAllowed?.() ?? true);
     }
     const kind = deps.connectionKindOf?.(context.channel) ?? context.channel;
+    // A connected account's chat is recorded where every dashboard user can
+    // read it, so its direct message is private only while nobody but the
+    // guardian may open the dashboard.
+    if (deps.visitorsAllowed?.() ?? true) return "shared";
     return messagingAudience(context, kind);
   };
 }

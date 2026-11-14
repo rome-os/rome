@@ -18,7 +18,7 @@ A new type or source needs a core release before a device sends it, because an i
 
 ## Routes
 
-Every route answers only the guardian's signed-in session, as the iOS app sends it. A visitor, an app key, an anonymous caller and a loopback caller, which an agent's shell is, get 403. Each answer is `Cache-Control: no-store`.
+The ingest takes only `Content-Type: application/json`, and answers 415 otherwise. Every route answers only the guardian's signed-in session, as the iOS app sends it. A visitor, an app key, an anonymous caller and a loopback caller, which an agent's shell is, get 403. Each answer is `Cache-Control: no-store`.
 
 | Route | Does |
 | --- | --- |
@@ -99,10 +99,12 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 ```
 
 - An ISO time without an offset, and a date, are read in `timeZone`. A date as `end` means the end of that day. With no `start`, the window starts at the local midnight of the day that ends at `end`.
+- A bucket is stored under its type, width and start, whatever key the device sends, and a delete of a bucket key is read the same way.
 - `hour` reads hour buckets. When the window starts at a local midnight, `day` reads the device's day bucket for each day that has one in `timeZone`, and adds up the hours of each other day. Otherwise it adds up hours. `week`, `month` and `total` roll up from days. Weeks start on Monday.
 - A summed type adds up. An averaged type takes the mean of its daily averages, labelled `avg_of_days`, or of its hours, labelled `avg_of_hours`. `min` and `max` are the exact extremes. `latest` does not fit a summed type, and `sum` does not fit an averaged one.
 - A sample or record belongs to the bucket it starts in. A night of sleep belongs to the day it ends on, as its key says. A record adds up what comes with it, such as minutes per sleep stage, and counts how many there were. An averaged record averages what comes with it too.
 - A bucket with no value is left out, never 0.
+- `freshness` says a type covers the window only when its earliest stored reading reaches back to the window's start and the device reports it synced up to the end. Otherwise `missingFrom` says where coverage is not known.
 - Each type is read from one origin: one whose readings reach back to the window's start, and among those the one that reports the type synced furthest. When none reaches back, the one synced furthest answers. An origin set off is never read. A second device, or a new origin after a sign-in, takes over a window once its backfill reaches it.
 
 ```json
@@ -113,15 +115,15 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
     { "type": "stepCount", "unit": "count", "aggregate": "sum",
       "buckets": [{ "startISO": "…", "endISO": "…", "value": 8412 }] }
   ],
-  "freshness": { "stepCount": { "syncedThrough": "2026-11-13T09:00:00Z", "coversWindow": false,
-                                "missingFrom": "2026-11-13T09:00:00Z" } }
+  "freshness": { "stepCount": { "syncedThrough": "2026-11-13T09:00:00Z", "earliest": "2026-05-14T16:00:00Z",
+                                "coversWindow": false, "missingFrom": "2026-11-13T09:00:00Z" } }
 }
 ```
 
 ## What is and is not enforced
 
 - Core refuses a personal-data action in a shared turn before it runs, and refuses a routine that reads personal data unless it works for a private chat.
-- A turn that an action starts through a worker, such as `system:summon` resuming a dashboard session, is shared, because the action's caller does not cross the worker boundary.
+- A turn that an action starts through a worker, such as `system:summon` or the reply to a channel message, takes the audience Rome read for the turn or chat that ran the action. A first-party action's chat is trusted for that, and any other action's turn is shared. A session the turn opens gets the same value in its shell, but a session already live keeps the one it opened with.
 - The live path goes through the agent's shell, where core sees no action. The agent's session carries `ROME_TURN_AUDIENCE`, and `rome-node device run` refuses a personal capability (Health on any device, and any capability `system.info` marks `personal`) while it says `shared`. The agent could unset the variable, so this is a guardrail against a model mistake, not a security boundary. The variable is read when the session opens, so a chat that opens to visitors later keeps the value its session started with.
 - A private turn can still send what it read elsewhere, with `send_message` or an email, and a Concierge turn woken by outside content, such as a mail it follows, is private. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
 - The store lives in Rome's database, which an agent's shell can read. The private-only rule guards against a model mistake, not against an agent that content in a shared chat tells to read the database.

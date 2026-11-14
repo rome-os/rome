@@ -34,9 +34,19 @@ describe("placeAudience", () => {
   const guardianDm = { threadType: "private" as const, senderBondLevel: "guardian" };
 
   it("reads a second connection of a kind by its connection kind", async () => {
-    const read = placeAudience({ connectionKindOf: (channel) => channel.replace(/-\d+$/, "") });
+    const read = placeAudience({
+      connectionKindOf: (channel) => channel.replace(/-\d+$/, ""),
+      visitorsAllowed: () => false,
+    });
     expect(await read({ channel: "telegram-2", threadId: "1", ...guardianDm })).toBe("private");
     expect(await read({ channel: "email-2", threadId: "1", ...guardianDm })).toBe("shared");
+  });
+
+  it("reads a direct message as shared while visitors may read its record on the dashboard", async () => {
+    const dm = { channel: "telegram", threadId: "1", ...guardianDm };
+    expect(await placeAudience({ visitorsAllowed: () => true })(dm)).toBe("shared");
+    expect(await placeAudience({})(dm)).toBe("shared");
+    expect(await placeAudience({ visitorsAllowed: () => false })(dm)).toBe("private");
   });
 
   it("looks a dashboard chat up, and fails closed without the lookup or a place", async () => {

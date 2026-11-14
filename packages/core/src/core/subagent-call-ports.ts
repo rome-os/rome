@@ -50,7 +50,7 @@ function subagentSession(child: AgentSession): SubagentSession {
 }
 
 /** What a parent hands its subagent's sessions: its tools' environment and its span attributes. */
-type Inherited = Pick<SessionOpening, "toolEnv" | "spanAttributes">;
+type Inherited = Pick<SessionOpening, "toolEnv" | "spanAttributes" | "audience">;
 
 /** A subagent's session shows no cards and takes no wake-ups; its tools and spans carry its parent's. */
 const opening = (at: SessionPlace, inherited: Inherited): SessionOpening => ({

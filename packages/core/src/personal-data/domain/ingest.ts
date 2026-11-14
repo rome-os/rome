@@ -140,15 +140,34 @@ export function checkUpsert(source: SourceSpec, raw: unknown, now: number): Item
     fields,
     metadata,
   };
-  return { ok: true, item: { key: item.key, ...stored, contentHash: contentHash(stored) } };
+  // A bucket is named by what it covers, never by the sender's key, so two
+  // spellings of one hour cannot both be stored and both be added up.
+  const key = resolution ? bucketKey(item.type, resolution, startAt) : item.key;
+  return { ok: true, item: { key, ...stored, contentHash: contentHash(stored) } };
 }
 
-/** Checks one delete. */
+/** Checks one delete. A bucket's key is read the way an upsert stores it. */
 export function checkDelete(raw: unknown): ItemCheck<{ key: string }> {
   const parsed = deleteSchema.safeParse(raw);
-  return parsed.success
-    ? { ok: true, item: parsed.data }
-    : { ok: false, code: "bad_item", key: keyOf(raw) };
+  if (!parsed.success) return { ok: false, code: "bad_item", key: keyOf(raw) };
+  const bucket = BUCKET_KEY.exec(parsed.data.key);
+  const at = bucket ? Date.parse(bucket[3]) : Number.NaN;
+  return {
+    ok: true,
+    item: {
+      key:
+        bucket && !Number.isNaN(at)
+          ? bucketKey(bucket[1], bucket[2] as Resolution, at)
+          : parsed.data.key,
+    },
+  };
+}
+
+const BUCKET_KEY = /^([^:]+):(hour|day):(.+)$/;
+
+/** The key a bucket is stored under: its type, width and start. */
+export function bucketKey(type: string, resolution: Resolution, startAt: number): string {
+  return `${type}:${resolution}:${new Date(startAt).toISOString()}`;
 }
 
 function keyOf(raw: unknown): string | undefined {

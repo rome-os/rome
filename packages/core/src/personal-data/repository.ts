@@ -306,11 +306,12 @@ export class PersonalDataRepository {
     source: string,
     type: string,
     windowStart: number,
-  ): { origin: string; syncedThroughAt: number | null } | undefined {
+  ): { origin: string; syncedThroughAt: number | null; earliestAt: number | null } | undefined {
     return this.db
       .select({
         origin: personalDataTypes.origin,
         syncedThroughAt: personalDataTypes.syncedThroughAt,
+        earliestAt: personalDataTypes.earliestAt,
       })
       .from(personalDataTypes)
       .innerJoin(

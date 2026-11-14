@@ -376,7 +376,7 @@ interface ManagerDeps {
   subagentSessions?: (
     manager: Sessions,
     parentLink: string,
-    inherited: Pick<SessionOpening, "toolEnv" | "spanAttributes">,
+    inherited: Pick<SessionOpening, "toolEnv" | "spanAttributes" | "audience">,
   ) => SubagentSessions;
   /** The middleware apps put around a turn's reply. Absent, the model replies directly. */
   turnMiddleware?: TurnMiddleware;
@@ -1488,6 +1488,9 @@ async function openSession(
           sessions: deps.subagentSessions(refs.getChildManager(), refs.childChannelThreadKey, {
             toolEnv: init.toolEnv,
             spanAttributes: init.spanAttributes,
+            // The subagent reads its starter's place; each of its turns is
+            // narrowed again by the starter's turn (parentAudience).
+            audience: init.audience,
           }),
           at: {
             workingDir,

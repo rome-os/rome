@@ -19,7 +19,10 @@ import type { PersonalDataRepository } from "./repository.js";
 
 export interface Freshness {
   syncedThrough?: string;
-  /** Whether the device reported the type complete up to the window's end. */
+  /** The type's earliest stored reading. */
+  earliest?: string;
+  /** Whether the stored readings reach back to the window's start and the
+   *  device reported the type complete up to its end. */
   coversWindow: boolean;
   /** Where the stored data stops covering the window. */
   missingFrom?: string;
@@ -55,11 +58,17 @@ export function queryPersonalData(
     // or a new origin after a sign-in takes over once it has caught up.
     const reading = repo.originFor(source.source, spec.type, plan.start);
     const at = reading?.syncedThroughAt ?? undefined;
+    const earliest = reading?.earliestAt ?? undefined;
     const windowEnd = Math.min(plan.end, defaults.now);
+    // The device reports how far it is synced, not how far back its history
+    // reaches, so the earliest reading stands in for that: a window that
+    // starts before it is not known to be covered.
+    const reachesBack = earliest !== undefined && earliest <= plan.start;
     freshness[spec.type] = {
       ...(at !== undefined ? { syncedThrough: new Date(at).toISOString() } : {}),
-      coversWindow: at !== undefined && at >= windowEnd,
-      ...(at === undefined
+      ...(earliest !== undefined ? { earliest: new Date(earliest).toISOString() } : {}),
+      coversWindow: at !== undefined && at >= windowEnd && reachesBack,
+      ...(at === undefined || !reachesBack
         ? { missingFrom: new Date(plan.start).toISOString() }
         : at < windowEnd
           ? { missingFrom: new Date(Math.max(at, plan.start)).toISOString() }

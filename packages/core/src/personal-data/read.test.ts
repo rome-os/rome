@@ -305,8 +305,13 @@ describe("queryPersonalData", () => {
     const covered = query({ type: "stepCount", start: "2026-11-10", end: "2026-11-11" });
     expect(covered.freshness.stepCount).toEqual({
       syncedThrough: new Date(NOV_10 + 2 * DAY).toISOString(),
+      earliest: new Date(NOV_10).toISOString(),
       coversWindow: true,
     });
+    // History before the earliest reading is not known to be on Rome.
+    expect(
+      query({ type: "stepCount", start: "2026-11-01", end: "2026-11-11" }).freshness.stepCount,
+    ).toMatchObject({ coversWindow: false, missingFrom: new Date(NOV_10 - 9 * DAY).toISOString() });
     const uncovered = query({
       types: ["stepCount", "heartRate"],
       start: "2026-11-10",

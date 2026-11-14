@@ -12,6 +12,8 @@ interface WallClock {
   second: number;
 }
 
+const DAY_MS = 86_400_000;
+
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
 function formatter(tz: string): Intl.DateTimeFormat {
@@ -64,7 +66,7 @@ function offsetAt(at: number, tz: string): number {
 
 /** The instant a wall-clock time names in `tz`. Fields out of range roll over,
  *  as `Date.UTC` rolls them. A time a daylight saving change skips reads as the
- *  instant after the change. */
+ *  instant the skip ends, and a time it repeats as the first of the two. */
 export function fromWallClock(
   tz: string,
   year: number,
@@ -74,11 +76,23 @@ export function fromWallClock(
   minute = 0,
   second = 0,
 ): number {
-  const guess = Date.UTC(year, month - 1, day, hour, minute, second);
-  // Two passes: the offset at the guess, then at the corrected instant, so a
-  // time near a daylight saving change lands on the right side of it.
-  const first = guess - offsetAt(guess, tz);
-  return guess - offsetAt(first, tz);
+  const wanted = Date.UTC(year, month - 1, day, hour, minute, second);
+  // The zone's offset a day before and a day after: a time near a change is
+  // one of the two readings, or in the gap between them.
+  const readings = [wanted - offsetAt(wanted - DAY_MS, tz), wanted - offsetAt(wanted + DAY_MS, tz)];
+  const named = readings.filter((at) => {
+    const clock = wallClock(at, tz);
+    const shown = Date.UTC(
+      clock.year,
+      clock.month - 1,
+      clock.day,
+      clock.hour,
+      clock.minute,
+      clock.second,
+    );
+    return shown === wanted;
+  });
+  return named.length > 0 ? Math.min(...named) : Math.max(...readings);
 }
 
 /** The start of the period of `interval` that holds `at`. Weeks start on Monday. */
