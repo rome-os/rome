@@ -1,6 +1,6 @@
-// Where each listening session's transcriber comes from. A Rome signed in to
-// Rome Cloud asks it for a session every time; one that is not uses its own
-// `ROME_TRANSCRIPTION_*` provider.
+// Where each listening session's transcriber comes from: a Rome signed in to
+// Rome Cloud asks it for a session every time. The instance holds no
+// long-lived credential for a transcription provider.
 
 import type { VoiceInputInfo, VoiceInputStopReason } from "@rome/api-types/voice-input";
 import { createLogger } from "../logger.js";
@@ -18,8 +18,8 @@ const log = createLogger("voice-input");
 /** One listening session's transcriber. */
 export interface ListeningSource {
   transcriber: Transcriber;
-  /** Rome Cloud's session id, or null on the instance's own provider. */
-  romeCloudSessionId: string | null;
+  /** Rome Cloud's id for the session, which its usage event carries. */
+  romeCloudSessionId: string;
 }
 
 export type OpenOutcome =
@@ -27,7 +27,7 @@ export type OpenOutcome =
   | { ok: false; reason: VoiceInputStopReason; detail?: string };
 
 export interface VoiceInputSource {
-  /** False when there is no source at all; the voice control is then absent. */
+  /** False while not signed in to Rome Cloud; the voice control is then absent. */
   available(): boolean;
   /** What the read API and Settings show. */
   info(): Promise<VoiceInputInfo>;
@@ -35,16 +35,16 @@ export interface VoiceInputSource {
   open(): Promise<OpenOutcome>;
 }
 
+const NONE: VoiceInputInfo = { available: false, place: null };
+
 /** No source at all: the voice control is absent. */
 export const NO_VOICE_INPUT: VoiceInputSource = {
   available: () => false,
-  info: async () => ({ available: false, via: null, place: null }),
+  info: async () => NONE,
   open: async () => ({ ok: false, reason: "service-unavailable" }),
 };
 
 export interface VoiceInputSourceDeps {
-  /** The instance's own provider, or null. */
-  own: Transcriber | null;
   /** Rome Cloud as the instance reaches it, or null while not signed in. */
   romeCloud: () => RomeCloudCaller | null;
   fetch?: typeof fetch;
@@ -52,9 +52,6 @@ export interface VoiceInputSourceDeps {
 
 // How long Rome trusts the provider Rome Cloud named.
 const PROVIDER_TTL_MS = 60_000;
-
-// Rome Cloud refusals that the instance's own provider, if any, answers instead.
-const OWN_PROVIDER_SERVES = new Set(["voice_input_not_allowed", "voice_input_not_configured"]);
 
 // Rome Cloud names providers by their lower-case id.
 const PROVIDER_NAMES: Record<string, string> = { soniox: "Soniox" };
@@ -86,11 +83,11 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
   };
 
   // The place Rome Cloud serves from, read without minting a credential.
-  const romeCloudInfo = async (caller: RomeCloudCaller): Promise<VoiceInputInfo | null> => {
+  const romeCloudInfo = async (caller: RomeCloudCaller): Promise<VoiceInputInfo> => {
     const now = Date.now();
     const asker = `${caller.origin} ${(await caller.bearer()) ?? ""}`;
     if (named && named.asker === asker && now - named.at < PROVIDER_TTL_MS) {
-      return { available: true, via: "rome-cloud", place: named.place };
+      return { available: true, place: named.place };
     }
     named = null;
     const outcome = await readRomeCloudProvider(caller, deps.fetch);
@@ -102,12 +99,11 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
           at: now,
           asker,
         };
-        return { available: true, via: "rome-cloud", place: named.place };
+        return { available: true, place: named.place };
       }
       case "not-configured":
         return {
           available: true,
-          via: "rome-cloud",
           place: null,
           placeUnknown: "rome-cloud-not-configured",
         };
@@ -115,77 +111,54 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
         log.warn("rome cloud transcription provider unreadable", { detail: outcome.detail });
         return {
           available: true,
-          via: "rome-cloud",
           place: null,
           placeUnknown: "rome-cloud-unreachable",
         };
       case "not-allowed":
-        return { available: false, via: null, place: null };
+        return NONE;
       case "signed-out":
-        return null;
+        return { available: true, place: null, placeUnknown: "rome-cloud-signed-out" };
     }
   };
 
   return {
-    available: () => deps.romeCloud() !== null || deps.own !== null,
+    available: () => deps.romeCloud() !== null,
 
     async info() {
       const caller = deps.romeCloud();
-      if (!caller) named = null;
-      const cloud = caller ? await romeCloudInfo(caller) : null;
-      // The gate lives in Rome Cloud: the instance's own provider is not gated,
-      // and serves where Rome Cloud has no provider set up.
-      const cloudServes =
-        cloud?.available && !(deps.own && cloud.placeUnknown === "rome-cloud-not-configured");
-      if (cloud && (cloudServes || !deps.own)) return cloud;
-      if (deps.own) return { available: true, via: "instance", place: deps.own.place };
-      // Signed in, but Rome Cloud does not take this instance's credential.
-      if (caller) {
-        return {
-          available: true,
-          via: "rome-cloud",
-          place: null,
-          placeUnknown: "rome-cloud-signed-out",
-        };
+      if (!caller) {
+        named = null;
+        return NONE;
       }
-      return { available: false, via: null, place: null };
+      return romeCloudInfo(caller);
     },
 
     async open() {
       const caller = deps.romeCloud();
-      if (caller) {
-        const outcome = await askRomeCloud(caller);
-        // The place named for Rome Cloud no longer says where this session's
-        // audio goes.
-        if (outcome.kind !== "granted") named = null;
-        switch (outcome.kind) {
-          case "granted":
-            return {
-              ok: true,
-              source: { transcriber: outcome.transcriber, romeCloudSessionId: outcome.sessionId },
-            };
-          case "refused":
-            // An account Rome Cloud does not allow, or a Rome Cloud with no
-            // provider set up, still has the instance's own provider.
-            if (OWN_PROVIDER_SERVES.has(outcome.code) && deps.own) break;
-            log.warn("rome cloud refused a transcription session", { code: outcome.code });
-            return { ok: false, reason: "service-refused", detail: outcome.code };
-          case "unavailable":
-            log.warn("rome cloud transcription session failed", { detail: outcome.detail });
-            return { ok: false, reason: "service-unavailable" };
-          case "unknown-provider":
-            log.warn("rome cloud named a provider rome has no adapter for", {
-              provider: outcome.provider,
-            });
-            return { ok: false, reason: "service-unavailable" };
-          case "signed-out":
-            // Rome Cloud does not take this instance: its own provider, if any.
-            break;
-        }
+      if (!caller) return { ok: false, reason: "service-unavailable" };
+      const outcome = await askRomeCloud(caller);
+      // The place named for Rome Cloud may no longer say where audio goes.
+      if (outcome.kind !== "granted") named = null;
+      switch (outcome.kind) {
+        case "granted":
+          return {
+            ok: true,
+            source: { transcriber: outcome.transcriber, romeCloudSessionId: outcome.sessionId },
+          };
+        case "refused":
+          log.warn("rome cloud refused a transcription session", { code: outcome.code });
+          return { ok: false, reason: "service-refused", detail: outcome.code };
+        case "signed-out":
+          return { ok: false, reason: "service-signed-out" };
+        case "unavailable":
+          log.warn("rome cloud transcription session failed", { detail: outcome.detail });
+          return { ok: false, reason: "service-unavailable" };
+        case "unknown-provider":
+          log.warn("rome cloud named a provider rome has no adapter for", {
+            provider: outcome.provider,
+          });
+          return { ok: false, reason: "service-unavailable" };
       }
-      if (deps.own)
-        return { ok: true, source: { transcriber: deps.own, romeCloudSessionId: null } };
-      return { ok: false, reason: caller ? "service-signed-out" : "service-unavailable" };
     },
   };
 }

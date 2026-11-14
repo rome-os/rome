@@ -239,7 +239,7 @@ export interface ApiDeps {
   visitorAllowListSync: VisitorAllowListSync;
   /** The chats the guardian's phone app holds open on the live-events socket. */
   phoneWatching?: PhoneWatching;
-  /** Where each listening session's speech becomes text: Rome Cloud, or the instance's own provider. */
+  /** Where each listening session's speech becomes text, as Rome Cloud grants it. */
   voiceInput?: VoiceInputSource;
   /** Whether the guardian is at a web dashboard, from its signals on the live-events socket. */
   dashboardActivity?: DashboardActivity;

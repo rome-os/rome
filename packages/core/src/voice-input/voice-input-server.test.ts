@@ -69,10 +69,12 @@ async function fakeSoniox(): Promise<FakeSoniox> {
   return fake;
 }
 
-/** The instance's own Soniox key, as `ROME_TRANSCRIPTION_*` configures it. */
-function ownSource(fake: FakeSoniox): Pick<VoiceInputSource, "open"> {
+/** A session on the fake, with a key as Rome Cloud would grant it. */
+function grantedSource(fake: FakeSoniox): Pick<VoiceInputSource, "open"> {
   const transcriber = createSonioxTranscriber({ apiKey: "key-1", url: fake.url });
-  return { open: async () => ({ ok: true, source: { transcriber, romeCloudSessionId: null } }) };
+  return {
+    open: async () => ({ ok: true, source: { transcriber, romeCloudSessionId: "session-0" } }),
+  };
 }
 
 /** Rome's dictation socket in front of the fake, and a client connected to it. */
@@ -85,7 +87,7 @@ async function dictation(
   const http: Server = createServer();
   const wss = new WebSocketServer({ server: http });
   wss.on("connection", (ws) =>
-    serve(ws, { source: ownSource(fake), maxDictationMs, finishTimeoutMs, ...options }),
+    serve(ws, { source: grantedSource(fake), maxDictationMs, finishTimeoutMs, ...options }),
   );
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   servers.push({
@@ -382,7 +384,7 @@ describe("voice input socket", () => {
     const fake = await fakeSoniox();
     const { client, messages, closed } = await dictation(fake, undefined, undefined, {
       source: {
-        open: async () => ({ ok: true, source: { transcriber, romeCloudSessionId: null } }),
+        open: async () => ({ ok: true, source: { transcriber, romeCloudSessionId: "session-0" } }),
       },
     });
 
@@ -429,7 +431,6 @@ describe("voice input on Rome Cloud", () => {
       30,
     );
     const source = createVoiceInputSource({
-      own: null,
       romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
       fetch: cloud.fetch,
     });
@@ -481,7 +482,6 @@ describe("voice input on Rome Cloud", () => {
       }),
     );
     const source = createVoiceInputSource({
-      own: null,
       romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
       fetch: cloud.fetch,
     });
@@ -512,7 +512,6 @@ describe("voice input on Rome Cloud", () => {
       ),
     );
     const source = createVoiceInputSource({
-      own: null,
       romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
       fetch: cloud.fetch,
     });
@@ -529,20 +528,6 @@ describe("voice input on Rome Cloud", () => {
       { type: "error", reason: "service-refused", detail: "voice_input_rate_limited" },
     ]);
     expect(fake.received).toEqual([]);
-    expect(usage.recorded).toEqual([]);
-  });
-
-  it("reports no usage for a session on the instance's own provider", async () => {
-    const fake = await fakeSoniox();
-    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
-    const usage = usageSink();
-    const { client, closed } = await dictation(fake, undefined, undefined, { usage });
-
-    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
-    client.send(Buffer.alloc(3_200, 1));
-    client.send(JSON.stringify({ type: "stop" }));
-    await closed;
-
     expect(usage.recorded).toEqual([]);
   });
 });

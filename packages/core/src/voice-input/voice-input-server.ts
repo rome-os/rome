@@ -138,11 +138,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     settle(last.type === "error" ? last.reason : last.type);
   };
 
-  // Usage is reported only for a Rome Cloud session: Rome Cloud does not
-  // count what the instance's own provider served.
+  // Every listening session is a Rome Cloud session, so each one reports.
   function reportUsage(status: string) {
-    const sessionId = listening?.source.romeCloudSessionId;
-    if (!listening || !sessionId || !options.usage) return;
+    if (!listening || !options.usage) return;
+    const sessionId = listening.source.romeCloudSessionId;
     const { transcriber } = listening.source;
     options.usage.recordTranscription({
       sessionId,
@@ -183,7 +182,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     listening = { source: opened.source, sampleRate, startedAt: Date.now() };
     log.info("voice input started", {
       provider: transcriber.place.provider,
-      via: opened.source.romeCloudSessionId ? "rome-cloud" : "instance",
+      sessionId: opened.source.romeCloudSessionId,
       sampleRate,
     });
     stream = transcriber.open(
