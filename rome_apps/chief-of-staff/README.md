@@ -10,7 +10,7 @@ This is phase 1. The agent answers when it is addressed. It does not yet draw on
 
 - It names every member, their role, and what they are working on, from the roster.
 - It states each current goal with its owner and date, from the goals document, and leaves out a goal the team has dropped.
-- In a direct message it knows which member it is talking to, from the person their Discord account is linked to. It never guesses a sender from a display name.
+- In any chat it knows which member said each message, from the person their Discord account is linked to. It never guesses a sender from a display name.
 - It names a source for every answer, and says so when it does not know.
 - It answers in the chat and the thread the message was said in.
 - It keeps to itself anything said in a direct message or a chat only some of the team can read.
@@ -49,7 +49,6 @@ Rome answers a member directly only when their bond level is one the guardian tr
 
 ## What this phase does not do
 
-- It cannot yet attribute each message in a group chat to the right person (rule K3). Rome tells the agent who sent a message only once per chat, so attribution holds in a chat with one member, such as a direct message, and not yet in a group chat. Fixing it is a change to Rome that is still being designed.
 - It does not draw on messages it was not addressed in. "What did we decide yesterday?" waits for phase 2.
 - It keeps no memory of a chat between answers. Each answer reads the roster and the goals document fresh, which is why its answers are the same after a session renewal and a restart (rule K6), and also why nothing a member says in a chat changes its answers yet (the phase 2 gap for rule K4).
 - It posts nothing on its own. Suggestions and reports wait for phase 3.
