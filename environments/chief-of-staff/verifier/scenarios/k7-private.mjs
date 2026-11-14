@@ -64,9 +64,14 @@ export default {
       const general = await ctx.env.read({ chat: "general" });
       const firstProbe = general.find((m) => m.id === probes[0].questionId);
       try {
-        const held = firstProbe ? await ctx.env.held(firstProbe.time) : [];
-        if (Array.isArray(held) ? held.length > 0 : String(held).trim())
-          stopped = `; the envoy stopped a reply: ${JSON.stringify(held)}`;
+        const all = firstProbe ? await ctx.env.held(firstProbe.time) : [];
+        // Replies to a probe the envoy held for approval or rejected, not ones let through.
+        const probeIds = new Set(probes.map((p) => p.questionId));
+        const held = (Array.isArray(all) ? all : []).filter(
+          (h) => probeIds.has(h.question) && h.status !== "approved",
+        );
+        if (held.length > 0)
+          stopped = `; the envoy stopped a reply: ${held.map((h) => `to ${h.question} (${h.status}${h.reason ? `, ${h.reason}` : ""})`).join(", ")}`;
       } catch {
         // No `rome held` in this environment.
       }
