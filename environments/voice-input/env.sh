@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The voice input environment: a Rome container of its own, built from a
-# product ref merged with this branch, a stand-in transcriber beside it, and
-# a Chrome whose microphone is a recording.
+# product ref merged with this branch, signed in to a Rome Cloud of its own,
+# a stand-in transcriber beside them, and a Chrome whose microphone is a
+# recording.
 #
 #   environments/voice-input/env.sh up [--no-build]  # start, or bring up to date
 #   environments/voice-input/env.sh reset            # wipe Rome back to empty and start again
@@ -34,6 +35,9 @@ CAPTURE="rome-env-${NAME}-capture"
 HOME_VOLUME="rome-env-${NAME}-home"
 MEMORY_VOLUME="rome-env-${NAME}-memory"
 USER_VOLUME="rome-env-${NAME}-user"
+SIGNER="rome-env-${NAME}-signer"
+SIGNER_KEY_VOLUME="rome-env-${NAME}-signer-key"
+SIGNER_SOCKET_VOLUME="rome-env-${NAME}-signer-sock"
 BUILD_TREE="$RUN_DIR/product-tree"
 
 # The product under test. Its code never lands on this branch: the build
@@ -58,6 +62,9 @@ GUARDIAN_USER=guardian
 
 # Rome's API inside the container, past Caddy.
 API="http://127.0.0.1:4141/api"
+
+# shellcheck source=lib/cloud.sh
+. "$ENV_DIR/lib/cloud.sh"
 
 log() { printf 'env/%s: %s\n' "$NAME" "$*" >&2; }
 die() {
@@ -139,6 +146,10 @@ image_sha() {
 # branch, in a throwaway checkout, so product code never lands here.
 build_rome_image() {
   local product_sha env_sha env_dirty=false merged
+  # The image takes the checkout's file modes. Under the state files' umask,
+  # its packages would be readable by Rome's own user only, and the signer,
+  # which runs as another user, could not load.
+  umask 022
   git -C "$REPO_ROOT" fetch --quiet origin main
   git -C "$REPO_ROOT" fetch --quiet origin "${PRODUCT_REF#origin/}" 2>/dev/null || true
   env_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
@@ -171,6 +182,7 @@ build_rome_image() {
       .docker/rome-runtime-workspace >/dev/null
   )
   git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
+  umask 077
 
   printf '{"product":{"ref":"%s","commit":"%s"},"environment":{"commit":"%s","dirty":%s},"merged":"%s","builtAt":"%s"}\n' \
     "$PRODUCT_REF" "$product_sha" "$env_sha" "$env_dirty" "$merged" "$(date -u +%FT%TZ)" >"$BUILD_FILE"
@@ -196,7 +208,7 @@ ws_dir() {
 
 start_transcriber() {
   docker rm -f "$TRANSCRIBER" >/dev/null 2>&1 || true
-  docker run -d --name "$TRANSCRIBER" --restart unless-stopped \
+  docker run -d --name "$TRANSCRIBER" --restart unless-stopped --memory 2g \
     --network "$NETWORK" --network-alias transcriber \
     -p "127.0.0.1:$TRANSCRIBER_CONTROL_PORT:8791" \
     -e "STAND_IN_API_KEY=$STAND_IN_KEY" \
@@ -213,15 +225,20 @@ start_transcriber() {
 # A value already in the Rome env file, so the instance secrets survive a rewrite.
 kept() { [ ! -f "$ROME_ENV_FILE" ] || sed -n "s/^$1=//p" "$ROME_ENV_FILE"; }
 
-# Rome's env file. The transcriber is the stand-in unless the state says
-# real, in which case Rome uses Soniox with the key from the secrets file.
+# Rome's env file. Signed in to Rome Cloud (the default), Rome holds no
+# provider credential: it gets one from Rome Cloud per listening session.
+# Otherwise it uses its own: the stand-in's key, or Soniox's from the secrets
+# file when the state says real.
 write_rome_env() {
-  local jwt key mode url api_key
+  local jwt key mode url api_key sign_in token
   jwt="$(kept ROME_JWT_SECRET)"
   key="$(kept ROME_OAUTH_TOKEN_ENCRYPTION_KEY)"
   [ -n "$jwt" ] || jwt="$(openssl rand -hex 32)"
   [ -n "$key" ] || key="$(openssl rand -hex 32)"
   mode="$(state transcriber || true)"
+  sign_in="$(state signIn || echo cloud)"
+  token="$(state cloud.instanceToken || true)"
+  [ "$sign_in" != cloud ] || [ -n "$token" ] || die "Rome Cloud has no instance for Rome yet. Run env.sh up."
   if [ "$mode" = real ]; then
     [ -n "${SONIOX_API_KEY:-}" ] || die "transcriber real needs SONIOX_API_KEY in $SECRETS_FILE"
     url="$SONIOX_URL" api_key="$SONIOX_API_KEY"
@@ -233,27 +250,47 @@ write_rome_env() {
     echo "WEB_HOST=0.0.0.0"
     echo "ROME_JWT_SECRET=$jwt"
     echo "ROME_OAUTH_TOKEN_ENCRYPTION_KEY=$key"
-    # A self-hosted instance, not linked to Rome Cloud, so the guardian signs
-    # in with a local password the environment holds.
-    echo "PANTHEON_BASE_ORIGIN="
-    echo "ROME_TRANSCRIPTION_PROVIDER=soniox"
-    echo "ROME_TRANSCRIPTION_URL=$url"
-    echo "ROME_TRANSCRIPTION_API_KEY=$api_key"
+    # The guardian signs in with a local password the environment holds,
+    # either way: Rome has no slug, so Rome Cloud sign-in stays off.
+    if [ "$sign_in" = cloud ]; then
+      echo "PANTHEON_BASE_ORIGIN=$CLOUD_ORIGIN"
+      echo "ROME_INSTANCE_TOKEN=$token"
+    else
+      echo "PANTHEON_BASE_ORIGIN="
+      echo "ROME_TRANSCRIPTION_PROVIDER=soniox"
+      echo "ROME_TRANSCRIPTION_URL=$url"
+      echo "ROME_TRANSCRIPTION_API_KEY=$api_key"
+    fi
     [ -z "${ANTHROPIC_API_KEY:-}" ] || echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
     [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || echo "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
   } >"$ROME_ENV_FILE.new"
   mv "$ROME_ENV_FILE.new" "$ROME_ENV_FILE"
 }
 
+# The signer beside Rome, as docker-compose.yml runs it: it holds the
+# instance's key, has no network, and shares only its socket with Rome. Rome
+# Cloud accepts an instance token only to register that key.
+start_signer() {
+  docker rm -f "$SIGNER" >/dev/null 2>&1 || true
+  docker run -d --name "$SIGNER" --restart unless-stopped --memory 256m \
+    --entrypoint node --user 10001:10001 --read-only --cap-drop ALL \
+    --security-opt no-new-privileges:true --network none \
+    -e "SIGNER_AUDIENCE=$CLOUD_ORIGIN" -e SIGNER_KEY_DIR=/keys -e SIGNER_SOCKET=/run/rome-signer/signer.sock \
+    -v "$SIGNER_KEY_VOLUME:/keys" -v "$SIGNER_SOCKET_VOLUME:/run/rome-signer" \
+    "$IMAGE" /opt/rome/packages/signer/dist/main.js >/dev/null
+}
+
 # The same container settings as a hosted Rome's docker-compose.yml, with its
 # public port on loopback only, where the environment's Chrome reaches it.
 start_rome() {
   docker rm -f "$ROME" >/dev/null 2>&1 || true
-  docker run -d --name "$ROME" --restart unless-stopped \
+  start_signer
+  docker run -d --name "$ROME" --restart unless-stopped --memory 6g \
     --network "$NETWORK" \
     -p "127.0.0.1:$DASHBOARD_PORT:8080" \
-    --env-file "$ROME_ENV_FILE" \
+    --env-file "$ROME_ENV_FILE" -e ROME_SIGNER_SOCKET=/run/rome-signer/signer.sock \
     -v "$HOME_VOLUME:/home/rome" -v "$MEMORY_VOLUME:/app/memory" -v "$USER_VOLUME:/home/user" \
+    -v "$SIGNER_SOCKET_VOLUME:/run/rome-signer:ro" \
     --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor=unconfined --shm-size 1g \
     "$IMAGE" >/dev/null
   wait_for_rome
@@ -304,11 +341,17 @@ cmd_up() {
   claim_ownership
   load_secrets
   [ -n "$(state transcriber || true)" ] || set_state '{"transcriber":"stand-in"}'
+  [ -n "$(state signIn || true)" ] || set_state '{"signIn":"cloud"}'
   if [ "$build" = 1 ] || [ -z "$(image_sha)" ]; then build_rome_image; fi
   build_tools_image
   ensure_network
   log "starting the stand-in transcriber ..."
   start_transcriber
+  apply_stand_in_keys
+  if [ "$(state signIn)" = cloud ]; then
+    log "starting Rome Cloud ..."
+    cmd_cloud_up
+  fi
   write_rome_env
   log "starting Rome ..."
   start_rome
@@ -318,8 +361,9 @@ cmd_up() {
 }
 
 remove_rome() {
-  docker rm -f "$ROME" >/dev/null 2>&1 || true
-  docker volume rm "$HOME_VOLUME" "$MEMORY_VOLUME" "$USER_VOLUME" >/dev/null 2>&1 || true
+  docker rm -f "$ROME" "$SIGNER" >/dev/null 2>&1 || true
+  docker volume rm "$HOME_VOLUME" "$MEMORY_VOLUME" "$USER_VOLUME" \
+    "$SIGNER_KEY_VOLUME" "$SIGNER_SOCKET_VOLUME" >/dev/null 2>&1 || true
 }
 
 # Chrome forks away from the pid it was started as, so every Chrome on the
@@ -352,7 +396,9 @@ cmd_reset() {
   docker rm -f "$CAPTURE" >/dev/null 2>&1 || true
   log "wiping Rome's home, memory and chats ..."
   remove_rome
-  set_state '{"guardianPassword":null,"cookies":null,"transcriber":"stand-in"}'
+  log "wiping Rome Cloud's account, sessions and usage ..."
+  remove_cloud_data
+  set_state '{"guardianPassword":null,"cookies":null,"transcriber":"stand-in","signIn":"cloud"}'
   cmd_up --no-build
 }
 
@@ -361,10 +407,11 @@ cmd_down() {
   stop_browser
   docker rm -f "$CAPTURE" "$TRANSCRIBER" >/dev/null 2>&1 || true
   remove_rome
+  remove_cloud_data
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm "$IMAGE" >/dev/null 2>&1 || true
   rm -rf "$RUN_DIR"
-  log "removed."
+  log "removed. Rome Cloud's checkout stays in $CLOUD_DIR"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

@@ -21,6 +21,7 @@ set -euo pipefail
 PUBLIC_ROME="rome-env-${NAME}-public-rome"
 PUBLIC_TRY="rome-env-${NAME}-public-try"
 PUBLIC_EDGE="rome-env-${NAME}-public-edge"
+PUBLIC_SIDECAR="rome-env-${NAME}-public-sidecar"
 PUBLIC_VOLUME_PREFIX="rome-env-${NAME}-public"
 PUBLIC_STATE="$RUN_DIR/../public"
 PUBLIC_ENV_FILE="$PUBLIC_STATE/rome.env"
@@ -57,7 +58,7 @@ cmd_up() {
 
   log "starting the public Rome with real Soniox ..."
   docker rm -f "$PUBLIC_ROME" >/dev/null 2>&1 || true
-  docker run -d --name "$PUBLIC_ROME" --restart unless-stopped --network "$NETWORK" \
+  docker run -d --name "$PUBLIC_ROME" --restart unless-stopped --memory 6g --network "$NETWORK" \
     --env-file "$PUBLIC_ENV_FILE" \
     -v "$PUBLIC_VOLUME_PREFIX-home:/home/rome" -v "$PUBLIC_VOLUME_PREFIX-memory:/app/memory" \
     -v "$PUBLIC_VOLUME_PREFIX-user:/home/user" \
@@ -77,7 +78,7 @@ cmd_up() {
 
   log "starting the try page ..."
   docker rm -f "$PUBLIC_TRY" >/dev/null 2>&1 || true
-  docker run -d --name "$PUBLIC_TRY" --restart unless-stopped --network "$NETWORK" \
+  docker run -d --name "$PUBLIC_TRY" --restart unless-stopped --memory 2g --network "$NETWORK" \
     -v "$ENV_DIR/try:/repo/environments/voice-input/try:ro" \
     -v "$REPO_ROOT/packages/core/package.json:/repo/packages/core/package.json:ro" \
     -v "$(ws_dir):/repo/packages/core/node_modules/ws:ro" \
@@ -91,7 +92,7 @@ cmd_up() {
     ':80 {' \
     '  @try host voice-try.rome.localhost' \
     '  handle @try {' "    reverse_proxy $PUBLIC_TRY:4790" '  }' \
-    '  handle {' "    reverse_proxy $PUBLIC_ROME:8080" '  }' \
+    '  handle {' "    reverse_proxy $PUBLIC_ROME:8081" '  }' \
     '}' >"$PUBLIC_STATE/Caddyfile"
   chmod 644 "$PUBLIC_STATE/Caddyfile"
   docker create --name "$PUBLIC_EDGE" --restart unless-stopped --network "$EDGE_NETWORK" \
@@ -103,12 +104,36 @@ cmd_up() {
     -v "$PUBLIC_STATE/Caddyfile:/etc/caddy/Caddyfile:ro" \
     caddy:2-alpine >/dev/null
   docker network connect "$NETWORK" "$PUBLIC_EDGE"
+
+  # Rome's own Caddy sets X-Forwarded-Proto to http, so behind the tunnel Rome
+  # would reconstruct its origin as http://voice-input.romeos.dev and refuse
+  # every WebSocket whose Origin is the https page. A sidecar in Rome's network
+  # namespace sends WebSockets straight to Rome's API with the public origin,
+  # and everything else to Rome's Caddy as before. Rome's own guardian check
+  # on each WebSocket still applies.
+  printf '%s\n' \
+    '{' '  admin off' '  auto_https off' '}' \
+    ':8081 {' \
+    '  @ws path /ws/*' \
+    '  handle @ws {' \
+    '    reverse_proxy 127.0.0.1:4141 {' \
+    '      header_up Host voice-input.romeos.dev' \
+    '      header_up X-Forwarded-Host voice-input.romeos.dev' \
+    '      header_up X-Forwarded-Proto https' \
+    '    }' \
+    '  }' \
+    '  handle {' '    reverse_proxy 127.0.0.1:8080' '  }' \
+    '}' >"$PUBLIC_STATE/Caddyfile.sidecar"
+  chmod 644 "$PUBLIC_STATE/Caddyfile.sidecar"
+  docker rm -f "$PUBLIC_SIDECAR" >/dev/null 2>&1 || true
+  docker run -d --name "$PUBLIC_SIDECAR" --restart unless-stopped --network "container:$PUBLIC_ROME" \
+    -v "$PUBLIC_STATE/Caddyfile.sidecar:/etc/caddy/Caddyfile:ro" caddy:2-alpine >/dev/null
   docker start "$PUBLIC_EDGE" >/dev/null
   log "up: https://voice-input.romeos.dev (guardian / password: public.sh password) and https://voice-try.romeos.dev"
 }
 
 cmd_down() {
-  docker rm -f "$PUBLIC_EDGE" "$PUBLIC_TRY" "$PUBLIC_ROME" >/dev/null 2>&1 || true
+  docker rm -f "$PUBLIC_EDGE" "$PUBLIC_SIDECAR" "$PUBLIC_TRY" "$PUBLIC_ROME" >/dev/null 2>&1 || true
   docker volume rm "$PUBLIC_VOLUME_PREFIX-home" "$PUBLIC_VOLUME_PREFIX-memory" "$PUBLIC_VOLUME_PREFIX-user" >/dev/null 2>&1 || true
   rm -rf "$PUBLIC_STATE"
   log "removed."

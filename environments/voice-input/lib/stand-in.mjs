@@ -9,13 +9,28 @@
 //                  {"mode":"error","errorCode":503,"errorType":"...","afterMs":0}
 //   GET  /stats    the sessions so far: their start request (key removed),
 //                  how they authenticated, audio bytes received, how they ended
-//   POST /reset    forget the sessions
+//   PUT  /keys     {"mintedOnly":true} accepts only temporary keys it minted
+//   POST /reset    forget the sessions and the temporary keys
+//
+// Like Soniox, it mints temporary keys on its WebSocket port:
+//   POST /v1/auth/temporary-api-key   Bearer <long-lived key>
+//        {"usage_type":"transcribe_websocket","expires_in_seconds":60,
+//         "client_reference_id":"..."}  ->  201 {"api_key","expires_at"}
+// With STAND_IN_MINTED_ONLY=1, or after PUT /keys, a session must
+// authenticate with a temporary key, which is what Rome gets from Rome Cloud.
+// Otherwise the long-lived key works too, as a Rome with its own credential
+// uses it.
 //
 // Audio is counted and dropped. Nothing about it is kept but its byte count.
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 
 const KEY = process.env.STAND_IN_API_KEY ?? "stand-in-key";
+let mintedOnly = process.env.STAND_IN_MINTED_ONLY === "1";
+// Temporary key -> {expiresAt (ms), clientReferenceId}
+const minted = new Map();
+let mints = [];
 const WS_PORT = Number(process.env.STAND_IN_PORT ?? 8790);
 const CONTROL_PORT = Number(process.env.STAND_IN_CONTROL_PORT ?? 8791);
 
@@ -42,11 +57,26 @@ function json(res, status, body) {
 const control = createServer(async (req, res) => {
   const path = new URL(req.url, "http://x").pathname;
   if (req.method === "GET" && path === "/script") return json(res, 200, script);
-  if (req.method === "GET" && path === "/stats") return json(res, 200, { sessions });
+  if (req.method === "GET" && path === "/stats")
+    return json(res, 200, { mintedOnly, mints, sessions });
   if (req.method === "POST" && path === "/reset") {
     sessions = [];
+    mints = [];
+    minted.clear();
     script = { ...DEFAULT_SCRIPT };
     return json(res, 200, { ok: true });
+  }
+  if (req.method === "PUT" && path === "/keys") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const next = JSON.parse(body);
+      if (typeof next.mintedOnly !== "boolean") throw new Error("mintedOnly is true or false");
+      mintedOnly = next.mintedOnly;
+      return json(res, 200, { mintedOnly });
+    } catch (e) {
+      return json(res, 400, { error: e.message });
+    }
   }
   if (req.method === "PUT" && path === "/script") {
     let body = "";
@@ -66,7 +96,61 @@ const control = createServer(async (req, res) => {
   json(res, 404, { error: "not found" });
 });
 
-const http = createServer((_req, res) => json(res, 404, { error: "not found" }));
+// Soniox's error body for its REST API.
+function apiError(res, status, type, message) {
+  json(res, status, { status_code: status, error_type: type, message, request_id: "stand-in" });
+}
+
+async function mintTemporaryKey(req, res) {
+  const record = { at: new Date().toISOString(), status: 0, clientReferenceId: null };
+  mints.push(record);
+  const done = (status, ...rest) => {
+    record.status = status;
+    return apiError(res, status, ...rest);
+  };
+  if (/^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1] !== KEY)
+    return done(401, "unauthenticated", "Incorrect API key provided.");
+  let body = "";
+  for await (const chunk of req) body += chunk;
+  let m;
+  try {
+    m = JSON.parse(body);
+  } catch {
+    return done(400, "invalid_request", "Body is JSON.");
+  }
+  const seconds = m.expires_in_seconds;
+  if (m.usage_type !== "transcribe_websocket")
+    return done(400, "invalid_request", "usage_type is transcribe_websocket.");
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600)
+    return done(400, "invalid_request", "expires_in_seconds is an integer from 1 to 3600.");
+  if (m.client_reference_id != null && String(m.client_reference_id).length > 256)
+    return done(400, "invalid_request", "client_reference_id is at most 256 characters.");
+  const apiKey = `temp:${randomBytes(24).toString("base64url")}`;
+  const expiresAt = Date.now() + seconds * 1000;
+  minted.set(apiKey, { expiresAt, clientReferenceId: m.client_reference_id ?? null });
+  Object.assign(record, {
+    status: 201,
+    clientReferenceId: m.client_reference_id ?? null,
+    expiresInSeconds: seconds,
+  });
+  json(res, 201, { api_key: apiKey, expires_at: new Date(expiresAt).toISOString() });
+}
+
+// Which kind of key this is, or null when the stand-in does not accept it.
+function keyKind(key) {
+  if (!key) return null;
+  if (key === KEY) return mintedOnly ? null : "long-lived";
+  const temp = minted.get(key);
+  if (!temp) return null;
+  return temp.expiresAt > Date.now() ? "temporary" : null;
+}
+
+const http = createServer((req, res) => {
+  const path = new URL(req.url, "http://x").pathname;
+  if (req.method === "POST" && path === "/v1/auth/temporary-api-key")
+    return mintTemporaryKey(req, res);
+  json(res, 404, { error: "not found" });
+});
 const wss = new WebSocketServer({ server: http, path: "/transcribe-websocket" });
 
 wss.on("connection", (ws, req) => {
@@ -92,6 +176,7 @@ wss.on("connection", (ws, req) => {
   const send = (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m));
   const procMs = () => (session.audioBytes / 2 / (session.start?.sample_rate ?? 16000)) * 1000;
   const fail = (code, type, message) => {
+    if (session.ended) return;
     session.ended = `error ${code}`;
     send({
       tokens: [],
@@ -167,15 +252,17 @@ wss.on("connection", (ws, req) => {
     }
     if (!session.start) {
       const { api_key, ...rest } = m;
-      const ways = [
-        bearer && "bearer",
-        api_key && "api_key",
-        protocolKey.includes(KEY) && "protocol",
-      ].filter(Boolean);
-      session.auth = ways;
-      if (![bearer, api_key].includes(KEY) && !protocolKey.includes(KEY)) {
-        return fail(401, "unauthenticated", "Incorrect API key provided.");
-      }
+      const offered = [
+        ["bearer", bearer],
+        ["api_key", api_key],
+        ...protocolKey.map((p) => ["protocol", p]),
+      ].filter(([, k]) => k);
+      const accepted = offered.find(([, k]) => keyKind(k));
+      session.auth = offered.filter(([, k]) => keyKind(k)).map(([way]) => way);
+      if (!accepted) return fail(401, "unauthenticated", "Incorrect API key provided.");
+      session.keyKind = keyKind(accepted[1]);
+      if (session.keyKind === "temporary")
+        session.clientReferenceId = minted.get(accepted[1]).clientReferenceId;
       if (!rest.model || !rest.audio_format)
         return fail(400, "invalid_request", "model and audio_format are required.");
       session.start = rest;

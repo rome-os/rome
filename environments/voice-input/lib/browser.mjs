@@ -99,9 +99,17 @@ writeFileSync(
     profile: { content_settings: { exceptions: { media_stream_mic: exceptions } } },
   }),
 );
+// Chrome outlives this command, until `voice-env browser stop`, the next
+// `browser`, or `env.sh reset|down` stops it by its profile. Where systemd is
+// there, its memory is capped so a runaway page cannot exhaust the machine.
+const SYSTEMD_RUN = "/run/current-system/sw/bin/systemd-run";
+const capped = existsSync(SYSTEMD_RUN)
+  ? [SYSTEMD_RUN, "--user", "--scope", "--quiet", "-p", "MemoryMax=2G", "--", args.chrome]
+  : [args.chrome];
 const chrome = spawn(
-  args.chrome,
+  capped[0],
   [
+    ...capped.slice(1),
     "--headless=new",
     `--remote-debugging-port=${args["cdp-port"]}`,
     "--remote-debugging-address=127.0.0.1",
