@@ -335,8 +335,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             });
         },
         getMetadataSnapshot: () => ({ reasoningEffort }),
+        stopVoiceInput: voice.stop,
       }),
       [
+        voice.stop,
         addPendingFiles,
         pendingUploads,
         invokeOnSend,

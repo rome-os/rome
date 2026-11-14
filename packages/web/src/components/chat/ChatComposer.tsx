@@ -132,6 +132,11 @@ export interface ChatComposerHandle {
     personaId?: string;
     reasoningEffort: ReasoningEffort;
   };
+  /**
+   * Stops listening, as the voice control's stop does, and keeps the heard
+   * text in the field. For a host about to hide the composer.
+   */
+  stopVoiceInput: () => void;
 }
 
 export interface ChatComposerProps {
@@ -678,8 +683,10 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         personaId,
         reasoningEffort,
       }),
+      stopVoiceInput: voice.stop,
     }),
     [
+      voice.stop,
       addPendingFiles,
       textareaMaxHeight,
       personaId,

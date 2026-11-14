@@ -2246,6 +2246,11 @@ export function Chat({
   // refused rather than filed into a draft no one sees.
   const sharingRef = useRef(false);
   sharingRef.current = shareMode && Boolean(mainSessionId);
+  // For the same reason it stops listening: no one could see it listen.
+  const composerHidden = sharingRef.current;
+  useEffect(() => {
+    if (composerHidden) composerRef.current?.stopVoiceInput();
+  }, [composerHidden, composerRef]);
   const refuseDrop = (event: React.DragEvent<HTMLDivElement>): boolean => {
     if (!sharingRef.current) return false;
     event.preventDefault();

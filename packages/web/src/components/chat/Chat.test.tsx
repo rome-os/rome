@@ -51,6 +51,7 @@ const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }))
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
+const conciergeStopVoiceInput = rs.hoisted(() => rs.fn());
 const toast = rs.hoisted(() => ({
   loading: rs.fn(() => "finding"),
   error: rs.fn(),
@@ -405,6 +406,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
       focus: () => {},
+      stopVoiceInput: conciergeStopVoiceInput,
     }));
     return (
       <div
@@ -2900,6 +2902,21 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
     drop();
     expect(conciergeAddFiles).toHaveBeenCalledOnce();
+  });
+
+  it("stops listening when share mode hides the composer", async () => {
+    const user = userEvent.setup();
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    await screen.findByTestId("share-bar");
+    expect(conciergeStopVoiceInput).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId("share-exit"));
+    await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
+    expect(conciergeStopVoiceInput).toHaveBeenCalledOnce();
   });
 
   it("keeps the composer, and its draft, through share mode", async () => {
