@@ -134,6 +134,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (opening) clearTimeout(opening);
     const since = pace?.since ?? Date.now();
     log.info("voice input stopped", {
+      sessionId: listening?.source.romeCloudSessionId ?? null,
       outcome,
       frames,
       bytes,
