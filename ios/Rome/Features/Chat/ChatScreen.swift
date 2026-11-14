@@ -838,11 +838,7 @@ struct TranscriptList<Row: View>: View {
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         row(item, index > 0 ? rows[index - 1] : nil)
-                            // Where each row sits in the content, so the rows in
-                            // view stay put when rows above them change height.
-                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.contentSpace)).minY } action: { [scrollHandle] top in
-                                scrollHandle.rowMoved(item.id, top: top, canAnchor: item.canAnchor)
-                            }
+                            .modifier(RowTop(row: item, handle: scrollHandle, space: Self.contentSpace))
                             .id(item.id)
                     }
                     if let footer {
@@ -900,13 +896,7 @@ struct TranscriptList<Row: View>: View {
                     await store.loadOlder()
                 }
             }
-            .onChange(of: following, initial: true) { _, following in
-                // At the bottom the anchor holds the end. Only on iOS 18 and
-                // later: before, an older page waits for the scroll to rest
-                // and the anchor holds it.
-                scrollHandle.keepsRows = !following && Self.placesInGlide
-            }
-            .onChange(of: rows.count) { scrollHandle.keepRows(Set(rows.map(\.id))) }
+            .modifier(KeepsRowsInView(following: following, rows: rows, handle: scrollHandle, enabled: Self.placesInGlide))
             .onChange(of: lazy, initial: true) { _, now in
                 if now { lazyLocked = true }
             }
@@ -1030,6 +1020,41 @@ private struct TranscriptStack<Content: View>: View {
         } else {
             VStack(spacing: 0, content: content)
         }
+    }
+}
+
+/// Where a row sits in the content, told to the scroll handle, so the rows
+/// in view stay put when rows above them change height.
+private struct RowTop: ViewModifier {
+    let row: TranscriptRow
+    let handle: ScrollHandle
+    let space: String
+
+    func body(content: Content) -> some View {
+        content.onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(space)).minY } action: { [handle, row] top in
+            handle.rowMoved(row.id, top: top, canAnchor: row.canAnchor)
+        }
+    }
+}
+
+/// Tells the scroll handle when to hold the rows in view, and which rows
+/// are still there. Its own modifier, to keep `TranscriptList`'s chain short
+/// enough for the compiler.
+private struct KeepsRowsInView: ViewModifier {
+    let following: Bool
+    let rows: [TranscriptRow]
+    let handle: ScrollHandle
+    /// iOS 18 and later: before, an older page waits for the scroll to rest
+    /// and the anchor holds it.
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        content
+            // At the bottom the anchor holds the end.
+            .onChange(of: following, initial: true) { _, following in
+                handle.keepsRows = !following && enabled
+            }
+            .onChange(of: rows.count) { handle.keepRows(Set(rows.map(\.id))) }
     }
 }
 
