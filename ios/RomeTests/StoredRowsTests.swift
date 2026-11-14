@@ -195,68 +195,55 @@ private func message(
         let backend = FakeBackend()
         backend.stored = [message("a1", "sure", at: 10, thread: "a1", title: "T")]
         let store = await chat(backend)
-        var opened: [String] = []
-        store.actions.onOpenChat = { id, title in opened.append("\(id) \(title)") }
         store.actions.reply(to: "a1")
         #expect(store.quote?.messageId == "a1")
         store.actions.openThread(at: "a1")
         #expect(store.thread != nil)
-        // From a row in the thread view, the view closes first.
-        store.actions.openChat("task", "Book", inThread: true)
-        #expect(store.thread == nil)
-        #expect(opened == ["task Book"])
         store.stop()
     }
 
-    /// A screen stops its store when another is pushed over it (a task chat
-    /// over a topic chat) and starts it again on the way back: its cards
-    /// must still open their chats then.
-    @Test func aStoreStoppedAndStartedAgainStillOpensChats() async {
-        let backend = FakeBackend()
-        let store = await chat(backend)
+    /// Each window's shell has its own actions, so a card or a link acts in
+    /// the window it was tapped in, whichever window appeared last.
+    @Test func eachWindowKeepsItsOwnActions() {
+        let drafts = DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-windows-\(UUID().uuidString)/Drafts"), instance: "t")
+        let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
         var opened: [String] = []
-        store.actions.onOpenChat = { id, _ in opened.append(id) }
-        store.stop()
-        store.start()
-        await settle { store.loaded }
-        store.actions.openChat("task-1", "Task")
-        #expect(opened == ["task-1"])
+        let first = ShellActions()
+        let second = ShellActions()
+        first.openTaskChat.run = { opened.append("first \($0.chatId)") }
+        second.openTaskChat.run = { opened.append("second \($0.chatId)") }
+        workspace.register(first)
+        workspace.register(second)
+        first.openTaskChat.run((chatId: "a", title: "A"))
+        second.openTaskChat.run((chatId: "b", title: "B"))
+        // One window closes: the other's actions still work.
+        first.reset()
+        workspace.unregister(first)
+        first.openTaskChat.run((chatId: "c", title: "C"))
+        second.openTaskChat.run((chatId: "d", title: "D"))
+        #expect(opened == ["first a", "second b", "second d"])
+        workspace.stop()
     }
 
-    /// The screen's callback holds what holds the store (the shell, the
-    /// workspace): a closed store lets go of it, so nothing keeps the old
-    /// workspace alive after a sign-out or a switch of instance.
-    @Test func aClosedStoreLetsGoOfTheScreenCallback() async {
-        final class Owner {}
-        let backend = FakeBackend()
-        let store = await chat(backend)
-        weak var released: Owner?
-        do {
-            let owner = Owner()
-            released = owner
-            store.actions.onOpenChat = { _, _ in _ = owner }
-        }
-        store.stop()
-        #expect(released != nil)
-        store.close()
-        #expect(released == nil)
-    }
-
-    /// The shell's actions and the chats' callbacks hold the shell, and so
-    /// the workspace: once it stops, nothing of it keeps it alive, whether
-    /// or not its shell saw itself leave (under the Agent page's cover).
+    /// The shells' actions hold the shells, and so the workspace: once it
+    /// stops, nothing of it keeps it alive, whether or not a shell saw itself
+    /// leave (under the Agent page's cover).
     @Test func aStoppedWorkspaceIsReleased() {
         weak var released: Workspace?
         do {
             let drafts = DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-release-\(UUID().uuidString)/Drafts"), instance: "t")
             let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
             released = workspace
-            workspace.shellActions.linkOpener.run = { _ in _ = workspace; return .handled }
-            workspace.shellActions.openUsage.run = { _ in _ = workspace }
-            workspace.shellActions.openUsageFromCover.run = { _ in _ = workspace }
-            workspace.concierge.actions.onOpenChat = { _, _ in _ = workspace }
-            workspace.topicStore("topic-1").actions.onOpenChat = { _, _ in _ = workspace }
-            workspace.taskStore("task-1").actions.onOpenChat = { _, _ in _ = workspace }
+            for _ in 0..<2 {
+                let actions = ShellActions()
+                actions.linkOpener.run = { _ in _ = workspace; return .handled }
+                actions.openUsage.run = { _ in _ = workspace }
+                actions.openUsageFromCover.run = { _ in _ = workspace }
+                actions.openTaskChat.run = { _ in _ = workspace }
+                workspace.register(actions)
+            }
+            _ = workspace.topicStore("topic-1")
+            _ = workspace.taskStore("task-1")
             workspace.stop()
         }
         #expect(released == nil)

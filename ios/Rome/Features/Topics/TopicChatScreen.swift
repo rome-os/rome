@@ -11,7 +11,6 @@ struct TopicChatScreen: View {
     let onMenu: () -> Void
     /// The header's mascot was tapped: the Agent page, for this chat.
     let onAgent: (String?) -> Void
-    let onOpenChat: (String, String) -> Void
     /// The chat was archived or deleted: the shell shows the main Chat.
     let onArchived: () -> Void
     let onCreated: (String) -> Void
@@ -77,7 +76,6 @@ struct TopicChatScreen: View {
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
         .onChange(of: store?.replies) { composerFocused = true }
-        .onChange(of: store.map(ObjectIdentifier.init), initial: true) { store?.actions.onOpenChat = onOpenChat }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}

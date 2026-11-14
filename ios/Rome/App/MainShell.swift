@@ -66,6 +66,8 @@ struct MainShell: View {
     @State private var linkNotice: String?
     /// "See usage" was pressed inside the Agent page: Settings opens as it closes.
     @State private var openUsageAfterCover = false
+    /// This window's actions for the views far below (`ShellActions`).
+    @State private var actions = ShellActions()
     @State private var settingsPath: [SettingsRoute] = []
     /// A page of the instance, in a sheet over the main stack.
     @State private var page: URL?
@@ -132,8 +134,9 @@ struct MainShell: View {
                         destination(route)
                     }
                 }
-                .environment(\.chatLinkOpener, workspace.shellActions.linkOpener)
-                .environment(\.openUsage, workspace.shellActions.openUsage)
+                .environment(\.chatLinkOpener, actions.linkOpener)
+                .environment(\.openUsage, actions.openUsage)
+                .environment(\.openTaskChat, actions.openTaskChat)
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
@@ -175,9 +178,9 @@ struct MainShell: View {
                 }
             }
             .environment(model)
-            .environment(\.chatLinkOpener, workspace.shellActions.linkOpener)
+            .environment(\.chatLinkOpener, actions.linkOpener)
             // Settings is a sheet of this view: the cover closes first.
-            .environment(\.openUsage, workspace.shellActions.openUsageFromCover)
+            .environment(\.openUsage, actions.openUsageFromCover)
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
@@ -219,12 +222,22 @@ struct MainShell: View {
         // Which chat is in front, for pushes: none under a sheet or the drawer.
         .onChange(of: visibleChat, initial: true) { _, chat in model.show(chat, by: screenID) }
         .onChange(of: workspace.mainChatServerID) { model.rewatch() }
-        // The workspace empties them when it stops; a shell built again
-        // for the same workspace sets them anew.
-        .onAppear { installShellActions() }
+        .onAppear {
+            installShellActions()
+            workspace.register(actions)
+        }
         // What toggling the navigation does depends on the width.
         .onChange(of: usesSidebar) { installShellActions() }
-        .onDisappear { model.hide(by: screenID) }
+        .onDisappear {
+            model.hide(by: screenID)
+            // The actions hold this view's state, which they must not
+            // outlive. The Agent page's cover takes the shell off screen too
+            // and uses them meanwhile; the workspace empties them when it
+            // stops, cover or not.
+            guard agentPage == nil else { return }
+            actions.reset()
+            workspace.unregister(actions)
+        }
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .onChange(of: drawerOpen) { _, open in
             if open {
@@ -377,7 +390,6 @@ struct MainShell: View {
     /// these objects, never closures made in `body`: a shell update changes
     /// none of them, so it draws no row and no message's text again.
     private func installShellActions() {
-        let actions = workspace.shellActions
         actions.linkOpener.run = { openChatLink($0) }
         actions.toggleNavigation.run = { _ in toggleNavigation() }
         actions.openAgent.run = { _ in agentPage = AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID) }
@@ -428,11 +440,13 @@ struct MainShell: View {
         // Chat stays alive under the other pages: rebuilt, its list would load
         // again from the top and scroll down while the drawer closes onto it.
         ZStack {
-            // A reference and a flag, no closures: a shell update that
-            // changes neither leaves Chat's body alone. Not `.equatable()`:
-            // that keeps iOS 26 from fading the rows under Chat's header.
+            // References and a flag, no closures: a shell update that
+            // changes none of them leaves Chat's body alone. Not
+            // `.equatable()`: that keeps iOS 26 from fading the rows under
+            // Chat's header.
             ChatScreen(
                 workspace: workspace,
+                shell: actions,
                 // The same answer the server watch and push banners go by: a
                 // sheet, the drawer or a pushed page over Chat hides it.
                 visible: visibleChat == conciergeChatID
@@ -485,7 +499,6 @@ struct MainShell: View {
                 // A blank chat has no tasks yet; its Tasks tab shows the empty state.
                 agentPage = AgentRoute(tasksChatId: id ?? "", composerKey: id ?? draftKey)
             },
-            onOpenChat: { id, title in path.append(.taskChat(chatId: id, title: title)) },
             onArchived: { show(.chat) },
             onCreated: { id in
                 if let key { startedTopics[id] = key }

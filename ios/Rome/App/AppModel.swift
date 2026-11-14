@@ -117,10 +117,14 @@ final class Workspace {
     /// The Concierge's own name; nil until read, or when none is set.
     private(set) var agentName: String?
     @ObservationIgnored private var nameWatch: UUID?
-    /// What views far below the shell call back into it. They live as long as
-    /// the workspace, so the environment's values stay the same objects even
-    /// when the shell is built again, and `stop()` empties them.
-    @ObservationIgnored let shellActions = ShellActions()
+    /// The actions of each window's shell. Their closures hold the shell,
+    /// and the shell holds this workspace: `stop()` empties them all, so a
+    /// closed workspace is freed however its shells left the screen.
+    @ObservationIgnored private var shells: [ObjectIdentifier: ShellActions] = [:]
+
+    func register(_ actions: ShellActions) { shells[ObjectIdentifier(actions)] = actions }
+
+    func unregister(_ actions: ShellActions) { shells[ObjectIdentifier(actions)] = nil }
     /// Whose session this is. Apps, the update page, AI tool usage, approvals
     /// and the instance's own settings are the guardian's; a visitor never sees
     /// them. Unknown (not read yet, or unreadable) is treated as the guardian,
@@ -537,7 +541,8 @@ final class Workspace {
         topics.stop()
         for store in topicStores.values { store.close() }
         for store in taskStores.values { store.close() }
-        shellActions.reset()
+        for actions in shells.values { actions.reset() }
+        shells = [:]
         backend.events.pause()
         transcripts.flush()
     }

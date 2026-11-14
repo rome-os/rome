@@ -18,10 +18,11 @@ final class ShellAction<Input, Output> {
     func reset() { run = idle }
 }
 
-/// The shell's actions for one workspace. The shell sets what they run, and
-/// those closures hold the shell, which holds the workspace: the workspace
-/// owns them and empties them when it stops, so a closed workspace is freed
-/// however its shell left the screen (under the Agent page's cover too).
+/// One shell's actions: each window has its own shell and its own set, so a
+/// link or a card acts in the window it was tapped in. The shell sets what
+/// they run; those closures hold the shell, which holds the workspace, so
+/// the shell registers them with the workspace, which empties them when it
+/// stops (`Workspace.register`).
 @MainActor
 final class ShellActions {
     let linkOpener = ShellAction<URL, OpenURLAction.Result> { _ in .systemAction }

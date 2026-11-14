@@ -7,11 +7,10 @@ let transcriptScrollLog = Logger(subsystem: "cc.romeos.mobile", category: "Trans
 /// Board 4: the Concierge chat, the app's home screen.
 struct ChatScreen: View {
     let workspace: Workspace
+    /// What it calls in its window's shell: the drawer, the Agent page.
+    let shell: ShellActions
     /// Chat is the page in front, with nothing pushed over it.
     var visible = true
-
-    /// What it calls in the shell: the drawer, the Agent page, a task chat.
-    private var shell: ShellActions { workspace.shellActions }
 
     #if DEBUG
     @Environment(AppModel.self) private var model
@@ -52,9 +51,6 @@ struct ChatScreen: View {
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
         .onChange(of: store.replies) { composerFocused = true }
-        .onChange(of: ObjectIdentifier(store), initial: true) { [shell] in
-            store.actions.onOpenChat = { shell.openTaskChat.run((chatId: $0, title: $1)) }
-        }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
@@ -260,8 +256,13 @@ struct ConciergeRow: View, Equatable {
         lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread
     }
 
+    @Environment(\.openTaskChat) private var openTaskChat
+
+    /// From a row in a thread view, the thread closes first, or the chat
+    /// would be pushed under it.
     private func openChat(_ chatId: String, _ title: String) {
-        store.actions.openChat(chatId, title, inThread: inThread)
+        if inThread { store.closeThread() }
+        openTaskChat?.run((chatId: chatId, title: title))
     }
 
     /// Only the Agent's text can be replied to: never a card of any kind
