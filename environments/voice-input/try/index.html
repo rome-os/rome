@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Try transcription</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --text: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #c2410c; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1c1917; --panel: #292524; --text: #f5f5f4; --muted: #a8a29e; --line: #44403c; --accent: #fb923c; --bad: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  .bar { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 600; padding: 10px 20px; border-radius: 999px; border: 0; background: var(--accent); color: #fff; cursor: pointer; min-width: 160px; }
+  button[aria-pressed="true"] { background: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  .meter { width: 120px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 80ms; }
+  #status { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-height: 200px; display: flex; flex-direction: column; gap: 8px; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .name { font-weight: 600; }
+  .model, .meta { color: var(--muted); font-size: 13px; }
+  .meta { display: flex; gap: 12px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .text { flex: 1; white-space: pre-wrap; word-break: break-word; }
+  .text .partial { color: var(--muted); }
+  .note { color: var(--muted); font-style: italic; }
+  .err { color: var(--bad); font-size: 13px; overflow-wrap: anywhere; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Try transcription providers</h1>
+  <p class="lead">Press start, say one message in English, Mandarin or both, then press stop. Each provider hears the same audio. Nothing is recorded.</p>
+  <div class="bar">
+    <button id="toggle" aria-pressed="false">Start listening</button>
+    <div class="meter" aria-hidden="true"><i id="level"></i></div>
+    <span id="status"></span>
+  </div>
+  <div class="grid" id="cards"></div>
+  <footer>
+    First text is measured from when your voice is first heard to when the provider's first words arrive here, so it includes the trip through the devbox.
+    Prices are each provider's list price for streaming, checked 2026-11-14.
+    <span id="envfile"></span>
+  </footer>
+</main>
+<script>
+const base = location.pathname.endsWith("/") ? location.pathname : location.pathname + "/";
+const $ = (id) => document.getElementById(id);
+let providers = [];
+let state = {};
+let ws, ctx, stream, node, listening = false, voiceAt = 0, pressAt = 0;
+
+async function loadProviders() {
+  const r = await fetch(base + "providers", { cache: "no-store" });
+  const body = await r.json();
+  providers = body.providers;
+  $("envfile").textContent = `Keys are read from ${body.envFile}.`;
+  render();
+}
+
+function render() {
+  $("cards").innerHTML = "";
+  for (const p of providers) {
+    const s = state[p.id] ?? {};
+    const card = document.createElement("section");
+    card.className = "card";
+    const first = s.firstAt ? `${Math.max(0, Math.round(s.firstAt - (voiceAt || pressAt)))} ms` : "–";
+    card.innerHTML = `
+      <div class="head"><span class="name"></span><span class="model"></span></div>
+      <div class="meta"><span>First text <b class="first"></b></span><span><b class="price"></b> / hour</span></div>
+      <div class="text"></div>`;
+    card.querySelector(".name").textContent = p.name;
+    card.querySelector(".model").textContent = p.model;
+    card.querySelector(".first").textContent = first;
+    card.querySelector(".price").textContent = `$${p.pricePerHour.toFixed(2)}`;
+    const text = card.querySelector(".text");
+    if (!p.configured) {
+      text.innerHTML = `<span class="note">no credential</span>`;
+    } else {
+      text.append(document.createTextNode(s.final ?? ""));
+      const partial = document.createElement("span");
+      partial.className = "partial";
+      partial.textContent = s.partial ?? "";
+      text.append(partial);
+      if (!s.final && !s.partial && !s.error) text.innerHTML = `<span class="note">${listening ? "listening…" : "ready"}</span>`;
+    }
+    if (s.error) {
+      const e = document.createElement("div");
+      e.className = "err";
+      e.textContent = s.error;
+      card.append(e);
+    }
+    $("cards").append(card);
+  }
+}
+
+const worklet = `
+class Tap extends AudioWorkletProcessor {
+  process(inputs) { const ch = inputs[0][0]; if (ch) this.port.postMessage(ch.slice(0)); return true; }
+}
+registerProcessor("tap", Tap);`;
+
+async function start() {
+  await loadProviders();
+  if (!providers.some((p) => p.configured)) { $("status").textContent = "No provider has a credential yet."; return; }
+  state = {};
+  voiceAt = 0;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    $("status").textContent = "The microphone is not allowed. Allow it in the address bar and try again.";
+    return;
+  }
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + base + "stream");
+  ws.binaryType = "arraybuffer";
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (!m.provider) return;
+    const s = (state[m.provider] ??= {});
+    if (m.type === "text") {
+      if (!s.firstAt && (m.final || m.partial)) s.firstAt = performance.now();
+      s.final = m.final; s.partial = m.partial;
+    } else if (m.type === "error") s.error = m.message;
+    render();
+  };
+  await new Promise((r) => (ws.onopen = r));
+  ws.send(JSON.stringify({ type: "start" }));
+
+  ctx = new AudioContext();
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: "text/javascript" })));
+  const source = ctx.createMediaStreamSource(stream);
+  node = new AudioWorkletNode(ctx, "tap");
+  const ratio = ctx.sampleRate / 16000;
+  let pending = [], pos = 0, buffered = new Int16Array(1600), filled = 0;
+  node.port.onmessage = ({ data }) => {
+    let sum = 0;
+    for (const v of data) sum += v * v;
+    const rms = Math.sqrt(sum / data.length);
+    $("level").style.width = Math.min(100, rms * 400) + "%";
+    if (!voiceAt && rms > 0.02) voiceAt = performance.now();
+    pending.push(...data);
+    // Resample to 16 kHz and send 100 ms at a time.
+    while (pos + 1 < pending.length) {
+      const j = Math.floor(pos), f = pos - j;
+      const v = pending[j] + (pending[j + 1] - pending[j]) * f;
+      buffered[filled++] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+      if (filled === buffered.length) {
+        if (ws.readyState === 1) ws.send(buffered.buffer.slice(0));
+        filled = 0;
+      }
+      pos += ratio;
+    }
+    const drop = Math.floor(pos);
+    pending = pending.slice(drop);
+    pos -= drop;
+  };
+  source.connect(node);
+  pressAt = performance.now();
+  listening = true;
+  $("toggle").textContent = "Stop listening";
+  $("toggle").setAttribute("aria-pressed", "true");
+  $("status").textContent = "Listening. Speak now.";
+  render();
+}
+
+async function stop() {
+  listening = false;
+  $("toggle").disabled = true;
+  $("status").textContent = "Waiting for the last words…";
+  node?.disconnect();
+  stream?.getTracks().forEach((t) => t.stop());
+  await ctx?.close();
+  $("level").style.width = "0";
+  if (ws?.readyState === 1) {
+    ws.send(JSON.stringify({ type: "stop" }));
+    await new Promise((r) => {
+      const prev = ws.onmessage;
+      ws.onmessage = (ev) => { prev(ev); if (JSON.parse(ev.data).type === "stopped") r(); };
+      setTimeout(r, 7000);
+    });
+    ws.close();
+  }
+  $("toggle").disabled = false;
+  $("toggle").textContent = "Start listening";
+  $("toggle").setAttribute("aria-pressed", "false");
+  $("status").textContent = "";
+  render();
+}
+
+$("toggle").onclick = () => (listening ? stop() : start());
+loadProviders();
+</script>
+</body>
+</html>
