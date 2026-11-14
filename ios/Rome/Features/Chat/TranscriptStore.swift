@@ -383,8 +383,15 @@ final class TranscriptStore {
         return true
     }
 
-    /// An older page can be fetched now: none is on its way or waiting.
-    var wantsOlder: Bool { hasOlder && !loadingOlder && olderPage == nil && cursor != nil }
+    /// An older page can be fetched now: none is on its way or waiting, and
+    /// none failed in the last few seconds. The list asks on every scroll
+    /// frame near the top, which offline would send a request each frame.
+    var wantsOlder: Bool {
+        hasOlder && !loadingOlder && olderPage == nil && cursor != nil
+            && (olderFailedAt.map { Date.now.timeIntervalSince($0) > Self.olderRetryDelay } ?? true)
+    }
+    @ObservationIgnored private var olderFailedAt: Date?
+    static let olderRetryDelay: TimeInterval = 3
 
     /// Fetches the page before the oldest message held. It waits in
     /// `olderPage` until the list places it with `placeOlderPage()`.
@@ -397,6 +404,7 @@ final class TranscriptStore {
         // A reload that found a gap started the history over while this ran;
         // a page from the old cursor would leave a hole in it.
         guard self.cursor == cursor else { return }
+        olderFailedAt = page == nil ? .now : nil
         olderPage = page
         olderPageArrived = .now
         transcriptScrollLog.notice("older page fetched in \(Int(Date.now.timeIntervalSince(asked) * 1000), privacy: .public) ms")

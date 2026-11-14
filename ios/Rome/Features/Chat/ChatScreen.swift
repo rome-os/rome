@@ -902,10 +902,13 @@ struct TranscriptList<Row: View>: View {
             .coordinateSpace(.named(Self.scrollSpace))
             .modifier(FollowBottom(following: $following, bottomVisible: bottomVisible, holdOlder: store.placingOlder, atTop: atLoadedTop, atRest: $atRest, jumping: $jumping, fingerDown: $fingerDown, legacy: legacyScroll, handle: scrollHandle))
             .onAppear { legacyScroll.attach(following: $following, atRest: $atRest, bottomVisible: $bottomVisible, jumping: $jumping, fingerDown: $fingerDown) }
-            // The page goes in as soon as it is here, a glide included: its
-            // offset shift keeps the rows in view where they are. Before iOS
-            // 18 there is no shift, so it waits for the scroll to rest.
-            .onChange(of: store.olderPage != nil && !store.placingOlder && !jumping && (Self.placesInGlide ? atLoadedTop && !fingerDown : atRest)) { _, ready in
+            // A fetched page goes in once the top of what is loaded is on
+            // screen and no finger is on the list; the held row keeps the
+            // rows in view where they are. Not while the list still follows
+            // the bottom away from it, as during a status-bar scroll to the
+            // top: the bottom anchors would move it. A short chat shows both
+            // ends. Before iOS 18 there is no hold, so it waits for rest.
+            .onChange(of: store.olderPage != nil && !store.placingOlder && !jumping && (Self.placesInGlide ? atLoadedTop && !fingerDown && (!following || bottomVisible) : atRest)) { _, ready in
                 if ready { Task { await store.placeOlderPage() } }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -1064,14 +1067,17 @@ private struct RowTop: ViewModifier {
     let space: String
 
     func body(content: Content) -> some View {
-        content.onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(space)).minY } action: { [handle, row] top in
-            handle.rowMoved(row.id, top: top, canAnchor: row.canAnchor)
-        }
+        content
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(space)).minY } action: { [handle, row] top in
+                handle.rowMoved(row.id, top: top, canAnchor: row.canAnchor)
+            }
+            // Removed, or let go of by a lazy stack. An eager stack keeps its
+            // rows while they scroll off screen.
+            .onDisappear { [handle, row] in handle.forget(row.id) }
     }
 }
 
-/// Tells the scroll handle when to hold the rows in view, and which rows
-/// are still there. Its own modifier, to keep `TranscriptList`'s chain short
+/// Tells the scroll handle when to hold the rows in view. Its own modifier, to keep `TranscriptList`'s chain short
 /// enough for the compiler.
 private struct KeepsRowsInView: ViewModifier {
     let following: Bool
@@ -1087,7 +1093,6 @@ private struct KeepsRowsInView: ViewModifier {
             .onChange(of: following, initial: true) { _, following in
                 handle.keepsRows = !following && enabled
             }
-            .onChange(of: rows.count) { handle.keepRows(Set(rows.map(\.id))) }
     }
 }
 
@@ -1125,7 +1130,10 @@ private struct FollowBottom: ViewModifier {
                 #if DEBUG
                 // `ROME_PERF=paging` flings in code, with no finger: it says
                 // when one starts, as a drag would.
-                .onReceive(NotificationCenter.default.publisher(for: PerfProbe.flingStarted)) { _ in following = false }
+                .onReceive(NotificationCenter.default.publisher(for: PerfProbe.flingStarted)) { note in
+                    // Only this list's: tests run lists side by side.
+                    if (note.object as AnyObject?) === handle.view { following = false }
+                }
                 #endif
                 .onScrollPhaseChange { old, phase, context in
                     transcriptScrollLog.notice("phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public) at \(context.geometry.contentOffset.y, privacy: .public) of \(context.geometry.contentSize.height, privacy: .public), container \(context.geometry.containerSize.height, privacy: .public), insets \(context.geometry.contentInsets.top, privacy: .public)/\(context.geometry.contentInsets.bottom, privacy: .public), visible \(context.geometry.visibleRect.height, privacy: .public)")
@@ -1305,24 +1313,33 @@ final class ScrollHandle {
         }
     }
 
-    /// The first row whose top is a third of the way down the visible area or
-    /// lower: away from the edge where rows go in, whose spacing changes with
-    /// the row put above it.
+    /// The row at a third of the way down the visible area: the last one
+    /// whose top is above that point, so a tall reply filling the screen is
+    /// held by its own top, and growth below the point moves nothing. A
+    /// third down keeps away from the edge where rows go in, whose spacing
+    /// changes with the row put above it. With no row above the point, the
+    /// first one below it.
     private func pickAnchor(_ view: UIScrollView) {
         let visible = view.bounds.height - view.adjustedContentInset.top - view.adjustedContentInset.bottom
-        let visibleTop = view.contentOffset.y + view.adjustedContentInset.top + max(0, visible) / 3
-        var best: (id: String, top: CGFloat)?
-        for (id, top) in rowTops where top >= visibleTop && top < (best?.top ?? .infinity) && anchorable.contains(id) {
-            best = (id, top)
+        let point = view.contentOffset.y + view.adjustedContentInset.top + max(0, visible) / 3
+        var covering: (id: String, top: CGFloat)?
+        var below: (id: String, top: CGFloat)?
+        for (id, top) in rowTops where anchorable.contains(id) {
+            if top <= point {
+                if top > (covering?.top ?? -.infinity) { covering = (id, top) }
+            } else if top < (below?.top ?? .infinity) {
+                below = (id, top)
+            }
         }
-        anchor = best
+        anchor = covering ?? below
     }
 
-    /// Forgets rows no longer in the list.
-    func keepRows(_ ids: Set<String>) {
-        rowTops = rowTops.filter { ids.contains($0.key) }
-        anchorable.formIntersection(ids)
-        if let anchor, !ids.contains(anchor.id) { self.anchor = nil }
+    /// Forgets a row that left the list, or that a lazy stack let go of: its
+    /// last top would go stale as rows go in above it.
+    func forget(_ id: String) {
+        rowTops[id] = nil
+        anchorable.remove(id)
+        if anchor?.id == id { anchor = nil }
     }
 
     /// Moves an offset left past the end of the content back to the end. A
@@ -1447,7 +1464,6 @@ private final class LegacyScrollMonitor {
     }
 }
 
-/// Reports content offset changes to the monitor before iOS 18.
 /// How the transcript pages back through older messages: a page is fetched
 /// ahead, quietly, and goes in at once when the guardian reaches the top,
 /// with the rows in view held where they are.
@@ -1460,6 +1476,7 @@ enum TranscriptPaging {
     static let topReach: CGFloat = 40
 }
 
+/// Reports content offset changes to the monitor before iOS 18.
 private struct LegacyContentMoves: ViewModifier {
     let monitor: LegacyScrollMonitor
     let space: String

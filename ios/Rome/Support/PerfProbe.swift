@@ -42,7 +42,8 @@ enum PerfProbe {
 #if DEBUG
 extension PerfProbe {
     @MainActor private static var started = false
-    /// A fling the `paging` scenario starts in code, which the list takes as a drag.
+    /// A fling the `paging` scenarios start in code, which the list whose
+    /// scroll view is the note's object takes as a drag.
     static let flingStarted = Notification.Name("RomePerfFlingStarted")
 
     /// Starts the scenario named by `ROME_PERF` once the main Chat has loaded.
@@ -157,20 +158,26 @@ extension PerfProbe {
             // Twelve flings up through older pages, each a glide that slows
             // the way UIKit's does; `TranscriptScroll` logs each page.
             for _ in 0..<12 {
-                NotificationCenter.default.post(name: flingStarted, object: nil)
-                if let scroll = transcriptScroll() { await Glide(scroll: scroll, speed: 6000).run() }
+                if let scroll = transcriptScroll() {
+                    NotificationCenter.default.post(name: flingStarted, object: scroll)
+                    await Glide(scroll: scroll, speed: 6000).run()
+                }
                 try? await Task.sleep(for: .milliseconds(300))
             }
         case "pagingdown":
             // Up through older pages until 520 messages are held (past the
             // lazy switch), then from the top, measured: ten flings back down.
             for _ in 0..<60 where (model.workspace?.concierge.messages.count ?? 0) < 520 {
-                NotificationCenter.default.post(name: flingStarted, object: nil)
-                if let scroll = transcriptScroll() { await Glide(scroll: scroll, speed: 6000).run() }
+                if let scroll = transcriptScroll() {
+                    NotificationCenter.default.post(name: flingStarted, object: scroll)
+                    await Glide(scroll: scroll, speed: 6000).run()
+                }
                 try? await Task.sleep(for: .milliseconds(400))
             }
-            NotificationCenter.default.post(name: flingStarted, object: nil)
-            if let scroll = transcriptScroll() { scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false) }
+            if let scroll = transcriptScroll() {
+                NotificationCenter.default.post(name: flingStarted, object: scroll)
+                scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
+            }
             try? await Task.sleep(for: .seconds(2))
             measureFromHere()
             if let scroll = transcriptScroll() { log.notice("pagingdown from \(scroll.contentOffset.y, privacy: .public) of \(scroll.contentSize.height, privacy: .public)") }

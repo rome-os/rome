@@ -268,12 +268,21 @@ private struct AppearHost: View {
     /// Rows that come in short and grow a moment later, as a reply's picture
     /// does once it loads.
     var grows: Set<String> = []
+    /// Replies taller than the screen; they grow by 240 pt when `growth` is on.
+    var tall: Set<String> = []
+    /// Rows of 180 pt that grow to 420 pt when `growth` is on.
+    var growOnCue: Set<String> = []
+    var growth = Growth()
 
     var body: some View {
         TranscriptList(store: store) { row, previous in
             Group {
                 if grows.contains(row.id) {
                     LateGrowingRow()
+                } else if tall.contains(row.id) {
+                    Color.gray.opacity(0.2).frame(height: growth.on ? 2240 : 2000)
+                } else if growOnCue.contains(row.id) {
+                    Color.gray.opacity(0.3).frame(height: growth.on ? 420 : 180)
                 } else {
                     switch row {
                     case .userText(_, let text, _, let pending): UserBubble(text: text, pending: pending)
@@ -339,6 +348,12 @@ private struct AppearHost: View {
     }
 }
 
+/// Turns on the growth of `AppearHost`'s rows that grow on cue.
+@MainActor @Observable
+private final class Growth {
+    var on = false
+}
+
 /// 180 pt, then 420 pt 0.4 s after it first shows: a picture's placeholder,
 /// then the picture.
 private struct LateGrowingRow: View {
@@ -391,7 +406,7 @@ private struct LateGrowingRow: View {
         // Up to the top of what is held.
         let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
         // As a drag up does: the list stops following the bottom.
-        NotificationCenter.default.post(name: PerfProbe.flingStarted, object: nil)
+        NotificationCenter.default.post(name: PerfProbe.flingStarted, object: scroll)
         scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
         try await Task.sleep(for: .milliseconds(100))
         let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
@@ -437,7 +452,7 @@ private struct LateGrowingRow: View {
 
         let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
         // As a drag up does: the list stops following the bottom.
-        NotificationCenter.default.post(name: PerfProbe.flingStarted, object: nil)
+        NotificationCenter.default.post(name: PerfProbe.flingStarted, object: scroll)
         scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
         try await Task.sleep(for: .milliseconds(100))
         let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
@@ -505,3 +520,60 @@ private struct LateGrowingRow: View {
     }
 }
 
+
+/// A reply taller than the screen fills it: the list is held by that reply,
+/// not by a row off screen.
+@MainActor
+@Suite(.serialized) struct TallReplyTests {
+    private func show(tall: Set<String>, growOnCue: Set<String>) async throws -> (TranscriptStore, Appearances, Growth, UIScrollView, UIWindow) {
+        let messages = (0..<60).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index / 2)", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index), long enough to fill a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        let backend = FakeBackend()
+        backend.stored = messages
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        let seen = Appearances()
+        let growth = Growth()
+        let host = UIHostingController(rootView: AppearHost(store: store, seen: seen, tall: tall, growOnCue: growOnCue, growth: growth))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        try await Task.sleep(for: .milliseconds(800))
+        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        return (store, seen, growth, scroll, window)
+    }
+
+    /// Puts 300 pt of `id` above the visible area, so it fills the screen.
+    private func scrollInto(_ id: String, seen: Appearances, scroll: UIScrollView) async throws {
+        NotificationCenter.default.post(name: PerfProbe.flingStarted, object: scroll)
+        let top = try #require(seen.tops[id])
+        scroll.setContentOffset(CGPoint(x: 0, y: top + 300 - scroll.adjustedContentInset.top), animated: false)
+        try await Task.sleep(for: .milliseconds(300))
+    }
+
+    @Test func aTallReplyThatGrowsBelowTheScreenDoesNotMove() async throws {
+        let (store, seen, growth, scroll, window) = try await show(tall: ["m50:0"], growOnCue: [])
+        defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil; store.stop() }
+        try await scrollInto("m50:0", seen: seen, scroll: scroll)
+        let before = try #require(seen.shown("m50:0", in: scroll))
+        growth.on = true
+        try await Task.sleep(for: .milliseconds(500))
+        let after = try #require(seen.shown("m50:0", in: scroll))
+        #expect(abs(after - before) < 1, "the reply in view moved from \(before) to \(after)")
+    }
+
+    @Test func aLastTallReplyStaysWhenRowsAboveGrow() async throws {
+        let (store, seen, growth, scroll, window) = try await show(tall: ["m59:0"], growOnCue: Set((40..<58).map { "m\($0):0" }))
+        defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil; store.stop() }
+        try await scrollInto("m59:0", seen: seen, scroll: scroll)
+        let before = try #require(seen.shown("m59:0", in: scroll))
+        growth.on = true
+        try await Task.sleep(for: .milliseconds(500))
+        let after = try #require(seen.shown("m59:0", in: scroll))
+        #expect(abs(after - before) < 1, "the reply in view moved from \(before) to \(after)")
+    }
+}
