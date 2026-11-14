@@ -495,10 +495,10 @@ struct MainShell: View {
         }
     }
 
-    /// A pushed page, the Agent page's cover or an app's sheet hides the
-    /// stack's root. A sheet leaves the root on screen, so its animations
-    /// would keep running under it.
-    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil }
+    /// A pushed page, the Agent page's cover or a large sheet (an app, a
+    /// dashboard page, Settings) hides the stack's root. A sheet leaves the
+    /// root on screen, so its animations would keep running under it.
+    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings }
 
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(

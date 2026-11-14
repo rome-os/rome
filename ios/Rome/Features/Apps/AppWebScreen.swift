@@ -92,7 +92,7 @@ struct AppWebScreen: View {
             .accessibilityLabel("More")
         }
         .padding(.horizontal, 12)
-        // Below the sheet's grabber.
+        // Clear of the sheet's round top corners.
         .padding(.top, 14)
         .padding(.bottom, 6)
     }
