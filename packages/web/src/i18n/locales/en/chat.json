@@ -703,6 +703,7 @@
   "voiceInput": {
     "start": "Start voice input",
     "stop": "Stop voice input",
+    "finishing": "Finishing voice input",
     "stopped": {
       "provider-unavailable": "Transcription service unavailable. Listening stopped",
       "provider-refused": "Transcription service refused the request. Listening stopped",

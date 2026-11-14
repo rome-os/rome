@@ -6,8 +6,9 @@ import type { VoiceInputState } from "./use-voice-input";
 
 /**
  * The composer's voice control. Its name and `aria-pressed` are a contract
- * with the voice input verifier: "Start voice input" and false while idle,
- * "Stop voice input" and true while listening.
+ * with the voice input verifier: "Start voice input" and false only while
+ * idle, "Stop voice input" and true while listening, and "Finishing voice
+ * input" while the rest of the text is on its way and the field is read-only.
  */
 export function VoiceInputButton({
   state,
@@ -18,7 +19,11 @@ export function VoiceInputButton({
 }) {
   const { t } = useTranslation("chat");
   const listening = state === "listening";
-  const label = listening ? t("voiceInput.stop") : t("voiceInput.start");
+  const label = listening
+    ? t("voiceInput.stop")
+    : state === "finishing"
+      ? t("voiceInput.finishing")
+      : t("voiceInput.start");
   return (
     <Button
       type="button"

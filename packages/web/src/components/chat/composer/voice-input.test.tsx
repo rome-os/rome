@@ -190,11 +190,14 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
 
     fireEvent.click(stop);
     expect(
-      screen.getByRole("button", { name: "Start voice input" }).getAttribute("aria-pressed"),
+      screen.getByRole("button", { name: "Finishing voice input" }).getAttribute("aria-pressed"),
     ).toBe("false");
     await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
     expect(microphone.closed).toBe(1);
     socket.say({ type: "ended" });
+    expect(
+      screen.getByRole("button", { name: "Start voice input" }).getAttribute("aria-pressed"),
+    ).toBe("false");
 
     expect(field().value).toBe("Note: buy milk");
     expect(field().readOnly).toBe(false);
@@ -258,6 +261,28 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
 
     await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
     expect(socket.sent.at(-2)).toBe(microphone.tail);
+  });
+
+  it("says it is finishing, not ready to start, until the rest of the text arrives", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+
+    expect(screen.queryByRole("button", { name: "Start voice input" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Finishing voice input" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(field().readOnly).toBe(true);
+
+    socket.say({ type: "ended" });
+    expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(field().value).toBe("hello");
   });
 
   it("gives the field back when Rome never answers a stop", async () => {
