@@ -97,10 +97,18 @@ actor SyncEngine {
         let deadline = budget.map { now().addingTimeInterval($0) }
         if running {
             pending.insert(trigger)
-            await waitForFollowUp(until: deadline)
-            return
+        } else {
+            running = true
+            // The engine owns the run, so a caller with a deadline stops
+            // waiting at it (HealthKit's completion is never held past the
+            // wake), while the run itself stops at its next step.
+            Task { await self.drive(trigger, deadline: deadline) }
         }
-        running = true
+        await waitForFollowUp(until: deadline)
+    }
+
+    /// Runs syncs until no trigger waits, then lets every waiter go.
+    private func drive(_ trigger: SyncTrigger, deadline: Date?) async {
         var triggers: Set<SyncTrigger> = [trigger]
         while true {
             // A follow-up the guardian is waiting on is not held to a background budget.

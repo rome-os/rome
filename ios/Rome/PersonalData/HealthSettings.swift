@@ -291,6 +291,9 @@ final class HealthSettings {
         return Task {
             // A sync under way stops before its next read or batch.
             await engine.quiesce()
+            // Turned on again meanwhile: an `off` now would hide what the
+            // phone has just sent.
+            guard !lane.switches.value.enabled else { return }
             await self.tellRome("off", lane: lane)
         }
     }
@@ -318,14 +321,17 @@ final class HealthSettings {
             lane.switches.set(enabled: before.enabled)
             return false
         }
+        // This Rome's sync is off from here, whichever Rome is open by now:
+        // reopened, it must not upload the history the guardian just deleted.
+        defaults.set(false, forKey: Defaults.enabled(id))
+        lane.switches.set(enabled: false)
         await lane.source.reset()
         let entry = await lane.log.append(SyncLogEntry(seq: 0, time: Date(), trigger: .manual, outcome: .deleted))
+        // The page's own state only for the Rome still open.
         guard self.lane === lane else { return true }
         observers.stop()
         isEnabled = false
-        defaults.set(false, forKey: Defaults.enabled(id))
         flag.set(false)
-        lane.switches.set(enabled: false)
         logged(entry, from: id)
         return true
     }

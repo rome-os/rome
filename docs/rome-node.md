@@ -618,9 +618,10 @@ answered.
 
 **Settings → Apple Health** is a row that shows On, Off or Needs
 sign-in and opens the Apple Health page. Its switch, **Sync with Rome**, belongs to
-the Rome open now, is off by default on each Rome, and decides both ways Health
-reaches that Rome: the background sync, and the
-live `health.*` actions, which fail with `health_off` while it is off. Turning it
+the Rome open now and is off by default on each Rome. It decides the background
+sync to that Rome, and the live `health.*` actions, which fail with `health_off`
+while it is off. A live request does not say which Rome sent it, so the live
+actions follow the switch of the Rome open on the phone, whichever Rome asks. Turning it
 on while iOS has never been asked shows the system's access sheet at once, then
 starts the history backfill. A line under the switch says how the sync stands,
 with Sync now at its end. One line of promises follows: Health is read only, never

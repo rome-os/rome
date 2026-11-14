@@ -133,7 +133,18 @@ actor FakePersonalDataBackend: PersonalDataBackend {
 
     func setState(source: String, origin: String, state: String) async throws(PersonalDataFailure) { states.append(state) }
 
+    var deleteGate: CheckedContinuation<Void, Never>?
+    var holdingDelete = false
+    func holdDelete() { holdingDelete = true }
+    func releaseDelete() {
+        holdingDelete = false
+        deleteGate?.resume()
+        deleteGate = nil
+    }
+    var deleteHeld: Bool { deleteGate != nil }
+
     func deleteOrigin(source: String, origin: String) async throws(PersonalDataFailure) -> Int {
+        if holdingDelete { await withCheckedContinuation { deleteGate = $0 } }
         if !failures.isEmpty { throw failures.removeFirst() }
         deletes += 1
         return 42
@@ -616,6 +627,32 @@ struct SyncRig {
         #expect(marked.map(\.offset) == [fresh.count - 1], "synced through only once its history is in")
     }
 
+    @Test func anOldReadingImportedAfterTheHistoryIsStillSent() async throws {
+        let rig = SyncRig()
+        await rig.backfill()
+        // A weight and a workout dated weeks before sync was turned on, added now.
+        rig.health.add("bodyMass", id: "late", start: rig.date("2026-10-15T00:00:00Z"), value: 69.5)
+        rig.health.add("workouts", id: "lateRun", start: rig.date("2026-10-20T10:00:00Z"), end: rig.date("2026-10-20T10:30:00Z"),
+                       workout: WorkoutRecord(start: rig.date("2026-10-20T10:00:00Z"), end: rig.date("2026-10-20T10:30:00Z"), activity: "running", durationMinutes: 30))
+        await rig.engine.sync(.manual)
+        let keys = Set(await rig.backend.upserts.map(\.key))
+        #expect(keys.contains("bodyMass:late"))
+        #expect(keys.contains("workouts:lateRun"))
+    }
+
+    @Test func theFirstBackgroundCallerStopsWaitingAtItsDeadline() async throws {
+        let rig = SyncRig(pause: { try await Task.sleep(for: .seconds($0)) })
+        rig.addThreeWeeks()
+        await rig.backend.hold()
+        let started = Date()
+        // The observer that starts the run, with the upload held.
+        await rig.engine.sync(.observer, budget: 0.2)
+        #expect(Date().timeIntervalSince(started) < 5, "HealthKit's completion is not held by a slow upload")
+        await rig.backend.release()
+        await rig.engine.quiesce()
+        #expect(await rig.lastEntry()?.outcome == .interrupted, "the run stops at its next step")
+    }
+
     @Test func dayBucketsAreKeyedByTheirStartInstant() {
         let calendar = HealthFixtures.calendar("Asia/Shanghai")
         let midnight = HealthFixtures.date("2026-11-08T16:00:00Z")
@@ -795,6 +832,41 @@ struct SyncRig {
         #expect(homeLog.last?.trigger == .manual)
         #expect(homeLog.last?.history == false, "a catch-up from its anchors, not a new 6 months")
         #expect(rig.make(Rig.work).isEnabled, "each Rome's switch is kept")
+    }
+
+    @Test func aDeleteFinishedAfterSwitchingRomesStillTurnsItsRomeOff() async throws {
+        let rig = Rig()
+        let settings = rig.make()
+        await settings.setEnabled(true).value
+        await rig.backend(Rig.home.id).holdDelete()
+        let delete = Task { await settings.deleteUploaded() }
+        for _ in 0..<500 where await !rig.backend(Rig.home.id).deleteHeld { try await Task.sleep(for: .milliseconds(10)) }
+        // The guardian opens another Rome while Home's delete is under way.
+        settings.select(Rig.work)
+        await rig.backend(Rig.home.id).releaseDelete()
+        #expect(await delete.value)
+        #expect(!rig.make(Rig.home).isEnabled, "reopened, Home does not upload what was deleted")
+        settings.select(Rig.home)
+        #expect(!settings.isEnabled)
+        let sent = await rig.backend(Rig.home.id).envelopes.count
+        await settings.syncNow().value
+        #expect(await rig.backend(Rig.home.id).envelopes.count == sent)
+    }
+
+    @Test func offThenOnDuringASyncSendsNoStaleOff() async throws {
+        let rig = Rig()
+        let settings = rig.make()
+        await settings.setEnabled(true).value
+        await rig.backend.hold()
+        let sync = settings.syncNow()
+        for _ in 0..<500 where await rig.backend.gate == nil { try await Task.sleep(for: .milliseconds(10)) }
+        let off = settings.setEnabled(false)
+        let on = settings.setEnabled(true)
+        await rig.backend.release()
+        await off.value
+        await on.value
+        await sync.value
+        #expect(await !rig.backend.states.contains("off"), "on again before the off went out")
     }
 
     @Test func deleteReachesOnlyTheOpenRome() async {

@@ -74,6 +74,16 @@ enum HealthSyncPlan {
 
     /// Where a backfill's delta window starts.
     static func deltaFrom(_ start: Date) -> Date { start.addingTimeInterval(-Double(deltaOverlapDays) * 86_400) }
+
+    /// Where a type's anchored query starts. A dense type's samples are many,
+    /// so its anchor covers a week before sync was turned on, and the
+    /// reconcile catches a later change further back. A sparse type (a weight,
+    /// a workout, a night) is anchored over the whole history, so a reading
+    /// imported later with an older date still comes through.
+    static func anchorFrom(_ type: HealthSyncType, start: Date, floor: Date) -> Date {
+        if case .bucket = type.shape { return deltaFrom(start) }
+        return floor
+    }
 }
 
 // MARK: - Reading
@@ -166,12 +176,13 @@ actor AppleHealthSource: PersonalDataSource {
         // now, before the history is read, so a change made during the
         // backfill comes through the next delta.
         var fresh = SyncProgress(instanceId: instanceId)
-        let from = HealthSyncPlan.deltaFrom(now)
-        for type in plan { fresh.anchors[type.name] = try await reader.currentAnchor(type, from: from) }
         let calendar = calendar()
         let today = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 1, to: today) ?? now
         let floor = calendar.date(byAdding: .day, value: -HealthSyncPlan.historyDays, to: today) ?? today
+        for type in plan {
+            fresh.anchors[type.name] = try await reader.currentAnchor(type, from: HealthSyncPlan.anchorFrom(type, start: now, floor: floor))
+        }
         fresh.backfill = SyncProgress.Backfill(start: now, floor: floor, cursor: end)
         // One look per type: a type with nothing in the window is left out
         // of the history, which then reads only what the phone recorded.
@@ -236,8 +247,8 @@ actor AppleHealthSource: PersonalDataSource {
         var chunk = SyncChunk(kind: .delta, commit: progress)
         let calendar = calendar()
         let floor = progress.backfill?.floor ?? calendar.date(byAdding: .day, value: -HealthSyncPlan.historyDays, to: now) ?? now
-        let from = HealthSyncPlan.deltaFrom(progress.backfill?.start ?? now)
         for type in active(progress) {
+            let from = HealthSyncPlan.anchorFrom(type, start: progress.backfill?.start ?? now, floor: floor)
             let anchor: Data
             if let saved = progress.anchors[type.name] {
                 anchor = saved
@@ -307,9 +318,11 @@ actor AppleHealthSource: PersonalDataSource {
             switch type.shape {
             case .bucket: try await addBuckets(type, in: window, emptyDeletes: true, now: now, to: &chunk)
             case .sleep:
+                // One read for every night of the window, not one per night.
+                let segments = try await reader.records(type, in: DateInterval(start: start.addingTimeInterval(-18 * 3600), end: end))
                 var day = start
                 while day < end {
-                    try await addNight(WireTime.day(day, calendar: calendar), to: &chunk, calendar: calendar)
+                    try await addNight(WireTime.day(day, calendar: calendar), to: &chunk, calendar: calendar, segments: segments)
                     guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
                     day = next
                 }
