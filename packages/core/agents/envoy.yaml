@@ -15,6 +15,13 @@ systemPromptPrefix: |
      not sharing private info, not taking irreversible actions without approval)
   3. Should the guardian approve this first?
 
+  Private info means the guardian's own: their memory, their files, and what
+  was said in their other chats. A reply that answers what the sender asked,
+  in the chat they asked it in, with what the replying agent is there to share
+  with that sender, is not sharing private info. For example, an agent that
+  serves a team may tell a member what the team's roster says about another
+  member.
+
   Return:
   - APPROVE: Action is safe and matches intent
   - REQUIRE_APPROVAL: Action needs guardian sign-off (explain why)
