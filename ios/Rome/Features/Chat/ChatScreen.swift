@@ -968,8 +968,7 @@ struct TranscriptList<Row: View>: View {
                 if new.contentHeight < old.contentHeight { scrollHandle.clampToEnd() }
                 guard store.placingOlder else { return }
                 let grew = new.contentHeight - old.contentHeight
-                let followed = new.offset - old.offset
-                if grew > 1 && abs(grew - followed) > 1 { scrollHandle.shift(by: grew - followed) }
+                if grew > 1 { scrollHandle.hold(at: old.offset + grew, contentHeight: new.contentHeight) }
             }))
         }
     }
@@ -1043,9 +1042,12 @@ private struct FollowBottom: ViewModifier {
             content
                 // The role nearest the scroll view wins over the general anchor.
                 // An older page placed above is held by its own offset shift
-                // (`ScrollHandle.shift`), which works in a glide as well.
-                .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
-                .defaultScrollAnchor(.bottom)
+                // (`ScrollHandle.hold`), which works in a glide as well. While
+                // it goes in, both anchors hold the top: from iOS 27 the
+                // general `.bottom` also moves the offset on a size change, to
+                // the end of the content.
+                .defaultScrollAnchor(following && !holdOlder ? .bottom : .top, for: .sizeChanges)
+                .defaultScrollAnchor(holdOlder ? .top : .bottom)
                 .onScrollPhaseChange { old, phase, context in
                     transcriptScrollLog.notice("phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public) at \(context.geometry.contentOffset.y, privacy: .public) of \(context.geometry.contentSize.height, privacy: .public), container \(context.geometry.containerSize.height, privacy: .public), insets \(context.geometry.contentInsets.top, privacy: .public)/\(context.geometry.contentInsets.bottom, privacy: .public), visible \(context.geometry.visibleRect.height, privacy: .public)")
                     atRest = phase == .idle || phase == .animating
@@ -1090,17 +1092,71 @@ private struct FollowBottom: ViewModifier {
 /// The UIScrollView under the transcript, found from inside its content.
 @MainActor
 final class ScrollHandle {
-    weak var view: UIScrollView?
+    weak var view: UIScrollView? {
+        didSet {
+            guard view !== oldValue else { return }
+            // Fires inside the layout that gives the scroll view its new size,
+            // so an offset set here shows in the same frame.
+            sizeWatch = view?.observe(\.contentSize) { [weak self] _, _ in
+                MainActor.assumeIsolated { _ = self?.placePending() }
+            }
+            offsetWatch = view?.observe(\.contentOffset) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.keepPlaced() }
+            }
+        }
+    }
+    private var sizeWatch: NSKeyValueObservation?
+    private var offsetWatch: NSKeyValueObservation?
+    /// Where the offset goes once the content reaches a height.
+    private var pending: (offset: CGFloat, contentHeight: CGFloat)?
+    /// The offset just placed, kept for the rest of that layout: SwiftUI sets
+    /// its own offset after the size, which put the list at the bottom.
+    private var placed: CGFloat?
     /// The glide was stopped to jump to the bottom: the rest that follows is
     /// not where the guardian left the list.
     var stoppedForJump = false
 
-    /// Moves the content by `dy` without stopping a glide: what an older page
-    /// added above the rows in view.
-    func shift(by dy: CGFloat) {
-        guard let view else { return }
+    /// Puts the offset at `offset` once the scroll view holds `contentHeight`
+    /// of content, without stopping a glide: an older page went in above the
+    /// rows in view. From iOS 27 the geometry reading comes before the scroll
+    /// view takes the new size, and an offset set then is lost, so it waits
+    /// for the size.
+    func hold(at offset: CGFloat, contentHeight: CGFloat) {
+        pending = (offset, contentHeight)
+        if !placePending() { placeLater(tries: 10) }
+    }
+
+    /// The size is normally caught as it is set; a main-queue turn at a time
+    /// in case it was set before the watch.
+    private func placeLater(tries: Int) {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.pending != nil, !self.placePending() else { return }
+                if tries > 0 { self.placeLater(tries: tries - 1) } else { self.pending = nil }
+            }
+        }
+    }
+
+    /// Places the pending offset if the content has its height. Returns whether it did.
+    private func placePending() -> Bool {
+        guard let view, let pending, abs(view.contentSize.height - pending.contentHeight) < 1 else { return false }
+        self.pending = nil
+        placed = pending.offset
+        // No glide frame runs before the next main-queue turn.
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.placed = nil }
+        }
+        let dy = pending.offset - view.contentOffset.y
+        guard abs(dy) > 1 else { return true }
         view.contentOffset.y += dy
         transcriptScrollLog.notice("shifted by \(dy, privacy: .public) to \(view.contentOffset.y, privacy: .public)")
+        return true
+    }
+
+    private func keepPlaced() {
+        guard let view, let placed, abs(view.contentOffset.y - placed) > 1 else { return }
+        transcriptScrollLog.notice("offset moved to \(view.contentOffset.y, privacy: .public) as the page went in, kept at \(placed, privacy: .public)")
+        view.contentOffset.y = placed
     }
 
     /// Moves an offset left past the end of the content back to the end. A

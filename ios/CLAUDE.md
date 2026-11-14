@@ -53,6 +53,8 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 **A fling's glide wins over `ScrollViewReader.scrollTo`.** The tap reaches the button and `scrollTo` runs, but the list keeps decelerating the other way, so a tap mid-glide seems to do nothing. A Simulator tap after a slow drag does not show it; a real fling does. `ScrollHandle` stops the `UIScrollView`'s deceleration before scrolling, and older pages wait until the jump lands, because content that grows under the scroll animation moves its target.
 
+**From iOS 27, `onScrollGeometryChange` reports a new content size before the `UIScrollView` has it.** An offset set in that callback is lost, and the general `.defaultScrollAnchor(.bottom)` then moves the offset to the end of the content. iOS CI runs an iOS 26 simulator, where both still hold, so it passes either way. `ScrollHandle.hold` places the offset when the scroll view's own `contentSize` changes; run scroll tests on an iOS 27 simulator too.
+
 **A page that stays mounted keeps its animations running.** Chat stays in the tree, faded out, under the other sections, and a `TimelineView(.animation)` draws every frame there for no one. Pass `paused: offScreen`; see [`PERFORMANCE.md`](PERFORMANCE.md).
 
 **A system switch ignores the Simulator panel's `tap`.** The tap has no duration, and a `Toggle` waits for a touch that lasts. Use `touch_path` with two samples at the same point about 120 ms apart; the simulator log (`xcrun simctl spawn booted log show`) tells whether the app received anything.
