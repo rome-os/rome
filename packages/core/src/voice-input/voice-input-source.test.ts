@@ -141,4 +141,70 @@ describe("voice input source", () => {
       source: { transcriber: own, romeCloudSessionId: null },
     });
   });
+
+  it("tells a revoked instance to sign in again rather than to wait for Rome Cloud", async () => {
+    const revoked = answering(() => Response.json({ error: "instance_revoked" }, { status: 403 }));
+    const source = createVoiceInputSource({ own: null, romeCloud: signedIn, fetch: revoked.fetch });
+    expect(await source.info()).toEqual({
+      available: true,
+      via: "rome-cloud",
+      place: null,
+      placeUnknown: "rome-cloud-signed-out",
+    });
+    expect(await source.open()).toEqual({ ok: false, reason: "service-signed-out" });
+  });
+
+  it("refuses a session whose streaming address is not a socket address", async () => {
+    const malformed = answering(() =>
+      Response.json({
+        sessionId: "session-1",
+        provider: "soniox",
+        url: "not-a-url",
+        model: "stt-rt-v6",
+        token: "temporary-1",
+        expiresAt: "2026-11-14T03:35:00Z",
+      }),
+    );
+    const source = createVoiceInputSource({
+      own: null,
+      romeCloud: signedIn,
+      fetch: malformed.fetch,
+    });
+    expect(await source.open()).toEqual({ ok: false, reason: "service-unavailable" });
+  });
+
+  it("stops naming Rome Cloud's place once a session falls back to the instance's own provider", async () => {
+    let revoked = false;
+    const cloud = answering((path) => {
+      if (revoked) return Response.json({ error: "instance_revoked" }, { status: 403 });
+      return path === "/v1/transcription/provider" ? provider() : granted();
+    });
+    const source = createVoiceInputSource({ own, romeCloud: signedIn, fetch: cloud.fetch });
+    expect((await source.info()).via).toBe("rome-cloud");
+    revoked = true;
+    await source.open();
+    expect(await source.info()).toEqual({
+      available: true,
+      via: "instance",
+      place: { provider: "Soniox", host: "transcriber:8790" },
+    });
+  });
+
+  it("tells Rome Cloud which providers this build can use", async () => {
+    const asked: Array<{ url: string; body?: string }> = [];
+    const fetch = (async (url: URL | string, init?: RequestInit) => {
+      asked.push({ url: String(url), body: init?.body as string | undefined });
+      return String(url).includes("/provider") ? provider() : granted();
+    }) as typeof globalThis.fetch;
+    const source = createVoiceInputSource({ own: null, romeCloud: signedIn, fetch });
+    await source.info();
+    await source.open();
+    expect(asked).toEqual([
+      { url: "https://cloud.example/v1/transcription/provider?providers=soniox", body: undefined },
+      {
+        url: "https://cloud.example/v1/transcription/sessions",
+        body: JSON.stringify({ providers: ["soniox"] }),
+      },
+    ]);
+  });
 });

@@ -22,6 +22,9 @@ interface SonioxResponse {
 // A temporary key's stream reached the time Rome Cloud gave it.
 const EXPIRED = "temp_api_key_session_expired";
 
+// How long the provider has to accept the connection.
+export const SONIOX_CONNECT_TIMEOUT_MS = 10_000;
+
 // Control tokens such as `<end>` and `<fin>` mark endpoints, not speech.
 const CONTROL_TOKEN = /^<[a-z]+>$/;
 
@@ -29,14 +32,16 @@ export function createSonioxTranscriber(options: {
   apiKey: string;
   url?: string;
   model?: string;
+  connectTimeoutMs?: number;
 }): Transcriber {
   const url = options.url ?? SONIOX_DEFAULT_URL;
   const model = options.model ?? SONIOX_DEFAULT_MODEL;
+  const connectTimeoutMs = options.connectTimeoutMs ?? SONIOX_CONNECT_TIMEOUT_MS;
   return {
     place: { provider: "Soniox", host: new URL(url).host },
     model,
     open: ({ sampleRate }, listener) =>
-      openSonioxStream(url, options.apiKey, model, sampleRate, listener),
+      openSonioxStream(url, options.apiKey, model, sampleRate, listener, connectTimeoutMs),
   };
 }
 
@@ -46,6 +51,7 @@ function openSonioxStream(
   model: string,
   sampleRate: number,
   listener: TranscriptionListener,
+  connectTimeoutMs: number,
 ): TranscriptionStream {
   // A long-lived key and a temporary one both go in the header. Soniox
   // refuses the old `api_key` field of the start request from January 2027.
@@ -54,10 +60,18 @@ function openSonioxStream(
   const queued: (Uint8Array | string)[] = [];
   let done = false;
   let finishing = false;
+  // Whether the client is showing unsettled text that a later response may clear.
+  let shown = false;
+
+  const connecting = setTimeout(
+    () => stop(() => listener.onFailure("unavailable", "connect timed out")),
+    connectTimeoutMs,
+  );
 
   const stop = (outcome: () => void) => {
     if (done) return;
     done = true;
+    clearTimeout(connecting);
     outcome();
     ws.removeAllListeners();
     ws.on("error", () => {});
@@ -70,6 +84,7 @@ function openSonioxStream(
   };
 
   ws.on("open", () => {
+    clearTimeout(connecting);
     ws.send(
       JSON.stringify({
         model,
@@ -108,7 +123,10 @@ function openSonioxStream(
       if (token.is_final) settled += token.text;
       else pending += token.text;
     }
-    if (settled || pending || (response.tokens?.length ?? 0) > 0) listener.onText(settled, pending);
+    // Each response replaces the unsettled tail, so one with no tokens clears
+    // whatever was still pending.
+    if (response.tokens && (settled || pending || shown)) listener.onText(settled, pending);
+    shown = pending !== "";
     if (response.finished) stop(() => listener.onEnd());
   });
 

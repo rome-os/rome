@@ -32,6 +32,20 @@ export interface RomeCloudCaller {
 
 const isText = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 
+const isStreamUrl = (value: unknown): value is string => {
+  if (!isText(value)) return false;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "wss:" || protocol === "ws:";
+  } catch {
+    return false;
+  }
+};
+
+// The providers this build has an adapter for, so Rome Cloud can pick one of
+// them or refuse with a clear reason.
+const SUPPORTED_PROVIDERS = ["soniox"];
+
 /** Asks Rome Cloud for one transcription session, as the instance. */
 export async function requestRomeCloudSession(
   caller: RomeCloudCaller,
@@ -44,7 +58,7 @@ export async function requestRomeCloudSession(
     response = await fetchImpl(new URL("/v1/transcription/sessions", caller.origin), {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({ providers: SUPPORTED_PROVIDERS }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
@@ -62,7 +76,7 @@ export async function requestRomeCloudSession(
     !body ||
     !isText(body.sessionId) ||
     !isText(body.provider) ||
-    !isText(body.url) ||
+    !isStreamUrl(body.url) ||
     !isText(body.model) ||
     !isText(body.token)
   ) {
@@ -105,7 +119,9 @@ export async function readRomeCloudProvider(
   if (!token) return { kind: "signed-out" };
   let response: Response;
   try {
-    response = await fetchImpl(new URL("/v1/transcription/provider", caller.origin), {
+    const url = new URL("/v1/transcription/provider", caller.origin);
+    url.searchParams.set("providers", SUPPORTED_PROVIDERS.join(","));
+    response = await fetchImpl(url, {
       headers: { Authorization: `Bearer ${token}`, "Cache-Control": "no-store" },
       cache: "no-store",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
