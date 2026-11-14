@@ -46,6 +46,7 @@ function setup(
   rows: Record<string, Row>,
   caller: string | null = "guardian",
   appReply: unknown = { ok: true },
+  connections: unknown[] = [],
 ) {
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
@@ -71,6 +72,9 @@ function setup(
     },
     callerOwner: async () => caller,
     forward: async (request) => {
+      if (request.method === "GET" && new URL(request.url).pathname === "/api/connections") {
+        return Response.json({ connections });
+      }
       forwarded.push({
         url: new URL(request.url).pathname,
         body: await request.json(),
@@ -81,10 +85,10 @@ function setup(
       );
     },
   });
-  const fire = (widgetId: string, body: unknown) =>
+  const fire = (widgetId: string, body: unknown, headers: Record<string, string> = {}) =>
     app.request(`/chat/widgets/${widgetId}/events`, {
       method: "POST",
-      headers: { "content-type": "application/json", cookie: "rome_session=x" },
+      headers: { "content-type": "application/json", cookie: "rome_session=x", ...headers },
       body: JSON.stringify(body),
     });
   return { fire, forwarded };
@@ -496,5 +500,116 @@ describe("an event on a widget, over the dashboard's own storage", () => {
     } finally {
       testDb.close();
     }
+  });
+});
+
+describe("an event on the connect card core owns", () => {
+  const connectCard = {
+    type: "pending_interaction",
+    toolUseId: "k1",
+    appId: "core",
+    render: {
+      kind: "inline",
+      componentId: "connect-card",
+      ui: {
+        components: [
+          { id: "root", component: "Column", children: ["connect", "check", "dismiss"] },
+          button("connect", "connect", { kind: "github" }),
+          button("check", "check", { kind: "github" }),
+          button("dismiss", "dismiss", { kind: "github" }),
+        ],
+      },
+    },
+  };
+  const github = (state: string | null, connect: unknown) => [
+    { connectionKind: "github", state, connect },
+  ];
+  const link = {
+    url: "https://cloud.example/oauth/github",
+    available: true,
+    unavailableReason: null,
+  };
+
+  it("opens the kind's authorization page on Connect, and answers nothing yet", async () => {
+    const { fire, forwarded } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github(null, link),
+    );
+    const res = await fire("m", { name: "connect", context: { kind: "github" } });
+    expect(await res.json()).toEqual({ open: "https://cloud.example/oauth/github" });
+    expect(forwarded).toEqual([]);
+  });
+
+  it("turns a link to a dashboard page into a link on the caller's origin", async () => {
+    const { fire } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github(null, { url: "/settings/connections", available: true, unavailableReason: null }),
+    );
+    const res = await fire("m", { name: "connect", context: { kind: "github" } });
+    expect(await res.json()).toEqual({ open: "http://localhost/settings/connections" });
+  });
+
+  it("joins a dashboard page to the address the guardian reached Rome at, behind a proxy", async () => {
+    const { fire } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github(null, { url: "/settings/connections", available: true, unavailableReason: null }),
+    );
+    const res = await fire(
+      "m",
+      { name: "connect", context: { kind: "github" } },
+      { "x-forwarded-host": "rome.example.com", "x-forwarded-proto": "https" },
+    );
+    expect(await res.json()).toEqual({ open: "https://rome.example.com/settings/connections" });
+  });
+
+  it("refuses Connect with the reason when the kind can't be connected here", async () => {
+    const { fire } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github(null, { url: null, available: false, unavailableReason: "Rome Cloud is not set up." }),
+    );
+    const res = await fire("m", { name: "connect", context: { kind: "github" } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "Rome Cloud is not set up." });
+  });
+
+  it("answers the agent on Check only once the connection is working", async () => {
+    const notYet = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github("broken", link),
+    );
+    expect(
+      await (await notYet.fire("m", { name: "check", context: { kind: "github" } })).json(),
+    ).toEqual({ error: "github isn't connected yet. Finish authorizing, then try again." });
+    expect(notYet.forwarded).toEqual([]);
+
+    const working = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github("working", link),
+    );
+    const res = await working.fire("m", { name: "check", context: { kind: "github" } });
+    expect(await res.json()).toMatchObject({ answered: true });
+    expect(working.forwarded[0]?.body).toMatchObject({
+      parts: [{ toolUseId: "k1", output: { kind: "github", status: "connected" } }],
+    });
+  });
+
+  it("answers that the guardian declined on Dismiss", async () => {
+    const { fire, forwarded } = setup({ m: { chatId: "c1", content: [connectCard] } });
+    await fire("m", { name: "dismiss", context: { kind: "github" } });
+    expect(forwarded[0]?.body).toMatchObject({
+      parts: [{ output: { kind: "github", dismissed: true } }],
+    });
   });
 });

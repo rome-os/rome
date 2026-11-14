@@ -40,7 +40,7 @@ The tools Rome serves the model during a turn, in four groups: actions, subagent
 
 ## Session tools
 
-The tools a session carries beyond the ones every session of its agent has, such as the Concierge's tools, and `propose_routine` where the widget drawing is card, unless the agent [delegates its work](../concepts/agents.md#agent-policy).
+The tools a session carries beyond the ones every session of its agent has, such as the Concierge's tools, `propose_routine` where the widget drawing is card, unless the agent [delegates its work](../concepts/agents.md#agent-policy), and `connect_account`, which shows the connect card for an account Rome connects itself.
 
 - A fork's session tools are its source's: the model is offered the same tools in the fork as in the source. The fork runs the ones it can run on its own, and refuses the others as unavailable in a forked turn. Until a session's tools are stored, the open session carries the tools its source last opened with. The rule is `forkSessionTools` in [`packages/core/src/agent/domain/session-tools.ts`](../../packages/core/src/agent/domain/session-tools.ts).
 

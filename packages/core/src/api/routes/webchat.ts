@@ -136,6 +136,7 @@ import {
   questionCardUi,
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
+import { connectCardUiFromProps } from "../../connections/connect-card.js";
 import { cameThroughWidgetEvent } from "./widget-events.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
 
@@ -618,6 +619,10 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
       emittedBy: (tool) => tool === "ask_question" || tool.endsWith("__ask_question"),
     },
     { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
+    {
+      componentId: "connect-card",
+      emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
+    },
   ];
 
 /** Validate and shape a host-owned suspension a tool result may emit.
@@ -641,6 +646,9 @@ function buildBuiltinCard(
     // from `props`.
     const questions =
       suspension.componentId === "question-card" ? parseAskQuestionInput(suspension.props) : null;
+    // The connect card described as data, built here for the same reason.
+    const connectUi =
+      suspension.componentId === "connect-card" ? connectCardUiFromProps(suspension.props) : null;
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -652,6 +660,7 @@ function buildBuiltinCard(
         builtin: true,
         ...(suspension.requiresCard ? { requiresCard: true } : {}),
         ...(questions?.ok ? { ui: questionCardUi(questions.questions) } : {}),
+        ...(connectUi ? { ui: connectUi } : {}),
       },
     };
   }
@@ -764,7 +773,7 @@ interface OpenSuspensionCard {
   messageId: string;
   /** An app's card described as data: only the app answers it, through the
    *  widget route. */
-  answeredByApp: boolean;
+  answeredByOwner: boolean;
 }
 
 /** The message an `interaction_result` part says holds its card, when it says. */
@@ -827,10 +836,13 @@ async function findOpenSuspensions(
             builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
           ...(questions?.ok ? { questions: questions.questions } : {}),
           messageId: msg.id,
-          answeredByApp:
-            part.appId !== "core" &&
-            part.render?.ui !== undefined &&
-            part.render?.componentId === undefined,
+          // A card whose owner decides its answer: an app's card described as
+          // data, or core's connect card, which answers once the connection works.
+          answeredByOwner:
+            (part.appId !== "core" &&
+              part.render?.ui !== undefined &&
+              part.render?.componentId === undefined) ||
+            (builtin && part.render?.componentId === "connect-card"),
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -4061,10 +4073,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // reply the widget route turns into this turn.
     if (
       resolution &&
-      openSuspensions.get(resolution.toolUseId)?.answeredByApp &&
+      openSuspensions.get(resolution.toolUseId)?.answeredByOwner &&
       !said.fromWidgetEvent
     ) {
-      return answer({ error: "Only the card's app answers it" }, 400);
+      return answer({ error: "Only the card's owner answers it" }, 400);
     }
     // A widget's event names the message that holds the card. A later card can
     // reuse the tool-use id, so the answer goes only to the card pressed.
