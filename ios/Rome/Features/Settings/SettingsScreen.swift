@@ -67,7 +67,7 @@ struct SettingsGroup<Content: View>: View {
                     .foregroundStyle(Palette.sub)
             }
             VStack(spacing: 0, content: content)
-                .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                 .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                 .hairline(radius: Metrics.groupRadius)
         }
@@ -87,7 +87,7 @@ struct SettingsRow<Trailing: View>: View {
                 .romeFont(15)
                 .foregroundStyle(Palette.fg)
                 .frame(width: 30, height: 30)
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Palette.secondaryFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             HStack {
                 Text(title).romeFont(17).foregroundStyle(Palette.fg)
                 Spacer(minLength: 8)
@@ -104,12 +104,13 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
-/// Board 3: account, AI tool usage, links, sign out.
+/// Board 3: account, AI tool usage, Apple Health and iPhone use, the app's
+/// own settings and links, sign out. Groups carry no titles.
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
     let onHealth: () -> Void
-    let onRequests: () -> Void
+    let onDevice: () -> Void
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
@@ -128,15 +129,15 @@ struct SettingsScreen: View {
                     .padding(.top, 8)
                 // The guardian's own subscriptions: not a visitor's to see.
                 if !workspace.isVisitor {
-                    SettingsGroup(header: "AI tool usage") {
+                    SettingsGroup {
                         UsageRow(name: "Claude", provider: usage?.claude, last: false)
                         UsageRow(name: "Codex", provider: usage?.codex, last: true)
                     }
                     .padding(.horizontal, 16)
                 }
-                NodeSettingsGroup(onHealth: onHealth, onRequests: onRequests)
+                NodeSettingsGroup(onHealth: onHealth, onDevice: onDevice)
                     .padding(.horizontal, 16)
-                SettingsGroup(header: "Other") {
+                SettingsGroup {
                     SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {
                         Menu {
                             Picker("Appearance", selection: Binding(get: { model.appearance.current }, set: { model.appearance.set($0) })) {
@@ -265,7 +266,7 @@ struct SettingsScreen: View {
         }
         .softTopScrollEdge()
         .floatingTopBar { PageHeader(title: "Settings", onClose: onClose, inSheet: true) }
-        .background(Palette.bg.ignoresSafeArea())
+        .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { if !workspace.isVisitor { usage = try? await workspace.backend.aiTools() } }
         .task {
@@ -326,7 +327,7 @@ struct SettingsScreen: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+            .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .softElevation(radius: Metrics.cardRadius)
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
@@ -401,7 +402,7 @@ struct UsageRow: View {
             if provider?.loggedIn == true {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Palette.fill)
+                        Capsule().fill(Palette.secondaryFill)
                         Capsule()
                             .fill(percent >= 100 || provider?.quotaExhausted == true ? Palette.destructive : Palette.fg)
                             .frame(width: geometry.size.width * percent / 100)

@@ -16,7 +16,7 @@ struct InstancesScreen: View {
                             SkeletonRow(last: index == 2)
                         }
                     }
-                    .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                    .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .hairline(radius: Metrics.groupRadius)
                     .padding(.horizontal, 16)
                 } else {
@@ -25,7 +25,7 @@ struct InstancesScreen: View {
                             row(instance, last: index == model.instances.count - 1)
                         }
                     }
-                    .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                    .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .hairline(radius: Metrics.groupRadius)
                     .padding(.horizontal, 16)
@@ -48,7 +48,7 @@ struct InstancesScreen: View {
         }
         .softTopScrollEdge()
         .floatingTopBar { PageHeader(title: "Switch instance", inSheet: true) }
-        .background(Palette.bg.ignoresSafeArea())
+        .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .task { await model.refreshInstances() }
@@ -126,8 +126,8 @@ private struct SkeletonRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 4).fill(Palette.fill).frame(width: 96, height: 14)
-                RoundedRectangle(cornerRadius: 4).fill(Palette.fill).frame(width: 140, height: 11)
+                RoundedRectangle(cornerRadius: 4).fill(Palette.secondaryFill).frame(width: 96, height: 14)
+                RoundedRectangle(cornerRadius: 4).fill(Palette.secondaryFill).frame(width: 140, height: 11)
             }
             Spacer()
         }

@@ -12,7 +12,7 @@ Example: when the drawer opens, the page behind it takes a deeper tone than the 
 
 Where iOS has a standard way to do something, the app uses it, so nothing has to be learned twice: sheets, switches, the per-app language setting, gestures and haptics.
 
-Example: Settings is a sheet, a setting that turns on and off is a switch, the language changes in iOS Settings, and lists have no pull-to-refresh.
+Example: Settings and an app are sheets (rule 12), a setting that turns on and off is a switch, the language changes in iOS Settings, and lists have no pull-to-refresh.
 
 ## 3. One emphasis per view
 
@@ -65,3 +65,11 @@ Example: the opening screen shows the mascot and "Rome" with no caption, and a p
 A screen adapts to the width it gets, not to the device, so an iPad window of any size and a phone follow the same rules. A conversation never runs wider than one readable column.
 
 Example: on a wide iPad window the drawer is pinned beside the page; narrowed in Split View, it slides out as on a phone, and the open chat stays as it was. Messages, cards and the composer stay in a centered column of 720 pt at most.
+
+## 12. Second-level pages rise as sheets
+
+Chat and Apps are first-level pages: the drawer switches between them, and they sit on the page background. Everything that covers them is a second-level page: Settings, an app, a dashboard page. A second-level page opens from the bottom as a sheet, with rounded top corners, and closes with a drag down or its close button. A page opened from inside it, such as Apple Health or iPhone use from Settings, pushes in from the side within the same sheet, and Back returns to the page under it.
+
+A second-level page has its own background, `Palette.secondaryPage`, and its cards use `Palette.secondaryCard` (an icon tile or a track inside one, `Palette.secondaryFill`). In dark it is a gray a step above the black first level, so the sheet's top edge reads against the page behind it; in light it is a light gray, so white cards stand out. Paint a second-level page with `secondaryPageBackground()`, which also gives its header's fade the same color.
+
+Example: an app opens from Apps in a sheet over the grid, not pushed over it. In Settings, the Apple Health row pushes the Apple Health page inside the sheet, and the X closes both.
