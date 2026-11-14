@@ -453,7 +453,7 @@ final class HostRig {
         #expect(await eventually { socket.sent.count == 1 })
         let error = parseJSON(socket.sent[0])["payload"]?["error"]
         #expect(error?["code"]?.string == "health_off")
-        #expect(error?["message"]?.string?.contains("Settings → iPhone use → Apple Health") == true)
+        #expect(error?["message"]?.string?.contains("Settings → Apple Health in the Rome app") == true)
         #expect(rig.health.reads == 0 && rig.health.accessRequests == 0)
     }
 

@@ -393,16 +393,6 @@
         }
       }
     },
-    "AI tool usage" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AI 工具用量"
-          }
-        }
-      }
-    },
     "Active" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2141,6 +2131,16 @@
         }
       }
     },
+    "Message in %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」中发消息"
+          }
+        }
+      }
+    },
     "Mindful minutes" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2767,16 +2767,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "或者自己写…"
-          }
-        }
-      }
-    },
-    "Other" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "其他"
           }
         }
       }

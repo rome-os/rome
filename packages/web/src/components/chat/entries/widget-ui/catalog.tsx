@@ -131,11 +131,20 @@ function children(list: Child[] | undefined, build: (id: string, basePath?: stri
   );
 }
 
-const Text = createComponentImplementation(TextApi, ({ props }) => (
-  <span className={cn("min-w-0 text-foreground", textClass[props.variant ?? "body"])}>
-    {shown(props.text)}
-  </span>
-));
+/** A button's label takes the button's own text colour, as on a primary
+ *  button's fill, rather than the card's. */
+const InButtonContext = createContext(false);
+
+const Text = createComponentImplementation(TextApi, ({ props }) => {
+  const inButton = useContext(InButtonContext);
+  return (
+    <span
+      className={cn("min-w-0", !inButton && "text-foreground", textClass[props.variant ?? "body"])}
+    >
+      {shown(props.text)}
+    </span>
+  );
+});
 
 const Stat = createComponentImplementation(StatApi, ({ props }) => (
   <div className="flex min-w-0 flex-col">
@@ -261,7 +270,9 @@ const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChi
       disabled={busy || props.isValid === false}
       onClick={() => void props.action?.()}
     >
-      {buildChild(props.child as string)}
+      <InButtonContext.Provider value={true}>
+        {buildChild(props.child as string)}
+      </InButtonContext.Provider>
     </Button>
   );
 });

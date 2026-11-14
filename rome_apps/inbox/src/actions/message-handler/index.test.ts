@@ -726,6 +726,8 @@ describe("message reply bond-level settings", () => {
       data: { action: "sent", response: "Here is the answer." },
     });
     expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel", "main", "envoy"]);
+    // Envoy judges what is private by who is replying, so it is told the agent.
+    expect(agentRunner.calls[2]?.prompt).toContain("Replying agent: main");
     expect(sentMessages).toEqual([
       {
         channel: "email",
