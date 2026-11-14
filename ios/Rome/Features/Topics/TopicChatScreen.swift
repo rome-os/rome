@@ -22,7 +22,10 @@ struct TopicChatScreen: View {
     @State private var startFailure: SendFailure = .unknown
     @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
-    @State private var confirmDelete = false
+    /// The delete alert, once the chat's follows and open tasks are read.
+    @State private var deleting: TopicDeletePrompt?
+    /// Set while that read runs, so a second tap on Delete starts no other.
+    @State private var readingWork = false
     @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -61,7 +64,7 @@ struct TopicChatScreen: View {
                     renaming = true
                 },
                 onArchive: chatId.map { id in { archive(id) } },
-                onDelete: { confirmDelete = true }
+                onDelete: { title in askToDelete(title) }
             )
             .accessibilityHidden(store?.thread != nil)
         }
@@ -85,9 +88,8 @@ struct TopicChatScreen: View {
                 Task { await workspace.renameTopic(chatId, to: name) }
             }
         }
-        .deleteChatAlert(isPresented: $confirmDelete) {
-            guard let chatId else { return }
-            Task { if await workspace.deleteTopic(chatId) { onArchived() } }
+        .deleteTopicChatAlert($deleting) { id, stoppingWork in
+            Task { if await workspace.deleteTopic(id, stoppingWork: stoppingWork) { onArchived() } }
         }
         .pageBackground()
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) }, prefill: Binding(
@@ -123,7 +125,12 @@ struct TopicChatScreen: View {
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
-        .onAppear { store?.start() }
+        // The open starts before the first fetch, so a reply that arrives
+        // live during it is never counted as unread.
+        .onAppear {
+            store?.beginOpen()
+            store?.start()
+        }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
         .onDisappear {
@@ -138,6 +145,8 @@ struct TopicChatScreen: View {
     /// page's sheet, the Agent page or the drawer.
     private func markRead(_ store: TranscriptStore) {
         guard visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId) else { return }
+        // Before the read: the open reads where the unread messages start.
+        store.beginOpen()
         store.markRead()
         workspace.topics.markRead(store.sessionId)
     }
@@ -152,6 +161,7 @@ struct TopicChatScreen: View {
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }
+            .overlay(alignment: .top) { UnreadPillButton(store: store) }
             .onAppear { markRead(store) }
             .onChange(of: store.arrivals) { markRead(store) }
             // Back from under a sheet: what arrived meanwhile is read now.
@@ -178,6 +188,17 @@ struct TopicChatScreen: View {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
+        }
+    }
+
+    /// Reads what the delete would move, then asks.
+    private func askToDelete(_ name: String) {
+        guard let chatId, !readingWork else { return }
+        readingWork = true
+        Task {
+            let work = await workspace.topicWork(chatId)
+            readingWork = false
+            deleting = TopicDeletePrompt(id: chatId, name: name, work: work)
         }
     }
 
@@ -264,7 +285,8 @@ private struct TopicChatHeader: View {
     /// Rename, with the chat's current title.
     let onRename: (String) -> Void
     let onArchive: (() -> Void)?
-    let onDelete: () -> Void
+    /// Delete, with the chat's current title.
+    let onDelete: (String) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -282,7 +304,7 @@ private struct TopicChatHeader: View {
             // A blank chat has nothing to rename, archive or delete yet.
             onRename: chatId == nil ? nil : { onRename(title) },
             onArchive: onArchive,
-            onDelete: chatId == nil ? nil : onDelete
+            onDelete: chatId == nil ? nil : { onDelete(title) }
         )
         .shareModeHeader(share)
     }

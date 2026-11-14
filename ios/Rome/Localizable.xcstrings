@@ -255,6 +255,34 @@
         }
       }
     },
+    "%lld new messages" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new message"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new messages"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条新消息"
+          }
+        }
+      }
+    },
     "%lld records" : {
       "localizations" : {
         "en" : {
@@ -299,6 +327,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条未读"
+          }
+        }
+      }
+    },
+    "%lld+ new messages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld+ 条新消息"
           }
         }
       }
@@ -489,6 +527,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "一个能……的应用"
+          }
+        }
+      }
+    },
+    "and %lld more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另有 %lld 项"
           }
         }
       }
@@ -839,6 +887,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法检查更新"
+          }
+        }
+      }
+    },
+    "Can't find where the new messages start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到新消息的起点"
           }
         }
       }
@@ -1483,6 +1541,16 @@
         }
       }
     },
+    "Delete “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除“%@”？"
+          }
+        }
+      }
+    },
     "Describe your own" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1679,6 +1747,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "爬楼层数"
+          }
+        }
+      }
+    },
+    "Following %@ · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关注 %@ · %@"
           }
         }
       }
@@ -2161,6 +2239,16 @@
         }
       }
     },
+    "Move to Chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "转到 Chat"
+          }
+        }
+      }
+    },
     "My Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2247,6 +2335,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新聊天"
+          }
+        }
+      }
+    },
+    "New messages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以下为新消息"
           }
         }
       }
@@ -2697,6 +2795,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开任务对话"
+          }
+        }
+      }
+    },
+    "Open task: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未完成的任务：%@"
           }
         }
       }
@@ -3815,6 +3923,16 @@
         }
       }
     },
+    "Stop them" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止它们"
+          }
+        }
+      }
+    },
     "Stopped" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4061,6 +4179,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "然后"
+          }
+        }
+      }
+    },
+    "This chat is deleted permanently." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被永久删除。"
+          }
+        }
+      }
+    },
+    "This chat is deleted permanently. It has:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被永久删除。其中有："
+          }
+        }
+      }
+    },
+    "This chat is deleted permanently. Its follows and open tasks move to Chat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被永久删除。它的关注和未完成的任务会转到 Chat。"
           }
         }
       }
@@ -4689,6 +4837,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你能帮我订阅哪些消息？"
+          }
+        }
+      }
+    },
+    "What happens to them?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如何处理它们？"
           }
         }
       }
