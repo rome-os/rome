@@ -51,6 +51,17 @@ function freePort() {
 // Where systemd is there, each Chrome's memory is capped, as the environment caps its own.
 const SYSTEMD_RUN = "/run/current-system/sw/bin/systemd-run";
 
+/** Whether a user scope can start here; a stripped test environment has no user manager. */
+function systemdWorks() {
+  if (!existsSync(SYSTEMD_RUN)) return false;
+  try {
+    execFileSync(SYSTEMD_RUN, ["--user", "--scope", "--quiet", "true"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Stops the Chrome this fake started, every process on its profile, and removes the profile. */
 function stopBrowser() {
   const { browserPid, browserProfile } = readState(statePath);
@@ -61,7 +72,7 @@ function stopBrowser() {
   }
   if (browserProfile) {
     try {
-      execFileSync("pkill", ["-KILL", "-f", `--user-data-dir=${browserProfile}`]);
+      execFileSync("pkill", ["-KILL", "-f", "--", `--user-data-dir=${browserProfile}`]);
     } catch {}
     rmSync(browserProfile, { recursive: true, force: true });
   }
@@ -77,7 +88,7 @@ async function startBrowser() {
   // Profiles live beside the state file, so a test's folder holds everything it made.
   const profile = mkdtempSync(join(dirname(statePath), "chrome-"));
   const chromium = chromiumOnPath();
-  const capped = existsSync(SYSTEMD_RUN)
+  const capped = systemdWorks()
     ? [SYSTEMD_RUN, "--user", "--scope", "--quiet", "-p", "MemoryMax=2G", "--", chromium]
     : [chromium];
   const child = spawn(

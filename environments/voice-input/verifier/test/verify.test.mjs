@@ -20,7 +20,7 @@ const testDirs = [];
 function killChromes() {
   for (const dir of testDirs) {
     try {
-      execFileSync("pkill", ["-KILL", "-f", `--user-data-dir=${dir}`]);
+      execFileSync("pkill", ["-KILL", "-f", "--", `--user-data-dir=${dir}`]);
     } catch {}
     rmSync(dir, { recursive: true, force: true });
   }
@@ -76,7 +76,7 @@ async function runAgainst(variant, options = {}) {
     // No Chrome or profile outlives the test, whatever the verifier did.
     execFileSync("node", [fakeEnv, "browser", "stop"], { env });
     try {
-      execFileSync("pkill", ["-KILL", "-f", `--user-data-dir=${dir}`]);
+      execFileSync("pkill", ["-KILL", "-f", "--", `--user-data-dir=${dir}`]);
     } catch {}
     rmSync(dir, { recursive: true, force: true });
     await standIn.close();
