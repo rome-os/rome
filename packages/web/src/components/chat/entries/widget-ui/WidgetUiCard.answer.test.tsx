@@ -154,6 +154,13 @@ describe("a question card described as data", () => {
     );
   });
 
+  it("draws a button's label in the button's own colour, not the card's", async () => {
+    render(<WidgetUiCard widgetId="m1" toolUseId="q1" appId="core" ui={ui} text="" waiting={{}} />);
+    const send = await screen.findByRole("button", { name: "Send" });
+    expect(send.querySelector(".text-foreground")).toBeNull();
+    expect(screen.getByText("Which tone?").className).toContain("text-foreground");
+  });
+
   it("stays usable when core does not take the event", async () => {
     rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 500 }));
     render(<WidgetUiCard widgetId="m1" toolUseId="q1" appId="core" ui={ui} text="" waiting={{}} />);
