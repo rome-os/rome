@@ -222,4 +222,49 @@ describe("useLiveEvents", () => {
     expect(MockEventSource.instances).toHaveLength(1);
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
+
+  it("returns from the SSE fallback to the socket when EventSource teardown throws", () => {
+    rs.useFakeTimers();
+    const fn = rs.fn();
+    const live = new LiveEventsClient({
+      WebSocket: asWebSocket,
+      url: () => "ws://rome.test/ws/events",
+      reconnectDelayMs: () => 100,
+      minFallbackMs: 0,
+      reprobeMs: 1_000,
+    });
+    render(live, fn);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      act(() => FakeWebSocket.latest().close());
+      act(() => rs.advanceTimersByTime(100));
+    }
+    const fallbackSource = MockEventSource.instances[0];
+    rs.spyOn(fallbackSource, "removeEventListener").mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+    fallbackSource.close.mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+
+    act(() => rs.advanceTimersByTime(1_000));
+    const socket = FakeWebSocket.latest();
+    expect(() => act(() => socket.open())).not.toThrow();
+    expect(fallbackSource.close).toHaveBeenCalledOnce();
+
+    act(() => {
+      fallbackSource.emit("session_name", JSON.stringify({ sessionId: "s1", name: "Stale SSE" }));
+    });
+    expect(fn).not.toHaveBeenCalled();
+
+    act(() => {
+      socket.receive({ type: "subscribed", topic: topic.topic });
+      socket.receive({
+        type: "event",
+        topic: topic.topic,
+        event: "session_name",
+        data: { sessionId: "s1", name: "Live socket" },
+      });
+    });
+    expect(fn).toHaveBeenCalledExactlyOnceWith({ sessionId: "s1", name: "Live socket" });
+  });
 });
