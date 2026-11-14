@@ -100,9 +100,15 @@ async function dictation(
   const client = new WebSocket(`ws://127.0.0.1:${(http.address() as AddressInfo).port}`);
   const messages: VoiceInputServerMessage[] = [];
   const closed = new Promise<void>((resolve) => client.on("close", () => resolve()));
-  client.on("message", (data) => messages.push(JSON.parse(data.toString())));
+  // `alive` comes every second regardless; tests read the rest.
+  let alive = 0;
+  client.on("message", (data) => {
+    const message = JSON.parse(data.toString()) as VoiceInputServerMessage;
+    if (message.type === "alive") alive += 1;
+    else messages.push(message);
+  });
   await new Promise<void>((resolve) => client.on("open", () => resolve()));
-  return { client, messages, closed };
+  return { client, messages, closed, alive: () => alive };
 }
 
 async function until(check: () => boolean): Promise<void> {
@@ -220,6 +226,21 @@ describe("voice input socket", () => {
     await closed;
 
     expect(messages).toEqual([{ type: "error", reason: "provider-unavailable" }]);
+  });
+
+  it("says it is still there every second while listening, until the stream closes", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, closed, alive } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await until(() => alive() >= 2);
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+    const after = alive();
+    await new Promise((r) => setTimeout(r, 1_200));
+
+    expect(alive()).toBe(after);
   });
 
   it("refuses audio before start", async () => {
