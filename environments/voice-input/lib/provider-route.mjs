@@ -22,7 +22,13 @@ const open = new Set();
 const connections = [];
 
 createServer((client) => {
-  const record = { opened: new Date().toISOString(), closed: null, closedBy: null, bytesUp: 0, bytesDown: 0 };
+  const record = {
+    opened: new Date().toISOString(),
+    closed: null,
+    closedBy: null,
+    bytesUp: 0,
+    bytesDown: 0,
+  };
   connections.push(record);
   if (cut) {
     record.closed = record.opened;
@@ -69,6 +75,7 @@ createHttpServer((req, res) => {
     cut = false;
     return reply(200, { cut });
   }
-  if (req.method === "GET" && req.url === "/stats") return reply(200, { cut, open: open.size, connections });
+  if (req.method === "GET" && req.url === "/stats")
+    return reply(200, { cut, open: open.size, connections });
   reply(404, { error: "not_found" });
 }).listen(8792, "0.0.0.0");

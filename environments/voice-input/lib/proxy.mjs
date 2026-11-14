@@ -65,7 +65,7 @@ function report() {
     end: new Date().toISOString(),
   };
   const requests = capture.entries.map((e) => {
-    const { sockets, upBySecond, frames, sniff, ...rest } = e;
+    const { sockets: _sockets, upBySecond: _upBySecond, frames, sniff: _sniff, ...rest } = e;
     const verdict = classify(e);
     return {
       ...rest,
