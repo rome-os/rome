@@ -55,7 +55,8 @@ async function runStop(ctx, message, stop) {
   // cutting Rome's route to it mid-message. The other stops use the run's transcriber.
   const isError = stop.kind === "transcriber error";
   const onStandIn = isError && ctx.transcriber === "stand-in";
-  const midway = (message.firstWordAt + message.lastWordAt) / 2;
+  // Three quarters through the speech, so several words are in the field before the stop.
+  const midway = message.firstWordAt + (message.lastWordAt - message.firstWordAt) * 0.75;
   if (onStandIn) {
     await env.transcriber({
       mode: "stand-in",
@@ -72,7 +73,8 @@ async function runStop(ctx, message, stop) {
   try {
     const { page } = opened;
     await watchPage(page);
-    let { control, form, field } = await voiceForm(page);
+    let { control, field } = await voiceForm(page);
+    let form;
     await recordField(field, control);
     await control.click();
     await waitForListening(page, control);

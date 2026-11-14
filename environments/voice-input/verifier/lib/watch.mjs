@@ -32,7 +32,10 @@ function watcher() {
   };
   let last = null;
   const read = () => {
-    const text = [...document.querySelectorAll("[role=status]")]
+    // Only the voice control's form: the page has other status elements, such as a message's
+    // delivery state.
+    const text = [...document.querySelectorAll("form [role=status]")]
+      .filter((el) => el.closest("form").querySelector("button[aria-pressed]"))
       .map((el) => el.textContent.trim())
       .filter(Boolean)
       .join(" | ");

@@ -48,6 +48,8 @@ const NOTICES = {
     lost: "Connection to Rome lost. Listening stopped",
     silence: "Listening stopped after 30 seconds without speech",
     error: "Voice input failed. Listening stopped",
+    start: "Start voice input",
+    stop: "Stop voice input",
   },
   zh: {
     reason: "Rome 使用麦克风将你的语音转成文字",
@@ -57,6 +59,8 @@ const NOTICES = {
     lost: "与 Rome 的连接已断开，已停止收听",
     silence: "30 秒未检测到语音，已停止收听",
     error: "语音输入失败，已停止收听",
+    start: "开始语音输入",
+    stop: "停止语音输入",
   },
 };
 
@@ -337,8 +341,9 @@ field.addEventListener("keydown", (event) => {
 
 function setListening(on) {
   button.setAttribute("aria-pressed", on ? "true" : "false");
-  button.textContent = on ? "Stop voice input" : "Start voice input";
+  button.textContent = on ? words.stop : words.start;
 }
+setListening(false);
 
 let blocked = false;
 navigator.permissions.query({ name: "microphone" }).then((p) => {

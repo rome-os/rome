@@ -24,6 +24,24 @@ export const WORDS = {
   },
 };
 
+/** Milliseconds between typed keys, a fast person's pace. */
+const TYPING_DELAY_MS = 50;
+
+/** The voice control's names in Simplified Chinese, which show the dashboard is in Chinese. */
+const CHINESE_CONTROL = /开始语音输入|停止语音输入/;
+
+/**
+ * Null when the dashboard shows `language`, else why the check cannot run: the environment's
+ * `--lang` sets the browser's language, and the dashboard may not follow it.
+ */
+async function wrongLanguage(control, language) {
+  if (language !== "zh-CN") return null;
+  const name = `${(await control.getAttribute("aria-label")) ?? ""} ${(await control.textContent()) ?? ""}`;
+  return CHINESE_CONTROL.test(name)
+    ? null
+    : `the dashboard is not in Simplified Chinese: with the browser in zh-CN the voice control is named "${name.trim()}"`;
+}
+
 export default {
   rule: "8",
   title: "Refusing the microphone costs you nothing else",
@@ -56,6 +74,8 @@ async function firstUse(ctx, mic, language) {
         `the browser's microphone permission is ${state}, not unset`,
       );
     const { control, form } = await voiceForm(page);
+    const notChinese = await wrongLanguage(control, language);
+    if (notChinese) return check(name, "not_checked", notChinese);
     const at = await page.evaluate(() => performance.now());
     await control.click();
     await waitForNotice(page, form, at, { timeoutMs: 3000 });
@@ -91,6 +111,13 @@ async function refused(ctx, mic, language) {
     const checks = [
       check(`${language}: the control stays visible`, "pass", "the voice control is shown"),
     ];
+    const notChinese = await wrongLanguage(form.control, language);
+    if (notChinese)
+      return [
+        ...checks,
+        check(`${language}: using it says how to allow the microphone`, "not_checked", notChinese),
+        check(`${language}: a typed message still sends`, "not_checked", notChinese),
+      ];
     const at = await page.evaluate(() => performance.now());
     await form.control.click();
     const notice = await waitForNotice(page, form.form, at);
@@ -105,7 +132,8 @@ async function refused(ctx, mic, language) {
     );
     await form.field.fill("");
     await form.field.focus();
-    await page.keyboard.type(words.typed);
+    // At a fast person's pace; with no pause between keys the dashboard drops the first one.
+    await page.keyboard.type(words.typed, { delay: TYPING_DELAY_MS });
     const before = await ctx.env.allMessages();
     await form.field.press("Enter");
     const [sent] = newMessages(before, await waitForNewMessage(ctx.env, before, ctx.waits));
