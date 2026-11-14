@@ -77,6 +77,16 @@ final class FakeHealthSync: HealthSyncReading, @unchecked Sendable {
         }
     }
 
+    private(set) var lookups: [String] = []
+
+    func hasSamples(_ type: HealthSyncType, in window: DateInterval) async throws -> Bool {
+        try read()
+        return lock.withLock {
+            lookups.append(type.name)
+            return (stored[type.name] ?? []).contains { $0.record.start >= window.start && $0.record.start < window.end }
+        }
+    }
+
     func records(_ type: HealthSyncType, in window: DateInterval) async throws -> [HealthRecord] {
         try read()
         return lock.withLock { (stored[type.name] ?? []).map(\.record).filter { $0.start >= window.start && $0.start < window.end } }
@@ -259,12 +269,24 @@ struct SyncRig {
         #expect(upserts.first { $0.key == "bodyMass:m1" }?.value == 70.2)
         #expect(upserts.allSatisfy { $0.tz == "Asia/Shanghai" })
         #expect(upserts.first { $0.key == "stepCount:hour:2026-11-09T01:00:00Z" }?.unit == "count")
+        // Hours for the last 14 days only; older days are day buckets alone.
+        #expect(!keys.contains("stepCount:hour:2026-09-01T02:00:00Z"), "no hours for a day two months back")
+        // No empty bucket: the two November samples share one hour.
+        #expect(upserts.filter { $0.type == "stepCount" }.count == 3, "one hour and one day in November, one day in September")
+        #expect(upserts.allSatisfy { $0.value != nil })
+        // Each type looked at once; one with nothing is left out of the history but still marked.
+        #expect(Set(rig.health.lookups) == Set(HealthSyncPlan.all.map(\.name)))
+        #expect(rig.health.lookups.count == HealthSyncPlan.all.count)
+        let skipped = await rig.progress.load().backfill?.skipped ?? []
+        #expect(skipped.contains("vo2Max") && !skipped.contains("stepCount"))
+        let marks = await rig.backend.envelopes.last?.types.map(\.type) ?? []
+        #expect(marks.contains("vo2Max"), "an empty window is a complete one")
 
         let entry = try #require(await rig.lastEntry())
         #expect(entry.outcome == .ok)
         #expect(entry.trigger == .backfill)
         #expect(entry.history)
-        #expect(entry.types["stepCount"]?.items ?? 0 >= 4)
+        #expect(entry.types["stepCount"]?.items == 3)
     }
 
     @Test func syncedThroughNeverClaimsWhatThePhoneHasNotSent() async throws {

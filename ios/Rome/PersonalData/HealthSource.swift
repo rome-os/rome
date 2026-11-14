@@ -52,6 +52,14 @@ enum HealthSyncPlan {
     static let historyDays = 183
     /// The history goes in chunks of this many days, newest first.
     static let historyChunkDays = 7
+    /// Hour buckets cover this many days, today included; older days have
+    /// day buckets only. A day that ages past it keeps the hours it has.
+    static let hourlyDays = 14
+
+    /// The first hour that still gets hour buckets, as of `now`.
+    static func hourFloor(_ now: Date, calendar: Calendar) -> Date {
+        calendar.date(byAdding: .day, value: -(hourlyDays - 1), to: calendar.startOfDay(for: now)) ?? now
+    }
     /// A deleted sample names no time: this many recent days are computed again.
     static let deletionDays = 7
     static let dailyReconcileDays = 7
@@ -109,6 +117,9 @@ protocol HealthSyncReading: Sendable {
     func changes(_ type: HealthSyncType, since anchor: Data, from: Date) async throws -> HealthChanges
     /// Whole local hours or days of the window, only those with a value.
     func buckets(_ type: HealthSyncType, _ resolution: BucketResolution, in window: DateInterval, calendar: Calendar) async throws -> [HealthBucketValue]
+    /// Whether the type has any sample that starts in the window: one
+    /// look, so the history skips a type the phone never recorded.
+    func hasSamples(_ type: HealthSyncType, in window: DateInterval) async throws -> Bool
     /// The samples that start in the window: sparse quantities, mindful
     /// sessions, workouts and sleep segments.
     func records(_ type: HealthSyncType, in window: DateInterval) async throws -> [HealthRecord]
@@ -162,6 +173,14 @@ actor AppleHealthSource: PersonalDataSource {
         let end = calendar.date(byAdding: .day, value: 1, to: today) ?? now
         let floor = calendar.date(byAdding: .day, value: -HealthSyncPlan.historyDays, to: today) ?? today
         fresh.backfill = SyncProgress.Backfill(start: now, floor: floor, cursor: end)
+        // One look per type: a type with nothing in the window is left out
+        // of the history, which then reads only what the phone recorded.
+        var skipped = Set<String>()
+        let window = DateInterval(start: floor, end: max(floor, now))
+        for type in plan {
+            if try await !reader.hasSamples(type, in: window) { skipped.insert(type.name) }
+        }
+        fresh.backfill?.skipped = skipped
         await store.save(fresh)
     }
 
@@ -239,7 +258,7 @@ actor AppleHealthSource: PersonalDataSource {
                     }
                 }
                 for range in Self.ranges(days.filter { $0 >= floor && $0 <= now }, calendar: calendar) {
-                    try await addBuckets(type, in: range, emptyDeletes: !changes.deleted.isEmpty, to: &chunk)
+                    try await addBuckets(type, in: range, emptyDeletes: !changes.deleted.isEmpty, now: now, to: &chunk)
                 }
             case .sample, .workouts:
                 for record in changes.added where record.start >= floor { add(record, of: type, to: &chunk) }
@@ -286,7 +305,7 @@ actor AppleHealthSource: PersonalDataSource {
         let window = DateInterval(start: start, end: end)
         for type in active(progress) {
             switch type.shape {
-            case .bucket: try await addBuckets(type, in: window, emptyDeletes: true, to: &chunk)
+            case .bucket: try await addBuckets(type, in: window, emptyDeletes: true, now: now, to: &chunk)
             case .sleep:
                 var day = start
                 while day < end {
@@ -312,10 +331,10 @@ actor AppleHealthSource: PersonalDataSource {
         let start = max(backfill.floor, calendar.startOfDay(for: weekBack))
         let window = DateInterval(start: start, end: backfill.cursor)
         var chunk = SyncChunk(kind: .backfill, historyMonth: start, commit: progress)
-        for type in active(progress) {
+        for type in active(progress) where !(backfill.skipped ?? []).contains(type.name) {
             switch type.shape {
             case .bucket:
-                try await addBuckets(type, in: window, emptyDeletes: false, to: &chunk)
+                try await addBuckets(type, in: window, emptyDeletes: false, now: backfill.start, to: &chunk)
             case .sample, .workouts:
                 for record in try await reader.records(type, in: window) { add(record, of: type, to: &chunk) }
             case .sleep:
@@ -351,9 +370,18 @@ actor AppleHealthSource: PersonalDataSource {
 
     // MARK: Items
 
-    private func addBuckets(_ type: HealthSyncType, in window: DateInterval, emptyDeletes: Bool, to chunk: inout SyncChunk) async throws {
+    /// Hour buckets for the last `hourlyDays` as of `now`, day buckets for
+    /// the whole window. HealthKit's statistics have no bucket for an hour
+    /// or day without samples, so an empty one is never sent.
+    private func addBuckets(_ type: HealthSyncType, in window: DateInterval, emptyDeletes: Bool, now: Date, to chunk: inout SyncChunk) async throws {
         let calendar = calendar()
+        let hourFloor = HealthSyncPlan.hourFloor(now, calendar: calendar)
         for resolution in [BucketResolution.hour, .day] {
+            var window = window
+            if resolution == .hour {
+                guard window.end > hourFloor else { continue }
+                window = DateInterval(start: max(window.start, hourFloor), end: window.end)
+            }
             let values = try await reader.buckets(type, resolution, in: window, calendar: calendar)
             var seen = Set<String>()
             for value in values {
@@ -374,9 +402,8 @@ actor AppleHealthSource: PersonalDataSource {
                 count(type.name, value.start, value.end, in: &chunk)
             }
             // A bucket whose samples were all deleted has no value now: its
-            // old one goes. Days only for a long window, so a weekly
-            // reconcile does not send thousands of empty hours.
-            guard emptyDeletes, resolution == .day || window.duration <= Double(HealthSyncPlan.dailyReconcileDays + 1) * 86_400 else { continue }
+            // old one goes. Hours only inside the hourly days.
+            guard emptyDeletes else { continue }
             for start in Self.slots(resolution, in: window, calendar: calendar) {
                 let key = Self.bucketKey(type.name, resolution, start, calendar: calendar)
                 if !seen.contains(key) { chunk.deletes.append(key) }

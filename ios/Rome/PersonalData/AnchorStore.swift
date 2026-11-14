@@ -33,6 +33,10 @@ struct SyncProgress: Codable, Equatable, Sendable {
         var floor: Date
         /// Everything from here to `start` is sent; the next chunk ends here.
         var cursor: Date
+        /// Types with no sample in the window when the backfill began: the
+        /// history does not read them. Their mark still comes at the end,
+        /// since an empty window is a complete one.
+        var skipped: Set<String>?
 
         var isDone: Bool { cursor <= floor }
     }

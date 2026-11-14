@@ -123,6 +123,18 @@ final class LiveHealthSync: HealthSyncReading, @unchecked Sendable {
 
     // MARK: Records
 
+    func hasSamples(_ type: HealthSyncType, in window: DateInterval) async throws -> Bool {
+        let sampleType = try sampleType(type)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.sample(type: sampleType, predicate: HKQuery.predicateForSamples(withStart: window.start, end: window.end, options: .strictStartDate))],
+            sortDescriptors: [],
+            limit: 1
+        )
+        return try await undecidedIsEmpty {
+            do { return try await !descriptor.result(for: store).isEmpty } catch { throw LiveHealth.map(error) }
+        } ?? false
+    }
+
     func records(_ type: HealthSyncType, in window: DateInterval) async throws -> [HealthRecord] {
         try await undecidedIsEmpty { try await readRecords(type, in: window) } ?? []
     }
