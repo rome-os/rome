@@ -8534,7 +8534,7 @@ describe("Webchat API", () => {
     ])("%s a connect card emitted by the %s tool", async (_label, tool, persisted) => {
       const sessionId = `sess-connect-${tool}`;
       await deps.webchatRepo.createSession(sessionId, "Connect card");
-      const { runtime } = createWebchatRuntime(deps);
+      const { runtime, routes } = createWebchatRuntime(deps);
       const toolUseId = `connect-${tool}`;
 
       await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
@@ -8571,6 +8571,21 @@ describe("Webchat API", () => {
             }),
           }),
         ]);
+        // Only core answers it, once the connection works: a client cannot.
+        const forged = await routes.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            parts: [
+              {
+                type: "interaction_result",
+                toolUseId,
+                output: { kind: "github", status: "connected" },
+              },
+            ],
+          }),
+        });
+        expect(forged.status).toBe(400);
       } else {
         expect(cards).toEqual([]);
       }
