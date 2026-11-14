@@ -303,6 +303,22 @@ describe("selection and parsing", () => {
     );
   });
 
+  it("asks the judge once more when it prints no verdict", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cos-verify-judge-"));
+    const script = join(dir, "flaky-judge.mjs");
+    // Prints no verdict on its first call, then a pass.
+    writeFileSync(
+      script,
+      `import { existsSync, writeFileSync } from "node:fs";
+const seen = ${JSON.stringify(join(dir, "seen"))};
+if (existsSync(seen)) console.log('{"verdict": "pass", "reasons": "ok"}');
+else { writeFileSync(seen, ""); console.log("- item: match"); }`,
+    );
+    const verdict = await makeJudge(["node", script])({ task: "same-facts" });
+    assert.equal(verdict.verdict, "pass");
+    assert.equal(verdict.tries, 2);
+  });
+
   it("reads the last verdict a model printed", () => {
     assert.deepEqual(parseVerdict('Thinking.\n{"verdict": "fail", "reasons": "missing Priya"}'), {
       verdict: "fail",

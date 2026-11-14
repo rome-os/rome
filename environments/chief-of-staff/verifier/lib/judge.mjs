@@ -26,6 +26,18 @@ function judgePrompt(input) {
  * verdict "error", which the runner reports as not checked.
  */
 export function makeJudge(command) {
+  const once = judgeOnce(command);
+  // A model sometimes ends without its verdict line. Ask once more before leaving the check
+  // not checked; the verdict keeps how many tries it took.
+  return async (input) => {
+    const first = await once(input);
+    if (first.verdict !== "error") return first;
+    const second = await once(input);
+    return { ...second, tries: 2, firstError: first.reasons };
+  };
+}
+
+function judgeOnce(command) {
   const [bin, ...fixed] = command;
   return (input) =>
     new Promise((resolve) => {
@@ -64,5 +76,5 @@ export function parseVerdict(text) {
       // Not JSON; try the next candidate.
     }
   }
-  return { verdict: "error", reasons: `judge printed no verdict: ${text.slice(0, 200)}` };
+  return { verdict: "error", reasons: `judge printed no verdict: …${text.slice(-400)}` };
 }
