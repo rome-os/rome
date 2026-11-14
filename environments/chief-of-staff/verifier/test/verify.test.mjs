@@ -159,6 +159,27 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.equal(report.answered.answered, 1);
   });
 
+  it("says when the envoy stopped a reply to a K7 probe", async () => {
+    const { report } = await runAgainst("held", { rules: ["K7"] });
+    assert.deepEqual(statuses(report), { K7: "not_checked" });
+    assert.match(report.results[0].reason, /the envoy stopped a reply/);
+  });
+
+  it("posts a question again when Rome restarted while it waited", async () => {
+    const { report, outDir } = await runAgainst("good", {
+      rules: ["A1"],
+      fakeEnv: { COS_FAKE_RESTART_ON: "Quick check" },
+      waits: { replyMs: 0, a1Ms: 0, pollMs: 0, restartMs: 0 },
+    });
+    assert.deepEqual(statuses(report), { A1: "pass" });
+    assert.equal(report.romeEvents.length, 1);
+    assert.equal(report.romeEvents[0].outcome, "answered after the repost");
+    assert.match(
+      readFileSync(join(outDir, "report.md"), "utf8"),
+      /## Rome restarted during the run/,
+    );
+  });
+
   it("refuses a dirty tree unless allowed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cos-verify-dirty-"));
     const env = {
@@ -203,6 +224,15 @@ describe("failures across runs", () => {
 
     const { outDir } = await runAgainst("fail-K5", { rules: ["K5"] });
     assert.match(readFileSync(join(outDir, "report.md"), "utf8"), /\| K5 \| 1 \|/);
+  });
+});
+
+describe("reading the chat", () => {
+  it("never calls cos-env read without a chat or a member", async () => {
+    // The fake cos-env refuses such a read as the real one does, and the client names the call.
+    const env = cosEnv({ command: ["node", join(here, "fake/cos-env.mjs")] });
+    await assert.rejects(env.read({ chat: undefined }), /read needs a chat or a member/);
+    await assert.rejects(env.read({ dm: undefined, since: "1" }), /read needs a chat or a member/);
   });
 });
 

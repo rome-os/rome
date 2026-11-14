@@ -39,6 +39,8 @@ Then the summary gives two numbers: the rules scored whole (the seven phase 1 ru
 
 After the results come each question's answer time, and the failures across runs: for each rule, how many times it failed in this run and every earlier report in the runs folder. A rule at 3 failures is marked "one more failure stops the loop", since the loop stops when a rule fails more than 3 times. Not checked and waiting on a design decision are not failures.
 
+When Rome restarts while a question waits for its answer, Rome may never have received the question. The verifier posts it once more after Rome is back, and the report lists each repost. A rule whose repost also crossed a restart is not checked, with the reason "Rome was down", not failed. When K7's probes go unanswered and `cos-env rome held` shows the envoy held back a reply, the report says "the envoy stopped a reply".
+
 A pass is earned. A check that passes when it finds nothing wrong, such as nothing leaked, nothing misplaced or nothing invented, needs at least one answer to look at. When the agent answered nothing it could judge, that check is not checked.
 
 The verifier refuses to run when anything under test has uncommitted changes, unless `--dirty` is passed.
@@ -105,6 +107,8 @@ The verifier drives the environment (`environments/chief-of-staff/`) only throug
 - **`cos-env post --thread <message id>`** posts in the thread started from that message. The thread is created with `--chat <name>`; once it exists `--chat` is optional.
 - **`cos-env post --as <member>:2`** posts from a second account of the same person. The leg is required: if the command ever fails, K3's two-account leg reports as not checked and K3 does not pass.
 - **`cos-env logs <dir> --since <time>`** copies Rome's logs since the run started, with memory stats, into the run folder.
+- **`cos-env version`**'s `memory.current.since`, when Rome's container last started, tells the verifier that Rome restarted during a question's wait.
+- **`cos-env rome held --since <time>`** lists the replies the envoy held back since then. Without it, K7 cannot say when the envoy stopped a reply.
 - **`cos-env rome renew-session --chat <name>`** renews the agent's session. When the environment cannot renew it, the command exits with an explanation, and K6's renewal leg reports as not checked.
 - **Chats**: `general` and `standup` are readable by all three members, `leads` by `member1` and `member2` only, and `dm-member1` to `dm-member3` are the private chats. All are named for the agent.
 

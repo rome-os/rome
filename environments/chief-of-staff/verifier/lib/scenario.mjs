@@ -9,16 +9,36 @@ import { secondsBetween, waitForAgent } from "./checks.mjs";
  * where `reply` is null when the agent stayed silent past the reply wait.
  */
 export async function ask(ctx, { as, chat, thread, text, watch, timeoutMs }) {
-  const questionId = chat
-    ? await ctx.env.post({ as, chat, thread, mentionAgent: true, text })
-    : await ctx.env.dm({ as, text });
   const chats = watch ?? [chat ?? dmChat(as)];
-  const reply = await waitForAgent(ctx.env, {
-    chats,
-    since: questionId,
-    timeoutMs: timeoutMs ?? ctx.waits.replyMs,
-    pollMs: ctx.waits.pollMs,
-  });
+  const once = async () => {
+    const startedAt = await romeStartedAt(ctx.env);
+    const questionId = chat
+      ? await ctx.env.post({ as, chat, thread, mentionAgent: true, text })
+      : await ctx.env.dm({ as, text });
+    const reply = await waitForAgent(ctx.env, {
+      chats,
+      since: questionId,
+      timeoutMs: timeoutMs ?? ctx.waits.replyMs,
+      pollMs: ctx.waits.pollMs,
+    });
+    const restarted = !reply && startedAt !== (await romeStartedAt(ctx.env));
+    return { questionId, reply, restarted };
+  };
+  // A message posted while Rome restarted may never have reached it. Post it once more after
+  // Rome is back; a second miss across a restart is Rome's, not the agent's.
+  let { questionId, reply, restarted } = await once();
+  if (restarted) {
+    const first = questionId;
+    ctx.log(`Rome restarted while ${first} waited; posting it again`);
+    await sleep(ctx.waits.restartMs ?? 60_000);
+    ({ questionId, reply, restarted } = await once());
+    ctx.romeEvents?.push({
+      rule: ctx.rule ?? "liveness",
+      questionId: first,
+      repostedAs: questionId,
+      outcome: reply ? "answered after the repost" : restarted ? "Rome was down" : "no answer",
+    });
+  }
   ctx.log(`${as} asked ${questionId}; reply ${reply ? reply.id : "none"}`);
   if (ctx.answered) {
     ctx.answered.sent += 1;
@@ -36,6 +56,17 @@ export async function ask(ctx, { as, chat, thread, text, watch, timeoutMs }) {
     });
   }
   return { questionId, reply };
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** When Rome's container last started, from `cos-env version`, or null when unknown. */
+async function romeStartedAt(env) {
+  try {
+    return (await env.version()).memory?.current?.since ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function check(name, status, detail, evidence = []) {

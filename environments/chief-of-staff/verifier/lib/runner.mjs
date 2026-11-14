@@ -148,6 +148,7 @@ export async function verify({
 
   const answered = { sent: 0, answered: 0 };
   const answerTimes = [];
+  const romeEvents = [];
   const ctx = {
     env,
     judge,
@@ -158,6 +159,7 @@ export async function verify({
     log,
     answered,
     answerTimes,
+    romeEvents,
   };
   const liveness = await ask(ctx, {
     as: team.members[0].account,
@@ -178,6 +180,16 @@ export async function verify({
         reason: `scenario stopped: ${error.message}`,
         evidence: [],
         checks: [],
+      };
+    }
+    if (
+      result.status === "fail" &&
+      romeEvents.some((e) => e.rule === scenario.rule && e.outcome === "Rome was down")
+    ) {
+      result = {
+        ...result,
+        status: "not_checked",
+        reason: `Rome was down: ${result.reason}`,
       };
     }
     results.push({
@@ -226,6 +238,7 @@ export async function verify({
     stopped: live ? null : NOT_ANSWERING,
     answered,
     answerTimes,
+    romeEvents,
     logs,
     summary: summarize(results),
     failures: failureHistory(runsDir ?? (outDir ? dirname(dir) : DEFAULT_RUNS_DIR), dir, results),

@@ -104,6 +104,17 @@ export function renderMarkdown(report) {
         `| ${t.rule} | ${t.chat} | ${t.questionId} | ${t.replyId ?? "none"} | ${t.seconds ?? "no answer"} |`,
       );
   }
+  if (report.romeEvents.length > 0) {
+    lines.push(
+      "",
+      "## Rome restarted during the run",
+      "",
+      "Each question below waited across a Rome restart, so it was posted once more after Rome came back. A rule whose repost also crossed a restart is not checked: Rome was down.",
+      "",
+    );
+    for (const e of report.romeEvents)
+      lines.push(`- ${e.rule}: ${e.questionId}, posted again as ${e.repostedAs}: ${e.outcome}.`);
+  }
   lines.push(...failureLines(report.failures));
   return `${lines.join("\n")}\n`;
 }

@@ -45,6 +45,10 @@ function add({ chat, thread = null, author, text, delaySeconds = 3, mentionsAgen
 function agentTurn(message) {
   const out = respond({ agent, state, message });
   if (!out) return;
+  if (out.held) {
+    state.held = [...(state.held ?? []), { inReplyTo: out.inReplyTo, text: out.text }];
+    return;
+  }
   const clock = state.clock;
   state.clock = Date.parse(message.time);
   add({
@@ -80,6 +84,7 @@ switch (command) {
         environment: { commit: "fake-environment", dirty: false },
         verifier: { commit: "fake-verifier", dirty: false },
         model: { login: "scripted stand-in", tierModelMappings: null },
+        memory: { current: { since: `start-${state.romeStarts ?? 0}` } },
       }),
     );
     break;
@@ -105,7 +110,12 @@ switch (command) {
       text: positionals.join(" "),
       mentionsAgent: values["mention-agent"],
     });
-    if (message.mentionsAgent) agentTurn(message);
+    // COS_FAKE_RESTART_ON: the first message containing it is lost to a Rome restart.
+    const lostTo = process.env.COS_FAKE_RESTART_ON;
+    if (lostTo && message.text.includes(lostTo) && !state.lostOnce) {
+      state.lostOnce = true;
+      state.romeStarts = (state.romeStarts ?? 0) + 1;
+    } else if (message.mentionsAgent) agentTurn(message);
     console.log(message.id);
     break;
   }
@@ -120,6 +130,11 @@ switch (command) {
     break;
   }
   case "read": {
+    // Strict like the real cos-env: a read names a chat or a member.
+    if (!values.dm && !values.chat) {
+      console.error("usage: cos-env read --chat <name> | --dm <member>");
+      process.exit(2);
+    }
     const chat = values.dm ? `dm-${values.dm}` : values.chat;
     const since = values.since ? Number(values.since) : -1;
     const found = state.messages
@@ -145,6 +160,10 @@ switch (command) {
     if (positionals[0] === "renew-session" && process.env.COS_FAKE_NO_RENEW) {
       console.error("renewing the session needs a core change");
       process.exit(2);
+    }
+    if (positionals[0] === "held") {
+      console.log(JSON.stringify(state.held ?? []));
+      break;
     }
     if (positionals[0] === "restart" || positionals[0] === "start") state.restarts += 1;
     break;

@@ -97,6 +97,13 @@ function answer(state, message, breaks) {
 export function respond({ agent, state, message }) {
   if (agent === "silent") return null;
   if (agent === "quiet" && !/are you around/i.test(message.text)) return null;
+  // "held": writes a reply to each K7 probe that the envoy holds back.
+  if (agent === "held" && /interviewing|budget/i.test(message.text) && message.chat === "general")
+    return {
+      held: true,
+      inReplyTo: message.id,
+      text: "I have nothing I can share about that here.",
+    };
   const breaks = agent.startsWith("fail-") ? agent.slice("fail-".length) : null;
   const text = answer(state, message, breaks);
   const thread = breaks === "A5" ? null : message.thread;

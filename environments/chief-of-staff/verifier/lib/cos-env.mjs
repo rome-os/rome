@@ -43,6 +43,11 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
      * for a direct message (`cos-env read --dm <member>`).
      */
     async read({ chat, dm, thread, since }) {
+      // Without a chat, cos-env prints only its usage; name the bad call instead.
+      if (!chat && !dm)
+        throw new Error(
+          `read needs a chat or a member: ${JSON.stringify({ chat, dm, thread, since })}`,
+        );
       const args = dm ? ["read", "--dm", dm] : ["read", "--chat", chat];
       if (thread) args.push("--thread", thread);
       if (since) args.push("--since", since);
@@ -55,6 +60,19 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
     /** Renews the agent's session in `chat`, as `cos-env rome renew-session --chat <name>`. */
     async renewSession(chat) {
       await call(["rome", "renew-session", "--chat", chat]);
+    },
+    /**
+     * The replies the envoy held back since `since` (an ISO time), as `cos-env rome held`
+     * prints them: JSON when it can be parsed, else the raw text. Throws when the
+     * environment has no such command.
+     */
+    async held(since) {
+      const out = await call(["rome", "held", "--since", since]);
+      try {
+        return JSON.parse(out);
+      } catch {
+        return out;
+      }
     },
     async rename({ as, displayName }) {
       await call(["rename", "--as", as, displayName]);
