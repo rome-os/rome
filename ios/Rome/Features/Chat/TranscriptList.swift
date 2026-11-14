@@ -288,6 +288,10 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     /// The status-bar tap is taking the list to its top: older pages wait
     /// until it gets there, or the top would keep moving away.
     private var scrollingToTop = false
+    /// When older rows were last asked for, and how many items there were:
+    /// a fetch that failed is asked again at most once a second, not on
+    /// every frame of a scroll.
+    private var askedOlder: (count: Int, at: ContinuousClock.Instant)?
     /// The last answer given to `onDividerAbove`.
     private var dividerAbove: Bool?
     #if DEBUG
@@ -508,8 +512,15 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         let distance = BackToBottom.distance(contentHeight: view.contentSize.height, offset: view.contentOffset.y, viewHeight: view.bounds.height, bottomInset: view.contentInset.bottom)
         scroll.set(atBottom: distance < 7, far: BackToBottom.shows(scroll.far, distance: distance, height: height))
         let fromTop = view.contentOffset.y + view.contentInset.top
-        if items.first == ItemID.older, height > 0, !scrollingToTop, fromTop < height * 4 { onNearTop() }
+        if items.first == ItemID.older, height > 0, !scrollingToTop, fromTop < height * 4 { askOlder() }
         readDivider(in: view)
+    }
+
+    private func askOlder() {
+        let now = ContinuousClock.now
+        if let askedOlder, askedOlder.count == items.count, now - askedOlder.at < .seconds(1) { return }
+        askedOlder = (items.count, now)
+        onNearTop()
     }
 
     /// Whether the unread line is out of sight above the visible area.
@@ -527,6 +538,9 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         revealing = nil
+        // A drag stops a status-bar scroll short of the top, and UIKit then
+        // never reports it reached the top.
+        scrollingToTop = false
         scroll?.set(following: false)
     }
 
@@ -544,7 +558,8 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
 
     func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
         revealing = nil
-        scrollingToTop = true
+        // Already on top, the tap moves nothing and nothing reports back.
+        scrollingToTop = scrollView.contentOffset.y + scrollView.adjustedContentInset.top > 1
         scroll?.set(following: false)
         return true
     }

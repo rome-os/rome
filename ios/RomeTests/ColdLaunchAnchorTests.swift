@@ -370,6 +370,42 @@ private struct AppearHost: View {
         let after = try #require(seen.frames[anchorId]).minY
         #expect(abs(after - before) < 1, "\(anchorId) moved from \(before) to \(after)")
     }
+
+    /// A drag that stops a status-bar scroll short of the top: UIKit never
+    /// reports the top reached, and older pages still load after it.
+    @Test func aDragAfterAStatusBarTapStillLoadsOlderPages() async throws {
+        let backend = FakeBackend()
+        backend.stored = (0..<160).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index / 2)", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index), long enough to fill a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        let host = UIHostingController(rootView: AppearHost(store: store, seen: Appearances()))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+            store.stop()
+        }
+        try await Task.sleep(for: .milliseconds(800))
+        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        let held = store.messages.count
+
+        // The tap starts the scroll; a drag stops it before the top.
+        #expect(scroll.delegate?.scrollViewShouldScrollToTop?(scroll) == true)
+        scroll.delegate?.scrollViewWillBeginDragging?(scroll)
+        scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
+        scroll.delegate?.scrollViewDidEndDragging?(scroll, willDecelerate: false)
+
+        for _ in 0..<200 where store.messages.count == held { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.count > held, "no older page came after the drag")
+    }
 }
 
 @MainActor
