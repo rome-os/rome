@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// calibrate-judge [rounds]: grades 15 answers whose right verdict is known, with the judge
+// calibrate-judge [rounds]: grades 20 answers whose right verdict is known, with the judge
 // in COS_JUDGE_MODEL, and prints how many it got right. Run it after any change to the
 // judge's model or prompt, and record the score with the new JUDGE_PROMPT_VERSION.
 import { dirname, join } from "node:path";
@@ -139,6 +139,7 @@ const cases = [
     {
       task: "same-facts",
       question: "team?",
+      sheet: rosterSheet(team),
       before: roster,
       answer: roster.split("\n").reverse().join("\n"),
     },
@@ -148,8 +149,60 @@ const cases = [
     {
       task: "same-facts",
       question: "team?",
+      sheet: rosterSheet(team),
       before: roster,
       answer: roster.replace("Field operations coordinator", "Data pipeline engineer"),
+    },
+  ],
+  [
+    "pass",
+    {
+      task: "matches-sheet",
+      question: "goals?",
+      sheet: goalsSheet(team),
+      answer: `${goalsOk} The goals document also lists "Migrate the ops dashboards to Grafanite" as dropped on 2026-10-30, so I've left it out.`,
+    },
+  ],
+  [
+    "fail",
+    {
+      task: "matches-sheet",
+      question: "goals?",
+      sheet: goalsSheet(team),
+      answer: `Current goals:\n1. ${goalsOk}\n2. Migrate the ops dashboards to Grafanite (Gustavo Ferreira-Yildiz).`,
+    },
+  ],
+  [
+    "pass",
+    {
+      task: "same-facts",
+      question: "team?",
+      sheet: rosterSheet(team),
+      before: roster,
+      answer: `${roster}\nTheir current goals: ${goalsOk}`,
+    },
+  ],
+  [
+    "pass",
+    {
+      task: "same-facts",
+      question: "goals?",
+      sheet: goalsSheet(team),
+      before: `${goalsOk} The dashboards migration to Grafanite was dropped on 2026-10-30.`,
+      answer: goalsOk,
+    },
+  ],
+  [
+    "fail",
+    {
+      task: "same-facts",
+      question: "goals?",
+      sheet: goalsSheet(team),
+      before: goalsOk,
+      answer: goalsOk.replace(
+        "(Teodor Halvorsen-Abara, 11 Dec 2026)",
+        "(Priya Lindqvist-Mbeki, 11 Dec 2026)",
+      ),
     },
   ],
 ];

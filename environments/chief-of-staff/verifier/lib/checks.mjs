@@ -73,6 +73,20 @@ export function namesSource(text, team) {
     });
 }
 
+const MARKED_DROPPED =
+  /\bdropped\b|no longer|cancel+ed|left (?:it )?out|not (?:a )?current|retired|abandoned/i;
+
+/**
+ * The tokens from `tokens` that `text` presents as current: each line naming one counts
+ * unless that line also marks it as dropped, such as "lists X as dropped, so I left it out".
+ */
+export function presentedAsCurrent(text, tokens) {
+  return text
+    .split("\n")
+    .filter((line) => !MARKED_DROPPED.test(line))
+    .flatMap((line) => tokensIn(line, tokens));
+}
+
 /** The tokens from `tokens` that appear in `text`, ignoring case. */
 export function tokensIn(text, tokens) {
   const lower = text.toLowerCase();

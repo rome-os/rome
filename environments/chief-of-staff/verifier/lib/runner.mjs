@@ -50,7 +50,8 @@ export const FAILURE_LIMIT = 3;
 /**
  * Failures per rule across every earlier run whose report sits in `runsRoot`, plus `results`.
  * Ouou's rule stops the loop when a rule fails more than FAILURE_LIMIT times. Not checked and
- * waiting on a design decision are not failures.
+ * waiting on a design decision are not failures. A run folder's regrade.json, written when the
+ * planner regrades a run under new rules, replaces the statuses of the rules it lists.
  */
 export function failureHistory(runsRoot, currentDir, results) {
   const counts = {};
@@ -63,8 +64,15 @@ export function failureHistory(runsRoot, currentDir, results) {
     if (join(runsRoot, name) === currentDir || !existsSync(path)) continue;
     try {
       const earlier = JSON.parse(readFileSync(path, "utf8"));
+      const regradePath = join(runsRoot, name, "regrade.json");
+      const regraded = existsSync(regradePath)
+        ? JSON.parse(readFileSync(regradePath, "utf8")).results
+        : [];
       runs.push(name);
-      for (const r of earlier.results ?? []) if (r.status === "fail") add(r.rule);
+      for (const r of earlier.results ?? []) {
+        const status = regraded.find((g) => g.rule === r.rule)?.status ?? r.status;
+        if (status === "fail") add(r.rule);
+      }
     } catch {
       // An unreadable report counts no failures.
     }

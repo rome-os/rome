@@ -112,20 +112,6 @@ export function ruleResult(checks) {
   };
 }
 
-/**
- * A check whose failure waits on a design decision rather than counting against the agent.
- * The check itself is unchanged: only a failure is relabelled.
- */
-export function waitsOnDesign(check, decision) {
-  return check.status === "fail"
-    ? {
-        ...check,
-        status: "waits_on_design",
-        detail: `${check.detail} (waits on a design decision: ${decision})`,
-      }
-    : check;
-}
-
 /** A check the rules require: when it comes back not checked, the rule cannot pass. */
 export function required(check) {
   return { ...check, required: true };

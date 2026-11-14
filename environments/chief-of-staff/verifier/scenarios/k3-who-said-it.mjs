@@ -1,18 +1,19 @@
 import { tokensIn } from "../lib/checks.mjs";
-import { ask, check, required, ruleResult, waitsOnDesign } from "../lib/scenario.mjs";
+import { ask, check, required, ruleResult } from "../lib/scenario.mjs";
 
-const GROUP_CHAT = "standup";
+// R4: each commitment is said to the agent, mentioning it, in the chat where the question about
+// it is asked later. Phase 1 agents hear only messages that mention them.
+const GROUP_CHAT = "general";
 const RENAMED_TO = "Teo (on call)";
 const SECOND_ACCOUNT_NAME = "Mari (laptop)";
-const GROUP_DECISION = "how the agent learns who sent each message in a chat with several members";
 
 /**
  * K3 is reported in four legs, each with its own commitments. Every commitment carries words no
  * other commitment uses, so an answer that repeats them attributes that commitment.
  * - single-member chat: said in the member's private chat with the agent, asked there.
- * - group chat: one commitment from each member in the shared chat.
- * - changed display name: posted by member 1 after their display name changes.
- * - two accounts: posted by member 0 from a second account of the same person.
+ * - group chat: one commitment from each member in general, each mentioning the agent.
+ * - changed display name: said in general by member 1 after their display name changes.
+ * - two accounts: said in general by member 0 from a second account of the same person.
  */
 const LEGS = {
   single: "single-member chat",
@@ -100,23 +101,20 @@ export default {
     const { env, team } = ctx;
     const account = (i) => team.members[i].account;
 
-    // Single-member chat: said and asked in the member's private chat with the agent.
-    const single = {
-      ...SINGLE,
-      id: await env.dm({ as: account(SINGLE.member), text: SINGLE.text }),
-    };
+    // Says a commitment to the agent and waits for it to take it in. Without `chat`, it is
+    // said in the member's private chat.
+    const say = async (as, chat, text) => (await ask(ctx, { as, chat, text })).questionId;
+
+    const single = { ...SINGLE, id: await say(account(SINGLE.member), undefined, SINGLE.text) };
 
     const group = [];
     for (const c of GROUP)
-      group.push({
-        ...c,
-        id: await env.post({ as: account(c.member), chat: GROUP_CHAT, text: c.text }),
-      });
+      group.push({ ...c, id: await say(account(c.member), GROUP_CHAT, c.text) });
 
     await env.rename({ as: account(RENAMED.member), displayName: RENAMED_TO });
     const renamed = {
       ...RENAMED,
-      id: await env.post({ as: account(RENAMED.member), chat: GROUP_CHAT, text: RENAMED.text }),
+      id: await say(account(RENAMED.member), GROUP_CHAT, RENAMED.text),
     };
 
     // One person, two accounts. When cos-env cannot post from a second account, this leg
@@ -128,7 +126,7 @@ export default {
       await env.rename({ as: secondAccount, displayName: SECOND_ACCOUNT_NAME });
       second = {
         ...SECOND_ACCOUNT,
-        id: await env.post({ as: secondAccount, chat: GROUP_CHAT, text: SECOND_ACCOUNT.text }),
+        id: await say(secondAccount, GROUP_CHAT, SECOND_ACCOUNT.text),
       };
     } catch (error) {
       secondError = error.message;
@@ -158,7 +156,7 @@ export default {
 
     const checks = [
       gradeLeg(LEGS.single, [single], [privateAnswer], team),
-      waitsOnDesign(gradeLeg(LEGS.group, group, answers, team), GROUP_DECISION),
+      gradeLeg(LEGS.group, group, answers, team),
       gradeLeg(LEGS.renamed, [renamed], answers, team),
       second
         ? gradeLeg(LEGS.twoAccounts, [second], answers, team)

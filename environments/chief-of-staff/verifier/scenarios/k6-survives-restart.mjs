@@ -1,10 +1,11 @@
 import { ask, check, judged, required, ruleResult } from "../lib/scenario.mjs";
+import { goalsSheet, rosterSheet } from "../lib/seed.mjs";
 import { K1_QUESTION } from "./k1-team.mjs";
 import { K2_QUESTION } from "./k2-goals.mjs";
 
 const QUESTIONS = [
-  { rule: "K1", text: K1_QUESTION, member: 2 },
-  { rule: "K2", text: K2_QUESTION, member: 1 },
+  { rule: "K1", text: K1_QUESTION, member: 2, sheet: rosterSheet },
+  { rule: "K2", text: K2_QUESTION, member: 1, sheet: goalsSheet },
 ];
 
 /** Asks the K1 and K2 questions again and compares each answer with the one in `before`. */
@@ -23,6 +24,8 @@ async function sameFactsAfter(ctx, before, label) {
       const verdict = await ctx.judge({
         task: "same-facts",
         question: q.text,
+        // R4: only the answer sheet's facts must survive; other facts may come and go.
+        sheet: q.sheet(ctx.team),
         before: earlier.reply.text,
         answer: later.reply.text,
       });

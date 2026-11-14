@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { cosEnv } from "../lib/cos-env.mjs";
 import { makeJudge, parseVerdict } from "../lib/judge.mjs";
-import { namesSource } from "../lib/checks.mjs";
+import { namesSource, presentedAsCurrent } from "../lib/checks.mjs";
 import { failureHistory, NOT_ANSWERING, selectScenarios, verify } from "../lib/runner.mjs";
 import { loadTeam } from "../lib/seed.mjs";
 
@@ -45,7 +45,7 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
   it("passes every phase 1 rule for the good stand-in", async () => {
     const { report, outDir } = await runAgainst("good");
     assert.deepEqual(statuses(report), Object.fromEntries(PHASE_1.map((r) => [r, "pass"])));
-    assert.equal(report.rulesVersion, "R3");
+    assert.equal(report.rulesVersion, "R4");
     assert.equal(report.underTest.agent.commit, "fake-good");
     assert.ok(
       report.results.every((r) => r.evidence.length > 0),
@@ -82,28 +82,21 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.match(markdown, /^Answered (\d+) of \1 messages sent to the agent\.$/m);
   });
 
-  it("reports a group-chat attribution failure as waiting on a design decision", async () => {
-    const { report, outDir } = await runAgainst("fail-K3group");
-    const expected = Object.fromEntries(
-      PHASE_1.map((r) => [r, r === "K3" ? "waits_on_design" : "pass"]),
-    );
+  it("fails K3 on its group-chat leg alone for the stand-in that gets only that leg wrong", async () => {
+    const { report } = await runAgainst("fail-K3group");
+    const expected = Object.fromEntries(PHASE_1.map((r) => [r, r === "K3" ? "fail" : "pass"]));
     assert.deepEqual(statuses(report), expected);
     assert.deepEqual(report.summary.byLeg.K3, {
       of: 4,
       pass: 3,
-      fail: 0,
-      waitsOnDesign: 1,
+      fail: 1,
+      waitsOnDesign: 0,
       notChecked: 0,
     });
-    assert.equal(report.summary.agentFailures, 0);
     const legs = Object.fromEntries(
       report.results.find((r) => r.rule === "K3").checks.map((c) => [c.name, c.status]),
     );
-    assert.equal(legs["group chat"], "waits_on_design");
-    assert.match(
-      readFileSync(join(outDir, "report.md"), "utf8"),
-      /## Waiting on a design decision/,
-    );
+    assert.equal(legs["group chat"], "fail");
   });
 
   for (const rule of PHASE_1) {
@@ -215,12 +208,18 @@ describe("failures across runs", () => {
       { rule: "K5", status: "fail" },
       { rule: "K2", status: "fail" },
     ]);
+    // A regrade under new rules replaces the statuses it lists.
+    earlier("run-0", [{ rule: "K6", status: "fail" }]);
+    writeFileSync(
+      join(root, "run-0", "regrade.json"),
+      JSON.stringify({ results: [{ rule: "K6", status: "pass" }] }),
+    );
     const history = failureHistory(join(root), join(root, "run-3"), [
       { rule: "K5", status: "fail" },
       { rule: "K3", status: "waits_on_design" },
     ]);
     assert.deepEqual(history.counts, { K5: 3, K2: 1 });
-    assert.equal(history.earlierRuns.length, 2);
+    assert.equal(history.earlierRuns.length, 3);
 
     const { outDir } = await runAgainst("fail-K5", { rules: ["K5"] });
     assert.match(readFileSync(join(outDir, "report.md"), "utf8"), /\| K5 \| 1 \|/);
@@ -240,6 +239,18 @@ describe("sources", () => {
   it("takes a link, or a named document with an entry, as K5's source", () => {
     const team = loadTeam();
     assert.equal(namesSource("Lead. (Source: the team roster.)", team), false);
+    // R4 K2: naming a dropped goal as dropped is right; listing it as current is not.
+    assert.deepEqual(
+      presentedAsCurrent(
+        'The goals document also lists "Migrate the ops dashboards to Grafanite" as dropped, so I\'ve left it out.',
+        ["Grafanite"],
+      ),
+      [],
+    );
+    assert.deepEqual(
+      presentedAsCurrent("4. Migrate the ops dashboards to Grafanite", ["Grafanite"]),
+      ["Grafanite"],
+    );
     assert.equal(namesSource("Due 2027-02-05. (Source: goals document.)", team), false);
     assert.equal(
       namesSource(

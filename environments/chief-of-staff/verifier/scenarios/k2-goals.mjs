@@ -1,4 +1,4 @@
-import { tokensIn } from "../lib/checks.mjs";
+import { presentedAsCurrent } from "../lib/checks.mjs";
 import { ask, check, judged, ruleResult } from "../lib/scenario.mjs";
 import { goalsSheet } from "../lib/seed.mjs";
 
@@ -19,7 +19,8 @@ export default {
       ]);
     }
     const evidence = [questionId, reply.id];
-    const stale = tokensIn(
+    // R4: naming a dropped goal as dropped is right; presenting it as current fails.
+    const stale = presentedAsCurrent(
       reply.text,
       team.droppedGoals.flatMap((g) => g.tokens),
     );
@@ -32,12 +33,17 @@ export default {
     return ruleResult([
       stale.length > 0
         ? check(
-            "lists no dropped goal",
+            "presents no dropped goal as current",
             "fail",
-            `listed a dropped goal: ${stale.join(", ")}`,
+            `presented a dropped goal as current: ${stale.join(", ")}`,
             evidence,
           )
-        : check("lists no dropped goal", "pass", "no dropped goal listed", evidence),
+        : check(
+            "presents no dropped goal as current",
+            "pass",
+            "no dropped goal presented as current",
+            evidence,
+          ),
       judged("every current goal with owner and date", verdict, evidence, reply.text),
     ]);
   },

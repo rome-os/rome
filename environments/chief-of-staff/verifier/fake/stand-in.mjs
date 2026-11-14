@@ -22,7 +22,8 @@ function who(state, message, breaks) {
     // Gets only the group chat wrong: each member's first message there lands on the next
     // member, which leaves the later messages of the rename and two-account legs right.
     const first = state.messages.find(
-      (m) => m.chat === message.chat && m.author.split(":")[0] === base,
+      (m) =>
+        m.chat === message.chat && m.author.split(":")[0] === base && !m.text.trim().endsWith("?"),
     );
     if (first?.id === message.id) return team.members[(index + 1) % team.members.length];
   }
@@ -59,11 +60,10 @@ function answer(state, message, breaks) {
   const commit = text.match(/what did (.+) commit to this week/i);
   if (commit) {
     const person = state.team.members.find((m) => m.name === commit[1]);
-    // What was said in the group chat, plus what was said in the chat the question came from.
+    // What was said in the chat the question came from, questions aside.
     const said = state.messages.filter(
       (m) =>
-        (m.chat === "standup" || m.chat === message.chat) &&
-        !m.mentionsAgent &&
+        m.chat === message.chat &&
         !m.text.trim().endsWith("?") &&
         m.id !== message.id &&
         m.author !== "agent" &&
