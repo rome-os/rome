@@ -7,7 +7,7 @@ A Rome container of its own, built from this checkout, connected to a test Disco
 - The chief of staff agent reading and answering in Discord chats, through today's Discord bot connection.
 - Attribution to the right person, including a member with two accounts and a member whose display name changes mid-run, since every webhook a member posts through is linked to that member's person.
 - The agent hearing other bots: every test chat has `activation.botMessages` set to `all`, because Discord marks webhook messages as bot messages.
-- The agent answering the team: `up` sets the Inbox page's reply-to setting to the guardian, inner circle and acquaintances, and `seed` links the members as acquaintances unless `team.json` names another bond level. Every answer to a member still passes the envoy check, as in production, which can hold it for the guardian's approval.
+- The agent answering the team: as the agent's README asks, `up` sets the Inbox page's reply-to and trusted settings to the guardian and inner circle, and `seed` links the members at inner circle unless `team.json` names another bond level. Every answer to a member still passes the envoy check, as in production, which can hold it for the guardian's approval.
 - Renewal: the agent's answers survive a renewed session and a Rome restart.
 
 ## Differences from production
@@ -59,7 +59,7 @@ Run them from the repository root inside `nix develop`.
 | `environments/chief-of-staff/env.sh down` | Deletes the members' webhooks and removes the Rome container, its volumes and its image. The test chats' messages stay |
 | `environments/chief-of-staff/env.sh seed <dir>` | The same as `cos-env seed <dir>` |
 
-`up` builds Rome from this branch with the refs in `COS_AGENT_REF` merged on top, in order, separated by spaces: `#<pull request>`, `origin/<branch>`, or a commit. It defaults to `#2130 #2169`, the agent and the envoy verdict change under test. The merge happens in a throwaway checkout, so none of it lands on this branch.
+`up` builds Rome from this branch with the refs in `COS_AGENT_REF` merged on top, in order, separated by spaces: `#<pull request>`, `origin/<branch>`, or a commit. It defaults to `#2130 #2169 #2170`: the agent, the envoy verdict change, and the envoy team-documents change, which is unmerged and not yet read by Ouou. `version` lists each ref with its commit, its pull request's state and title when it is one, and any note `COS_REF_NOTES` (JSON keyed by ref) gives it. The merge happens in a throwaway checkout, so none of it lands on this branch.
 
 ### cos-env
 

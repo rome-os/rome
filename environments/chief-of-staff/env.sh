@@ -43,7 +43,10 @@ BUILD_TREE="$RUN_DIR/agent-tree"
 # is the head of the chief of staff agent's pull request.
 # The refs merged into the build, in order, separated by spaces. Each is a
 # pull request as #<number>, a remote branch as origin/<branch>, or any commit.
-AGENT_REFS="${COS_AGENT_REF:-#2130 #2169}"
+AGENT_REFS="${COS_AGENT_REF:-#2130 #2169 #2170}"
+# A note `version` carries for a ref, as JSON keyed by the ref, for what the
+# ref's own state does not say.
+REF_NOTES="${COS_REF_NOTES:-{\"#2170\":\"unmerged, not yet read by Ouou\"\}}"
 # The one model every tier runs on, cheapest first to keep the bill down. A run
 # that needs a stronger model sets COS_MODEL, in the shell or the secrets file.
 DEFAULT_MODEL=claude-haiku-5-5
@@ -221,6 +224,18 @@ resolve_ref() {
   esac
 }
 
+# For a pull request ref, its state and title on GitHub when the image is built,
+# as JSON fields to add to the ref's entry, plus any note REF_NOTES gives it.
+pr_fields() {
+  local ref="$1" fields=""
+  if [[ "$ref" == "#"* ]] && command -v gh >/dev/null; then
+    fields="$(gh pr view "${ref#\#}" --json state,title,url 2>/dev/null |
+      node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{const p=JSON.parse(s);process.stdout.write(`,"state":${JSON.stringify(p.state)},"title":${JSON.stringify(p.title)},"url":${JSON.stringify(p.url)}`)})')" || fields=""
+  fi
+  fields+="$(node -e 'const n=JSON.parse(process.argv[1])[process.argv[2]];if(n)process.stdout.write(`,"note":${JSON.stringify(n)}`)' "$REF_NOTES" "$ref")"
+  printf '%s' "$fields"
+}
+
 build_rome_image() {
   local main_sha env_sha env_dirty=false merged ref sha merged_refs="" done_refs="" refs
   git -C "$REPO_ROOT" fetch --quiet origin main
@@ -244,7 +259,7 @@ build_rome_image() {
       die "$ref does not merge cleanly on top of ${done_refs:-this branch}. Rebase it on main, or change COS_AGENT_REF."
     fi
     done_refs+="${done_refs:+ + }$ref"
-    merged_refs+="${merged_refs:+,}{\"ref\":\"$ref\",\"commit\":\"$sha\"}"
+    merged_refs+="${merged_refs:+,}{\"ref\":\"$ref\",\"commit\":\"$sha\"$(pr_fields "$ref")}"
   done
   merged="$(git -C "$BUILD_TREE" rev-parse HEAD)"
 
@@ -451,12 +466,14 @@ set_model() {
     "$model" "$model" "$model" | api PUT /settings >/dev/null
 }
 
-# The agent answers only the bond levels the guardian picks on the Inbox page,
-# the guardian alone by default. The team are acquaintances, so the agent
-# answers them, and still not a stranger.
+# Rome answers only the bond levels the guardian picks on the Inbox page, the
+# guardian alone by default, and sends the rest through sender triage unless
+# their level is trusted. The agent's README puts the team at inner circle and
+# both settings at that level, so this does the same.
 let_agent_answer_team() {
   log "letting the agent answer the team ..."
-  printf '{"replyToBondLevels":["guardian","inner-circle","acquaintance"]}' | api PUT /settings >/dev/null
+  printf '{"replyToBondLevels":["guardian","inner-circle"],"trustedBondLevels":["guardian","inner-circle"]}' |
+    api PUT /settings >/dev/null
 }
 
 cmd_up() {
@@ -568,7 +585,8 @@ put_document() {
 # webhooks to one person, sets the names the members post under, and hands the
 # agent the roster and goals. team.json is the verifier's team, whose members
 # each name an account and a person: { "members": [{ "account": "member1",
-# "name": "...", "bondLevel"?: "..." }, ...] }, acquaintance when unset. member1:2,
+# "name": "...", "bondLevel"?: "..." }, ...] }, inner circle when unset, as the
+# agent's README sets the team. member1:2,
 # member1's second account, belongs to member1's person and posts under the same
 # name until renamed. The roster and goals are markdown the agent reads through
 # its own documents.
@@ -592,7 +610,7 @@ cmd_seed() {
     read -r bond display < <(node -e '
       const team = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
       const m = (team.members ?? []).find((m) => m.account === process.argv[2]);
-      if (m?.name) process.stdout.write(`${m.bondLevel ?? "acquaintance"} ${m.name}\n`);' \
+      if (m?.name) process.stdout.write(`${m.bondLevel ?? "inner-circle"} ${m.name}\n`);' \
       "$dir/team.json" "$member") || die "team.json names no person for $member"
     # Every webhook of the member, its second account's included, is one of its accounts.
     accounts="$(node -e '
