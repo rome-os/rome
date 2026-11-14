@@ -379,7 +379,9 @@ export function daysFromHours(spec: TypeSpec, plan: QueryPlan, hours: readonly S
   const days = new Map<number, StoredPoint[]>();
   for (const hour of hours) {
     if (hour.value === null) continue;
-    const day = periodStart(hour.startAt, plan.tz, "day");
+    // A window that starts mid-day starts its first day there, so the day
+    // lands in the window's first bucket.
+    const day = Math.max(periodStart(hour.startAt, plan.tz, "day"), plan.start);
     days.set(day, [...(days.get(day) ?? []), hour]);
   }
   return [...days.entries()].map(([dayStart, list]): StoredPoint => {
@@ -392,7 +394,7 @@ export function daysFromHours(spec: TypeSpec, plan: QueryPlan, hours: readonly S
       shape: "bucket",
       resolution: "day",
       startAt: dayStart,
-      endAt: nextPeriod(dayStart, plan.tz, "day"),
+      endAt: nextPeriod(periodStart(dayStart, plan.tz, "day"), plan.tz, "day"),
       tz: plan.tz,
       value: spec.rollup === "sum" ? total : total / list.length,
       // A summed day's minimum is the day's total, not its smallest hour.

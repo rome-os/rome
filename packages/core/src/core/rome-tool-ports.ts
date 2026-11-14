@@ -4,8 +4,8 @@
 // Vocabulary: docs/domains/agents.md#rome-tools.
 
 import type { ThreadContext } from "@rome-os/app-runtime";
+import type { PlaceAudience } from "./place-audience.js";
 import {
-  type Audience,
   type AgentAction,
   type AgentActions,
   narrowerAudience,
@@ -37,6 +37,8 @@ export interface RomeToolPortsDeps {
   eventSources?: EventSources;
   /** Whose a dashboard chat is, for a wake scheduled in one. */
   webchatRepo?: Pick<WebChatRepository, "getSession">;
+  /** Who can read a chat. Absent, every chat is shared. */
+  placeAudience?: PlaceAudience;
   /** The tools Rome adds for an agent. When absent, a session carries none. */
   sessionTools?: SessionToolsProvider;
   /**
@@ -99,7 +101,12 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           return actionEngine.run(action.config.name, input as Record<string, unknown>, {
             initiator: `agent:${turn.agentName}`,
             ...(actor ? { actor } : {}),
-            audience: await placeAudience(deps.webchatRepo, turn),
+            // Read again on each call, so a chat that opens to visitors after
+            // the turn started reads no personal data.
+            audience: narrowerAudience(
+              turn.audience(),
+              (await deps.placeAudience?.(turn.threadContext())) ?? "shared",
+            ),
             channelContext: turn.threadContext(),
             sharedContext: turn.sharedContext(),
             sessionId: turn.sessionId,
@@ -238,20 +245,6 @@ function toAgentAction(a: Action): AgentAction {
     cancellable: !!a.config.cancellable,
     inputSchema: a.inputSchema!,
   };
-}
-
-/**
- * The turn's audience, narrowed by whose dashboard chat it runs in: a
- * visitor's chat is shared. A dashboard chat Rome cannot look up is shared.
- */
-async function placeAudience(
-  webchatRepo: Pick<WebChatRepository, "getSession"> | undefined,
-  turn: TurnFacts,
-): Promise<Audience> {
-  const audience = turn.audience();
-  if (audience === "shared" || turn.threadContext()?.channel !== "webchat") return audience;
-  const owner = await dashboardChatOwner(webchatRepo, turn.threadContext());
-  return narrowerAudience(audience, owner === "guardian" ? "private" : "shared");
 }
 
 /** Whose a dashboard chat is, for work scheduled in it; undefined for any other thread. */

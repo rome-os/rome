@@ -191,6 +191,11 @@ export interface SessionOpening {
   toolEnv?: Record<string, string | undefined>;
   /** Attributes stamped on the spans of every turn. The session passes them through. */
   spanAttributes?: Attributes;
+  /**
+   * Who can read the session's chat, as its opener read it (turnAudience's
+   * `place`). Absent, a turn reads its place off its thread context alone.
+   */
+  audience?: Audience;
 }
 
 /** What a resume states. It carries no reset policy, since a session named by
@@ -1679,7 +1684,10 @@ async function openSession(
         ...(use.startedAt ? { startedAt: use.startedAt } : {}),
       });
     };
-    const forkAudience = turnAudience(opening.threadContext, { actor: fork.actor });
+    const forkAudience = turnAudience(opening.threadContext, {
+      actor: fork.actor,
+      place: init.audience,
+    });
     const refs: TurnExecRefs = {
       sessionId: fork.forkSessionId,
       getRomeSessionId: () => fork.forkSessionId,
@@ -1855,6 +1863,7 @@ async function openSession(
     owningAppId,
     threadContext: init.threadContext,
     sharedContext: init.sharedContext,
+    placeAudience: init.audience,
     spanAttributes: init.spanAttributes,
     isNewSession,
     isSubagent: opts.isSubagent,
@@ -1929,6 +1938,7 @@ interface ImplArgs {
   /** The app that owns the agent, when an app does. */
   owningAppId?: string;
   threadContext?: ThreadContext;
+  placeAudience?: Audience;
   sharedContext?: Record<string, unknown>;
   /** Whether the underlying SDK session was freshly minted (vs resumed). */
   isNewSession: boolean;
@@ -2184,6 +2194,8 @@ class AgentSessionImpl implements AgentSession {
   private readonly turns: TurnsById;
   private attribution: TurnAttribution;
   private threadContext?: ThreadContext;
+  /** Who can read the session's chat, as its opener read it. */
+  private readonly placeAudience?: Audience;
   private sharedContext?: Record<string, unknown>;
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
@@ -2284,6 +2296,7 @@ class AgentSessionImpl implements AgentSession {
     this.turns = args.turns;
     this.attribution = { agentName: args.key.agentName, owningAppId: args.owningAppId };
     this.threadContext = args.threadContext;
+    this.placeAudience = args.placeAudience;
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
     this.isSubagent = args.isSubagent;
@@ -2364,7 +2377,9 @@ class AgentSessionImpl implements AgentSession {
 
   /** The running turn's audience; between turns, the session's place read alone. */
   get currentTurnAudienceRef(): Audience {
-    return this.currentSink?.audience ?? turnAudience(this.threadContext);
+    return (
+      this.currentSink?.audience ?? turnAudience(this.threadContext, { place: this.placeAudience })
+    );
   }
 
   /** The next turn resumes what an earlier session of the chat started, so
@@ -3569,6 +3584,7 @@ class AgentSessionImpl implements AgentSession {
       audience: turnAudience(options?.threadContext ?? this.threadContext, {
         actor: options?.actor,
         parent: options?.parentAudience,
+        place: this.placeAudience,
       }),
       reportedTask: options?.reportedTask,
       lifecycleFinishDispatched: false,

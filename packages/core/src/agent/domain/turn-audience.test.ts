@@ -11,8 +11,11 @@ const place = (overrides: Partial<ThreadContext>): ThreadContext => ({
 const guardianDm = { threadType: "private" as const, senderBondLevel: "guardian" };
 
 describe("turnAudience", () => {
-  it("reads a dashboard chat as private", () => {
-    expect(turnAudience(place({ channel: "webchat", ...guardianDm }))).toBe("private");
+  it("reads a dashboard chat as its opener read it, and as shared when it read nothing", () => {
+    const dashboard = place({ channel: "webchat", ...guardianDm });
+    expect(turnAudience(dashboard, { place: "private" })).toBe("private");
+    expect(turnAudience(dashboard, { place: "shared" })).toBe("shared");
+    expect(turnAudience(dashboard)).toBe("shared");
   });
 
   it.each([
@@ -21,6 +24,8 @@ describe("turnAudience", () => {
     "whatsapp",
     "discord",
     "wechat",
+    "wechat_user",
+    "linkedin",
     "slack",
     "feishu",
     "lark",
@@ -59,19 +64,20 @@ describe("turnAudience", () => {
     expect(turnAudience(undefined)).toBe("shared");
   });
 
-  it("reads a turn that acts for a visitor as shared, even in a dashboard chat", () => {
-    expect(
-      turnAudience(place({ channel: "webchat", ...guardianDm }), { actor: { kind: "visitor" } }),
-    ).toBe("shared");
-    expect(
-      turnAudience(place({ channel: "webchat", ...guardianDm }), { actor: { kind: "guardian" } }),
-    ).toBe("private");
+  it("reads a turn that acts for a visitor as shared, even in a private chat", () => {
+    const dashboard = place({ channel: "webchat", ...guardianDm });
+    expect(turnAudience(dashboard, { place: "private", actor: { kind: "visitor" } })).toBe(
+      "shared",
+    );
+    expect(turnAudience(dashboard, { place: "private", actor: { kind: "guardian" } })).toBe(
+      "private",
+    );
   });
 
   it("keeps a subagent's or fork's turn no more private than the turn that started it", () => {
     const dashboard = place({ channel: "webchat", ...guardianDm });
-    expect(turnAudience(dashboard, { parent: "shared" })).toBe("shared");
-    expect(turnAudience(dashboard, { parent: "private" })).toBe("private");
+    expect(turnAudience(dashboard, { place: "private", parent: "shared" })).toBe("shared");
+    expect(turnAudience(dashboard, { place: "private", parent: "private" })).toBe("private");
     // A private parent does not make a shared place private.
     expect(turnAudience(place({ threadType: "group" }), { parent: "private" })).toBe("shared");
   });

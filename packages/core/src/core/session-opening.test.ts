@@ -1,9 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import {
-  dashboardChatAudience,
-  sessionOpeningFor,
-  talkerChannelSurface,
-} from "./session-opening.js";
+import { sessionOpeningFor, talkerChannelSurface } from "./session-opening.js";
 
 describe("talkerChannelSurface", () => {
   it("reads an omitted fact as a messaging channel's", () => {
@@ -27,78 +23,51 @@ describe("sessionOpeningFor", () => {
         : null;
   const openingFor = sessionOpeningFor({ channelSurface: surfaces });
 
-  it("states a web chat's session shows cards, faces the guardian, and carries its channel", () => {
-    expect(openingFor("webchat:chat-1", { channel: "webchat", threadId: "chat-1" })).toEqual({
+  it("states a web chat's session shows cards, faces the guardian, and carries its channel", async () => {
+    expect(await openingFor("webchat:chat-1", { channel: "webchat", threadId: "chat-1" })).toEqual({
       drawsCards: true,
       guardianFacing: true,
-      toolEnv: { ROME_CHANNEL: "webchat", ROME_TURN_AUDIENCE: "private" },
+      toolEnv: { ROME_CHANNEL: "webchat", ROME_TURN_AUDIENCE: "shared" },
       spanAttributes: { "channel.name": "webchat" },
+      audience: "shared",
     });
   });
 
-  it("takes cards from the opener's channel and the rest from the key", () => {
-    const opening = openingFor("telegram:42", { channel: "webchat", threadId: "chat-1" });
+  it("takes cards from the opener's channel and the rest from the key", async () => {
+    const opening = await openingFor("telegram:42", { channel: "webchat", threadId: "chat-1" });
     expect(opening.drawsCards).toBe(true);
-    expect(opening.toolEnv).toEqual({ ROME_CHANNEL: "telegram", ROME_TURN_AUDIENCE: "private" });
+    expect(opening.toolEnv).toEqual({ ROME_CHANNEL: "telegram", ROME_TURN_AUDIENCE: "shared" });
   });
 
-  it("states nothing a keyless or unknown conversation would need", () => {
-    expect(openingFor("worker:3b1f")).toEqual({
+  it("states nothing a keyless or unknown conversation would need", async () => {
+    expect(await openingFor("worker:3b1f")).toEqual({
       drawsCards: false,
       guardianFacing: false,
       toolEnv: { ROME_CHANNEL: "worker", ROME_TURN_AUDIENCE: "shared" },
       spanAttributes: { "channel.name": "worker" },
+      audience: "shared",
     });
-    expect(openingFor("")).toEqual({
+    expect(await openingFor("")).toEqual({
       drawsCards: false,
       guardianFacing: false,
       toolEnv: { ROME_CHANNEL: undefined, ROME_TURN_AUDIENCE: "shared" },
       spanAttributes: {},
+      audience: "shared",
     });
   });
 });
 
-describe("the audience a session's tools carry", () => {
-  const openingFor = sessionOpeningFor({ channelSurface: () => null });
-  const audienceOf = (...args: Parameters<typeof openingFor>) =>
-    openingFor(...args).toolEnv.ROME_TURN_AUDIENCE;
-
-  it("reads the opener's place: a guardian's direct message is private, a group shared", () => {
-    expect(
-      audienceOf("telegram:42", {
-        channel: "telegram",
-        threadId: "42",
-        threadType: "private",
-        senderBondLevel: "guardian",
-      }),
-    ).toBe("private");
-    expect(
-      audienceOf("telegram:-100", {
-        channel: "telegram",
-        threadId: "-100",
-        threadType: "group",
-        senderBondLevel: "guardian",
-      }),
-    ).toBe("shared");
+describe("the audience a session opens with", () => {
+  const openingFor = sessionOpeningFor({
+    channelSurface: () => null,
+    placeAudience: async (context) => (context?.threadId === "dm" ? "private" : "shared"),
   });
 
-  it("is narrowed by what the opener knows, never widened", () => {
-    const dashboard = { channel: "webchat", threadId: "chat-1" };
-    expect(audienceOf("webchat:chat-1", dashboard, "shared")).toBe("shared");
-    expect(audienceOf("worker:1", undefined, "private")).toBe("shared");
-  });
-
-  it("reads a visitor's dashboard chat, or one Rome cannot find, as shared", async () => {
-    const repo = (ownerKey: string | null | undefined) => ({
-      getSession: async () => (ownerKey === undefined ? null : ({ ownerKey } as never)),
-    });
-    const dashboard = { channel: "webchat", threadId: "chat-1" };
-    expect(await dashboardChatAudience(repo(null), dashboard)).toBe("private");
-    expect(await dashboardChatAudience(repo("guardian"), dashboard)).toBe("private");
-    expect(await dashboardChatAudience(repo("visitor:acct-1"), dashboard)).toBe("shared");
-    expect(await dashboardChatAudience(repo(undefined), dashboard)).toBe("shared");
-    expect(await dashboardChatAudience(repo(null), { channel: "telegram", threadId: "1" })).toBe(
-      undefined,
-    );
+  it("is the place's audience, in the session and in its tools' environment", async () => {
+    const dm = await openingFor("telegram:dm", { channel: "telegram", threadId: "dm" });
+    expect(dm.audience).toBe("private");
+    expect(dm.toolEnv.ROME_TURN_AUDIENCE).toBe("private");
+    const group = await openingFor("telegram:g", { channel: "telegram", threadId: "g" });
+    expect(group.toolEnv.ROME_TURN_AUDIENCE).toBe("shared");
   });
 });

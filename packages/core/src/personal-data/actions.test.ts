@@ -53,6 +53,21 @@ describe("personal-data actions", () => {
     });
   });
 
+  it("answers a routine's fire, which adds the payload that fired it", async () => {
+    const result = await engine.run(
+      "core:personal_data_query",
+      {
+        source: "apple_health",
+        type: "stepCount",
+        start: "2026-11-10",
+        end: "2026-11-11",
+        __triggerPayload: { firedAt: "2026-11-12T09:00:00Z" },
+      },
+      { audience: "private" },
+    );
+    expect(result).toMatchObject({ status: "ok", data: { results: [{ value: 14000 }] } });
+  });
+
   it("returns a query it cannot answer as an error the Agent reads", async () => {
     const result = await engine.run(
       "core:personal_data_query",

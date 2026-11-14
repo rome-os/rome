@@ -27,11 +27,7 @@ import type {
 } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
-import {
-  dashboardChatAudience,
-  type SessionOpeningFor,
-  sessionOpeningFor,
-} from "./session-opening.js";
+import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import {
@@ -222,11 +218,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           const opening = {
             ...sessionInit,
             // Stated here, never taken from the worker's request.
-            ...this.openingFor(
-              openedKey ?? "",
-              sessionInit.threadContext,
-              await dashboardChatAudience(this.webchatRepo, sessionInit.threadContext),
-            ),
+            ...(await this.openingFor(openedKey ?? "", sessionInit.threadContext)),
             kind: sessionInit.threadContext ? ("conversation" as const) : ("action" as const),
             workingDir,
             isSubagent: true,
@@ -311,6 +303,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const handle = await session.submit(req.input, {
           priority: "after",
           ...(actor ? { actor } : {}),
+          // An action asked for this turn, and what the action's caller can
+          // read does not cross the worker boundary. A turn resumed in a
+          // dashboard session would otherwise read as private for a caller
+          // in a group, so it reads personal data never.
+          parentAudience: "shared",
           threadContext: req.init?.threadContext,
           sharedContext: req.init?.sharedContext,
           romeSessionId,

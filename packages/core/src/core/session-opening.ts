@@ -2,13 +2,8 @@ import type { ThreadContext } from "@rome-os/app-runtime";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 import { sessionKeyChannel } from "./agent-session-key.js";
-import {
-  type Audience,
-  narrowerAudience,
-  type SessionOpening,
-  turnAudience,
-} from "../agent/index.js";
-import type { WebChatRepository } from "../webchat/repository.js";
+import type { SessionOpening } from "../agent/index.js";
+import type { PlaceAudience } from "./place-audience.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 
 const log = createLogger("session-opening");
@@ -51,16 +46,22 @@ export interface SessionOpeningDeps {
   /** The connection kind behind a channel id. When absent, every channel id reads as
    *  its own connection kind, which holds only where no connection kind has a second channel. */
   connectionKindOfChannel?: ConnectionKindOfChannel;
+  /** Who can read a chat. Absent, every chat is shared. */
+  placeAudience?: PlaceAudience;
 }
 
 /** What an opener states for the session it opens under `continuityKey`. */
 export type SessionOpeningFor = (
   continuityKey: string,
   threadContext?: ThreadContext,
-  /** What the opener knows narrows the audience its place reads as, such as
-   *  a visitor owning the dashboard chat. */
-  audience?: Audience,
-) => Required<Pick<SessionOpening, "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes">>;
+) => Promise<
+  Required<
+    Pick<
+      SessionOpening,
+      "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes" | "audience"
+    >
+  >
+>;
 
 /**
  * What an opener states for a session it opens: whether its conversation
@@ -69,7 +70,7 @@ export type SessionOpeningFor = (
  * falls back to the channel the continuity key names.
  */
 export function sessionOpeningFor(deps: SessionOpeningDeps): SessionOpeningFor {
-  return (continuityKey, threadContext, audience) => {
+  return async (continuityKey, threadContext) => {
     const keyChannel = sessionKeyChannel(continuityKey);
     const openingChannel = threadContext?.channel ?? keyChannel;
     if (keyChannel && openingChannel !== keyChannel && deps.channelSurface(keyChannel) !== null) {
@@ -78,6 +79,7 @@ export function sessionOpeningFor(deps: SessionOpeningDeps): SessionOpeningFor {
         openingChannel,
       });
     }
+    const audience = (await deps.placeAudience?.(threadContext)) ?? "shared";
     return {
       drawsCards:
         !!openingChannel && surfaceOf(deps.channelSurface, openingChannel).interactiveCards,
@@ -87,28 +89,14 @@ export function sessionOpeningFor(deps: SessionOpeningDeps): SessionOpeningFor {
       // account. Set even when undefined, so a value Rome itself inherited
       // never leaks in. ROME_TURN_AUDIENCE says who can read the session's
       // turns, and the rome-node CLI refuses a device's personal capability
-      // while it says shared. A session serves one chat, so it holds for the
-      // session's life.
+      // while it says shared. It is read when the session opens and holds for
+      // the session's life. The action check reads the chat again on every call.
       toolEnv: {
         ROME_CHANNEL: keyChannel,
-        ROME_TURN_AUDIENCE: narrowerAudience(turnAudience(threadContext), audience),
+        ROME_TURN_AUDIENCE: audience,
       },
       spanAttributes: keyChannel ? { "channel.name": keyChannel } : {},
+      audience,
     };
   };
-}
-
-/**
- * The audience a dashboard chat's owner allows: shared for a visitor's chat,
- * or for one Rome cannot find. Undefined for a thread that is no dashboard chat.
- */
-export async function dashboardChatAudience(
-  webchatRepo: Pick<WebChatRepository, "getSession"> | undefined,
-  threadContext: ThreadContext | undefined,
-): Promise<Audience | undefined> {
-  if (threadContext?.channel !== "webchat") return undefined;
-  const chat = threadContext.threadId
-    ? await webchatRepo?.getSession(threadContext.threadId)
-    : null;
-  return chat && (chat.ownerKey ?? "guardian") === "guardian" ? "private" : "shared";
 }

@@ -252,6 +252,22 @@ describe("queryPersonalData", () => {
     ).toMatchObject({ value: 6100 });
   });
 
+  it("keeps the hours of a window that starts mid-day", () => {
+    // 00:00 and 01:00 hours of Nov 10: a window from 01:00 holds the second.
+    expect(
+      query({ type: "stepCount", start: "2026-11-10T01:00", end: "2026-11-10T03:00" }).results[0],
+    ).toMatchObject({ value: 40 });
+    const days = query({
+      type: "stepCount",
+      start: "2026-11-10T00:30",
+      end: "2026-11-10T03:00",
+      interval: "day",
+    });
+    expect(days.results[0]).toMatchObject({
+      buckets: [{ startISO: "2026-11-10T00:30:00+08:00", value: 40 }],
+    });
+  });
+
   it("converts units and takes the latest sample", () => {
     expect(
       query({

@@ -55,6 +55,7 @@ function ports(
     actionRegistry: registry,
     actionEngine: engine,
     webchatRepo: { getSession } as never,
+    placeAudience: async (context) => (context?.threadId === "shared-chat" ? "shared" : "private"),
     ...(taskOwner ? { taskOwner } : {}),
     sessionTools,
   });
@@ -234,23 +235,22 @@ describe("romeToolPorts actions carry the turn's audience", () => {
   const audienceOfRun = (run: ReturnType<typeof ports>["run"]) =>
     (run.mock.calls.at(-1) as unknown as [string, unknown, { audience?: string }])[2].audience;
 
-  it("hands a private turn in the guardian's dashboard chat on as private", async () => {
+  it("hands a private turn in a private chat on as private", async () => {
     const { actions, run } = ports();
     await actions.run(turn({ audience: () => "private" }), "send_message", {});
     expect(audienceOfRun(run)).toBe("private");
   });
 
-  it("narrows a private turn in a visitor's dashboard chat to shared", async () => {
-    const { actions, run, getSession } = ports();
-    getSession.mockImplementation(async () => ({ ownerKey: "visitor:acct-v" }) as never);
-    await actions.run(turn({ audience: () => "private" }), "send_message", {});
-    expect(audienceOfRun(run)).toBe("shared");
-  });
-
-  it("reads a dashboard chat Rome cannot find as shared", async () => {
-    const { actions, run, getSession } = ports();
-    getSession.mockImplementation(async () => null as never);
-    await actions.run(turn({ audience: () => "private" }), "send_message", {});
+  it("reads the chat again on each call, so a chat that became shared narrows the turn", async () => {
+    const { actions, run } = ports();
+    await actions.run(
+      turn({
+        audience: () => "private",
+        threadContext: () => ({ channel: "webchat", threadId: "shared-chat" }),
+      }),
+      "send_message",
+      {},
+    );
     expect(audienceOfRun(run)).toBe("shared");
   });
 

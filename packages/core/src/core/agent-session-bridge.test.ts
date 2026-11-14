@@ -571,8 +571,9 @@ describe("AgentSessionBridge working dir", () => {
       guardianFacing: true,
       toolEnv: { ROME_CHANNEL: "telegram" },
       spanAttributes: { "channel.name": "telegram" },
+      audience: "shared" as const,
     };
-    const { acquired, runTurn } = setup({}, undefined, () => stated);
+    const { acquired, runTurn } = setup({}, undefined, async () => stated);
     const forged = {
       drawsCards: true,
       guardianFacing: false,

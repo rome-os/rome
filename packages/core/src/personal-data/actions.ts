@@ -117,7 +117,9 @@ export function registerPersonalDataActions(
       additionalProperties: false,
     },
     execute: async (args) => {
-      const input = queryInputSchema.safeParse(args);
+      // A routine's fire adds the payload that fired it, which a query does not read.
+      const { __triggerPayload: _payload, ...query } = args;
+      const input = queryInputSchema.safeParse(query);
       if (!input.success) {
         const issue = input.error.issues[0];
         return {
