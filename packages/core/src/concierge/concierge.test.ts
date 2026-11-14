@@ -2002,6 +2002,22 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("chat_card shows a task whose wait ran out as its task card, since its question takes no answer", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async (ids) =>
+        approvalWaits(new Map(ids.map((id) => [id, Date.now() - 2 * 24 * 60 * 60 * 1000]))),
+      reportPending: () => [],
+    });
+    await s.tool("chat_card", { chatId: "task-1" });
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "task" }],
+    ]);
+  });
+
   it("chat_forward stores the task chat it came from, and the intro in the same message", async () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });

@@ -37,7 +37,7 @@
       "checkFailed": "Could not check the connection"
     },
     "ask": {
-      "expiredFold": "Expired · answer to continue",
+      "expired": "Expired: no answer within a day",
       "unavailable": "This question or approval can no longer be shown",
       "answered": "Answered",
       "answeredWith": "Answered: {{answer}}",
@@ -58,7 +58,6 @@
         "stopped": "Stopped",
         "no_response": "No response"
       },
-      "expired": "Expired — answer to continue",
       "stop": "Stop",
       "sourceMissing": "Can't find the original message",
       "findingMessage": "Finding message…"

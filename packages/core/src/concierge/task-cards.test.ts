@@ -321,7 +321,7 @@ describe("a card whose task ended", () => {
     expect(await closedOf(row(false))).toEqual({ q2: false, a1: false });
   });
 
-  it("leaves a card with an outcome, and an expired question, not closed", async () => {
+  it("leaves a card with an outcome not closed, and closes an expired question", async () => {
     const { read } = sources(new Map([["task-1", open()]]), [row(true)]);
     expect(await settledCard(read, "task-1", { kind: "question", id: "q1" })).toMatchObject({
       closed: false,
@@ -329,8 +329,8 @@ describe("a card whose task ended", () => {
     expect(await settledCard(read, "task-1", { kind: "approval", id: "a2" })).toMatchObject({
       closed: false,
     });
-    // A question nobody answered in time still takes an answer.
-    expect(await closedOf(row(true, true))).toEqual({ q2: false, a1: true });
+    // A question nobody answered in time closes with its task too.
+    expect(await closedOf(row(true, true))).toEqual({ q2: true, a1: true });
   });
 
   it("fills `closed` into the cards a page hands out", async () => {

@@ -126,16 +126,12 @@ function approvalOutcome(approval: AskedApproval): TaskApprovalOutcome | undefin
 }
 
 /** The approval as a card draws it. */
-/**
- * `card` with `closed` filled in from its task `row`: an open card of a task
- * that ended is closed, except an expired question, which still takes an answer.
- */
+/** `card` with `closed` filled in from its task `row`: a card with no outcome whose task ended is closed. */
 function closedBy<C extends Extract<TaskCard, { kind: "question" | "approval" }>>(
   card: C,
   row: ConciergeTaskRow | undefined,
 ): C {
-  const open = !card.outcome && !(card.kind === "question" && card.expired);
-  return { ...card, closed: open && row?.endedAt != null };
+  return { ...card, closed: !card.outcome && row?.endedAt != null };
 }
 
 /** The approval as a card draws it; `row` says whether its task ended. */

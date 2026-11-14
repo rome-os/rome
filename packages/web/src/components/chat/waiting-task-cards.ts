@@ -6,7 +6,8 @@ import { cardKey } from "./entries/live-task-cards";
 /**
  * Whether a question or approval card waits on its owner now, read from the
  * card alone: it has no outcome, its wait did not run out, and its task did not
- * end with it open (`closed`, which Rome fills in from the task).
+ * end with it open (`closed`, which Rome fills in from the task). Any other
+ * card is read-only.
  */
 export function cardWaits(
   card: TaskCard | undefined,

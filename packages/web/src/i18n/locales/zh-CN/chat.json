@@ -37,7 +37,7 @@
       "checkFailed": "无法检查连接状态"
     },
     "ask": {
-      "expiredFold": "已过期 · 回答后继续",
+      "expired": "已过期：一天内没有回应",
       "unavailable": "这个问题或审批已无法显示",
       "answered": "已回答",
       "answeredWith": "已回答：{{answer}}",
@@ -58,7 +58,6 @@
         "stopped": "已停止",
         "no_response": "没回应"
       },
-      "expired": "已过期，回答后继续",
       "stop": "停止",
       "sourceMissing": "找不到原消息",
       "findingMessage": "正在查找消息…"

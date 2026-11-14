@@ -232,7 +232,7 @@ function cardNow(until = Number.POSITIVE_INFINITY): TaskCard {
     since: question.at,
     expired,
     ...(outcome ? { outcome } : {}),
-    closed: !outcome && !expired && taskEnded(),
+    closed: !outcome && taskEnded(),
   };
 }
 
@@ -412,13 +412,13 @@ describe("TaskChatCard with its task", () => {
     );
   });
 
-  it("labels a question nobody answered in time as expired, and keeps it answerable", async () => {
+  it("holds no question once it expired: its owner carries on in the task's thread", async () => {
     taskRows = [taskRow("ended", "no_response")];
     waiting = false;
     show();
-    expect(await screen.findByText("Expired — answer to continue")).toBeTruthy();
-    // The question is still there to answer.
-    expect(document.querySelector("[data-chat-task-open]")).toBeTruthy();
+    expect(await screen.findByText("Task chat")).toBeTruthy();
+    expect(document.querySelector("[data-chat-task-open]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 
   it("shows no status line for a task that neither works nor waits, and no Stop", async () => {
@@ -531,25 +531,17 @@ describe("TaskChatCard shown as one card or the other", () => {
     expect(card.closest("[data-chat-task-waiting]")).toBeTruthy();
   });
 
-  it("folds an expired question to a card that waits on no one, and opens to the form", async () => {
+  it("folds an expired question read-only, saying it expired, and reads no task list", async () => {
     taskRows = [expiredRow];
     show(true, "ask");
     // In a card like any settled one: what it asked, then that it expired.
-    const line = await screen.findByRole("button", {
-      name: "Which tone?Expired · answer to continue",
-    });
-    expect(line.closest("[data-chat-settled-card]")).toBeTruthy();
-    // The card says it expired itself: no task list is read.
+    const line = await screen.findByText("Expired: no answer within a day");
+    expect(line.closest("[data-chat-settled-card]")?.textContent).toContain("Which tone?");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
       false,
     );
-    expect(screen.queryByRole("button", { name: "Warm" })).toBeNull();
     expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
-    await userEvent.setup().click(line);
-    expect(await screen.findByText("Which tone?")).toBeTruthy();
-    expect(screen.getByText("Expired — answer to continue")).toBeTruthy();
-    // Opened, it still takes an answer, but counts as waiting nowhere.
-    expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 
   describe("folded", () => {
