@@ -64,6 +64,8 @@ export const APPLE_HEALTH: SourceSpec = {
     averaged("respiratoryRate", "count/min"),
     averaged("oxygenSaturation", "%"),
     averaged("heartRateVariabilitySDNN", "ms"),
+    // A CGM reads every few minutes, over the per-type sample cap in months.
+    averaged("bloodGlucose", "mg/dL"),
     sampled("restingHeartRate", "count/min"),
     sampled("walkingHeartRateAverage", "count/min"),
     sampled("vo2Max", "ml/(kg*min)"),
@@ -73,7 +75,6 @@ export const APPLE_HEALTH: SourceSpec = {
     sampled("height", "m", height),
     sampled("bloodPressureSystolic", "mmHg"),
     sampled("bloodPressureDiastolic", "mmHg"),
-    sampled("bloodGlucose", "mg/dL"),
     sampled("bodyTemperature", "degC", [{ name: "degF", factor: 9 / 5, offset: 32 }]),
     {
       type: "mindfulSession",

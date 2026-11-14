@@ -300,6 +300,62 @@ describe("queryPersonalData", () => {
     ).toMatchObject({ aggregate: "latest", value: 100 });
   });
 
+  it("reads blood glucose as averaged buckets: hours recent, days older, and refuses a sample", () => {
+    const bucket = (
+      resolution: "hour" | "day",
+      start: number,
+      value: number,
+      low: number,
+      high: number,
+    ) => ({
+      key: `bloodGlucose:${resolution}:${new Date(start).toISOString()}`,
+      type: "bloodGlucose",
+      shape: "bucket",
+      resolution,
+      start: new Date(start).toISOString(),
+      end: new Date(start + (resolution === "hour" ? HOUR : DAY)).toISOString(),
+      tz: TZ,
+      value,
+      unit: "mg/dL",
+      fields: { min: low, max: high },
+    });
+    const { response } = repo.ingest(
+      APPLE_HEALTH,
+      batch("glucose", {
+        upserts: [
+          bucket("day", NOV_10 - DAY, 100, 70, 160),
+          bucket("hour", NOV_10 + 8 * HOUR, 110, 95, 140),
+          bucket("hour", NOV_10 + 9 * HOUR, 130, 120, 180),
+          {
+            ...bucket("hour", NOV_10 + 10 * HOUR, 1, 1, 1),
+            key: "bloodGlucose:reading-1",
+            shape: "sample",
+          },
+        ],
+      }),
+      NOW,
+    );
+    expect(response.inserted).toBe(3);
+    expect(response.rejected.map((r) => r.index)).toEqual([3]);
+    const days = query({
+      type: "bloodGlucose",
+      start: "2026-11-09",
+      end: "2026-11-10",
+      interval: "day",
+    });
+    expect(days.results[0]).toMatchObject({
+      unit: "mg/dL",
+      buckets: [
+        { startISO: "2026-11-09T00:00:00+08:00", value: 100 },
+        { startISO: "2026-11-10T00:00:00+08:00", value: 120 },
+      ],
+    });
+    expect(
+      query({ type: "bloodGlucose", start: "2026-11-10", end: "2026-11-10", aggregate: "max" })
+        .results[0],
+    ).toMatchObject({ value: 180 });
+  });
+
   it("reads older day-only history in another zone by its dates, and says which zone", () => {
     // The phone keeps day buckets alone for older history; the guardian reads in Los Angeles.
     const days = query({
