@@ -45,8 +45,9 @@ async function readNamedPlace(ctx, mic) {
     const romeHost = new URL(page.url()).host;
     const response = await page.request.get(new URL(PLACE_API, page.url()).toString());
     const body = response.ok() ? await response.json().catch(() => null) : null;
+    const named = body?.place;
     const place =
-      body?.provider && body?.host ? { provider: body.provider, host: body.host } : null;
+      named?.provider && named?.host ? { provider: named.provider, host: named.host } : null;
     const apiCheck = required(
       check(
         "read API names the place",
@@ -59,6 +60,16 @@ async function readNamedPlace(ctx, mic) {
     if (!place)
       return { check: apiCheck, settingsCheck: settingsUnread("no place to look for"), romeHost };
     await page.goto(new URL(SETTINGS_PATH, page.url()).toString());
+    // The place sits under Settings → Advanced.
+    const advanced = page
+      .getByRole("link", { name: /^Advanced$/ })
+      .or(page.getByRole("tab", { name: /^Advanced$/ }))
+      .or(page.getByRole("button", { name: /^Advanced$/ }))
+      .first();
+    if (await advanced.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await advanced.click();
+      await page.waitForLoadState("networkidle").catch(() => {});
+    }
     const text = await page.locator("body").innerText();
     const shown = text.includes(place.provider) && text.includes(place.host);
     const settingsCheck = required(
@@ -66,8 +77,8 @@ async function readNamedPlace(ctx, mic) {
         "Settings names the place",
         shown ? "pass" : "fail",
         shown
-          ? `the Settings page shows ${place.provider} and ${place.host}`
-          : `the Settings page does not show both ${place.provider} and ${place.host}`,
+          ? `Settings → Advanced shows ${place.provider} and ${place.host}`
+          : `Settings → Advanced does not show both ${place.provider} and ${place.host}`,
       ),
     );
     return { check: apiCheck, settingsCheck, place, romeHost };
