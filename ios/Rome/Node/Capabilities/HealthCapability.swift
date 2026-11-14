@@ -18,7 +18,6 @@ struct HealthCapability: NodeCapability {
     let name = "Apple Health"
     var title: LocalizedStringResource { "Apple Health" }
     let symbol = "heart"
-    var summary: LocalizedStringResource { "Reads Health while Rome is open" }
     let personal = true
     var switchKind: NodeCapabilitySwitch { .follows(.health) }
 
@@ -29,14 +28,9 @@ struct HealthCapability: NodeCapability {
 
     var detail: NodeCapabilityDetail {
         NodeCapabilityDetail(
-            reads: "The Health data you allow, such as steps, sleep, heart rate and workouts. Never changed.",
-            leaves: "What a request asks for goes to your Rome and its AI model, only while the Rome app is open.",
-            examples: [
-                "How did I sleep last night?",
-                "How many steps did I walk today?",
-                "Did I work out more this week than last?",
-            ],
-            systemAccess: "Choose which Health data Rome can read in the Health app: tap your picture, then Apps → Rome."
+            reads: "The Health data you allow",
+            leaves: "Only what Rome asks for",
+            systemAccess: "Health app → your picture → Apps → Rome"
         )
     }
 

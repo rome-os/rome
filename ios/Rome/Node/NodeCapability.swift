@@ -46,8 +46,6 @@ struct NodeCapabilityDetail: Sendable {
     let reads: LocalizedStringResource
     /// What leaves the phone, and where it goes.
     let leaves: LocalizedStringResource
-    /// Two or three things to ask Rome.
-    let examples: [LocalizedStringResource]
     /// Where iOS's own access for it is set, when a link cannot open it;
     /// nil when it needs no iOS access.
     let systemAccess: LocalizedStringResource?
@@ -61,8 +59,6 @@ protocol NodeCapability: Sendable {
     var title: LocalizedStringResource { get }
     /// An SF Symbol.
     var symbol: String { get }
-    /// One line for the list row.
-    var summary: LocalizedStringResource { get }
     /// Reads the guardian's personal data: refused in a shared chat by the
     /// `rome-node` CLI.
     var personal: Bool { get }

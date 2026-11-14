@@ -168,7 +168,7 @@ enum NodeStatusLine {
 }
 
 /// One capability's page: its switch (or the page whose switch it follows),
-/// iOS's access, what it reads and what leaves the phone, and what to ask.
+/// what it reads, what it sends, and where iOS's access is set.
 struct NodeCapabilityScreen: View {
     let prefix: String
     let onFollow: (SettingsRoute) -> Void
@@ -182,26 +182,11 @@ struct NodeCapabilityScreen: View {
                 VStack(alignment: .leading, spacing: 26) {
                     header(capability)
                     switchCard(capability, node: node)
-                    if let access = capability.detail.systemAccess {
-                        SettingsGroup(header: "iOS access") {
-                            Text(access)
-                                .romeFont(15)
-                                .foregroundStyle(Palette.fg)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    SettingsGroup(header: "What it reads") {
-                        DetailText(text: capability.detail.reads)
-                    }
-                    SettingsGroup(header: "What leaves this device") {
-                        DetailText(text: capability.detail.leaves)
-                    }
-                    SettingsGroup(header: "Try asking") {
-                        ForEach(Array(capability.detail.examples.enumerated()), id: \.offset) { index, example in
-                            DetailText(text: example, quoted: true, last: index == capability.detail.examples.count - 1)
+                    SettingsGroup {
+                        DetailRow(title: "Reads", value: capability.detail.reads)
+                        DetailRow(title: "Sends", value: capability.detail.leaves, last: capability.detail.systemAccess == nil)
+                        if let access = capability.detail.systemAccess {
+                            DetailRow(title: "iOS access", value: access, last: true)
                         }
                     }
                 }
@@ -232,10 +217,6 @@ struct NodeCapabilityScreen: View {
                 .romeFont(24, .bold)
                 .tracking(-0.4)
                 .foregroundStyle(Palette.fg)
-            Text(capability.summary)
-                .romeFont(15)
-                .foregroundStyle(Palette.sub)
-                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
     }
@@ -271,23 +252,27 @@ struct NodeCapabilityScreen: View {
     }
 }
 
-/// A paragraph inside a card; `quoted` sets an example prompt.
-private struct DetailText: View {
-    let text: LocalizedStringResource
-    var quoted = false
-    var last = true
+/// A label and its short value, as Settings' rows have them.
+private struct DetailRow: View {
+    let title: LocalizedStringKey
+    let value: LocalizedStringResource
+    var last = false
 
     var body: some View {
-        Text(quoted ? "“\(String(localized: text))”" : String(localized: text))
-            .romeFont(15)
-            .foregroundStyle(Palette.fg)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .bottom) {
-                if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
-            }
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title).romeFont(17).foregroundStyle(Palette.fg)
+            Spacer(minLength: 8)
+            Text(value)
+                .romeFont(15)
+                .foregroundStyle(Palette.sub)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .overlay(alignment: .bottom) {
+            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

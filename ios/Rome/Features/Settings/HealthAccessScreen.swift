@@ -58,10 +58,8 @@ struct HealthStatusLine: Equatable {
     }
 }
 
-/// Settings → Apple Health: Sync with Rome, which keeps the Health data the
-/// guardian allows up to date on their Rome, and what that means. Health data
-/// goes to the Rome and the AI model behind it, so the page says what is
-/// read, for what, and where it goes.
+/// Settings → Apple Health: Sync with Rome, how it stands, its history, and
+/// where the data goes: to the Rome and the AI model behind it.
 struct HealthAccessScreen: View {
     static let privacyURL = URL(string: "https://romeos.cc/privacy")!
 
@@ -76,7 +74,6 @@ struct HealthAccessScreen: View {
                 VStack(alignment: .leading, spacing: 26) {
                     header
                     toggleCard(health)
-                    capabilities
                     dataFlow
                     Button { openURL(Self.privacyURL) } label: {
                         Text("Privacy Policy")
@@ -118,11 +115,6 @@ struct HealthAccessScreen: View {
                 .romeFont(28, .bold)
                 .tracking(-0.6)
                 .foregroundStyle(Palette.fg)
-            Text("Your Rome can use your health data to plan and explain things for you.")
-                .romeFont(16)
-                .foregroundStyle(Palette.sub)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 12)
@@ -164,32 +156,7 @@ struct HealthAccessScreen: View {
                 .buttonStyle(RowPressStyle())
             }
             .padding(.top, 10)
-            NoteLine(text: String(localized: "Steps, sleep, heart rate, workouts and the other Health data you allow. Agents read it only in your private chats."))
-        }
-    }
-
-    private var capabilities: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SettingsGroup(header: "What your Rome can do") {
-                CapabilityRow(
-                    symbol: "figure.run", title: "Plan fat-loss workouts",
-                    request: String(localized: "Plan my workouts so I lose 3 kg by March."),
-                    reply: String(localized: "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan.")
-                )
-                CapabilityRow(
-                    symbol: "bed.double", title: "Understand your sleep",
-                    request: String(localized: "Why have I felt so tired lately?"),
-                    reply: String(localized: "Your deep sleep dropped over the last two weeks, and your HRV fell with it.")
-                )
-                CapabilityRow(
-                    symbol: "waveform.path.ecg", title: "Notice heart trends",
-                    request: String(localized: "Has my resting heart rate changed this month?"),
-                    reply: String(localized: "It's 4 bpm higher than last month, mostly on days you slept under 6 hours."), last: true
-                )
-            }
-            Text("For everyday wellness, not medical advice.")
-                .romeFont(13)
-                .foregroundStyle(Palette.sub)
+            NoteLine(text: String(localized: "Agents read this only in private chats."))
         }
     }
 
@@ -278,41 +245,6 @@ struct NoteLine: View {
             .romeFont(13)
             .foregroundStyle(Palette.sub)
             .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-/// One thing the Rome can do with Health, as a short chat: the request in the
-/// guardian's bubble and the Rome's answer in its own, both the real chat's.
-private struct CapabilityRow: View {
-    let symbol: String
-    let title: LocalizedStringKey
-    let request: String
-    let reply: String
-    var last = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                Image(systemName: symbol)
-                    .romeFont(20)
-                    .foregroundStyle(Palette.sub)
-                    .frame(width: 30, alignment: .center)
-                    .accessibilityHidden(true)
-                Text(title).romeFont(16, .semibold).foregroundStyle(Palette.fg)
-                Spacer(minLength: 0)
-            }
-            VStack(spacing: 8) {
-                UserBubble(text: request, pending: nil)
-                AgentBubble(text: reply, forwardedFrom: nil, position: .single)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) {
-            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
-        }
-        .accessibilityElement(children: .combine)
     }
 }
 

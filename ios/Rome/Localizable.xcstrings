@@ -473,6 +473,16 @@
         }
       }
     },
+    "Agents read this only in private chats." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 只会在私人聊天中读取。"
+          }
+        }
+      }
+    },
     "All AI tools are at their limits" : {
       "localizations" : {
         "zh-Hans" : {
@@ -783,22 +793,12 @@
         }
       }
     },
-    "Battery level and charging, Low Power Mode, the kind of network and how warm the phone is. Not the Wi-Fi name." : {
+    "Battery, network, temperature" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "电量和充电状态、低电量模式、网络类型以及设备温度。不读取 Wi-Fi 名称。"
-          }
-        }
-      }
-    },
-    "Battery, network and Low Power Mode" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "电池、网络和低电量模式"
+            "value" : "电池、网络、温度"
           }
         }
       }
@@ -1079,16 +1079,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "从相册选择"
-          }
-        }
-      }
-    },
-    "Choose which Health data Rome can read in the Health app: tap your picture, then Apps → Rome." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在“健康”App 中选择 Rome 可以读取哪些数据：轻点你的头像，然后选择“App”→“Rome”。"
           }
         }
       }
@@ -1643,16 +1633,6 @@
         }
       }
     },
-    "Did I work out more this week than last?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我这周的运动比上周多吗？"
-          }
-        }
-      }
-    },
     "Didn't finish" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1833,16 +1813,6 @@
         }
       }
     },
-    "For everyday wellness, not medical advice." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅用于日常健康管理，不构成医疗建议。"
-          }
-        }
-      }
-    },
     "Get notified when Rome has something for you" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1873,12 +1843,12 @@
         }
       }
     },
-    "Has my resting heart rate changed this month?" : {
+    "Health app → your picture → Apps → Rome" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "我这个月的静息心率有变化吗？"
+            "value" : "“健康”App → 你的头像 → App → Rome"
           }
         }
       }
@@ -2003,26 +1973,6 @@
         }
       }
     },
-    "How many steps did I walk today?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我今天走了多少步？"
-          }
-        }
-      }
-    },
-    "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我查看了你的步数、体能训练、静息心率和体重。这是一份 12 周计划。"
-          }
-        }
-      }
-    },
     "I turn bigger jobs into tasks and tell you when they're done." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2117,26 +2067,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收到的登录信息无效"
-          }
-        }
-      }
-    },
-    "Is my phone charging?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我的手机在充电吗？"
-          }
-        }
-      }
-    },
-    "It's 4 bpm higher than last month, mostly on days you slept under 6 hours." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "比上个月高了 4 次/分钟，主要出现在睡眠不足 6 小时的日子。"
           }
         }
       }
@@ -2821,16 +2751,6 @@
         }
       }
     },
-    "Notice heart trends" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "留意心率趋势"
-          }
-        }
-      }
-    },
     "Notifications" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2907,6 +2827,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "只有这个 Rome 的所有者能批准"
+          }
+        }
+      }
+    },
+    "Only what Rome asks for" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅 Rome 请求的内容"
           }
         }
       }
@@ -3131,26 +3061,6 @@
         }
       }
     },
-    "Plan fat-loss workouts" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "规划减脂锻炼"
-          }
-        }
-      }
-    },
-    "Plan my workouts so I lose 3 kg by March." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "帮我规划锻炼，争取三月前减 3 公斤。"
-          }
-        }
-      }
-    },
     "Play a game" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3231,12 +3141,12 @@
         }
       }
     },
-    "Reads Health while Rome is open" : {
+    "Reads" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Rome 打开时读取健康数据"
+            "value" : "读取"
           }
         }
       }
@@ -3287,16 +3197,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新加载"
-          }
-        }
-      }
-    },
-    "Remind me to charge my phone if the battery is low tonight." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "如果今晚电量低，提醒我给手机充电。"
           }
         }
       }
@@ -3785,6 +3685,16 @@
         }
       }
     },
+    "Sends" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送"
+          }
+        }
+      }
+    },
     "Sends this message" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4195,16 +4105,6 @@
         }
       }
     },
-    "Steps, sleep, heart rate, workouts and the other Health data you allow. Agents read it only in your private chats." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "步数、睡眠、心率、体能训练，以及你允许的其他健康数据。Agent 只会在你的私人聊天中读取。"
-          }
-        }
-      }
-    },
     "Stop" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4495,12 +4395,12 @@
         }
       }
     },
-    "The Health data you allow, such as steps, sleep, heart rate and workouts. Never changed." : {
+    "The Health data you allow" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你允许的健康数据，例如步数、睡眠、心率和体能训练。从不更改。"
+            "value" : "你允许的健康数据"
           }
         }
       }
@@ -4685,16 +4585,6 @@
         }
       }
     },
-    "Those few values go to your Rome and its AI model when it asks, only while the Rome app is open." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这几项数据会在你的 Rome 请求时发送给它及其 AI 模型，仅在 Rome App 打开时。"
-          }
-        }
-      }
-    },
     "Tidying up context…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4805,16 +4695,6 @@
         }
       }
     },
-    "Try asking" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "试着问问"
-          }
-        }
-      }
-    },
     "Turn it on on the web" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4921,16 +4801,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在回复"
-          }
-        }
-      }
-    },
-    "Understand your sleep" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "了解你的睡眠"
           }
         }
       }
@@ -5253,42 +5123,12 @@
         }
       }
     },
-    "What a request asks for goes to your Rome and its AI model, only while the Rome app is open." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请求所需的数据会发送到你的 Rome 及其 AI 模型，仅在 Rome App 打开时。"
-          }
-        }
-      }
-    },
     "What can you watch for me?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "你能帮我订阅哪些消息？"
-          }
-        }
-      }
-    },
-    "What it reads" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "读取什么"
-          }
-        }
-      }
-    },
-    "What leaves this device" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "什么会离开此设备"
           }
         }
       }
@@ -5323,16 +5163,6 @@
         }
       }
     },
-    "What your Rome can do" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的 Rome 能做什么"
-          }
-        }
-      }
-    },
     "When %@ arrives" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5359,16 +5189,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的数据去向"
-          }
-        }
-      }
-    },
-    "Why have I felt so tired lately?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我最近为什么总是很累？"
           }
         }
       }
@@ -5483,16 +5303,6 @@
         }
       }
     },
-    "Your Rome can use your health data to plan and explain things for you." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的 Rome 可以借助健康数据，为你规划和解释各种事情。"
-          }
-        }
-      }
-    },
     "Your Rome couldn't take it" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5569,16 +5379,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 需要更新才能同步健康数据"
-          }
-        }
-      }
-    },
-    "Your deep sleep dropped over the last two weeks, and your HRV fell with it." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "过去两周你的深度睡眠减少了，心率变异性也随之下降。"
           }
         }
       }

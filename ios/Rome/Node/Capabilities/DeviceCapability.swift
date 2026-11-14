@@ -16,7 +16,6 @@ struct DeviceCapability: NodeCapability {
     let name = "Device status"
     var title: LocalizedStringResource { "Device status" }
     let symbol = "battery.75percent"
-    var summary: LocalizedStringResource { "Battery, network and Low Power Mode" }
     let personal = false
     var switchKind: NodeCapabilitySwitch { .own(defaultsKey: Self.defaultsKey) }
     var ownFlag: NodeFlag? { enabled }
@@ -36,12 +35,8 @@ struct DeviceCapability: NodeCapability {
 
     var detail: NodeCapabilityDetail {
         NodeCapabilityDetail(
-            reads: "Battery level and charging, Low Power Mode, the kind of network and how warm the phone is. Not the Wi-Fi name.",
-            leaves: "Those few values go to your Rome and its AI model when it asks, only while the Rome app is open.",
-            examples: [
-                "Is my phone charging?",
-                "Remind me to charge my phone if the battery is low tonight.",
-            ],
+            reads: "Battery, network, temperature",
+            leaves: "Only what Rome asks for",
             systemAccess: nil
         )
     }
