@@ -7,6 +7,7 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useCallback } from "react";
 import { invalidateChatSessions } from "@/hooks/use-chat-sessions";
 import { fetchJson } from "@/lib/fetch-json";
+import { LIVE_QUERY_OPTIONS } from "@/lib/query-client";
 import { useSettings } from "@/hooks/use-settings";
 import { mainAgentDisplayName } from "@/lib/agent-name";
 
@@ -60,7 +61,7 @@ const conciergeSessionQuery = {
 };
 
 function useConciergeSession(enabled = true) {
-  return useQuery({ ...conciergeSessionQuery, enabled, staleTime: 0 });
+  return useQuery({ ...conciergeSessionQuery, enabled, ...LIVE_QUERY_OPTIONS });
 }
 
 /**
@@ -132,18 +133,38 @@ export function useConciergeUnread(chatId: string | null): number {
  * The Concierge chats: the main chat first, then the topic chats, each with
  * its unread count. Empty while the list is loading. Like the chat list, it
  * stays cached for the tab's lifetime (`gcTime: Infinity`), so the sidebar's
- * topic chats show at once after a long time away from Chat, and every mount
- * still refetches behind them (`staleTime: 0`).
+ * topic chats show at once after a long time away from Chat. Events and the
+ * sidebar's changes invalidate it; a mount refetches only past
+ * {@link LIVE_QUERY_OPTIONS}' staleTime.
  */
 export function useConciergeChats(): ConciergeChatDto[] {
   const { data } = useQuery({
     queryKey: CONCIERGE_CHATS_QUERY_KEY,
     queryFn: ({ signal }) =>
       fetchJson<ConciergeChatsResponse>("/api/concierge/chats", { signal, fallback: "" }),
-    staleTime: 0,
+    ...LIVE_QUERY_OPTIONS,
     gcTime: Number.POSITIVE_INFINITY,
   });
   return data?.chats ?? [];
+}
+
+/**
+ * Clears chat `id`'s unread count wherever this tab holds it: the main chat's
+ * badge and the Concierge's chat list. A read mark changes nothing else, so
+ * nothing is fetched again for it.
+ */
+export function markConciergeChatReadInCache(queryClient: QueryClient, id: string): void {
+  queryClient.setQueryData<ConciergeSession>(CONCIERGE_SESSION_QUERY_KEY, (session) =>
+    session?.id === id && session.unread !== 0 ? { ...session, unread: 0 } : session,
+  );
+  queryClient.setQueryData<ConciergeChatsResponse>(CONCIERGE_CHATS_QUERY_KEY, (data) =>
+    data?.chats.some((chat) => chat.id === id && chat.unread !== 0)
+      ? {
+          ...data,
+          chats: data.chats.map((chat) => (chat.id === id ? { ...chat, unread: 0 } : chat)),
+        }
+      : data,
+  );
 }
 
 /**

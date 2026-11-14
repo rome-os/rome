@@ -3269,6 +3269,20 @@ export class WebChatRepository {
     return rows[0] ?? null;
   }
 
+  /** Every feedback row of the session, by turn id. A session has at most one per turn. */
+  async listTurnFeedback(sessionId: string): Promise<Map<string, StoredTurnFeedback>> {
+    const rows = await this.db
+      .select({
+        turnId: webchatTurnFeedback.turnId,
+        rating: webchatTurnFeedback.rating,
+        comment: webchatTurnFeedback.comment,
+        updatedAt: webchatTurnFeedback.updatedAt,
+      })
+      .from(webchatTurnFeedback)
+      .where(eq(webchatTurnFeedback.sessionId, sessionId));
+    return new Map(rows.map(({ turnId, ...row }) => [turnId, row]));
+  }
+
   /**
    * Write-once insert: atomically commit a feedback row for (sessionId, turnId)
    * via INSERT ... ON CONFLICT DO NOTHING. Returns the stored row on success,

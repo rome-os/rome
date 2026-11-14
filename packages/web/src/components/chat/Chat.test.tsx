@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ChatSession } from "@/lib/chat-types";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
@@ -689,6 +690,56 @@ describe("Chat trace in the tool pane", () => {
 });
 
 describe("Chat read marking", () => {
+  it("clears the chat's unread mark in the cached lists, and refetches none of them", async () => {
+    const { markSessionRead } = await import("@/lib/chat-api");
+    const client = queries();
+    const row = (id: string) => ({ id, unread: true }) as unknown as ChatSession;
+    client.setQueryData(["chat-sessions", "active", "all"], [row("session-1"), row("session-2")]);
+    client.setQueryData(["chat-sessions", "all", "all"], [row("session-1")]);
+    client.setQueryData(["concierge-chats"], {
+      chats: [
+        { id: "session-1", unread: 3 },
+        { id: "session-2", unread: 1 },
+      ],
+    });
+    const invalidate = rs.spyOn(client, "invalidateQueries");
+    const onSessionsChanged = rs.fn();
+    render(
+      <MemoryRouter>
+        {pane(<Chat sessionId="session-1" onSessionsChanged={onSessionsChanged} />)}
+      </MemoryRouter>,
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("session-1"));
+    await waitFor(() =>
+      expect(
+        client
+          .getQueryData<ChatSession[]>(["chat-sessions", "active", "all"])
+          ?.map((s) => s.unread),
+      ).toEqual([false, true]),
+    );
+    expect(client.getQueryData<ChatSession[]>(["chat-sessions", "all", "all"])?.[0]?.unread).toBe(
+      false,
+    );
+    expect(
+      client
+        .getQueryData<{ chats: { unread: number }[] }>(["concierge-chats"])
+        ?.chats.map((c) => c.unread),
+    ).toEqual([0, 1]);
+    expect(onSessionsChanged).not.toHaveBeenCalled();
+    expect(
+      invalidate.mock.calls.filter(([filters]) =>
+        ["chat-sessions", "concierge-chats", "concierge-session"].includes(
+          String(filters?.queryKey?.[0]),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   it("leaves a chat unread while its tab is hidden, then marks it on return", async () => {
     const { markSessionRead } = await import("@/lib/chat-api");
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });

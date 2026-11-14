@@ -29,6 +29,11 @@ import { chatTasksTopicName } from "@rome/api-types/live-events";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  connectorOf,
+  followStateWith,
+  useConciergeConnectors,
+} from "@/hooks/use-concierge-connectors";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import { fetchJson } from "@/lib/fetch-json";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
@@ -343,19 +348,22 @@ function FollowRow({ item }: { item: TaskListFollowItem }) {
           ),
         })
       : null;
+  // Whether the service delivers now comes from the connector list, read once and shared.
+  const { data: connectors } = useConciergeConnectors();
+  const state = followStateWith(connectors, item);
   return (
     <Row
       glyph={<Radio className="size-4 shrink-0 text-subtle-foreground" aria-hidden />}
       title={item.target}
       times={timesOf(t, item.createdAt)}
       state={stateLine(
-        item.label,
-        item.state === "unavailable"
+        connectorOf(connectors, item.source)?.label ?? item.label,
+        state === "unavailable"
           ? t("concierge.taskList.follow.unavailable")
-          : item.state === "off" && t("concierge.taskList.follow.off"),
+          : state === "off" && t("concierge.taskList.follow.off"),
         digest,
       )}
-      dimmed={item.state !== "active"}
+      dimmed={state !== "active"}
     />
   );
 }

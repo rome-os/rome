@@ -56,6 +56,11 @@ export interface TaskListFollowItem {
   /** The service's name as a person reads it. */
   label: string;
   target: string;
+  /**
+   * From the stored follow only: `off` when every kind is off, else `active`.
+   * The list no longer says `unavailable`; whether the source is ready now is
+   * in `GET /concierge/connectors`.
+   */
   state: ConciergeFollowDto["state"];
   /** When its owner's digest comes each day, `HH:mm` in their zone, sorted. */
   digestTimes: string[];

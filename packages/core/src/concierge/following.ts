@@ -1402,21 +1402,21 @@ export function startConciergeFollowing(
   const following: ConciergeFollowing = {
     ...unserialized,
     async followsIn(chatId, owner) {
-      const [stored, sources] = await Promise.all([readStored(), readSources().catch(() => [])]);
+      // The panel reads only what is stored: asking the providers costs a
+      // round trip to each service. Whether a source is ready now comes from
+      // `GET /concierge/connectors`; a label comes from sources read before.
+      const stored = await readStored();
+      const known = sourcesCache?.watch ?? [];
       const { digestTimes } = rulesOf(stored, owner);
       const items: TaskListFollowItem[] = [];
       for (const follow of followsOf(stored, owner)) {
         if ((await chatRefOf(follow.chat, owner)).id !== chatId) continue;
-        const source = sources.find((s) => s.source === follow.source);
         items.push({
           kind: "follow",
           source: follow.source,
-          label: source?.label ?? follow.source,
+          label: known.find((s) => s.source === follow.source)?.label ?? follow.source,
           target: follow.target,
-          // A source that does not answer now reads as unavailable.
-          state: source
-            ? toDto(source, follow, { id: chatId, name: "", main: false }).state
-            : "unavailable",
+          state: follow.kinds.length === 0 ? "off" : "active",
           digestTimes,
           ...(follow.createdAt !== undefined ? { createdAt: follow.createdAt } : {}),
         });

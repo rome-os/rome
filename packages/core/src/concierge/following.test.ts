@@ -1590,6 +1590,33 @@ describe("follows in several Concierge chats", () => {
     s.stop();
   });
 
+  it("lists a chat's follows for the Tasks panel from what is stored, asking no provider", async () => {
+    const s = setup();
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    await s.following().follow({ source: "github", target: "acme/gadgets" });
+    s.calling.chat = null;
+    await s.following().configure({
+      source: "github",
+      target: "acme/gadgets",
+      kinds: {
+        review_requested: false,
+        your_pr_closed: false,
+        your_ci_failed: false,
+        new_pr_or_issue: false,
+      },
+    });
+    const asked = () => s.calls.filter(([name]) => name === "connector_watch_sources").length;
+    const before = asked();
+    const rows = await s.following().followsIn!("calendar", GUARDIAN_OWNER);
+    expect(asked()).toBe(before);
+    expect(rows.map((r) => [r.label, r.target, r.state])).toEqual([
+      ["GitHub", "acme/widgets", "active"],
+      ["GitHub", "acme/gadgets", "off"],
+    ]);
+    s.stop();
+  });
+
   it("lists only one chat's follows of one owner, and ending them keeps another person's routines", async () => {
     const s = setup();
     const ann = "visitor:acct-ann";

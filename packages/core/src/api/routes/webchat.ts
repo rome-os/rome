@@ -59,7 +59,7 @@ import {
   TURN_FEEDBACK_COMMENT_MAX_LENGTH,
   isTurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
-import type { TurnFeedback } from "@rome/api-types/trace-segments";
+import type { SessionTurnFeedbackResponse, TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../webchat/repository.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
@@ -3503,6 +3503,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // GET and POST agree on errors: an unknown session or an unanchored turn
   // produces 404 on both verbs so a misrouted client surfaces the bug on
   // hydrate instead of silently rendering an empty drawer.
+  // Every turn's feedback in one read, so a transcript does not ask once per
+  // turn. A turn with none is absent.
+  app.get("/chat/sessions/:sessionId/feedback", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    const lookup = await getStoredWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const rows = await deps.webchatRepo.listTurnFeedback(sessionId);
+    const feedback: Record<string, TurnFeedback> = {};
+    for (const [turnId, row] of rows) feedback[turnId] = formatFeedback(row) as TurnFeedback;
+    return c.json({ feedback } satisfies SessionTurnFeedbackResponse);
+  });
+
   app.get("/chat/sessions/:sessionId/turns/:turnId/feedback", async (c) => {
     const sessionId = c.req.param("sessionId");
     const turnId = c.req.param("turnId");

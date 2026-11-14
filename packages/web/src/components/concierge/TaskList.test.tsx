@@ -59,7 +59,11 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
+/** What `GET /api/concierge/connectors` answers. */
+let connectors: object[] = [];
+
 beforeEach(() => {
+  connectors = [];
   requests = [];
   readGate = null;
   parts = {
@@ -111,6 +115,9 @@ beforeEach(() => {
       const endedBefore = new URL(String(input), "http://rome.test").searchParams.get(
         "endedBefore",
       );
+      if (String(input) === "/api/concierge/connectors") {
+        return new Response(JSON.stringify({ connectors, rules: {} }), { status: 200 });
+      }
       const body =
         method === "GET"
           ? {
@@ -153,6 +160,43 @@ const reads = () => requests.filter((request) => request.method === "GET").lengt
 const rowOf = (title: string) => screen.getByText(title).closest("li") as HTMLElement;
 
 describe("TaskList", () => {
+  it("dims a follow as unavailable when the connector list says its service cannot deliver", async () => {
+    const follow = (target: string) => ({
+      kind: "follow" as const,
+      source: "github",
+      label: "github",
+      target,
+      state: "active" as const,
+      digestTimes: [],
+    });
+    parts = {
+      tasks: [],
+      checks: [],
+      follows: [follow("acme/up"), follow("acme/down")],
+      routines: [],
+    };
+    connectors = [
+      {
+        service: "github",
+        label: "GitHub",
+        capabilities: {
+          watch: {
+            follows: [
+              { target: "acme/up", state: "active" },
+              { target: "acme/down", state: "unavailable" },
+            ],
+          },
+        },
+      },
+    ];
+    renderList();
+
+    await waitFor(() => expect(within(rowOf("acme/down")).getByText(/Not available/)).toBeTruthy());
+    expect(within(rowOf("acme/up")).queryByText(/Not available/)).toBeNull();
+    expect(within(rowOf("acme/up")).getByText(/GitHub/)).toBeTruthy();
+    expect(requests.filter((r) => r.url === "/api/concierge/connectors")).toHaveLength(1);
+  });
+
   it("shows placeholder rows while the first read is on its way", async () => {
     let open!: () => void;
     readGate = new Promise((resolve) => {

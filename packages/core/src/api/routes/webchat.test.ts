@@ -6108,6 +6108,31 @@ describe("Webchat API", () => {
       await anchorTurn(SESSION_ID, TURN_ID);
     });
 
+    it("answers every turn's feedback in one read, and only this session's", async () => {
+      await anchorTurn(SESSION_ID, "turn-fb-2");
+      await deps.webchatRepo.createSession("sess-fb-other", "Other");
+      await anchorTurn("sess-fb-other", "turn-fb-other");
+      const app = createWebchatRuntime(deps).routes;
+      const rate = (sessionId: string, turnId: string, rating: string, comment?: string) =>
+        app.request(`/chat/sessions/${sessionId}/turns/${turnId}/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rating, comment }),
+        });
+      await rate(SESSION_ID, TURN_ID, "positive", "nice");
+      await rate("sess-fb-other", "turn-fb-other", "negative");
+
+      const res = await app.request(`/chat/sessions/${SESSION_ID}/feedback`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { feedback: Record<string, unknown> };
+      expect(Object.keys(body.feedback)).toEqual([TURN_ID]);
+      expect(body.feedback[TURN_ID]).toMatchObject({ rating: "positive", comment: "nice" });
+      // The per-turn read still answers the same record.
+      const one = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`);
+      expect(await one.json()).toEqual({ feedback: body.feedback[TURN_ID] });
+      expect((await app.request("/chat/sessions/missing/feedback")).status).toBe(404);
+    });
+
     it("returns null when no feedback has been submitted", async () => {
       const app = createWebchatRuntime(deps).routes;
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`);

@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { createContext, type ReactNode, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -13,7 +14,7 @@ import type { ApprovalCardStatus } from "@/lib/chat-types";
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { TaskApprovalOutcome, TaskCard } from "@rome/api-types/chat";
 import { ApprovalCard } from "../approval/ApprovalCard";
-import { useChatSessions } from "@/hooks/use-chat-sessions";
+import { invalidateChatSessions, useChatSession } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { isOpenWait } from "./live-task-cards";
 import { QuestionCard } from "./QuestionCard";
@@ -91,11 +92,11 @@ function TaskAskCard({
   card?: TaskCard;
 }) {
   const { t } = useTranslation("chat");
-  const { invalidate } = useChatSessions("all", "all");
+  const queryClient = useQueryClient();
   // The whole list: a card or thread outlives the panel's window of recent ended tasks.
   const { tasks, loaded, reload } = useConciergeTasks({ allDone: true });
   const refresh = async () => {
-    await Promise.all([invalidate(), reload()]);
+    await Promise.all([invalidateChatSessions(queryClient), reload()]);
   };
   const [open, setOpen] = useState(false);
   if (!card || card.kind === "unavailable") {
@@ -282,7 +283,8 @@ function LiveTaskChatCard({
   card?: TaskCard;
 }) {
   const { t } = useTranslation("chat");
-  const { sessions, invalidate } = useChatSessions("all", "all");
+  // The row from the lists already loaded, such as the sidebar's: no list of its own.
+  const { session, invalidate } = useChatSession(chatId);
   const [liveRunning, setLiveRunning] = useState<boolean | null>(null);
   useLiveEvents(chatStatusTopic, {
     session_running: {
@@ -295,7 +297,6 @@ function LiveTaskChatCard({
       },
     },
   });
-  const session = sessions?.find((candidate) => candidate.id === chatId);
   const running = liveRunning ?? session?.running ?? false;
   const status: TaskStatus = running
     ? "running"

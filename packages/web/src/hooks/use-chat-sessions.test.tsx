@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { listSessions } from "@/lib/chat-api";
 import { emitSessionsChanged } from "@/lib/session-events";
-import { useChatSessions } from "./use-chat-sessions";
+import { useChatSession, useChatSessions } from "./use-chat-sessions";
 
 rs.mock("@/lib/chat-api", () => ({ listSessions: rs.fn() }));
 
@@ -27,6 +27,37 @@ describe("useChatSessions", () => {
   afterEach(() => {
     cleanup();
     client.clear();
+  });
+
+  it("reuses the list for a remount, and does not refetch it when the tab comes back", async () => {
+    const wrapper = wrapperFor(client);
+    const first = renderHook(() => useChatSessions("active", "all"), { wrapper });
+    await waitFor(() => expect(listSessions).toHaveBeenCalledTimes(1));
+    first.unmount();
+    renderHook(() => useChatSessions("active", "all"), { wrapper });
+    // React Query reads focus from `visibilitychange` on the window.
+    act(() => {
+      window.dispatchEvent(new Event("visibilitychange"));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(listSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads one chat from the sidebar's list, fetching every chat only when no list holds it", async () => {
+    const chat = (id: string) => ({ id, name: id }) as never;
+    rs.mocked(listSessions).mockImplementation(async (status) =>
+      status === "active" ? [chat("open")] : [chat("open"), chat("archived")],
+    );
+    const wrapper = wrapperFor(client);
+    renderHook(() => useChatSessions("active", "all"), { wrapper });
+    const cards = [0, 1, 2].map(() => renderHook(() => useChatSession("open"), { wrapper }));
+    await waitFor(() => expect(cards[0]?.result.current.session).toMatchObject({ id: "open" }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(rs.mocked(listSessions).mock.calls.map((call) => call[0])).toEqual(["active"]);
+
+    const archived = renderHook(() => useChatSession("archived"), { wrapper });
+    await waitFor(() => expect(archived.result.current.session).toMatchObject({ id: "archived" }));
+    expect(rs.mocked(listSessions).mock.calls.map((call) => call[0])).toEqual(["active", "all"]);
   });
 
   it("refetches once when many consumers share one sessions-changed event", async () => {

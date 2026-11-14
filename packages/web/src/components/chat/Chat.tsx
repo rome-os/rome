@@ -1,4 +1,6 @@
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
+import { useQueryClient } from "@tanstack/react-query";
+import { markChatSessionReadInCache } from "@/hooks/use-chat-sessions";
+import { CONCIERGE_CHAT_ID, markConciergeChatReadInCache } from "@/hooks/use-concierge";
 import {
   cardKey,
   chatCardSettledSchema,
@@ -1150,6 +1152,7 @@ export function Chat({
     }
   }, []);
 
+  const queryClient = useQueryClient();
   const isMountedRef = useRef(true);
   useEffect(() => {
     isMountedRef.current = true;
@@ -1181,12 +1184,15 @@ export function Chat({
       }
       try {
         await apiMarkSessionRead(id);
-        notifySessionsChanged();
+        // A read changes only this chat's unread mark: clear it in the cached
+        // lists rather than refetch every list that holds it.
+        markChatSessionReadInCache(queryClient, id);
+        markConciergeChatReadInCache(queryClient, id);
       } catch {
         // Best effort. The next successful active-session load can retry.
       }
     },
-    [notifySessionsChanged, pendingMark],
+    [queryClient, pendingMark],
   );
   useEffect(() => {
     const flush = () => {

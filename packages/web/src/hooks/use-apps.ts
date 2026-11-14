@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { AppListResponse, InstalledAppCard, SpecSource } from "@rome/api-types/apps";
 import { fetchJson } from "@/lib/fetch-json";
+import { LIVE_QUERY_OPTIONS } from "@/lib/query-client";
 
 export interface UpgradeCandidate {
   appId: string;
@@ -9,12 +10,6 @@ export interface UpgradeCandidate {
   availableVersion: string;
   /** Source to send back via `POST /apps` to perform the upgrade. */
   targetSource: SpecSource;
-}
-
-export interface AppsResult {
-  apps: InstalledAppCard[] | null;
-  upgradable: Record<string, UpgradeCandidate>;
-  error: Error | null;
 }
 
 // Two keys under one prefix: the authoritative installed list, and the
@@ -31,19 +26,17 @@ export interface AppsListResult {
   retry: () => void;
 }
 
-// The authoritative installed list on its own — for surfaces that never read
-// upgrade candidates (e.g. the app details page), so mounting them doesn't
-// kick off the expensive per-app Rome Cloud updates probe. Shares
-// LIST_QUERY_KEY with useApps, so the two stay one cache entry.
+// The authoritative installed list on its own. It never asks for upgrade
+// candidates: `/api/apps/updates` calls Rome Cloud once per app, so only a view
+// that shows updates reads it, through useUpgradeCandidates.
 export function useAppsList(options: { enabled?: boolean } = {}): AppsListResult {
   const { t } = useTranslation("apps");
-  // staleTime: 0 keeps this page eager — every mount/focus revalidates against
-  // the server, so revisiting after a background app transition or an out-of-band
-  // change shows current truth rather than a cached snapshot.
+  // The sidebar's catalog-change stream and every lifecycle mutation invalidate
+  // the list, so a remount (each app tab icon, each chat page widget) reuses it.
   const list = useQuery({
     queryKey: LIST_QUERY_KEY,
     enabled: options.enabled,
-    staleTime: 0,
+    ...LIVE_QUERY_OPTIONS,
     queryFn: ({ signal }) =>
       fetchJson<AppListResponse>("/api/apps", {
         signal,
@@ -102,24 +95,6 @@ export function useUpgradeCandidates(options?: {
     }
   }
   return upgradable;
-}
-
-// The installed list and the upgrade probe are independent: the
-// list is authoritative, while `/api/apps/updates` can do slow Rome Cloud/network
-// lookups. Running them as separate queries lets the cards settle (and lifecycle
-// mutations leave their "acting" state) the moment the list returns, regardless
-// of whether update detection is slow or failing.
-export function useApps(): AppsResult {
-  const { apps, error } = useAppsList();
-  const upgradable = useUpgradeCandidates();
-
-  return {
-    apps,
-    upgradable,
-    // Only the authoritative list surfaces a load error; the updates probe is
-    // advisory and degrades to "no updates" on failure.
-    error,
-  };
 }
 
 export type StoreListingVersion = { published: true; version: string } | { published: false };

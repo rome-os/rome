@@ -13,7 +13,7 @@ import { useToolTrace } from "./tool-trace";
 import * as store from "./use-free-cells";
 import type { ToolView, WidgetPlacement } from "./use-free-cells";
 
-rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: [] }) }));
+rs.mock("@/hooks/use-apps", () => ({ useAppsList: () => ({ apps: [] }) }));
 // The panel is tested on its own; here it only has to be the tab's body.
 rs.mock("@/components/concierge/TaskList", () => ({
   TaskList: ({ chatId }: { chatId: string }) => <p>Task panel body {chatId}</p>,
