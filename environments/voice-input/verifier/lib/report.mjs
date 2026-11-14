@@ -33,7 +33,10 @@ export function renderMarkdown(report) {
     "## Under test",
     "",
     part("Product", underTest.product),
-    part("Environment", underTest.environment),
+    part("Environment, as built", underTest.environment),
+    ...(underTest.environmentCheckout
+      ? [part("Environment checkout, running its scripts", underTest.environmentCheckout)]
+      : []),
     part("Verifier", underTest.verifier),
     `- Transcriber mode asked for: ${report.transcriberMode}`,
     ...inUse(report.transcriberInUse, underTest.transcriber),

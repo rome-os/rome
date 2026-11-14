@@ -5,7 +5,7 @@
 // provider on the script instead of scoring the product. See README.md.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { compare, PROVIDERS } from "./lib/compare.mjs";
 import { verify } from "./lib/runner.mjs";
@@ -79,6 +79,7 @@ try {
     }),
     script,
     rules,
+    environmentDir: dirname(values["voice-env"].split(" ").filter(Boolean)[0]),
     phase: values.phase ? Number(values.phase) : undefined,
     place: values.place,
     transcriber: values.transcriber,

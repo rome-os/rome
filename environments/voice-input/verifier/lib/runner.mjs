@@ -21,9 +21,13 @@ export function selectRules({ rules, phase }) {
 }
 
 function verifierCommit() {
+  return checkoutCommit(verifierDir);
+}
+
+/** The commit checked out at `dir`, and whether anything under `dir` is uncommitted. */
+export function checkoutCommit(dir) {
   try {
-    const git = (...args) =>
-      execFileSync("git", args, { cwd: verifierDir, encoding: "utf8" }).trim();
+    const git = (...args) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
     return {
       commit: git("rev-parse", "HEAD"),
       dirty: git("status", "--porcelain", "--", ".") !== "",
@@ -67,16 +71,22 @@ export async function verify({
   runsDir,
   outDir,
   log,
+  environmentDir,
 }) {
   const startedAt = new Date();
-  const version = { ...(await env.version()), verifier: verifierCommit() };
+  // The environment's own `version` names the commit its containers were built from; its
+  // scripts, such as the capture, run from whatever its checkout holds now.
+  const version = {
+    ...(await env.version()),
+    ...(environmentDir ? { environmentCheckout: checkoutCommit(environmentDir) } : {}),
+    verifier: verifierCommit(),
+  };
   const dirty = dirtyParts(version);
   if (dirty.length > 0 && !allowDirty)
     throw new Error(`uncommitted changes in ${dirty.join(", ")}; commit them or pass --dirty`);
   const productCommit = String(version.product?.commit ?? "unknown").slice(0, 12);
   const stamp = startedAt.toISOString().replace(/[:.]/g, "-");
   const dir = outDir ?? join(runsDir ?? DEFAULT_RUNS_DIR, `${stamp}-${productCommit}`);
-  mkdirSync(dir, { recursive: true });
 
   const wanted = selectRules({ rules, phase });
   const ctx = { env, script, transcriber, waits, memo: {}, log };
@@ -110,6 +120,7 @@ export async function verify({
     summary: summarize(results),
     results,
   };
+  mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   writeFileSync(join(dir, "report.md"), renderMarkdown(report));
   return { report, outDir: dir };
