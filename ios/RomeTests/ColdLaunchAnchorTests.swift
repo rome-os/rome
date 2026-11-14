@@ -343,9 +343,11 @@ private struct AppearHost: View {
             store.stop()
         }
         try await Task.sleep(for: .milliseconds(800))
-        // On the bottom with older pages behind: nothing fetched yet.
+        // On the bottom with older pages behind. A chat this short is within
+        // reach of its top, so it may have fetched one already.
+        for _ in 0..<100 where store.loadingOlder || store.olderPage != nil || store.placingOlder { try await Task.sleep(for: .milliseconds(10)) }
         let held = store.messages.count
-        #expect(store.hasOlder && held == TranscriptStore.pageSize)
+        #expect(store.hasOlder && held >= TranscriptStore.pageSize)
 
         // Up to the top of what is held.
         let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))

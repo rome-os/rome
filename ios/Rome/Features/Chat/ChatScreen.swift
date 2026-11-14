@@ -872,7 +872,7 @@ struct TranscriptList<Row: View>: View {
             // The page goes in as soon as it is here, a glide included: its
             // offset shift keeps the rows in view where they are. Before iOS
             // 18 there is no shift, so it waits for the scroll to rest.
-            .onChange(of: store.olderPage != nil && !jumping && (Self.placesInGlide ? !fingerDown : atRest)) { _, ready in
+            .onChange(of: store.olderPage != nil && !store.placingOlder && !jumping && (Self.placesInGlide ? !fingerDown : atRest)) { _, ready in
                 if ready { Task { await store.placeOlderPage() } }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -957,7 +957,7 @@ struct TranscriptList<Row: View>: View {
             .animation(.easeOut(duration: 0.2), value: BackToBottom.visible(far: showsBackToBottom, unseen: unseen, following: following))
             .animation(.easeOut(duration: 0.2), value: unseen > 0)
             .modifier(DistanceFromBottom(visibleHeight: visibleHeight, showing: $showsBackToBottom, bottomVisible: $bottomVisible, onNearTop: {
-                Task { await store.loadOlder() }
+                if store.wantsOlder { Task { await store.loadOlder() } }
             }, onContentChange: { old, new in
                 // An older page went in above the rows in view: move the offset
                 // by what the content grew and the scroll did not follow, so the
@@ -968,7 +968,10 @@ struct TranscriptList<Row: View>: View {
                 if new.contentHeight < old.contentHeight { scrollHandle.clampToEnd() }
                 guard store.placingOlder else { return }
                 let grew = new.contentHeight - old.contentHeight
-                if grew > 1 { scrollHandle.hold(at: old.offset + grew, contentHeight: new.contentHeight) }
+                PerfProbe.sample("pageLayoutMs", (CACurrentMediaTime() - store.placedAt) * 1000)
+                PerfProbe.sample("pageFromTopPt", old.fromTop)
+                transcriptScrollLog.notice("older page went in \(old.fromTop, privacy: .public) from the top, finger \(fingerDown, privacy: .public), rest \(atRest, privacy: .public)")
+                if grew > 1 { scrollHandle.hold(from: old.offset, grew: grew, contentHeight: new.contentHeight) }
             }))
         }
     }
@@ -1042,12 +1045,17 @@ private struct FollowBottom: ViewModifier {
             content
                 // The role nearest the scroll view wins over the general anchor.
                 // An older page placed above is held by its own offset shift
-                // (`ScrollHandle.hold`), which works in a glide as well. While
-                // it goes in, both anchors hold the top: from iOS 27 the
-                // general `.bottom` also moves the offset on a size change, to
-                // the end of the content.
+                // (`ScrollHandle.hold`), which works in a glide as well. Both
+                // anchors hold the top unless the list follows the bottom, and
+                // while a page goes in: from iOS 27 the general `.bottom` also
+                // moves the offset on a size change, to the end of the content.
                 .defaultScrollAnchor(following && !holdOlder ? .bottom : .top, for: .sizeChanges)
-                .defaultScrollAnchor(holdOlder ? .top : .bottom)
+                .defaultScrollAnchor(following && !holdOlder ? .bottom : .top)
+                #if DEBUG
+                // `ROME_PERF=paging` flings in code, with no finger: it says
+                // when one starts, as a drag would.
+                .onReceive(NotificationCenter.default.publisher(for: PerfProbe.flingStarted)) { _ in following = false }
+                #endif
                 .onScrollPhaseChange { old, phase, context in
                     transcriptScrollLog.notice("phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public) at \(context.geometry.contentOffset.y, privacy: .public) of \(context.geometry.contentSize.height, privacy: .public), container \(context.geometry.containerSize.height, privacy: .public), insets \(context.geometry.contentInsets.top, privacy: .public)/\(context.geometry.contentInsets.bottom, privacy: .public), visible \(context.geometry.visibleRect.height, privacy: .public)")
                     atRest = phase == .idle || phase == .animating
@@ -1116,23 +1124,22 @@ final class ScrollHandle {
     /// not where the guardian left the list.
     var stoppedForJump = false
 
-    /// Puts the offset at `offset` once the scroll view holds `contentHeight`
-    /// of content, without stopping a glide: an older page went in above the
-    /// rows in view. From iOS 27 the geometry reading comes before the scroll
-    /// view takes the new size, and an offset set then is lost, so it waits
-    /// for the size.
-    func hold(at offset: CGFloat, contentHeight: CGFloat) {
-        pending = (offset, contentHeight)
-        if !placePending() { placeLater(tries: 10) }
-    }
-
-    /// The size is normally caught as it is set; a main-queue turn at a time
-    /// in case it was set before the watch.
-    private func placeLater(tries: Int) {
-        DispatchQueue.main.async { [weak self] in
+    /// Moves the offset from `offset` by `grew` once the scroll view holds
+    /// `contentHeight` of content, without stopping a glide: an older page
+    /// went in above the rows in view. From iOS 27 the geometry reading comes
+    /// before the scroll view takes the new size, and an offset set then is
+    /// lost, so it waits for the size. A second page that comes before the
+    /// first is placed adds to it.
+    func hold(from offset: CGFloat, grew: CGFloat, contentHeight: CGFloat) {
+        pending = ((pending?.offset ?? offset) + grew, contentHeight)
+        guard !placePending() else { return }
+        // The watch on the size places it. One that never comes, such as a
+        // size taken back before it was set, is dropped after a moment.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.pending != nil, !self.placePending() else { return }
-                if tries > 0 { self.placeLater(tries: tries - 1) } else { self.pending = nil }
+                guard let self, let pending = self.pending, pending.contentHeight == contentHeight else { return }
+                transcriptScrollLog.notice("content never reached \(contentHeight, privacy: .public), offset left at \(self.view?.contentOffset.y ?? 0, privacy: .public)")
+                self.pending = nil
             }
         }
     }
@@ -1282,13 +1289,21 @@ private final class LegacyScrollMonitor {
 }
 
 /// Reports content offset changes to the monitor before iOS 18.
+/// How the transcript pages back through older messages.
+enum TranscriptPaging {
+    /// How many screens above the visible area an older page is fetched:
+    /// a fling up covers about four, and a page takes a moment to come.
+    static let fetchAhead: CGFloat = 4
+}
+
 private struct LegacyContentMoves: ViewModifier {
     let monitor: LegacyScrollMonitor
     let space: String
     /// The height between the bars.
     let visibleHeight: CGFloat
-    /// Within 1.5 screens of the top of what is loaded: time to fetch the
-    /// older page, as iOS 18 reads it from the scroll's geometry.
+    /// Within `TranscriptPaging.fetchAhead` screens of the top of what is
+    /// loaded: time to fetch the older page, as iOS 18 reads it from the
+    /// scroll's geometry.
     var onNearTop: () -> Void = {}
 
     func body(content: Content) -> some View {
@@ -1300,7 +1315,7 @@ private struct LegacyContentMoves: ViewModifier {
             } action: { minY in
                 monitor.moved()
                 // A load already on its way, or none left, makes this a no-op.
-                if visibleHeight > 0, -minY < visibleHeight * 1.5 { onNearTop() }
+                if visibleHeight > 0, -minY < visibleHeight * TranscriptPaging.fetchAhead { onNearTop() }
             }
         }
     }
@@ -1374,6 +1389,8 @@ private struct DistanceFromBottom: ViewModifier {
         var contentHeight: CGFloat
         var distance: CGFloat
         var offset: CGFloat
+        /// How far the visible area's top is below the content's top.
+        var fromTop: CGFloat = 0
     }
 
     let visibleHeight: CGFloat
@@ -1381,7 +1398,8 @@ private struct DistanceFromBottom: ViewModifier {
     /// The bottom marker at least half on screen, from the offset: the
     /// marker's own visibility can report it seen at the top after a page lands.
     @Binding var bottomVisible: Bool
-    /// Within 1.5 screens of the top of what is loaded: time to fetch the older page.
+    /// Within `TranscriptPaging.fetchAhead` screens of the top of what is
+    /// loaded: time to fetch the older page.
     var onNearTop: () -> Void = {}
     var onContentChange: (Reading, Reading) -> Void = { _, _ in }
 
@@ -1390,20 +1408,27 @@ private struct DistanceFromBottom: ViewModifier {
             // One reading for both ends: two on one view do not both fire.
             content.onScrollGeometryChange(for: Reading.self) { geometry in
                 Reading(
-                    nearTop: geometry.contentOffset.y + geometry.contentInsets.top < geometry.containerSize.height * 1.5,
+                    nearTop: geometry.contentOffset.y + geometry.contentInsets.top < geometry.containerSize.height * TranscriptPaging.fetchAhead,
                     // A page that lands while still near the top asks for the next.
                     contentHeight: geometry.contentSize.height,
                     distance: BackToBottom.distance(contentHeight: geometry.contentSize.height, offset: geometry.contentOffset.y, topInset: geometry.contentInsets.top, visibleHeight: geometry.containerSize.height),
-                    offset: geometry.contentOffset.y
+                    offset: geometry.contentOffset.y,
+                    fromTop: geometry.contentOffset.y + geometry.contentInsets.top
                 )
             } action: { old, new in
+                if new.fromTop < 1 && old.fromTop >= 1 {
+                    PerfProbe.count("reachedTop")
+                    transcriptScrollLog.notice("reached the top of what is loaded")
+                }
                 if abs(new.contentHeight - old.contentHeight) > 50 {
                     transcriptScrollLog.notice("content \(old.contentHeight, privacy: .public) -> \(new.contentHeight, privacy: .public), offset \(old.offset, privacy: .public) -> \(new.offset, privacy: .public)")
                 }
                 if old.contentHeight != new.contentHeight { onContentChange(old, new) }
                 let atBottom = new.distance < BottomMarker.height / 2
                 if atBottom != bottomVisible { bottomVisible = atBottom }
-                if new.nearTop && (!old.nearTop || old.contentHeight != new.contentHeight) { onNearTop() }
+                // Each change near the top asks, not only the move into it: a chat
+                // that opens within reach of the top is already there.
+                if new.nearTop { onNearTop() }
                 let distance = new.distance
                 let next = BackToBottom.shows(showing, distance: distance, height: visibleHeight)
                 if next != showing {

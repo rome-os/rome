@@ -80,10 +80,16 @@ final class DemoBackend: RomeBackend {
     private func lengthenMainChat() {
         let start = Date.now.addingTimeInterval(-2 * 86400)
         var earlier: [ChatMessage] = []
-        for index in 0..<60 {
-            let at = start.addingTimeInterval(Double(index) * 600)
+        // `ROME_DEMO_PAIRS` makes it deeper, with answers of mixed length, for
+        // paging through many pages (`ROME_PERF=paging`).
+        let pairs = ProcessInfo.processInfo.environment["ROME_DEMO_PAIRS"].flatMap(Int.init)
+        for index in 0..<(pairs ?? 60) {
+            let at = start.addingTimeInterval(Double(index) * 600 - Double(max(0, (pairs ?? 60) - 60)) * 600)
             earlier.append(user("long-u\(index)", "第 \(index + 1) 个问题：今天有什么要注意的？", at: at))
-            earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))
+            let answer = pairs != nil && index % 4 == 1
+                ? "第 \(index + 1) 个回答：\n" + (1...(3 + index % 7)).map { "\($0). 下午三点和设计团队过首页文案，记得带上上周的反馈。" }.joined(separator: "\n")
+                : "第 \(index + 1) 个回答：没有新的安排，照常进行。"
+            earlier.append(agent(answer, at: at.addingTimeInterval(30)))
         }
         let digest = (1...24).map { "\($0). 今天的邮件摘要第 \($0) 条：项目进度、会议时间和需要你回复的事项。" }.joined(separator: "\n")
         messages[conciergeChatID] = earlier + (messages[conciergeChatID] ?? []) + [agent(digest, at: .now.addingTimeInterval(-60))]

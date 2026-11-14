@@ -37,6 +37,9 @@ final class TranscriptStore {
     private(set) var olderPage: MessagePage?
     /// An older page is going in above the rows.
     private(set) var placingOlder = false
+    @ObservationIgnored private var olderPageArrived: Date?
+    /// When the last older page went in, for `ROME_PERF` timing.
+    @ObservationIgnored private(set) var placedAt: CFTimeInterval = 0
     private(set) var hasOlder = false
     /// The chat is running a turn.
     private(set) var running = false
@@ -344,31 +347,57 @@ final class TranscriptStore {
         return true
     }
 
+    /// An older page can be fetched now: none is on its way or waiting.
+    var wantsOlder: Bool { hasOlder && !loadingOlder && olderPage == nil && cursor != nil }
+
     /// Fetches the page before the oldest message held. It waits in
     /// `olderPage` until the list places it with `placeOlderPage()`.
     func loadOlder() async {
-        guard hasOlder, !loadingOlder, olderPage == nil, let cursor else { return }
+        guard wantsOlder, let cursor else { return }
         loadingOlder = true
         defer { loadingOlder = false }
+        let asked = Date.now
         let page = try? await backend.messages(sessionId: sessionId, before: cursor, limit: Self.pageSize)
         // A reload that found a gap started the history over while this ran;
         // a page from the old cursor would leave a hole in it.
         guard self.cursor == cursor else { return }
         olderPage = page
+        olderPageArrived = .now
+        transcriptScrollLog.notice("older page fetched in \(Int(Date.now.timeIntervalSince(asked) * 1000), privacy: .public) ms")
     }
 
-    /// Puts the fetched older page above the rows. The list calls it when the
-    /// scroll is at rest: a page placed under a moving finger pushes the rows
-    /// in view down.
+    /// How many messages of an older page go in per frame. A whole page laid
+    /// out at once took about 55 ms on a phone, a visible stall mid-fling;
+    /// four take about 10.
+    static let olderChunk = 4
+
+    /// Puts the fetched older page above the rows, a few messages a frame,
+    /// newest first. The list calls it once no finger is on it: a page placed
+    /// under a moving finger pushes the rows in view down.
     func placeOlderPage() async {
-        guard let page = olderPage else { return }
+        guard let page = olderPage, !placingOlder else { return }
         olderPage = nil
+        if let arrived = olderPageArrived {
+            transcriptScrollLog.notice("older page placed \(Int(Date.now.timeIntervalSince(arrived) * 1000), privacy: .public) ms after it came")
+        }
+        PerfProbe.count("olderPlaced")
         placingOlder = true
-        merge(page.messages)
+        // The next page can be fetched while this one goes in.
         cursor = page.nextCursor
-        hasOlder = page.nextCursor != nil
+        var rest = page.messages[...]
+        while !rest.isEmpty {
+            let chunk = rest.suffix(Self.olderChunk)
+            rest = rest.dropLast(chunk.count)
+            placedAt = CACurrentMediaTime()
+            merge(Array(chunk))
+            // With the last chunk, so the spinner above the rows goes in the
+            // same layout and the list holds both.
+            if rest.isEmpty { hasOlder = page.nextCursor != nil }
+            // One layout a frame.
+            else { try? await Task.sleep(for: .milliseconds(16)) }
+        }
         // The list keeps the rows in view still while this is set; hold it
-        // through the layout that places the page above them.
+        // through the layout that places the last chunk above them.
         try? await Task.sleep(for: .milliseconds(150))
         placingOlder = false
     }
