@@ -160,7 +160,8 @@
       },
       "routine": {
         "paused": "Paused",
-        "lastFailed": "Last run failed"
+        "lastFailed": "Last run failed",
+        "fromTask": "From {{title}}"
       },
       "actions": {
         "respond": "Respond",

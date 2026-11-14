@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { routineRuns, routines } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
@@ -148,6 +148,11 @@ export class RoutinesRepository {
   /** The routines that work for chat `chatId`, as stored rows. */
   async findByChat(chatId: string) {
     return this.db.select().from(routines).where(eq(routines.chatId, chatId));
+  }
+
+  /** The routines that work for some chat, as stored rows. */
+  async findWithChat() {
+    return this.db.select().from(routines).where(isNotNull(routines.chatId));
   }
 
   /** Look up a routine by its caller-assigned `key`. Used by create_routine to

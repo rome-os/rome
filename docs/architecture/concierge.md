@@ -66,7 +66,7 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 ### The main chat stays
 
 - **Each owner has exactly one main chat, and it is never archived or deleted.** The dashboard refuses both.
-- **Archiving or deleting a topic chat moves its follows and the events still owed to it to its owner's main chat,** and the Concierge says so there. Its task rows stay its own and are read as the main chat's while it is archived or gone, which is the one way a row changes chat. Nothing that was one owner's ever becomes another's. Restoring the chat moves no follow back, and its rows read as its own again. An archived topic chat is listed with the other archived chats, where it can be restored.
+- **Archiving or deleting a topic chat moves its follows and the events still owed to it to its owner's main chat,** and the Concierge says so there. Its task rows stay its own and are read as the main chat's while it is archived or gone, which is the one way a row changes chat. Nothing that was one owner's ever becomes another's. Restoring the chat moves no follow back, and its rows read as its own again. Deleting a topic chat can instead end its follows and stop its open tasks when its owner chooses so. Whatever fails to end still moves, and a delete that ends everything leaves the main chat no notice. An archived topic chat is listed with the other archived chats, where it can be restored.
 - **A topic chat starts on the model the main chat uses,** and keeps its own selection after that.
 - **A topic chat started without a name is named from its first message, as an ordinary chat is.** One started with a name, and the main chat, keep theirs.
 

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
@@ -1660,6 +1660,41 @@ describe("Chat turn stream lifecycle", () => {
     await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("session-1"));
   });
 
+  describe("after deleting the open chat", () => {
+    const whereTo = async (identity: { forkable?: boolean }) => {
+      mockUseSessionIdentity.mockReturnValue({
+        sessionName: null,
+        pinnedAgentMention: null,
+        archivedAt: null,
+        ...identity,
+      });
+      function Where() {
+        return <output data-testid="where">{useLocation().pathname}</output>;
+      }
+      const user = userEvent.setup();
+      renderChat(
+        <>
+          <Chat sessionId="session-1" />
+          <Where />
+        </>,
+      );
+      await user.click(screen.getByRole("button", { name: "navbar.more" }));
+      await user.click(screen.getByRole("menuitem", { name: "navbar.delete" }));
+      const dialog = screen.getByRole("dialog", { name: "navbar.delete" });
+      await user.click(within(dialog).getByRole("button", { name: "navbar.delete" }));
+      await waitFor(() => expect(screen.getByTestId("where").textContent).not.toBe("/"));
+      return screen.getByTestId("where").textContent;
+    };
+
+    it("opens a new chat when it was an ordinary chat, so the chat list stays in Chat mode", async () => {
+      expect(await whereTo({ forkable: true })).toBe("/chat");
+    });
+
+    it("opens the main chat when it was not an ordinary chat", async () => {
+      expect(await whereTo({ forkable: false })).toBe("/message");
+    });
+  });
+
   it("aborts an attached turn stream when the chat unmounts", async () => {
     const { unmount } = renderChat(<Chat sessionId="session-1" />);
 
@@ -3184,5 +3219,117 @@ describe("Chat Concierge jump to a message", () => {
 
     expect(scrollTo).not.toHaveBeenCalled();
     expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The header's "⋯" delete of a topic chat asks what the sidebar's delete asks.
+describe("Chat header delete of a Concierge topic chat", () => {
+  // What `follows-and-tasks` answers for topic-1.
+  const work = {
+    answer: { follows: [], openTasks: [] } as {
+      follows: { source: string; label: string; target: string }[];
+      openTasks: { id: string; title: string }[];
+    },
+  };
+  const workReads: string[] = [];
+
+  beforeEach(() => {
+    work.answer = { follows: [], openTasks: [] };
+    workReads.length = 0;
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/concierge/chats/topic-1/follows-and-tasks") {
+          workReads.push(url);
+          return Response.json(work.answer);
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+  });
+
+  const openDialog = async (user: ReturnType<typeof userEvent.setup>) => {
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.delete" }));
+    return screen.findByRole("dialog", { name: "recentChats.topicChatDeleteTitle" });
+  };
+
+  it("lists the follows and open tasks and moves them by default", async () => {
+    work.answer = {
+      follows: [{ source: "github", label: "GitHub", target: "rome-os/rome" }],
+      openTasks: [{ id: "t-1", title: "Fix login redirect" }],
+    };
+    const user = userEvent.setup();
+    const dialog = await openDialog(user);
+    await within(dialog).findByText("recentChats.topicChatDeleteWithWork");
+    expect(within(dialog).getByText("recentChats.topicChatDeleteFollow")).toBeTruthy();
+    expect(within(dialog).getByText("recentChats.topicChatDeleteTask")).toBeTruthy();
+    const move = within(dialog).getByRole("radio", { name: /topicChatDeleteMove/ });
+    const stop = within(dialog).getByRole("radio", { name: /topicChatDeleteStop/ });
+    expect(move.getAttribute("aria-checked")).toBe("true");
+    expect(stop.getAttribute("aria-checked")).toBe("false");
+    expect(deleteSession).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.delete" }));
+
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("topic-1"));
+    expect(rs.mocked(deleteSession).mock.calls).toEqual([["topic-1"]]);
+  });
+
+  it("stops the follows and open tasks when asked", async () => {
+    work.answer = { follows: [], openTasks: [{ id: "t-1", title: "Fix login redirect" }] };
+    const user = userEvent.setup();
+    const dialog = await openDialog(user);
+    await user.click(await within(dialog).findByRole("radio", { name: /topicChatDeleteStop/ }));
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.delete" }));
+
+    await waitFor(() =>
+      expect(deleteSession).toHaveBeenCalledWith("topic-1", { followsAndTasks: "stop" }),
+    );
+  });
+
+  it("deletes a topic chat with no follows or open tasks without a choice", async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog(user);
+    await within(dialog).findByText("recentChats.topicChatDeleteEmpty");
+    expect(within(dialog).queryByRole("radio")).toBeNull();
+
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.delete" }));
+
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("topic-1"));
+    expect(rs.mocked(deleteSession).mock.calls).toEqual([["topic-1"]]);
+  });
+
+  it("does not read an archived topic chat's follows and tasks, which moved when it was archived", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: "2026-11-01T00:00:00.000Z",
+    });
+    const user = userEvent.setup();
+    const dialog = await openDialog(user);
+    expect(within(dialog).getByText("recentChats.topicChatDeleteMoves")).toBeTruthy();
+    expect(workReads).toEqual([]);
+
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.delete" }));
+
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("topic-1"));
+  });
+
+  it("keeps the plain confirmation for a chat that is not a Concierge topic chat", async () => {
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.delete" }));
+
+    expect(screen.getByRole("dialog", { name: "navbar.delete" })).toBeTruthy();
+    expect(workReads).toEqual([]);
   });
 });

@@ -84,7 +84,11 @@ export type TaskListTrigger =
   | { type: "event-bus"; eventName: string }
   | { type: "manual" };
 
-/** A routine that sends into this chat, such as an older daily summary. */
+/**
+ * A routine that works for this chat, such as an older daily summary: one
+ * that sends into it or was made in it, or one that works for one of its
+ * task chats.
+ */
 export interface TaskListRoutineItem {
   kind: "routine";
   id: string;
@@ -101,6 +105,11 @@ export interface TaskListRoutineItem {
   } | null;
   /** When it was made, epoch milliseconds. */
   createdAt?: number;
+  /**
+   * The task whose task chat the routine works for, ended or not, when it
+   * shows here through that task chat. Absent for the chat's own routines.
+   */
+  fromTask?: { id: string; title: string };
 }
 
 export type TaskListItem =

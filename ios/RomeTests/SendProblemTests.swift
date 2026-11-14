@@ -143,7 +143,7 @@ import UIKit
         store.retry("in-11:0")
         for _ in 0..<100 where store.pending.first?.state == .sending || store.pending.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
         let copy = try #require(store.pending.first?.id)
-        func ids() -> [String] { thread.rows(chatMessages: []).compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } } }
+        func ids() -> [String] { thread.rows.compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } } }
         // On its way: the copy in the original's place.
         #expect(ids() == ["root:0", copy])
         // Sent and stored, but held only by the thread's own read: the copy

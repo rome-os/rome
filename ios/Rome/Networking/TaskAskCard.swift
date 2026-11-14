@@ -183,7 +183,10 @@ struct TaskAskCard: Hashable, Sendable {
     }
 
     private static func patching(content: String, kind: String, id: String, _ change: (inout JSONValue) -> Void) -> String? {
-        guard content.contains("\"task_chat\""),
+        // A card's id is written as is in the JSON, unless it holds a
+        // character an encoder may escape: then only a decode can tell.
+        let plainID = id.allSatisfy { $0.isLetter || $0.isNumber || "-_:.".contains($0) }
+        guard content.contains("\"task_chat\""), !plainID || content.contains(id),
               let data = content.data(using: .utf8),
               case .array(var parts)? = try? JSONDecoder().decode(JSONValue.self, from: data)
         else { return nil }

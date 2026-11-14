@@ -149,7 +149,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         backend.threads["q"] = [card, answer]
         store.reopenThread(ThreadTarget(messageId: "q", instanceKnowsThreads: true))
         await settle { store.thread != nil }
-        let rows = store.thread?.rows(chatMessages: store.messages) ?? []
+        let rows = store.thread?.rows ?? []
         guard case .question(_, _, _, let answered) = rows.first(where: { if case .question = $0 { return true } else { return false } }) else {
             Issue.record("no question row"); return
         }
@@ -170,7 +170,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         backend.threads["q"] = [card]
         store.reopenThread(ThreadTarget(messageId: "q", instanceKnowsThreads: true))
         await settle { store.thread != nil }
-        let rows = store.thread?.rows(chatMessages: store.messages) ?? []
+        let rows = store.thread?.rows ?? []
         guard case .question(_, _, _, let answered) = rows.first(where: { if case .question = $0 { return true } else { return false } }) else {
             Issue.record("no question row"); return
         }
@@ -194,7 +194,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         backend.threads["q"] = [earlier, later]
         store.reopenThread(ThreadTarget(messageId: "q", instanceKnowsThreads: true))
         await settle { store.thread != nil }
-        let rows = store.thread?.rows(chatMessages: store.messages) ?? []
+        let rows = store.thread?.rows ?? []
         let answered = rows.compactMap { row -> JSONValue?? in
             if case .question(let id, _, _, let answered) = row, id.hasPrefix("q:") { return answered } else { return nil }
         }

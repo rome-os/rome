@@ -91,6 +91,16 @@ export interface ConciergeChatStartRequest {
   name?: string;
 }
 
+/**
+ * `GET /api/concierge/chats/:chatId/follows-and-tasks`: what deleting the
+ * caller's topic chat moves to the main chat or, when they choose so, stops.
+ */
+export interface ConciergeChatWorkResponse {
+  /** `label` names the source as the connectors list does. */
+  follows: { source: string; label: string; target: string }[];
+  openTasks: { id: string; title: string }[];
+}
+
 /** How many days of finished rows `GET /concierge/tasks` returns by default. */
 export const CONCIERGE_DONE_DAYS = 7;
 

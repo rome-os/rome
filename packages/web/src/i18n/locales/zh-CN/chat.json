@@ -160,7 +160,8 @@
       },
       "routine": {
         "paused": "已暂停",
-        "lastFailed": "上次运行失败"
+        "lastFailed": "上次运行失败",
+        "fromTask": "来自 {{title}}"
       },
       "actions": {
         "respond": "去处理",

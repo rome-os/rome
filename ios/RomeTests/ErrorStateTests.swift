@@ -217,13 +217,13 @@ private func message(
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
         await store.reload()
         let row = store.rows.first { $0.messageId == "u" }!
-        #expect(store.statusMark(ofRow: row) == .working)
+        #expect(store.info(for: row).mark == .working)
 
         store.start()
         backend.bus.emit(LiveTopic.chat(conciergeChatID), .statusReaction(sessionId: conciergeChatID, messageId: "u", reaction: "failed"))
-        #expect(store.statusMark(ofRow: row) == .failed)
+        #expect(store.info(for: row).mark == .failed)
         backend.bus.emit(LiveTopic.chat(conciergeChatID), .statusReaction(sessionId: conciergeChatID, messageId: "u", reaction: nil))
-        #expect(store.statusMark(ofRow: row) == nil)
+        #expect(store.info(for: row).mark == nil)
         store.stop()
     }
 
@@ -232,7 +232,7 @@ private func message(
         backend.stored = [message("u", role: "user", [["type": "text", "content": "hi"]], at: 0, reaction: "failed")]
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
-        #expect(store.statusMark(ofRow: store.rows.first { $0.messageId == "u" }!) == nil)
+        #expect(store.info(for: store.rows.first { $0.messageId == "u" }!).mark == nil)
     }
 
     @Test func decodesTheMarkAndTheInputStateAndTheEvent() {

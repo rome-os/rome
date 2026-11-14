@@ -209,6 +209,20 @@ export class ConciergeTasksRepository {
   }
 
   /**
+   * Task `id` is archived on its own, with no task chat to archive it with:
+   * it leaves the task list, and no chat brings it back. An archived row
+   * keeps when it was archived.
+   */
+  async archive(id: string, now = new Date()): Promise<void> {
+    const archived = await this.db
+      .update(conciergeTasks)
+      .set({ archivedAt: now, archivedWithChat: false, updatedAt: now })
+      .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.archivedAt)))
+      .returning({ id: conciergeTasks.id });
+    if (archived.length > 0) await this.announce(id, "refresh");
+  }
+
+  /**
    * Archived task chat `chatId` is back, and so is the row of `owner` that
    * archiving it archived. It stays stopped. A row archived before its chat
    * stays archived.
@@ -484,6 +498,48 @@ export class ConciergeTasksRepository {
       ),
     );
     return rows.filter((task) => task.conciergeChat.id === conciergeChatId);
+  }
+
+  /**
+   * Which of chats `chatIds` are task chats of `owner`'s Concierge chat
+   * `conciergeChatId`, each with its task, ended or archived included. One
+   * read by the task chat's index, of the few columns it needs. A row
+   * belongs to the chat as the panel reads it, so a row whose topic chat is
+   * archived or gone is its main chat's.
+   */
+  async taskChatsAmong(
+    chatIds: readonly string[],
+    conciergeChatId: string,
+    owner: string,
+  ): Promise<Array<{ chatId: string; task: { id: string; title: string } }>> {
+    if (chatIds.length === 0) return [];
+    const origin = alias(romeSessions, "origin");
+    const rows = await this.db
+      .select({
+        id: conciergeTasks.id,
+        title: conciergeTasks.title,
+        sessionId: conciergeTasks.sessionId,
+        chatId: conciergeTasks.chatId,
+        originId: origin.id,
+        originArchivedAt: origin.archivedAt,
+      })
+      .from(conciergeTasks)
+      .leftJoin(origin, eq(origin.id, conciergeTasks.chatId))
+      .where(
+        and(
+          isNotNull(conciergeTasks.sessionId),
+          inArray(conciergeTasks.sessionId, [...new Set(chatIds)]),
+          eq(conciergeTasks.ownerKey, owner),
+        ),
+      );
+    const main = mainChatIdOf(owner);
+    return rows.flatMap((row) => {
+      const chat =
+        row.chatId && row.originId !== null && row.originArchivedAt === null ? row.chatId : main;
+      return chat === conciergeChatId && row.sessionId
+        ? [{ chatId: row.sessionId, task: { id: row.id, title: row.title } }]
+        : [];
+    });
   }
 
   /** The Concierge's own view: not archived, finished rows only on request. */

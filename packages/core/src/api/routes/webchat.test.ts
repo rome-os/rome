@@ -7732,6 +7732,40 @@ describe("Webchat API", () => {
       expect(gone).toEqual([["topic-2", true]]);
     });
 
+    it("ends a topic chat's follows and tasks before retiring it only when asked to, and never for another chat", async () => {
+      const calls: string[] = [];
+      deps.concierge = {
+        endChatWork: async (chatId: string) => void calls.push(`end ${chatId}`),
+        retireChat: async (chatId: string) => {
+          calls.push(`retire ${chatId}`);
+          return "concierge";
+        },
+        chatGone: async () => undefined,
+        endTaskChat: async (chatId: string) => {
+          await deps.webchatRepo.deleteSession(chatId);
+          return null;
+        },
+      } as never;
+      const make = (id: string, agent?: string) =>
+        deps.webchatRepo.createSession(id, id, undefined, undefined, null, undefined, agent);
+      await make("topic-a", "core:concierge");
+      await make("topic-b", "core:concierge");
+      await make("topic-c", "core:concierge");
+      await make("plain-chat");
+      const app = createWebchatRuntime(deps).routes;
+      const del = (id: string, query = "") =>
+        app.request(`/chat/sessions/${id}${query}`, { method: "DELETE" });
+
+      // Without the option it behaves as before: the chat is only retired.
+      expect((await del("topic-a")).status).toBe(200);
+      // Any other value is no request to stop.
+      expect((await del("topic-b", "?followsAndTasks=move")).status).toBe(200);
+      expect((await del("topic-c", "?followsAndTasks=stop")).status).toBe(200);
+      // A chat that is not a topic chat has nothing to end.
+      expect((await del("plain-chat", "?followsAndTasks=stop")).status).toBe(200);
+      expect(calls).toEqual(["retire topic-a", "retire topic-b", "end topic-c", "retire topic-c"]);
+    });
+
     it("lists a quiet backend turn as quiet, and an ordinary one without the flag", async () => {
       const sessionId = "sess-quiet-turns";
       await deps.webchatRepo.createSession(sessionId, "Quiet turns");
