@@ -60,11 +60,9 @@ struct SourceLabelLine: View {
 }
 
 /// "New messages" between two hairlines, above the first message that was
-/// unread when the chat opened. Plain: not tappable.
-/// It tells the pill whether it is above the visible transcript; the pill
-/// decides the rest, so a scroll never draws the line again.
+/// unread when the chat opened. Plain: not tappable. The transcript tells
+/// the pill whether the line is above the visible rows.
 struct UnreadDivider: View {
-    let pill: UnreadPill
 
     var body: some View {
         HStack(spacing: 12) {
@@ -78,12 +76,6 @@ struct UnreadDivider: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
-        // Under the header is out of sight too: the space starts below it.
-        .onGeometryChange(for: Bool.self) { proxy in
-            proxy.frame(in: .named(transcriptScrollSpace)).maxY <= 0
-        } action: { above in
-            pill.dividerAbove(above)
-        }
     }
 }
 
