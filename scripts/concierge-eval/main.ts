@@ -42,7 +42,9 @@ Options:
   --no-restore         keep the stack as it is (debugging only: rounds are not comparable)`;
 
 /** This checkout's stack, as `pnpm dev:all` names it (scripts/worktree-slug.sh). */
-const SLUG = execFileSync("scripts/worktree-slug.sh", { encoding: "utf8" }).trim();
+const SLUG = execFileSync("bash", [join("scripts", "worktree-slug.sh")], {
+  encoding: "utf8",
+}).trim();
 
 const { values: args } = parseArgs({
   options: {
