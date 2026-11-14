@@ -152,7 +152,10 @@ function resultFor(
   }
   // A day bucket of another zone may start up to a day either side of the window.
   const deviceDays = read({ from: plan.start - DAY_MS, to: plan.end + DAY_MS, resolution: "day" });
-  const { days, deviceOnly, otherZones } = mergeDays(spec, plan, deviceDays, hours);
+  // Hours grouped by the device's date in another zone may also start up to
+  // a day either side; only the window's own hours are added up by this zone.
+  const nearHours = read({ from: plan.start - DAY_MS, to: plan.end + DAY_MS, resolution: "hour" });
+  const { days, deviceOnly, otherZones } = mergeDays(spec, plan, deviceDays, hours, nearHours);
   const result = rollUp(spec, plan, days, deviceOnly);
   if (otherZones.length > 0) result.dayZones = otherZones;
   return { result, hoursOnly: false };

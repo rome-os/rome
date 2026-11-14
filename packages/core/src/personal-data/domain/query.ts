@@ -225,6 +225,8 @@ export function mergeDays(
   plan: QueryPlan,
   deviceDays: readonly StoredPoint[],
   hours: readonly StoredPoint[],
+  /** The hours of a day either side of the window as well, for the device's dates. */
+  nearHours: readonly StoredPoint[] = hours,
 ): { days: StoredPoint[]; deviceOnly: boolean; otherZones: string[] } {
   const inWindow = (at: number) => at >= plan.start && at < plan.end;
   const byDate = new Map<number, StoredPoint>();
@@ -234,16 +236,20 @@ export function mergeDays(
     if (!inWindow(startAt) || byDate.has(startAt)) continue;
     byDate.set(startAt, { ...day, startAt, endAt: nextPeriod(startAt, plan.tz, "day") });
   }
-  const otherZones = [
-    ...new Set([...byDate.values()].filter((day) => day.tz !== plan.tz).map((day) => day.tz)),
-  ];
-  // In another zone, hours are grouped by the device's dates too, so every
-  // date is split the one way the device's buckets split it.
-  const fromHours =
-    otherZones.length === 0
-      ? daysFromHours(spec, plan, hours)
-      : daysByDeviceDate(spec, plan, hours);
+  // Any reading in another zone, a day bucket or an hour, means the device
+  // splits days its own way, so every day here is split by its dates.
+  const deviceZone = [...deviceDays, ...nearHours].some((point) => point.tz !== plan.tz);
+  const fromHours = deviceZone
+    ? daysByDeviceDate(spec, plan, nearHours)
+    : daysFromHours(spec, plan, hours);
   const filled = fromHours.filter((day) => !byDate.has(day.startAt));
+  const otherZones = deviceZone
+    ? [
+        ...new Set(
+          [...byDate.values(), ...filled].map((day) => day.tz).filter((tz) => tz !== plan.tz),
+        ),
+      ]
+    : [];
   return {
     days: [...byDate.values(), ...filled].sort((a, b) => a.startAt - b.startAt),
     deviceOnly: filled.length === 0,

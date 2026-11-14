@@ -89,16 +89,25 @@ describe("queryPersonalData", () => {
     });
   });
 
-  it("adds hours up into days in another zone", () => {
-    const answer = query({
+  it("reads the device's dates in another zone, its hours included", () => {
+    // The Nov 10 Shanghai hours fall on Nov 9 in UTC, but they are the device's Nov 10.
+    const nov9 = query({
       type: "stepCount",
       start: "2026-11-09",
       end: "2026-11-09",
       timeZone: "UTC",
+    });
+    expect(nov9.results[0]).not.toHaveProperty("value");
+    const nov10 = query({
+      type: "stepCount",
+      start: "2026-11-10",
+      end: "2026-11-10",
+      timeZone: "UTC",
       interval: "day",
     });
-    expect(answer.results[0]).toMatchObject({
-      buckets: [{ startISO: "2026-11-09T00:00:00+00:00", value: 852 }],
+    expect(nov10.results[0]).toMatchObject({
+      dayZones: [TZ],
+      buckets: [{ startISO: "2026-11-10T00:00:00+00:00", value: 8000 }],
     });
   });
 
@@ -352,6 +361,25 @@ describe("queryPersonalData", () => {
       ["2026-11-11", 6000],
       ["2026-11-12", 500],
     ]);
+  });
+
+  it("counts every hour of an edge date read by the device's date", () => {
+    // Shanghai Nov 12 has hours only, from 00:00 to 02:00: in Los Angeles that is Nov 11 08:00-10:00.
+    const nov12 = NOV_10 + 2 * DAY;
+    repo.ingest(
+      APPLE_HEALTH,
+      batch("edge-hours", { upserts: [stepHour(nov12, 300), stepHour(nov12 + HOUR, 200)] }),
+      NOW,
+    );
+    // The Los Angeles window Nov 12 starts after those hours, yet they are Shanghai Nov 12's.
+    expect(
+      query({
+        type: "stepCount",
+        start: "2026-11-12",
+        end: "2026-11-12",
+        timeZone: "America/Los_Angeles",
+      }).results[0],
+    ).toMatchObject({ value: 500 });
   });
 
   it("says where hourly detail starts, and does not claim an hourly window before it", () => {
