@@ -605,9 +605,8 @@ struct SyncRig {
         await rig.backend.hold()
         let foreground = Task { await rig.engine.sync(.manual) }
         await rig.waitUntilHeld()
-        let started = Date()
         await rig.engine.sync(.observer, budget: 0.2)
-        #expect(Date().timeIntervalSince(started) < 5, "HealthKit's completion is not held by a long foreground run")
+        #expect(await rig.backend.envelopes.isEmpty, "HealthKit's completion is not held by a long foreground run")
         await rig.backend.release()
         await foreground.value
     }
@@ -644,10 +643,11 @@ struct SyncRig {
         let rig = SyncRig(pause: { try await Task.sleep(for: .seconds($0)) })
         rig.addThreeWeeks()
         await rig.backend.hold()
-        let started = Date()
-        // The observer that starts the run, with the upload held.
+        // The observer that starts the run, with the upload held: it returns
+        // at its deadline while the batch is still out, not when the upload ends.
         await rig.engine.sync(.observer, budget: 0.2)
-        #expect(Date().timeIntervalSince(started) < 5, "HealthKit's completion is not held by a slow upload")
+        await rig.waitUntilHeld()
+        #expect(await rig.backend.envelopes.isEmpty, "returned before the held batch went through")
         await rig.backend.release()
         await rig.engine.quiesce()
         #expect(await rig.lastEntry()?.outcome == .interrupted, "the run stops at its next step")
