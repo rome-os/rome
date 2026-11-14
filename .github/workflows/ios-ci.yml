@@ -91,3 +91,33 @@ jobs:
             fi
           done
           echo "Release binary holds no test audio source."
+
+  # UI tests launch the Debug app on a simulator and drive it. They run here,
+  # apart from the unit tests, so Build + Test keeps its time.
+  ui-tests:
+    name: UI tests
+    runs-on: macos-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26.6
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26.6*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+      - name: Pick a simulator
+        id: sim
+        run: |
+          name=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9]+( Pro)?' | sort -V | tail -1)
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: Run the UI tests
+        run: |
+          xcodebuild test \
+            -project Rome.xcodeproj \
+            -scheme RomeUITests \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO
