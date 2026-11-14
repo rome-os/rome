@@ -259,11 +259,15 @@ write_rome_env() {
 # The same container settings as a hosted Rome's docker-compose.yml, less the
 # ports: nothing outside reaches this Rome except through `docker exec`.
 start_rome() {
+  save_rome_logs
   docker rm -f "$ROME" >/dev/null 2>&1 || true
   # The devbox runs many Romes at once. The cap keeps this one, and the Chrome
   # the image runs inside it, from taking the box down; Chrome dies with the
   # container on reset and down.
+  # Logs go to a file of the container's own, kept whole across restarts,
+  # rather than the host journal, which drops old entries.
   docker run -d --name "$ROME" --restart unless-stopped --memory 6g \
+    --log-driver json-file --log-opt max-size=100m --log-opt max-file=10 \
     --env-file "$ROME_ENV_FILE" \
     -v "$HOME_VOLUME:/home/rome" -v "$MEMORY_VOLUME:/app/memory" -v "$USER_VOLUME:/home/user" \
     --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor=unconfined \
@@ -362,7 +366,13 @@ let_chats_hear_bots() {
     sleep 2
   done
   while IFS= read -r name; do
-    set_chat "$name" '{"activation":{"botMessages":"all"}}'
+    if [[ "$name" == "$COS_DM_CHAT_PREFIX"* ]]; then
+      # A direct message is answered without a mention, so the private chat
+      # that stands in for one answers every message too.
+      set_chat "$name" '{"activation":{"botMessages":"all","mode":"all"}}'
+    else
+      set_chat "$name" '{"activation":{"botMessages":"all"}}'
+    fi
   done < <(all_chat_names)
 }
 
@@ -416,7 +426,18 @@ clear_chats() {
   done < <(all_chat_names)
 }
 
+# Copies the Rome container's whole log into the run folder before the
+# container goes, so a run's log outlives a reset. Named by when the container
+# was made, which a restart keeps.
+save_rome_logs() {
+  local started
+  started="$(docker inspect -f '{{.Created}}' "$ROME" 2>/dev/null)" || return 0
+  mkdir -p "$RUN_DIR/logs"
+  docker logs "$ROME" >"$RUN_DIR/logs/rome-${started%%.*}.log" 2>&1 || true
+}
+
 remove_rome() {
+  save_rome_logs
   docker rm -f "$ROME" >/dev/null 2>&1 || true
   docker volume rm "$HOME_VOLUME" "$MEMORY_VOLUME" "$USER_VOLUME" >/dev/null 2>&1 || true
 }
