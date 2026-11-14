@@ -59,8 +59,14 @@ extension PerfProbe {
             counts.withLock { $0 = [:] }
             samples.withLock { $0 = [:] }
             frames.reset()
-            let began = CACurrentMediaTime()
-            await drive(scenario, model: model)
+            var began = CACurrentMediaTime()
+            await drive(scenario, model: model) {
+                // The scenario's setup is done: measure from here.
+                counts.withLock { $0 = [:] }
+                samples.withLock { $0 = [:] }
+                frames.reset()
+                began = CACurrentMediaTime()
+            }
             let seconds = CACurrentMediaTime() - began
             frames.stop()
             var line = String(format: "PERF %@ secs=%.1f hitch_ms_per_s=%.1f worst_ms=%.0f frames=%d", scenario, seconds, frames.hitch / seconds, frames.worst, frames.count)
@@ -111,7 +117,7 @@ extension PerfProbe {
     }
 
     @MainActor
-    private static func drive(_ scenario: String, model: AppModel) async {
+    private static func drive(_ scenario: String, model: AppModel, measureFromHere: () -> Void) async {
         switch scenario {
         case "idle", "idle-apps":
             if scenario == "idle-apps" { model.debugCommand = .section(.apps) }
@@ -155,6 +161,24 @@ extension PerfProbe {
                 if let scroll = transcriptScroll() { await Glide(scroll: scroll, speed: 6000).run() }
                 try? await Task.sleep(for: .milliseconds(300))
             }
+        case "pagingdown":
+            // Up through older pages until 520 messages are held (past the
+            // lazy switch), then from the top, measured: ten flings back down.
+            for _ in 0..<60 where (model.workspace?.concierge.messages.count ?? 0) < 520 {
+                NotificationCenter.default.post(name: flingStarted, object: nil)
+                if let scroll = transcriptScroll() { await Glide(scroll: scroll, speed: 6000).run() }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+            NotificationCenter.default.post(name: flingStarted, object: nil)
+            if let scroll = transcriptScroll() { scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false) }
+            try? await Task.sleep(for: .seconds(2))
+            measureFromHere()
+            if let scroll = transcriptScroll() { log.notice("pagingdown from \(scroll.contentOffset.y, privacy: .public) of \(scroll.contentSize.height, privacy: .public)") }
+            for _ in 0..<10 {
+                if let scroll = transcriptScroll() { await Glide(scroll: scroll, speed: -6000).run() }
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            if let scroll = transcriptScroll() { log.notice("pagingdown to \(scroll.contentOffset.y, privacy: .public) of \(scroll.contentSize.height, privacy: .public)") }
         case "chats":
             // Opens and leaves 24 task chats, for the memory the kept stores take.
             let chats = (model.workspace?.tasks.tasks.compactMap(\.chat?.id) ?? []) + (0..<24).map { "perf-chat-\($0)" }
@@ -194,9 +218,12 @@ extension PerfProbe {
             if last > 0 {
                 let dt = link.timestamp - last
                 let top = -scroll.adjustedContentInset.top
-                scroll.contentOffset.y = max(top, scroll.contentOffset.y - speed * dt)
+                let end = max(top, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
+                scroll.contentOffset.y = min(end, max(top, scroll.contentOffset.y - speed * dt))
                 speed *= pow(UIScrollView.DecelerationRate.normal.rawValue, dt * 1000)
-                if speed < 30 || scroll.contentOffset.y <= top {
+                // A positive speed flings up, toward older rows; a negative one down.
+                let stopped = speed > 0 ? scroll.contentOffset.y <= top : scroll.contentOffset.y >= end
+                if abs(speed) < 30 || stopped {
                     link.invalidate()
                     done?.resume()
                     done = nil

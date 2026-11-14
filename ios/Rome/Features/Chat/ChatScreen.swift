@@ -792,8 +792,9 @@ struct TranscriptList<Row: View>: View {
     /// Once the stack has gone lazy it stays lazy, so it changes kind at
     /// most once.
     @State private var lazyLocked = false
-    /// How tall the rows are, without the space under short content.
-    @State private var rowsHeight: CGFloat = 0
+    /// The rows, without the space under short content, do not fill the
+    /// screen (`needsOlderToFill`).
+    @State private var rowsShort = false
     /// The top of what is loaded is on screen: the spinner above the first
     /// row shows, and a fetched older page goes in.
     @State private var atLoadedTop = false
@@ -827,6 +828,7 @@ struct TranscriptList<Row: View>: View {
     }
 
     var body: some View {
+        let _ = PerfProbe.count("listBody")
         let rows = store.rows
         let lazy = Self.isLazy(rows: rows.count, locked: lazyLocked, following: following, atRest: atRest)
         ScrollViewReader { proxy in
@@ -858,7 +860,12 @@ struct TranscriptList<Row: View>: View {
                 .readableColumn()
                 .environment(\.shareTurns, store.share.isSelecting ? ShareTurns(messages: store.messages, rows: rows) : nil)
                 // The rows' own height, before the space below fills it out.
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
+                // Only whether they fill the screen: the height itself changes
+                // on every frame of a scroll through a lazy stack, and each
+                // change drew the whole list again.
+                .onGeometryChange(for: Bool.self) { [visibleHeight] proxy in
+                    Self.needsOlderToFill(hasOlder: true, rowsHeight: proxy.size.height, visibleHeight: visibleHeight)
+                } action: { rowsShort = $0 }
                 // Never shorter than the space between the bars. Content shorter
                 // than that is held at the bottom by a top inset the scroll view
                 // adds, and takes back a frame late once the rows outgrow the
@@ -894,8 +901,8 @@ struct TranscriptList<Row: View>: View {
             .onChange(of: bottomVisible) { _, now in
                 transcriptScrollLog.notice("bottom visible \(now, privacy: .public), height \(visibleHeight, privacy: .public)")
             }
-            .task(id: "\(Self.needsOlderToFill(hasOlder: store.hasOlder, rowsHeight: rowsHeight, visibleHeight: visibleHeight))|\(store.messages.count)") {
-                if Self.needsOlderToFill(hasOlder: store.hasOlder, rowsHeight: rowsHeight, visibleHeight: visibleHeight) {
+            .task(id: "\(store.hasOlder && rowsShort)|\(store.messages.count)") {
+                if store.hasOlder && rowsShort {
                     await store.loadOlder()
                 }
             }

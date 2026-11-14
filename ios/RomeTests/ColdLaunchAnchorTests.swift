@@ -243,6 +243,15 @@ private func runLoopTurn() {
 private final class Appearances {
     var count: [String: Int] = [:]
     var frames: [String: CGRect] = [:]
+    /// Each row's top within the transcript's content.
+    var tops: [String: CGFloat] = [:]
+
+    /// Where `id` shows on screen: its top in the content less the scroll
+    /// view's own offset, which is what is drawn. SwiftUI's global frame
+    /// catches up with an offset set on the scroll view one update later.
+    func shown(_ id: String, in scroll: UIScrollView) -> CGFloat? {
+        tops[id].map { $0 - scroll.contentOffset.y }
+    }
 }
 
 /// The transcript, counting how often each row comes on screen: a row the
@@ -269,6 +278,7 @@ private struct AppearHost: View {
             }
             .onAppear { seen.count[row.id, default: 0] += 1 }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { seen.frames[row.id] = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("transcriptContent")).minY } action: { seen.tops[row.id] = $0 }
             .padding(.top, TranscriptSpacing.top(row, after: previous))
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: 66) }
@@ -379,12 +389,12 @@ private struct LateGrowingRow: View {
         scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
         try await Task.sleep(for: .milliseconds(100))
         let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
-        let before = try #require(seen.frames[anchorId]).minY
+        let before = try #require(seen.shown(anchorId, in: scroll))
 
         for _ in 0..<200 where store.messages.count == held { try await Task.sleep(for: .milliseconds(10)) }
         #expect(store.messages.count > held, "no older page came")
         try await Task.sleep(for: .milliseconds(600))
-        let after = try #require(seen.frames[anchorId]).minY
+        let after = try #require(seen.shown(anchorId, in: scroll))
         #expect(abs(after - before) < 1, "\(anchorId) moved from \(before) to \(after)")
     }
 
@@ -425,7 +435,7 @@ private struct LateGrowingRow: View {
         scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
         try await Task.sleep(for: .milliseconds(100))
         let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
-        let before = try #require(seen.frames[anchorId]).minY
+        let before = try #require(seen.shown(anchorId, in: scroll))
 
         // Every 10 ms through the insert and the growth after it.
         var worst: CGFloat = 0
@@ -433,7 +443,7 @@ private struct LateGrowingRow: View {
         var last = before
         for _ in 0..<200 {
             try await Task.sleep(for: .milliseconds(10))
-            let now = seen.frames[anchorId]?.minY ?? last
+            let now = seen.shown(anchorId, in: scroll) ?? last
             worst = max(worst, abs(now - before))
             if abs(now - last) > 1 { steps += 1 }
             last = now
