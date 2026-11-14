@@ -262,11 +262,13 @@ describe("the Concierge agent", () => {
       concierge.systemPromptPrefix
         .split("\n")
         .find((line) => line.startsWith("- A turn that ended `by=concierge`")) ?? "";
+    // Silent only where Rome's own gate is: the guardian's card choice or approval.
     expect(finished).toContain(
-      "only repeats, confirms or carries out what the guardian chose on a card",
+      "only carried out what the guardian chose on that task's card or decided on its approval",
     );
-    expect(finished).toContain("says there is nothing to report");
-    expect(finished).toContain("send nothing");
+    expect(finished).toContain("says there is nothing to report, send nothing");
+    expect(finished).toContain("as for any other result such as a scheduled run's");
+    expect(finished).not.toContain("tells nothing the card or the thread does not already show");
   });
 
   it("schedules recurring work itself, never through a task chat", () => {
