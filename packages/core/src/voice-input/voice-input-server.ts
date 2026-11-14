@@ -119,6 +119,11 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   let bytes = 0;
   // When `start` arrived and at what rate, to hold audio to real time.
   let pace: { since: number; sampleRate: number } | null = null;
+  // When the source opened, the client asked to stop, and how much audio
+  // waited for the source: what the log needs to tell where time and audio went.
+  let openedAt: number | null = null;
+  let stopAt: number | null = null;
+  let earlyBytes = 0;
 
   const reply = (message: VoiceInputServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
@@ -127,7 +132,16 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (limit) clearTimeout(limit);
     if (finishing) clearTimeout(finishing);
     if (opening) clearTimeout(opening);
-    log.info("voice input stopped", { outcome, frames, bytes });
+    const since = pace?.since ?? Date.now();
+    log.info("voice input stopped", {
+      outcome,
+      frames,
+      bytes,
+      earlyBytes,
+      openMs: openedAt === null ? null : openedAt - since,
+      stopMs: stopAt === null ? null : stopAt - since,
+      endMs: Date.now() - since,
+    });
     reportUsage(outcome);
   };
   const close = (last: VoiceInputServerMessage) => {
@@ -179,7 +193,8 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       return;
     }
     const { transcriber } = opened.source;
-    listening = { source: opened.source, sampleRate, startedAt: Date.now() };
+    openedAt = Date.now();
+    listening = { source: opened.source, sampleRate, startedAt: openedAt };
     log.info("voice input started", {
       provider: transcriber.place.provider,
       sessionId: opened.source.romeCloudSessionId,
@@ -214,8 +229,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       if (stopAsked || finishAsked) return;
       const chunk = toBytes(data);
       if (!accept(chunk)) return;
-      if (starting) early.push(chunk);
-      else stream?.sendAudio(chunk);
+      if (starting) {
+        early.push(chunk);
+        earlyBytes += chunk.byteLength;
+      } else stream?.sendAudio(chunk);
       return;
     }
     let parsed: unknown;
@@ -237,6 +254,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       });
       return;
     }
+    stopAt ??= Date.now();
     if (starting) {
       // A stop does not wait forever for the source to open.
       stopAsked = true;
