@@ -163,6 +163,17 @@ describe("PersonalDataRepository", () => {
     expect(synced()).toBe(at(9 * HOUR));
   });
 
+  it("does not mark a type synced in a batch that refused one of its readings", () => {
+    const synced = () => repo.catalog()[0].types.find((t) => t.type === "stepCount")?.syncedThrough;
+    ingest(
+      batch("b-1", {
+        upserts: [stepHour(NOV_10, 812), { ...stepHour(NOV_10 + HOUR, 40), unit: "steps" }],
+        types: [{ type: "stepCount", syncedThrough: new Date(NOV_10 + 2 * HOUR).toISOString() }],
+      }),
+    );
+    expect(synced()).toBeUndefined();
+  });
+
   it("drops metadata keys the source does not allow", () => {
     ingest(batch("b-1", { upserts: [weight(NOV_10, 70.2, "w1")] }));
     const [row] = testDb.db.select().from(personalDataPoints).all();

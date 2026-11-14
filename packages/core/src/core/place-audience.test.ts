@@ -49,6 +49,27 @@ describe("placeAudience", () => {
     expect(await placeAudience({ visitorsAllowed: () => false })(dm)).toBe("private");
   });
 
+  it("reads the sender's bond from People, not from the thread context", async () => {
+    // The inbox hook's chat details carry no bond level.
+    const fromHook = {
+      channel: "slack_bot",
+      threadId: "D1",
+      threadType: "private" as const,
+      channelUserId: "U1",
+    };
+    const read = (bond: string | undefined) =>
+      placeAudience({ visitorsAllowed: () => false, senderBondLevel: async () => bond })(fromHook);
+    expect(await read("guardian")).toBe("private");
+    expect(await read("inner-circle")).toBe("shared");
+    expect(await read(undefined)).toBe("shared");
+    const claimed = { ...fromHook, senderBondLevel: "guardian" };
+    expect(
+      await placeAudience({ visitorsAllowed: () => false, senderBondLevel: async () => undefined })(
+        claimed,
+      ),
+    ).toBe("shared");
+  });
+
   it("looks a dashboard chat up, and fails closed without the lookup or a place", async () => {
     const read = placeAudience({
       dashboardChat: async (id) => (id === "chat-1" ? common : null),

@@ -586,6 +586,16 @@ async function main() {
     connectionKindOf: connectionKindOfChannel,
     dashboardChat: (chatId) => webchatRepo.getSession(chatId),
     visitorsAllowed: () => dashboardAccessState.hasCloudEmailAccess(),
+    // Main reads who sent a message itself, never the bond a caller names.
+    senderBondLevel: async (context) =>
+      context.channelUserId
+        ? (
+            await peopleRepo.byAccount({
+              platform: platformOfChannel(context.channel),
+              id: context.channelUserId,
+            })
+          )?.bondLevel
+        : undefined,
   });
   const routinesRepo = new RoutinesRepository(db, (chatId) =>
     chatAudience({ channel: "webchat", threadId: chatId }),

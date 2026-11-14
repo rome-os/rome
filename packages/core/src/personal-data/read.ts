@@ -122,6 +122,8 @@ function resultFor(
   }
   if (spec.shape !== "bucket") return rollUp(spec, plan, read({ from: plan.start, to: plan.end }));
   const hours = read({ from: plan.start, to: plan.end, resolution: "hour" });
+  // The latest reading is the last hour's, which a day's average would hide.
+  if (plan.aggregate === "latest") return rollUp(spec, plan, hours);
   if (!readsDayBuckets(plan, now)) return rollUp(spec, plan, daysFromHours(spec, plan, hours));
   const deviceDays = read({ from: plan.start, to: plan.end, resolution: "day" });
   const { days, deviceOnly } = mergeDays(spec, plan, deviceDays, hours);

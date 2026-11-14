@@ -140,12 +140,16 @@ export class PersonalDataRepository {
       const stored = new Map<string, number>();
       const rejected: Rejected[] = [];
       const touched = new Set<string>();
+      // A type with a refused reading is not complete, whatever the device says.
+      const refusedTypes = new Set<string>();
       let rangeStart: number | undefined;
       let rangeEnd: number | undefined;
 
       envelope.upserts.forEach((raw, index) => {
         const checked = checkUpsert(source, raw, receivedAt);
         if (!checked.ok) {
+          const type = typeOfItem(raw);
+          if (type) refusedTypes.add(type);
           rejected.push({
             index,
             ...(checked.key ? { key: checked.key } : {}),
@@ -156,6 +160,7 @@ export class PersonalDataRepository {
         const item = checked.item;
         const outcome = writePoint(tx, source.source, origin, item, ingestId, receivedAt, stored);
         if (outcome === "type_cap") {
+          refusedTypes.add(item.type);
           rejected.push({ index, key: item.key, code: "type_cap" });
           return;
         }
@@ -199,7 +204,7 @@ export class PersonalDataRepository {
         if (!typeSpec(source, entry.type) || !entry.syncedThrough) continue;
         const at = Date.parse(entry.syncedThrough);
         // A device clock ahead of Rome's would mark the type covered for good.
-        if (at > receivedAt + MAX_CLOCK_AHEAD_MS) continue;
+        if (at > receivedAt + MAX_CLOCK_AHEAD_MS || refusedTypes.has(entry.type)) continue;
         syncedThrough.set(entry.type, at);
         touched.add(entry.type);
       }
@@ -473,6 +478,14 @@ export class PersonalDataRepository {
         errorCode: row.errorCode,
       }));
   }
+}
+
+function typeOfItem(raw: unknown): string | undefined {
+  if (raw && typeof raw === "object" && "type" in raw) {
+    const type = (raw as { type: unknown }).type;
+    if (typeof type === "string") return type;
+  }
+  return undefined;
 }
 
 function sourceRow(source: string, origin: string) {

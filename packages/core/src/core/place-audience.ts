@@ -19,6 +19,11 @@ export interface PlaceAudienceDeps {
   dashboardChat?: (chatId: string) => Promise<ChatPrivacyRow | null>;
   /** Whether anyone besides the guardian may open the dashboard. Absent, someone may. */
   visitorsAllowed?: () => boolean;
+  /**
+   * The bond level of the person behind a message's sender, as People links
+   * them. Given, it stands in for whatever the thread context says.
+   */
+  senderBondLevel?: (context: ThreadContext) => Promise<string | undefined>;
 }
 
 /**
@@ -50,6 +55,9 @@ export function placeAudience(deps: PlaceAudienceDeps): PlaceAudience {
     // read it, so its direct message is private only while nobody but the
     // guardian may open the dashboard.
     if (deps.visitorsAllowed?.() ?? true) return "shared";
-    return messagingAudience(context, kind);
+    const bond = deps.senderBondLevel
+      ? await deps.senderBondLevel(context)
+      : context.senderBondLevel;
+    return messagingAudience({ ...context, senderBondLevel: bond }, kind);
   };
 }

@@ -569,6 +569,17 @@ export class ActionEngine {
       });
       return { status: "error", error: PERSONAL_DATA_PRIVATE_ONLY };
     }
+    // Only a first-party action carries the audience on to the turns it
+    // starts, so a third-party app cannot start a private turn and read
+    // personal data through it. The worker cannot tell, so it never passes
+    // one on to a nested call (handleNestedCall).
+    if (
+      context?.audience !== undefined &&
+      this.processRole === "main" &&
+      !this.isTrustedForAudience(action.config.name)
+    ) {
+      context = { ...context, audience: undefined };
+    }
     const runContext = withCurrentHookInvocationContext(context);
 
     const inheritedObserver = observer ?? actionExecutionContext.getStore()?.runtimeObserver;
@@ -969,7 +980,10 @@ export class ActionEngine {
       // accountable for every hop underneath it.
       actor: parentStore?.actor ?? context?.actor,
       channelContext: context?.channelContext ?? parentStore?.channelContext,
-      audience: context?.audience ?? parentStore?.audience,
+      audience:
+        this.processRole === "main" && this.isTrustedForAudience(action.config.name)
+          ? (context?.audience ?? parentStore?.audience)
+          : undefined,
       sharedContext: mergeSharedContext(parentStore?.sharedContext, context?.sharedContext),
       sessionId: context?.sessionId ?? parentStore?.sessionId,
       turnId: context?.turnId ?? parentStore?.turnId,

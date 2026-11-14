@@ -268,6 +268,29 @@ describe("queryPersonalData", () => {
     });
   });
 
+  it("takes the latest hour of an averaged type, not a day's average", () => {
+    const hour = (start: number, value: number) => ({
+      key: `heartRate:hour:${start}`,
+      type: "heartRate",
+      shape: "bucket",
+      resolution: "hour",
+      start: new Date(start).toISOString(),
+      end: new Date(start + HOUR).toISOString(),
+      tz: TZ,
+      value,
+      unit: "count/min",
+    });
+    repo.ingest(
+      APPLE_HEALTH,
+      batch("hr-hours", { upserts: [hour(NOV_10 + 8 * HOUR, 60), hour(NOV_10 + 9 * HOUR, 100)] }),
+      NOW,
+    );
+    expect(
+      query({ type: "heartRate", start: "2026-11-10", end: "2026-11-10", aggregate: "latest" })
+        .results[0],
+    ).toMatchObject({ aggregate: "latest", value: 100 });
+  });
+
   it("converts units and takes the latest sample", () => {
     expect(
       query({
