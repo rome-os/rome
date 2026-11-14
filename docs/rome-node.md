@@ -598,7 +598,7 @@ for anything else. The phone answers at most 4 requests at once. Another request
 gets `busy` before it is recorded or Health is read, and `system.info` is always
 answered.
 
-**Settings → iPhone use → Apple Health** is a row that shows On or Off and opens the
+**Settings → Apple Health** is a row that shows On or Off and opens the
 Apple Health page. The switch ("Allow Rome to read Health") is on that page and is
 off by default. Health values go to the user's Rome and to the AI model behind it,
 so the page shows what the Rome can do with Health as three short chats, each with
