@@ -59,7 +59,7 @@ Run them from the repository root inside `nix develop`.
 | `environments/chief-of-staff/env.sh down` | Deletes the members' webhooks and removes the Rome container, its volumes and its image. The test chats' messages stay |
 | `environments/chief-of-staff/env.sh seed <dir>` | The same as `cos-env seed <dir>` |
 
-`up` builds Rome from this branch with the refs in `COS_AGENT_REF` merged on top, in order, separated by spaces: `#<pull request>`, `origin/<branch>`, or a commit. It defaults to `#2130 #2155`, the agent and the envoy change under test. The merge happens in a throwaway checkout, so none of it lands on this branch.
+`up` builds Rome from this branch with the refs in `COS_AGENT_REF` merged on top, in order, separated by spaces: `#<pull request>`, `origin/<branch>`, or a commit. It defaults to `#2130 #2169`, the agent and the envoy verdict change under test. The merge happens in a throwaway checkout, so none of it lands on this branch.
 
 ### cos-env
 
