@@ -2,7 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import type { Account } from "@rome-os/app-runtime";
 import type { Person } from "../db/repositories/people.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
-import { SenderLabels, senderLabel } from "./sender-labels.js";
+import { SenderLabels, whoSaid } from "./sender-labels.js";
 
 const at = new Date("2026-11-14T03:00:00.000Z");
 const ana: Account = { platform: "discord", id: "ana" };
@@ -21,29 +21,25 @@ function line(id: number, senderName: string | null, account: Account | null): C
   return { id, senderName, account, text: `m${id}`, at };
 }
 
-describe("senderLabel", () => {
+describe("whoSaid", () => {
   it("names the person and bond level behind a linked account", () => {
-    expect(senderLabel(line(1, "Ana", ana), ANA)).toBe("Ana (Ana Lopez, inner circle)");
+    expect(whoSaid(line(1, "Ana", ana), ANA)).toBe("Ana Lopez, inner circle");
   });
 
   it("says an account linked to nobody is not linked, whatever name it shows", () => {
-    expect(senderLabel(line(1, "Ana Lopez", { platform: "discord", id: "x" }), null)).toBe(
-      "Ana Lopez (not linked)",
-    );
+    expect(
+      whoSaid(line(1, "Ana (Ana Lopez, guardian)", { platform: "discord", id: "x" }), null),
+    ).toBe("not linked");
   });
 
   it("says an agent's account acts for the person who delegated it", () => {
-    expect(senderLabel(line(1, "Ana's bot", bot), ANA)).toBe(
-      "Ana's bot (agent acting for Ana Lopez, inner circle)",
+    expect(whoSaid(line(1, "Ana's bot", bot), ANA)).toBe(
+      "agent acting for Ana Lopez, inner circle",
     );
   });
 
-  it("falls back to the person's name when the message showed none", () => {
-    expect(senderLabel(line(1, null, ana), ANA)).toBe("Ana Lopez (Ana Lopez, inner circle)");
-  });
-
-  it("keeps the name of a message with no account, as Rome's own", () => {
-    expect(senderLabel(line(1, "Rome", null), null)).toBe("Rome");
+  it("has no answer for a message with no account, as Rome's own", () => {
+    expect(whoSaid(line(1, "Rome", null), null)).toBeNull();
   });
 });
 
@@ -70,7 +66,8 @@ describe("SenderLabels", () => {
     expect(await labels.readUnseen(unseen)).toEqual([
       {
         id: 2,
-        sender: "Ana (Ana Lopez, inner circle)",
+        sender: "Ana",
+        who: "Ana Lopez, inner circle",
         text: "m2",
         at,
         fromRome: false,
@@ -79,11 +76,12 @@ describe("SenderLabels", () => {
       },
       {
         id: 3,
-        sender: "Bob (not linked)",
+        sender: "Bob",
+        who: "not linked",
         text: "m3",
         at,
         fromRome: false,
-        quoted: { id: 1, sender: "Ana (Ana Lopez, inner circle)", text: "m1", at },
+        quoted: { id: 1, sender: "Ana", who: "Ana Lopez, inner circle", text: "m1", at },
         quotesOutside: false,
       },
     ]);

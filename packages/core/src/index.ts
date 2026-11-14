@@ -1257,6 +1257,7 @@ async function main() {
       // and nothing in a chat whose channel hands the agent every message.
       promptFacts: chatPromptFacts({
         facts: chatsWired.links,
+        messages: chatsWired.messages,
         labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
@@ -1310,12 +1311,7 @@ async function main() {
     actionWorkerCoordinator,
     agentTurnStreamRegistry,
     undefined,
-    {
-      lines: chatsWired.speakerMessages,
-      labels: chatsWired.labels,
-      links: chatsWired.links,
-      replies: chatsWired.replies,
-    },
+    { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
     openingFor,
     (chat, turn) => chatTurns.start(chat, turn),
@@ -1328,12 +1324,7 @@ async function main() {
     webchatRepo,
     agentTurnStreamRegistry,
     actionRegistry,
-    {
-      lines: chatsWired.speakerMessages,
-      labels: chatsWired.labels,
-      links: chatsWired.links,
-      replies: chatsWired.replies,
-    },
+    { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
     openingFor,
   );

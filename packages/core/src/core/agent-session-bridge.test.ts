@@ -938,7 +938,6 @@ describe("AgentSessionBridge answer recording", () => {
           repo,
           runLineDeps: {
             lines: { recorded: async () => null, stands: () => stands },
-            labels: { read: async () => [] },
             links: { prompt: () => {} },
           },
         });

@@ -7,7 +7,7 @@ import type { PromptMessage, UnseenMessage } from "../agent/index.js";
 import type { BondLevel, Person, PeopleRepository } from "../db/repositories/people.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
 
-/** A message as an agent reads it, its sender labelled. */
+/** A message as an agent reads it, with who said it. */
 export type MessageAsRead = PromptMessage;
 
 const BOND_LEVEL_WORDS: Record<BondLevel, string> = {
@@ -18,24 +18,23 @@ const BOND_LEVEL_WORDS: Record<BondLevel, string> = {
 };
 
 /**
- * The label the agent reads a message's sender by: the name the message
- * showed, then who People says is behind the account. `person` is People's
- * answer for `line.account`, or null when it answers nobody. A message with
- * no account, such as one of Rome's own, keeps the name it showed.
+ * Who a message's sender is, as the agent reads it: the person and bond level
+ * People says is behind the account, or "not linked" when People answers
+ * nobody. `person` is that answer for `line.account`. Null for a message with
+ * no account, such as one of Rome's own. Never built from the name the
+ * message showed, which the sender chose.
  */
-export function senderLabel(line: ContextLine, person: Person | null): string | null {
-  const shown = line.senderName?.trim() || null;
+export function whoSaid(line: ContextLine, person: Person | null): string | null {
   const { account } = line;
-  if (!account) return shown;
-  const name = shown ?? person?.displayName ?? "Unknown sender";
-  if (!person) return `${name} (not linked)`;
+  if (!account) return null;
+  if (!person) return "not linked";
   const bond = BOND_LEVEL_WORDS[person.bondLevel];
   const delegate = person.links.some(
     (link) => link.delegate && link.platform === account.platform && link.id === account.id,
   );
   return delegate
-    ? `${name} (agent acting for ${person.displayName}, ${bond})`
-    : `${name} (${person.displayName}, ${bond})`;
+    ? `agent acting for ${person.displayName}, ${bond}`
+    : `${person.displayName}, ${bond}`;
 }
 
 /**
@@ -68,7 +67,13 @@ export class SenderLabels {
 
   private asRead(line: ContextLine, persons: ReadonlyMap<string, Person | null>): PromptMessage {
     const person = line.account ? (persons.get(accountKey(line.account)) ?? null) : null;
-    return { id: line.id, sender: senderLabel(line, person), text: line.text, at: line.at };
+    return {
+      id: line.id,
+      sender: line.senderName,
+      who: whoSaid(line, person),
+      text: line.text,
+      at: line.at,
+    };
   }
 
   /** People's answer for each account among `lines`, asked once per account. */
