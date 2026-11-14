@@ -223,15 +223,16 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             actions.run(turn, name, input),
         }),
         // A session whose own tools already show a connect card (the
-        // Concierge's `connect_card`) keeps that one, so the agent has one way
-        // to ask for a connection.
-        ...(provided.some((tool) => tool.name === "connect_card")
-          ? []
-          : connectAccountTools({
-              widgets: turn.widgets,
-              hasSpeaker,
-              devices: deps.deviceKinds?.(),
-            })),
+        // Concierge's `connect_card`) keeps that one for the kinds Rome
+        // connects itself, so the agent has one way to ask for each, and gets
+        // `connect_account` for device kinds alone, which that card does not
+        // connect.
+        ...connectAccountTools({
+          widgets: turn.widgets,
+          hasSpeaker,
+          devices: deps.deviceKinds?.(),
+          devicesOnly: provided.some((tool) => tool.name === "connect_card"),
+        }),
       ];
     },
   };

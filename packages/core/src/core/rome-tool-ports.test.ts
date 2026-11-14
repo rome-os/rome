@@ -47,6 +47,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
 function ports(
   sessionTools = rs.fn(async () => []),
   taskOwner?: (taskId: string) => Promise<string | null>,
+  deviceKinds?: () => { kind: string; label: string }[],
 ) {
   const run = rs.fn(async () => ({ status: "ok" as const, data: { routineId: "r1" } }));
   const engine = { run } as unknown as ActionEngine;
@@ -58,6 +59,7 @@ function ports(
     placeAudience: async (context) => (context?.threadId === "shared-chat" ? "shared" : "private"),
     ...(taskOwner ? { taskOwner } : {}),
     sessionTools,
+    ...(deviceKinds ? { deviceKinds } : {}),
   });
   return { ...built, run, getSession, provided: sessionTools };
 }
@@ -196,6 +198,31 @@ describe("romeToolPorts sessionTools", () => {
     const { sessionTools } = ports(rs.fn(async () => [connectCard]));
     const tools = await sessionTools.forTurn(turn(), true);
     expect(tools.map((tool) => tool.name)).toEqual(["connect_card", "propose_routine"]);
+  });
+
+  it("serves connect_account for device kinds alone beside the session's own connect card", async () => {
+    const connectCard = {
+      name: "connect_card",
+      description: "",
+      inputSchema: {},
+      handler: async () => ({ content: [] }),
+    };
+    const { sessionTools } = ports(
+      rs.fn(async () => [connectCard]),
+      undefined,
+      () => [{ kind: "apple_health", label: "Apple Health" }],
+    );
+    const tools = await sessionTools.forTurn(turn(), true);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "connect_card",
+      "propose_routine",
+      "connect_account",
+    ]);
+    const connect = tools.find((tool) => tool.name === "connect_account")!;
+    const schema = connect.inputSchema as { properties: { kind: { enum: string[] } } };
+    expect(schema.properties.kind.enum).toEqual(["apple_health"]);
+    const refused = await connect.handler({ kind: "github" });
+    expect(refused.isError).toBe(true);
   });
 
   it("serves the tools Rome adds, then propose_routine and connect_account, to a turn with a speaker", async () => {

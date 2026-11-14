@@ -95,12 +95,13 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
 export function parseConnectAccountInput(
   input: unknown,
   devices: readonly DeviceKind[] = [],
+  options: { devicesOnly?: boolean } = {},
 ):
   | { ok: true; kind: OAuthProvider; device?: undefined }
   | { ok: true; kind: string; device: DeviceKind }
   | { ok: false; error: string } {
   const kind = (input as { kind?: unknown } | null)?.kind;
-  const kinds = connectableKinds();
+  const kinds = options.devicesOnly ? [] : connectableKinds();
   if (typeof kind === "string" && kinds.includes(kind as OAuthProvider)) {
     return { ok: true, kind: kind as OAuthProvider };
   }
