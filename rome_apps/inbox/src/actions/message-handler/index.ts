@@ -62,7 +62,7 @@ export interface SentinelDecision {
 }
 
 type CollectedAgentResult =
-  | { success: true; content: string; turnId?: string }
+  | { success: true; content: string; structuredOutput?: unknown; turnId?: string }
   | { success: false; error: string };
 
 // ---------------------------------------------------------------------------
@@ -266,15 +266,34 @@ async function envoyCheck(
     };
   }
 
-  const envoyOutput = envoyResult.content;
-  const upper = envoyOutput.toUpperCase();
-  if (upper.includes("REQUIRE_APPROVAL") || upper.includes("REQUIRE APPROVAL")) {
-    return { action: "require_approval", reason: envoyOutput };
+  return readEnvoyVerdict(envoyResult.structuredOutput, envoyResult.content);
+}
+
+const ENVOY_VERDICTS = ["approve", "require_approval", "reject"] as const;
+type EnvoyVerdict = (typeof ENVOY_VERDICTS)[number];
+
+/**
+ * The envoy's decision is its `verdict` field and nothing else. An answer
+ * without a known verdict holds the message for the guardian.
+ */
+function readEnvoyVerdict(
+  structuredOutput: unknown,
+  content: string,
+): { action: EnvoyVerdict; reason?: string } {
+  const answer =
+    structuredOutput && typeof structuredOutput === "object"
+      ? (structuredOutput as { verdict?: unknown; reason?: unknown })
+      : undefined;
+  const verdict = ENVOY_VERDICTS.find((v) => v === answer?.verdict);
+  if (!verdict) {
+    log.warn("envoy answered without a verdict; requiring approval", { content });
+    return {
+      action: "require_approval",
+      reason: `Envoy answered without a verdict: ${content}`,
+    };
   }
-  if (upper.includes("REJECT")) {
-    return { action: "reject", reason: envoyOutput };
-  }
-  return { action: "approve", reason: envoyOutput };
+  const reason = typeof answer?.reason === "string" ? answer.reason : undefined;
+  return { action: verdict, ...(reason ? { reason } : {}) };
 }
 
 async function collectAgentResult(
@@ -284,13 +303,17 @@ async function collectAgentResult(
   agentName?: string,
 ): Promise<CollectedAgentResult> {
   let response = "";
+  let structuredOutput: unknown;
   let lastError = "";
   let turnId: string | undefined;
   for await (const msg of runner.run(params)) {
     if (msg.type === "turn_start") {
       turnId = msg.turnId;
     }
-    if (msg.type === "result") response = msg.content;
+    if (msg.type === "result") {
+      response = msg.content;
+      structuredOutput = msg.structuredOutput;
+    }
     if (msg.type === "error") lastError = msg.error;
     emitAgentMessage?.({ ...msg, agent: agentName });
   }
@@ -298,7 +321,7 @@ async function collectAgentResult(
     log.warn("agent returned error instead of result", { agentName, error: lastError });
     return { success: false, error: lastError };
   }
-  return { success: true, content: response, turnId };
+  return { success: true, content: response, structuredOutput, turnId };
 }
 
 function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {

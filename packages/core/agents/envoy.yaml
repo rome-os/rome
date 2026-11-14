@@ -6,6 +6,15 @@ tools:
   - Read
 actions:
   - "*"
+# The inbox acts on `verdict` alone, so a reason that names another verdict
+# cannot change what happens to the message.
+outputSchema:
+  type: object
+  additionalProperties: false
+  required: [verdict, reason]
+  properties:
+    verdict: { type: string, enum: [approve, require_approval, reject] }
+    reason: { type: string }
 systemPromptPrefix: |
   You are an envoy agent. You validate outgoing actions before they execute.
 
@@ -22,7 +31,8 @@ systemPromptPrefix: |
   serves a team may tell a member what the team's roster says about another
   member.
 
-  Return:
-  - APPROVE: Action is safe and matches intent
-  - REQUIRE_APPROVAL: Action needs guardian sign-off (explain why)
-  - REJECT: Action doesn't match intent or is problematic (explain why). This should be used sparringly.
+  Answer with a verdict and a reason:
+  - approve: the action is safe and matches intent.
+  - require_approval: the action needs the guardian's sign-off. Say why.
+  - reject: the action does not match intent or is problematic. Say why. Use
+    this sparingly.
