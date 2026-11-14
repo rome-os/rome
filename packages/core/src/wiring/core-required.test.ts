@@ -19,22 +19,15 @@ describe("deriveCoreRequiredApps", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("always includes baseline core-required apps", async () => {
+  it("always includes the apps it is told are required", async () => {
     await expect(
       deriveCoreRequiredApps({
         projectRoot: root,
+        alwaysRequired: ["system", "inbox"],
         coreAgentsRoot: join(root, "agents"),
         seedAppsRoot: join(root, "rome_apps"),
       }),
-    ).resolves.toEqual([
-      "assistant",
-      "browser-automation",
-      "coding",
-      "connector",
-      "inbox",
-      "skills",
-      "system",
-    ]);
+    ).resolves.toEqual(["inbox", "system"]);
   });
 
   it("derives an owning app from a canonical core subagent reference", async () => {
@@ -52,7 +45,12 @@ describe("deriveCoreRequiredApps", () => {
     );
 
     await expect(
-      deriveCoreRequiredApps({ projectRoot: root, coreAgentsRoot, seedAppsRoot }),
+      deriveCoreRequiredApps({
+        projectRoot: root,
+        alwaysRequired: [],
+        coreAgentsRoot,
+        seedAppsRoot,
+      }),
     ).resolves.toContain("planner");
   });
 });

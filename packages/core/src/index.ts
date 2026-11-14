@@ -305,7 +305,7 @@ import {
   subagentSessions,
   subagentTurnLog,
 } from "./core/subagent-call-ports.js";
-import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
+import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./wiring/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
