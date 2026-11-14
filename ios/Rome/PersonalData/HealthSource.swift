@@ -44,6 +44,8 @@ enum HealthSyncPlan {
         "stepCount", "distanceWalkingRunning", "distanceCycling", "flightsClimbed", "activeEnergyBurned",
         "basalEnergyBurned", "appleExerciseTime", "appleStandTime", "dietaryEnergyConsumed", "dietaryWater",
         "heartRate", "respiratoryRate", "oxygenSaturation", "heartRateVariabilitySDNN",
+        // A CGM reads every 5 minutes: as samples it would pass the Rome's cap per type.
+        "bloodGlucose",
     ]
 
     static func named(_ name: String) -> HealthSyncType? { all.first { $0.name == name } }
