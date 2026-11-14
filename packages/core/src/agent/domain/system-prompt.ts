@@ -108,7 +108,9 @@ export function buildPromptPrefix(
   // global runtime capabilities.
   if (!policy.delegatesWork) sections.push(COMMAND_LINE_TOOLS_SECTION);
 
-  const installedApps = options.setup ? null : installedAppsSection(material.installedApps);
+  // An agent that delegates its work reaches no app itself.
+  const installedApps =
+    options.setup || policy.delegatesWork ? null : installedAppsSection(material.installedApps);
   if (installedApps) sections.push(installedApps);
 
   return sections.join(SECTION_DIVIDER);
@@ -125,6 +127,8 @@ export function buildSystemPrompt(input: {
   memory: PromptMemory | null;
   contextSuffix?: string;
   widgets: WidgetDrawing;
+  /** An agent that hands its work to others texts, and draws no diagrams. */
+  delegatesWork?: boolean;
 }): string {
   const sections = [input.prefix];
   if (input.memory?.index) sections.push(markdownSection("Memory", input.memory.index));
@@ -134,7 +138,7 @@ export function buildSystemPrompt(input: {
   if (input.contextSuffix) sections.push(input.contextSuffix);
   const prompt = sections.join("\n\n");
 
-  return input.owner === "core" && input.widgets === "card"
+  return input.owner === "core" && input.widgets === "card" && !input.delegatesWork
     ? `${prompt}${SECTION_DIVIDER}${DIAGRAMS_SECTION}`
     : prompt;
 }

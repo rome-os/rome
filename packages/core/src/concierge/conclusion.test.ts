@@ -4,6 +4,9 @@ import {
   CONCLUSION_MAX_CHARS,
   CONCLUSION_OPEN,
   CONCLUSION_INSTRUCTION,
+  NOTHING_TO_REPORT,
+  RECURRING_PREFIX,
+  recurringOf,
   conclusionOf,
   taskChatInstructions,
   withoutConclusion,
@@ -106,6 +109,29 @@ describe("the instruction every task chat gets", () => {
     expect(CONCLUSION_INSTRUCTION).toContain("in every final answer");
     expect(CONCLUSION_INSTRUCTION).toContain("when the guardian writes to you directly");
     expect(CONCLUSION_INSTRUCTION).toContain("Never put a secret");
+  });
+
+  it("gives a result that only carries out the guardian's own choice the fixed no-news line", () => {
+    expect(CONCLUSION_INSTRUCTION).toContain("only confirms or carries out what they just chose");
+    expect(CONCLUSION_INSTRUCTION).toContain(`exactly "${NOTHING_TO_REPORT}", word for word`);
+  });
+
+  it("leaves recurring work to the Concierge's schedule, and keeps the task's own checks", () => {
+    expect(CONCLUSION_INSTRUCTION).toContain("set up no routine or schedule yourself");
+    expect(CONCLUSION_INSTRUCTION).toContain(`starting with "${RECURRING_PREFIX}"`);
+    expect(CONCLUSION_INSTRUCTION).toContain("Keep it out of the conclusion");
+    expect(CONCLUSION_INSTRUCTION).toContain(
+      "Checks you defer while you work on the task are yours",
+    );
+  });
+
+  it("reads the recurring line outside the conclusion only", () => {
+    const answer = `Here is today's quote.\n${RECURRING_PREFIX} every day at 10:00\n\n${CONCLUSION_OPEN}\nA quote.\n${CONCLUSION_CLOSE}`;
+    expect(recurringOf(answer)).toBe("every day at 10:00");
+    expect(
+      recurringOf(`${CONCLUSION_OPEN}\n${RECURRING_PREFIX} daily\n${CONCLUSION_CLOSE}`),
+    ).toBeNull();
+    expect(recurringOf("No wish here.")).toBeNull();
   });
 
   it("follows the language of the guardian's request as the brief gives it, and names no other", () => {

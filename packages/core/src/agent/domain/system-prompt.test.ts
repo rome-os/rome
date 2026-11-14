@@ -67,6 +67,7 @@ describe("buildPromptPrefix", () => {
       { ...material, runtime: { ...material.runtime, docsDir: "/docs" } },
     );
     expect(prefix).not.toContain("# Command Line Tools");
+    expect(prefix).not.toContain("# Installed Apps");
     const runtime = prefix.split("\n\n---\n\n").find((s) => s.startsWith("# Runtime Context"));
     expect(runtime).toBe(
       [
@@ -146,10 +147,13 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("```mermaid");
   });
 
-  it("gives diagrams to no app's agent and to nothing that draws plain text", () => {
+  it("gives diagrams to no app's agent, no agent that delegates, and nothing that draws plain text", () => {
     const input = { prefix: "Fixed.", memory: null };
     expect(buildSystemPrompt({ ...input, owner: "app", widgets: "card" })).toBe("Fixed.");
     expect(buildSystemPrompt({ ...input, owner: "core", widgets: "plain_text" })).toBe("Fixed.");
+    expect(
+      buildSystemPrompt({ ...input, owner: "core", widgets: "card", delegatesWork: true }),
+    ).toBe("Fixed.");
   });
 });
 
