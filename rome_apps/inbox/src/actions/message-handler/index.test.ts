@@ -13,6 +13,7 @@ import { ActionInvocationError } from "@rome-os/app-runtime";
 import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
+  buildSenderInfo,
   createAction as createMessageHandlerAction,
   parseSentinelDecision,
   sendAnswer,
@@ -66,6 +67,11 @@ function createMockAgentRunner(
       return (actionCapable[agentName] ?? []).includes(actionName);
     },
   };
+}
+
+function envoyAnswer(verdict: string, reason: string): AgentMessage {
+  const structuredOutput = { verdict, reason };
+  return { type: "result", content: JSON.stringify(structuredOutput), structuredOutput };
 }
 
 function createAction(
@@ -166,7 +172,7 @@ describe("buildMessageContext", () => {
     rs.clearAllMocks();
   });
 
-  it("loads guardian and sender markdown for non-guardian messages", () => {
+  it("loads the guardian's profile and no sender's notes, whoever sends the message", () => {
     const profileDir = createTempProfile({
       "memory/relationship/GUARDIAN.md": "# Guardian Profile\n\nName: Test Guardian",
       "memory/relationship/alice.md": "# Alice\n\nLikes concise updates.",
@@ -192,9 +198,10 @@ describe("buildMessageContext", () => {
 
     expect(result).toContain("## Guardian");
     expect(result).toContain("Name: Test Guardian");
-    expect(result).toContain("## Sender info");
-    expect(result).toContain("# Alice");
-    expect(result).toContain("Likes concise updates.");
+    // A group has many senders and this suffix is fixed when the session
+    // opens, so a sender's notes reach the agent another way.
+    expect(result).not.toContain("## Sender info");
+    expect(result).not.toContain("Likes concise updates.");
     // Thread + project framing now lives in the `<thread_context>` block on the
     // session's first user message (see @rome/core buildThreadContextBlock), not
     // in this system-prompt suffix.
@@ -251,33 +258,7 @@ describe("buildMessageContext", () => {
     expect(telegram).not.toContain("## Discord channel control");
   });
 
-  it("marks unknown senders as stranger", () => {
-    const profileDir = createTempProfile({
-      "memory/relationship/GUARDIAN.md": "# Guardian Profile\n\nName: Test Guardian",
-    });
-
-    const result = buildMessageContext({
-      channel: "whatsapp",
-      threadId: "555@s.whatsapp.net",
-      channelUserId: "555@s.whatsapp.net",
-      displayName: "Unknown",
-      bondLevel: "other",
-      person: {
-        id: STRANGER_PERSON_ID,
-        displayName: "Unknown",
-        bondLevel: "other",
-        channelMappings: [],
-        createdAt: new Date("2026-01-01T00:00:00Z"),
-      },
-      resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
-    });
-
-    expect(result).toContain("## Sender info");
-    expect(result).toContain("stranger (no person mapping yet)");
-  });
-
-  it("omits sender info for guardian messages", () => {
+  it("adds nothing about the guardian as a sender", () => {
     const profileDir = createTempProfile({
       "memory/relationship/GUARDIAN.md": "# Guardian Profile\n\nName: Test Guardian",
     });
@@ -319,6 +300,60 @@ describe("buildMessageContext", () => {
     expect(result).not.toContain("project name: alpha");
     expect(result).not.toContain("## Project context");
     expect(result).not.toContain("Current selected project");
+  });
+});
+
+describe("buildSenderInfo", () => {
+  it("reads the sender's notes", () => {
+    const profileDir = createTempProfile({
+      "memory/relationship/alice.md": "# Alice\n\nLikes concise updates.",
+    });
+    const result = buildSenderInfo({
+      person: {
+        id: "alice",
+        displayName: "Alice",
+        bondLevel: "acquaintance",
+        profilePath: "memory/relationship/alice.md",
+        channelMappings: [],
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      },
+      resolveProfilePath: (filePath: string) => join(profileDir, filePath),
+      strangerPersonId: STRANGER_PERSON_ID,
+    });
+    expect(result).toContain("Likes concise updates.");
+  });
+
+  it("reads the notes kept under the sender's id when no path is stored", () => {
+    const profileDir = createTempProfile({
+      "memory/relationship/bob-id.md": "# Bob\n\nPrefers email.",
+    });
+    const result = buildSenderInfo({
+      person: {
+        id: "bob-id",
+        displayName: "Bob",
+        bondLevel: "acquaintance",
+        channelMappings: [],
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      },
+      resolveProfilePath: (filePath: string) => join(profileDir, filePath),
+      strangerPersonId: STRANGER_PERSON_ID,
+    });
+    expect(result).toContain("Prefers email.");
+  });
+
+  it("marks an unknown sender as a stranger", () => {
+    const result = buildSenderInfo({
+      person: {
+        id: STRANGER_PERSON_ID,
+        displayName: "Unknown",
+        bondLevel: "other",
+        channelMappings: [],
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      },
+      resolveProfilePath: (filePath: string) => filePath,
+      strangerPersonId: STRANGER_PERSON_ID,
+    });
+    expect(result).toBe("stranger (no person mapping yet)");
   });
 });
 
@@ -651,7 +686,7 @@ describe("message reply bond-level settings", () => {
       },
       agentResponses: [
         [{ type: "result", content: "Sure." }],
-        [{ type: "result", content: "APPROVE" }],
+        [envoyAnswer("approve", "Fine to send.")],
       ],
     });
     const action = createAction(actionConfig, deps);
@@ -703,7 +738,7 @@ describe("message reply bond-level settings", () => {
           },
         ],
         [{ type: "result", content: "Here is the answer." }],
-        [{ type: "result", content: "APPROVE" }],
+        [envoyAnswer("approve", "Fine to send.")],
       ],
     });
     (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
@@ -726,6 +761,18 @@ describe("message reply bond-level settings", () => {
       data: { action: "sent", response: "Here is the answer." },
     });
     expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel", "main", "envoy"]);
+    // Sentinel reads the sender's own notes on the message it triages. No
+    // session's system prompt carries them.
+    expect(agentRunner.calls[0].prompt).toContain(
+      "<sender>\nMapped person: Casey\nBond level: other\nNo notes on this sender yet.\n</sender>",
+    );
+    for (const call of agentRunner.calls) {
+      expect(String(call.contextSuffix ?? "")).not.toContain("Casey");
+    }
+    // Its session is the sender's own, so no other sender's notes are in it.
+    expect(agentRunner.calls[0].channelThreadKey).toBe(
+      "sentinel:email:mail-thread-1:casey@example.com",
+    );
     // Envoy judges what is private by who is replying, so it is told the agent.
     expect(agentRunner.calls[2]?.prompt).toContain("Replying agent: main");
     expect(sentMessages).toEqual([
@@ -773,6 +820,58 @@ describe("message reply bond-level settings", () => {
     });
     expect(agentRunner.calls).toHaveLength(0);
     expect(sentMessages).toHaveLength(0);
+  });
+});
+
+describe("envoy verdict", () => {
+  const casey: PersonRecord = {
+    id: "casey",
+    displayName: "Casey",
+    bondLevel: "other",
+    channelMappings: [{ channel: "telegram", channelUserId: "casey-tg" }],
+    profilePath: null,
+  };
+
+  async function replyWithEnvoyAnswer(answer: AgentMessage) {
+    const { deps, sentMessages } = createMessageHandlerDeps({
+      settings: { replyToBondLevels: ["guardian", "other"] },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => casey) },
+      agentResponses: [[{ type: "result", content: "Sure." }], [answer]],
+    });
+    const result = await createAction(actionConfig, deps).execute({
+      channel: "telegram",
+      channelUserId: "casey-tg",
+      threadId: "thread-1",
+      threadType: "private",
+      displayName: "Casey",
+      text: "Can you answer?",
+      messageId: "msg-1",
+    });
+    return { action: (result.data as { action: string }).action, sentMessages };
+  }
+
+  it.each([
+    ["approve", "sent", 1],
+    ["require_approval", "pending_approval", 0],
+    ["reject", "rejected_by_envoy", 0],
+  ])("acts on the verdict %s", async (verdict, action, sent) => {
+    const outcome = await replyWithEnvoyAnswer(envoyAnswer(verdict, "Because."));
+    expect(outcome.action).toBe(action);
+    expect(outcome.sentMessages).toHaveLength(sent);
+  });
+
+  it("sends an approved reply whose reason names another verdict", async () => {
+    const outcome = await replyWithEnvoyAnswer(
+      envoyAnswer("approve", "No need to REJECT or REQUIRE_APPROVAL; it answers the question."),
+    );
+    expect(outcome.action).toBe("sent");
+    expect(outcome.sentMessages).toHaveLength(1);
+  });
+
+  it("holds the reply when the envoy answers without a verdict", async () => {
+    const outcome = await replyWithEnvoyAnswer({ type: "result", content: "APPROVE" });
+    expect(outcome.action).toBe("pending_approval");
+    expect(outcome.sentMessages).toEqual([]);
   });
 });
 

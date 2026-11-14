@@ -145,6 +145,9 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // roots, outside this action's context.
   "system:publish_event",
   "core:set_agent_name",
+  // Reads a person and their notes (people/read-person.ts), which only main
+  // registers.
+  "core:read_person",
   "core:show_file",
   "core:app_connection_read",
   "core:app_connection_write",

@@ -888,8 +888,8 @@ export async function buildConciergeTools(
   };
 
   // How `chat_card` shows task chat `chatId`: its question or approval while
-  // the task waits on the guardian, an expired one included, since its card
-  // still takes an answer; else its task card.
+  // the task waits on the guardian; else its task card. An expired question
+  // takes no answer, so it is the task card's then.
   // An `ask` card keeps what the task waits on, so it shows that item even
   // after a newer one is asked and settled.
   const shownAs = async (
@@ -898,7 +898,7 @@ export async function buildConciergeTools(
     const task = await tasks.repo.findBySession(chatId);
     if (!task) return { show: "task" };
     const status = (await tasks.statusOf([task])).get(task.id);
-    if (status?.status !== "needs_you" && status?.endReason !== "no_response") {
+    if (status?.status !== "needs_you") {
       return { show: "task" };
     }
     const wait = status.openWait;

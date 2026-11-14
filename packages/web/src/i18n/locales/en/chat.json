@@ -37,7 +37,7 @@
       "checkFailed": "Could not check the connection"
     },
     "ask": {
-      "expiredFold": "Expired · answer to continue",
+      "expired": "Expired: no answer within a day",
       "unavailable": "This question or approval can no longer be shown",
       "answered": "Answered",
       "answeredWith": "Answered: {{answer}}",
@@ -45,6 +45,7 @@
       "approved": "Approved",
       "rejected": "Rejected",
       "waitingBelow": "Waiting: answer the card below",
+      "closed": "Closed: the task ended",
       "turnedDown": "Turned down: no answer within a day",
       "turnedDownStopped": "Turned down: task stopped",
       "openToAnswer": "Open the task chat to answer"
@@ -57,7 +58,6 @@
         "stopped": "Stopped",
         "no_response": "No response"
       },
-      "expired": "Expired — answer to continue",
       "stop": "Stop",
       "sourceMissing": "Can't find the original message",
       "findingMessage": "Finding message…"

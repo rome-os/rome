@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,7 +8,11 @@ import { Spinner } from "@rome-os/ui/spinner";
 import { ConnectorIcon } from "@/components/brand-icons/connector-icon";
 import { Button } from "@/components/ui/button";
 import {
-  isServiceWorking,
+  connectorOf,
+  refreshConciergeConnectors,
+  useConciergeConnectors,
+} from "@/hooks/use-concierge-connectors";
+import {
   notifyServiceConnected,
   openPendingTab,
   readConnector,
@@ -54,16 +59,14 @@ export function ConnectCard({
   const run = useRef<AbortController | null>(null);
   const told = useRef(false);
 
+  const queryClient = useQueryClient();
+  // Every card reads the one cached connector list; the click below reads it fresh.
+  const { data: connectors } = useConciergeConnectors();
+  const workingNow = connectorOf(connectors, service)?.state === "working";
   useEffect(() => {
-    let current = true;
-    void isServiceWorking(service).then((working) => {
-      if (current && working) setPhase({ kind: "connected" });
-    });
-    return () => {
-      current = false;
-      run.current?.abort();
-    };
-  }, [service]);
+    if (workingNow) setPhase((p) => (p.kind === "idle" ? { kind: "connected" } : p));
+  }, [workingNow]);
+  useEffect(() => () => run.current?.abort(), []);
 
   const start = useCallback(async () => {
     run.current?.abort();
@@ -78,6 +81,7 @@ export function ConnectCard({
     setPhase({ kind: "connecting" });
     const connectedNow = () => {
       setPhase({ kind: "connected" });
+      void refreshConciergeConnectors(queryClient);
       if (chatId && !told.current) {
         told.current = true;
         void notifyServiceConnected(chatId, service);
@@ -114,7 +118,7 @@ export function ConnectCard({
       if (controller.signal.aborted) return;
       setPhase({ kind: "failed", reason: err instanceof Error ? err.message : String(err) });
     }
-  }, [service, chatId, t]);
+  }, [service, chatId, t, queryClient]);
 
   const unavailable =
     connect.kind === "rome_oauth" && (!connect.available || !connect.url)

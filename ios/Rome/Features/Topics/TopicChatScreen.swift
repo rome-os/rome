@@ -123,7 +123,12 @@ struct TopicChatScreen: View {
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
-        .onAppear { store?.start() }
+        // The open starts before the first fetch, so a reply that arrives
+        // live during it is never counted as unread.
+        .onAppear {
+            store?.beginOpen()
+            store?.start()
+        }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
         .onDisappear {
@@ -138,6 +143,8 @@ struct TopicChatScreen: View {
     /// page's sheet, the Agent page or the drawer.
     private func markRead(_ store: TranscriptStore) {
         guard visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId) else { return }
+        // Before the read: the open reads where the unread messages start.
+        store.beginOpen()
         store.markRead()
         workspace.topics.markRead(store.sessionId)
     }
@@ -152,6 +159,7 @@ struct TopicChatScreen: View {
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }
+            .overlay(alignment: .top) { UnreadPillButton(store: store) }
             .onAppear { markRead(store) }
             .onChange(of: store.arrivals) { markRead(store) }
             // Back from under a sheet: what arrived meanwhile is read now.

@@ -1,6 +1,6 @@
 import { MessageSquare } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
+import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { IconButton } from "@/components/ui/icon-button";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -8,6 +8,7 @@ import {
   type ReactNode,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -267,30 +268,75 @@ export function ChatThreadView({
 }
 
 /**
- * The thread view header's way into the open thread's task chat, when a task
- * of the chat has that thread.
+ * The task chat of thread `threadRoot`, from the thread's own messages: the
+ * task chat Rome names on them, else the chat a task card or question card in
+ * it names (a server before the name), or null when none loaded does.
+ */
+export function taskChatOfThread(
+  messages: readonly ChatMessage[],
+  threadRoot: string,
+): string | null {
+  for (const message of messages) {
+    if (message.chatThreadId === threadRoot && message.chatThreadTaskChatId) {
+      return message.chatThreadTaskChatId;
+    }
+  }
+  for (const message of messages) {
+    if (message.id !== threadRoot && message.chatThreadId !== threadRoot) continue;
+    if (message.role !== "assistant") continue;
+    for (const part of parseMessageEntries(message)) {
+      if (part.type === "task_chat") return part.chatId;
+    }
+  }
+  return null;
+}
+
+/**
+ * The thread view header's way into the open thread's task chat, when the
+ * thread's messages name one: those the thread view loaded, and the chat's own.
  */
 export function OpenThreadTaskChat({
+  sessionId,
+  messageId,
   threadRoot,
+  messages,
+  liveTaskChat,
   size,
   className,
 }: {
+  sessionId: string;
+  /** The message the thread view opened on, which keys its read of the thread. */
+  messageId: string;
   threadRoot: string;
+  /** The chat's loaded messages. */
+  messages: readonly ChatMessage[];
+  /** The thread's task chat a live placement told, if one did. */
+  liveTaskChat?: string | null;
   size: "sm" | "md";
   className?: string;
 }) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
-  // The whole list: a card or thread outlives the panel's window of recent ended tasks.
-  const { tasks } = useConciergeTasks({ allDone: true });
-  const chat = tasks.find((task) => task.threadRoot === threadRoot)?.chat;
-  if (!chat) return null;
+  // The thread view's own read of the thread, shared through the cache.
+  const { data: thread } = useQuery({
+    queryKey: chatThreadQueryKey(sessionId, messageId),
+    queryFn: async () => (await listChatThreadMessages(sessionId, messageId)) ?? [],
+    enabled: false,
+  });
+  const chatId = useMemo(
+    () =>
+      liveTaskChat ??
+      taskChatOfThread(thread ?? [], threadRoot) ??
+      taskChatOfThread(messages, threadRoot),
+    [liveTaskChat, thread, messages, threadRoot],
+  );
+  if (!chatId) return null;
   return (
     <IconButton
       size={size}
       label={t("thread.openTaskChat")}
       icon={<MessageSquare />}
-      onClick={() => navigate(`/chat/${chat.id}`)}
+      onClick={() => navigate(`/chat/${chatId}`)}
       className={className}
     />
   );

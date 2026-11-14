@@ -283,6 +283,7 @@ struct AppWebView: UIViewRepresentable {
             return
         }
         var request = URLRequest(url: url)
+        DevAccess.stamp(&request)
         request.setValue(language == "zh-CN" ? "zh-CN,zh;q=0.9" : "en", forHTTPHeaderField: "Accept-Language")
         if let cookie {
             view.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) { view.load(request) }

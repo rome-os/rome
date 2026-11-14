@@ -1,10 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { UnseenMessage } from "../agent/index.js";
+import type { UnseenLine } from "../sessions/turn-links.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
 
-const AMBIENT: UnseenMessage = {
+const AMBIENT: UnseenLine = {
   id: 7,
   senderName: "Bob",
+  account: { platform: "telegram", id: "bob" },
   text: "ambient update",
   at: new Date("2026-08-03T08:01:00.000Z"),
   fromRome: false,
@@ -22,6 +23,17 @@ function facts() {
   const seen = rs.fn((_ids: readonly number[], _chatId: string, _turnId: string) => undefined);
   const promptFacts = chatPromptFacts({
     facts: { unseen: () => [AMBIENT], seen },
+    messages: { byIds: () => [] },
+    labels: {
+      read: async () => [],
+      readUnseen: async (lines) =>
+        lines.map(({ senderName, account: _account, ...line }) => ({
+          ...line,
+          sender: senderName,
+          who: "labelled",
+          quoted: null,
+        })),
+    },
     channelOfChat: (chatId) => CHANNELS[chatId] ?? null,
     channelSurface: (channel) =>
       channel === "quiet"
@@ -34,17 +46,27 @@ function facts() {
 }
 
 describe("chatPromptFacts", () => {
-  it("answers none in a chat whose channel hands the agent every message", () => {
-    expect(facts().promptFacts.unseen("chat-quiet")).toBeNull();
+  it("answers none in a chat whose channel hands the agent every message", async () => {
+    expect(await facts().promptFacts.unseen("chat-quiet")).toBeNull();
   });
 
-  it("answers the unseen messages in a chat whose channel does not", () => {
+  it("answers the unseen messages in a chat whose channel does not, with who said them", async () => {
     const { promptFacts } = facts();
-    expect(promptFacts.unseen("chat-telegram")).toEqual([AMBIENT]);
+    const read = {
+      id: 7,
+      sender: "Bob",
+      who: "labelled",
+      text: "ambient update",
+      at: AMBIENT.at,
+      fromRome: false,
+      quoted: null,
+      quotesOutside: false,
+    };
+    expect(await promptFacts.unseen("chat-telegram")).toEqual([read]);
     // A channel name no channel has reads as a messaging channel's.
-    expect(promptFacts.unseen("chat-unknown")).toEqual([AMBIENT]);
+    expect(await promptFacts.unseen("chat-unknown")).toEqual([read]);
     // So does a chat no channel opened.
-    expect(promptFacts.unseen("chat-none")).toEqual([AMBIENT]);
+    expect(await promptFacts.unseen("chat-none")).toEqual([read]);
   });
 
   it("passes what a turn was shown through", () => {
