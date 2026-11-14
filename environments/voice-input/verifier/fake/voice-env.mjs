@@ -70,6 +70,7 @@ async function startBrowser() {
       "--no-first-run",
       "--use-fake-ui-for-media-stream",
       "--use-fake-device-for-media-stream",
+      ...(values.mic ? [`--use-file-for-fake-audio-capture=${values.mic}%noloop`] : []),
       `--lang=${values.lang}`,
       `${baseUrl}/`,
     ],

@@ -1,5 +1,6 @@
 // The product as a guardian sees it in Chrome, found only through the contract in the rules
 // (rules-V2.md, "Contract between the product and the verifier").
+import { resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +22,10 @@ export const VOICE_CONTROL = /^(Start voice input|Stop voice input|开始语音�
 export async function openPage(env, { mic, path, permission, language }) {
   const { cdp } = await env.browser({ mic, permission, language });
   const browser = await chromium.connectOverCDP(cdp);
+  await assertMic(browser, mic).catch(async (error) => {
+    await browser.close().catch(() => {});
+    throw error;
+  });
   const context = browser.contexts()[0] ?? (await browser.newContext());
   const page = context.pages()[0] ?? (await context.newPage());
   if (path) await page.goto(new URL(path, page.url()).toString());
@@ -28,6 +33,22 @@ export async function openPage(env, { mic, path, permission, language }) {
     page,
     close: () => browser.close().catch(() => {}),
   };
+}
+
+/**
+ * Throws when the Chrome behind `cdp` plays another recording than `mic`, as when a Chrome left
+ * from an earlier run still holds the debugging port. A Chrome started without a recorded
+ * microphone, such as the stand-in's, is not checked.
+ */
+async function assertMic(browser, mic) {
+  if (!mic) return;
+  const session = await browser.newBrowserCDPSession();
+  const { arguments: args } = await session
+    .send("Browser.getBrowserCommandLine")
+    .catch(() => ({ arguments: [] }));
+  const flag = args.find((a) => a.startsWith("--use-file-for-fake-audio-capture="));
+  if (flag && !flag.includes(resolve(mic)))
+    throw new Error(`the Chrome on the debugging port plays ${flag.split("=")[1]}, not ${mic}`);
 }
 
 /**
