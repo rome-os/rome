@@ -69,7 +69,7 @@ The one command the verifier drives, and the only one it may call. Its contract 
 
 | Command | Does |
 | --- | --- |
-| `cos-env seed <dir>` | Makes each member's webhooks, links all of a member's webhooks (member1's second account's included) to the person `<dir>/team.json` names, sets the names the members post under, and hands the agent `<dir>/roster.md` and `<dir>/goals.md` through the agent app's own documents |
+| `cos-env seed <dir>` | Makes each member's webhooks, deletes the people an earlier seed made (anyone holding a member's webhook, or named like a person in `team.json`), links all of a member's webhooks (member1's second account's included) to the person `<dir>/team.json` names, sets the names the members post under, and hands the agent `<dir>/roster.md` and `<dir>/goals.md` through the agent app's own documents |
 | `cos-env post --as <member> --chat <name> [--thread <id>] [--mention-agent] <text>` | Posts as the member through its webhook in that chat, and prints the message id. `--as` takes `member1`, `member2`, `member3`, or `member1:2`. `--mention-agent` prefixes a mention of the agent. `--thread <message id>` posts in the thread off that message, starting it from the message when needed (pass `--chat` so it can start it) |
 | `cos-env dm --as <member> <text>` | Posts in that member's private chat (`dm-<member>`), which stands in for a direct message to the agent. Prints the message id |
 | `cos-env read --chat <name> [--thread <id>] [--since <message id>]` | Prints the chat's messages as JSON, oldest first. Without `--thread`, includes the chat's threads' messages too, each tagged with its thread id or null. `--since` returns only messages after that id, which may come from any chat |

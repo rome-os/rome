@@ -14,6 +14,7 @@ import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 const API = "https://discord.com/api/v10";
 // Discord error codes this script reacts to.
 const UNKNOWN_CHANNEL = 10003;
+const UNKNOWN_MESSAGE = 10008;
 const UNKNOWN_WEBHOOK = 10015;
 const MISSING_PERMISSIONS = 50013;
 // The Discord message types a person writes: a plain message and a reply.
@@ -265,6 +266,7 @@ async function deleteAsAuthor(s, bot, channelId, parent, message) {
       await attempt();
       return true;
     } catch (error) {
+      if (error.code === UNKNOWN_MESSAGE) return true;
       if (error.code !== MISSING_PERMISSIONS && error.code !== UNKNOWN_WEBHOOK) throw error;
     }
   }
@@ -405,6 +407,7 @@ const commands = {
       try {
         await discord(bot, "DELETE", `/channels/${threadId}`);
       } catch (error) {
+        if (error.code === UNKNOWN_CHANNEL) continue;
         if (error.code !== MISSING_PERMISSIONS) throw error;
         left.messages += await deleteMessages(s, bot, threadId, id);
         left.threads += 1;

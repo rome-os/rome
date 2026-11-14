@@ -634,6 +634,30 @@ put_document() {
 # member1's second account, belongs to member1's person and posts under the same
 # name until renamed. The roster and goals are markdown the agent reads through
 # its own documents.
+# Deletes the people an earlier seed made: anyone who holds one of the members'
+# webhooks as an account, or who has the name of a person in team.json. Seeding
+# again then starts from no people, as after a reset.
+forget_team() {
+  local id
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    log "deleting $id, from an earlier seed ..."
+    api DELETE "/people/$id" </dev/null >/dev/null || die "Rome did not delete $id"
+  done < <(api GET /people | node -e '
+    const fs = require("fs");
+    const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const team = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+    const hooks = new Set(Object.values(s.webhooks ?? {}).flatMap((h) => Object.values(h).map((w) => w.id)));
+    const names = new Set((team.members ?? []).map((m) => m.name));
+    let raw = ""; process.stdin.on("data", (d) => (raw += d)).on("end", () => {
+      for (const p of JSON.parse(raw).people ?? []) {
+        if (p.bondLevel === "guardian") continue;
+        if (names.has(p.displayName) || p.accounts.some((a) => a.channel === "discord" && hooks.has(a.channelUserId)))
+          console.log(p.id);
+      }
+    });' "$STATE_FILE" "$1")
+}
+
 cmd_seed() {
   local dir="${1:?usage: cos-env seed <dir>}"
   mkdir -p "$RUN_DIR"
@@ -650,6 +674,7 @@ cmd_seed() {
     plan+="${plan:+,}\"$chat\":$members"
   done < <(all_chat_names)
   printf '{%s}' "$plan" | discord webhooks
+  forget_team "$dir/team.json"
   for member in "${MEMBERS[@]}"; do
     read -r bond display < <(node -e '
       const team = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
