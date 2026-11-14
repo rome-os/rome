@@ -655,16 +655,6 @@
     "loadFailed": "Couldn't load this chat thread.",
     "replyPlaceholder": "Reply"
   },
-  "sessionRenewal": {
-    "notice": "Context tidied up · {{reason}}",
-    "reasons": {
-      "context": "conversation got long",
-      "setup": "setup updated",
-      "idle": "after a quiet period",
-      "daily": "daily reset",
-      "working_dir": "working folder gone"
-    }
-  },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
     "kinds": {

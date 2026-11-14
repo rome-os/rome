@@ -254,7 +254,6 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
     terminalErrorReason: z.custom<ChatErrorReason>((value) => typeof value === "string").optional(),
     plan: agentPlanSchema.optional(),
     model: z.string().optional(),
-    sessionRenewal: z.object({ reason: z.string(), sessionId: z.string() }).optional(),
   }),
 );
 
