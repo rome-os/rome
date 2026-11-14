@@ -10,6 +10,7 @@ export default {
   rule: "3",
   title: "The text is what you said",
   phase: 1,
+  legA: true,
   async run(ctx) {
     // The stand-in answers with the written text on fixed times, so accuracy is not measured.
     if (ctx.transcriber === "stand-in") return notChecked(standInReason(ctx));

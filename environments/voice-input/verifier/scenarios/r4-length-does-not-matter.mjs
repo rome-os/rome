@@ -9,6 +9,7 @@ import {
   waitForControlReturn,
   waitForSteadyField,
 } from "../lib/product.mjs";
+import { phoneDictateMessage } from "../lib/phone.mjs";
 import { standInReason, useTranscriber } from "../lib/runs.mjs";
 import { check, notChecked, required, ruleResult } from "../lib/scenario.mjs";
 import { browserLanguage } from "../lib/script.mjs";
@@ -22,6 +23,7 @@ export default {
   rule: "4",
   title: "Length does not matter",
   phase: 2,
+  legA: true,
   async run(ctx) {
     if (ctx.transcriber === "stand-in") return notChecked(standInReason(ctx));
     await useTranscriber(ctx);
@@ -92,6 +94,12 @@ async function scoreLong(ctx, message) {
 
 /** Listens to the whole long recording in one session and resolves to the field's text. */
 async function dictate(ctx, message) {
+  const listenMs = message.lastWordAt * 1000 + ctx.waits.afterSpeechMs;
+  if (ctx.place === "phone") {
+    const r = await phoneDictateMessage(ctx.env, message, { listenMs });
+    if (r.error) throw new Error(`the socket answered error ${r.error} after "${r.text}"`);
+    return r.text;
+  }
   const opened = await openPage(ctx.env, {
     mic: message.path,
     language: browserLanguage(message),
@@ -101,7 +109,7 @@ async function dictate(ctx, message) {
     const { control, field } = await voiceForm(page);
     await recordField(field, control);
     await control.click();
-    await page.waitForTimeout(message.lastWordAt * 1000 + ctx.waits.afterSpeechMs);
+    await page.waitForTimeout(listenMs);
     if (await isListening(control)) await control.click();
     await waitForControlReturn(page, control);
     await waitForSteadyField(page, { quietMs: ctx.waits.steadyMs });

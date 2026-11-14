@@ -5,6 +5,7 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { readWav, resample } from "./compare.mjs";
+import { openPage } from "./product.mjs";
 
 // Rome's own WebSocket client, since the browser's API cannot send the sign-in cookie.
 const WebSocket = createRequire(new URL("../../../../packages/core/package.json", import.meta.url))(
@@ -17,20 +18,20 @@ export const ALIVE_TIMEOUT_MS = 3000;
 
 /**
  * Plays the WAV at `path` to the voice input socket of the instance at `origin`, signed in with
- * `cookies` (Playwright's shape), and resolves to
+ * `cookies` (Playwright's shape), for `listenMs` (silence after the recording ends, the
+ * recording cut short before), then stops, and resolves to
  * `{ text, samples, startedAt, endedAt, ended, error, aliveLapse }`. `samples` are `[ms, text]`
  * from the first frame, one per change; `aliveLapse` is true when the socket went 3 s without
  * `alive` while open, which is when the app would give up.
  */
-export async function phoneDictate({
-  origin,
-  cookies,
-  path,
-  afterSpeechMs = 2000,
-  endTimeoutMs = 20000,
-}) {
+export async function phoneDictate({ origin, cookies, path, listenMs, endTimeoutMs = 20000 }) {
   const { samples: raw, rate } = readWav(readFileSync(path));
-  const pcm = resample(raw, rate, PHONE_RATE);
+  const recorded = resample(raw, rate, PHONE_RATE);
+  const length = Math.round(
+    ((listenMs ?? (recorded.length / PHONE_RATE) * 1000 + 2000) * PHONE_RATE) / 1000,
+  );
+  const pcm = new Int16Array(length);
+  pcm.set(recorded.subarray(0, length));
   const url = new URL("/ws/voice-input", origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(url, {
@@ -103,7 +104,6 @@ export async function phoneDictate({
       const due = startedAt + ((i + step) / PHONE_RATE) * 1000;
       await new Promise((r) => setTimeout(r, Math.max(0, due - Date.now())));
     }
-    await new Promise((r) => setTimeout(r, afterSpeechMs));
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "stop" }));
     await Promise.race([done, new Promise((r) => setTimeout(r, endTimeoutMs))]);
   } finally {
@@ -112,4 +112,21 @@ export async function phoneDictate({
   }
   result.startedAt = startedAt;
   return result;
+}
+
+/**
+ * Dictates `message` the way the iOS app does, signed in as the guardian through the
+ * environment's browser, and resolves to what `phoneDictate` does.
+ */
+export async function phoneDictateMessage(env, message, { listenMs } = {}) {
+  const opened = await openPage(env, { mic: message.path });
+  let origin;
+  let cookies;
+  try {
+    origin = new URL(opened.page.url()).origin;
+    cookies = await opened.page.context().cookies(origin);
+  } finally {
+    await opened.close();
+  }
+  return phoneDictate({ origin, cookies, path: message.path, listenMs });
 }

@@ -11,6 +11,7 @@ import {
   voiceForm,
   waitForSteadyField,
 } from "../lib/product.mjs";
+import { phoneDictateMessage } from "../lib/phone.mjs";
 import { setMessages, useTranscriber } from "../lib/runs.mjs";
 import { check, notChecked, required, ruleResult } from "../lib/scenario.mjs";
 import { browserLanguage } from "../lib/script.mjs";
@@ -31,6 +32,7 @@ export default {
   rule: "11",
   title: "Rome Cloud provides it, to the accounts Ouou allows",
   phase: 1,
+  legA: true,
   async run(ctx) {
     const { env } = ctx;
     let status;
@@ -42,17 +44,18 @@ export default {
     if (!status.signedIn) return notChecked("the instance is not signed in to Rome Cloud");
 
     const message = setMessages(ctx.script, "B")[0];
-    const checks = await gateOff(env, message);
+    const checks = await gateOff(ctx, message);
     await env.gate("on");
     await waitForAvailable(env, message, true);
     checks.push(...(await gateOn(ctx, message)));
-    checks.push(await signedOut(env, message));
+    checks.push(await signedOut(ctx, message));
     return ruleResult(checks);
   },
 };
 
 /** The gate-off half: no voice control, and Rome Cloud refuses a session and mints nothing. */
-async function gateOff(env, message) {
+async function gateOff(ctx, message) {
+  const { env } = ctx;
   try {
     await env.gate("off");
   } catch (error) {
@@ -64,23 +67,13 @@ async function gateOff(env, message) {
   }
   const checks = [];
   const available = await waitForAvailable(env, message, false);
-  const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
-  let shown;
-  try {
-    shown = await voiceForm(opened.page, { timeoutMs: 5000 })
-      .then(() => true)
-      .catch(() => false);
-  } finally {
-    await opened.close();
-  }
+  const offer = await voiceOffered(ctx, message);
   checks.push(
     required(
       check(
-        "gate off: no voice control",
-        shown ? "fail" : "pass",
-        shown
-          ? `the dashboard shows a voice control; ${PLACE_API} says available ${available}`
-          : `the dashboard shows no voice control; ${PLACE_API} says available ${available}`,
+        `gate off: ${offer.noneName}`,
+        offer.offered ? "fail" : "pass",
+        `${offer.detail}; ${PLACE_API} says available ${available}`,
       ),
     ),
   );
@@ -121,8 +114,9 @@ async function gateOff(env, message) {
  * An instance not signed in to Rome Cloud has no voice input, even with its own
  * `ROME_TRANSCRIPTION_*` settings: the environment's sign-out restarts Rome that way.
  */
-async function signedOut(env, message) {
-  const name = "not signed in, own provider settings: no voice control";
+async function signedOut(ctx, message) {
+  const { env } = ctx;
+  const name = `not signed in, own provider settings: ${ctx.place === "phone" ? "the socket refuses" : "no voice control"}`;
   let status;
   try {
     status = await env.cloudSignOut();
@@ -142,16 +136,8 @@ async function signedOut(env, message) {
         ),
       );
     const available = await waitForAvailable(env, message, false);
-    const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
-    let shown;
-    try {
-      shown = await voiceForm(opened.page, { timeoutMs: 5000 }).then(
-        () => true,
-        () => false,
-      );
-    } finally {
-      await opened.close();
-    }
+    const offer = await voiceOffered(ctx, message);
+    const shown = offer.offered;
     // Nothing may reach the transcriber on the instance's own settings.
     const decoy = await env
       .transcriberStatus()
@@ -166,12 +152,48 @@ async function signedOut(env, message) {
       check(
         name,
         shown || used ? "fail" : "pass",
-        `${shown ? "the dashboard shows a voice control" : "the dashboard shows no voice control"} with ROME_TRANSCRIPTION_* set; ${PLACE_API} says available ${available}; ${decoy === undefined ? "the transcriber does not count connections on those settings" : `${decoy} connections reached the transcriber on them`}`,
+        `${offer.detail} with ROME_TRANSCRIPTION_* set; ${PLACE_API} says available ${available}; ${decoy === undefined ? "the transcriber does not count connections on those settings" : `${decoy} connections reached the transcriber on them`}`,
       ),
     );
   } finally {
     await env.cloudSignIn();
     await waitForAvailable(env, message, true);
+  }
+}
+
+/**
+ * Whether the guardian is offered voice input: on the dashboard, a voice control; on the iOS
+ * audio path (leg A), a socket session that takes speech without an error.
+ */
+async function voiceOffered(ctx, message) {
+  if (ctx.place === "phone") {
+    const r = await phoneDictateMessage(ctx.env, message, { listenMs: 3000 }).catch((error) => ({
+      error: error.message,
+      text: "",
+    }));
+    return {
+      offered: !r.error,
+      noneName: "the socket refuses",
+      detail: r.error
+        ? `the voice input socket answered error ${r.error}`
+        : `the voice input socket took speech and showed "${r.text}"`,
+    };
+  }
+  const opened = await openPage(ctx.env, { mic: message.path, language: browserLanguage(message) });
+  try {
+    const offered = await voiceForm(opened.page, { timeoutMs: 5000 }).then(
+      () => true,
+      () => false,
+    );
+    return {
+      offered,
+      noneName: "no voice control",
+      detail: offered
+        ? "the dashboard shows a voice control"
+        : "the dashboard shows no voice control",
+    };
+  } finally {
+    await opened.close();
   }
 }
 
@@ -258,25 +280,33 @@ async function dictate(ctx, message) {
   // taken for this session's, so the count must settle first.
   const usageBefore = ctx.memo.romeLogsSessionId ? undefined : await settledUsage(env);
   const stopsBefore = (await stopEntries(env)).length;
-  const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
   let listened;
   let heard;
-  try {
-    const { page } = opened;
-    const form = await voiceForm(page).catch(() => null);
-    if (!form) return { shown: false };
-    await recordField(form.field, form.control);
-    const startedAt = await pageNow(page);
-    await form.control.click();
+  if (ctx.place === "phone") {
     // Listen for the whole recording, so the seconds used match its length.
-    await page.waitForTimeout(message.seconds * 1000);
-    if (await isListening(form.control)) await form.control.click();
-    listened = ((await pageNow(page)) - startedAt) / 1000;
-    await waitForSteadyField(page, { quietMs: ctx.waits.steadyMs });
-    heard = await fieldText(form.field);
-    await form.field.fill("");
-  } finally {
-    await opened.close();
+    const r = await phoneDictateMessage(env, message, { listenMs: message.seconds * 1000 });
+    if (r.error && !r.text) return { shown: false };
+    heard = r.text;
+    listened = message.seconds;
+  } else {
+    const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
+    try {
+      const { page } = opened;
+      const form = await voiceForm(page).catch(() => null);
+      if (!form) return { shown: false };
+      await recordField(form.field, form.control);
+      const startedAt = await pageNow(page);
+      await form.control.click();
+      // Listen for the whole recording, so the seconds used match its length.
+      await page.waitForTimeout(message.seconds * 1000);
+      if (await isListening(form.control)) await form.control.click();
+      listened = ((await pageNow(page)) - startedAt) / 1000;
+      await waitForSteadyField(page, { quietMs: ctx.waits.steadyMs });
+      heard = await fieldText(form.field);
+      await form.field.fill("");
+    } finally {
+      await opened.close();
+    }
   }
   // Rome logs its own count of the session; read it now, before a later restart loses it.
   const stop = (await stopEntries(env)).slice(stopsBefore).at(-1);

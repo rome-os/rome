@@ -91,7 +91,7 @@ export async function verify({
   const dir = outDir ?? join(runsDir ?? DEFAULT_RUNS_DIR, `${stamp}-${productCommit}`);
 
   const wanted = selectRules({ rules, phase });
-  const ctx = { env, script, transcriber, waits, secondsRepeats, memo: {}, log };
+  const ctx = { env, script, transcriber, waits, secondsRepeats, place, memo: {}, log };
   if (PLACES.includes(place)) await env.reset();
   const results = [];
   try {
@@ -136,6 +136,10 @@ async function scoreRule(rule, place, ctx) {
   let result;
   if (!PLACES.includes(place)) result = notChecked(`the verifier cannot score ${place} yet`);
   else if (!scenario) result = notChecked("no scenario for this rule yet");
+  else if (place === "phone" && !scenario.legA)
+    result = notChecked(
+      "on iOS the app's UI tests (leg B) or Ouou's hand checks (leg C) score this rule",
+    );
   else {
     ctx.log(`running rule ${rule}: ${scenario.title}`);
     try {
@@ -154,6 +158,8 @@ async function scoreRule(rule, place, ctx) {
  */
 function platformOf(place, version) {
   const host = `${process.platform} ${process.arch}`;
+  if (place === "phone")
+    return `${host}, the iOS app's audio path played by the verifier over /ws/voice-input (leg A), no phone`;
   if (place !== "desktop") return `${host}, Chrome`;
   const app = version.desktop ? ` (${JSON.stringify(version.desktop)})` : "";
   return `${host}, the desktop app on Electron${app}; macOS not checked by machine`;

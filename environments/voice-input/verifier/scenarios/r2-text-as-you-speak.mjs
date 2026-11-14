@@ -11,6 +11,7 @@ export default {
   rule: "2",
   title: "Text appears as you speak",
   phase: 1,
+  legA: true,
   async run(ctx) {
     // The stand-in answers with the written text on fixed times, so streaming is not measured.
     if (ctx.transcriber === "stand-in") return notChecked(standInReason(ctx));

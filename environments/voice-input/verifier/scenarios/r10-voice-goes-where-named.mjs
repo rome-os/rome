@@ -16,6 +16,7 @@ export default {
   rule: "10",
   title: "Your voice goes only where Rome says, and is not kept",
   phase: 1,
+  legA: true,
   /** Rome must name the place before any dictation, so it is read on the fresh instance. */
   async prepare(ctx) {
     ctx.memo.named = await readNamedPlace(ctx, setMessages(ctx.script, "B")[0].path);
@@ -25,7 +26,16 @@ export default {
       throw new Error(`could not read the place: ${ctx.memo.prepare10.error}`);
     await scriptRuns(ctx);
     const named = ctx.memo.named;
-    const checks = [named.check, named.settingsCheck];
+    // The iOS app's Settings is the app's to show; leg A reads only what Rome says.
+    const settingsCheck =
+      ctx.place === "phone"
+        ? check(
+            "Settings names the place",
+            "not_checked",
+            "on iOS the app's Settings is leg B's or C's to check",
+          )
+        : named.settingsCheck;
+    const checks = [named.check, settingsCheck];
     checks.push(trafficCheck(ctx.memo.capture, named.place, named.romeHost));
     checks.push(namedHostUsed(ctx.memo.capture, named.place));
     const scan = await ctx.env.audioScan();

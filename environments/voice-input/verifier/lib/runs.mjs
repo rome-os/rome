@@ -2,6 +2,7 @@
 // Set B (20 messages worded for an assistant) serves rules 2, 3, 5 and 10, with the
 // environment capturing traffic throughout. Set A (public real-speech recordings) serves only
 // rule 3, so its runs skip the send checks.
+import { phoneDictateMessage } from "./phone.mjs";
 import { browserLanguage } from "./script.mjs";
 import { newMessages } from "./voice-env.mjs";
 import {
@@ -41,7 +42,11 @@ export async function scriptRuns(ctx, set = "B") {
     for (const message of messages) {
       if (ctx.transcriber === "stand-in")
         await env.transcriber({ mode: "stand-in", text: message.text });
-      runs.push(await runOne(ctx, message, { checkSend: capture }));
+      runs.push(
+        ctx.place === "phone"
+          ? await phoneRunOne(ctx, message)
+          : await runOne(ctx, message, { checkSend: capture }),
+      );
       ctx.log(`${message.key}: ${runs[runs.length - 1].error ?? "done"}`);
     }
   } finally {
@@ -158,6 +163,30 @@ async function runOne(ctx, message, { checkSend }) {
     return { ...base, error: error.message };
   } finally {
     await opened?.close();
+  }
+}
+
+/**
+ * One script message dictated the way the iOS app does, for leg A. It records what `runOne`
+ * does but sends nothing: sending is the app's, so rule 5 is not leg A's to score.
+ */
+async function phoneRunOne(ctx, message) {
+  const base = {
+    key: message.key,
+    language: message.language,
+    written: message.text,
+    firstWordAt: message.firstWordAt,
+    lastWordAt: message.lastWordAt,
+  };
+  try {
+    const r = await phoneDictateMessage(ctx.env, message, {
+      listenMs: message.lastWordAt * 1000 + ctx.waits.afterSpeechMs,
+    });
+    if (r.error && !r.text) return { ...base, error: `the socket answered error ${r.error}` };
+    // The first frame plays the recording's start, as the click does on the dashboard.
+    return { ...base, heard: r.text, clickAt: 0, samples: r.samples, socketError: r.error };
+  } catch (error) {
+    return { ...base, error: error.message };
   }
 }
 
