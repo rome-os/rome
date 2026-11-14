@@ -705,7 +705,7 @@ personal on every device, and so is any capability whose `system.info` entry in
 `fs.list` run without the lookup. Rome sets the variable on every agent session
 from the turn's [audience](domains/participation.md#audience), and a person
 running the CLI leaves it unset. It is a guardrail against a model mistake, not a
-security boundary ([user-data.md](user-data.md#what-is-and-is-not-enforced)).
+security boundary ([personal-data.md](personal-data.md#what-is-and-is-not-enforced)).
 
 `device rename <id> <name>` and `device remove <id>` change the account's device
 list in Cloud. They do not contact the device, so it can be offline. Cloud trims

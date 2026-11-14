@@ -1,5 +1,5 @@
-// `/api/user-data/*`: where the guardian's devices push user data, and where
-// they read what Rome holds. Contract: docs/user-data.md#routes.
+// `/api/personal-data/*`: where the guardian's devices push personal data, and where
+// they read what Rome holds. Contract: docs/personal-data.md#routes.
 
 import { Hono } from "hono";
 import { z } from "zod";
@@ -7,30 +7,30 @@ import { resolveGuardianSession } from "../access/guardian-session.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createLogger } from "../logger.js";
 import { ingestEnvelopeSchema, MAX_BATCH_BYTES, MAX_ITEMS_PER_BATCH } from "./domain/ingest.js";
-import type { UserDataRepository } from "./repository.js";
+import type { PersonalDataRepository } from "./repository.js";
 import { sourceSpec } from "./sources/index.js";
 
-const log = createLogger("user-data");
+const log = createLogger("personal-data");
 
 /** At most this many ingest requests per origin per minute. */
 const INGESTS_PER_MINUTE = 60;
 
 const stateSchema = z.object({ state: z.enum(["active", "paused", "off"]) });
 
-export interface UserDataRoutesDeps {
+export interface PersonalDataRoutesDeps {
   db: DrizzleDb;
-  userData: UserDataRepository;
+  personalData: PersonalDataRepository;
   now?: () => number;
 }
 
-export function userDataRoutes(deps: UserDataRoutesDeps): Hono {
+export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
   const app = new Hono();
   const now = deps.now ?? Date.now;
   const recentIngests = new Map<string, number[]>();
 
   // Only the guardian's own signed-in session reads or writes personal data.
   // A loopback caller, which an agent's shell is, does not count here.
-  app.use("/user-data/*", async (c, next) => {
+  app.use("/personal-data/*", async (c, next) => {
     const session = await resolveGuardianSession(c, deps.db);
     if (!session || session.via !== "cookie") {
       return c.json({ error: "Guardian session required" }, 403);
@@ -39,7 +39,7 @@ export function userDataRoutes(deps: UserDataRoutesDeps): Hono {
     await next();
   });
 
-  app.post("/user-data/ingest", async (c) => {
+  app.post("/personal-data/ingest", async (c) => {
     const receivedAt = now();
     const declared = Number(c.req.header("content-length") ?? 0);
     if (declared > MAX_BATCH_BYTES) return c.json({ error: "too_large" }, 413);
@@ -70,8 +70,8 @@ export function userDataRoutes(deps: UserDataRoutesDeps): Hono {
       c.header("Retry-After", String(limited));
       return c.json({ error: "rate_limited" }, 429);
     }
-    const { response, repeated } = deps.userData.ingest(source, envelope, receivedAt);
-    log.info("user data ingested", {
+    const { response, repeated } = deps.personalData.ingest(source, envelope, receivedAt);
+    log.info("personal data ingested", {
       source: source.source,
       trigger: envelope.batch.trigger,
       repeated,
@@ -85,12 +85,12 @@ export function userDataRoutes(deps: UserDataRoutesDeps): Hono {
     return c.json(response);
   });
 
-  app.get("/user-data/sources", (c) => c.json({ sources: deps.userData.catalog() }));
+  app.get("/personal-data/sources", (c) => c.json({ sources: deps.personalData.catalog() }));
 
-  app.put("/user-data/sources/:source/origins/:origin/state", async (c) => {
+  app.put("/personal-data/sources/:source/origins/:origin/state", async (c) => {
     const body = stateSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: "bad_state" }, 400);
-    const changed = deps.userData.setState(
+    const changed = deps.personalData.setState(
       c.req.param("source"),
       c.req.param("origin"),
       body.data.state,
@@ -99,19 +99,23 @@ export function userDataRoutes(deps: UserDataRoutesDeps): Hono {
     return c.json({ state: body.data.state });
   });
 
-  app.delete("/user-data/sources/:source/origins/:origin", (c) => {
-    const result = deps.userData.deleteOrigin(c.req.param("source"), c.req.param("origin"), now());
+  app.delete("/personal-data/sources/:source/origins/:origin", (c) => {
+    const result = deps.personalData.deleteOrigin(
+      c.req.param("source"),
+      c.req.param("origin"),
+      now(),
+    );
     if (!result) return c.json({ error: "unknown_origin" }, 404);
-    log.info("user data deleted", {
+    log.info("personal data deleted", {
       source: c.req.param("source"),
       deletedPoints: result.deletedPoints,
     });
     return c.json(result);
   });
 
-  app.get("/user-data/sources/:source/ingests", (c) => {
+  app.get("/personal-data/sources/:source/ingests", (c) => {
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 500);
-    return c.json({ ingests: deps.userData.ingests(c.req.param("source"), limit) });
+    return c.json({ ingests: deps.personalData.ingests(c.req.param("source"), limit) });
   });
 
   return app;

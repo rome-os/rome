@@ -1,6 +1,6 @@
 import { widgetEventRoutes } from "./routes/widget-events.js";
 import { devicesRoutes } from "./routes/devices.js";
-import { userDataRoutes } from "../user-data/routes.js";
+import { personalDataRoutes } from "../personal-data/routes.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -200,7 +200,7 @@ export function buildApp(
   api.route("/", conciergeRoutes(deps));
   api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
-  api.route("/", userDataRoutes(deps));
+  api.route("/", personalDataRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));

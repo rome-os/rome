@@ -1,4 +1,4 @@
-// Invented Apple Health batches for the user-data tests. No real person's data.
+// Invented Apple Health batches for the personal-data tests. No real person's data.
 
 import type { IngestEnvelope } from "../domain/ingest.js";
 

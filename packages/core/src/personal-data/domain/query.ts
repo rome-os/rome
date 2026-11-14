@@ -1,5 +1,5 @@
 // A query over stored readings: its input, which mirrors the iPhone's live
-// `health.stats`, and the rollups. Contract: docs/user-data.md#query.
+// `health.stats`, and the rollups. Contract: docs/personal-data.md#query.
 
 import { z } from "zod";
 import { isValidTimeZone } from "../../lib/timezone.js";

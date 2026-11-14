@@ -1,41 +1,41 @@
-// `core:user_data_catalog` and `core:user_data_query`: how an Agent reads user
+// `core:personal_data_catalog` and `core:personal_data_query`: how an Agent reads user
 // data. Both are personal-data actions, so they run only in a private turn
-// (docs/domains/participation.md#audience). Contract: docs/user-data.md#agent-access.
+// (docs/domains/participation.md#audience). Contract: docs/personal-data.md#agent-access.
 
 import type { ActionRegistry } from "../apps/actions/types.js";
 import { queryInputSchema } from "./domain/query.js";
-import { queryUserData } from "./read.js";
-import type { UserDataRepository } from "./repository.js";
-import { sourceSpec, USER_DATA_SOURCES } from "./sources/index.js";
+import { queryPersonalData } from "./read.js";
+import type { PersonalDataRepository } from "./repository.js";
+import { sourceSpec, PERSONAL_DATA_SOURCES } from "./sources/index.js";
 
-export const USER_DATA_CATALOG_ACTION = "core:user_data_catalog";
-export const USER_DATA_QUERY_ACTION = "core:user_data_query";
+export const PERSONAL_DATA_CATALOG_ACTION = "core:personal_data_catalog";
+export const PERSONAL_DATA_QUERY_ACTION = "core:personal_data_query";
 
 const STORED_FIRST =
   "Read stored data first. Use the live device path only when the stored data does not cover what " +
   "you need (freshness.coversWindow is false and the question needs the latest hours) and the device " +
   "is online. Otherwise answer from stored data and say how fresh it is.";
 
-export interface UserDataActionDeps {
-  userData: UserDataRepository;
+export interface PersonalDataActionDeps {
+  personalData: PersonalDataRepository;
   /** The guardian's time zone, the default zone of a query. */
   guardianTimeZone: () => Promise<string>;
   now?: () => number;
 }
 
-export function registerUserDataActions(
+export function registerPersonalDataActions(
   actions: Pick<ActionRegistry, "register">,
-  deps: UserDataActionDeps,
+  deps: PersonalDataActionDeps,
 ): void {
   const now = deps.now ?? Date.now;
   actions.register({
     config: {
-      name: USER_DATA_CATALOG_ACTION,
+      name: PERSONAL_DATA_CATALOG_ACTION,
       type: "system",
       description:
         "List the guardian's personal data that their devices sync to Rome, such as Apple Health: " +
         "each source, the device it comes from, when it last synced, and each type with its unit, " +
-        `range and how far it is synced. Call it before ${USER_DATA_QUERY_ACTION}. ${STORED_FIRST} ` +
+        `range and how far it is synced. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ${STORED_FIRST} ` +
         "Runs only in a private chat with the guardian.",
       complexity: "simple",
       speed: "fast",
@@ -43,13 +43,13 @@ export function registerUserDataActions(
       sideEffects: "read-only",
     },
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    execute: async () => ({ status: "ok", data: { sources: deps.userData.catalog() } }),
+    execute: async () => ({ status: "ok", data: { sources: deps.personalData.catalog() } }),
   });
 
-  const sourceNames = USER_DATA_SOURCES.map((source) => source.source);
+  const sourceNames = PERSONAL_DATA_SOURCES.map((source) => source.source);
   actions.register({
     config: {
-      name: USER_DATA_QUERY_ACTION,
+      name: PERSONAL_DATA_QUERY_ACTION,
       type: "system",
       description:
         "Aggregate or list the guardian's synced personal data, such as Apple Health steps, sleep, " +
@@ -132,7 +132,7 @@ export function registerUserDataActions(
           error: `Unknown source "${input.data.source}". Sources: ${sourceNames.join(", ")}.`,
         };
       }
-      const answer = queryUserData(deps.userData, source, input.data, {
+      const answer = queryPersonalData(deps.personalData, source, input.data, {
         tz: await deps.guardianTimeZone(),
         now: now(),
       });

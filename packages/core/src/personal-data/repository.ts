@@ -1,12 +1,12 @@
-// The user-data store's one way into the database. Concept: docs/user-data.md.
+// The personal-data store's one way into the database. Concept: docs/personal-data.md.
 
 import { and, asc, count, desc, eq, gt, gte, lt, max, min, or, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
-  userDataIngests,
-  userDataPoints,
-  userDataSources,
-  userDataTypes,
+  personalDataIngests,
+  personalDataPoints,
+  personalDataSources,
+  personalDataTypes,
 } from "../db/schema/system.js";
 import {
   checkDelete,
@@ -83,7 +83,7 @@ export interface IngestLogEntry {
 const iso = (at: number | null | undefined) =>
   at === null || at === undefined ? undefined : new Date(at).toISOString();
 
-export class UserDataRepository {
+export class PersonalDataRepository {
   constructor(
     private readonly db: DrizzleDb,
     private readonly sources: readonly SourceSpec[],
@@ -103,13 +103,13 @@ export class UserDataRepository {
     return this.db.transaction((tx) => {
       const origin = envelope.origin.id;
       const earlier = tx
-        .select({ response: userDataIngests.response })
-        .from(userDataIngests)
+        .select({ response: personalDataIngests.response })
+        .from(personalDataIngests)
         .where(
           and(
-            eq(userDataIngests.source, source.source),
-            eq(userDataIngests.origin, origin),
-            eq(userDataIngests.batchId, envelope.batch.id),
+            eq(personalDataIngests.source, source.source),
+            eq(personalDataIngests.origin, origin),
+            eq(personalDataIngests.batchId, envelope.batch.id),
           ),
         )
         .get();
@@ -119,7 +119,7 @@ export class UserDataRepository {
 
       upsertSource(tx, source, envelope, receivedAt);
       const ingestId = tx
-        .insert(userDataIngests)
+        .insert(personalDataIngests)
         .values({
           source: source.source,
           origin,
@@ -129,7 +129,7 @@ export class UserDataRepository {
           itemCount: envelope.upserts.length + envelope.deletes.length,
           status: "ok",
         })
-        .returning({ id: userDataIngests.id })
+        .returning({ id: personalDataIngests.id })
         .get().id;
 
       const counts = { inserted: 0, updated: 0, unchanged: 0, deleted: 0 };
@@ -171,15 +171,15 @@ export class UserDataRepository {
           return;
         }
         const gone = tx
-          .delete(userDataPoints)
+          .delete(personalDataPoints)
           .where(
             and(
-              eq(userDataPoints.source, source.source),
-              eq(userDataPoints.origin, origin),
-              eq(userDataPoints.dedupeKey, checked.item.key),
+              eq(personalDataPoints.source, source.source),
+              eq(personalDataPoints.origin, origin),
+              eq(personalDataPoints.dedupeKey, checked.item.key),
             ),
           )
-          .returning({ type: userDataPoints.type })
+          .returning({ type: personalDataPoints.type })
           .all();
         if (gone.length === 0) {
           counts.unchanged += 1;
@@ -207,7 +207,7 @@ export class UserDataRepository {
         rejected,
         receivedAt: new Date(receivedAt).toISOString(),
       };
-      tx.update(userDataIngests)
+      tx.update(personalDataIngests)
         .set({
           ...counts,
           rejected: rejected.length,
@@ -217,14 +217,14 @@ export class UserDataRepository {
           status,
           response: response as unknown as Record<string, unknown>,
         })
-        .where(eq(userDataIngests.id, ingestId))
+        .where(eq(personalDataIngests.id, ingestId))
         .run();
-      tx.update(userDataSources)
+      tx.update(personalDataSources)
         .set({ lastSyncAt: receivedAt, lastResult: status, lastErrorCode: null })
         .where(sourceRow(source.source, origin))
         .run();
-      tx.delete(userDataIngests)
-        .where(lt(userDataIngests.receivedAt, receivedAt - INGEST_LOG_DAYS * 86_400_000))
+      tx.delete(personalDataIngests)
+        .where(lt(personalDataIngests.receivedAt, receivedAt - INGEST_LOG_DAYS * 86_400_000))
         .run();
       return { response, repeated: false };
     });
@@ -234,10 +234,14 @@ export class UserDataRepository {
   catalog(): CatalogSource[] {
     const sources = this.db
       .select()
-      .from(userDataSources)
-      .orderBy(desc(userDataSources.lastSyncAt))
+      .from(personalDataSources)
+      .orderBy(desc(personalDataSources.lastSyncAt))
       .all();
-    const types = this.db.select().from(userDataTypes).orderBy(asc(userDataTypes.type)).all();
+    const types = this.db
+      .select()
+      .from(personalDataTypes)
+      .orderBy(asc(personalDataTypes.type))
+      .all();
     return sources
       .flatMap((row): CatalogSource[] => {
         const spec = this.sources.find((s) => s.source === row.source);
@@ -285,10 +289,10 @@ export class UserDataRepository {
   /** The origin a query reads: the active one, else the one that synced last. */
   currentOrigin(source: string): string | undefined {
     const rows = this.db
-      .select({ origin: userDataSources.origin, state: userDataSources.state })
-      .from(userDataSources)
-      .where(eq(userDataSources.source, source))
-      .orderBy(desc(userDataSources.lastSyncAt))
+      .select({ origin: personalDataSources.origin, state: personalDataSources.state })
+      .from(personalDataSources)
+      .where(eq(personalDataSources.source, source))
+      .orderBy(desc(personalDataSources.lastSyncAt))
       .all();
     return (rows.find((row) => row.state === "active") ?? rows[0])?.origin;
   }
@@ -296,9 +300,9 @@ export class UserDataRepository {
   /** The origin's synced-through time per type. */
   syncedThrough(source: string, origin: string): Map<string, number> {
     const rows = this.db
-      .select({ type: userDataTypes.type, at: userDataTypes.syncedThroughAt })
-      .from(userDataTypes)
-      .where(and(eq(userDataTypes.source, source), eq(userDataTypes.origin, origin)))
+      .select({ type: personalDataTypes.type, at: personalDataTypes.syncedThroughAt })
+      .from(personalDataTypes)
+      .where(and(eq(personalDataTypes.source, source), eq(personalDataTypes.origin, origin)))
       .all();
     return new Map(rows.flatMap((row) => (row.at === null ? [] : [[row.type, row.at]])));
   }
@@ -319,35 +323,38 @@ export class UserDataRepository {
     const after = range.after;
     const query = this.db
       .select({
-        id: userDataPoints.id,
-        type: userDataPoints.type,
-        shape: userDataPoints.shape,
-        resolution: userDataPoints.resolution,
-        startAt: userDataPoints.startAt,
-        endAt: userDataPoints.endAt,
-        tz: userDataPoints.tz,
-        value: userDataPoints.value,
-        fields: userDataPoints.fields,
-        metadata: userDataPoints.metadata,
+        id: personalDataPoints.id,
+        type: personalDataPoints.type,
+        shape: personalDataPoints.shape,
+        resolution: personalDataPoints.resolution,
+        startAt: personalDataPoints.startAt,
+        endAt: personalDataPoints.endAt,
+        tz: personalDataPoints.tz,
+        value: personalDataPoints.value,
+        fields: personalDataPoints.fields,
+        metadata: personalDataPoints.metadata,
       })
-      .from(userDataPoints)
+      .from(personalDataPoints)
       .where(
         and(
-          eq(userDataPoints.source, source),
-          eq(userDataPoints.type, type),
-          range.resolution ? eq(userDataPoints.resolution, range.resolution) : undefined,
-          eq(userDataPoints.origin, origin),
-          gte(userDataPoints.startAt, range.from),
-          lt(userDataPoints.startAt, range.to),
+          eq(personalDataPoints.source, source),
+          eq(personalDataPoints.type, type),
+          range.resolution ? eq(personalDataPoints.resolution, range.resolution) : undefined,
+          eq(personalDataPoints.origin, origin),
+          gte(personalDataPoints.startAt, range.from),
+          lt(personalDataPoints.startAt, range.to),
           after
             ? or(
-                gt(userDataPoints.startAt, after.startAt),
-                and(eq(userDataPoints.startAt, after.startAt), gt(userDataPoints.id, after.id)),
+                gt(personalDataPoints.startAt, after.startAt),
+                and(
+                  eq(personalDataPoints.startAt, after.startAt),
+                  gt(personalDataPoints.id, after.id),
+                ),
               )
             : undefined,
         ),
       )
-      .orderBy(asc(userDataPoints.startAt), asc(userDataPoints.id));
+      .orderBy(asc(personalDataPoints.startAt), asc(personalDataPoints.id));
     const rows = range.limit ? query.limit(range.limit).all() : query.all();
     return rows.map((row) => ({
       ...row,
@@ -359,10 +366,10 @@ export class UserDataRepository {
   /** Sets an origin's state. False when the origin never sent this source. */
   setState(source: string, origin: string, state: OriginState): boolean {
     const changed = this.db
-      .update(userDataSources)
+      .update(personalDataSources)
       .set({ state })
       .where(sourceRow(source, origin))
-      .returning({ origin: userDataSources.origin })
+      .returning({ origin: personalDataSources.origin })
       .all();
     return changed.length > 0;
   }
@@ -374,22 +381,22 @@ export class UserDataRepository {
    */
   deleteOrigin(source: string, origin: string, at: number): { deletedPoints: number } | undefined {
     return this.db.transaction((tx) => {
-      const known = tx.select().from(userDataSources).where(sourceRow(source, origin)).get();
+      const known = tx.select().from(personalDataSources).where(sourceRow(source, origin)).get();
       if (!known) return undefined;
       const deletedPoints =
         tx
           .select({ n: count() })
-          .from(userDataPoints)
-          .where(and(eq(userDataPoints.source, source), eq(userDataPoints.origin, origin)))
+          .from(personalDataPoints)
+          .where(and(eq(personalDataPoints.source, source), eq(personalDataPoints.origin, origin)))
           .get()?.n ?? 0;
-      tx.delete(userDataPoints)
-        .where(and(eq(userDataPoints.source, source), eq(userDataPoints.origin, origin)))
+      tx.delete(personalDataPoints)
+        .where(and(eq(personalDataPoints.source, source), eq(personalDataPoints.origin, origin)))
         .run();
-      tx.delete(userDataTypes)
-        .where(and(eq(userDataTypes.source, source), eq(userDataTypes.origin, origin)))
+      tx.delete(personalDataTypes)
+        .where(and(eq(personalDataTypes.source, source), eq(personalDataTypes.origin, origin)))
         .run();
-      tx.update(userDataSources).set({ state: "off" }).where(sourceRow(source, origin)).run();
-      tx.insert(userDataIngests)
+      tx.update(personalDataSources).set({ state: "off" }).where(sourceRow(source, origin)).run();
+      tx.insert(personalDataIngests)
         .values({
           source,
           origin,
@@ -407,9 +414,9 @@ export class UserDataRepository {
   ingests(source: string, limit: number): IngestLogEntry[] {
     return this.db
       .select()
-      .from(userDataIngests)
-      .where(eq(userDataIngests.source, source))
-      .orderBy(desc(userDataIngests.receivedAt), desc(userDataIngests.id))
+      .from(personalDataIngests)
+      .where(eq(personalDataIngests.source, source))
+      .orderBy(desc(personalDataIngests.receivedAt), desc(personalDataIngests.id))
       .limit(limit)
       .all()
       .map((row) => ({
@@ -434,7 +441,7 @@ export class UserDataRepository {
 }
 
 function sourceRow(source: string, origin: string) {
-  return and(eq(userDataSources.source, source), eq(userDataSources.origin, origin));
+  return and(eq(personalDataSources.source, source), eq(personalDataSources.origin, origin));
 }
 
 function upsertSource(
@@ -451,7 +458,7 @@ function upsertSource(
     state: "active",
     note: source.note,
   };
-  tx.insert(userDataSources)
+  tx.insert(personalDataSources)
     .values({
       source: source.source,
       origin: envelope.origin.id,
@@ -459,10 +466,10 @@ function upsertSource(
       ...refreshed,
     })
     .onConflictDoUpdate({
-      target: [userDataSources.source, userDataSources.origin],
+      target: [personalDataSources.source, personalDataSources.origin],
       set: {
         ...refreshed,
-        firstSyncAt: sql`coalesce(${userDataSources.firstSyncAt}, ${receivedAt})`,
+        firstSyncAt: sql`coalesce(${personalDataSources.firstSyncAt}, ${receivedAt})`,
       },
     })
     .run();
@@ -477,13 +484,13 @@ function writePoint(
   now: number,
 ): "inserted" | "updated" | "unchanged" | "type_cap" {
   const existing = tx
-    .select({ id: userDataPoints.id, hash: userDataPoints.contentHash })
-    .from(userDataPoints)
+    .select({ id: personalDataPoints.id, hash: personalDataPoints.contentHash })
+    .from(personalDataPoints)
     .where(
       and(
-        eq(userDataPoints.source, source),
-        eq(userDataPoints.origin, origin),
-        eq(userDataPoints.dedupeKey, item.key),
+        eq(personalDataPoints.source, source),
+        eq(personalDataPoints.origin, origin),
+        eq(personalDataPoints.dedupeKey, item.key),
       ),
     )
     .get();
@@ -504,24 +511,24 @@ function writePoint(
     updatedAt: now,
   };
   if (existing) {
-    tx.update(userDataPoints).set(values).where(eq(userDataPoints.id, existing.id)).run();
+    tx.update(personalDataPoints).set(values).where(eq(personalDataPoints.id, existing.id)).run();
     return "updated";
   }
   if (item.shape !== "bucket") {
     const stored = tx
       .select({ n: count() })
-      .from(userDataPoints)
+      .from(personalDataPoints)
       .where(
         and(
-          eq(userDataPoints.source, source),
-          eq(userDataPoints.type, item.type),
-          eq(userDataPoints.origin, origin),
+          eq(personalDataPoints.source, source),
+          eq(personalDataPoints.type, item.type),
+          eq(personalDataPoints.origin, origin),
         ),
       )
       .get();
     if ((stored?.n ?? 0) >= MAX_POINTS_PER_TYPE) return "type_cap";
   }
-  tx.insert(userDataPoints)
+  tx.insert(personalDataPoints)
     .values({ source, origin, dedupeKey: item.key, ...values })
     .run();
   return "inserted";
@@ -540,15 +547,15 @@ function refreshType(
   const stats = tx
     .select({
       n: count(),
-      earliest: min(userDataPoints.startAt),
-      latest: max(userDataPoints.endAt),
+      earliest: min(personalDataPoints.startAt),
+      latest: max(personalDataPoints.endAt),
     })
-    .from(userDataPoints)
+    .from(personalDataPoints)
     .where(
       and(
-        eq(userDataPoints.source, source.source),
-        eq(userDataPoints.type, type),
-        eq(userDataPoints.origin, origin),
+        eq(personalDataPoints.source, source.source),
+        eq(personalDataPoints.type, type),
+        eq(personalDataPoints.origin, origin),
       ),
     )
     .get();
@@ -562,10 +569,10 @@ function refreshType(
     updatedAt: now,
     ...(syncedThroughAt !== undefined ? { syncedThroughAt } : {}),
   };
-  tx.insert(userDataTypes)
+  tx.insert(personalDataTypes)
     .values({ source: source.source, origin, type, ...values })
     .onConflictDoUpdate({
-      target: [userDataTypes.source, userDataTypes.origin, userDataTypes.type],
+      target: [personalDataTypes.source, personalDataTypes.origin, personalDataTypes.type],
       set: values,
     })
     .run();

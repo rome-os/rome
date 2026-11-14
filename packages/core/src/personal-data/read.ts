@@ -1,5 +1,5 @@
 // Answers a query from the store: the plan, the points it reads and how fresh
-// they are. Contract: docs/user-data.md#query.
+// they are. Contract: docs/personal-data.md#query.
 
 import {
   daysFromHours,
@@ -14,7 +14,7 @@ import {
 } from "./domain/query.js";
 import type { SourceSpec, TypeSpec } from "./domain/source.js";
 import { isoInZone } from "./domain/zoned-time.js";
-import type { UserDataRepository } from "./repository.js";
+import type { PersonalDataRepository } from "./repository.js";
 
 export interface Freshness {
   syncedThrough?: string;
@@ -40,8 +40,8 @@ interface ListedRecords {
   nextCursor?: string;
 }
 
-export function queryUserData(
-  repo: UserDataRepository,
+export function queryPersonalData(
+  repo: PersonalDataRepository,
   source: SourceSpec,
   input: QueryInput,
   defaults: { tz: string; now: number },
@@ -83,14 +83,14 @@ function emptyResult(spec: TypeSpec, plan: QueryPlan): TypeResult | ListedRecord
 }
 
 function resultFor(
-  repo: UserDataRepository,
+  repo: PersonalDataRepository,
   source: SourceSpec,
   origin: string,
   spec: TypeSpec,
   plan: QueryPlan,
   now: number,
 ): TypeResult | ListedRecords {
-  const read = (range: Parameters<UserDataRepository["points"]>[3]) =>
+  const read = (range: Parameters<PersonalDataRepository["points"]>[3]) =>
     repo.points(source.source, origin, spec.type, range);
   if (plan.records) {
     const rows = read({

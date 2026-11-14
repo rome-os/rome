@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/db.js";
 import type { QueryInput } from "./domain/query.js";
-import { type QueryAnswer, queryUserData } from "./read.js";
-import { UserDataRepository } from "./repository.js";
+import { type QueryAnswer, queryPersonalData } from "./read.js";
+import { PersonalDataRepository } from "./repository.js";
 import { APPLE_HEALTH } from "./sources/apple-health.js";
-import { USER_DATA_SOURCES } from "./sources/index.js";
+import { PERSONAL_DATA_SOURCES } from "./sources/index.js";
 import {
   batch,
   DAY,
@@ -20,13 +20,13 @@ import {
 
 const NOW = NOV_10 + 5 * DAY + 10 * HOUR;
 
-describe("queryUserData", () => {
+describe("queryPersonalData", () => {
   let testDb: TestDb;
-  let repo: UserDataRepository;
+  let repo: PersonalDataRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new UserDataRepository(testDb.db, USER_DATA_SOURCES);
+    repo = new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES);
     repo.ingest(
       APPLE_HEALTH,
       batch("seed", {
@@ -50,7 +50,7 @@ describe("queryUserData", () => {
   afterEach(() => testDb.close());
 
   const query = (input: Omit<QueryInput, "source">): QueryAnswer => {
-    const answer = queryUserData(
+    const answer = queryPersonalData(
       repo,
       APPLE_HEALTH,
       { source: "apple_health", ...input },
@@ -60,7 +60,7 @@ describe("queryUserData", () => {
     return answer;
   };
   const queryError = (input: Omit<QueryInput, "source">) => {
-    const answer = queryUserData(
+    const answer = queryPersonalData(
       repo,
       APPLE_HEALTH,
       { source: "apple_health", ...input },
@@ -213,8 +213,8 @@ describe("queryUserData", () => {
   });
 
   it("answers a store with no data with no values", () => {
-    const empty = new UserDataRepository(createTestDb().db, USER_DATA_SOURCES);
-    const answer = queryUserData(
+    const empty = new PersonalDataRepository(createTestDb().db, PERSONAL_DATA_SOURCES);
+    const answer = queryPersonalData(
       empty,
       APPLE_HEALTH,
       { source: "apple_health", type: "stepCount" },

@@ -70,28 +70,28 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 - **Event-bus event** — an event is a thing that happens. A routine is a standing binding that may use one as its trigger.
 - **[Event](sessions.md#event)** — one item of a turn's stream. The deprecated alias "events" above means routines, never turn events.
 
-## User data
+## Personal data
 
-User data is personal data that the guardian's devices push to Rome and store, such as Apple Health. Agents read it through `core:user_data_catalog` and `core:user_data_query`. The contracts for the ingest, the routes and the query are in [user-data.md](../user-data.md).
+Personal data is data about the guardian that only they should see, which their devices push to Rome and Rome stores, such as Apple Health. It lives in the personal-data store and is read only in private turns ([audience](../domains/participation.md#audience)). Agents read it through `core:personal_data_catalog` and `core:personal_data_query`. The contracts for the ingest, the routes and the query are in [personal-data.md](../personal-data.md).
 
-- **Source**: where user data comes from, such as `apple_health`. Each source declares its types in core.
+- **Source**: where personal data comes from, such as `apple_health`. Each source declares its types in core.
 - **Origin**: the device that sent a source's data, such as the guardian's iPhone. A query reads one origin per source.
 - **Type**: one kind of reading inside a source, such as `stepCount`, with one unit and one shape: bucket, sample or record.
 - **Sync**: one run on the device that reads changes and sends them.
 - **Ingest**: one batch as the server received it.
-- **Personal data**: data about the guardian that only they should see. All user data is personal data. An action that reads it is a personal-data action, and it runs only in a private turn ([audience](../domains/participation.md#audience)).
+- **Personal-data action**: an action that reads the store. It runs only in a private turn, and is refused in a shared one.
 
 **Contracts:**
 
-- A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Document data, such as calendar events, is not user data.
+- A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Document data, such as calendar events, is not personal data.
 - An ingest is idempotent per batch and per item, so a device may resend a batch after a lost answer.
-- Rome keeps user data until the guardian deletes it. Deleting an origin removes its readings and keeps the ingest log, which holds counts and never a value.
-- Facts an agent already wrote into memory or a chat are not user data anymore, and nothing checks where they go next.
+- Rome keeps personal data until the guardian deletes it. Deleting an origin removes its readings and keeps the ingest log, which holds counts and never a value.
+- Facts an agent already wrote into memory or a chat are not personal data anymore, and nothing checks where they go next.
 
 **Not to be confused with:**
 
-- **[Memory](#memory)** — memory is authored and loads into context. User data is measured, and an agent reads it on demand.
-- **[App data](apps.md#app-data)** — app data belongs to an app. No app owns user data.
+- **[Memory](#memory)** — memory is authored and loads into context. Personal data is measured, and an agent reads it on demand.
+- **[App data](apps.md#app-data)** — app data belongs to an app. No app owns personal data.
 
 ## Database
 

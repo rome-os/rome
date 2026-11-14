@@ -15,9 +15,9 @@ actions:
   - core:set_agent_name
   # Copies a file into the chat and returns the Markdown that shows it.
   - core:show_file
-  # Reads the guardian's synced personal data, such as Apple Health (docs/user-data.md).
-  - core:user_data_catalog
-  - core:user_data_query
+  # Reads the guardian's synced personal data, such as Apple Health (docs/personal-data.md).
+  - core:personal_data_catalog
+  - core:personal_data_query
   # Reads this conversation's earlier messages after a model switch starts a new thread.
   - system:fetch_channel_history
   # Finds and removes the defer that watches a task row (see Task list).

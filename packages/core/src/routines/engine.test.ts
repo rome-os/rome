@@ -289,7 +289,7 @@ describe("RoutineEngine fire audience", () => {
     const inChat = await routines.create({
       name: "steps",
       trigger: { type: "manual" },
-      actionName: "core:user_data_query",
+      actionName: "core:personal_data_query",
       args: { source: "apple_health", type: "stepCount" },
       madeIn: "guardian-chat",
     });
@@ -305,7 +305,7 @@ describe("RoutineEngine fire audience", () => {
 
     expect(run).toHaveBeenNthCalledWith(
       1,
-      "core:user_data_query",
+      "core:personal_data_query",
       expect.anything(),
       expect.objectContaining({ audience: "private" }),
     );

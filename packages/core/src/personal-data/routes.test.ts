@@ -2,22 +2,22 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { COOKIE_NAME, createSession } from "../access/auth.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { MAX_ITEMS_PER_BATCH } from "./domain/ingest.js";
-import { UserDataRepository } from "./repository.js";
-import { userDataRoutes } from "./routes.js";
-import { USER_DATA_SOURCES } from "./sources/index.js";
+import { PersonalDataRepository } from "./repository.js";
+import { personalDataRoutes } from "./routes.js";
+import { PERSONAL_DATA_SOURCES } from "./sources/index.js";
 import { batch, NOV_10, ORIGIN, stepHour } from "./__fixtures__/apple-health.js";
 
 const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("guardian-seat")}`;
 
-describe("/user-data routes", () => {
+describe("/personal-data routes", () => {
   let testDb: TestDb;
-  let app: ReturnType<typeof userDataRoutes>;
+  let app: ReturnType<typeof personalDataRoutes>;
 
   beforeEach(() => {
     testDb = createTestDb();
-    app = userDataRoutes({
+    app = personalDataRoutes({
       db: testDb.db,
-      userData: new UserDataRepository(testDb.db, USER_DATA_SOURCES),
+      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
       now: () => NOV_10 + 86_400_000,
     });
   });
@@ -33,19 +33,19 @@ describe("/user-data routes", () => {
       },
     });
   const ingest = (body: unknown, cookie?: string | null) =>
-    send("/user-data/ingest", { method: "POST", body: JSON.stringify(body) }, cookie);
+    send("/personal-data/ingest", { method: "POST", body: JSON.stringify(body) }, cookie);
 
   it("refuses a caller without the guardian's session, a loopback agent included", async () => {
     expect((await ingest(batch("b-1"), null)).status).toBe(403);
-    expect((await send("/user-data/sources", {}, null)).status).toBe(403);
-    expect((await send("/user-data/sources", {}, `${COOKIE_NAME}=forged`)).status).toBe(403);
+    expect((await send("/personal-data/sources", {}, null)).status).toBe(403);
+    expect((await send("/personal-data/sources", {}, `${COOKIE_NAME}=forged`)).status).toBe(403);
   });
 
   it("ingests a batch and answers its counts, then lists the source", async () => {
     const response = await ingest(batch("b-1", { upserts: [stepHour(NOV_10, 812)] }));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ batchId: "b-1", status: "ok", inserted: 1 });
-    const sources = await (await send("/user-data/sources")).json();
+    const sources = await (await send("/personal-data/sources")).json();
     expect(sources.sources[0]).toMatchObject({ source: "apple_health", origin: { id: ORIGIN } });
   });
 
@@ -74,7 +74,7 @@ describe("/user-data routes", () => {
 
   it("sets an origin's state, deletes its data and lists the log", async () => {
     await ingest(batch("b-1", { upserts: [stepHour(NOV_10, 812)] }));
-    const base = `/user-data/sources/apple_health/origins/${ORIGIN}`;
+    const base = `/personal-data/sources/apple_health/origins/${ORIGIN}`;
     const paused = await send(`${base}/state`, {
       method: "PUT",
       body: JSON.stringify({ state: "paused" }),
@@ -86,14 +86,14 @@ describe("/user-data routes", () => {
     ).toBe(400);
     expect(
       (
-        await send("/user-data/sources/apple_health/origins/other/state", {
+        await send("/personal-data/sources/apple_health/origins/other/state", {
           method: "PUT",
           body: JSON.stringify({ state: "paused" }),
         })
       ).status,
     ).toBe(404);
     expect(await (await send(base, { method: "DELETE" })).json()).toEqual({ deletedPoints: 1 });
-    const log = await (await send("/user-data/sources/apple_health/ingests?limit=5")).json();
+    const log = await (await send("/personal-data/sources/apple_health/ingests?limit=5")).json();
     expect(log.ingests.map((entry: { status: string }) => entry.status)).toEqual(["deleted", "ok"]);
   });
 });

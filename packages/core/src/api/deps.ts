@@ -1,5 +1,5 @@
 import type { AgentNameEvents } from "../people/agent-name.js";
-import type { UserDataRepository } from "../user-data/repository.js";
+import type { PersonalDataRepository } from "../personal-data/repository.js";
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
@@ -154,8 +154,8 @@ export interface ApiDeps {
   eventCatalog: EventCatalog;
   routinesRepo: RoutinesRepository;
   routineRunsRepo: RoutineRunsRepository;
-  /** The user-data store the guardian's devices push to. */
-  userData: UserDataRepository;
+  /** The personal-data store the guardian's devices push to. */
+  personalData: PersonalDataRepository;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
   /** The agents under every name they have had, for reading names stored before ids were canonical. */

@@ -1,6 +1,6 @@
-// What a user-data source declares: its types, each with a shape, a canonical
+// What a personal-data source declares: its types, each with a shape, a canonical
 // unit and a rollup rule. A source's table is data, not logic. Concept:
-// docs/user-data.md.
+// docs/personal-data.md.
 
 /** How a type's readings are stored. A source joins the store only with these. */
 export type Shape = "bucket" | "sample" | "record";

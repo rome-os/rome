@@ -119,7 +119,7 @@ describe("a routine that reads personal data", () => {
   const query = (madeIn?: string) => ({
     name: "Morning steps",
     trigger: DAILY,
-    actionName: "core:user_data_query",
+    actionName: "core:personal_data_query",
     args: { source: "apple_health", type: "stepCount" },
     ...(madeIn ? { madeIn } : {}),
   });
@@ -135,14 +135,14 @@ describe("a routine that reads personal data", () => {
     await expect(repo.create(query("group-chat"))).rejects.toThrow("personal_data_private_only");
     await expect(repo.create(query())).rejects.toThrow("personal_data_private_only");
     await expect(
-      repo.create({ ...query("group-chat"), actionName: "user_data_catalog" }),
+      repo.create({ ...query("group-chat"), actionName: "personal_data_catalog" }),
     ).rejects.toThrow("personal_data_private_only");
   });
 
   it("is refused when an edit binds a shared routine to a personal-data action", async () => {
     const repo = repoWith();
     const id = await repo.create({ ...query("group-chat"), actionName: "send_user_message" });
-    await expect(repo.update(id, { actionName: "core:user_data_query" })).rejects.toThrow(
+    await expect(repo.update(id, { actionName: "core:personal_data_query" })).rejects.toThrow(
       "personal_data_private_only",
     );
   });

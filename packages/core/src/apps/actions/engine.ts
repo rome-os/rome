@@ -147,9 +147,9 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "system:publish_event",
   "core:set_agent_name",
   "core:show_file",
-  // Reads of the user-data store (user-data/actions.ts).
-  "core:user_data_catalog",
-  "core:user_data_query",
+  // Reads of the personal-data store (personal-data/actions.ts).
+  "core:personal_data_catalog",
+  "core:personal_data_query",
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",

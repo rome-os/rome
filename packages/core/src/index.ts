@@ -220,9 +220,9 @@ import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
-import { registerUserDataActions } from "./user-data/actions.js";
-import { UserDataRepository } from "./user-data/repository.js";
-import { USER_DATA_SOURCES } from "./user-data/sources/index.js";
+import { registerPersonalDataActions } from "./personal-data/actions.js";
+import { PersonalDataRepository } from "./personal-data/repository.js";
+import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -581,7 +581,7 @@ async function main() {
     const chat = await webchatRepo.getSession(chatId);
     return chat && (chat.ownerKey ?? "guardian") === "guardian" ? "private" : "shared";
   });
-  const userDataRepo = new UserDataRepository(db, USER_DATA_SOURCES);
+  const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
   const routineRunsRepo = new RoutineRunsRepository(db);
   // Runs before the action engine, routine engine, and ingress below exist, so
   // every `running` row it ends belongs to the stopped process.
@@ -1394,8 +1394,8 @@ async function main() {
   });
 
   registerShowFileAction(actionRegistry);
-  registerUserDataActions(actionRegistry, {
-    userData: userDataRepo,
+  registerPersonalDataActions(actionRegistry, {
+    personalData: personalDataRepo,
     guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
   });
   registerTaskRunAction(actionRegistry, concierge);
@@ -2251,7 +2251,7 @@ async function main() {
   try {
     const apiDeps: ApiDeps = {
       agentNameEvents,
-      userData: userDataRepo,
+      personalData: personalDataRepo,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,

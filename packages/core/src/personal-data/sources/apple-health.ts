@@ -1,6 +1,6 @@
 // The Apple Health source: the only Health-specific file in core. The units
 // are the first unit of each type in the iOS app's `HealthTypes.all`, which the
-// phone sends. Contract: docs/user-data.md.
+// phone sends. Contract: docs/personal-data.md.
 
 import type { SourceSpec, TypeSpec, UnitConversion } from "../domain/source.js";
 

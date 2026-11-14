@@ -1460,14 +1460,14 @@ export const connectionGrants = sqliteTable(
   ],
 );
 
-// User data: readings the guardian's devices push to Rome, such as Apple
-// Health. Every row is personal data. Concept: docs/user-data.md. All access
-// goes through packages/core/src/user-data/repository.ts.
+// Personal data: readings the guardian's devices push to Rome, such as Apple
+// Health. Every row is personal data. Concept: docs/personal-data.md. All access
+// goes through packages/core/src/personal-data/repository.ts.
 
 // One stored reading. A sender's key names it, unique per source and origin,
 // so a repeat of the same key replaces the reading instead of adding one.
-export const userDataPoints = sqliteTable(
-  "user_data_points",
+export const personalDataPoints = sqliteTable(
+  "personal_data_points",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     source: text("source").notNull(),
@@ -1494,8 +1494,8 @@ export const userDataPoints = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("uq_user_data_points_key").on(table.source, table.origin, table.dedupeKey),
-    index("idx_user_data_points_query").on(
+    uniqueIndex("uq_personal_data_points_key").on(table.source, table.origin, table.dedupeKey),
+    index("idx_personal_data_points_query").on(
       table.source,
       table.type,
       table.resolution,
@@ -1506,8 +1506,8 @@ export const userDataPoints = sqliteTable(
 
 // The catalog: one row per source, origin and type, kept current by every
 // ingest so reading the catalog never scans points.
-export const userDataTypes = sqliteTable(
-  "user_data_types",
+export const personalDataTypes = sqliteTable(
+  "personal_data_types",
   {
     source: text("source").notNull(),
     origin: text("origin").notNull(),
@@ -1527,8 +1527,8 @@ export const userDataTypes = sqliteTable(
 );
 
 // One row per source and origin: the device that sends it and how its syncs go.
-export const userDataSources = sqliteTable(
-  "user_data_sources",
+export const personalDataSources = sqliteTable(
+  "personal_data_sources",
   {
     source: text("source").notNull(),
     origin: text("origin").notNull(),
@@ -1548,8 +1548,8 @@ export const userDataSources = sqliteTable(
 
 // The server's ingest log, kept 90 days. It counts and ranges, and never holds
 // a reading's value.
-export const userDataIngests = sqliteTable(
-  "user_data_ingests",
+export const personalDataIngests = sqliteTable(
+  "personal_data_ingests",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     source: text("source").notNull(),
@@ -1574,7 +1574,7 @@ export const userDataIngests = sqliteTable(
     response: text("response", { mode: "json" }).$type<Record<string, unknown>>(),
   },
   (table) => [
-    uniqueIndex("uq_user_data_ingests_batch").on(table.source, table.origin, table.batchId),
-    index("idx_user_data_ingests_received").on(table.source, table.receivedAt),
+    uniqueIndex("uq_personal_data_ingests_batch").on(table.source, table.origin, table.batchId),
+    index("idx_personal_data_ingests_received").on(table.source, table.receivedAt),
   ],
 );

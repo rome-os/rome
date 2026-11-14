@@ -1,4 +1,4 @@
-CREATE TABLE `user_data_ingests` (
+CREATE TABLE `personal_data_ingests` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`source` text NOT NULL,
 	`origin` text NOT NULL,
@@ -19,9 +19,9 @@ CREATE TABLE `user_data_ingests` (
 	`response` text
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `uq_user_data_ingests_batch` ON `user_data_ingests` (`source`,`origin`,`batch_id`);--> statement-breakpoint
-CREATE INDEX `idx_user_data_ingests_received` ON `user_data_ingests` (`source`,`received_at`);--> statement-breakpoint
-CREATE TABLE `user_data_points` (
+CREATE UNIQUE INDEX `uq_personal_data_ingests_batch` ON `personal_data_ingests` (`source`,`origin`,`batch_id`);--> statement-breakpoint
+CREATE INDEX `idx_personal_data_ingests_received` ON `personal_data_ingests` (`source`,`received_at`);--> statement-breakpoint
+CREATE TABLE `personal_data_points` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`source` text NOT NULL,
 	`origin` text NOT NULL,
@@ -41,9 +41,9 @@ CREATE TABLE `user_data_points` (
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `uq_user_data_points_key` ON `user_data_points` (`source`,`origin`,`dedupe_key`);--> statement-breakpoint
-CREATE INDEX `idx_user_data_points_query` ON `user_data_points` (`source`,`type`,`resolution`,`start_at`);--> statement-breakpoint
-CREATE TABLE `user_data_sources` (
+CREATE UNIQUE INDEX `uq_personal_data_points_key` ON `personal_data_points` (`source`,`origin`,`dedupe_key`);--> statement-breakpoint
+CREATE INDEX `idx_personal_data_points_query` ON `personal_data_points` (`source`,`type`,`resolution`,`start_at`);--> statement-breakpoint
+CREATE TABLE `personal_data_sources` (
 	`source` text NOT NULL,
 	`origin` text NOT NULL,
 	`origin_name` text,
@@ -58,7 +58,7 @@ CREATE TABLE `user_data_sources` (
 	PRIMARY KEY(`source`, `origin`)
 );
 --> statement-breakpoint
-CREATE TABLE `user_data_types` (
+CREATE TABLE `personal_data_types` (
 	`source` text NOT NULL,
 	`origin` text NOT NULL,
 	`type` text NOT NULL,

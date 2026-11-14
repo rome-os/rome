@@ -1,12 +1,12 @@
-# User data
+# Personal data
 
-The store for the guardian's [user data](concepts/data.md#user-data): what a device pushes, what Rome keeps, and how an agent reads it. The code is in [`packages/core/src/user-data/`](../packages/core/src/user-data/README.md).
+The personal-data store: what the guardian's devices push, what Rome keeps, and how an agent reads it, only in a private turn ([audience](domains/participation.md#audience)). The terms are in [personal data](concepts/data.md#personal-data), and the code is in [`packages/core/src/personal-data/`](../packages/core/src/personal-data/README.md).
 
 ## Scope
 
 A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Health readings fit, and so would location samples or screen time. Calendar events, reminders, contacts and notes do not: they have titles and people, change in place, and are searched by text. A document source gets its own design, with the same personal-data mark, audience rule, origin and ingest log, and never goes into a reading's `fields`.
 
-Each source declares its types in core: the type, its shape, its canonical unit, whether it adds up or averages, and the units a query may convert to. Apple Health's table is [`sources/apple-health.ts`](../packages/core/src/user-data/sources/apple-health.ts).
+Each source declares its types in core: the type, its shape, its canonical unit, whether it adds up or averages, and the units a query may convert to. Apple Health's table is [`sources/apple-health.ts`](../packages/core/src/personal-data/sources/apple-health.ts).
 
 | Shape | What one reading is | Example |
 | --- | --- | --- |
@@ -22,11 +22,11 @@ Every route answers only the guardian's signed-in session, as the iOS app sends 
 
 | Route | Does |
 | --- | --- |
-| `POST /api/user-data/ingest` | Applies one batch |
-| `GET /api/user-data/sources` | The catalog, the same body as `core:user_data_catalog` |
-| `PUT /api/user-data/sources/:source/origins/:origin/state` | Sets `active`, `paused` or `off`, so the agent knows why data stops |
-| `DELETE /api/user-data/sources/:source/origins/:origin` | Deletes every reading and catalog row of the origin, sets it `off`, logs one `deleted` row, and answers `{ deletedPoints }` |
-| `GET /api/user-data/sources/:source/ingests?limit=50` | The ingest log, newest first, at most 500 rows |
+| `POST /api/personal-data/ingest` | Applies one batch |
+| `GET /api/personal-data/sources` | The catalog, the same body as `core:personal_data_catalog` |
+| `PUT /api/personal-data/sources/:source/origins/:origin/state` | Sets `active`, `paused` or `off`, so the agent knows why data stops |
+| `DELETE /api/personal-data/sources/:source/origins/:origin` | Deletes every reading and catalog row of the origin, sets it `off`, logs one `deleted` row, and answers `{ deletedPoints }` |
+| `GET /api/personal-data/sources/:source/ingests?limit=50` | The ingest log, newest first, at most 500 rows |
 
 A state change or a delete for an origin Rome never heard from answers 404.
 
@@ -75,7 +75,7 @@ The ingest log keeps 90 days of rows with counts, ranges and codes, and never a 
 
 ## Agent access
 
-`core:user_data_catalog` takes no input and lists each source and origin: its state, when it last synced, each type with its unit, range, count and `syncedThrough`, and how to read it live. `core:user_data_query` aggregates or lists readings. Main reaches both through `actions: ["*"]`, and the Concierge lists both in `concierge.yaml`.
+`core:personal_data_catalog` takes no input and lists each source and origin: its state, when it last synced, each type with its unit, range, count and `syncedThrough`, and how to read it live. `core:personal_data_query` aggregates or lists readings. Main reaches both through `actions: ["*"]`, and the Concierge lists both in `concierge.yaml`.
 
 Both are personal-data actions. They run only in a private turn and are refused in a shared one with `personal_data_private_only` and a reason the agent passes on ([audience](domains/participation.md#audience)).
 

@@ -823,7 +823,7 @@ export async function buildTestDeps(
     webhookInvocationsRepo,
     routinesRepo,
     routineRunsRepo,
-    userData: new UserDataRepository(db, USER_DATA_SOURCES),
+    personalData: new PersonalDataRepository(db, PERSONAL_DATA_SOURCES),
     routineEngine,
     eventCatalog: new EventCatalog(),
     appCatalog,
@@ -993,8 +993,8 @@ import {
   type TelemetryBridge,
 } from "@rome-os/app-runtime";
 import { testChannelSurface } from "./channel-surface.js";
-import { UserDataRepository } from "../user-data/repository.js";
-import { USER_DATA_SOURCES } from "../user-data/sources/index.js";
+import { PersonalDataRepository } from "../personal-data/repository.js";
+import { PERSONAL_DATA_SOURCES } from "../personal-data/sources/index.js";
 export interface SpanHarness {
   exporter: InMemorySpanExporter;
   shutdown(): Promise<void>;

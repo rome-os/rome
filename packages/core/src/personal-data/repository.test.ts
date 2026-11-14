@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { MAX_POINTS_PER_TYPE } from "./domain/ingest.js";
-import { UserDataRepository } from "./repository.js";
+import { PersonalDataRepository } from "./repository.js";
 import { APPLE_HEALTH } from "./sources/apple-health.js";
-import { USER_DATA_SOURCES } from "./sources/index.js";
+import { PERSONAL_DATA_SOURCES } from "./sources/index.js";
 import {
   batch,
   DAY,
@@ -15,17 +15,17 @@ import {
   weight,
 } from "./__fixtures__/apple-health.js";
 import { sql } from "drizzle-orm";
-import { userDataPoints } from "../db/schema/system.js";
+import { personalDataPoints } from "../db/schema/system.js";
 
 const NOW = NOV_10 + 2 * DAY;
 
-describe("UserDataRepository", () => {
+describe("PersonalDataRepository", () => {
   let testDb: TestDb;
-  let repo: UserDataRepository;
+  let repo: PersonalDataRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new UserDataRepository(testDb.db, USER_DATA_SOURCES);
+    repo = new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES);
   });
   afterEach(() => testDb.close());
 
@@ -40,7 +40,7 @@ describe("UserDataRepository", () => {
     const again = ingest(batch("b-1", { upserts: [stepHour(NOV_10, 999)] }), NOW + 1000);
     expect(again.repeated).toBe(true);
     expect(again.response).toEqual(first.response);
-    const stored = testDb.db.select().from(userDataPoints).all();
+    const stored = testDb.db.select().from(personalDataPoints).all();
     expect(stored.map((row) => row.value)).toEqual([812]);
   });
 
@@ -88,7 +88,7 @@ describe("UserDataRepository", () => {
   it("refuses a sample over the per-type cap", () => {
     testDb.db.run(sql`
       WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${MAX_POINTS_PER_TYPE})
-      INSERT INTO user_data_points
+      INSERT INTO personal_data_points
         (source, origin, type, shape, start_at, end_at, tz, value, unit, dedupe_key, content_hash, ingest_id, updated_at)
       SELECT 'apple_health', ${ORIGIN}, 'bodyMass', 'sample', ${NOV_10} - i * 1000, ${NOV_10} - i * 1000,
         'UTC', 70, 'kg', 'bodyMass:seed-' || i, 'seed', 0, ${NOV_10}
@@ -135,7 +135,7 @@ describe("UserDataRepository", () => {
 
   it("drops metadata keys the source does not allow", () => {
     ingest(batch("b-1", { upserts: [weight(NOV_10, 70.2, "w1")] }));
-    const [row] = testDb.db.select().from(userDataPoints).all();
+    const [row] = testDb.db.select().from(personalDataPoints).all();
     expect(row.metadata).toEqual({ sourceApp: "Health" });
   });
 

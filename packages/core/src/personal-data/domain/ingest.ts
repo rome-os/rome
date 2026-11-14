@@ -1,5 +1,5 @@
 // The ingest contract: the envelope a device sends and the checks each item
-// passes. Contract: docs/user-data.md#ingest.
+// passes. Contract: docs/personal-data.md#ingest.
 
 import { createHash } from "node:crypto";
 import { z } from "zod";
