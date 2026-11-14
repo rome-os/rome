@@ -118,16 +118,6 @@ export function useVoiceInput({
     };
   }, []);
 
-  // An edit clears the notice. The field is mounted for the hook's life.
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    const onInput = () => {
-      if (!inserting) setNotice(null);
-    };
-    el.addEventListener("input", onInput);
-    return () => el.removeEventListener("input", onInput);
-  }, [setNotice, textareaRef]);
 
   const commit = useCallback(
     (heard: string) => {
@@ -211,6 +201,12 @@ export function useVoiceInput({
   }, [commit, deps, setNotice, setValue, textareaRef]);
 
   const dismissNotice = useCallback(() => setNotice(null), [setNotice]);
+  // Runs inside the field's React change handler, so the edit's own value
+  // lands in the same render. A native listener rendered first and put the
+  // old value back, dropping the typed character.
+  const noticeEdited = useCallback(() => {
+    if (!inserting) setNotice(null);
+  }, [setNotice]);
 
   const stop = useCallback(() => {
     if (!dictationRef.current) return;
@@ -232,6 +228,8 @@ export function useVoiceInput({
     asking,
     /** Clears the notice, as a send does. */
     dismissNotice,
+    /** Call from the field's change handler: an edit clears the notice. */
+    noticeEdited,
     /** While true, the field is read-only and sending waits. */
     active: state !== "idle",
     toggle: state === "listening" ? stop : start,

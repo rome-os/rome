@@ -9,6 +9,8 @@ export const SONIOX_DEFAULT_MODEL = "stt-rt-v6";
 interface SonioxToken {
   text: string;
   is_final: boolean;
+  /** Where the token ends, in milliseconds of the stream's audio. */
+  end_ms?: number;
 }
 
 interface SonioxResponse {
@@ -124,15 +126,18 @@ function openSonioxStream(
     }
     let settled = "";
     let pending = "";
+    let spokeUntilMs: number | undefined;
     for (const token of response.tokens ?? []) {
       if (CONTROL_TOKEN.test(token.text)) continue;
       if (token.is_final) settled += token.text;
       else pending += token.text;
+      if (typeof token.end_ms === "number" && token.text.trim())
+        spokeUntilMs = Math.max(spokeUntilMs ?? 0, token.end_ms);
     }
     // Each response replaces the unsettled tail, so one with no tokens clears
     // whatever was still pending.
     if (response.tokens && (settled || pending || shown)) {
-      listener.onText(settled, pending);
+      listener.onText(settled, pending, spokeUntilMs);
       shown = pending !== "";
     }
     if (response.finished) stop(() => listener.onEnd());
