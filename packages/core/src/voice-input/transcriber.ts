@@ -7,8 +7,11 @@ export interface TranscriptionPlace {
   host: string;
 }
 
-/** Why a stream stopped before the client finished it. */
-export type TranscriptionFailure = "unavailable" | "refused";
+/**
+ * Why a stream stopped before the client finished it. `expired` is a
+ * short-lived credential reaching the end of its time.
+ */
+export type TranscriptionFailure = "unavailable" | "refused" | "expired";
 
 export interface TranscriptionListener {
   /**

@@ -35,6 +35,8 @@ export const FINISH_TIMEOUT_MS = 5_000;
 const STOP_REASON: Record<TranscriptionFailure, VoiceInputStopReason> = {
   unavailable: "provider-unavailable",
   refused: "provider-refused",
+  // Rome Cloud's credential lives as long as one dictation may.
+  expired: "time-limit",
 };
 
 /**

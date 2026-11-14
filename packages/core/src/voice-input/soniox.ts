@@ -15,8 +15,12 @@ interface SonioxResponse {
   tokens?: SonioxToken[];
   finished?: boolean;
   error_code?: number;
+  error_type?: string;
   error_message?: string;
 }
+
+// A temporary key's stream reached the time Rome Cloud gave it.
+const EXPIRED = "temp_api_key_session_expired";
 
 // Control tokens such as `<end>` and `<fin>` mark endpoints, not speech.
 const CONTROL_TOKEN = /^<[a-z]+>$/;
@@ -87,13 +91,13 @@ function openSonioxStream(
       return;
     }
     if (response.error_code !== undefined) {
+      const detail = `${response.error_code} ${response.error_message ?? ""}`.trim();
+      const expired =
+        response.error_type === EXPIRED || (response.error_message ?? "").includes(EXPIRED);
       const refused =
         response.error_code === 400 || response.error_code === 401 || response.error_code === 403;
       stop(() =>
-        listener.onFailure(
-          refused ? "refused" : "unavailable",
-          `${response.error_code} ${response.error_message ?? ""}`.trim(),
-        ),
+        listener.onFailure(expired ? "expired" : refused ? "refused" : "unavailable", detail),
       );
       return;
     }

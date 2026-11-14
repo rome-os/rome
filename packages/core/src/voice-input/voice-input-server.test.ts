@@ -240,6 +240,26 @@ describe("voice input socket", () => {
 
     await until(() => fake.closed());
   });
+  it("stops at the time limit, keeping the text, when a temporary key's stream expires", async () => {
+    const fake = await fakeSoniox();
+    const { client, messages, closed } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(Buffer.from([1, 2]));
+    await until(() => fake.received.some((frame) => frame.kind === "audio"));
+    fake.say({ tokens: [{ text: "Hello", is_final: true }] });
+    fake.say({
+      error_code: 408,
+      error_type: "temp_api_key_session_expired",
+      error_message: "temp_api_key_session_expired: the session reached its time limit",
+    });
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "Hello", pending: "" },
+      { type: "error", reason: "time-limit" },
+    ]);
+  });
 });
 
 describe("voice input on Rome Cloud", () => {
