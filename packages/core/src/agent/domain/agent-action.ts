@@ -355,7 +355,23 @@ function shownUiOutput(widget: ShownUi, widgetsShow: boolean, appId?: string): u
     return {
       message:
         "The card could not be shown, because this conversation cannot show cards. " +
-        `Tell the guardian what it would have shown, in a message: ${text}`,
+        `Tell the guardian what it would have shown, in a message: ${text}` +
+        (widget.waits === true ? " Then wait for their reply before doing anything else." : ""),
+    };
+  }
+  if (widget.waits === true) {
+    // The card answers the agent through one of its events, which the app
+    // handles; the answer arrives as the next turn, so the model stops here.
+    return {
+      showWidget: true,
+      waits: true,
+      appId,
+      ui,
+      ...(bind ? { bind } : {}),
+      text,
+      message:
+        `${text} The card has been shown to the guardian, and their answer will arrive as the ` +
+        `next turn's prompt — do not call any further tools or send another message until then.`,
     };
   }
   return {

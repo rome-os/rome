@@ -145,6 +145,7 @@ import {
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
 import { useTaskList } from "@/components/concierge/TaskListPane";
+import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
@@ -1199,18 +1200,25 @@ export function Chat({
   }, [markSessionRead]);
 
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
-  // sidebar list and drop back to a fresh chat.
-  const handleDeleteSession = useCallback(async () => {
-    setDeleteConfirmOpen(false);
-    if (!mainSessionId) return;
-    try {
-      await deleteSession(mainSessionId);
-    } catch {
-      // best-effort — the list refresh below reconciles either way
-    }
-    notifySessionsChanged();
-    navigate(MAIN_CHAT_PATH);
-  }, [mainSessionId, notifySessionsChanged, navigate]);
+  // sidebar list and drop back to a fresh chat. `stopWork` ends a topic
+  // chat's follows and open tasks instead of moving them to the main chat.
+  const handleDeleteSession = useCallback(
+    async (stopWork?: boolean) => {
+      setDeleteConfirmOpen(false);
+      if (!mainSessionId) return;
+      try {
+        if (stopWork) await deleteSession(mainSessionId, { followsAndTasks: "stop" });
+        else await deleteSession(mainSessionId);
+      } catch {
+        // best-effort — the list refresh below reconciles either way
+      }
+      notifySessionsChanged();
+      // `forkable` holds for a common or fork chat, the ordinary chats. Leaving
+      // one for the main chat's page would switch the chat list to Concierge.
+      navigate(forkable ? "/chat" : MAIN_CHAT_PATH);
+    },
+    [forkable, mainSessionId, notifySessionsChanged, navigate],
+  );
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
   // not navigate away — the transcript stays open, read-only. The override flips
@@ -3038,15 +3046,28 @@ export function Chat({
               })
             }
           />
-          <RomeConfirmDialog
-            open={deleteConfirmOpen}
-            destructive
-            title={t("navbar.delete")}
-            description={t("navbar.deleteConfirm")}
-            confirmLabel={t("navbar.delete")}
-            onCancel={() => setDeleteConfirmOpen(false)}
-            onConfirm={() => void handleDeleteSession()}
-          />
+          {/* A topic chat asks, as the sidebar does, what becomes of its
+              follows and open tasks. */}
+          {concierge && mainSessionId && !isMainChat ? (
+            <TopicChatDeleteDialog
+              open={deleteConfirmOpen}
+              chatId={mainSessionId}
+              name={sessionName?.trim() || t("recentChats.newChat", { ns: "common" })}
+              archived={isArchived}
+              onCancel={() => setDeleteConfirmOpen(false)}
+              onConfirm={(stopWork) => void handleDeleteSession(stopWork)}
+            />
+          ) : (
+            <RomeConfirmDialog
+              open={deleteConfirmOpen}
+              destructive
+              title={t("navbar.delete")}
+              description={t("navbar.deleteConfirm")}
+              confirmLabel={t("navbar.delete")}
+              onCancel={() => setDeleteConfirmOpen(false)}
+              onConfirm={() => void handleDeleteSession()}
+            />
+          )}
         </div>
       </TooltipProvider>
     </WidgetHostContext.Provider>

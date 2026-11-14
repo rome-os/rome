@@ -108,7 +108,9 @@ export function WidgetUiCard({
 }: WidgetUiCardProps) {
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
-  const [sendFailed, setSendFailed] = useState(false);
+  // A refused event, with why when core says.
+  const [sendFailed, setSendFailed] = useState<string | false>(false);
+  const [blockedLink, setBlockedLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const result = waiting?.result;
@@ -183,10 +185,17 @@ export function WidgetUiCard({
           turn: widgetHostRef.current.turnFields(),
         });
         if (!outcome.ok) throw new Error(`The widget's event failed: ${outcome.status}`);
-        // A card the agent waits on is answered once core takes the event; any
-        // other card reads its data again.
+        // A link the reply names opens; a card core says is answered locks,
+        // and any other card reads its data again.
         setSendFailed(false);
-        if (host) setSent(true);
+        if (outcome.open) {
+          // A browser lets a page open a tab only right after a click, and the
+          // reply may come later: a blocked tab shows as a link instead.
+          const tab = window.open(outcome.open, "_blank");
+          if (tab) tab.opener = null;
+          else setBlockedLink(outcome.open);
+        }
+        if (outcome.answered && host) setSent(true);
         else {
           await load(p);
           setFailed(false);
@@ -194,7 +203,7 @@ export function WidgetUiCard({
       } catch {
         // A refused event says the send failed; a read after it says the data did.
         if (outcome.ok) setFailed(true);
-        else setSendFailed(true);
+        else setSendFailed(outcome.error ?? "");
       } finally {
         host?.onSettled?.(outcome);
         widgetHostRef.current.onSettled?.(outcome);
@@ -305,8 +314,21 @@ export function WidgetUiCard({
           )}
         </span>
       ) : null}
-      {sendFailed ? (
-        <span className="text-aux text-destructive">{t("stream.errors.sendFallback")}</span>
+      {blockedLink ? (
+        <a
+          href={blockedLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-aux text-primary underline underline-offset-2"
+          onClick={() => setBlockedLink(null)}
+        >
+          {t("appComponent.widgetOpenLink")}
+        </a>
+      ) : null}
+      {sendFailed !== false ? (
+        <span className="text-aux text-destructive">
+          {sendFailed || t("stream.errors.sendFallback")}
+        </span>
       ) : failed ? (
         <span className="text-aux text-destructive">
           {t("appComponent.widgetUnavailable", { text })}

@@ -32,7 +32,7 @@ struct WidgetUIPart: Hashable, Sendable {
     /// A card the agent waits on, described as data: a `pending_interaction`
     /// part whose `render.ui` is set.
     init?(interaction value: JSONValue) {
-        self.init(toolUseId: value["toolUseId"]?.string, appId: value["appId"]?.string, ui: value["render"]?["ui"], text: nil, bind: nil, waits: true)
+        self.init(toolUseId: value["toolUseId"]?.string, appId: value["appId"]?.string, ui: value["render"]?["ui"], text: value["text"]?.string, bind: value["render"]?["bind"], waits: true)
     }
 
     private init?(toolUseId: String?, appId: String?, ui: JSONValue?, text: String?, bind: JSONValue?, waits: Bool) {
@@ -60,6 +60,26 @@ struct WidgetUIPart: Hashable, Sendable {
 }
 
 /// The paths a card reads and writes, and the images it loads.
+/// What core said to an event a widget fired: whether it answered the agent
+/// waiting on the widget, and a link the reply asks the client to open.
+struct WidgetEventReply: Sendable, Equatable {
+    var answered = false
+    var open: URL? = nil
+
+    init(answered: Bool = false, open: URL? = nil) {
+        self.answered = answered
+        self.open = open
+    }
+
+    /// Read from core's JSON reply. Core vets the link; a web link opens as given.
+    init(json: JSONValue) {
+        answered = json["answered"]?.bool == true
+        open = json["open"]?.string.flatMap(URL.init(string:)).flatMap { url in
+            ["https", "http"].contains(url.scheme?.lowercased() ?? "") ? url : nil
+        }
+    }
+}
+
 enum WidgetPaths {
     /// Rome's own strings a card names with `{ string }`: the question card's labels.
     static func hostString(_ name: String) -> String {

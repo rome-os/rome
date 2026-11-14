@@ -41,6 +41,7 @@ rs.mock("@/hooks/use-concierge", () => ({
 const identity = rs.hoisted(() => ({
   current: { sessionName: null } as {
     sessionName: string | null;
+    forkable?: boolean;
     pinnedAgentMention?: { appId: string; appLabel: string; agentName: string; iconUrl: null };
   },
 }));
@@ -73,6 +74,10 @@ rs.mock("./AppWidget", () => ({
     return <iframe title="Seeded app" />;
   },
 }));
+
+function PathProbe() {
+  return <output data-testid="location-path">{useLocation().pathname}</output>;
+}
 
 function NavigationProbe({ withProject }: { withProject: boolean }) {
   const location = useLocation();
@@ -305,6 +310,7 @@ describe("FreeGrid mobile header", () => {
           <QueryClientProvider client={queryClient}>
             <SlotProvider>
               {shell ? null : <SlotOutlet name="mobileHeader" className="header" />}
+              <PathProbe />
               <Routes>
                 <Route element={shell ? <RomeShellLayout /> : <Outlet />}>
                   <Route path="/chat/*" element={<FreeGrid />} />
@@ -429,6 +435,18 @@ describe("FreeGrid mobile header", () => {
     const other = renderAt("/chat/some-other-chat");
     await user.click(await moreButton(other.container));
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+  });
+
+  it.each([
+    ["an ordinary chat, so the chat list stays in Chat mode", true, "/chat"],
+    ["a chat that is not an ordinary one", false, "/message"],
+  ])("lands on the right page after the phone header deletes %s", async (_, forkable, path) => {
+    identity.current = { sessionName: "Plan the launch", forkable };
+    const user = userEvent.setup();
+    const { container } = renderAt("/chat/some-other-chat");
+    await user.click(await moreButton(container));
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByTestId("location-path").textContent).toBe(path));
   });
 });
 

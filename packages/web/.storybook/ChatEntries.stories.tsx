@@ -72,7 +72,7 @@ export const WrappedSubmission: Story = {
     const realFetch = globalThis.fetch;
     globalThis.fetch = fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
-      return new Response("{}", { status: 200 });
+      return Response.json({ answered: true });
     }) as typeof fetch;
     try {
       const answer = "要，中文 + 英文，默认跟随 Rome 界面语言";

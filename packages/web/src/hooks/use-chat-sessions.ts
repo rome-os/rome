@@ -12,6 +12,30 @@ import { CHAT_SESSIONS_CHANGED_EVENT } from "@/lib/session-events";
 /** Prefix shared by every filter's list, so one invalidation reaches them all. */
 const CHAT_SESSIONS_QUERY_KEY = ["chat-sessions"] as const;
 
+/**
+ * The chat with this id from any chat list this tab has loaded, whatever its
+ * filter, or undefined when none holds it. Never fetches.
+ */
+export function findCachedChatSession(
+  queryClient: QueryClient,
+  id: string,
+): ChatSession | undefined {
+  for (const [, list] of queryClient.getQueriesData<ChatSession[]>({
+    queryKey: CHAT_SESSIONS_QUERY_KEY,
+  })) {
+    const found = list?.find((session) => session.id === id);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** Whether this tab has loaded any chat list, so a chat's absence from them means something. */
+export function hasCachedChatSessions(queryClient: QueryClient): boolean {
+  return queryClient
+    .getQueriesData<ChatSession[]>({ queryKey: CHAT_SESSIONS_QUERY_KEY })
+    .some(([, list]) => list !== undefined);
+}
+
 const pendingInvalidations = new WeakMap<QueryClient, Promise<void>>();
 
 /**

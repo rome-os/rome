@@ -453,6 +453,7 @@
   "appComponent": {
     "dismiss": "跳过",
     "widgetUnavailable": "无法读取这张卡片的数据。{{text}}",
+    "widgetOpenLink": "打开页面继续",
     "widgetUndrawable": "无法显示这张卡片。{{text}}"
   },
   "aiToolsCard": {

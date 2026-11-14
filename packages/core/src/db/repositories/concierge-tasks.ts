@@ -209,6 +209,20 @@ export class ConciergeTasksRepository {
   }
 
   /**
+   * Task `id` is archived on its own, with no task chat to archive it with:
+   * it leaves the task list, and no chat brings it back. An archived row
+   * keeps when it was archived.
+   */
+  async archive(id: string, now = new Date()): Promise<void> {
+    const archived = await this.db
+      .update(conciergeTasks)
+      .set({ archivedAt: now, archivedWithChat: false, updatedAt: now })
+      .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.archivedAt)))
+      .returning({ id: conciergeTasks.id });
+    if (archived.length > 0) await this.announce(id, "refresh");
+  }
+
+  /**
    * Archived task chat `chatId` is back, and so is the row of `owner` that
    * archiving it archived. It stays stopped. A row archived before its chat
    * stays archived.

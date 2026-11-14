@@ -33,7 +33,7 @@ import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
 import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { resultSummary, startConciergeEvents } from "./events.js";
-import { MIN_FLUSH_SPACING_MS, RETRY_MS } from "./task-events.js";
+import { MIN_FLUSH_SPACING_MS, RETRY_MS, TaskEventCoalescer } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import { mainChatIdOf } from "./main-chat.js";
 import { createConciergeOwners } from "./owners.js";
@@ -4906,6 +4906,202 @@ describe("Concierge chats", () => {
       '<concierge_chat_retired name="Calendar" how="archived" follows="0" tasks="1"/>',
     );
     await expect(s.service.retireChat(CONCIERGE_CHAT, "deleted")).rejects.toThrow("main");
+  });
+
+  describe("ending a topic chat's follows and tasks before it is deleted", () => {
+    /** "Calendar" has a running task with a task chat, a finished one, and one with no task chat. */
+    const withWork = async () => {
+      const s = setup({ startEvents: false });
+      await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+      s.turnIn(TOPIC_CHAT);
+      await s.tool("say", { text: "On it" });
+      const running = JSON.parse(
+        (await s.tool("chat_start", { title: "Book dentist", brief: "Book it" })).content[0].text,
+      ) as { chatId: string; taskId: string };
+      const made = (await s.tool("task_upsert", {
+        tasks: [{ title: "Old" }, { title: "Loose" }],
+      })) as { content: { text: string }[] };
+      const [oldId, looseId] = (JSON.parse(made.content[0]!.text).tasks as { id: string }[]).map(
+        (task) => task.id,
+      ) as [string, string];
+      await s.taskRepo.setLastOutcome(oldId, "succeeded", new Date(), { reported: false });
+      s.tasks.attachFacts({
+        now: () => Date.now(),
+        running: (chatId) => chatId === running.chatId,
+        openWaits: async () => new Map(),
+        reportPending: () => [],
+      });
+      s.chats.activeTurns = (chatId: string) => (chatId === running.chatId ? ["t1"] : []);
+      const cancelled: string[] = [];
+      s.deps.checks = {
+        cancelFor: async (id: string) => (cancelled.push(id), 0),
+        laterOf: async () => new Map(),
+      } as never;
+      const unfollowed: [string, string, string][] = [];
+      s.service.attachFollowing({
+        followsOfChat: async () => [{ source: "github", label: "GitHub", target: "acme/widgets" }],
+        unfollow: async (source: string, target: string, owner: string) => {
+          unfollowed.push([source, target, owner]);
+          return { removed: true };
+        },
+        moveToMainChat: async () => 0,
+      } as unknown as ConciergeFollowing);
+      return { s, running, oldId, looseId, cancelled, unfollowed };
+    };
+
+    it("lists the follows and the open tasks the delete would move, and not a finished task", async () => {
+      const { s, running, looseId } = await withWork();
+      const work = await s.service.followsAndTasksOf(TOPIC_CHAT, "guardian");
+      expect(work.follows).toEqual([{ source: "github", label: "GitHub", target: "acme/widgets" }]);
+      expect(work.openTasks.map((task) => task.id).sort()).toEqual(
+        [running.taskId, looseId].sort(),
+      );
+      expect(work.openTasks.map((task) => task.title).sort()).toEqual(["Book dentist", "Loose"]);
+    });
+
+    it("ends the follows, interrupts a running turn, cancels the checks and archives the task chat's row", async () => {
+      const { s, running, looseId, oldId, cancelled, unfollowed } = await withWork();
+      await s.service.endChatWork(TOPIC_CHAT);
+      expect(unfollowed).toEqual([["github", "acme/widgets", "guardian"]]);
+      expect(s.chats.interruptTurn).toHaveBeenCalledWith("t1");
+      expect(cancelled).toContain(running.taskId);
+      expect(cancelled).toContain(looseId);
+      expect(await s.taskRepo.get(running.taskId)).toMatchObject({
+        stopReason: "archived",
+        archivedAt: expect.any(Date),
+      });
+      expect(await s.taskRepo.get(looseId)).toMatchObject({
+        stopReason: "guardian",
+        archivedAt: expect.any(Date),
+      });
+      // Ended·stopped, not open, and the finished one is as it was.
+      const status = await s.tasks.statusOf(
+        [(await s.taskRepo.get(running.taskId))!, (await s.taskRepo.get(looseId))!],
+        { asReported: true },
+      );
+      expect([...status.values()].map((one) => one.status)).toEqual(["ended", "ended"]);
+      expect(await s.taskRepo.get(oldId)).toMatchObject({ stopReason: null });
+      // The row with a task chat is archived with it, so the main chat's panel does not list it.
+      await s.service.retireChat(TOPIC_CHAT, "deleted");
+      const panel = (await s.tasks.listForPanel()).map((row) => row.id);
+      expect(panel).not.toContain(running.taskId);
+      expect(await s.service.followsAndTasksOf(TOPIC_CHAT, "guardian")).toMatchObject({
+        openTasks: [],
+      });
+    });
+
+    it("leaves neither kind of stopped task on the main chat's task panel", async () => {
+      const { s, running, looseId, oldId } = await withWork();
+      await s.service.endChatWork(TOPIC_CHAT);
+      await s.storedChats.deleteSession(TOPIC_CHAT);
+      await s.service.retireChat(TOPIC_CHAT, "deleted");
+      const panel = await s.tasks.listForPanel();
+      const ids = panel.map((row) => row.id);
+      // The task with a task chat and the one with none are both gone from it.
+      expect(ids).not.toContain(running.taskId);
+      expect(ids).not.toContain(looseId);
+      // A task that had already finished is untouched, and reads as the main chat's.
+      expect(panel.find((row) => row.id === oldId)?.conciergeChat.main).toBe(true);
+    });
+
+    it("sends the main chat no news of the tasks it ended, and keeps a task it could not end heard", async () => {
+      const { s, running } = await withWork();
+      const events = new TaskEventCoalescer({
+        now: () => Date.now(),
+        render: async () => [],
+        deliver: async () => "completed",
+        giveUp: () => {},
+      });
+      s.service.attachTaskEvents(events);
+      // News the running task held before the delete is dropped too.
+      events.mark({ taskId: running.taskId, kind: "turn_end:completed by=system", urgent: false });
+      await s.service.endChatWork(TOPIC_CHAT);
+      // The interrupted turn ends after the delete; its news is dropped.
+      events.mark({
+        taskId: running.taskId,
+        kind: "turn_end:interrupted by=system",
+        urgent: false,
+      });
+      // The task with no task chat is stopped without a stopped_by_owner report.
+      expect(events.pending).toEqual([]);
+
+      const failing = await withWork();
+      const heard = new TaskEventCoalescer({
+        now: () => Date.now(),
+        render: async () => [],
+        deliver: async () => "completed",
+        giveUp: () => {},
+      });
+      failing.s.service.attachTaskEvents(heard);
+      failing.s.chats.interruptTurn = async () => {
+        throw new Error("turn_not_interruptible");
+      };
+      await failing.s.service.endChatWork(TOPIC_CHAT);
+      // Work that kept running moves to the main chat, and its news still reaches it.
+      heard.mark({
+        taskId: failing.running.taskId,
+        kind: "turn_end:completed by=system",
+        urgent: false,
+      });
+      expect(heard.pending).toEqual([failing.running.taskId]);
+      events.stop();
+      heard.stop();
+    });
+
+    it('leaves the main chat no "chat retired" notice once everything ended', async () => {
+      const { s } = await withWork();
+      await s.service.endChatWork(TOPIC_CHAT);
+      const before = s.backendTurns.length;
+      await s.service.retireChat(TOPIC_CHAT, "deleted");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(
+        s.backendTurns.slice(before).some((turn) => turn.prompt.includes("concierge_chat_retired")),
+      ).toBe(false);
+    });
+
+    it("keeps moving what fails to end, and ends nothing for the main chat or a chat that is gone", async () => {
+      const { s, running, looseId, unfollowed } = await withWork();
+      s.chats.interruptTurn = async () => {
+        throw new Error("turn_not_interruptible");
+      };
+      s.service.attachFollowing({
+        followsOfChat: async () => [{ source: "github", label: "GitHub", target: "acme/widgets" }],
+        unfollow: async () => {
+          throw new Error("connector down");
+        },
+        moveToMainChat: async () => 1,
+      } as unknown as ConciergeFollowing);
+      await s.service.endChatWork(TOPIC_CHAT);
+      // A task whose turn could not be interrupted stays open, neither stopped nor archived.
+      expect(await s.taskRepo.get(running.taskId)).toMatchObject({
+        stoppedAt: null,
+        archivedAt: null,
+      });
+      // The failed follow and that task are still there for retireChat to move and announce.
+      await s.service.retireChat(TOPIC_CHAT, "deleted");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(s.backendTurns.at(-1)?.prompt).toContain(
+        '<concierge_chat_retired name="Calendar" how="deleted" follows="1" tasks="1"/>',
+      );
+      expect(unfollowed).toEqual([]);
+      await s.storedChats.deleteSession(TOPIC_CHAT);
+      const panel = await s.tasks.listForPanel();
+      expect(panel.find((row) => row.id === running.taskId)?.conciergeChat.main).toBe(true);
+      // The task with no task chat had nothing to interrupt, and ended.
+      expect(panel.map((row) => row.id)).not.toContain(looseId);
+      await s.service.endChatWork(CONCIERGE_CHAT);
+      await s.service.endChatWork("gone");
+    });
+
+    it("moves the follows and open tasks as before when nothing ended them", async () => {
+      const { s, unfollowed } = await withWork();
+      await s.service.retireChat(TOPIC_CHAT, "deleted");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unfollowed).toEqual([]);
+      expect(s.backendTurns.at(-1)?.prompt).toContain(
+        '<concierge_chat_retired name="Calendar" how="deleted" follows="0" tasks="2"/>',
+      );
+    });
   });
 
   it("asks once in the digest about a row left a day with no task chat and nothing scheduled", async () => {

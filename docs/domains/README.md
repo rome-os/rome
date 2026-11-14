@@ -66,7 +66,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.
 - Disconnecting the last of Rome's accounts on a platform keeps every link on it.
 - The guardian can start topic chats beside the Concierge's main chat. Each follow and each task reports to one Concierge chat, and a follow's alerts and digest go to that chat.
-- The dashboard's chat list opens with the main chat and its topic chats, then the common chats and task chats under Projects. Chat and the home page open the main chat, and only a common chat or a fork chat can be forked.
+- The dashboard's chat list has two modes. Chat mode lists the common chats and fork chats under Projects, and Concierge mode lists the main chat, its topic chats and the task chats. The home page opens the main chat, and so does the rail's Chat entry in Concierge mode. Only a common chat or a fork chat can be forked.
 - The guardian and every visitor on the dashboard allow-list each have their own Concierge, private to them, with their own follows, tasks, digest times, quiet hours and time zone. Memory is shared.
 - Each Concierge chat's task list, labelled Tasks, lists its tasks, checks, follows and the routines that send into it, for its owner only. The dashboard has no checks strip.
 - The grant names the account it reaches, by platform and the platform's own id.

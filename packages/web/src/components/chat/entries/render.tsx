@@ -241,12 +241,36 @@ export function renderSingleEntry(
           />
         );
       }
+      // An app's card described as data, which the agent waits on: drawn like
+      // any widget, and answered by one of its events, which core routes.
+      if (block.render.ui && block.render.componentId === undefined) {
+        return (
+          <CardBoundary
+            key={`app-widget-${block.toolUseId}`}
+            fallback={
+              block.text ? <p className="text-ui text-muted-foreground">{block.text}</p> : null
+            }
+          >
+            <Suspense fallback={null}>
+              <WidgetUiCard
+                widgetId={widgetId}
+                toolUseId={block.toolUseId}
+                appId={block.appId}
+                ui={block.render.ui}
+                bind={block.render.bind}
+                text={block.text ?? ""}
+                waiting={{ result: resultFor(block.toolUseId) }}
+              />
+            </Suspense>
+          </CardBoundary>
+        );
+      }
       return (
         <AppComponentView
           key={`app-component-${block.toolUseId}`}
           toolUseId={block.toolUseId}
           appId={block.appId}
-          componentId={block.render.componentId}
+          componentId={block.render.componentId ?? ""}
           props={block.render.props}
           result={resultFor(block.toolUseId)}
           onSubmit={submit}
