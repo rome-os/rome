@@ -232,14 +232,45 @@ describe("voice input socket", () => {
 
     client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
     let word = 0;
-    const speaking = setInterval(
-      () => fake.say({ tokens: [{ text: `w${word++} `, is_final: false }] }),
-      50,
-    );
+    const speaking = setInterval(() => {
+      // 50 ms of audio, and a word that ends where it does.
+      client.send(new Uint8Array(1600));
+      word += 1;
+      fake.say({ tokens: [{ text: `w${word} `, is_final: false, end_ms: word * 50 }] });
+    }, 50);
     await closed;
     clearInterval(speaking);
 
     expect(messages.at(-1)).toEqual({ type: "error", reason: "time-limit" });
+  });
+
+  it("counts the quiet from the end of the last word, however late the provider reports it", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      quietLimitMs: 300,
+    });
+    const frame = new Uint8Array(1600); // 50 ms at 16 kHz
+    const audioReceived = () => fake.received.filter((r) => r.kind === "audio").length;
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    for (let i = 0; i < 4; i++) client.send(frame);
+    await until(() => audioReceived() === 4);
+    // At 200 ms of audio the provider reports a word that ended at 100 ms.
+    fake.say({ tokens: [{ text: "hello", is_final: true, end_ms: 100 }] });
+    await until(() => messages.length === 1);
+    while (messages.length < 2) {
+      client.send(frame);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "hello", pending: "" },
+      { type: "error", reason: "no-speech" },
+    ]);
+    // 100 ms + 300 ms of quiet is 8 frames; counting from the report would be 10.
+    expect(audioReceived()).toBe(8);
   });
 
   it("closes a dictation whose provider never finishes after the length limit", async () => {

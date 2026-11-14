@@ -17,8 +17,10 @@ export interface TranscriptionListener {
   /**
    * `settled` is text the provider will not change, to append to what came
    * before. `pending` is the whole unsettled tail, which replaces the last one.
+   * `spokeUntilMs` is where in the stream's audio the last word in this update
+   * ends, when the provider says.
    */
-  onText(settled: string, pending: string): void;
+  onText(settled: string, pending: string, spokeUntilMs?: number): void;
   /** The provider has sent everything after `finish()`. Called once, last. */
   onEnd(): void;
   /** The stream stopped early. Called once, last, and never after `onEnd`. */

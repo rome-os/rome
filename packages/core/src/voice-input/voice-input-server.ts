@@ -213,9 +213,11 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     stream = transcriber.open(
       { sampleRate },
       {
-        onText: (settled, pending) => {
+        onText: (settled, pending, spokeUntilMs) => {
           if (closed) return;
-          if (settled || pending !== lastPending) listenForSpeech();
+          // Without the provider's timing, the words count as heard now.
+          if (settled || pending !== lastPending)
+            spokeUntil = Math.max(spokeUntil, spokeUntilMs ?? audioMs());
           lastPending = pending;
           reply({ type: "text", settled, pending });
         },
@@ -229,17 +231,25 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     for (const chunk of early.splice(0)) stream.sendAudio(chunk);
     if (stopAsked) return finish();
     limit = setTimeout(() => stopFor("time-limit"), maxDictationMs);
-    listenForSpeech();
+    audioArrived();
   }
 
-  // Restarts the wait for speech; it runs out after `quietLimitMs` of nothing heard.
+  // Speech is measured on the audio's own clock: listening stops once
+  // `quietLimitMs` of audio has passed since the end of the last word heard,
+  // however late the provider reports that word. Audio that stops arriving
+  // counts as silence too.
   let lastPending = "";
-  function listenForSpeech() {
+  let spokeUntil = 0;
+  const audioMs = () => (listening ? (bytes / 2 / listening.sampleRate) * 1000 : 0);
+  function audioArrived() {
+    if (finishAsked || !stream) return;
+    if (audioMs() - spokeUntil >= quietLimitMs) return stopFor("no-speech");
     if (quiet) clearTimeout(quiet);
     quiet = setTimeout(() => stopFor("no-speech"), quietLimitMs);
   }
 
   function stopFor(reason: VoiceInputStopReason) {
+    if (finishAsked) return;
     stoppedFor = reason;
     finish();
   }
@@ -255,7 +265,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       if (starting) {
         early.push(chunk);
         earlyBytes += chunk.byteLength;
-      } else stream?.sendAudio(chunk);
+      } else {
+        stream?.sendAudio(chunk);
+        audioArrived();
+      }
       return;
     }
     let parsed: unknown;
