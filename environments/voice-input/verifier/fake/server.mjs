@@ -143,7 +143,7 @@ async function handle(req, res, statePath, script) {
         at: new Date().toISOString(),
       });
       s.logs ??= [];
-      s.logs.push({ msg: "voice input stopped", sessionId, outcome: "stopped" });
+      s.logs.push({ message: "voice input stopped", data: { sessionId, outcome: "ended" } });
     });
     return send(204, "text/plain", "");
   }

@@ -280,7 +280,8 @@ async function dictate(ctx, message) {
   }
   // Rome logs its own count of the session; read it now, before a later restart loses it.
   const stop = (await stopEntries(env)).slice(stopsBefore).at(-1);
-  const sessionId = stop?.sessionId ?? null;
+  // Rome logs its fields under `data`.
+  const sessionId = stop?.data?.sessionId ?? stop?.sessionId ?? null;
   if (sessionId) ctx.memo.romeLogsSessionId = true;
   const usage = sessionId
     ? await waitForSessionUsage(env, sessionId)
