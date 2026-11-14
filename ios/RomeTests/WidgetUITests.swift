@@ -327,7 +327,8 @@ final class Box<T>: @unchecked Sendable {
 }
 
 /// A card drawn again after its view went away, as in a reused list cell,
-/// keeps what the guardian typed when the list keeps its surface.
+/// keeps what the guardian typed when the list keeps its surface, and a
+/// card in another row with the same tool use id keeps its own.
 @MainActor @Suite(.serialized) struct WidgetSurfacesTests {
     @MainActor @Observable final class Shown { var on = true }
 
@@ -340,9 +341,12 @@ final class Box<T>: @unchecked Sendable {
             VStack {
                 if shown.on {
                     WidgetUICardView(part: part, call: { _, _, _ in throw APIError.notFound }, waiting: .init(answered: nil))
+                        .environment(\.widgetSurfaces, kept.row("r1"))
                 }
+                // The same tool use id in a later turn: a card of its own.
+                WidgetUICardView(part: part, call: { _, _, _ in throw APIError.notFound }, waiting: .init(answered: nil))
+                    .environment(\.widgetSurfaces, kept.row("r2"))
             }
-            .environment(\.widgetSurfaces, kept)
         }
     }
 
@@ -365,16 +369,19 @@ final class Box<T>: @unchecked Sendable {
             window.rootViewController = nil
             window.windowScene = nil
         }
-        let surface = kept.surface(for: part.toolUseId)
-        for _ in 0..<100 where !surface.loaded { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(surface.loaded, "the card did not draw from the kept surface")
+        let surface = kept.surface(row: "r1", card: part.toolUseId)
+        let other = kept.surface(row: "r2", card: part.toolUseId)
+        for _ in 0..<100 where !surface.loaded || !other.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(surface.loaded && other.loaded, "the cards did not draw from the kept surfaces")
+        #expect(surface !== other)
         surface.viewModel?.dataModel.set("/answers/0/text", value: .string("Soup"))
 
         shown.on = false
         try await Task.sleep(for: .milliseconds(100))
         shown.on = true
         try await Task.sleep(for: .milliseconds(300))
-        #expect(kept.surface(for: part.toolUseId) === surface)
+        #expect(kept.surface(row: "r1", card: part.toolUseId) === surface)
         #expect(surface.viewModel?.dataModel.get("/answers/0/text")?.stringValue == "Soup")
+        #expect(other.viewModel?.dataModel.get("/answers/0/text")?.stringValue != "Soup")
     }
 }

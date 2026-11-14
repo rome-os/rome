@@ -38,16 +38,29 @@ struct WidgetUICardView: View {
 final class WidgetSurfaces {
     private var surfaces: [String: WidgetSurface] = [:]
 
-    func surface(for id: String) -> WidgetSurface {
-        if let surface = surfaces[id] { return surface }
+    /// A tool use id repeats across turns, so a card is known by its row too.
+    func surface(row: String, card: String) -> WidgetSurface {
+        let key = "\(row)/\(card)"
+        if let surface = surfaces[key] { return surface }
         let surface = WidgetSurface()
-        surfaces[id] = surface
+        surfaces[key] = surface
         return surface
+    }
+
+    /// The surfaces of the cards in one row.
+    func row(_ id: String) -> Row { Row(surfaces: self, id: id) }
+
+    @MainActor
+    struct Row {
+        let surfaces: WidgetSurfaces
+        let id: String
+
+        func surface(for card: String) -> WidgetSurface { surfaces.surface(row: id, card: card) }
     }
 }
 
 extension EnvironmentValues {
-    @Entry var widgetSurfaces: WidgetSurfaces? = nil
+    @Entry var widgetSurfaces: WidgetSurfaces.Row? = nil
 }
 
 private struct WidgetCardBody: View {
@@ -238,7 +251,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
                 guard reply.ok else { throw APIError.server(status: 500, message: nil) }
                 values.append((pointer, reply.body))
             }
-            guard read == reads else { return }
+            guard read == reads, !Task.isCancelled else { return }
             for (pointer, value) in values {
                 _ = send("updateDataModel", [
                     "surfaceId": .string(part.toolUseId), "path": .string(pointer), "value": value,
@@ -246,6 +259,8 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             }
             failed = false
         } catch {
+            // A card whose view went away mid-read keeps its last state.
+            if Task.isCancelled { return }
             if read == reads { failed = true }
         }
         loaded = true

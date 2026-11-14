@@ -679,7 +679,7 @@ private struct RowHost: View {
         build(box.row, box.previous)
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()
-            .environment(\.widgetSurfaces, cells.surfaces)
+            .environment(\.widgetSurfaces, cells.surfaces.row(box.row.id))
             .environment(\.self, cells.environment)
     }
 }
