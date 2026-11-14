@@ -147,7 +147,7 @@ export function resultSummary(text: string): string | null {
   const body = (
     conclusion.kind === "found" && !hasNothingToReport(text)
       ? conclusion.text
-      : withoutConclusion(withoutMarkers(text))
+      : withoutMarkers(withoutConclusion(text))
   )
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/[`*_#>]/g, "")
@@ -675,16 +675,20 @@ export function startConciergeEvents(
     const question = event.status === "completed" ? openQuestion(rows) : null;
     // A scheduled turn that finished with no question, approval or error
     // needs no word: its result waits for no report.
-    // A result that says it has nothing to report owes no report either:
-    // the guardian already knows it, so no Concierge turn hears of it.
     const finalText =
       event.status === "completed" && !question
         ? event.output.text?.trim() ||
           userText(rows.filter((row) => row.role === "assistant").at(-1)?.content ?? "")
         : "";
-    // A wish for the work to recur is still news for the Concierge.
+    // A turn that only carries out what the guardian chose on the task's
+    // card or decided on its approval, and says it has nothing to report,
+    // owes no report: the card already shows it, so no Concierge turn hears
+    // of it. Any other turn reports as usual, and so does a wish for the
+    // work to recur, which is news for the Concierge.
+    const carriesOwnersChoice =
+      (carriesApproval && !turnedDownByRome) || userRows.some((row) => answersCard(row.content));
     const nothingNew =
-      !carriesApproval && hasNothingToReport(finalText) && recurringOf(finalText) === null;
+      carriesOwnersChoice && hasNothingToReport(finalText) && recurringOf(finalText) === null;
     const passive =
       nothingNew ||
       (by === "system" && event.status === "completed" && !carriesApproval && !question);

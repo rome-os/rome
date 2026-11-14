@@ -2972,6 +2972,8 @@ describe("Concierge events", () => {
     expect(resultSummary(concluded(NOTHING_TO_REPORT, "Wrote notes.md. It has two lines."))).toBe(
       "Wrote notes.md.",
     );
+    // A reply with no stop of its own never runs into the no-news line.
+    expect(resultSummary(concluded(NOTHING_TO_REPORT, "Saved Tea"))).toBe("Saved Tea");
     const long = resultSummary(`${"word ".repeat(60)}end.`);
     expect(long?.length).toBe(CONCIERGE_TASK_SUMMARY_MAX_LENGTH);
     expect(long?.endsWith("…")).toBe(true);
@@ -3034,12 +3036,24 @@ describe("Concierge events", () => {
     expect((await s.taskRepo.get(taskId))?.summary).toBe("Eric replied");
   });
 
-  it("tells the Concierge nothing of a result whose conclusion has nothing to report", async () => {
+  /** The guardian answered task chat `chatId`'s card in turn `turnId`. */
+  const answeredCard = (s: ReturnType<typeof setup>, chatId: string, turnId: string) =>
+    s.messages.get(chatId)?.push({
+      id: `answer-${turnId}`,
+      role: "user",
+      content: JSON.stringify([
+        { type: "interaction_result", toolUseId: "ask-1", output: { answers: ["Tea"] } },
+      ]),
+      turnId,
+    });
+
+  it("tells the Concierge nothing of a turn that only carries out the guardian's card answer", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
     s.fakeTimers();
+    answeredCard(s, chatId, "task-turn-2");
     await s.finish({
-      turnId: "task-turn-1",
+      turnId: "task-turn-2",
       agentName: "core:main",
       chatId,
       text: concluded(NOTHING_TO_REPORT, "Saved Tea as your afternoon drink."),
@@ -3048,6 +3062,25 @@ describe("Concierge events", () => {
     expect(s.backendTurns).toEqual([]);
     // The row's line comes from the reply, not the no-news line.
     expect((await s.taskRepo.get(taskId))?.summary).toBe("Saved Tea as your afternoon drink.");
+  });
+
+  it("still reports a turn the Concierge's own brief started, even with nothing to report", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: concluded(NOTHING_TO_REPORT) }]),
+    });
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      text: concluded(NOTHING_TO_REPORT),
+    });
+    await rs.advanceTimersByTimeAsync(2_100);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain(`conclusion: ${NOTHING_TO_REPORT}`);
   });
 
   it("tells the Concierge of a wish for the work to recur, even with nothing else to report", async () => {
@@ -3469,6 +3502,33 @@ describe("Concierge events", () => {
     expect(s.backendTurns).toEqual([]);
     await rs.advanceTimersByTimeAsync(58_000);
     expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=guardian"');
+    expect(s.quietFlags).toEqual([true]);
+  });
+
+  it("wakes no urgent turn for an approved action that has nothing to report, and tells the decision quietly", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.chats.activeTurns = () => [];
+    s.resolveApproval({ status: "approved", payload: { channelContext: { threadId: chatId } } });
+    s.messages.get(chatId)?.push({
+      id: "result",
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: "Wrote eval-approve.txt." }]),
+      turnId: "task-turn-2",
+    });
+    await s.finish({
+      turnId: "task-turn-2",
+      agentName: "core:main",
+      chatId,
+      text: concluded(NOTHING_TO_REPORT, "Wrote eval-approve.txt."),
+      startedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain('changes="approval_decided"');
     expect(s.quietFlags).toEqual([true]);
   });
 
@@ -6142,6 +6202,14 @@ describe("Concierge status reactions", () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId } = await started(s);
+      s.messages.get(chatId)?.push({
+        id: "answer",
+        role: "user",
+        content: JSON.stringify([
+          { type: "interaction_result", toolUseId: "ask-1", output: { answers: ["Tea"] } },
+        ]),
+        turnId: "task-turn-1",
+      });
       await s.finish({
         turnId: "task-turn-1",
         agentName: "core:main",

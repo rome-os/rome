@@ -45,7 +45,13 @@ du -sh "$S"
 const RESTORE_SCRIPT = String.raw`
 set -eu
 S="${SNAPSHOTS}/$NAME"
+# Everything that can fail is checked before the first live file is
+# replaced, so a bad snapshot never leaves the stack half restored.
 [ -e "$S/default/rome.db" ] || { echo "no snapshot at $S" >&2; exit 3; }
+for d in "$S/default/memory" "$S/default/projects"; do
+  [ -d "$d" ] || { echo "snapshot $S lacks $(basename "$d")" >&2; exit 3; }
+done
+case "$OWNER" in ""|[0-9]*) ;; *) echo "unexpected owner: $OWNER" >&2; exit 3 ;; esac
 rm -f "${PROFILE}/rome.db" "${PROFILE}/rome.db-wal" "${PROFILE}/rome.db-shm"
 for f in rome.db rome.db-wal rome.db-shm; do
   [ -e "$S/default/$f" ] && cp -a "$S/default/$f" "${PROFILE}/"
@@ -63,7 +69,12 @@ for f in "$S/codex/"*.sqlite*; do [ -e "$f" ] && cp -a "$f" /rome-home/.codex/; 
 if [ -d "$S/claude/projects" ]; then rm -rf /rome-home/.claude/projects && cp -a "$S/claude/projects" /rome-home/.claude/projects; fi
 # The copy runs as root, and the volumes keep what it wrote as root: hand
 # them back to the user the backend runs as, or it cannot read them.
-if [ -n "$OWNER" ]; then chown -R "$OWNER" /rome-home/.claude /rome-home/.codex; fi
+# A provider the stack never used has no folder to hand back.
+if [ -n "$OWNER" ]; then
+  for d in /rome-home/.claude /rome-home/.codex; do
+    if [ -d "$d" ]; then chown -R "$OWNER" "$d"; fi
+  done
+fi
 echo "restored $(cat "$S/created-at")"
 `;
 
