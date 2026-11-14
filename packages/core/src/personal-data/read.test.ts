@@ -147,6 +147,88 @@ describe("queryPersonalData", () => {
     });
   });
 
+  it("places a night of sleep on the day it ends, by its wake date", () => {
+    // 23:30 on Nov 12 to 07:00 on Nov 13, Shanghai time.
+    const wake = NOV_10 + 3 * DAY + 7 * HOUR;
+    repo.ingest(
+      APPLE_HEALTH,
+      batch("late-night", {
+        upserts: [
+          { ...sleepNight(wake, 390, 50), start: new Date(wake - 7.5 * HOUR).toISOString() },
+        ],
+      }),
+      NOW,
+    );
+    expect(
+      query({ type: "sleep", start: "2026-11-13", end: "2026-11-13" }).results[0],
+    ).toMatchObject({
+      value: 390,
+      count: 1,
+    });
+    const days = query({ type: "sleep", start: "2026-11-11", end: "2026-11-13", interval: "day" });
+    expect(
+      (days.results[0] as { buckets: { startISO: string; value: number }[] }).buckets.map((b) => [
+        b.startISO.slice(0, 10),
+        b.value,
+      ]),
+    ).toEqual([
+      ["2026-11-11", 400],
+      ["2026-11-12", 420],
+      ["2026-11-13", 390],
+    ]);
+  });
+
+  it("averages what comes with a record when it averages the record", () => {
+    expect(
+      query({ type: "sleep", start: "2026-11-10", end: "2026-11-12", aggregate: "avg" }).results[0],
+    ).toMatchObject({ value: 410, count: 2, fields: { deep: 65, rem: 90 } });
+  });
+
+  it("adds up hours for a day the device sent no day bucket for", () => {
+    const nov12 = NOV_10 + 2 * DAY;
+    repo.ingest(
+      APPLE_HEALTH,
+      batch("hours-only", { upserts: [stepHour(nov12, 300), stepHour(nov12 + HOUR, 200)] }),
+      NOW,
+    );
+    const days = query({
+      type: "stepCount",
+      start: "2026-11-10",
+      end: "2026-11-12",
+      interval: "day",
+    });
+    expect(days.results[0]).toMatchObject({
+      aggregate: "sum",
+      buckets: [{ value: 8000 }, { value: 6000 }, { value: 500 }],
+    });
+  });
+
+  it("reads each type from the origin that covers it furthest", () => {
+    const later = new Date(NOW).toISOString();
+    repo.ingest(
+      APPLE_HEALTH,
+      {
+        ...batch("ipad-1", {
+          upserts: [stepDay(NOV_10, 100)],
+          types: [{ type: "stepCount", syncedThrough: later }],
+        }),
+        origin: { id: "second-origin", name: "iPad", platform: "ios" },
+      },
+      NOW,
+    );
+    expect(
+      query({ type: "stepCount", start: "2026-11-10", end: "2026-11-10" }).results[0],
+    ).toMatchObject({
+      value: 100,
+    });
+    // The first origin still answers for the types only it has.
+    expect(
+      query({ type: "sleep", start: "2026-11-10", end: "2026-11-12" }).results[0],
+    ).toMatchObject({
+      value: 820,
+    });
+  });
+
   it("converts units and takes the latest sample", () => {
     expect(
       query({

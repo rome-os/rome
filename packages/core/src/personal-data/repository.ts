@@ -1,6 +1,6 @@
 // The personal-data store's one way into the database. Concept: docs/personal-data.md.
 
-import { and, asc, count, desc, eq, gt, gte, lt, max, min, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, lt, max, min, ne, or, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
   personalDataIngests,
@@ -19,6 +19,9 @@ import {
 import type { StoredPoint } from "./domain/query.js";
 import type { Resolution, Shape, SourceSpec } from "./domain/source.js";
 import { typeSpec } from "./domain/source.js";
+
+/** How far ahead of Rome's clock a device may report a type synced. */
+const MAX_CLOCK_AHEAD_MS = 86_400_000;
 
 /** How long the ingest log keeps a row. */
 const INGEST_LOG_DAYS = 90;
@@ -133,6 +136,8 @@ export class PersonalDataRepository {
         .get().id;
 
       const counts = { inserted: 0, updated: 0, unchanged: 0, deleted: 0 };
+      // Rows per type, counted once per batch and kept current as it inserts.
+      const stored = new Map<string, number>();
       const rejected: Rejected[] = [];
       const touched = new Set<string>();
       let rangeStart: number | undefined;
@@ -149,7 +154,7 @@ export class PersonalDataRepository {
           return;
         }
         const item = checked.item;
-        const outcome = writePoint(tx, source.source, origin, item, ingestId, receivedAt);
+        const outcome = writePoint(tx, source.source, origin, item, ingestId, receivedAt, stored);
         if (outcome === "type_cap") {
           rejected.push({ index, key: item.key, code: "type_cap" });
           return;
@@ -192,7 +197,10 @@ export class PersonalDataRepository {
       const syncedThrough = new Map<string, number>();
       for (const entry of envelope.types) {
         if (!typeSpec(source, entry.type) || !entry.syncedThrough) continue;
-        syncedThrough.set(entry.type, Date.parse(entry.syncedThrough));
+        const at = Date.parse(entry.syncedThrough);
+        // A device clock ahead of Rome's would mark the type covered for good.
+        if (at > receivedAt + MAX_CLOCK_AHEAD_MS) continue;
+        syncedThrough.set(entry.type, at);
         touched.add(entry.type);
       }
       for (const type of touched) {
@@ -286,28 +294,45 @@ export class PersonalDataRepository {
       .sort((a, b) => Number(b.state === "active") - Number(a.state === "active"));
   }
 
-  /** The origin a query reads: the active one, else the one that synced last. */
-  currentOrigin(source: string): string | undefined {
-    const rows = this.db
-      .select({ origin: personalDataSources.origin, state: personalDataSources.state })
-      .from(personalDataSources)
-      .where(eq(personalDataSources.source, source))
-      .orderBy(desc(personalDataSources.lastSyncAt))
-      .all();
-    return (rows.find((row) => row.state === "active") ?? rows[0])?.origin;
-  }
-
-  /** The origin's synced-through time per type. */
-  syncedThrough(source: string, origin: string): Map<string, number> {
-    const rows = this.db
-      .select({ type: personalDataTypes.type, at: personalDataTypes.syncedThroughAt })
+  /**
+   * The origin a query of `type` reads: the one whose device reports the type
+   * synced furthest, then the one with the latest reading. An origin set off
+   * is never read. Undefined when no origin has the type.
+   */
+  originFor(
+    source: string,
+    type: string,
+  ): { origin: string; syncedThroughAt: number | null } | undefined {
+    return this.db
+      .select({
+        origin: personalDataTypes.origin,
+        syncedThroughAt: personalDataTypes.syncedThroughAt,
+      })
       .from(personalDataTypes)
-      .where(and(eq(personalDataTypes.source, source), eq(personalDataTypes.origin, origin)))
-      .all();
-    return new Map(rows.flatMap((row) => (row.at === null ? [] : [[row.type, row.at]])));
+      .innerJoin(
+        personalDataSources,
+        and(
+          eq(personalDataSources.source, personalDataTypes.source),
+          eq(personalDataSources.origin, personalDataTypes.origin),
+        ),
+      )
+      .where(
+        and(
+          eq(personalDataTypes.source, source),
+          eq(personalDataTypes.type, type),
+          ne(personalDataSources.state, "off"),
+        ),
+      )
+      .orderBy(
+        sql`coalesce(${personalDataTypes.syncedThroughAt}, 0) desc`,
+        sql`coalesce(${personalDataTypes.latestAt}, 0) desc`,
+      )
+      .limit(1)
+      .get();
   }
 
-  /** An origin's points of one type that start in `[from, to)`, oldest first. */
+  /** An origin's points of one type that start in `[from, to)`, or end in it
+   *  with `by: "end"`, oldest first. */
   points(
     source: string,
     origin: string,
@@ -315,6 +340,7 @@ export class PersonalDataRepository {
     range: {
       from: number;
       to: number;
+      by?: "start" | "end";
       resolution?: Resolution;
       after?: { startAt: number; id: number };
       limit?: number;
@@ -341,8 +367,11 @@ export class PersonalDataRepository {
           eq(personalDataPoints.type, type),
           range.resolution ? eq(personalDataPoints.resolution, range.resolution) : undefined,
           eq(personalDataPoints.origin, origin),
-          gte(personalDataPoints.startAt, range.from),
-          lt(personalDataPoints.startAt, range.to),
+          gte(
+            range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt,
+            range.from,
+          ),
+          lt(range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt, range.to),
           after
             ? or(
                 gt(personalDataPoints.startAt, after.startAt),
@@ -482,6 +511,7 @@ function writePoint(
   item: PointInput,
   ingestId: number,
   now: number,
+  stored: Map<string, number>,
 ): "inserted" | "updated" | "unchanged" | "type_cap" {
   const existing = tx
     .select({ id: personalDataPoints.id, hash: personalDataPoints.contentHash })
@@ -514,23 +544,31 @@ function writePoint(
     tx.update(personalDataPoints).set(values).where(eq(personalDataPoints.id, existing.id)).run();
     return "updated";
   }
+  let held: number | undefined;
   if (item.shape !== "bucket") {
-    const stored = tx
-      .select({ n: count() })
-      .from(personalDataPoints)
-      .where(
-        and(
-          eq(personalDataPoints.source, source),
-          eq(personalDataPoints.type, item.type),
-          eq(personalDataPoints.origin, origin),
-        ),
-      )
-      .get();
-    if ((stored?.n ?? 0) >= MAX_POINTS_PER_TYPE) return "type_cap";
+    held =
+      stored.get(item.type) ??
+      tx
+        .select({ n: count() })
+        .from(personalDataPoints)
+        .where(
+          and(
+            eq(personalDataPoints.source, source),
+            eq(personalDataPoints.type, item.type),
+            eq(personalDataPoints.origin, origin),
+          ),
+        )
+        .get()?.n ??
+      0;
+    if (held >= MAX_POINTS_PER_TYPE) {
+      stored.set(item.type, held);
+      return "type_cap";
+    }
   }
   tx.insert(personalDataPoints)
     .values({ source, origin, dedupeKey: item.key, ...values })
     .run();
+  if (held !== undefined) stored.set(item.type, held + 1);
   return "inserted";
 }
 
@@ -567,13 +605,26 @@ function refreshType(
     latestAt: stats?.latest ?? null,
     pointCount: stats?.n ?? 0,
     updatedAt: now,
-    ...(syncedThroughAt !== undefined ? { syncedThroughAt } : {}),
   };
   tx.insert(personalDataTypes)
-    .values({ source: source.source, origin, type, ...values })
+    .values({
+      source: source.source,
+      origin,
+      type,
+      ...values,
+      syncedThroughAt: syncedThroughAt ?? null,
+    })
     .onConflictDoUpdate({
       target: [personalDataTypes.source, personalDataTypes.origin, personalDataTypes.type],
-      set: values,
+      // Synced-through only moves forward: a late batch from an older sync
+      // does not take back what a newer one reported.
+      set:
+        syncedThroughAt === undefined
+          ? values
+          : {
+              ...values,
+              syncedThroughAt: sql`max(coalesce(${personalDataTypes.syncedThroughAt}, 0), ${syncedThroughAt})`,
+            },
     })
     .run();
 }

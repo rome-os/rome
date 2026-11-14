@@ -26,6 +26,12 @@ export interface TypeSpec {
   /** The bucket widths a device sends, for a bucket type. */
   resolutions?: readonly Resolution[];
   rollup: Rollup;
+  /**
+   * Which end of a reading places it in a window and a bucket. `end` for a
+   * reading named by when it ends, such as a night of sleep by its wake time.
+   * Default `start`.
+   */
+  bucketBy?: "start" | "end";
   /** Other units a query may convert to. */
   conversions?: readonly UnitConversion[];
   /** A short line for the Agent. */

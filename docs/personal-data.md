@@ -51,10 +51,10 @@ A state change or a delete for an origin Rome never heard from answers 404.
 - A batch id the origin already sent answers the answer it got then and writes nothing. An upsert whose stored fields are unchanged counts as `unchanged`, and so does a delete of a missing key. A retry after a lost answer is always safe.
 - Each item is checked on its own. A refused item is listed in `rejected` with its index and code, the rest applies, and the status is `partial`. The index counts upserts first, then deletes after them.
 - A bad envelope (another version, an unknown source, a missing origin or batch) is refused whole with 400.
-- One batch takes at most 2,000 items and 1 MB, or it is refused with 413. An origin may send 60 batches a minute. Over that, it gets 429 with `Retry-After`.
+- One batch takes at most 2,000 items and 1 MB, with or without a Content-Length, or it is refused with 413. An origin may send 60 batches a minute. Over that, it gets 429 with `Retry-After`.
 - One batch is one transaction, the catalog included.
 - A batch brings its origin back to `active`, and refreshes the origin's name and app version.
-- `syncedThrough` is how far the device reports a type complete, which is not the latest reading: a day with no steps still counts as synced.
+- `syncedThrough` is how far the device reports a type complete, which is not the latest reading: a day with no steps still counts as synced. It only moves forward, and a value more than a day ahead of Rome's clock is ignored.
 - The metadata keys a source allows are kept, and others are dropped.
 
 | Code | Why the item is refused |
@@ -99,11 +99,11 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 ```
 
 - An ISO time without an offset, and a date, are read in `timeZone`. A date as `end` means the end of that day. With no `start`, the window starts at the local midnight of the day that ends at `end`.
-- `hour` reads hour buckets. `day` reads the device's day buckets when the window starts at a local midnight and every day bucket is in `timeZone`, and adds hours up otherwise. `week`, `month` and `total` roll up from days. Weeks start on Monday.
+- `hour` reads hour buckets. When the window starts at a local midnight, `day` reads the device's day bucket for each day that has one in `timeZone`, and adds up the hours of each other day. Otherwise it adds up hours. `week`, `month` and `total` roll up from days. Weeks start on Monday.
 - A summed type adds up. An averaged type takes the mean of its daily averages, labelled `avg_of_days`, or of its hours, labelled `avg_of_hours`. `min` and `max` are the exact extremes. `latest` does not fit a summed type, and `sum` does not fit an averaged one.
-- A sample or record belongs to the bucket it starts in. A record adds up what comes with it, such as minutes per sleep stage, and counts how many there were.
+- A sample or record belongs to the bucket it starts in. A night of sleep belongs to the day it ends on, as its key says. A record adds up what comes with it, such as minutes per sleep stage, and counts how many there were. An averaged record averages what comes with it too.
 - A bucket with no value is left out, never 0.
-- A query reads the source's active origin, or the one that synced last.
+- Each type is read from one origin: the one that reports it synced furthest, then the one with the latest reading. An origin set off is never read. A second device, or a new origin after a sign-in, takes over a type once it has caught up.
 
 ```json
 {
@@ -122,4 +122,5 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 
 - Core refuses a personal-data action in a shared turn before it runs, and refuses a routine that reads personal data unless it works for a private chat.
 - The live path goes through the agent's shell, where core sees no action. The agent's session carries `ROME_TURN_AUDIENCE`, and `rome-node device run` refuses a personal capability (Health on any device, and any capability `system.info` marks `personal`) while it says `shared`. The agent could unset the variable, so this is a guardrail against a model mistake, not a security boundary.
+- A private turn can still send what it read elsewhere, with `send_message` or an email, and a Concierge turn woken by outside content, such as a mail it follows, is private. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
 - What an agent already wrote into memory or a chat is not checked. The system prompt tells it not to repeat the guardian's personal data in a shared chat, and only the model keeps that rule.

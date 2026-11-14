@@ -87,6 +87,8 @@ export const APPLE_HEALTH: SourceSpec = {
       shape: "record",
       unit: "min",
       rollup: "sum",
+      // A night is the day it ends on, as its key says.
+      bucketBy: "end",
       note: "One record per night, keyed by its wake date: asleep minutes, with minutes per stage in fields.",
     },
     {

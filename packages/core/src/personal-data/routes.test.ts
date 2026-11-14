@@ -41,6 +41,39 @@ describe("/personal-data routes", () => {
     expect((await send("/personal-data/sources", {}, `${COOKIE_NAME}=forged`)).status).toBe(403);
   });
 
+  it("refuses the guardian's loopback session, which an agent's shell has", async () => {
+    const loopback = personalDataRoutes({
+      db: testDb.db,
+      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
+      guardianSession: async () => ({ userId: "guardian-seat", via: "loopback" }),
+    });
+    expect((await loopback.request("/personal-data/sources")).status).toBe(403);
+    const cookie = personalDataRoutes({
+      db: testDb.db,
+      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
+      guardianSession: async () => ({ userId: "guardian-seat", via: "cookie" }),
+    });
+    expect((await cookie.request("/personal-data/sources")).status).toBe(200);
+  });
+
+  it("refuses a chunked body over 1 MB that names no length", async () => {
+    const chunk = new TextEncoder().encode(" ".repeat(64 * 1024));
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent++ < 20) controller.enqueue(chunk);
+        else controller.close();
+      },
+    });
+    const response = await app.request("/personal-data/ingest", {
+      method: "POST",
+      body,
+      headers: { cookie: GUARDIAN_COOKIE, "content-type": "application/json" },
+      duplex: "half",
+    } as RequestInit);
+    expect(response.status).toBe(413);
+  });
+
   it("ingests a batch and answers its counts, then lists the source", async () => {
     const response = await ingest(batch("b-1", { upserts: [stepHour(NOV_10, 812)] }));
     expect(response.status).toBe(200);

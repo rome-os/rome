@@ -195,18 +195,36 @@ export function windowBuckets(plan: Pick<QueryPlan, "start" | "end" | "tz" | "in
   return buckets;
 }
 
-/** Whether a query of `spec` can read the device's day buckets, which hold the
- *  device's own day statistics, rather than adding up hours. */
+/** Whether a query can read the device's day buckets, which hold the device's
+ *  own day statistics, rather than adding up hours. */
 export function readsDayBuckets(
   plan: Pick<QueryPlan, "start" | "end" | "tz" | "interval">,
-  days: readonly StoredPoint[],
   now: number,
 ): boolean {
   if (plan.interval === "hour") return false;
   if (!isMidnight(plan.start, plan.tz)) return false;
   // An end inside a past day would count that whole day.
-  if (!isMidnight(plan.end, plan.tz) && plan.end < now - 60_000) return false;
-  return days.length > 0 && days.every((day) => day.tz === plan.tz);
+  return isMidnight(plan.end, plan.tz) || plan.end >= now - 60_000;
+}
+
+/**
+ * One reading per day: the device's day bucket where it has one in the plan's
+ * zone, and the day's hours added up where it does not. `deviceOnly` says
+ * whether every day came from the device.
+ */
+export function mergeDays(
+  spec: TypeSpec,
+  plan: QueryPlan,
+  deviceDays: readonly StoredPoint[],
+  hours: readonly StoredPoint[],
+): { days: StoredPoint[]; deviceOnly: boolean } {
+  const fromDevice = deviceDays.filter((day) => day.tz === plan.tz);
+  const covered = new Set(fromDevice.map((day) => day.startAt));
+  const filled = daysFromHours(spec, plan, hours).filter((day) => !covered.has(day.startAt));
+  return {
+    days: [...fromDevice, ...filled].sort((a, b) => a.startAt - b.startAt),
+    deviceOnly: filled.length === 0,
+  };
 }
 
 interface Reading {
@@ -238,7 +256,8 @@ export interface TypeResult {
  * Rolls one type's points up over the plan's buckets. A bucket type reads
  * `units`: the device's hour buckets, or its day buckets when
  * {@link readsDayBuckets} says so. A sample or record belongs to the bucket
- * it starts in. A bucket with no value is left out, never 0.
+ * it starts in, or ends in for a type bucketed by its end. A bucket with no
+ * value is left out, never 0.
  */
 export function rollUp(
   spec: TypeSpec,
@@ -252,7 +271,8 @@ export function rollUp(
   const inBucket = buckets.map(() => [] as StoredPoint[]);
   for (const point of units) {
     if (point.value === null && !point.fields) continue;
-    const index = buckets.findIndex((b) => point.startAt >= b.start && point.startAt < b.end);
+    const at = placedAt(spec, point);
+    const index = buckets.findIndex((b) => at >= b.start && at < b.end);
     if (index >= 0) inBucket[index].push(point);
   }
   const label = aggregateLabel(spec, aggregate, plan.interval, deviceDays);
@@ -337,11 +357,19 @@ function combine(
         fields[key] = (fields[key] ?? 0) + value;
       }
     }
+    // An averaged record averages what comes with it the same way, so a
+    // night's stages add up to its value.
+    const per = aggregate === "avg" ? readings.length : 1;
     if (Object.keys(fields).length > 0) {
-      out.fields = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, round(v)]));
+      out.fields = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, round(v / per)]));
     }
   }
   return out;
+}
+
+/** The time that places a reading in a window and a bucket (TypeSpec.bucketBy). */
+export function placedAt(spec: TypeSpec, point: Pick<StoredPoint, "startAt" | "endAt">): number {
+  return spec.bucketBy === "end" ? point.endAt : point.startAt;
 }
 
 /** Adds the hours of each day up into one reading per day in the plan's zone,

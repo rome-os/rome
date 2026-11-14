@@ -21,6 +21,8 @@ export interface PersonalDataRoutesDeps {
   db: DrizzleDb;
   personalData: PersonalDataRepository;
   now?: () => number;
+  /** Who the request is. Default: the guardian session resolved from the request. */
+  guardianSession?: typeof resolveGuardianSession;
 }
 
 export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
@@ -31,7 +33,7 @@ export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
   // Only the guardian's own signed-in session reads or writes personal data.
   // A loopback caller, which an agent's shell is, does not count here.
   app.use("/personal-data/*", async (c, next) => {
-    const session = await resolveGuardianSession(c, deps.db);
+    const session = await (deps.guardianSession ?? resolveGuardianSession)(c, deps.db);
     if (!session || session.via !== "cookie") {
       return c.json({ error: "Guardian session required" }, 403);
     }
@@ -43,8 +45,8 @@ export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
     const receivedAt = now();
     const declared = Number(c.req.header("content-length") ?? 0);
     if (declared > MAX_BATCH_BYTES) return c.json({ error: "too_large" }, 413);
-    const text = await c.req.text();
-    if (Buffer.byteLength(text) > MAX_BATCH_BYTES) return c.json({ error: "too_large" }, 413);
+    const text = await readCapped(c.req.raw, MAX_BATCH_BYTES);
+    if (text === undefined) return c.json({ error: "too_large" }, 413);
     let body: unknown;
     try {
       body = JSON.parse(text);
@@ -119,6 +121,28 @@ export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
   });
 
   return app;
+}
+
+/**
+ * The request body as text, or undefined once it passes `max` bytes. Reads
+ * the stream, so a chunked body with no Content-Length stops at the cap too.
+ */
+async function readCapped(request: Request, max: number): Promise<string | undefined> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 /** Seconds until the origin may ingest again, or 0 when it may now. */

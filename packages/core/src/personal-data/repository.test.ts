@@ -133,6 +133,16 @@ describe("PersonalDataRepository", () => {
     expect(source.types.find((t) => t.type === "sleep")?.pointCount).toBe(1);
   });
 
+  it("never moves synced-through back, and ignores one ahead of Rome's clock", () => {
+    const at = (offset: number) => new Date(NOV_10 + offset).toISOString();
+    const synced = () => repo.catalog()[0].types.find((t) => t.type === "stepCount")?.syncedThrough;
+    ingest(batch("b-1", { types: [{ type: "stepCount", syncedThrough: at(9 * HOUR) }] }));
+    ingest(batch("b-2", { types: [{ type: "stepCount", syncedThrough: at(5 * HOUR) }] }));
+    expect(synced()).toBe(at(9 * HOUR));
+    ingest(batch("b-3", { types: [{ type: "stepCount", syncedThrough: at(30 * DAY) }] }));
+    expect(synced()).toBe(at(9 * HOUR));
+  });
+
   it("drops metadata keys the source does not allow", () => {
     ingest(batch("b-1", { upserts: [weight(NOV_10, 70.2, "w1")] }));
     const [row] = testDb.db.select().from(personalDataPoints).all();

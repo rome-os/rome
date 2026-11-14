@@ -5,6 +5,7 @@ import {
   daysFromHours,
   encodeCursor,
   listedRecord,
+  mergeDays,
   planQuery,
   type QueryInput,
   type QueryPlan,
@@ -48,14 +49,12 @@ export function queryPersonalData(
 ): QueryAnswer | { error: string } {
   const plan = planQuery(source, input, defaults);
   if ("error" in plan) return plan;
-  const origin = repo.currentOrigin(source.source);
-  const synced = origin ? repo.syncedThrough(source.source, origin) : new Map<string, number>();
-  const results = plan.types.map((spec) =>
-    origin ? resultFor(repo, source, origin, spec, plan, defaults.now) : emptyResult(spec, plan),
-  );
   const freshness: Record<string, Freshness> = {};
-  for (const spec of plan.types) {
-    const at = synced.get(spec.type);
+  const results = plan.types.map((spec) => {
+    // Each type reads the origin that covers it furthest, so a second device
+    // or a new origin after a sign-in takes over once it has caught up.
+    const reading = repo.originFor(source.source, spec.type);
+    const at = reading?.syncedThroughAt ?? undefined;
     const windowEnd = Math.min(plan.end, defaults.now);
     freshness[spec.type] = {
       ...(at !== undefined ? { syncedThrough: new Date(at).toISOString() } : {}),
@@ -66,7 +65,10 @@ export function queryPersonalData(
           ? { missingFrom: new Date(Math.max(at, plan.start)).toISOString() }
           : {}),
     };
-  }
+    return reading
+      ? resultFor(repo, source, reading.origin, spec, plan, defaults.now)
+      : emptyResult(spec, plan);
+  });
   return {
     startISO: isoInZone(plan.start, plan.tz),
     endISO: isoInZone(plan.end, plan.tz),
@@ -90,8 +92,9 @@ function resultFor(
   plan: QueryPlan,
   now: number,
 ): TypeResult | ListedRecords {
+  const by = spec.bucketBy ?? "start";
   const read = (range: Parameters<PersonalDataRepository["points"]>[3]) =>
-    repo.points(source.source, origin, spec.type, range);
+    repo.points(source.source, origin, spec.type, { by, ...range });
   if (plan.records) {
     const rows = read({
       from: plan.start,
@@ -109,10 +112,9 @@ function resultFor(
     };
   }
   if (spec.shape !== "bucket") return rollUp(spec, plan, read({ from: plan.start, to: plan.end }));
-  if (plan.interval !== "hour") {
-    const days = read({ from: plan.start, to: plan.end, resolution: "day" });
-    if (readsDayBuckets(plan, days, now)) return rollUp(spec, plan, days, true);
-  }
   const hours = read({ from: plan.start, to: plan.end, resolution: "hour" });
-  return rollUp(spec, plan, daysFromHours(spec, plan, hours));
+  if (!readsDayBuckets(plan, now)) return rollUp(spec, plan, daysFromHours(spec, plan, hours));
+  const deviceDays = read({ from: plan.start, to: plan.end, resolution: "day" });
+  const { days, deviceOnly } = mergeDays(spec, plan, deviceDays, hours);
+  return rollUp(spec, plan, days, deviceOnly);
 }
