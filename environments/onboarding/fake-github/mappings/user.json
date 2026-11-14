@@ -1,0 +1,8 @@
+{
+  "request": { "method": "GET", "urlPath": "/api/user" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "id": 1001, "login": "rome-test", "name": "Rome Test", "avatar_url": null, "email": null }
+  }
+}

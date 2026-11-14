@@ -8,6 +8,11 @@
 }
 
 :80 {
+	# The fake GitHub, which the browser reaches for its authorization page.
+	@github host {$FAKE_GITHUB_HOST}.rome.localhost
+	handle @github {
+		reverse_proxy {$FAKE_GITHUB}:8080
+	}
 	@rome header_regexp rome Host ^([a-z0-9-]+)\.rome\.localhost(:[0-9]+)?$
 	handle @rome {
 		reverse_proxy rome-vm-{re.rome.1}:8080 {

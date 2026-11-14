@@ -1,0 +1,8 @@
+{
+  "request": { "method": "GET", "urlPath": "/api/user/emails" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": [{ "email": "rome-test@example.com", "verified": true, "primary": true }]
+  }
+}

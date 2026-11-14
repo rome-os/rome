@@ -1,0 +1,9 @@
+{
+  "request": { "method": "GET", "urlPath": "/login/oauth/authorize" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "text/html; charset=utf-8" },
+    "body": "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Fake GitHub</title><style>body{font:16px system-ui;max-width:28rem;margin:4rem auto;padding:0 1rem}a{display:inline-block;margin:.5rem .5rem 0 0;padding:.6rem 1rem;border-radius:6px;text-decoration:none}.ok{background:#1f883d;color:#fff}.no{border:1px solid #ccc;color:#333}</style></head><body><h1>Fake GitHub</h1><p>The onboarding environment's stand-in for GitHub. Authorize to connect the account <b>rome-test</b>.</p><p>Scopes: {{request.query.scope}}</p><a class=\"ok\" href=\"{{request.query.redirect_uri}}?code=fake-code&amp;state={{urlEncode request.query.state}}\">Authorize</a><a class=\"no\" href=\"{{request.query.redirect_uri}}?error=access_denied&amp;state={{urlEncode request.query.state}}\">Cancel</a></body></html>",
+    "transformers": ["response-template"]
+  }
+}

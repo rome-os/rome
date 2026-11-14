@@ -1,14 +1,22 @@
 // Walks the chat cards an agent waits on, in the Rome walk.mjs signed up for:
 // the agent shows core's connect card, the guardian presses it, and the agent's
 // next turn carries the answer. Connect is pressed for each kind in TEST_APPS,
-// which are the test OAuth apps Rome Cloud holds; the walk stops at the
-// provider's authorization page, since signing in there is a person's step.
+// which are the providers Rome Cloud can connect. On a real provider the walk
+// stops at its authorization page, since signing in there is a person's step;
+// on the fake GitHub it authorizes, and the agent's next turn must follow.
 const PROVIDER_HOSTS = {
   github: /(^|\.)github\.com$/,
   slack: /(^|\.)slack\.com$/,
   shopify: /(^|\.)(shopify|myshopify)\.com$/,
 };
 const KIND_NAMES = { github: "GitHub", slack: "Slack", shopify: "Shopify" };
+
+// The fake GitHub's address, when the environment runs one.
+const fakeGithub = process.env.FAKE_GITHUB_ORIGIN ? new URL(process.env.FAKE_GITHUB_ORIGIN).hostname : null;
+
+function providerHost(kind) {
+  return kind === "github" && fakeGithub ? new RegExp(`^${fakeGithub.replaceAll(".", "\\.")}$`) : PROVIDER_HOSTS[kind];
+}
 
 export async function walkCards({ page, step, out }) {
   const model = process.env.MODEL;
@@ -85,15 +93,29 @@ export async function walkCards({ page, step, out }) {
       if (typeof reply.open !== "string") throw new Error(`Connect opened nothing: ${JSON.stringify(reply)}`);
       const provider = await page.context().newPage();
       await provider.goto(new URL(reply.open, page.url()).href, { timeout: 60_000 });
-      await provider.waitForURL((url) => PROVIDER_HOSTS[kind].test(url.hostname), { timeout: 60_000 });
+      await provider.waitForURL((url) => providerHost(kind).test(url.hostname), { timeout: 60_000 });
       await provider.screenshot({ path: `${out}/provider-${kind}.png` });
-      await provider.close();
+      if (kind === "github" && fakeGithub) {
+        // The fake GitHub signs nobody in, so the walk finishes the connection.
+        await provider.getByRole("link", { name: "Authorize" }).click();
+        await provider.waitForURL((url) => !providerHost(kind).test(url.hostname), { timeout: 60_000 });
+        // The Rome's callback page redeems the connection, so let it finish.
+        await provider.waitForTimeout(5_000);
+        console.log(`\n  provider page ended at ${provider.url()}`);
+        await provider.screenshot({ path: `${out}/provider-${kind}-done.png` });
+        await provider.close();
+        const checked = await press(card, "I've authorized");
+        if (checked.answered !== true) throw new Error(`I've authorized did not answer: ${JSON.stringify(checked)}`);
+        await agentResumed(page, chatId);
+      } else {
+        await provider.close();
+      }
     });
   }
 }
 
-// Waits for the agent's turn after the card's answer: an assistant message with
-// text, after the message that carries the answer.
+// Waits for the agent's turn after the card's latest answer: an assistant
+// message with text, after the message that carries the answer.
 async function agentResumed(page, chatId) {
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
@@ -102,7 +124,7 @@ async function agentResumed(page, chatId) {
     );
     if (res.ok()) {
       const messages = listOf(await res.json());
-      const answeredAt = messages.findIndex((m) => partsOf(m).some((p) => p?.type === "interaction_result"));
+      const answeredAt = messages.findLastIndex((m) => partsOf(m).some((p) => p?.type === "interaction_result"));
       if (
         answeredAt >= 0 &&
         messages
