@@ -3,7 +3,7 @@
 // and one undo removes the spoken words. Typing includes the leading space the contract gives
 // spoken text after a character that is neither a space nor Chinese.
 import { fileURLToPath } from "node:url";
-import { useTranscriber, waitForNewMessage } from "../lib/runs.mjs";
+import { setMessages, useTranscriber, waitForNewMessage } from "../lib/runs.mjs";
 import { check, required, ruleResult } from "../lib/scenario.mjs";
 import { browserLanguage } from "../lib/script.mjs";
 import { newMessages } from "../lib/voice-env.mjs";
@@ -65,7 +65,7 @@ export default {
   phase: 1,
   async run(ctx) {
     await useTranscriber(ctx);
-    const message = ctx.script.messages[0];
+    const message = setMessages(ctx.script, "B")[0];
     if (ctx.transcriber === "stand-in")
       await ctx.env.transcriber({ mode: "stand-in", text: message.text });
     const checks = [];

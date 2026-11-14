@@ -1,5 +1,7 @@
-// The 20 script runs that rules 2, 3, 5 and 10 score. They run once per verify run, whichever
-// of those rules asks first, with the environment capturing traffic throughout.
+// The script runs the rules score, once per set per verify run, whichever rule asks first.
+// Set B (20 messages worded for an assistant) serves rules 2, 3, 5 and 10, with the
+// environment capturing traffic throughout. Set A (public real-speech recordings) serves only
+// rule 3, so its runs skip the send checks.
 import { browserLanguage } from "./script.mjs";
 import { newMessages } from "./voice-env.mjs";
 import {
@@ -15,41 +17,61 @@ import {
 /**
  * Plays every script message into the dashboard's message field and records, for each:
  * `{ key, language, written, heard, clickAt, samples, firstWordAt, lastWordAt,
- *    newAfterWait, sent, error }`.
+ *    newAfterWait, sent, error }`; set A runs stop at `samples`.
  * `samples` are `[ms, text]` in the page's clock and `clickAt` is the start click in the same
  * clock. `newAfterWait` are the messages, in any chat, that appeared between the start click
  * and `waits.sendCheckMs` after listening stopped. `sent` are those that appeared after the
  * send action, the guardian's first. A message whose run broke carries `error` and nothing else to score.
  */
-export async function scriptRuns(ctx) {
-  if (ctx.memo.scriptRuns) return ctx.memo.scriptRuns;
-  const { env, script } = ctx;
+export async function scriptRuns(ctx, set = "B") {
+  ctx.memo.scriptRuns ??= {};
+  if (ctx.memo.scriptRuns[set]) return ctx.memo.scriptRuns[set];
+  const { env } = ctx;
+  const messages = setMessages(ctx.script, set);
   await useTranscriber(ctx);
   const runs = [];
-  // The environment records a browser's traffic only once a browser runs.
-  const first = await openPage(env, { mic: script.messages[0].path });
-  await env.captureStart();
-  await first.close();
+  const capture = set === "B";
+  if (capture) {
+    // The environment records a browser's traffic only once a browser runs.
+    const first = await openPage(env, { mic: messages[0].path });
+    await env.captureStart();
+    await first.close();
+  }
   try {
-    for (const message of script.messages) {
+    for (const message of messages) {
       if (ctx.transcriber === "stand-in")
         await env.transcriber({ mode: "stand-in", text: message.text });
-      runs.push(await runOne(ctx, message));
+      runs.push(await runOne(ctx, message, { checkSend: capture }));
       ctx.log(`${message.key}: ${runs[runs.length - 1].error ?? "done"}`);
     }
   } finally {
-    ctx.memo.capture = await env.captureStop();
+    if (capture) ctx.memo.capture = await env.captureStop();
   }
-  ctx.memo.scriptRuns = { runs };
-  return ctx.memo.scriptRuns;
+  ctx.memo.scriptRuns[set] = { runs };
+  return ctx.memo.scriptRuns[set];
 }
 
-/** Points Rome at the transcriber this run uses. */
+/** The script messages of one set, in order. */
+export function setMessages(script, set) {
+  return script.messages.filter((m) => (m.set ?? "A") === set);
+}
+
+/**
+ * Points Rome at the transcriber this run uses, once per verify run, since switching
+ * restarts Rome. Throws "no provider credential" when the environment has no key for it.
+ */
 export async function useTranscriber(ctx) {
-  await ctx.env.transcriber({ mode: ctx.transcriber });
+  if (ctx.memo.transcriberSet) return;
+  try {
+    await ctx.env.transcriber({ mode: ctx.transcriber });
+  } catch (error) {
+    if (/API_KEY/.test(error.message)) throw new Error(`no provider credential (${error.message})`);
+    throw error;
+  }
+  ctx.memo.transcriberSet = true;
 }
 
-async function runOne(ctx, message) {
+async function runOne(ctx, message, { checkSend }) {
   const { env, waits } = ctx;
   const base = {
     key: message.key,
@@ -74,15 +96,18 @@ async function runOne(ctx, message) {
     await waitForSteadyField(page, { quietMs: waits.steadyMs });
     const record = await readRecord(page);
     const heard = await fieldText(field);
+    const result = { ...base, heard, clickAt: record.clicks[0], samples: record.samples };
+    if (!checkSend) {
+      // Leave no draft behind for the next message.
+      await field.fill("");
+      return result;
+    }
     await page.waitForTimeout(waits.sendCheckMs);
     const afterWait = await env.allMessages();
     await field.press("Enter");
     const afterSend = await waitForNewMessage(env, afterWait, waits);
     return {
-      ...base,
-      heard,
-      clickAt: record.clicks[0],
-      samples: record.samples,
+      ...result,
       newAfterWait: newMessages(before, afterWait),
       sent: newMessages(afterWait, afterSend),
     };

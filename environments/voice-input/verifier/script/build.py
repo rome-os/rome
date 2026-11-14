@@ -71,10 +71,36 @@ def synthesize(voice_url, text):
     for path, url in ((model, voice_url), (f"{model}.json", f"{voice_url}.json")):
         if not os.path.exists(path):
             subprocess.run(["curl", "-fsSL", "-o", path, url], check=True)
-    wav = subprocess.run(
-        ["piper", "-m", model, "-f", "-"], input=text.encode(), capture_output=True, check=True
-    ).stdout
-    return decode(wav)
+    # PIPER names a piper newer than nixpkgs', which the Mandarin voice's pinyin needs.
+    # PIPER_LIBS is the library path its wheels need on NixOS.
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["LD_LIBRARY_PATH"] = os.environ.get("PIPER_LIBS", "")
+    out = os.path.join(cache, "out.wav")
+    subprocess.run(
+        [os.environ.get("PIPER", "piper"), "-m", model, "-f", out],
+        input=text.encode(),
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+    with open(out, "rb") as f:
+        return decode(f.read())
+
+
+def synthesize_mixed(zh_voice, en_voice, text):
+    """Mandarin runs in the Mandarin voice and English runs in the English one, joined.
+
+    The Mandarin voice's pinyin front end drops Latin words, so each language gets its own.
+    """
+    parts = []
+    for run in re.findall(r"[A-Za-z][A-Za-z ]*[A-Za-z]|[A-Za-z]|[^A-Za-z]+", text):
+        if not run.strip(" ，。？！"):
+            continue
+        voice = en_voice if run[0].isascii() and run[0].isalpha() else zh_voice
+        clip = synthesize(voice, run)
+        start, end = speech_bounds(clip)
+        parts += [clip[int(start * RATE) : int(end * RATE)], silence(0.08)]
+    return np.concatenate([silence(0.3), *parts, silence(0.3)])
 
 
 def speech_bounds(samples):
@@ -120,7 +146,9 @@ def main():
     manifest = {"selectionVersion": sel["version"], "sampleRate": RATE, "sources": sel["sources"], "messages": []}
     for m in sel["messages"]:
         source = sel["sources"][m["source"]]
-        if source.get("synthesized"):
+        if source.get("synthesized") and "englishSource" in m:
+            samples = synthesize_mixed(source["voice"], sel["sources"][m["englishSource"]]["voice"], m["text"])
+        elif source.get("synthesized"):
             samples = synthesize(source["voice"], m["text"])
         else:
             samples = decode(rows[m["file"]]["audio"]["bytes"])

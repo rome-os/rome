@@ -115,7 +115,7 @@ export async function compare({
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
     rules,
-    notChecked: key ? null : `no credential: set ${provider.keyVar}`,
+    notChecked: key ? null : `no provider credential: set ${provider.keyVar}`,
     pricePerHour: provider.pricePerHour,
     languages: key ? summarize(results, provider) : [],
     results,
@@ -126,7 +126,7 @@ export async function compare({
 }
 
 async function scoreMessage(provider, key, message, speed) {
-  const base = { key: message.key, language: message.language };
+  const base = { key: message.key, language: message.language, set: message.set ?? "A" };
   try {
     const wav = readFileSync(message.path);
     const heard = provider.file
@@ -161,21 +161,27 @@ function summarize(results, provider) {
     ["Mandarin mixed with English", ["mixed"]],
     ["Mandarin and mixed (rule 3 pool)", ["zh", "mixed"]],
   ];
-  return groups.map(([label, langs]) => {
-    const pool = results.filter((r) => langs.includes(r.language) && !r.error);
-    const within = pool.filter(
-      (r) => r.firstDelay !== null && r.firstDelay <= BAR_SECONDS && r.completeDelay <= BAR_SECONDS,
-    ).length;
-    return {
-      label,
-      messages: pool.length,
-      failed: results.filter((r) => langs.includes(r.language) && r.error).length,
-      wrongPer100: per100(pool),
-      medianFirstDelay: provider.file ? null : median(pool.map((r) => r.firstDelay)),
-      medianCompleteDelay: provider.file ? null : median(pool.map((r) => r.completeDelay)),
-      withinRule2Bar: provider.file ? null : within,
-    };
-  });
+  const sets = [...new Set(results.map((r) => r.set))].sort();
+  return sets.flatMap((set) =>
+    groups.map(([group, langs]) => {
+      const label = `set ${set}, ${group}`;
+      const inSet = results.filter((r) => r.set === set);
+      const pool = inSet.filter((r) => langs.includes(r.language) && !r.error);
+      const within = pool.filter(
+        (r) =>
+          r.firstDelay !== null && r.firstDelay <= BAR_SECONDS && r.completeDelay <= BAR_SECONDS,
+      ).length;
+      return {
+        label,
+        messages: pool.length,
+        failed: inSet.filter((r) => langs.includes(r.language) && r.error).length,
+        wrongPer100: per100(pool),
+        medianFirstDelay: provider.file ? null : median(pool.map((r) => r.firstDelay)),
+        medianCompleteDelay: provider.file ? null : median(pool.map((r) => r.completeDelay)),
+        withinRule2Bar: provider.file ? null : within,
+      };
+    }),
+  );
 }
 
 function renderComparison(report) {
@@ -192,7 +198,7 @@ function renderComparison(report) {
   }
   lines.push(
     "",
-    "| Language | Messages | Wrong in 100 | Median delay to first text | Median delay to complete text | Within rule 2 bar |",
+    "| Set and language | Messages | Wrong in 100 | Median delay to first text | Median delay to complete text | Within rule 2 bar |",
     "| --- | --- | --- | --- | --- | --- |",
   );
   for (const l of report.languages) {

@@ -1,7 +1,7 @@
 // Rule 10: Rome names the place where speech becomes text; during the script every request
 // that carries audio goes there; afterwards the instance holds no audio from voice input.
 import { openPage } from "../lib/product.mjs";
-import { scriptRuns } from "../lib/runs.mjs";
+import { scriptRuns, setMessages } from "../lib/runs.mjs";
 import { check, required, ruleResult } from "../lib/scenario.mjs";
 
 /**
@@ -18,7 +18,7 @@ export default {
   phase: 1,
   async run(ctx) {
     await scriptRuns(ctx);
-    const named = await readNamedPlace(ctx, ctx.script.messages[0].path);
+    const named = await readNamedPlace(ctx, setMessages(ctx.script, "B")[0].path);
     const checks = [named.check, named.settingsCheck];
     checks.push(trafficCheck(ctx.memo.capture, named.place, named.romeHost));
     const scan = await ctx.env.audioScan();

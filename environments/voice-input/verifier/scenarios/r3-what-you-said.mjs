@@ -15,35 +15,51 @@ export default {
       return notChecked(
         "the stand-in transcriber returns the written text, so accuracy is not measured; needs a provider credential",
       );
-    const { runs } = await scriptRuns(ctx);
-    const broken = runs.filter((r) => r.error);
-    const scored = runs
-      .filter((r) => !r.error)
-      .map((r) => ({ ...r, ...errors(r.written, r.heard, r.language) }));
-    const pool = (langs) => scored.filter((r) => langs.includes(r.language));
-    const checks = [
-      poolCheck("English, wrong words in 100", pool(["en"])),
-      poolCheck("Mandarin and mixed, wrong characters in 100", pool(["zh", "mixed"])),
-    ];
-    if (broken.length > 0) {
+    const checks = [];
+    const info = [];
+    const detail = [];
+    // Rule 3 needs both sets within the bar: A is real speech, B is synthesized messages.
+    for (const set of ["A", "B"]) {
+      const { runs } = await scriptRuns(ctx, set);
+      const broken = runs.filter((r) => r.error);
+      const scored = runs
+        .filter((r) => !r.error)
+        .map((r) => ({ ...r, ...errors(r.written, r.heard, r.language) }));
+      const pool = (langs) => scored.filter((r) => langs.includes(r.language));
       checks.push(
-        required(
-          check(
-            "every message scored",
-            "not_checked",
-            `${broken.length} runs broke: ${broken.map((r) => `${r.key} (${r.error})`).join("; ")}`,
-            broken.map((r) => r.key),
+        poolCheck(`set ${set}, English, wrong words in 100`, pool(["en"])),
+        poolCheck(`set ${set}, Mandarin and mixed, wrong characters in 100`, pool(["zh", "mixed"])),
+      );
+      if (broken.length > 0) {
+        checks.push(
+          required(
+            check(
+              `set ${set}, every message scored`,
+              "not_checked",
+              `${broken.length} runs broke: ${broken.map((r) => `${r.key} (${r.error})`).join("; ")}`,
+              broken.map((r) => r.key),
+            ),
           ),
+        );
+      }
+      info.push(
+        check(
+          `set ${set}, Mandarin alone`,
+          "info",
+          `${per100(pool(["zh"]))} wrong characters in 100`,
+        ),
+        check(
+          `set ${set}, mixed alone`,
+          "info",
+          `${per100(pool(["mixed"]))} wrong characters in 100`,
+        ),
+      );
+      detail.push(
+        ...scored.map((r) =>
+          check(r.key, "info", `${r.wrong} wrong of ${r.of}; heard "${r.heard}"`, [r.key]),
         ),
       );
     }
-    const detail = scored.map((r) =>
-      check(r.key, "info", `${r.wrong} wrong of ${r.of}; heard "${r.heard}"`, [r.key]),
-    );
-    const info = [
-      check("Mandarin alone", "info", `${per100(pool(["zh"]))} wrong characters in 100`),
-      check("mixed alone", "info", `${per100(pool(["mixed"]))} wrong characters in 100`),
-    ];
     return { ...ruleResult(checks), checks: [...checks, ...info, ...detail] };
   },
 };

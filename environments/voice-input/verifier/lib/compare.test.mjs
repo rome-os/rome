@@ -67,6 +67,6 @@ describe("comparison", () => {
       outDir: mkdtempSync(join(tmpdir(), "voice-compare-")),
       log: () => {},
     });
-    assert.equal(report.notChecked, "no credential: set SONIOX_API_KEY");
+    assert.equal(report.notChecked, "no provider credential: set SONIOX_API_KEY");
   });
 });

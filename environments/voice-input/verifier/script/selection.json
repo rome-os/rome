@@ -25,28 +25,28 @@
     "piper-kristin": {
       "voice": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/kristin/medium/en_US-kristin-medium.onnx",
       "dataset": "Piper voice en_US-kristin-medium, synthesized with piper-tts",
-      "licence": "voice dataset public domain (LibriVox); Piper MIT",
+      "licence": "voice dataset public domain (LibriVox); synthesized with piper-tts 1.8 (GPL-3.0)",
       "homepage": "https://huggingface.co/rhasspy/piper-voices",
       "synthesized": true
     },
     "piper-bryce": {
       "voice": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/bryce/medium/en_US-bryce-medium.onnx",
       "dataset": "Piper voice en_US-bryce-medium, synthesized with piper-tts",
-      "licence": "voice dataset public domain; Piper MIT",
+      "licence": "voice dataset public domain; synthesized with piper-tts 1.8 (GPL-3.0)",
       "homepage": "https://huggingface.co/rhasspy/piper-voices",
       "synthesized": true
     },
     "piper-joe": {
       "voice": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/joe/medium/en_US-joe-medium.onnx",
       "dataset": "Piper voice en_US-joe-medium, synthesized with piper-tts",
-      "licence": "voice dataset CC0; Piper MIT",
+      "licence": "voice dataset CC0; synthesized with piper-tts 1.8 (GPL-3.0)",
       "homepage": "https://huggingface.co/rhasspy/piper-voices",
       "synthesized": true
     },
     "piper-chaowen": {
       "voice": "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/chaowen/medium/zh_CN-chaowen-medium.onnx",
       "dataset": "Piper voice zh_CN-chaowen-medium, synthesized with piper-tts",
-      "licence": "voice dataset CC0; Piper MIT",
+      "licence": "voice dataset CC0; synthesized with piper-tts 1.8 (GPL-3.0)",
       "homepage": "https://huggingface.co/rhasspy/piper-voices",
       "synthesized": true
     }
@@ -329,28 +329,32 @@
       "set": "B",
       "language": "mixed",
       "source": "piper-chaowen",
-      "text": "帮我把这个PDF发给Lisa。"
+      "text": "帮我把这个PDF发给Lisa。",
+      "englishSource": "piper-kristin"
     },
     {
       "key": "b-mixed-2",
       "set": "B",
       "language": "mixed",
       "source": "piper-chaowen",
-      "text": "明天的meeting改到下午三点。"
+      "text": "明天的meeting改到下午三点。",
+      "englishSource": "piper-kristin"
     },
     {
       "key": "b-mixed-3",
       "set": "B",
       "language": "mixed",
       "source": "piper-chaowen",
-      "text": "帮我在Google Docs里新建一个文档。"
+      "text": "帮我在Google Docs里新建一个文档。",
+      "englishSource": "piper-kristin"
     },
     {
       "key": "b-mixed-4",
       "set": "B",
       "language": "mixed",
       "source": "piper-chaowen",
-      "text": "这个bug修好了吗？给我一个update。"
+      "text": "这个bug修好了吗？给我一个update。",
+      "englishSource": "piper-kristin"
     }
   ],
   "long": {
