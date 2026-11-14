@@ -13,6 +13,7 @@ import { ActionInvocationError } from "@rome-os/app-runtime";
 import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
+  buildSenderInfo,
   createAction as createMessageHandlerAction,
   parseSentinelDecision,
   sendAnswer,
@@ -166,7 +167,7 @@ describe("buildMessageContext", () => {
     rs.clearAllMocks();
   });
 
-  it("loads guardian and sender markdown for non-guardian messages", () => {
+  it("loads the guardian's profile and no sender's notes, whoever sends the message", () => {
     const profileDir = createTempProfile({
       "memory/relationship/GUARDIAN.md": "# Guardian Profile\n\nName: Test Guardian",
       "memory/relationship/alice.md": "# Alice\n\nLikes concise updates.",
@@ -192,9 +193,10 @@ describe("buildMessageContext", () => {
 
     expect(result).toContain("## Guardian");
     expect(result).toContain("Name: Test Guardian");
-    expect(result).toContain("## Sender info");
-    expect(result).toContain("# Alice");
-    expect(result).toContain("Likes concise updates.");
+    // A group has many senders and this suffix is fixed when the session
+    // opens, so a sender's notes reach the agent another way.
+    expect(result).not.toContain("## Sender info");
+    expect(result).not.toContain("Likes concise updates.");
     // Thread + project framing now lives in the `<thread_context>` block on the
     // session's first user message (see @rome/core buildThreadContextBlock), not
     // in this system-prompt suffix.
@@ -251,33 +253,7 @@ describe("buildMessageContext", () => {
     expect(telegram).not.toContain("## Discord channel control");
   });
 
-  it("marks unknown senders as stranger", () => {
-    const profileDir = createTempProfile({
-      "memory/relationship/GUARDIAN.md": "# Guardian Profile\n\nName: Test Guardian",
-    });
-
-    const result = buildMessageContext({
-      channel: "whatsapp",
-      threadId: "555@s.whatsapp.net",
-      channelUserId: "555@s.whatsapp.net",
-      displayName: "Unknown",
-      bondLevel: "other",
-      person: {
-        id: STRANGER_PERSON_ID,
-        displayName: "Unknown",
-        bondLevel: "other",
-        channelMappings: [],
-        createdAt: new Date("2026-01-01T00:00:00Z"),
-      },
-      resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
-    });
-
-    expect(result).toContain("## Sender info");
-    expect(result).toContain("stranger (no person mapping yet)");
-  });
-
-  it("omits sender info for guardian messages", () => {
+  it("adds nothing about the guardian as a sender", () => {
     const profileDir = createTempProfile({
       "memory/relationship/GUARDIAN.md": "# Guardian Profile\n\nName: Test Guardian",
     });
@@ -319,6 +295,42 @@ describe("buildMessageContext", () => {
     expect(result).not.toContain("project name: alpha");
     expect(result).not.toContain("## Project context");
     expect(result).not.toContain("Current selected project");
+  });
+});
+
+describe("buildSenderInfo", () => {
+  it("reads the sender's notes", () => {
+    const profileDir = createTempProfile({
+      "memory/relationship/alice.md": "# Alice\n\nLikes concise updates.",
+    });
+    const result = buildSenderInfo({
+      person: {
+        id: "alice",
+        displayName: "Alice",
+        bondLevel: "acquaintance",
+        profilePath: "memory/relationship/alice.md",
+        channelMappings: [],
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      },
+      resolveProfilePath: (filePath: string) => join(profileDir, filePath),
+      strangerPersonId: STRANGER_PERSON_ID,
+    });
+    expect(result).toContain("Likes concise updates.");
+  });
+
+  it("marks an unknown sender as a stranger", () => {
+    const result = buildSenderInfo({
+      person: {
+        id: STRANGER_PERSON_ID,
+        displayName: "Unknown",
+        bondLevel: "other",
+        channelMappings: [],
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      },
+      resolveProfilePath: (filePath: string) => filePath,
+      strangerPersonId: STRANGER_PERSON_ID,
+    });
+    expect(result).toBe("stranger (no person mapping yet)");
   });
 });
 
@@ -726,6 +738,14 @@ describe("message reply bond-level settings", () => {
       data: { action: "sent", response: "Here is the answer." },
     });
     expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel", "main", "envoy"]);
+    // Sentinel reads the sender's own notes on the message it triages. No
+    // session's system prompt carries them.
+    expect(agentRunner.calls[0].prompt).toContain(
+      "<sender>\nMapped person: Casey\nBond level: other\nSender profile markdown unavailable.\n</sender>",
+    );
+    for (const call of agentRunner.calls) {
+      expect(String(call.contextSuffix ?? "")).not.toContain("Casey");
+    }
     expect(sentMessages).toEqual([
       {
         channel: "email",

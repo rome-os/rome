@@ -219,6 +219,7 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
+import { registerReadPersonAction } from "./people/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
@@ -1398,6 +1399,7 @@ async function main() {
 
   registerShowFileAction(actionRegistry);
   registerTaskRunAction(actionRegistry, concierge);
+  registerReadPersonAction(actionRegistry, { people: peopleRepo });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),

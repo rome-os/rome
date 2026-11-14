@@ -137,8 +137,14 @@ function getRuntimeThreadPath(): string | undefined {
   return typeof threadPath === "string" && threadPath.trim() ? threadPath : undefined;
 }
 
-function buildSenderInfo(
-  ctx: MessageContext & {
+/**
+ * What Rome knows about a message's sender: their person's notes, or their
+ * name and bond level when the guardian keeps none, or that they are a
+ * stranger. Sentinel reads it with each message it triages. The agents that
+ * answer read a person's notes themselves, with `core:read_person`.
+ */
+export function buildSenderInfo(
+  ctx: Pick<MessageContext, "person"> & {
     resolveProfilePath(filePath: string): string;
     strangerPersonId: string;
   },
@@ -176,26 +182,21 @@ export function buildMessageContext(
     return readMarkdownContext(resolved);
   };
 
-  // Only the STABLE Guardian profile (and, for non-guardian senders, the Sender
-  // info) belongs in this system-prompt suffix — both stay in the cacheable
-  // system prefix. The per-thread, dynamic thread + project framing is rendered
-  // separately as a `<thread_context>` block on the session's FIRST user message
+  // Only the STABLE Guardian profile belongs in this system-prompt suffix, so
+  // it stays in the cacheable system prefix. Who sent each message reaches the
+  // agent on the message itself, not here: a group has many senders, and the
+  // suffix is fixed when the session opens. The per-thread, dynamic thread +
+  // project framing is rendered separately as a `<thread_context>` block on the session's FIRST user message
   // (one renderer for every channel) — see `buildThreadContextBlock` in
   // @rome/core agent/domain/prompt.ts and AgentSession.runOneTurn. The thread context
   // travels there via the `threadContext` already forwarded into the agent run.
-  const sections: string[] = [
+  return [
     "# Context",
     "",
     "## Guardian",
     "",
     readContext("memory/relationship/GUARDIAN.md") ?? "Guardian profile unavailable.",
-  ];
-
-  if (ctx.bondLevel !== "guardian") {
-    sections.push("", "## Sender info", "", buildSenderInfo(ctx));
-  }
-
-  return sections.join("\n");
+  ].join("\n");
 }
 
 export function parseSentinelDecision(raw: string): SentinelDecision {
@@ -506,6 +507,7 @@ async function handleUntrustedMessage(
   contextSuffix: string,
   chatId: string,
   targetAgent: string,
+  senderInfo: string,
 ): Promise<ActionResult> {
   const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
     string,
@@ -520,7 +522,9 @@ async function handleUntrustedMessage(
     deps.agentRunner,
     {
       agentName: "sentinel",
-      prompt: `Triage this message from ${displayName} (${bondLevel}):\n\n${text}`,
+      // The sender's own notes go on each message: the sentinel's session is
+      // the chat's, where many people speak, and it reads no one else's.
+      prompt: `<sender>\n${senderInfo}\n</sender>\n\nTriage this message from ${displayName} (${bondLevel}):\n\n${text}`,
       channelThreadKey: `sentinel:${channelThreadKey}`,
       contextSuffix,
       workingDir,
@@ -822,6 +826,11 @@ export function createMessageHandlerAction(
           contextSuffix,
           conversation.id,
           targetAgent,
+          buildSenderInfo({
+            person: person as PersonRecord | null,
+            resolveProfilePath: deps.resolveProfilePath,
+            strangerPersonId: deps.strangerPersonId,
+          }),
         );
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
