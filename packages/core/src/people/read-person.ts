@@ -37,7 +37,7 @@ export function registerReadPersonAction(
       name: READ_PERSON_ACTION,
       type: "system",
       description:
-        "Read who a person is: their bond level, their accounts, and the guardian's notes on them. Call it when a message comes from, or mentions, someone you do not recognize. Pass the person's name as a message's sender label shows it in parentheses, such as `Ana Lopez` from `Ana (Ana Lopez, inner circle)`. A sender marked `not linked` is nobody the guardian tracks and has no notes.",
+        "Read who a person is: their bond level, their accounts, and the guardian's notes on them. Call it when a message comes from, or mentions, someone you do not recognize. Pass the person's name as Rome names the sender, before the bond level: `Ana Lopez` from `who=\"Ana Lopez, inner circle\"` or from `Ana [Ana Lopez, inner circle]`. A sender marked `not linked` is nobody the guardian tracks and has no notes.",
       complexity: "simple",
       speed: "fast",
       reliability: "high",

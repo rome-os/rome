@@ -153,20 +153,15 @@ export function buildSenderInfo(
     return "stranger (no person mapping yet)";
   }
 
-  if (!ctx.person.profilePath) {
-    return [
-      `Mapped person: ${ctx.person.displayName}`,
-      `Bond level: ${ctx.person.bondLevel}`,
-      "Sender profile markdown unavailable.",
-    ].join("\n");
-  }
-
+  // Notes live at the stored profile path, or by the person's id when none
+  // is stored, as core's `personProfilePath` places them.
+  const profilePath = ctx.person.profilePath || `memory/relationship/${ctx.person.id}.md`;
   return (
-    readMarkdownContext(ctx.resolveProfilePath(ctx.person.profilePath)) ??
+    readMarkdownContext(ctx.resolveProfilePath(profilePath)) ??
     [
       `Mapped person: ${ctx.person.displayName}`,
       `Bond level: ${ctx.person.bondLevel}`,
-      `Sender profile missing: ${ctx.person.profilePath}`,
+      "No notes on this sender yet.",
     ].join("\n")
   );
 }

@@ -318,6 +318,24 @@ describe("buildSenderInfo", () => {
     expect(result).toContain("Likes concise updates.");
   });
 
+  it("reads the notes kept under the sender's id when no path is stored", () => {
+    const profileDir = createTempProfile({
+      "memory/relationship/bob-id.md": "# Bob\n\nPrefers email.",
+    });
+    const result = buildSenderInfo({
+      person: {
+        id: "bob-id",
+        displayName: "Bob",
+        bondLevel: "acquaintance",
+        channelMappings: [],
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      },
+      resolveProfilePath: (filePath: string) => join(profileDir, filePath),
+      strangerPersonId: STRANGER_PERSON_ID,
+    });
+    expect(result).toContain("Prefers email.");
+  });
+
   it("marks an unknown sender as a stranger", () => {
     const result = buildSenderInfo({
       person: {
@@ -741,7 +759,7 @@ describe("message reply bond-level settings", () => {
     // Sentinel reads the sender's own notes on the message it triages. No
     // session's system prompt carries them.
     expect(agentRunner.calls[0].prompt).toContain(
-      "<sender>\nMapped person: Casey\nBond level: other\nSender profile markdown unavailable.\n</sender>",
+      "<sender>\nMapped person: Casey\nBond level: other\nNo notes on this sender yet.\n</sender>",
     );
     for (const call of agentRunner.calls) {
       expect(String(call.contextSuffix ?? "")).not.toContain("Casey");
