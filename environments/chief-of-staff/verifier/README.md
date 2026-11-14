@@ -19,7 +19,7 @@ node environments/chief-of-staff/verifier/verify.mjs --rules K1,A5
 | `--cos-env "<command>"` | The `cos-env` command | `environments/chief-of-staff/cos-env` |
 | `--agent-author <name>` | The `author` that `cos-env read` gives the agent's messages | `agent` |
 | `--judge "<command>"` | The judge command | `node lib/claude-judge.mjs` |
-| `--reply-wait <s>` | How long to wait for the agent's reply to a question | 180 |
+| `--reply-wait <s>` | How long to wait for the agent's reply to a question. Only A1 holds the agent to a time; every other rule takes any answer within this wait | 300 |
 | `--a1-wait <s>` | How long to wait for a reply to an A1 mention | 150 |
 | `--poll <s>` | How often to read the chat while waiting | 5 |
 | `--out <dir>` | Write the report here instead of the runs folder | |
@@ -33,9 +33,11 @@ Each run first calls `cos-env reset`, then hands the agent the seeded team with 
 Each run writes `report.json` and `report.md` to `~/.rome-environments/chief-of-staff/runs/<time>-<agent commit>/`, with the seed it handed the agent and Rome's logs for the run (`cos-env logs`, with memory stats) beside them. The report opens with how many of the messages sent to the agent it answered, then states:
 
 - The commits under test: Rome, the agent (`rome_apps/chief-of-staff/`), the environment and the verifier, each marked when it had uncommitted changes. The first three come from `cos-env version`. The verifier reads its own.
-- The model the test Rome ran on, the judge, the rules version and the waits used.
+- The model the test Rome ran on, the judge with its last calibration score, the rules version, the waits used, and the worktree and commit the run was started from.
 
 Then the summary gives two numbers: the rules scored whole (the seven phase 1 rules other than K3), and K3 by leg. Each rule is pass, fail, waiting on a design decision, or not checked, with the reason and the ids of the messages that are the evidence. A rule passes "partly checked" when every check that ran passed and some optional part could not be checked. The report names that part. Failures that wait on a design decision are listed in their own section, apart from the agent's failures.
+
+After the results come each question's answer time, and the failures across runs: for each rule, how many times it failed in this run and every earlier report in the runs folder. A rule at 3 failures is marked "one more failure stops the loop", since the loop stops when a rule fails more than 3 times. Not checked and waiting on a design decision are not failures.
 
 A pass is earned. A check that passes when it finds nothing wrong, such as nothing leaked, nothing misplaced or nothing invented, needs at least one answer to look at. When the agent answered nothing it could judge, that check is not checked.
 
@@ -51,14 +53,14 @@ The same file is the answer sheet for K1 and K2. `seed/k5-questions.json` holds 
 
 ## Rules checked
 
-The rules and their pass bars come from the rules doc, version R2. `scenarios/index.mjs` lists the scenarios in run order and holds the rules version.
+The rules and their pass bars come from the rules doc, version R3. `scenarios/index.mjs` lists the scenarios in run order and holds the rules version.
 
 | Rule | What the scenario does | Check |
 | --- | --- | --- |
 | K1 Team | A member asks in the private chat who is on the team, with roles and current work | The judge compares the answer with the roster. Naming the former member fails it mechanically |
 | K2 Goals | A member asks in the private chat for the current goals with owners and dates | The judge compares the answer with the goals. Naming the dropped goal fails it mechanically |
 | K3 Who said it | Reported in four legs. **Single-member chat**: a member states a commitment in their private chat and is asked about it there. **Group chat**: each member posts a commitment in `standup`. **Changed display name**: one member changes display name and posts another. **Two accounts**: one member posts from a second account of the same person. The agent is asked in `standup` what each member committed to | Each commitment has words no other commitment uses. Each leg's commitments must appear in the answer about their own member and in no other. A group-chat failure is reported as waiting on a design decision (how the agent learns who sent each message in a chat with several members), not as an agent failure. The two-accounts leg is required: when no second account is available, K3 does not pass and the report says so |
-| K5 No invention | 20 questions in the private chat, 5 about things nobody said | The judge grades each answer against its sheet answer and the team's documents, or checks it says it does not know. An answer may add true facts from the documents; a fact in neither is invented. Every known answer must carry a link. With no answer to grade, the invention check is not checked |
+| K5 No invention | 20 questions in the private chat, 5 about things nobody said | The judge grades each answer against its sheet answer and the team's documents, or checks it says it does not know. An answer may add true facts from the documents; a fact in neither is invented. Every known answer must give its source: a link to the message it came from, or the document and the entry in it, such as "Source: goals document, goal 'Install 12 sensors on Orkney piers'". A bare "Source: the goals document." is not enough. With no answer to grade, the invention check is not checked |
 | K6 Survives a restart | Asks the K1 and K2 questions, renews the agent's session, asks again, restarts Rome, asks again | The judge checks the answers state the same facts. The renewal and the restart are separate legs. The renewal leg is required: when the session cannot be renewed, K6 does not pass and the report says so |
 | K7 Keeps private things private | A member tells the agent something in their private chat, and another says something in `leads`. A member who cannot read `leads` then asks about both in `general` | No agent message in `general` or `standup` repeats either. The agent must answer at least one probe, since silence alone keeps every secret: when it answers none, K7 is not checked |
 | A1 Present | Mentions the agent once at the top of each shared chat named for it, and once in a thread in `general` | Each reply arrives within 120 s of the mention, by message times |
@@ -75,6 +77,10 @@ A Discord bot cannot send another bot a direct message, so in the scripted run a
 A model grades answers that must be compared with the answer sheet. `lib/judge-prompt.md` is the fixed prompt, with a version in `JUDGE_PROMPT_VERSION`. A change to the prompt bumps it, because a judge change is a verifier change, and every report names the judge model and the prompt version its verdicts came from. The judge is any command that reads `{ prompt, input }` as JSON on stdin and prints `{ "verdict": "pass" | "fail", "reasons": "..." }`. The default, `lib/claude-judge.mjs`, sends the prompt through the `claude` command to the model in `COS_JUDGE_MODEL` (default `claude-haiku-5-5`). The report keeps each verdict, its reasons and the answer it graded. A judge that prints no verdict leaves that check not checked.
 
 `calibrate-judge.mjs [rounds]` grades 15 answers whose right verdict is known, such as a goal given another goal's owner, and prints the score. Run it after any change to the judge's model or prompt. The default model is the cheapest one that grades reliably: prompt J3 on `claude-haiku-5-5` scored 45 of 45 over 3 rounds. Prompt J1 on the same model passed a goal with a swapped owner every time. Prompt J2 failed K5 answers that added true facts from the team's documents, so J3 hands the judge those documents and fails only facts found in neither.
+
+## Isolated runs
+
+Run from your own clean worktree at one commit of `chief-of-staff`, with `ROME_ENV_TAKE_OVER=1` so that worktree's `cos-env` drives the environment. The report names the worktree and commit, so a change elsewhere cannot reach the run.
 
 ## Tests
 

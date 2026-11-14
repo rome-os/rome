@@ -1,6 +1,6 @@
 // What a scenario uses to talk to the agent and to report a rule's result.
 import { dmChat } from "./cos-env.mjs";
-import { waitForAgent } from "./checks.mjs";
+import { secondsBetween, waitForAgent } from "./checks.mjs";
 
 /**
  * Posts `text` as member `as` (in a chat with a mention, in a thread, or as a direct
@@ -23,6 +23,17 @@ export async function ask(ctx, { as, chat, thread, text, watch, timeoutMs }) {
   if (ctx.answered) {
     ctx.answered.sent += 1;
     if (reply) ctx.answered.answered += 1;
+  }
+  if (ctx.answerTimes) {
+    const where = chat ? { chat } : { dm: as };
+    const asked = reply ? (await ctx.env.read(where)).find((m) => m.id === questionId) : null;
+    ctx.answerTimes.push({
+      rule: ctx.rule ?? "liveness",
+      chat: chat ?? dmChat(as).label,
+      questionId,
+      replyId: reply?.id ?? null,
+      seconds: asked ? secondsBetween(asked.time, reply.time) : null,
+    });
   }
   return { questionId, reply };
 }

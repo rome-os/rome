@@ -49,7 +49,8 @@ export function renderMarkdown(report) {
     part("Environment", underTest.environment),
     part("Verifier", underTest.verifier),
     `- Model: ${typeof underTest.model === "object" && underTest.model !== null ? `\`${JSON.stringify(underTest.model)}\`` : (underTest.model ?? "unknown")}`,
-    `- Judge: ${report.judge}`,
+    `- Judge: ${report.judge}, calibrated ${report.judgeCalibration}`,
+    `- Run from: \`${report.runFrom.dir}\` at \`${report.runFrom.commit}\``,
     `- Rome's logs: ${report.logs === "logs" ? "`logs/` beside this report" : report.logs}`,
     `- Waits: reply ${report.waits.replyMs / 1000} s, A1 ${report.waits.a1Ms / 1000} s, poll ${report.waits.pollMs / 1000} s`,
   ];
@@ -88,5 +89,45 @@ export function renderMarkdown(report) {
       if (c.quote) lines.push("", "  > " + c.quote.replaceAll("\n", "\n  > "), "");
     }
   }
+  if (report.answerTimes.length > 0) {
+    lines.push(
+      "",
+      "## Answer times",
+      "",
+      "Only A1 holds the agent to a time (2 minutes). Every other question takes any answer within the reply wait.",
+      "",
+      "| Rule | Chat | Question | Answer | Seconds |",
+      "| --- | --- | --- | --- | --- |",
+    );
+    for (const t of report.answerTimes)
+      lines.push(
+        `| ${t.rule} | ${t.chat} | ${t.questionId} | ${t.replyId ?? "none"} | ${t.seconds ?? "no answer"} |`,
+      );
+  }
+  lines.push(...failureLines(report.failures));
   return `${lines.join("\n")}\n`;
+}
+
+function failureLines({ earlierRuns, counts, limit }) {
+  const lines = [
+    "",
+    "## Failures across runs",
+    "",
+    `This run and ${earlierRuns.length} earlier runs. The loop stops when a rule fails more than ${limit} times. Not checked is not a failure.`,
+    "",
+  ];
+  const rules = Object.keys(counts).sort();
+  if (rules.length === 0) return [...lines, "No rule has failed."];
+  lines.push("| Rule | Failures | |", "| --- | --- | --- |");
+  for (const rule of rules) {
+    const n = counts[rule];
+    const note =
+      n > limit
+        ? `failed more than ${limit} times: the loop stops`
+        : n === limit
+          ? "one more failure stops the loop"
+          : "";
+    lines.push(`| ${rule} | ${n} | ${note} |`);
+  }
+  return lines;
 }

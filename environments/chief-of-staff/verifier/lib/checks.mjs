@@ -46,6 +46,33 @@ export function hasLink(text) {
   return linkPattern.test(text);
 }
 
+const SOURCE_CLAUSE =
+  /\bsources?\b[^:\n]*:\s*([^\n]+)|\bsources?\s+(?:for [^\n]*? )?is\s+([^\n]+)/gi;
+const DOCUMENT = /roster|goals?\s+doc/i;
+const QUOTED = /["'“‘][^"'”’]{3,}["'”’]/;
+
+/**
+ * Whether `text` gives its source the way rule K5 (R3) asks: a link (to a message, or to a
+ * document the reader can open), or a source clause that names a document and an entry in it.
+ * An entry is a member's name, a goal's title or id, or any quoted entry name.
+ */
+export function namesSource(text, team) {
+  if (hasLink(text)) return true;
+  const entries = [
+    ...team.members.map((m) => m.name),
+    ...team.goals.flatMap((g) => [g.title, g.id]),
+  ].map((e) => e.toLowerCase());
+  return [...text.matchAll(SOURCE_CLAUSE)]
+    .map((m) => m[1] ?? m[2])
+    .some((clause) => {
+      const lower = clause.toLowerCase();
+      return (
+        DOCUMENT.test(clause) &&
+        (QUOTED.test(clause) || entries.some((e) => new RegExp(`\\b${e}\\b`).test(lower)))
+      );
+    });
+}
+
 /** The tokens from `tokens` that appear in `text`, ignoring case. */
 export function tokensIn(text, tokens) {
   const lower = text.toLowerCase();

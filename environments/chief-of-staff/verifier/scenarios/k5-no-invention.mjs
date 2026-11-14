@@ -1,4 +1,4 @@
-import { hasLink } from "../lib/checks.mjs";
+import { namesSource } from "../lib/checks.mjs";
 import { ask, check, ruleResult } from "../lib/scenario.mjs";
 import { goalsSheet, rosterSheet } from "../lib/seed.mjs";
 
@@ -49,7 +49,7 @@ export default {
       });
       if (verdict.verdict === "fail") invented.push(`${reply.id}: ${verdict.reasons}`);
       if (verdict.verdict === "error") ungraded.push(`${reply.id}: ${verdict.reasons}`);
-      if (question.known && !hasLink(reply.text)) unsourced.push(reply.id);
+      if (question.known && !namesSource(reply.text, ctx.team)) unsourced.push(reply.id);
     }
     const unknownCount = ctx.k5Questions.filter((q) => !q.known).length;
     const inventionCheck =
@@ -75,18 +75,19 @@ export default {
                 `${ctx.k5Questions.length} questions, ${unknownCount} about things nobody said`,
                 evidence,
               );
+    // R3: a message source is a link to it; a document source names the document and the entry.
     const sourceCheck =
       unsourced.length > 0
         ? check(
-            "a link on every known answer",
+            "a source on every known answer",
             "fail",
-            `no link in ${unsourced.join(", ")}`,
+            `no link and no named document entry in ${unsourced.join(", ")}`,
             evidence,
           )
         : check(
-            "a link on every known answer",
+            "a source on every known answer",
             "pass",
-            "every known answer carries a link",
+            "every known answer links its source or names the document and entry",
             evidence,
           );
     return ruleResult([{ ...inventionCheck, answers }, sourceCheck]);

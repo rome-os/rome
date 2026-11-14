@@ -9,7 +9,7 @@ import k6 from "./k6-survives-restart.mjs";
 import k7 from "./k7-private.mjs";
 
 /** The rules version the scenarios encode. Change it with the rules doc. */
-export const RULES_VERSION = "R2";
+export const RULES_VERSION = "R3";
 
 // K6 restarts Rome, so it runs after the rules whose answers it reuses.
 export const SCENARIOS = [k1, k2, k3, k5, k7, a1, a5, k6];

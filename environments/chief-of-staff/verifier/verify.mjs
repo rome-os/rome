@@ -21,7 +21,7 @@ const { values } = parseArgs({
     judge: { type: "string", default: `node ${join(here, "lib", "claude-judge.mjs")}` },
     out: { type: "string" },
     "runs-dir": { type: "string" },
-    "reply-wait": { type: "string", default: "180" },
+    "reply-wait": { type: "string", default: "300" },
     "a1-wait": { type: "string", default: "150" },
     poll: { type: "string", default: "5" },
   },

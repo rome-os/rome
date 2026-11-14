@@ -1,14 +1,16 @@
 // The verifier against its fake cos-env: the good stand-in passes every phase 1 rule, and
 // each failing stand-in fails its own rule and no other.
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { cosEnv } from "../lib/cos-env.mjs";
 import { makeJudge, parseVerdict } from "../lib/judge.mjs";
-import { NOT_ANSWERING, selectScenarios, verify } from "../lib/runner.mjs";
+import { namesSource } from "../lib/checks.mjs";
+import { failureHistory, NOT_ANSWERING, selectScenarios, verify } from "../lib/runner.mjs";
+import { loadTeam } from "../lib/seed.mjs";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
 const PHASE_1 = ["K1", "K2", "K3", "K5", "K6", "K7", "A1", "A5"];
@@ -43,7 +45,7 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
   it("passes every phase 1 rule for the good stand-in", async () => {
     const { report, outDir } = await runAgainst("good");
     assert.deepEqual(statuses(report), Object.fromEntries(PHASE_1.map((r) => [r, "pass"])));
-    assert.equal(report.rulesVersion, "R2");
+    assert.equal(report.rulesVersion, "R3");
     assert.equal(report.underTest.agent.commit, "fake-good");
     assert.ok(
       report.results.every((r) => r.evidence.length > 0),
@@ -71,6 +73,12 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
       existsSync(join(outDir, "logs/rome.log")),
       "Rome's logs are copied beside the report",
     );
+    assert.ok(
+      report.answerTimes.every((t) => typeof t.seconds === "number"),
+      "every answer has its time",
+    );
+    assert.match(markdown, /## Answer times/);
+    assert.match(markdown, /## Failures across runs/);
     assert.match(markdown, /^Answered (\d+) of \1 messages sent to the agent\.$/m);
   });
 
@@ -168,6 +176,50 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
       }),
       /uncommitted changes in agent/,
     );
+  });
+});
+
+describe("failures across runs", () => {
+  it("counts each rule's failures in earlier reports and this run, and marks the limit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cos-verify-history-"));
+    const earlier = (name, results) => {
+      mkdirSync(join(root, name));
+      writeFileSync(join(root, name, "report.json"), JSON.stringify({ results }));
+    };
+    earlier("run-1", [
+      { rule: "K5", status: "fail" },
+      { rule: "K3", status: "not_checked" },
+    ]);
+    earlier("run-2", [
+      { rule: "K5", status: "fail" },
+      { rule: "K2", status: "fail" },
+    ]);
+    const history = failureHistory(join(root), join(root, "run-3"), [
+      { rule: "K5", status: "fail" },
+      { rule: "K3", status: "waits_on_design" },
+    ]);
+    assert.deepEqual(history.counts, { K5: 3, K2: 1 });
+    assert.equal(history.earlierRuns.length, 2);
+
+    const { outDir } = await runAgainst("fail-K5", { rules: ["K5"] });
+    assert.match(readFileSync(join(outDir, "report.md"), "utf8"), /\| K5 \| 1 \|/);
+  });
+});
+
+describe("sources", () => {
+  it("takes a link, or a named document with an entry, as K5's source", () => {
+    const team = loadTeam();
+    assert.equal(namesSource("Lead. (Source: the team roster.)", team), false);
+    assert.equal(namesSource("Due 2027-02-05. (Source: goals document.)", team), false);
+    assert.equal(
+      namesSource(
+        "Due 2027-02-05. (Source: goals document, goal 'Install 12 sensors on Orkney piers')",
+        team,
+      ),
+      true,
+    );
+    assert.equal(namesSource("Lead. (Source: team roster, Marisol Okonkwo-Vance.)", team), true);
+    assert.equal(namesSource("Said in standup: https://discord.test/1/2", team), true);
   });
 });
 

@@ -1,11 +1,12 @@
 // Runs the selected scenarios against the environment and writes the report.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RULES_VERSION, SCENARIOS } from "../scenarios/index.mjs";
 import { renderMarkdown } from "./report.mjs";
+import { JUDGE_CALIBRATION } from "./judge.mjs";
 import { ask } from "./scenario.mjs";
 import { loadK5Questions, loadTeam, writeSeed } from "./seed.mjs";
 
@@ -41,6 +42,35 @@ export function summarize(results) {
   const agentFailures =
     tally(whole).fail + Object.values(byLeg).reduce((sum, legs) => sum + legs.fail, 0);
   return { rules: tally(whole), byLeg, agentFailures };
+}
+
+/** A rule at this many failures across runs is one failure from stopping the loop. */
+export const FAILURE_LIMIT = 3;
+
+/**
+ * Failures per rule across every earlier run whose report sits in `runsRoot`, plus `results`.
+ * Ouou's rule stops the loop when a rule fails more than FAILURE_LIMIT times. Not checked and
+ * waiting on a design decision are not failures.
+ */
+export function failureHistory(runsRoot, currentDir, results) {
+  const counts = {};
+  const runs = [];
+  const add = (rule) => {
+    counts[rule] = (counts[rule] ?? 0) + 1;
+  };
+  for (const name of existsSync(runsRoot) ? readdirSync(runsRoot).sort() : []) {
+    const path = join(runsRoot, name, "report.json");
+    if (join(runsRoot, name) === currentDir || !existsSync(path)) continue;
+    try {
+      const earlier = JSON.parse(readFileSync(path, "utf8"));
+      runs.push(name);
+      for (const r of earlier.results ?? []) if (r.status === "fail") add(r.rule);
+    } catch {
+      // An unreadable report counts no failures.
+    }
+  }
+  for (const r of results) if (r.status === "fail") add(r.rule);
+  return { earlierRuns: runs, counts, limit: FAILURE_LIMIT };
 }
 
 /** The scenarios for `rules` when given, else every rule of `phase` and the phases before it. */
@@ -117,7 +147,18 @@ export async function verify({
     await env.rename({ as: member.account, displayName: member.name });
 
   const answered = { sent: 0, answered: 0 };
-  const ctx = { env, judge, team, k5Questions: loadK5Questions(), waits, memo: {}, log, answered };
+  const answerTimes = [];
+  const ctx = {
+    env,
+    judge,
+    team,
+    k5Questions: loadK5Questions(),
+    waits,
+    memo: {},
+    log,
+    answered,
+    answerTimes,
+  };
   const liveness = await ask(ctx, {
     as: team.members[0].account,
     chat: "general",
@@ -127,6 +168,7 @@ export async function verify({
   const results = [];
   for (const scenario of live ? scenarios : []) {
     log(`running ${scenario.rule} ${scenario.title}`);
+    ctx.rule = scenario.rule;
     let result;
     try {
       result = await scenario.run(ctx);
@@ -173,6 +215,8 @@ export async function verify({
     underTest: version,
     dirty,
     judge: judgeName,
+    judgeCalibration: JUDGE_CALIBRATION,
+    runFrom: { dir: dirname(dirname(dirname(verifierDir))), commit: version.verifier.commit },
     waits,
     notes: [
       "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. The real direct-message path is checked by hand in the live trial.",
@@ -181,8 +225,10 @@ export async function verify({
     liveness: { questionId: liveness.questionId, replyId: liveness.reply?.id ?? null },
     stopped: live ? null : NOT_ANSWERING,
     answered,
+    answerTimes,
     logs,
     summary: summarize(results),
+    failures: failureHistory(runsDir ?? (outDir ? dirname(dir) : DEFAULT_RUNS_DIR), dir, results),
     results,
   };
   writeFileSync(join(dir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
