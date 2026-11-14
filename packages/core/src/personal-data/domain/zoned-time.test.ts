@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { fromWallClock, isoInZone, nextPeriod, periodStart } from "./zoned-time.js";
+import { fromWallClock, isoInZone, nextPeriod, parseBound, periodStart } from "./zoned-time.js";
 
 describe("zoned time", () => {
   it("reads a midnight a daylight saving change skips as the instant the skip ends", () => {
@@ -23,5 +23,15 @@ describe("zoned time", () => {
     // New York repeats 01:00–02:00 on 2026-11-01.
     const repeated = fromWallClock("America/New_York", 2026, 11, 1, 1, 30);
     expect(isoInZone(repeated, "America/New_York")).toBe("2026-11-01T01:30:00-04:00");
+  });
+
+  it("reads a local time with fractional seconds in the zone asked, not the server's", () => {
+    const zone = "Asia/Shanghai";
+    expect(parseBound("2026-11-10T00:00:00.000", zone, false)).toBe(
+      Date.parse("2026-11-09T16:00:00Z"),
+    );
+    expect(parseBound("2026-11-10T00:00:00.25", zone, false)).toBe(
+      Date.parse("2026-11-09T16:00:00.250Z"),
+    );
   });
 });

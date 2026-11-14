@@ -145,7 +145,7 @@ export function isoInZone(at: number, tz: string): string {
 }
 
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
-const LOCAL_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+const LOCAL_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?$/;
 
 /**
  * Reads a window bound: an ISO 8601 time with an offset, a local time without
@@ -164,7 +164,9 @@ export function parseBound(text: string, tz: string, endOfDay: boolean): number 
   const local = LOCAL_TIME.exec(text);
   if (local) {
     const [year, month, day, hour, minute] = local.slice(1, 6).map(Number);
-    return fromWallClock(tz, year, month, day, hour, minute, Number(local[6] ?? 0));
+    // Fractional seconds keep their milliseconds. Finer digits are dropped.
+    const ms = Number((local[7] ?? "").padEnd(3, "0").slice(0, 3));
+    return fromWallClock(tz, year, month, day, hour, minute, Number(local[6] ?? 0)) + ms;
   }
   const parsed = Date.parse(text);
   return Number.isNaN(parsed) ? undefined : parsed;
