@@ -197,5 +197,6 @@ private struct TopicItem: View {
         .buttonStyle(PressScaleStyle(scale: 0.98))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityValue(unread > 0 ? Text("\(unread) unread") : Text(verbatim: ""))
+        .accessibilityIdentifier("topic-chat")
     }
 }

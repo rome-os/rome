@@ -192,6 +192,7 @@ struct ThreadLabelLine: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 6)
         .accessibilityLabel(Text(verbatim: title))
+        .accessibilityIdentifier("thread-label")
         .accessibilityHint(Text("Opens the chat thread"))
     }
 }

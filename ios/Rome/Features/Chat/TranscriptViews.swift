@@ -537,6 +537,7 @@ struct TaskCard: View {
         }
         .bubbleWidth()
         .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
+        .accessibilityIdentifier("task-card")
     }
 }
 
@@ -685,6 +686,7 @@ struct Composer: View {
                         }
                         .disabled(!canSend)
                         .accessibilityLabel("Send")
+                        .accessibilityIdentifier("send")
                         .transition(.scale.combined(with: .opacity))
                     }
                 }

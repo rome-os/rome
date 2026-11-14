@@ -35,6 +35,7 @@ struct ComposerTextView: UIViewRepresentable {
         // The placeholder is fitted to the width: draw it again when that changes.
         view.contentMode = .redraw
         view.accessibilityLabel = placeholder
+        view.accessibilityIdentifier = "message-field"
         handle?.view = view
         return view
     }
