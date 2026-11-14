@@ -60,6 +60,10 @@ import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries"
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
 import {
+  READ_ONLY_WIDGET_HOST,
+  WidgetHostContext,
+} from "@/components/chat/entries/widget-ui/turn-fields";
+import {
   getSessionMetrics,
   getRomeSession,
   listSessionTurns,
@@ -1038,60 +1042,62 @@ function SessionsIndexPage({
   }
 
   return (
-    <TooltipProvider delayDuration={150}>
-      <SessionsListFrame
-        fullMode={fullMode}
-        header={
-          <ActivityHeader
-            title="Overview"
-            viewSwitch={viewSwitch}
-            actions={
-              <>
-                {rangeSelect}
-                {refreshButton}
-              </>
-            }
-          >
-            {activeFilters.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <Separator className="h-5" orientation="vertical" />
-                {activeFilters.map((filter) => (
-                  <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
-                    {filter.label}
-                    <span aria-hidden>×</span>
-                  </Button>
-                ))}
-              </div>
-            ) : null}
-          </ActivityHeader>
-        }
-      >
-        <PendingApprovalsBanner className="px-5 pt-4" />
-        <SessionsOverview
-          data={metrics.data}
-          error={metrics.error}
-          loading={metrics.loading}
-          metric={metric}
-          trendBy={trendBy}
-          groupBy={groupBy}
-          recentSessions={recentInventory.data?.sessions ?? []}
-          recentSessionsError={recentInventory.error}
-          recentSessionsLoading={recentInventory.loading}
-          onMetricChange={setMetric}
-          onTrendByChange={setTrendBy}
-          onGroupByChange={setGroupBy}
-          onGroupSelect={groupSelect}
-          onRecentSessionOpen={openSession}
-          onSeriesSelect={seriesSelect}
-          onViewAllSessions={() => {
-            setSort("activity");
-            setSortDirection("desc");
-            setOffset(0);
-            navigate("all", { relative: "path" });
-          }}
-        />
-      </SessionsListFrame>
-    </TooltipProvider>
+    <WidgetHostContext.Provider value={READ_ONLY_WIDGET_HOST}>
+      <TooltipProvider delayDuration={150}>
+        <SessionsListFrame
+          fullMode={fullMode}
+          header={
+            <ActivityHeader
+              title="Overview"
+              viewSwitch={viewSwitch}
+              actions={
+                <>
+                  {rangeSelect}
+                  {refreshButton}
+                </>
+              }
+            >
+              {activeFilters.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <Separator className="h-5" orientation="vertical" />
+                  {activeFilters.map((filter) => (
+                    <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
+                      {filter.label}
+                      <span aria-hidden>×</span>
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+            </ActivityHeader>
+          }
+        >
+          <PendingApprovalsBanner className="px-5 pt-4" />
+          <SessionsOverview
+            data={metrics.data}
+            error={metrics.error}
+            loading={metrics.loading}
+            metric={metric}
+            trendBy={trendBy}
+            groupBy={groupBy}
+            recentSessions={recentInventory.data?.sessions ?? []}
+            recentSessionsError={recentInventory.error}
+            recentSessionsLoading={recentInventory.loading}
+            onMetricChange={setMetric}
+            onTrendByChange={setTrendBy}
+            onGroupByChange={setGroupBy}
+            onGroupSelect={groupSelect}
+            onRecentSessionOpen={openSession}
+            onSeriesSelect={seriesSelect}
+            onViewAllSessions={() => {
+              setSort("activity");
+              setSortDirection("desc");
+              setOffset(0);
+              navigate("all", { relative: "path" });
+            }}
+          />
+        </SessionsListFrame>
+      </TooltipProvider>
+    </WidgetHostContext.Provider>
   );
 }
 
@@ -1176,63 +1182,65 @@ function ReadOnlySessionChat({
       : traceDrawerTarget;
 
   return (
-    <TooltipProvider delayDuration={150}>
-      <div className="@container/chat relative flex min-h-0 flex-1 overflow-hidden">
-        <div
-          className={`relative flex min-h-0 min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
-            traceDrawerTarget !== null,
-            false,
-          )}`}
-        >
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain pb-safe">
-            <MessageList
-              rows={rows}
-              live={{
-                isStreaming: liveTurn !== null,
-                runningTurnId: liveTurn?.turnId ?? null,
-                snapshot: liveTurn?.snapshot ?? null,
-                textStore: liveTextStore,
-                identity,
-              }}
-              contentRef={NO_OP}
-              onOpenLiveTrace={() => {
-                if (!liveTurn) return;
-                setTraceDrawerTarget({
-                  kind: "live",
-                  sessionId: session.id,
-                  turnId: liveTurn.turnId,
-                  summary: liveTurn.snapshot.summary,
-                  segments: liveTurn.snapshot.segments,
-                  streaming: true,
-                });
-              }}
-              onOpenStoredTrace={setTraceDrawerTarget}
-              actions={actions}
-            />
+    <WidgetHostContext.Provider value={READ_ONLY_WIDGET_HOST}>
+      <TooltipProvider delayDuration={150}>
+        <div className="@container/chat relative flex min-h-0 flex-1 overflow-hidden">
+          <div
+            className={`relative flex min-h-0 min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
+              traceDrawerTarget !== null,
+              false,
+            )}`}
+          >
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain pb-safe">
+              <MessageList
+                rows={rows}
+                live={{
+                  isStreaming: liveTurn !== null,
+                  runningTurnId: liveTurn?.turnId ?? null,
+                  snapshot: liveTurn?.snapshot ?? null,
+                  textStore: liveTextStore,
+                  identity,
+                }}
+                contentRef={NO_OP}
+                onOpenLiveTrace={() => {
+                  if (!liveTurn) return;
+                  setTraceDrawerTarget({
+                    kind: "live",
+                    sessionId: session.id,
+                    turnId: liveTurn.turnId,
+                    summary: liveTurn.snapshot.summary,
+                    segments: liveTurn.snapshot.segments,
+                    streaming: true,
+                  });
+                }}
+                onOpenStoredTrace={setTraceDrawerTarget}
+                actions={actions}
+              />
+            </div>
           </div>
+          <TraceDrawer
+            target={drawerTarget}
+            onClose={() => setTraceDrawerTarget(null)}
+            loadStoredTrace={loadStoredTrace}
+            allowSubagentUsage
+            readOnly
+            renderInlineBlock={(block, key) =>
+              renderSingleEntry(block, key, {
+                onApprovalResolved: NO_OP,
+                compact: true,
+              })
+            }
+            renderRunBlocks={(blocks, live) =>
+              renderFlatEntries(blocks, {
+                onApprovalResolved: NO_OP,
+                compact: true,
+                live,
+              })
+            }
+          />
         </div>
-        <TraceDrawer
-          target={drawerTarget}
-          onClose={() => setTraceDrawerTarget(null)}
-          loadStoredTrace={loadStoredTrace}
-          allowSubagentUsage
-          readOnly
-          renderInlineBlock={(block, key) =>
-            renderSingleEntry(block, key, {
-              onApprovalResolved: NO_OP,
-              compact: true,
-            })
-          }
-          renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks, {
-              onApprovalResolved: NO_OP,
-              compact: true,
-              live,
-            })
-          }
-        />
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </WidgetHostContext.Provider>
   );
 }
 

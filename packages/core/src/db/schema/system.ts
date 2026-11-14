@@ -658,6 +658,8 @@ export const chatMessages = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
+    // A dashboard line by the id clients know it by, such as a widget's.
+    index("idx_chat_messages_by_key").on(table.key),
     // One chat thread's lines.
     index("idx_chat_messages_chat_thread").on(table.chatId, table.chatThreadId),
     // A place's lines by time. Within one second lines keep the order they
@@ -1176,41 +1178,52 @@ export const webchatTurnFeedback = sqliteTable(
   ],
 );
 
-export const routines = sqliteTable("routines", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  // Optional caller-assigned identity. Unique when set (SQLite treats multiple
-  // NULLs as distinct, so most routines can leave it null). Lets a caller make
-  // create_routine idempotent/dedup-able without overloading `name` (the human
-  // title): briefing keys its managed routines `briefing-*` and recreates them
-  // by key. A duplicate key is rejected at create time.
-  key: text("key").unique(),
-  // The app that owns and manages this routine (its appId), e.g. "briefing".
-  // Null for routines a guardian or agent created directly. A managed routine is
-  // the app's to maintain: users can't delete it (the dashboard/DELETE path and
-  // agent's delete_routine both refuse), only the managing app can — so an app
-  // can freely recreate its routines on sync without a user pruning them.
-  managedBy: text("managed_by"),
-  enabled: integer("enabled", { mode: "boolean" }).default(true),
+export const routines = sqliteTable(
+  "routines",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    // Optional caller-assigned identity. Unique when set (SQLite treats multiple
+    // NULLs as distinct, so most routines can leave it null). Lets a caller make
+    // create_routine idempotent/dedup-able without overloading `name` (the human
+    // title): briefing keys its managed routines `briefing-*` and recreates them
+    // by key. A duplicate key is rejected at create time.
+    key: text("key").unique(),
+    // The app that owns and manages this routine (its appId), e.g. "briefing".
+    // Null for routines a guardian or agent created directly. A managed routine is
+    // the app's to maintain: users can't delete it (the dashboard/DELETE path and
+    // agent's delete_routine both refuse), only the managing app can — so an app
+    // can freely recreate its routines on sync without a user pruning them.
+    managedBy: text("managed_by"),
+    enabled: integer("enabled", { mode: "boolean" }).default(true),
 
-  // Trigger config (JSON, discriminated by trigger.type)
-  trigger: text("trigger", { mode: "json" }).notNull(),
+    // Trigger config (JSON, discriminated by trigger.type)
+    trigger: text("trigger", { mode: "json" }).notNull(),
 
-  actionName: text("action_name").notNull(),
-  args: text("args", { mode: "json" }).notNull(), // JSON array
-  // Whether a run's record keeps the payload that fired it. Off for a routine
-  // whose payloads are private and large, such as a whole mail: its runs then
-  // keep only the payload's size.
-  keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" }).notNull().default(true),
-  // The person who created the routine, as a session actor (JSON): its fires
-  // act for them, so a reminder's push reaches the person who asked. Null on
-  // rows from before the column, whose fires act for the chat's owner.
-  createdBy: text("created_by", { mode: "json" }),
+    actionName: text("action_name").notNull(),
+    args: text("args", { mode: "json" }).notNull(), // JSON array
+    // Whether a run's record keeps the payload that fired it. Off for a routine
+    // whose payloads are private and large, such as a whole mail: its runs then
+    // keep only the payload's size.
+    keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    // The person who created the routine, as a session actor (JSON): its fires
+    // act for them, so a reminder's push reaches the person who asked. Null on
+    // rows from before the column, whose fires act for the chat's owner.
+    createdBy: text("created_by", { mode: "json" }),
 
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),
-  nextRunAt: integer("next_run_at", { mode: "timestamp" }),
-});
+    // The chat the routine works for: the chat its args send into, else the
+    // chat it was made in. Null for a routine of no one chat, such as the
+    // Concierge's follows and digests. A chat's task list reads it.
+    chatId: text("chat_id"),
+
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),
+    nextRunAt: integer("next_run_at", { mode: "timestamp" }),
+  },
+  (table) => [index("idx_routines_chat_id").on(table.chatId)],
+);
 
 export const routineRuns = sqliteTable(
   "routine_runs",

@@ -11,6 +11,16 @@
         }
       }
     },
+    "%@ at %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ %@"
+          }
+        }
+      }
+    },
     "%@ has an update" : {
       "localizations" : {
         "zh-Hans" : {
@@ -273,34 +283,6 @@
         }
       }
     },
-    "%lld replies" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld reply"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld replies"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 条回复"
-          }
-        }
-      }
-    },
     "%lld selected" : {
       "localizations" : {
         "zh-Hans" : {
@@ -411,12 +393,12 @@
         }
       }
     },
-    "AI tool usage" : {
+    "Active" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "AI 工具用量"
+            "value" : "进行中"
           }
         }
       }
@@ -437,6 +419,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加照片"
+          }
+        }
+      }
+    },
+    "Add your own…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加自己的选项…"
           }
         }
       }
@@ -527,6 +519,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "应用"
+          }
+        }
+      }
+    },
+    "App not found" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到这个应用"
           }
         }
       }
@@ -991,6 +993,16 @@
         }
       }
     },
+    "Checks %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@检查"
+          }
+        }
+      }
+    },
     "Choose from library" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1017,6 +1029,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭"
+          }
+        }
+      }
+    },
+    "Collapsed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已收起"
           }
         }
       }
@@ -1117,6 +1139,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法检查连接状态"
+          }
+        }
+      }
+    },
+    "Could not find the card" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到这张卡片"
           }
         }
       }
@@ -1261,16 +1293,6 @@
         }
       }
     },
-    "Couldn't send your answer" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法发送你的回答"
-          }
-        }
-      }
-    },
     "Couldn't send your answer. Your choices are kept" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1371,6 +1393,16 @@
         }
       }
     },
+    "Created %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建于 %@"
+          }
+        }
+      }
+    },
     "Creating…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1387,6 +1419,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "骑行距离"
+          }
+        }
+      }
+    },
+    "Daily at %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天 %@"
           }
         }
       }
@@ -1491,12 +1533,32 @@
         }
       }
     },
+    "Digest daily at %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天 %@ 汇总"
+          }
+        }
+      }
+    },
+    "Dismiss" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳过"
+          }
+        }
+      }
+    },
     "Dismissed" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已忽略"
+            "value" : "已跳过"
           }
         }
       }
@@ -1517,6 +1579,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已到时间"
+          }
+        }
+      }
+    },
+    "Ended" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已结束"
           }
         }
       }
@@ -1551,6 +1623,16 @@
         }
       }
     },
+    "Expanded" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已展开"
+          }
+        }
+      }
+    },
     "Expired · answer to continue" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1571,6 +1653,26 @@
         }
       }
     },
+    "Failed to load tasks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务加载失败"
+          }
+        }
+      }
+    },
+    "Failed to stop the task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止任务失败"
+          }
+        }
+      }
+    },
     "Flights climbed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1581,42 +1683,12 @@
         }
       }
     },
-    "Following" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关注"
-          }
-        }
-      }
-    },
-    "Following · digest" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关注 · 摘要"
-          }
-        }
-      }
-    },
     "For everyday wellness, not medical advice." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "仅用于日常健康管理，不构成医疗建议。"
-          }
-        }
-      }
-    },
-    "From “%@”" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来自「%@」"
           }
         }
       }
@@ -1809,16 +1881,6 @@
         }
       }
     },
-    "In progress" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "进行中"
-          }
-        }
-      }
-    },
     "Instances are managed in Rome Cloud." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1889,6 +1951,16 @@
         }
       }
     },
+    "Last run failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次运行失败"
+          }
+        }
+      }
+    },
     "Later" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1919,6 +1991,16 @@
         }
       }
     },
+    "Loading" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载中"
+          }
+        }
+      }
+    },
     "Loading approval…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1945,16 +2027,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本地 Rome"
-          }
-        }
-      }
-    },
-    "Make a new app" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "做一个新应用"
           }
         }
       }
@@ -2055,6 +2127,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发消息"
+          }
+        }
+      }
+    },
+    "Message in %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」中发消息"
           }
         }
       }
@@ -2329,6 +2411,16 @@
         }
       }
     },
+    "Not available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可用"
+          }
+        }
+      }
+    },
     "Not connected yet" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2399,22 +2491,22 @@
         }
       }
     },
-    "Not sent. Tap to retry." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "发送失败，点按重试"
-          }
-        }
-      }
-    },
     "Not signed in" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "未登录"
+          }
+        }
+      }
+    },
+    "Not started · Created %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未开始 · %@创建"
           }
         }
       }
@@ -2479,6 +2571,16 @@
         }
       }
     },
+    "On a schedule" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按计划"
+          }
+        }
+      }
+    },
     "Online" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2505,6 +2607,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "仅当"
+          }
+        }
+      }
+    },
+    "Only when run by hand" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅手动运行"
           }
         }
       }
@@ -2649,32 +2761,12 @@
         }
       }
     },
-    "Opens the task chat." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开任务对话"
-          }
-        }
-      }
-    },
     "Or type your own…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "或者自己写…"
-          }
-        }
-      }
-    },
-    "Other" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "其他"
           }
         }
       }
@@ -2919,6 +3011,16 @@
         }
       }
     },
+    "Reply to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回复：%@"
+          }
+        }
+      }
+    },
     "Reply to this task" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3043,6 +3145,16 @@
         }
       }
     },
+    "Respond" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "去处理"
+          }
+        }
+      }
+    },
     "Restarting your Rome…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3089,16 +3201,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重试"
-          }
-        }
-      }
-    },
-    "Retrying…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在重试…"
           }
         }
       }
@@ -3189,6 +3291,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行中"
+          }
+        }
+      }
+    },
+    "Running on its own" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动运行"
           }
         }
       }
@@ -3423,30 +3535,12 @@
         }
       }
     },
-    "Show %lld older" : {
+    "Show %lld more" : {
       "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Show %lld older"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Show %lld older"
-                }
-              }
-            }
-          }
-        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "显示更早的 %lld 项"
+            "value" : "再显示 %lld 条"
           }
         }
       }
@@ -3891,16 +3985,6 @@
         }
       }
     },
-    "Task, %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "任务，%@"
-          }
-        }
-      }
-    },
     "Tasks" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4027,16 +4111,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这张卡片已不可用"
-          }
-        }
-      }
-    },
-    "This card was already answered. The task has been refreshed." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这张卡片已经回答过，任务已刷新。"
           }
         }
       }
@@ -4499,6 +4573,16 @@
         }
       }
     },
+    "Waiting for %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待 %@"
+          }
+        }
+      }
+    },
     "Waiting for your answer" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4509,12 +4593,12 @@
         }
       }
     },
-    "Waiting on you" : {
+    "Waiting for your approval" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "等你回复"
+            "value" : "等你批准"
           }
         }
       }
@@ -4645,6 +4729,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 能做什么"
+          }
+        }
+      }
+    },
+    "When %@ arrives" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收到 %@ 时"
           }
         }
       }
@@ -4949,6 +5043,16 @@
         }
       }
     },
+    "optional" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选"
+          }
+        }
+      }
+    },
     "setup updated" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4991,6 +5095,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "「%@」已停止。在 Rome Cloud 启动后再打开。"
+          }
+        }
+      }
+    },
+    "Sent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已发送"
           }
         }
       }

@@ -161,15 +161,19 @@ export interface MessageMarkFacts {
 
 /**
  * A guardian message's status reaction (docs/domains/chats.md#status-reaction):
- * working while its turn has not answered it, or a task made for it waits
- * for its owner, is active or is checked later; failed when its turn failed,
- * a task made for it ended failed, or Rome gave up telling the result of a
- * task not stopped since; else none. A task that ended for no response shows
- * none, even when Rome gave up telling it.
+ * working only while the Concierge works for it now, that is while its turn
+ * has not answered it or a task made for it is active, its report included;
+ * failed when its turn failed, a task made for it ended failed, or Rome gave
+ * up telling the result of a task not stopped since, once none of its tasks
+ * is still open; else none. A task that waits for its owner or for later,
+ * such as a scheduled task between runs, shows none. A task that ended for
+ * no response shows none, even when Rome gave up telling it.
  */
 export function messageStatusReaction(facts: MessageMarkFacts): ConciergeStatusReaction | null {
-  const open = (task: ConciergeTaskStatusResult) => task.status !== "ended";
-  if (facts.answered === false || facts.tasks.some(open)) return "working";
+  if (facts.answered === false || facts.tasks.some((task) => task.status === "active")) {
+    return "working";
+  }
+  if (facts.tasks.some((task) => task.status !== "ended")) return null;
   const failed =
     facts.turnFailed === true ||
     facts.tasks.some(

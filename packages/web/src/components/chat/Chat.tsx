@@ -1,4 +1,6 @@
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
+import { useQueryClient } from "@tanstack/react-query";
+import { markChatSessionReadInCache } from "@/hooks/use-chat-sessions";
+import { CONCIERGE_CHAT_ID, markConciergeChatReadInCache } from "@/hooks/use-concierge";
 import {
   cardKey,
   chatCardSettledSchema,
@@ -24,7 +26,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
-  ListChecks,
   MoreHorizontal,
   PanelRightOpen,
   Share2,
@@ -32,6 +33,7 @@ import {
   X,
 } from "lucide-react";
 import { z } from "zod";
+import type { MessageWritingEvent } from "@rome/api-types/concierge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -104,6 +106,10 @@ import { useDesktop } from "@/hooks/use-desktop";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
+import {
+  type WidgetHost,
+  WidgetHostContext,
+} from "@/components/chat/entries/widget-ui/turn-fields";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions, type ChatVariant } from "@/components/chat/MessageList";
@@ -140,8 +146,8 @@ import {
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
-import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
-import { PendingChecks } from "./PendingChecks";
+import { useTaskList } from "@/components/concierge/TaskListPane";
+import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
@@ -270,12 +276,22 @@ const sessionNameSchema = z.object({
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
+/** How the running turn shows the typing dots (`message_writing`). */
+const messageWritingSchema: z.ZodType<MessageWritingEvent> = z.object({
+  sessionId: z.string(),
+  turnId: z.string(),
+  mode: z.enum(["exact", "simulated"]),
+  writing: z.boolean(),
+});
+
 const messageChatThreadSchema = z.object({
   sessionId: z.string(),
   messageId: z.string(),
   chatThreadId: z.string(),
   /** The task's title, when the thread is a task's. */
   chatThreadTitle: z.string().optional(),
+  /** The task's own chat, when it has one. */
+  chatThreadTaskChatId: z.string().optional(),
 });
 
 /** A task left the chat, and its chat thread with it. */
@@ -296,6 +312,8 @@ interface ChatSessionEventsProps {
   onChatCardSettled?: (event: z.infer<typeof chatCardSettledSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
+  /** How the running turn shows the typing dots changed. */
+  onMessageWriting?: (event: MessageWritingEvent) => void;
   onReconnect: (sessionId: string) => void;
 }
 
@@ -308,6 +326,7 @@ function ChatSessionEvents({
   onChatCardSettled,
   onSessionName,
   onSessionRunning,
+  onMessageWriting,
   onReconnect,
 }: ChatSessionEventsProps) {
   useLiveEvents(
@@ -349,6 +368,12 @@ function ChatSessionEvents({
         schema: sessionRunningSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onSessionRunning(event);
+        },
+      },
+      message_writing: {
+        schema: messageWritingSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageWriting?.(event);
         },
       },
     },
@@ -561,6 +586,10 @@ export function Chat({
   const [liveThreadTitles, setLiveThreadTitles] = useState<ReadonlyMap<string, string | null>>(
     new Map(),
   );
+  // Each task thread's task chat live placements told, by the thread.
+  const [liveThreadTaskChats, setLiveThreadTaskChats] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const handleChatThreadRetired = useCallback(
     ({ chatThreadId }: z.infer<typeof chatThreadRetiredSchema>) =>
       setLiveThreadTitles((prev) =>
@@ -569,10 +598,22 @@ export function Chat({
     [],
   );
   const handleMessageChatThread = useCallback(
-    ({ messageId, chatThreadId, chatThreadTitle }: z.infer<typeof messageChatThreadSchema>) => {
+    ({
+      messageId,
+      chatThreadId,
+      chatThreadTitle,
+      chatThreadTaskChatId,
+    }: z.infer<typeof messageChatThreadSchema>) => {
       setRethreaded((prev) =>
         placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
       );
+      if (chatThreadTaskChatId) {
+        setLiveThreadTaskChats((prev) =>
+          prev.get(chatThreadId) === chatThreadTaskChatId
+            ? prev
+            : new Map(prev).set(chatThreadId, chatThreadTaskChatId),
+        );
+      }
       if (chatThreadTitle) {
         setLiveThreadTitles((prev) =>
           prev.get(chatThreadId) === chatThreadTitle
@@ -589,6 +630,15 @@ export function Chat({
   const handleMessageStatusReaction = useCallback(
     ({ messageId, statusReaction }: z.infer<typeof messageStatusReactionSchema>) =>
       setLiveReactions((prev) => new Map(prev).set(messageId, statusReaction)),
+    [],
+  );
+  // How each chat's running turn shows the typing dots, its latest word.
+  const [liveWriting, setLiveWriting] = useState<ReadonlyMap<string, MessageWritingEvent>>(
+    new Map(),
+  );
+  const handleMessageWriting = useCallback(
+    (event: MessageWritingEvent) =>
+      setLiveWriting((prev) => new Map(prev).set(event.sessionId, event)),
     [],
   );
   // Task cards' questions and approvals live events settled since the
@@ -872,8 +922,9 @@ export function Chat({
     [scrollerEl, floorEl, landOn, jumpToMessage],
   );
 
-  // A row of the task panel points to a Concierge message that may sit pages
-  // above the loaded ones, so the jump pages older history in until it renders.
+  // Respond in the Tasks panel points to a Concierge message that may sit
+  // pages above the loaded ones, so the jump reads history down through it in
+  // one page; the unread divider pages older history in until it renders.
   const olderRef = useRef({ hasOlder, loadOlder });
   olderRef.current = { hasOlder, loadOlder };
   const shownCountRef = useRef(0);
@@ -882,36 +933,45 @@ export function Chat({
   }, [displayMessages]);
   const findingMessageRef = useRef(false);
   // Pages older history in until `find` returns an element, then hands it to
-  // `reveal`, or says `missing` when the search runs out. Only one search runs
-  // at a time.
+  // `reveal`, or says `missing` when the search runs out. With `through`, the
+  // message it looks for, one read brings the history down to it instead of
+  // a page at a time. Only one search runs at a time. Resolves whether it
+  // revealed it.
   const revealWhenLoaded = useCallback(
-    async (find: () => HTMLElement | null, reveal: () => void, missing: string) => {
-      if (!mainSessionId || findingMessageRef.current) return;
+    async (
+      find: () => HTMLElement | null,
+      reveal: () => void,
+      missing: string,
+      through?: string,
+    ): Promise<boolean> => {
+      if (!mainSessionId || findingMessageRef.current) return false;
       if (find()) {
         reveal();
-        return;
+        return true;
       }
       findingMessageRef.current = true;
       const loading = toast.loading(t("concierge.tasks.findingMessage"));
       try {
         let stalled = 0;
-        for (let page = 0; page < MAX_JUMP_PAGES; page++) {
+        for (let page = 0; page < (through ? 1 : MAX_JUMP_PAGES); page++) {
           if (!olderRef.current.hasOlder(mainSessionId)) break;
           const before = shownCountRef.current;
-          await olderRef.current.loadOlder(mainSessionId);
+          await olderRef.current.loadOlder(mainSessionId, through ? { through } : undefined);
           // The page lands in state first and renders a moment later.
           for (let wait = 0; wait < 40 && shownCountRef.current === before; wait++) {
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
+          await new Promise((resolve) => requestAnimationFrame(resolve));
           if (find()) {
             reveal();
-            return;
+            return true;
           }
           // A page that fails to load changes nothing; two in a row end the search.
           stalled = shownCountRef.current === before ? stalled + 1 : 0;
           if (stalled >= 2) break;
         }
         toast.error(missing);
+        return false;
       } finally {
         toast.dismiss(loading);
         findingMessageRef.current = false;
@@ -922,11 +982,12 @@ export function Chat({
   const showSourceMessage = useCallback(
     (messageId: string) => {
       const scroller = scrollerEl;
-      if (!scroller) return Promise.resolve();
+      if (!scroller) return Promise.resolve(false);
       return revealWhenLoaded(
         () => findMessageAnchor(scroller, messageId),
         () => jumpToMessage(messageId),
         t("concierge.tasks.sourceMissing"),
+        messageId,
       );
     },
     [scrollerEl, revealWhenLoaded, jumpToMessage, t],
@@ -948,7 +1009,7 @@ export function Chat({
   }, [scrollerEl, revealWhenLoaded, scrollToAnchor, t]);
   useEffect(() => {
     if (!concierge) return;
-    return onConciergeJump((messageId) => void showSourceMessage(messageId));
+    return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
   const displayedMessageIds = useMemo(
@@ -1109,6 +1170,7 @@ export function Chat({
     }
   }, []);
 
+  const queryClient = useQueryClient();
   const isMountedRef = useRef(true);
   useEffect(() => {
     isMountedRef.current = true;
@@ -1140,12 +1202,15 @@ export function Chat({
       }
       try {
         await apiMarkSessionRead(id);
-        notifySessionsChanged();
+        // A read changes only this chat's unread mark: clear it in the cached
+        // lists rather than refetch every list that holds it.
+        void markChatSessionReadInCache(queryClient, id);
+        void markConciergeChatReadInCache(queryClient, id);
       } catch {
         // Best effort. The next successful active-session load can retry.
       }
     },
-    [notifySessionsChanged, pendingMark],
+    [queryClient, pendingMark],
   );
   useEffect(() => {
     const flush = () => {
@@ -1159,18 +1224,25 @@ export function Chat({
   }, [markSessionRead]);
 
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
-  // sidebar list and drop back to a fresh chat.
-  const handleDeleteSession = useCallback(async () => {
-    setDeleteConfirmOpen(false);
-    if (!mainSessionId) return;
-    try {
-      await deleteSession(mainSessionId);
-    } catch {
-      // best-effort — the list refresh below reconciles either way
-    }
-    notifySessionsChanged();
-    navigate(MAIN_CHAT_PATH);
-  }, [mainSessionId, notifySessionsChanged, navigate]);
+  // sidebar list and drop back to a fresh chat. `stopWork` ends a topic
+  // chat's follows and open tasks instead of moving them to the main chat.
+  const handleDeleteSession = useCallback(
+    async (stopWork?: boolean) => {
+      setDeleteConfirmOpen(false);
+      if (!mainSessionId) return;
+      try {
+        if (stopWork) await deleteSession(mainSessionId, { followsAndTasks: "stop" });
+        else await deleteSession(mainSessionId);
+      } catch {
+        // best-effort — the list refresh below reconciles either way
+      }
+      notifySessionsChanged();
+      // `forkable` holds for a common or fork chat, the ordinary chats. Leaving
+      // one for the main chat's page would switch the chat list to Concierge.
+      navigate(forkable ? "/chat" : MAIN_CHAT_PATH);
+    },
+    [forkable, mainSessionId, notifySessionsChanged, navigate],
+  );
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
   // not navigate away — the transcript stays open, read-only. The override flips
@@ -1718,16 +1790,28 @@ export function Chat({
   );
   const handleSessionRunning = useCallback(
     (event: z.infer<typeof sessionRunningSchema>) => {
+      if (event.sessionId !== mainSessionIdRef.current) return;
       // A turn queued or ended with the chat still running is one to follow.
-      if (event.running && event.sessionId === mainSessionIdRef.current) kickTurnPoll();
+      if (event.running) kickTurnPoll();
+      // The chat stopped: what its last turn left, such as an error, may have
+      // come after the last read, and no message event announces it.
+      else resyncSessionMessages(event.sessionId);
     },
-    [kickTurnPoll],
+    [kickTurnPoll, resyncSessionMessages],
   );
   // Events missed while the stream was down may include a turn's start.
   const handleSessionEventsReconnect = useCallback(
     (sid: string) => {
       setLiveReactions(new Map());
       setLiveCards(new Map());
+      // The word before the drop may be stale; the server replays the latest
+      // to the new subscription.
+      setLiveWriting((prev) => {
+        if (!prev.has(sid)) return prev;
+        const next = new Map(prev);
+        next.delete(sid);
+        return next;
+      });
       resyncSessionMessages(sid);
       if (sid === mainSessionIdRef.current) kickTurnPoll();
     },
@@ -2063,6 +2147,35 @@ export function Chat({
     [runTurnLifecycle, workspaceContextRegistry],
   );
 
+  // The chat's own turn fields, which a widget sends with every event: core
+  // uses them only when the event starts a turn.
+  const widgetTurnFields = useCallback(() => {
+    const meta = composerRef.current?.getMetadataSnapshot();
+    const turn: Record<string, unknown> = {};
+    if (meta) {
+      if (meta.personaId) turn.personaId = meta.personaId;
+      turn.reasoningEffort = meta.reasoningEffort;
+    }
+    const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
+    if (ws) turn.workspace = ws;
+    return turn;
+  }, [workspaceContextRegistry]);
+
+  // A widget's event may start a turn that ends before the poll sees it run,
+  // and the guardian's own answer is never announced: read the chat again.
+  const widgetHost = useMemo<WidgetHost>(
+    () => ({
+      turnFields: widgetTurnFields,
+      onSettled: () => {
+        const sid = mainSessionIdRef.current;
+        if (!sid) return;
+        resyncSessionMessages(sid);
+        kickTurnPoll();
+      },
+    }),
+    [widgetTurnFields, resyncSessionMessages, kickTurnPoll],
+  );
+
   const handleDismissAppComponent = useCallback(
     async (sessionId: string, toolUseId: string) => {
       await handleSubmitAppComponent(sessionId, toolUseId, { dismissed: true });
@@ -2337,7 +2450,8 @@ export function Chat({
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  const conciergeTaskList = useConciergeTaskList(concierge ? (mainSessionId ?? null) : null);
+  // The agent's logo in the header opens the chat's task list: what runs for it.
+  const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
   // A Concierge chat's header buttons sit on round badges like its pill, except
   // in the Mac app's title bar, where they are any chat's.
   const floating = concierge && !navbarSlot;
@@ -2347,16 +2461,21 @@ export function Chat({
   // The name the header shows for the Concierge, which a share of this chat
   // labels its turns by too.
   const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
-  const conciergeStatus = concierge ? (
-    <ConciergeHeaderStatus
-      // Every Concierge chat, main or topic, goes by the Concierge's name
-      // here; a topic chat's own name is in the chat list.
-      name={conciergeDisplayName}
-      activity={conciergeActivity}
-      // A chat with no messages yet draws its own large mascot.
-      badge={!conciergeEmpty}
-    />
-  ) : null;
+  // A blank topic chat, before its first message, shows nothing in the
+  // header: its empty state speaks for it, and it has no tasks yet.
+  const blankTopicChat = conciergeEmpty && !isMainChat;
+  const conciergeStatus =
+    concierge && !blankTopicChat ? (
+      <ConciergeHeaderStatus
+        // Every Concierge chat, main or topic, goes by the Concierge's name
+        // here; a topic chat's own name is in the chat list.
+        name={conciergeDisplayName}
+        activity={conciergeActivity}
+        // A chat with no messages yet draws its own large mascot.
+        badge={!conciergeEmpty}
+        onOpenTasks={taskList.open}
+      />
+    ) : null;
 
   const navbarTitle = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -2399,12 +2518,6 @@ export function Chat({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {concierge ? (
-              <DropdownMenuItem onSelect={conciergeTaskList.open}>
-                <ListChecks className="size-4" />
-                {t("concierge.tasks.title")}
-              </DropdownMenuItem>
-            ) : null}
             <DropdownMenuItem onSelect={() => enterShareMode()}>
               <Share2 className="size-4" />
               {t("share.title", "Share chat")}
@@ -2537,10 +2650,11 @@ export function Chat({
   const threadRootOfView = threadView
     ? (chatThreads.taskThreads.get(threadView) ?? threadView)
     : null;
+
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
-      {conciergeTaskList.sheet}
+      {taskList.sheet}
     </>
   ) : null;
 
@@ -2552,136 +2666,139 @@ export function Chat({
   );
 
   const page = (
-    <TooltipProvider delayDuration={150}>
-      {sessionEventIds.map((sid) => (
-        <ChatSessionEvents
-          key={sid}
-          sessionId={sid}
-          onMessageInsert={handleMessageInsert}
-          onMessageChatThread={handleMessageChatThread}
-          onChatThreadRetired={handleChatThreadRetired}
-          onMessageStatusReaction={handleMessageStatusReaction}
-          onChatCardSettled={handleChatCardSettled}
-          onSessionName={handleSessionName}
-          onSessionRunning={handleSessionRunning}
-          onReconnect={handleSessionEventsReconnect}
-        />
-      ))}
-      <div
-        className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
-        onDragEnter={handleDragEnter}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        {/* ---- Main Chat Area ---- */}
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {isDraggingFiles && (
-            <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-16 border-2 border-dashed border-info bg-info-bg/85 text-ui text-info-fg md:inset-6">
-              {t("composer.dropFiles")}
-            </div>
-          )}
+    <WidgetHostContext.Provider value={widgetHost}>
+      <TooltipProvider delayDuration={150}>
+        {sessionEventIds.map((sid) => (
+          <ChatSessionEvents
+            key={sid}
+            sessionId={sid}
+            onMessageInsert={handleMessageInsert}
+            onMessageChatThread={handleMessageChatThread}
+            onChatThreadRetired={handleChatThreadRetired}
+            onMessageStatusReaction={handleMessageStatusReaction}
+            onChatCardSettled={handleChatCardSettled}
+            onSessionName={handleSessionName}
+            onSessionRunning={handleSessionRunning}
+            onMessageWriting={handleMessageWriting}
+            onReconnect={handleSessionEventsReconnect}
+          />
+        ))}
+        <div
+          className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {/* ---- Main Chat Area ---- */}
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {isDraggingFiles && (
+              <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-16 border-2 border-dashed border-info bg-info-bg/85 text-ui text-info-fg md:inset-6">
+                {t("composer.dropFiles")}
+              </div>
+            )}
 
-          {/* No rule under the bar: the chat canvas runs up to the top. A new
+            {/* No rule under the bar: the chat canvas runs up to the top. A new
               chat with no app has nothing to name yet, since the welcome below
               says it already, so the bar keeps only its height and controls
               and the page does not move when the first message starts the
               session. */}
-          {concierge ? (
-            conciergeHeader
-          ) : navbarSlot ? (
-            <SlotContent name={navbarSlot}>{navbar}</SlotContent>
-          ) : (
-            <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
-              {navbar}
-            </div>
-          )}
-          {/* The message scroller — the ONLY scrolling node in the chat. It is
+            {concierge ? (
+              conciergeHeader
+            ) : navbarSlot ? (
+              <SlotContent name={navbarSlot}>{navbar}</SlotContent>
+            ) : (
+              <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
+                {navbar}
+              </div>
+            )}
+            {/* The message scroller — the ONLY scrolling node in the chat. It is
               bounded by the /chat viewport shell, so message reflow (mermaid,
               late media) stays inside here and never resizes the document or
               moves the sidebar/composer. `overscroll-contain` kills page-level
               rubber-banding/scroll-chaining; momentum scrolling keeps the iPad
               touch feel. */}
-          {/* Positioning + measurement parent for the timeline rail. Its own
+            {/* Positioning + measurement parent for the timeline rail. Its own
               container name matters: `@container/chat` is declared on the outer
               element, which also holds the standalone trace overlay, so a gate
               keyed to it would not follow the transcript column itself. */}
-          <div className="@container/transcript relative flex min-h-0 flex-1 flex-col">
-            {/* The left inset opens the timeline rail's lane. Without it the
+            <div className="@container/transcript relative flex min-h-0 flex-1 flex-col">
+              {/* The left inset opens the timeline rail's lane. Without it the
                 transcript's own `max-w-5xl` body reaches the container edge
                 once the container drops under 1024px, and the markers would land
                 on the bubbles. Padding sits inside the scroller's border box,
                 so the scrollbar does not move — only the content shifts. The
                 query MUST match ChatTimelineRail's visibility gate. */}
-            <div
-              ref={attachScroller}
-              className={cn(
-                "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
-                // Concierge has no timeline rail, so no lane for it. Its
-                // header floats over the messages, so the first one starts
-                // below it, and a jump to a message stops below it too.
-                concierge ? "concierge-header-clear" : "@min-[48rem]/transcript:pl-8",
-              )}
-            >
-              {conciergeEmpty ? (
-                mainSessionId === conciergeMainChatId ? (
-                  <ConciergeEmptyState
-                    onPick={(prompt) => composerRef.current?.insertText(prompt)}
-                  />
+              <div
+                ref={attachScroller}
+                className={cn(
+                  "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+                  // Concierge has no timeline rail, so no lane for it. Its
+                  // header floats over the messages, so the first one starts
+                  // below it, and a jump to a message stops below it too.
+                  concierge ? "concierge-header-clear" : "@min-[48rem]/transcript:pl-8",
+                )}
+              >
+                {conciergeEmpty ? (
+                  mainSessionId === conciergeMainChatId ? (
+                    <ConciergeEmptyState
+                      onPick={(prompt) => composerRef.current?.insertText(prompt)}
+                    />
+                  ) : (
+                    // A topic chat: its starters send themselves as its first message.
+                    <ConciergeTopicEmptyState
+                      onStart={(prompt) => composerRef.current?.submit(prompt)}
+                    />
+                  )
+                ) : mainSessionId ? (
+                  <>
+                    {hasOlder(mainSessionId) ? (
+                      <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
+                    ) : null}
+                    <ChatThreadsProvider value={chatThreads}>
+                      <TaskChatContext.Provider value={isTaskChat}>
+                        <MessageList
+                          rows={rows}
+                          live={{
+                            isStreaming: displayedStreaming,
+                            runningTurnId,
+                            quiet: activeSessionStream?.quiet,
+                            writing: liveWriting.get(activeSessionId) ?? null,
+                            snapshot: currentSnapshot,
+                            textStore: liveTextStore,
+                            blockIx: activeSessionStream?.assistantBlockIx,
+                            textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                            identity: mainIdentity,
+                          }}
+                          selection={
+                            shareMode
+                              ? {
+                                  selectedTurns: selectedShareTurns,
+                                  selectableSessionId: mainSessionId,
+                                  onToggleTurn: toggleShareTurn,
+                                }
+                              : undefined
+                          }
+                          contentRef={attachContent}
+                          onOpenLiveTrace={openLiveTraceDrawer}
+                          onOpenStoredTrace={openStoredTraceDrawer}
+                          onOpenSubagentTrace={openSubagentTraceDrawer}
+                          activeTraceTarget={traceDrawerTarget}
+                          subagentIconByName={subagentIconByName}
+                          actions={blockActions}
+                          feedback
+                          fork={forkable}
+                          variant={variant}
+                          unreadFrom={unread?.firstId ?? null}
+                        />
+                      </TaskChatContext.Provider>
+                    </ChatThreadsProvider>
+                  </>
                 ) : (
-                  // A topic chat: its starters send themselves as its first message.
-                  <ConciergeTopicEmptyState
-                    onStart={(prompt) => composerRef.current?.submit(prompt)}
-                  />
-                )
-              ) : mainSessionId ? (
-                <>
-                  {hasOlder(mainSessionId) ? (
-                    <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
-                  ) : null}
-                  <ChatThreadsProvider value={chatThreads}>
-                    <TaskChatContext.Provider value={isTaskChat}>
-                      <MessageList
-                        rows={rows}
-                        live={{
-                          isStreaming: displayedStreaming,
-                          runningTurnId,
-                          quiet: activeSessionStream?.quiet,
-                          snapshot: currentSnapshot,
-                          textStore: liveTextStore,
-                          blockIx: activeSessionStream?.assistantBlockIx,
-                          textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
-                          identity: mainIdentity,
-                        }}
-                        selection={
-                          shareMode
-                            ? {
-                                selectedTurns: selectedShareTurns,
-                                selectableSessionId: mainSessionId,
-                                onToggleTurn: toggleShareTurn,
-                              }
-                            : undefined
-                        }
-                        contentRef={attachContent}
-                        onOpenLiveTrace={openLiveTraceDrawer}
-                        onOpenStoredTrace={openStoredTraceDrawer}
-                        onOpenSubagentTrace={openSubagentTraceDrawer}
-                        activeTraceTarget={traceDrawerTarget}
-                        subagentIconByName={subagentIconByName}
-                        actions={blockActions}
-                        feedback
-                        fork={forkable}
-                        variant={variant}
-                        unreadFrom={unread?.firstId ?? null}
-                      />
-                    </TaskChatContext.Provider>
-                  </ChatThreadsProvider>
-                </>
-              ) : (
-                emptyState
-              )}
+                  emptyState
+                )}
 
-              {/* The single floating composer — a `sticky bottom-0` floor inside the
+                {/* The single floating composer — a `sticky bottom-0` floor inside the
                 message scroller, so messages scroll behind its translucent blur
                 ("scroll under the composer") instead of stopping at a solid dock.
                 In share mode it's swapped for the ShareBar,
@@ -2694,22 +2811,22 @@ export function Chat({
                 also takes pointer events there, while no thread view is open, so a tap on the canvas cannot
                 land on a link it hides. It stays inside the scroller, so the
                 scroll and keyboard geometry match the desktop layout. */}
-              <div
-                ref={setFloorEl}
-                data-chat-floor
-                className={cn(
-                  "pointer-events-none sticky bottom-0 px-3 md:px-6",
-                  // Over an open thread view only the composer takes presses.
-                  chatFloorLayering(threadOpen),
-                  // Presentation mode gives the draft's bottom gap 5x its normal
-                  // size so a recording framed on the empty state keeps the
-                  // composer clear of the capture's lower edge.
-                  presentationMode && !mainSessionId
-                    ? "pb-[calc(var(--rome-safe-area-bottom)+5rem)] md:pb-[calc(var(--rome-safe-area-bottom)+7.5rem)]"
-                    : "pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]",
-                )}
-              >
-                {/* Back to the live tail. It rides the sticky floor rather than the
+                <div
+                  ref={setFloorEl}
+                  data-chat-floor
+                  className={cn(
+                    "pointer-events-none sticky bottom-0 px-3 md:px-6",
+                    // Over an open thread view only the composer takes presses.
+                    chatFloorLayering(threadOpen),
+                    // Presentation mode gives the draft's bottom gap 5x its normal
+                    // size so a recording framed on the empty state keeps the
+                    // composer clear of the capture's lower edge.
+                    presentationMode && !mainSessionId
+                      ? "pb-[calc(var(--rome-safe-area-bottom)+5rem)] md:pb-[calc(var(--rome-safe-area-bottom)+7.5rem)]"
+                      : "pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]",
+                  )}
+                >
+                  {/* Back to the live tail. It rides the sticky floor rather than the
                     scroller, so it tracks a composer whose height changes with the
                     draft, and it sits in every floor state — scrolling has nothing
                     to do with which one is showing.
@@ -2727,247 +2844,262 @@ export function Chat({
                     the END of the transition, so the faded-out button stops taking
                     clicks and leaves the tab order instead of lurking invisibly
                     over the transcript. */}
-                <IconButton
-                  size="md"
-                  label={t("jumpToLatest")}
-                  icon={<ArrowDown />}
-                  // IconButton mirrors its label into `title`, which the browser
-                  // renders as a native tooltip. The aria-label already names the
-                  // control, and a lone arrow above the composer needs no gloss.
-                  title={undefined}
-                  onClick={() => scrollToBottom("auto")}
-                  className={cn(
-                    // `touch-target` because this control, unlike the timeline
-                    // rail, has no width gate: it is reachable on a phone, where
-                    // the 36px step is under the 44px floor.
-                    "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                    !mainSessionId || isAtBottom || threadOpen
-                      ? "invisible opacity-0"
-                      : "visible opacity-100",
-                  )}
-                />
-                <div className="pointer-events-auto relative mx-auto max-w-5xl">
-                  {/* Sits on the composer's top-right corner, clear of the
+                  <IconButton
+                    size="md"
+                    label={t("jumpToLatest")}
+                    icon={<ArrowDown />}
+                    // IconButton mirrors its label into `title`, which the browser
+                    // renders as a native tooltip. The aria-label already names the
+                    // control, and a lone arrow above the composer needs no gloss.
+                    title={undefined}
+                    onClick={() => scrollToBottom("auto")}
+                    className={cn(
+                      // `touch-target` because this control, unlike the timeline
+                      // rail, has no width gate: it is reachable on a phone, where
+                      // the 36px step is under the 44px floor.
+                      "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
+                      !mainSessionId || isAtBottom || threadOpen
+                        ? "invisible opacity-0"
+                        : "visible opacity-100",
+                    )}
+                  />
+                  <div className="pointer-events-auto relative mx-auto max-w-5xl">
+                    {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
-                  {mainSessionId && !threadOpen && (
-                    <div className="pointer-events-none absolute right-0 bottom-full mb-2">
-                      {concierge ? (
-                        <ConciergeCardJump
-                          scroller={scrollerEl}
-                          content={contentEl}
-                          floor={floorEl}
-                          currentReplyMessageIds={currentReplyMessageIds}
-                          messages={view.displayMessages}
-                          liveCards={liveCards}
+                    {mainSessionId && !threadOpen && (
+                      <div className="pointer-events-none absolute right-0 bottom-full mb-2">
+                        {concierge ? (
+                          <ConciergeCardJump
+                            scroller={scrollerEl}
+                            content={contentEl}
+                            floor={floorEl}
+                            currentReplyMessageIds={currentReplyMessageIds}
+                            messages={view.displayMessages}
+                            liveCards={liveCards}
+                          />
+                        ) : (
+                          <ChatPendingCardJump
+                            scroller={scrollerEl}
+                            content={contentEl}
+                            floor={floorEl}
+                            currentReplyMessageIds={currentReplyMessageIds}
+                          />
+                        )}
+                      </div>
+                    )}
+                    {shareMode && mainSessionId ? (
+                      <ShareBar
+                        sessionId={mainSessionId}
+                        selectedTurnIds={[...selectedShareTurns]}
+                        agentName={concierge ? conciergeDisplayName : mainIdentity.name}
+                        onExit={exitShareMode}
+                      />
+                    ) : null}
+                    {/* Share mode hides the composer rather than unmounting it,
+                      so a draft is still there when share mode ends. */}
+                    <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                      {isArchived ? (
+                        <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
+                          <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleUnarchive()}
+                          >
+                            <ArchiveRestore data-icon="inline-start" className="size-3.5" />
+                            {t("archived.unarchive")}
+                          </Button>
+                        </div>
+                      ) : concierge ? (
+                        <ConciergeComposer
+                          ref={composerRef}
+                          boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                          onSend={handleComposerSend}
+                          isStreaming={displayedStreaming}
+                          onStop={stopComposerTurn}
+                          streamError={streamError}
+                          // An open topic chat names itself in its box.
+                          chatName={isMainChat ? null : sessionName?.trim() || null}
+                          modelSelection={
+                            chatModelPickable
+                              ? { value: chatModelValue, onChange: pickChatModel }
+                              : undefined
+                          }
                         />
                       ) : (
-                        <ChatPendingCardJump
-                          scroller={scrollerEl}
-                          content={contentEl}
-                          floor={floorEl}
-                          currentReplyMessageIds={currentReplyMessageIds}
+                        <ChatComposer
+                          persistNewChatDraft={!mainSessionId}
+                          ref={composerRef}
+                          // The box look lives on the composer now so the chip row can sit
+                          // outside it; this mount adds the floating blur/translucency.
+                          boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                          onSend={handleComposerSend}
+                          // A draft picks the session's project, model, and agent.
+                          // A session keeps its project and agent, and its model
+                          // can change from the next turn.
+                          showProjectSelector={!mainSessionId}
+                          showModelSelector={!mainSessionId || chatModelPickable}
+                          chatModelSelection={composerModelSelection}
+                          initialProjectName={initialProjectName}
+                          initialDeviceFolder={initialDeviceFolder}
+                          initialAgentMention={initialAgentMention}
+                          isStreaming={displayedStreaming}
+                          onStop={stopComposerTurn}
+                          streamError={streamError}
+                          pinnedAgentMention={pinnedAgentMention}
+                          lockAgentMention={Boolean(mainSessionId)}
+                          // Locks once the turn that saved the card has ended, so
+                          // Stop stays in reach while it still streams.
+                          lockedReason={
+                            lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
+                          }
                         />
                       )}
                     </div>
-                  )}
-                  {shareMode && mainSessionId ? (
-                    <ShareBar
-                      sessionId={mainSessionId}
-                      selectedTurnIds={[...selectedShareTurns]}
-                      agentName={concierge ? conciergeDisplayName : mainIdentity.name}
-                      onExit={exitShareMode}
-                    />
-                  ) : null}
-                  {/* Share mode hides the composer rather than unmounting it,
-                      so a draft is still there when share mode ends. */}
-                  <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
-                    {mainSessionId && !isArchived ? (
-                      <PendingChecks chatId={mainSessionId} turnKey={displayedStreaming} />
-                    ) : null}
-                    {isArchived ? (
-                      <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
-                        <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void handleUnarchive()}
-                        >
-                          <ArchiveRestore data-icon="inline-start" className="size-3.5" />
-                          {t("archived.unarchive")}
-                        </Button>
-                      </div>
-                    ) : concierge ? (
-                      <ConciergeComposer
-                        ref={composerRef}
-                        boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                        onSend={handleComposerSend}
-                        isStreaming={displayedStreaming}
-                        onStop={stopComposerTurn}
-                        streamError={streamError}
-                        // An open topic chat names itself in its box.
-                        chatName={isMainChat ? null : sessionName?.trim() || null}
-                        modelSelection={
-                          chatModelPickable
-                            ? { value: chatModelValue, onChange: pickChatModel }
-                            : undefined
-                        }
-                      />
-                    ) : (
-                      <ChatComposer
-                        persistNewChatDraft={!mainSessionId}
-                        ref={composerRef}
-                        // The box look lives on the composer now so the chip row can sit
-                        // outside it; this mount adds the floating blur/translucency.
-                        boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                        onSend={handleComposerSend}
-                        // A draft picks the session's project, model, and agent.
-                        // A session keeps its project and agent, and its model
-                        // can change from the next turn.
-                        showProjectSelector={!mainSessionId}
-                        showModelSelector={!mainSessionId || chatModelPickable}
-                        chatModelSelection={composerModelSelection}
-                        initialProjectName={initialProjectName}
-                        initialDeviceFolder={initialDeviceFolder}
-                        initialAgentMention={initialAgentMention}
-                        isStreaming={displayedStreaming}
-                        onStop={stopComposerTurn}
-                        streamError={streamError}
-                        pinnedAgentMention={pinnedAgentMention}
-                        lockAgentMention={Boolean(mainSessionId)}
-                        // Locks once the turn that saved the card has ended, so
-                        // Stop stays in reach while it still streams.
-                        lockedReason={
-                          lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
-                        }
-                      />
-                    )}
                   </div>
                 </div>
-              </div>
-              {/* Pairs with the empty state's `md:flex-auto`. Both use auto basis,
+                {/* Pairs with the empty state's `md:flex-auto`. Both use auto basis,
                   so the free space splits evenly above and below the greeting and
                   composer; a 0 basis (`flex-1`) on either side puts them off-center.
                   Phones keep the docked composer, where the keyboard owns the
                   bottom of the screen. */}
-              {centerDraftComposer && !mainSessionId ? (
-                <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
+                {centerDraftComposer && !mainSessionId ? (
+                  <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
+                ) : null}
+              </div>
+              {concierge && unread && mainSessionId ? (
+                // Under the floating header, on the transcript's top-right corner.
+                // Kept mounted under a thread view: the pill's state is the
+                // guardian's progress through the unread messages.
+                <div
+                  className={cn(
+                    "pointer-events-none absolute top-[calc(var(--rome-concierge-header-offset)+0.5rem)] right-3 z-10 md:right-6",
+                    threadOpen && "invisible",
+                  )}
+                >
+                  <ConciergeUnreadPill
+                    scroller={scrollerEl}
+                    content={contentEl}
+                    count={unread.count}
+                    more={unread.more}
+                    anchored={unread.firstId !== null}
+                    onJump={showUnreadDivider}
+                  />
+                </div>
               ) : null}
-            </div>
-            {concierge && unread && mainSessionId ? (
-              // Under the floating header, on the transcript's top-right corner.
-              // Kept mounted under a thread view: the pill's state is the
-              // guardian's progress through the unread messages.
-              <div
-                className={cn(
-                  "pointer-events-none absolute top-[calc(var(--rome-concierge-header-offset)+0.5rem)] right-3 z-10 md:right-6",
-                  threadOpen && "invisible",
-                )}
-              >
-                <ConciergeUnreadPill
+              {concierge ? null : (
+                <ChatTimelineRail
                   scroller={scrollerEl}
                   content={contentEl}
-                  count={unread.count}
-                  more={unread.more}
-                  anchored={unread.firstId !== null}
-                  onJump={showUnreadDivider}
+                  questions={timelineQuestions}
+                  onJump={jumpToMessage}
                 />
-              </div>
-            ) : null}
-            {concierge ? null : (
-              <ChatTimelineRail
-                scroller={scrollerEl}
-                content={contentEl}
-                questions={timelineQuestions}
-                onJump={jumpToMessage}
-              />
-            )}
-            {threadView && mainSessionId ? (
-              <ChatThreadView
-                key={threadView}
-                sessionId={mainSessionId}
-                messageId={threadView}
-                onClose={replyDraft.closeThread}
-                floor={floorEl}
-                originTop={threadOrigin(threadView)}
-                header={conciergeHeaderWith(
-                  <>
-                    {threadRootOfView ? (
-                      <OpenThreadTaskChat
-                        threadRoot={threadRootOfView}
+              )}
+              {threadView && mainSessionId ? (
+                <ChatThreadView
+                  key={threadView}
+                  sessionId={mainSessionId}
+                  messageId={threadView}
+                  onClose={replyDraft.closeThread}
+                  floor={floorEl}
+                  originTop={threadOrigin(threadView)}
+                  header={conciergeHeaderWith(
+                    <>
+                      {threadRootOfView ? (
+                        <OpenThreadTaskChat
+                          sessionId={mainSessionId}
+                          messageId={threadView}
+                          threadRoot={threadRootOfView}
+                          messages={displayMessages}
+                          liveTaskChat={liveThreadTaskChats.get(threadRootOfView) ?? null}
+                          size={floating ? "md" : "sm"}
+                          className={actionBadge}
+                        />
+                      ) : null}
+                      <IconButton
                         size={floating ? "md" : "sm"}
+                        label={t("thread.close")}
+                        icon={<X />}
+                        onClick={replyDraft.closeThread}
                         className={actionBadge}
                       />
-                    ) : null}
-                    <IconButton
-                      size={floating ? "md" : "sm"}
-                      label={t("thread.close")}
-                      icon={<X />}
-                      onClick={replyDraft.closeThread}
-                      className={actionBadge}
-                    />
-                  </>,
-                )}
-                renderMessages={(threadMessages) => (
-                  // The thread view offers Copy and Reply, not Share: a share
-                  // is made from the chat's own timeline.
-                  <MessageSharingContext.Provider value={null}>
-                    <ConciergeTranscript
-                      rows={buildRows(threadMessages, identityBySession, mainIdentity, {
-                        runningTurnId: null,
-                        isStreaming: false,
-                      })}
-                      live={{
-                        isStreaming: false,
-                        runningTurnId: null,
-                        snapshot: null,
-                        textStore: liveTextStore,
-                        identity: mainIdentity,
-                      }}
-                      actions={{
-                        ...blockActions,
-                        interactionResults: threadInteractionResults(threadMessages, {
-                          messages: displayMessages,
-                          results: blockActions.interactionResults,
-                        }),
-                      }}
-                      contentRef={ignoreThreadContent}
-                    />
-                  </MessageSharingContext.Provider>
-                )}
-              />
-            ) : null}
+                    </>,
+                  )}
+                  renderMessages={(threadMessages) => (
+                    // The thread view offers Copy and Reply, not Share: a share
+                    // is made from the chat's own timeline.
+                    <MessageSharingContext.Provider value={null}>
+                      <ConciergeTranscript
+                        rows={buildRows(threadMessages, identityBySession, mainIdentity, {
+                          runningTurnId: null,
+                          isStreaming: false,
+                        })}
+                        live={{
+                          isStreaming: false,
+                          runningTurnId: null,
+                          snapshot: null,
+                          textStore: liveTextStore,
+                          identity: mainIdentity,
+                        }}
+                        actions={{
+                          ...blockActions,
+                          interactionResults: threadInteractionResults(threadMessages, {
+                            messages: displayMessages,
+                            results: blockActions.interactionResults,
+                          }),
+                        }}
+                        contentRef={ignoreThreadContent}
+                      />
+                    </MessageSharingContext.Provider>
+                  )}
+                />
+              ) : null}
+            </div>
           </div>
+          <TraceDrawer
+            target={traceDrawerTarget}
+            onClose={closeTraceDrawer}
+            outlet={toolTrace.outlet}
+            renderInlineBlock={(block, key) =>
+              renderSingleEntry(block, key, {
+                onApprovalResolved: refreshActiveSession,
+                compact: true,
+              })
+            }
+            renderRunBlocks={(blocks, live) =>
+              renderFlatEntries(blocks, {
+                onApprovalResolved: refreshActiveSession,
+                compact: true,
+                live,
+              })
+            }
+          />
+          {/* A topic chat asks, as the sidebar does, what becomes of its
+              follows and open tasks. */}
+          {concierge && mainSessionId && !isMainChat ? (
+            <TopicChatDeleteDialog
+              open={deleteConfirmOpen}
+              chatId={mainSessionId}
+              name={sessionName?.trim() || t("recentChats.newChat", { ns: "common" })}
+              archived={isArchived}
+              onCancel={() => setDeleteConfirmOpen(false)}
+              onConfirm={(stopWork) => void handleDeleteSession(stopWork)}
+            />
+          ) : (
+            <RomeConfirmDialog
+              open={deleteConfirmOpen}
+              destructive
+              title={t("navbar.delete")}
+              description={t("navbar.deleteConfirm")}
+              confirmLabel={t("navbar.delete")}
+              onCancel={() => setDeleteConfirmOpen(false)}
+              onConfirm={() => void handleDeleteSession()}
+            />
+          )}
         </div>
-        <TraceDrawer
-          target={traceDrawerTarget}
-          onClose={closeTraceDrawer}
-          outlet={toolTrace.outlet}
-          renderInlineBlock={(block, key) =>
-            renderSingleEntry(block, key, {
-              onApprovalResolved: refreshActiveSession,
-              compact: true,
-            })
-          }
-          renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks, {
-              onApprovalResolved: refreshActiveSession,
-              compact: true,
-              live,
-            })
-          }
-        />
-        <RomeConfirmDialog
-          open={deleteConfirmOpen}
-          destructive
-          title={t("navbar.delete")}
-          description={t("navbar.deleteConfirm")}
-          confirmLabel={t("navbar.delete")}
-          onCancel={() => setDeleteConfirmOpen(false)}
-          onConfirm={() => void handleDeleteSession()}
-        />
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </WidgetHostContext.Provider>
   );
 
   return (

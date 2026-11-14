@@ -11,12 +11,10 @@ struct TopicChatScreen: View {
     let onMenu: () -> Void
     /// The header's mascot was tapped: the Agent page, for this chat.
     let onAgent: (String?) -> Void
-    let onOpenChat: (String, String) -> Void
     /// The chat was archived or deleted: the shell shows the main Chat.
     let onArchived: () -> Void
     let onCreated: (String) -> Void
 
-    @Environment(AppModel.self) private var model
     @Environment(\.visibleChat) private var visibleChat
     @State private var draft = ""
     @State private var starting: String?
@@ -33,12 +31,8 @@ struct TopicChatScreen: View {
 
     /// A blank chat, or one whose transcript loaded empty.
     private var showsStarters: Bool {
-        if let store { return ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) }
+        if let store { return ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) }
         return starting == nil
-    }
-
-    private var title: String {
-        TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
     }
 
     var body: some View {
@@ -49,29 +43,26 @@ struct TopicChatScreen: View {
         // Under an open thread, VoiceOver reads the thread, not what it covers.
         .accessibilityHidden(store?.thread != nil)
         .floatingTopBar {
-            ChatHeader(
-                // The Concierge's name, as in the main chat; the topic's own
-                // title stays in the "…" menu.
-                name: workspace.agentDisplayName,
-                menuTitle: title,
-                activity: workspace.topics.activity(for: chatId),
-                announces: chatId != nil && model.visibleChat == chatId,
+            // The title and the status are read by the header itself, so a
+            // change in them never redraws the transcript.
+            TopicChatHeader(
+                workspace: workspace,
+                chatId: chatId,
+                draftKey: draftKey,
+                share: store?.share,
                 onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
                 },
                 onAgent: { onAgent(chatId) },
-                zoomSource: AgentZoom.source(chatId ?? draftKey),
-                // A blank chat has nothing to rename, archive or delete yet.
-                onRename: chatId == nil ? nil : {
+                onRename: { title in
                     newName = title
                     renaming = true
                 },
                 onArchive: chatId.map { id in { archive(id) } },
-                onDelete: chatId == nil ? nil : { confirmDelete = true }
+                onDelete: { confirmDelete = true }
             )
-            .shareModeHeader(store?.share)
             .accessibilityHidden(store?.thread != nil)
         }
         .overlay(alignment: .top) {
@@ -80,7 +71,7 @@ struct TopicChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: { workspace.topics.activity(for: chatId) }, onClose: { store.closeThread() })
             }
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
@@ -109,7 +100,7 @@ struct TopicChatScreen: View {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatePill(agentName: workspace.agentName)
                 if let store, store.showsQuoteBar {
-                    QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                    QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if startFailed && store == nil {
@@ -121,7 +112,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                Composer(text: $draft, placeholder: store?.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
+                TopicComposer(workspace: workspace, chatId: chatId, replying: store?.composerThread != nil, draft: $draft, focused: $composerFocused, attachments: attachments) { send() }
             }
             .shareModeComposer(store?.share)
             .animation(.easeOut(duration: 0.2), value: showsStarters)
@@ -155,7 +146,8 @@ struct TopicChatScreen: View {
     private var content: some View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
-                ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
+                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks)
+                    .equatable()
                     .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
@@ -237,5 +229,61 @@ struct TopicChatScreen: View {
                 attachments.restore(images)
             }
         }
+    }
+}
+
+/// A topic chat's composer, named after the chat. It reads the chat's name
+/// itself, so a rename never redraws the transcript.
+private struct TopicComposer: View {
+    let workspace: Workspace
+    let chatId: String?
+    let replying: Bool
+    @Binding var draft: String
+    @Binding var focused: Bool
+    let attachments: ComposerAttachments
+    let onSend: () -> Void
+
+    var body: some View {
+        let chat = chatId.flatMap(workspace.topics.chat)
+        // Only "Message in <name>" is fitted; a reply keeps "Reply".
+        let name = replying ? nil : TopicChatsStore.composerName(chat)
+        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, onSend: onSend)
+    }
+}
+
+/// A topic chat's header. It reads the chat's title, its status and whether it
+/// is on screen itself, so a change in any of them redraws it alone.
+private struct TopicChatHeader: View {
+    let workspace: Workspace
+    let chatId: String?
+    let draftKey: String
+    let share: ChatShareFlow?
+    let onMenu: () -> Void
+    /// The header's mascot was tapped: the Agent page, for this chat.
+    let onAgent: () -> Void
+    /// Rename, with the chat's current title.
+    let onRename: (String) -> Void
+    let onArchive: (() -> Void)?
+    let onDelete: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let title = TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
+        ChatHeader(
+            // The Concierge's name, as in the main chat; the topic's own
+            // title stays in the "…" menu.
+            name: workspace.agentDisplayName,
+            menuTitle: title,
+            activity: workspace.topics.activity(for: chatId),
+            announces: chatId != nil && model.visibleChat == chatId,
+            onMenu: onMenu,
+            onAgent: onAgent,
+            zoomSource: AgentZoom.source(chatId ?? draftKey),
+            // A blank chat has nothing to rename, archive or delete yet.
+            onRename: chatId == nil ? nil : { onRename(title) },
+            onArchive: onArchive,
+            onDelete: chatId == nil ? nil : onDelete
+        )
+        .shareModeHeader(share)
     }
 }

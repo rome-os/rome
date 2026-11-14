@@ -398,6 +398,19 @@ extension LastInstanceDefaults {
             }
         }
 
+        /// Two quick taps: the later one is followed, and only once.
+        @Test func twoQuickTapsFollowTheLater() async {
+            await clean {
+                LaunchProtocol.offline = true
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                await app.openFromWidget(.app(instanceId: "b", appId: "habits"))
+                await app.openFromWidget(.app(instanceId: "b", appId: "packing"))
+                #expect(app.takeWidgetLink(for: "b") == .app(instanceId: "b", appId: "packing"))
+                #expect(app.takeWidgetLink(for: "b") == nil)
+            }
+        }
+
         /// A push tap for another instance opens that one, not the kept one.
         @Test func aPushTapForAnotherInstanceOpensIt() async {
             await clean {

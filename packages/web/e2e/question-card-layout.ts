@@ -1,14 +1,11 @@
 import { expect, type Locator } from "@playwright/test";
 
-export async function expectQuestionCardContained(fieldset: Locator) {
-  const violations = await fieldset.evaluate((el) => {
-    const card = el.parentElement!;
+/** Every option, field and button of a described question card stays inside the card. */
+export async function expectQuestionCardContained(card: Locator) {
+  const violations = await card.evaluate((card) => {
     const bounds = card.getBoundingClientRect();
     const failures: string[] = [];
-    for (const node of [
-      card,
-      ...card.querySelectorAll("fieldset, label, button, input, textarea"),
-    ]) {
+    for (const node of [card, ...card.querySelectorAll("label, button, input, textarea")]) {
       const rect = node.getBoundingClientRect();
       const name = `${node.tagName}: ${node.textContent?.slice(0, 40)}`;
       if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1) {

@@ -1,5 +1,6 @@
 import SwiftUI
 import Testing
+import UIKit
 @testable import Rome
 
 /// The + and Send sit centered in an empty composer at every text size.
@@ -15,6 +16,28 @@ import Testing
         }
         // At the default size the buttons keep their 7 pt gap.
         #expect(abs(ComposerTextView.controlBottomPadding(height: 36, size: .large) - 7) < 0.01)
+    }
+}
+
+/// A named placeholder shortens only its name, so the words around it stay.
+@MainActor
+@Suite struct NamedPlaceholderTests {
+    private func width(_ text: String, _ attributes: [NSAttributedString.Key: Any]) -> CGFloat {
+        (text as NSString).size(withAttributes: attributes).width
+    }
+
+    @Test func aNameThatFitsShowsWhole() {
+        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 16)]
+        let named = NamedPlaceholder(name: "Kyoto trip") { "在「\($0)」中发消息" }
+        let full = "在「Kyoto trip」中发消息"
+        #expect(PastingTextView.fitted(named, width: width(full, attributes) + 40, attributes: attributes) == full)
+    }
+
+    @Test func aLongNameIsShortenedInsideTheSentence() {
+        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 16)]
+        let named = NamedPlaceholder(name: "Planning the Kyoto trip") { "在「\($0)」中发消息" }
+        let short = "在「Plann…」中发消息"
+        #expect(PastingTextView.fitted(named, width: width(short, attributes), attributes: attributes) == short)
     }
 }
 

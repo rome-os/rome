@@ -20,14 +20,14 @@ for (const width of [375, 1440]) {
         if (story === "resolved-question") {
           await page.locator("[data-chat-settled-card] button").click();
         }
-        const fieldset = page.locator("fieldset");
-        await expect(fieldset).toBeVisible();
+        const card = page.locator("[data-widget-app]");
+        await expect(card).toBeVisible();
         if (story === "wrapped-submission") {
-          await expect(fieldset.getByRole("button").first()).toBeDisabled();
+          await expect(card.getByRole("button").first()).toBeDisabled();
           await expect(page.locator(".sb-errordisplay")).not.toBeVisible();
         }
         await page.evaluate(() => document.fonts.ready);
-        await expectQuestionCardContained(fieldset);
+        await expectQuestionCardContained(card);
         expect(
           await page.evaluate(
             () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

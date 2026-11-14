@@ -19,10 +19,14 @@ struct PendingSend: Identifiable, Hashable, Sendable {
     let text: String
     /// Photos sent with it.
     var images: [ComposerImage] = []
+    /// Other files: only a resend of a stored message has them.
+    var files: [OutgoingFile] = []
     let createdAt: Date
     var state: State
     /// Sent from a chat thread: a retry goes to the same thread.
     var thread: ThreadTarget? = nil
+    /// Kept as a draft until the server takes it; a resend keeps none.
+    var keepsDraft = true
 }
 
 /// A photo in the guardian's bubble: the one being sent, or a stored upload.
@@ -52,7 +56,8 @@ enum TranscriptRow: Identifiable, Hashable {
     case webOnly(id: String, kind: MessagePart.WebOnlyKind, done: Bool = false)
     case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
-    case widgetUI(id: String, part: WidgetUIPart)
+    /// `answered`: what answered the card, when the agent waits on it and it was.
+    case widgetUI(id: String, part: WidgetUIPart, sessionId: String, answered: JSONValue? = nil)
     case error(id: String, error: TurnError)
     /// A quiet line between messages, such as the chat moving to another model.
     case notice(id: String, text: String)
@@ -83,7 +88,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
+             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
              .threadLabel(let id, _, _), .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
             return id
         case .typing:
@@ -159,6 +164,7 @@ enum TranscriptBuilder {
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
         let labels = options.showThreads ? threadLabels(messages) : [:]
+        let taskThreads = options.showThreads ? taskThreadTitles(messages) : [:]
         // Each message's parts, read once.
         let parsed = messages.map(\.parts)
         // The turns whose reply is an error part.
@@ -201,18 +207,25 @@ enum TranscriptBuilder {
             }
         }
 
-        // The turns the Concierge began on its own, with where each came from:
-        // by the turn's trace, or, from before, by an automated message that began it.
-        // A turn that took one of the guardian's own messages is never one of them.
+        // The turns someone else made the Concierge speak in, with who: by the
+        // turn's trace, or, from before, by an automated message that began it.
+        // A turn that took one of the guardian's own messages is never one of
+        // them, and the Concierge's own wake-ups (a check, what it follows, its
+        // digest) label nothing.
         var unprompted: [String: TraceSummary.InputSource] = [:]
+        var seen: Set<String> = []
         if options.showNotices {
             for message in messages {
                 guard let turn = message.turnId, !guardianTurns.contains(turn) else { continue }
-                if message.isTrace, let source = message.traceSummary?.automatedInput { unprompted[turn] = source }
+                if message.isTrace, let source = message.traceSummary?.automatedInput {
+                    seen.insert(turn)
+                    if SourceCopy.labels(source) { unprompted[turn] = source }
+                }
             }
             for message in messages where Self.isAutomated(message) {
-                guard let turn = message.turnId, !guardianTurns.contains(turn), unprompted[turn] == nil, let sender = message.sender else { continue }
-                unprompted[turn] = TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
+                guard let turn = message.turnId, !guardianTurns.contains(turn), !seen.contains(turn), unprompted[turn] == nil, let sender = message.sender else { continue }
+                let source = TraceSummary.InputSource(type: sender.sourceType ?? "automation", name: sender.name)
+                if SourceCopy.labels(source) { unprompted[turn] = source }
             }
         }
 
@@ -262,15 +275,19 @@ enum TranscriptBuilder {
                 case .approval(let approval):
                     rows.append(.approval(id: id, part: approval, sessionId: message.sessionId))
                 case .question(let question):
-                    rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[question.toolUseId]))
+                    var question = question
+                    question.ui?.widgetId = message.id
+                    rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[message.id]))
                 case .webOnly(let kind, let toolUseId):
-                    rows.append(.webOnly(id: id, kind: kind, done: toolUseId.map { answers[$0] != nil } ?? false))
+                    rows.append(.webOnly(id: id, kind: kind, done: toolUseId != nil && answers[message.id] != nil))
                 case .routineDraft(let draft):
                     rows.append(.routineDraft(id: id, part: draft))
                 case .connectCard(let card):
                     rows.append(.connect(id: id, part: card, sessionId: message.sessionId))
                 case .widgetUI(let card):
-                    rows.append(.widgetUI(id: id, part: card))
+                    var card = card
+                    card.widgetId = message.id
+                    rows.append(.widgetUI(id: id, part: card, sessionId: message.sessionId, answered: card.waits ? answers[message.id] : nil))
                 case .error(let error):
                     rows.append(.error(id: id, error: error))
                 case .notice(let text):
@@ -281,8 +298,10 @@ enum TranscriptBuilder {
             }
             if !rows.isEmpty, let title = labels[message.id] {
                 rows.append(.threadLabel(id: "label-\(message.id)", messageId: message.id, title: title))
-            } else if !rows.isEmpty, !message.isUser, let turn = message.turnId, let source = unprompted[turn] {
-                // One label a message; a task's thread shows only its own.
+            } else if !rows.isEmpty, !message.isUser, message.chatThreadId.flatMap({ taskThreads[$0] }) == nil,
+                      let turn = message.turnId, let source = unprompted[turn] {
+                // One label a message at most: a message in a task's thread
+                // shows only its thread's label, or none in the middle of a run.
                 rows.append(.sourceLabel(id: "source-\(message.id)", text: SourceCopy.label(source)))
             }
             if !rows.isEmpty {
@@ -293,7 +312,7 @@ enum TranscriptBuilder {
         for send in pending.sorted(by: { $0.createdAt < $1.createdAt }) where !storedIDs.contains(send.id) {
             entries.append(Entry(
                 id: send.id, date: send.createdAt, guardian: true,
-                rows: [.userText(id: send.id, text: send.text, images: send.images.map(UserImage.local), pending: send.state)],
+                rows: [.userText(id: send.id, text: send.text, images: send.images.map(UserImage.local) + Self.fileTiles(send), pending: send.state)],
                 bubbleIndexes: []
             ))
         }
@@ -399,27 +418,51 @@ enum TranscriptBuilder {
         return TurnError(text: text, code: summary?.terminalErrorCode, provider: summary?.terminalErrorProvider, reason: summary?.terminalErrorReason, didntFinish: true)
     }
 
-    /// The label under each Concierge message in a task's chat thread, by
-    /// message id: the task's title. A thread is a task's when a message of
-    /// it carries the title; the server sends none for a thread no task has.
-    /// The guardian's messages get none, and neither does a message showing
-    /// a task card, which names its task itself. A task's question or
-    /// approval shown alone does get one (docs/domains/chats.md#chat-thread).
-    static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
+    /// The task title of each chat thread a task has, by the thread's first
+    /// message. The server sends a title only for a thread a task has.
+    static func taskThreadTitles(_ messages: [ChatMessage]) -> [String: String] {
         var titles: [String: String] = [:]
         for message in messages {
             if let root = message.chatThreadId, let title = message.chatThreadTitle, !title.isEmpty {
                 titles[root] = title
             }
         }
-        var labels: [String: String] = [:]
-        for message in messages where !message.isUser && !message.isTrace {
-            guard let root = message.chatThreadId, let title = titles[root] else { continue }
+        return titles
+    }
+
+    /// The label under Concierge messages in a task's chat thread, by message
+    /// id: the task's title. The guardian's messages get none, and neither
+    /// does a message showing a task card, which names its task itself. A
+    /// task's question or approval shown alone does get one. Of a run of one
+    /// thread's messages with nothing else between them, only the first and
+    /// the last show it, so a run of one or two shows it on each. An Agent
+    /// message from another thread or none, or a task card, ends the run;
+    /// the guardian's messages are skipped (docs/domains/chats.md#chat-thread).
+    static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
+        let titles = taskThreadTitles(messages)
+        var runs: [(title: String, root: String, ids: [String])] = []
+        var open = false
+        // The owner's messages neither join a run nor end it.
+        for message in messages where !message.isTrace && !message.isUser {
             let showsTaskCard = message.parts.contains {
                 if case .taskChat(_, _, let show, _) = $0 { return show != .ask }
                 return false
             }
-            if !showsTaskCard { labels[message.id] = title }
+            guard !showsTaskCard, let root = message.chatThreadId, let title = titles[root] else {
+                open = false
+                continue
+            }
+            if open, let last = runs.last, last.root == root {
+                runs[runs.count - 1].ids.append(message.id)
+            } else {
+                runs.append((title, root, [message.id]))
+            }
+            open = true
+        }
+        var labels: [String: String] = [:]
+        for run in runs {
+            if let first = run.ids.first { labels[first] = run.title }
+            if let last = run.ids.last { labels[last] = run.title }
         }
         return labels
     }
@@ -439,13 +482,41 @@ enum TranscriptBuilder {
         message.isUser && message.sender?.kind == "automated"
     }
 
+    /// A resend's documents, drawn as the tiles a stored message's files are.
+    static func fileTiles(_ send: PendingSend) -> [UserImage] {
+        send.files.enumerated().map { index, file in
+            .stored(UploadLines.Upload(name: file.name, linkPath: "pending:\(send.id):\(index)"))
+        }
+    }
+
     /// Answers the guardian already gave, read from their `interaction_result` parts.
+    /// Answers given to cards, by the id of the message that holds each card.
+    /// A provider reuses tool-use ids (`item_0`) across turns, so a result
+    /// answers the newest card before it with its id, never a later one.
+    /// A result whose card is not among `messages` is kept by its tool-use id.
     static func answers(in messages: [ChatMessage]) -> [String: JSONValue] {
+        var open: [String: String] = [:]
         var answers: [String: JSONValue] = [:]
-        for message in messages where message.isUser {
+        for message in messages {
             for part in message.parts {
-                if case .interactionResult(let toolUseId, let output) = part {
-                    answers[toolUseId] = output
+                switch part {
+                case .question(let question) where !message.isUser:
+                    open[question.toolUseId] = message.id
+                case .widgetUI(let card) where card.waits && !message.isUser:
+                    open[card.toolUseId] = message.id
+                case .webOnly(_, let toolUseId?) where !message.isUser:
+                    open[toolUseId] = message.id
+                case .interactionResult(let toolUseId, let output, let cardId) where message.isUser:
+                    // A result that names its card's message answers that card,
+                    // whatever order the reads put them in.
+                    if let cardId {
+                        answers[cardId] = output
+                        if open[toolUseId] == cardId { open[toolUseId] = nil }
+                    } else {
+                        answers[open.removeValue(forKey: toolUseId) ?? toolUseId] = output
+                    }
+                default:
+                    break
                 }
             }
         }

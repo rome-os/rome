@@ -185,10 +185,15 @@ final class ComposerAttachments {
 }
 
 /// A file in a turn's `files`: `POST /chat/sessions/:id/turns`.
-struct OutgoingFile: Encodable, Equatable, Sendable {
+struct OutgoingFile: Encodable, Hashable, Sendable {
     var name: String
     var mimeType: String
     var dataBase64: String
+
+    /// The type a stored file's name says, for sending it again.
+    static func mimeType(of name: String) -> String {
+        UTType(filenameExtension: (name as NSString).pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+    }
 
     /// Photos named in the order they were attached.
     static func photos(_ photos: [ComposerImage]) -> [OutgoingFile] {

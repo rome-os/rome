@@ -60,6 +60,7 @@ import {
 } from "./apps/actions/app-action-schema-cache.js";
 import {
   initTelemetry,
+  startEventLoopDelayMetric,
   getTracer,
   shutdown as shutdownTelemetry,
   withInboundSpans,
@@ -133,6 +134,7 @@ import {
 import { ownPlatforms } from "./webchat/send.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
+import { backfillQuestionCards } from "./webchat/question-card-backfill.js";
 import { domainOf, domainOfGrant } from "./connections/platform.js";
 import {
   AccountListening,
@@ -218,6 +220,7 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
+import { registerReadPersonAction } from "./people/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
@@ -401,6 +404,7 @@ async function main() {
   ensureProfileExampleAppsSeeded();
 
   initTelemetry();
+  startEventLoopDelayMetric();
   const tracer = getTracer("rome");
 
   const db: DrizzleDb = getDb(config.database);
@@ -1255,6 +1259,8 @@ async function main() {
       // and nothing in a chat whose channel hands the agent every message.
       promptFacts: chatPromptFacts({
         facts: chatsWired.links,
+        messages: chatsWired.messages,
+        labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
       }),
@@ -1385,6 +1391,10 @@ async function main() {
 
   registerShowFileAction(actionRegistry);
   registerTaskRunAction(actionRegistry, concierge);
+  registerReadPersonAction(actionRegistry, {
+    people: peopleRepo,
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
@@ -2040,6 +2050,9 @@ async function main() {
   // Legacy chats move into Chats once their channel knows its account, before
   // any channel hears anything (src/db/chats-backfill.ts).
   backfillLegacyChats(db);
+  // Question cards stored before cards were described as data get their
+  // description (src/webchat/question-card-backfill.ts).
+  backfillQuestionCards(db);
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.

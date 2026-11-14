@@ -2,8 +2,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ChatSession } from "@/lib/chat-types";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
@@ -57,8 +58,6 @@ const toast = rs.hoisted(() => ({
   dismiss: rs.fn(),
 }));
 rs.mock("sonner", () => ({ toast }));
-// The strip of scheduled checks reads its own query; PendingChecks.test.tsx covers it.
-rs.mock("./PendingChecks", () => ({ PendingChecks: () => null }));
 // How often the chat and its composer render: the chat calls this hook once
 // per render, and the composer stand-in counts its own.
 const renders = rs.hoisted(() => ({ chat: 0, composer: 0 }));
@@ -104,8 +103,8 @@ rs.mock("@/components/concierge/use-concierge-activity", () => ({
   useConciergeActivity: mockConciergeActivity,
 }));
 const mockOpenTaskList = rs.hoisted(() => rs.fn());
-rs.mock("@/components/concierge/ConciergeTaskList", () => ({
-  useConciergeTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
+rs.mock("@/components/concierge/TaskListPane", () => ({
+  useTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -205,9 +204,7 @@ function ReplyJump() {
       <button
         type="button"
         data-testid="open-thread"
-        onClick={() =>
-          reply?.openThread({ messageId: "u-1", author: "guardian", preview: "First" })
-        }
+        onClick={() => reply?.openThread({ thread: "u-1", title: "First" })}
       >
         open thread
       </button>
@@ -233,6 +230,7 @@ rs.mock("@/components/chat/MessageList", () => ({
     onOpenStoredTrace: (target: unknown) => void;
     live: {
       identity: { name: string };
+      writing?: { writing: boolean } | null;
       snapshot: { segments: unknown[]; summary: { totalSteps: number } } | null;
     };
     rows: {
@@ -247,7 +245,11 @@ rs.mock("@/components/chat/MessageList", () => ({
     }[];
   }) => (
     <>
-      <div data-testid="message-list" data-unread-from={unreadFrom ?? ""}>
+      <div
+        data-testid="message-list"
+        data-unread-from={unreadFrom ?? ""}
+        data-writing={live.writing?.writing ? "true" : ""}
+      >
         {live.identity.name}
       </div>
       {live.snapshot ? (
@@ -688,6 +690,56 @@ describe("Chat trace in the tool pane", () => {
 });
 
 describe("Chat read marking", () => {
+  it("clears the chat's unread mark in the cached lists, and refetches none of them", async () => {
+    const { markSessionRead } = await import("@/lib/chat-api");
+    const client = queries();
+    const row = (id: string) => ({ id, unread: true }) as unknown as ChatSession;
+    client.setQueryData(["chat-sessions", "active", "all"], [row("session-1"), row("session-2")]);
+    client.setQueryData(["chat-sessions", "all", "all"], [row("session-1")]);
+    client.setQueryData(["concierge-chats"], {
+      chats: [
+        { id: "session-1", unread: 3 },
+        { id: "session-2", unread: 1 },
+      ],
+    });
+    const invalidate = rs.spyOn(client, "invalidateQueries");
+    const onSessionsChanged = rs.fn();
+    render(
+      <MemoryRouter>
+        {pane(<Chat sessionId="session-1" onSessionsChanged={onSessionsChanged} />)}
+      </MemoryRouter>,
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("session-1"));
+    await waitFor(() =>
+      expect(
+        client
+          .getQueryData<ChatSession[]>(["chat-sessions", "active", "all"])
+          ?.map((s) => s.unread),
+      ).toEqual([false, true]),
+    );
+    expect(client.getQueryData<ChatSession[]>(["chat-sessions", "all", "all"])?.[0]?.unread).toBe(
+      false,
+    );
+    expect(
+      client
+        .getQueryData<{ chats: { unread: number }[] }>(["concierge-chats"])
+        ?.chats.map((c) => c.unread),
+    ).toEqual([0, 1]);
+    expect(onSessionsChanged).not.toHaveBeenCalled();
+    expect(
+      invalidate.mock.calls.filter(([filters]) =>
+        ["chat-sessions", "concierge-chats", "concierge-session"].includes(
+          String(filters?.queryKey?.[0]),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   it("leaves a chat unread while its tab is hidden, then marks it on return", async () => {
     const { markSessionRead } = await import("@/lib/chat-api");
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
@@ -1153,6 +1205,47 @@ describe("Chat session events", () => {
     act(() => source.emitLifecycle("error", MockEventSource.CLOSED));
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalledOnce());
   });
+
+  it("drops the typing word it held when the session event stream reconnects", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    // A chat with a message, so it shows its transcript, not its empty state.
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "a1",
+        sessionId: "concierge",
+        turnId: "turn-0",
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "hello" }]),
+        createdAt: "2026-10-27T12:00:00.000Z",
+      },
+    ]);
+    const writing = () => screen.getByTestId("message-list").getAttribute("data-writing");
+    try {
+      renderChat(<Chat sessionId="concierge" variant="concierge" />);
+      await screen.findByTestId("message-list");
+      await waitFor(() => expect(chatEvents()).toBeTruthy());
+      const source = chatEvents()!;
+      act(() => source.emitLifecycle("open", MockEventSource.OPEN));
+
+      act(() => {
+        source.emit("message_writing", {
+          sessionId: "concierge",
+          turnId: "turn-1",
+          mode: "exact",
+          writing: true,
+        });
+      });
+      await waitFor(() => expect(writing()).toBe("true"));
+
+      act(() => {
+        source.emitLifecycle("error", MockEventSource.CONNECTING);
+        source.emitLifecycle("open", MockEventSource.OPEN);
+      });
+      await waitFor(() => expect(writing()).toBe(""));
+    } finally {
+      rs.mocked(listSessionMessages).mockResolvedValue([]);
+    }
+  });
 });
 
 describe("Chat history paging", () => {
@@ -1456,6 +1549,21 @@ describe("Chat turn poll", () => {
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
   });
 
+  it("reads the chat again when its topic says it stopped running", async () => {
+    const socket = await renderIdle();
+    const reads = rs.mocked(listSessionMessages).mock.calls.length;
+    act(() =>
+      socket.receive({
+        type: "event",
+        topic: sessionTopic,
+        event: "session_running",
+        data: { sessionId: "session-1", running: false },
+      }),
+    );
+    await flush();
+    expect(rs.mocked(listSessionMessages).mock.calls.length).toBe(reads + 1);
+  });
+
   it.each([
     false,
     true,
@@ -1601,6 +1709,41 @@ describe("Chat turn stream lifecycle", () => {
     await user.click(within(dialog).getByRole("button", { name: "navbar.delete" }));
 
     await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("session-1"));
+  });
+
+  describe("after deleting the open chat", () => {
+    const whereTo = async (identity: { forkable?: boolean }) => {
+      mockUseSessionIdentity.mockReturnValue({
+        sessionName: null,
+        pinnedAgentMention: null,
+        archivedAt: null,
+        ...identity,
+      });
+      function Where() {
+        return <output data-testid="where">{useLocation().pathname}</output>;
+      }
+      const user = userEvent.setup();
+      renderChat(
+        <>
+          <Chat sessionId="session-1" />
+          <Where />
+        </>,
+      );
+      await user.click(screen.getByRole("button", { name: "navbar.more" }));
+      await user.click(screen.getByRole("menuitem", { name: "navbar.delete" }));
+      const dialog = screen.getByRole("dialog", { name: "navbar.delete" });
+      await user.click(within(dialog).getByRole("button", { name: "navbar.delete" }));
+      await waitFor(() => expect(screen.getByTestId("where").textContent).not.toBe("/"));
+      return screen.getByTestId("where").textContent;
+    };
+
+    it("opens a new chat when it was an ordinary chat, so the chat list stays in Chat mode", async () => {
+      expect(await whereTo({ forkable: true })).toBe("/chat");
+    });
+
+    it("opens the main chat when it was not an ordinary chat", async () => {
+      expect(await whereTo({ forkable: false })).toBe("/message");
+    });
   });
 
   it("aborts an attached turn stream when the chat unmounts", async () => {
@@ -2451,13 +2594,13 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(seen.outlet).toBe(true));
   });
 
-  it("leaves the mascot's badge out while the chat has no messages, which draws its own", async () => {
+  it("leaves the mascot's badge out while the main chat has no messages, which draws its own", async () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    renderChat(<Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />);
     await screen.findByRole("region", { name: "concierge.empty.title" });
     const header = document.querySelector<HTMLElement>("[data-concierge-header]")!;
     expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
@@ -2466,6 +2609,40 @@ describe("Chat Concierge empty state", () => {
     expect(name.className).toContain("row-start-1");
     expect(within(name).getByText("Rome")).toBeTruthy();
     expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
+  });
+
+  it("shows neither the mascot nor the name in a blank topic chat, and both once it has a message", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(
+      <Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    const header = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-concierge-header]");
+      if (!found) throw new Error("no header");
+      return found;
+    });
+    await waitFor(() => expect(rs.mocked(listSessionMessages)).toHaveBeenCalled());
+    expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
+    expect(header.querySelector("[data-concierge-header-name]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "concierge.taskList.open" })).toBeNull();
+    view.unmount();
+
+    rs.mocked(listSessionMessages).mockResolvedValueOnce([
+      {
+        id: "m-1",
+        sessionId: "topic-1",
+        role: "user" as const,
+        content: "hello",
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ]);
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await screen.findByTestId("user-row");
+    expect(await screen.findByRole("button", { name: "concierge.taskList.open" })).toBeTruthy();
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
@@ -2628,19 +2805,34 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the task list from a plain Tasks item in a Concierge chat's menu", async () => {
+  it("opens the task list from the agent's logo in a Concierge chat's header, not its menu", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
       pinnedAgentMention: null,
       archivedAt: null,
     });
+    // A topic chat with a message: a blank one shows no header.
+    rs.mocked(listSessionMessages).mockResolvedValueOnce([
+      {
+        id: "m-1",
+        sessionId: "topic-1",
+        role: "user" as const,
+        content: "hello",
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
-    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
-    const item = screen.getByRole("menuitem", { name: "concierge.tasks.title" });
-    expect(item.textContent).toBe("concierge.tasks.title");
-    await user.click(item);
-    expect(mockOpenTaskList).toHaveBeenCalledTimes(1);
+    // The header settles once the chat loads; press the button it settles on.
+    await screen.findByRole("button", { name: "concierge.taskList.open" });
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole("button", { name: "concierge.taskList.open" }));
+      expect(mockOpenTaskList).toHaveBeenCalled();
+    });
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
+      "concierge.tasks.title",
+    );
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
@@ -2655,7 +2847,6 @@ describe("Chat Concierge empty state", () => {
     );
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      "concierge.tasks.title",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
@@ -2970,7 +3161,7 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
 
     expect(scrollTo).toHaveBeenCalledOnce();
     expect(anchor("m-2")?.hasAttribute("data-timeline-landed")).toBe(true);
@@ -2992,20 +3183,22 @@ describe("Chat Concierge jump to a message", () => {
     Object.defineProperty(scroller, "scrollTop", { value: 1000, configurable: true });
     anchor("m-2")!.getBoundingClientRect = () => ({ top: 500 }) as DOMRect;
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000 + 500 - 112 - 24, behavior: "auto" });
   });
 
-  it("pages older history in until the message renders, says so meanwhile, then jumps", async () => {
+  it("reads from the oldest loaded turn through the message in one page, says so meanwhile, then jumps", async () => {
     rs.mocked(listSessionMessagePage)
       .mockResolvedValueOnce({ messages: [message(5), message(6)], nextCursor: "c1" })
-      .mockResolvedValueOnce({ messages: [message(3), message(4)], nextCursor: "c2" })
-      .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+      .mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3), message(4)],
+        nextCursor: null,
+      });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-1"));
+    act(() => void requestConciergeJump("m-1"));
 
     await waitFor(() => expect(anchor("m-1")?.hasAttribute("data-timeline-landed")).toBe(true));
     expect(toast.loading).toHaveBeenCalledWith("concierge.tasks.findingMessage");
@@ -3013,8 +3206,7 @@ describe("Chat Concierge jump to a message", () => {
     expect(toast.error).not.toHaveBeenCalled();
     expect(rs.mocked(listSessionMessagePage).mock.calls.map((call) => call[1])).toEqual([
       { limit: expect.any(Number) },
-      { limit: expect.any(Number), before: "c1" },
-      { limit: expect.any(Number), before: "c2" },
+      { limit: expect.any(Number), before: "c1", through: "m-1" },
     ]);
     expect(scrollTo).toHaveBeenCalledOnce();
   });
@@ -3030,32 +3222,26 @@ describe("Chat Concierge jump to a message", () => {
     anchor("m-1")!.addEventListener(HOLD_STICK_EVENT, () => order.push("hold"));
     scrollTo.mockImplementation(() => order.push("scroll"));
 
-    act(() => requestConciergeJump("m-1"));
+    act(() => void requestConciergeJump("m-1"));
 
     expect(order).toEqual(["hold", "scroll"]);
   });
 
-  it("gives up after 20 older pages and says it can't find the message", async () => {
-    // The newest page and 20 older ones, each with a page behind it.
-    for (let page = 1; page <= 21; page++) {
-      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
-        messages: [message(1000 - page)],
-        nextCursor: `c${page}`,
-      });
-    }
+  it("says it can't find a message the one read does not bring", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [message(9)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [message(8)], nextCursor: "c2" });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(1));
 
-    act(() => requestConciergeJump("m-missing"));
+    act(() => void requestConciergeJump("m-missing"));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"), {
-      timeout: 10_000,
-    });
-    // The newest page, then 20 older ones.
-    expect(listSessionMessagePage).toHaveBeenCalledTimes(21);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
+    // The newest page, then one read through the message.
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
     expect(scrollTo).not.toHaveBeenCalled();
     expect(toast.dismiss).toHaveBeenCalledWith("finding");
-  }, 15_000);
+  });
 
   it("says it can't find a message when all the history is loaded and it is not there", async () => {
     rs.mocked(listSessionMessagePage)
@@ -3064,7 +3250,7 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
-    act(() => requestConciergeJump("m-gone"));
+    act(() => void requestConciergeJump("m-gone"));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
     expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
@@ -3079,10 +3265,122 @@ describe("Chat Concierge jump to a message", () => {
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(rows()).toBe(1));
 
-    act(() => requestConciergeJump("m-2"));
+    act(() => void requestConciergeJump("m-2"));
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(scrollTo).not.toHaveBeenCalled();
     expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The header's "⋯" delete of a topic chat asks what the sidebar's delete asks.
+describe("Chat header delete of a Concierge topic chat", () => {
+  // What `follows-and-tasks` answers for topic-1.
+  const work = {
+    answer: { follows: [], openTasks: [] } as {
+      follows: { source: string; label: string; target: string }[];
+      openTasks: { id: string; title: string }[];
+    },
+  };
+  const workReads: string[] = [];
+
+  beforeEach(() => {
+    work.answer = { follows: [], openTasks: [] };
+    workReads.length = 0;
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/concierge/chats/topic-1/follows-and-tasks") {
+          workReads.push(url);
+          return Response.json(work.answer);
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+  });
+
+  const openDialog = async (user: ReturnType<typeof userEvent.setup>) => {
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.delete" }));
+    return screen.findByRole("dialog", { name: "recentChats.topicChatDeleteTitle" });
+  };
+
+  it("lists the follows and open tasks and moves them by default", async () => {
+    work.answer = {
+      follows: [{ source: "github", label: "GitHub", target: "rome-os/rome" }],
+      openTasks: [{ id: "t-1", title: "Fix login redirect" }],
+    };
+    const user = userEvent.setup();
+    const dialog = await openDialog(user);
+    await within(dialog).findByText("recentChats.topicChatDeleteWithWork");
+    expect(within(dialog).getByText("recentChats.topicChatDeleteFollow")).toBeTruthy();
+    expect(within(dialog).getByText("recentChats.topicChatDeleteTask")).toBeTruthy();
+    const move = within(dialog).getByRole("radio", { name: /topicChatDeleteMove/ });
+    const stop = within(dialog).getByRole("radio", { name: /topicChatDeleteStop/ });
+    expect(move.getAttribute("aria-checked")).toBe("true");
+    expect(stop.getAttribute("aria-checked")).toBe("false");
+    expect(deleteSession).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.delete" }));
+
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("topic-1"));
+    expect(rs.mocked(deleteSession).mock.calls).toEqual([["topic-1"]]);
+  });
+
+  it("stops the follows and open tasks when asked", async () => {
+    work.answer = { follows: [], openTasks: [{ id: "t-1", title: "Fix login redirect" }] };
+    const user = userEvent.setup();
+    const dialog = await openDialog(user);
+    await user.click(await within(dialog).findByRole("radio", { name: /topicChatDeleteStop/ }));
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.delete" }));
+
+    await waitFor(() =>
+      expect(deleteSession).toHaveBeenCalledWith("topic-1", { followsAndTasks: "stop" }),
+    );
+  });
+
+  it("deletes a topic chat with no follows or open tasks without a choice", async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog(user);
+    await within(dialog).findByText("recentChats.topicChatDeleteEmpty");
+    expect(within(dialog).queryByRole("radio")).toBeNull();
+
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.delete" }));
+
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("topic-1"));
+    expect(rs.mocked(deleteSession).mock.calls).toEqual([["topic-1"]]);
+  });
+
+  it("does not read an archived topic chat's follows and tasks, which moved when it was archived", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: "2026-11-01T00:00:00.000Z",
+    });
+    const user = userEvent.setup();
+    const dialog = await openDialog(user);
+    expect(within(dialog).getByText("recentChats.topicChatDeleteMoves")).toBeTruthy();
+    expect(workReads).toEqual([]);
+
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.delete" }));
+
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("topic-1"));
+  });
+
+  it("keeps the plain confirmation for a chat that is not a Concierge topic chat", async () => {
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.delete" }));
+
+    expect(screen.getByRole("dialog", { name: "navbar.delete" })).toBeTruthy();
+    expect(workReads).toEqual([]);
   });
 });

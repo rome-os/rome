@@ -1,6 +1,6 @@
 # Rome for iOS
 
-A native SwiftUI app for Rome. Chat (the Concierge) is the home screen; the Tasks sheet lists what the Concierge is working on, and each task opens its chat, where approvals and questions are answered. Sign-in goes through Rome Cloud, and the app opens an instance on its own: the one this device used last, else the only running one, else the first running one.
+A native SwiftUI app for Rome. Chat (the Concierge) is the home screen. The mascot in a chat's header opens the Agent page, whose Tasks tab lists what runs for that chat; a task's question or approval is answered at its card in the chat. Sign-in goes through Rome Cloud, and the app opens an instance on its own: the one this device used last, else the only running one, else the first running one.
 
 ## Build and run
 
@@ -113,6 +113,7 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | `ROME_DEMO=update-offered` | Opens the demo data on a Rome behind its latest release but new enough for the app: the banner and the drawer's line offer the update. |
 | `ROME_DEMO=visitor` | Opens the demo data as a dashboard visitor of a shared Rome. |
 | `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid and the widget. |
+| `ROME_PERF=<scenario>` | With `ROME_DEMO=long-chat`: runs one scenario for about 20 s and logs frame hitches and how often rows, screens and parses ran (`PerfProbe`). Scenarios: `idle`, `idle-apps`, `stream`, `stream-apps`, `taskstream`, `sections`, `settings`, `scroll`, `chats`. The result is in the log (category `Perf`) and in `tmp/perf-<scenario>.txt` in the app's container. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |
 
 **A chat with every card state.** To look at the app's cards and lines against a dev stack, fill a chat with copies of the main Chat's cards (tasks, questions and approvals in every state the stack holds, forwarded results, a connect card, model switches and stored model errors). Test data only, on a dev stack, never a real instance. Make a chat (`POST /api/concierge/chats` with a name such as `zz-all-card-states`), then run the script inside the dev container, never from the host:
@@ -146,9 +147,9 @@ Debug allows plain HTTP to names under `localhost`. The app opens an `http://` i
 
 ## Apple Health (this iPhone as a device)
 
-Signed in to Rome Cloud, with Settings → iPhone use → Can Rome use this iPhone turned on (it is off by default), the app also connects the phone as a rome-node device, so an agent can read Apple Health with `health.stats` and `health.samples`. The wire protocol, arguments and audit log are in [`docs/rome-node.md`](../docs/rome-node.md#iphone). The code is in `Rome/Node` and the switches, status and recent activity are in Settings → iPhone use.
+Signed in to Rome Cloud, with Settings → iPhone use → Can Rome use this iPhone turned on (it is off by default), the app also connects the phone as a rome-node device, so an agent can read Apple Health with `health.stats` and `health.samples`. The wire protocol, arguments and audit log are in [`docs/rome-node.md`](../docs/rome-node.md#iphone). The code is in `Rome/Node`. The device switch, status and recent activity are in Settings → iPhone use, and the Health switch is in Settings → Apple Health.
 
-The device is online only while the app is in front and past the sign-in screen. HealthKit needs the `com.apple.developer.healthkit` entitlement in `Config/Rome.entitlements` and `NSHealthShareUsageDescription` in both Info plists. The text says the Health data you allow goes to your Rome and its AI model. The Apple Health row in Settings → iPhone use opens a page (`Features/Settings/HealthAccessScreen.swift`) that explains what Rome does with Health and where the data goes, and holds the switch. The switch is off until the user turns it on, and a request meets `health_off` until then. Both builds read only. `NSHealthUpdateUsageDescription` is in `Config/Info-Debug.plist` alone, for the Debug seeding below. A build on a physical iPhone or TestFlight also needs the HealthKit capability on the App ID `cc.romeos.mobile` (and `.dev`) in the Apple Developer portal, and the App Store privacy answers need Health and Fitness data (the privacy manifest lists both).
+The device is online only while the app is in front and past the sign-in screen. HealthKit needs the `com.apple.developer.healthkit` entitlement in `Config/Rome.entitlements` and `NSHealthShareUsageDescription` in both Info plists. The text says the Health data you allow goes to your Rome and its AI model. The Apple Health row in Settings opens a page (`Features/Settings/HealthAccessScreen.swift`) that explains what Rome does with Health and where the data goes, and holds the switch. The switch is off until the user turns it on, and a request meets `health_off` until then. Both builds read only. `NSHealthUpdateUsageDescription` is in `Config/Info-Debug.plist` alone, for the Debug seeding below. A build on a physical iPhone or TestFlight also needs the HealthKit capability on the App ID `cc.romeos.mobile` (and `.dev`) in the Apple Developer portal, and the App Store privacy answers need Health and Fitness data (the privacy manifest lists both).
 
 The Simulator's Health is empty. Launch a Debug build with the argument `-RomeSeedHealth` and it writes a week of steps, heart rate, sleep (with overlapping records) and three runs, once per install:
 

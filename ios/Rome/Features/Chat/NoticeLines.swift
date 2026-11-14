@@ -21,16 +21,19 @@ enum NoticeCopy {
 
 /// The words of the label under a reply the Concierge began on its own.
 enum SourceCopy {
-    /// "Routine · Daily summary", "Following · digest", or the kind alone.
-    /// A kind this build does not know reads as an automation.
+    /// The sources that label a reply: someone else made Chat speak. A
+    /// check, a follow or a digest is the Concierge's own wake-up.
+    static let labelled: Set<String> = ["routine", "app", "agent", "automation"]
+
+    static func labels(_ source: TraceSummary.InputSource) -> Bool { source.type.map(labelled.contains) ?? false }
+
+    /// "Routine · Daily summary", "Agent · Flint", or the kind alone.
     static func label(_ source: TraceSummary.InputSource) -> String {
-        if source.type == "digest" { return String(localized: "Following · digest") }
         let kind: String
         switch source.type {
         case "routine": kind = String(localized: "Routine")
         case "app": kind = String(localized: "App")
         case "agent": kind = String(localized: "Agent")
-        case "following": kind = String(localized: "Following")
         default: kind = String(localized: "Automation")
         }
         guard let name = source.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return kind }

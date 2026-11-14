@@ -797,7 +797,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         setInputText(persistNewChatDraft ? rawText : text);
         setPendingUploads(uploads);
         setDraftSkill(skill);
-        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
+        if (snapshot.replyTo) replyDraft?.restore({ target: snapshot.replyTo });
       }
       // Nothing to restore otherwise — a cancelled or failed upload never
       // cleared the text or the attachment tray in the first place.

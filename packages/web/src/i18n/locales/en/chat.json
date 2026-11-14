@@ -37,7 +37,7 @@
       "checkFailed": "Could not check the connection"
     },
     "ask": {
-      "expiredFold": "Expired · answer to continue",
+      "expired": "Expired: no answer within a day",
       "unavailable": "This question or approval can no longer be shown",
       "answered": "Answered",
       "answeredWith": "Answered: {{answer}}",
@@ -45,6 +45,7 @@
       "approved": "Approved",
       "rejected": "Rejected",
       "waitingBelow": "Waiting: answer the card below",
+      "closed": "Closed: the task ended",
       "turnedDown": "Turned down: no answer within a day",
       "turnedDownStopped": "Turned down: task stopped",
       "openToAnswer": "Open the task chat to answer"
@@ -52,50 +53,14 @@
     "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",
     "openTaskChat": "Open",
     "tasks": {
-      "title": "Tasks",
-      "close": "Close tasks",
-      "groups": {
-        "needsYou": "Waiting for you",
-        "active": "Active",
-        "later": "Later",
-        "ended": "Ended"
-      },
       "ended": {
         "failed": "Failed",
         "stopped": "Stopped",
         "no_response": "No response"
       },
-      "expired": "Expired — answer to continue",
       "stop": "Stop",
-      "done": "Done",
-      "cancelCheck": "Cancel check",
-      "archive": "Archive",
-      "retry": "Try again",
-      "pending": {
-        "stop": "Stopping…",
-        "archive": "Archiving…",
-        "done": "Sending…"
-      },
-      "unchanged": "{{name}} did not change it",
-      "timeout": "{{name}} has not handled this yet",
-      "failed": "Could not send",
-      "notSynced": "Not synced",
       "sourceMissing": "Can't find the original message",
-      "findingMessage": "Finding message…",
-      "showMore": "Show {{count}} older",
-      "showLess": "Show less",
-      "openChat": "Open the chat for {{title}}",
-      "actionText": {
-        "stop": "Stop \"{{title}}\"",
-        "archive": "Archive \"{{title}}\"",
-        "done": "Done \"{{title}}\"",
-        "withId": "(task {{id}})"
-      },
-      "replyText": {
-        "done": "I've done this"
-      },
-      "emptyTitle": "No tasks yet",
-      "emptyDescription": "Tasks {{name}} hands to other agents appear here, with what each one waits for."
+      "findingMessage": "Finding message…"
     },
     "messageDetails": "Message details",
     "chooseFolder": "Choose folder…",
@@ -145,13 +110,79 @@
     "statusReaction": {
       "working": "Working on it",
       "failed": "Did not finish"
+    },
+    "taskList": {
+      "title": "Tasks",
+      "close": "Close tasks",
+      "open": "Open tasks",
+      "groups": {
+        "needs_you": "Needs you",
+        "active": "Active",
+        "later": "Later",
+        "on_its_own": "Running on its own",
+        "ended": "Ended"
+      },
+      "empty": "Nothing runs here yet.",
+      "loading": "Loading tasks",
+      "loadFailed": "Failed to load tasks",
+      "showMore": "Show {{count}} more",
+      "task": {
+        "waitingAnswer": "Waiting for your answer",
+        "waitingApproval": "Waiting for your approval",
+        "running": "Running",
+        "checksIn": "Checks {{when}}",
+        "notStarted": "Not started",
+        "stopping": "Stopping…",
+        "opening": "Opening…",
+        "ended": {
+          "done": "Done",
+          "failed": "Failed",
+          "stopped": "Stopped",
+          "no_response": "No response"
+        },
+        "notStartedAge": "Not started · Created {{age}}"
+      },
+      "schedule": {
+        "daily": "Daily at {{time}}",
+        "days": "{{days}} at {{time}}",
+        "once": "{{date}} at {{time}}",
+        "event": "When {{event}} arrives",
+        "manual": "Only when run by hand",
+        "other": "On a schedule"
+      },
+      "check": {
+        "waiting": "Waiting for {{what}}"
+      },
+      "follow": {
+        "digest": "Digest daily at {{times}}",
+        "unavailable": "Not available",
+        "off": "Off"
+      },
+      "routine": {
+        "paused": "Paused",
+        "lastFailed": "Last run failed",
+        "fromTask": "From {{title}}"
+      },
+      "actions": {
+        "respond": "Respond",
+        "respondTo": "Respond to {{title}}",
+        "stop": "Stop",
+        "stopTask": "Stop {{title}}",
+        "openChat": "Open the chat for {{title}}"
+      },
+      "failed": {
+        "stop": "Failed to stop the task"
+      },
+      "created": "Created {{when}}",
+      "endedAt": "Ended {{when}}"
     }
   },
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
     "jump": "Go to the original message",
-    "openThread": "Open the chat thread"
+    "openThread": "Open the chat thread",
+    "toThread": "Reply to {{title}}"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -181,18 +212,6 @@
   "archived": {
     "readOnly": "This chat is archived and read-only.",
     "unarchive": "Unarchive"
-  },
-  "checks": {
-    "label": "Checks scheduled in this chat",
-    "timed": "{{name}} · {{when}}",
-    "waiting": "Waiting for {{what}} · checks {{when}}",
-    "cancel": "Cancel {{name}}",
-    "skip": "Skip the next run of {{name}}",
-    "loadFailed": "Failed to load scheduled checks",
-    "summary": "{{count}} checks · next: {{next}}",
-    "expand": "Show scheduled checks",
-    "collapse": "Hide scheduled checks",
-    "cancelFailed": "Failed to cancel the check"
   },
   "share": {
     "title": "Share chat",
@@ -410,6 +429,9 @@
     "playVideo": "Play",
     "closeImagePreview": "Close",
     "downloadImage": "Download",
+    "previousImage": "Previous picture",
+    "nextImage": "Next picture",
+    "imageCounter": "{{current}} / {{total}}",
     "filePill": "#File {{index}}",
     "uploadProgressFor": "Upload progress for {{name}}",
     "cancelUpload": "Cancel",
@@ -419,6 +441,7 @@
     "stopGenerating": "Stop generating"
   },
   "questionCard": {
+    "sent": "Sent",
     "optional": "optional",
     "addOwn": "Add your own…",
     "typeOwn": "Or type your own…",
@@ -431,6 +454,7 @@
   "appComponent": {
     "dismiss": "Dismiss",
     "widgetUnavailable": "Could not read this card's data. {{text}}",
+    "widgetOpenLink": "Open the page to continue",
     "widgetUndrawable": "Could not show this card. {{text}}"
   },
   "aiToolsCard": {

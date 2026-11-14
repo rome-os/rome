@@ -4,13 +4,20 @@ import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
-import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import type { LivePreview } from "@/components/chat/MessageList";
 
 /** Messages from the same sender closer than this share one group. */
 const GROUP_GAP_MS = 5 * 60_000;
 /** A gap of at least this long, or a change of local day, gets a time separator. */
 const SEPARATOR_GAP_MS = 15 * 60_000;
+
+/** The sources that label a reply: someone else made the Concierge speak. */
+const LABELLED_SOURCES: ReadonlySet<SystemInputSource["type"]> = new Set([
+  "routine",
+  "app",
+  "agent",
+  "automation",
+]);
 
 /** One message in a group. */
 export interface ConciergeEntry {
@@ -80,66 +87,33 @@ export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
   );
 }
 
-/** Whether turn `turnId` took one of the owner's messages as its input. */
-function turnTookOwnerMessage(rows: ChatRow[], turnId: string | null): boolean {
-  if (!turnId) return false;
-  return rows.some((row) => row.kind === "user" && row.message.turnId === turnId);
-}
-
-// The tools whose call is itself a message the chat draws: once one lands,
-// nothing is left to type for it.
-const MESSAGE_TOOLS = new Set(["say", "chat_forward"]);
-
-/** A tool's name without its provider or group prefix (`mcp__rome__say`, `core:say`). */
-function bareTool(tool: string): string {
-  const afterMcp = tool.includes("__") ? tool.slice(tool.lastIndexOf("__") + 2) : tool;
-  return (
-    afterMcp.includes(":") ? afterMcp.slice(afterMcp.lastIndexOf(":") + 1) : afterMcp
-  ).toLowerCase();
+/** How long a simulated turn's message waits behind the dots: by its length, 0.5 to 1 s. */
+export function simulatedTypingMs(message: ChatMessage): number {
+  const length = parseMessageEntries(message).reduce(
+    (sum, part) => sum + (part.type === "text" ? part.content.length : 0),
+    0,
+  );
+  return Math.min(1000, Math.max(500, length * 5));
 }
 
 /**
- * Whether the live trace has a call open, other than one that says a message:
- * the turn is working on something the chat does not show yet.
- */
-export function hasOpenWorkCall(snapshot: TraceSnapshot | null): boolean {
-  if (!snapshot) return false;
-  const blocks = [...snapshot.segments]
-    .sort((a, b) => a.ordinal - b.ordinal)
-    .flatMap((segment) => (segment.kind === "run" ? segment.blocks : [segment.block]));
-  const open = new Map<string, string>();
-  let anon = 0;
-  for (const block of blocks) {
-    if (block.type === "tool_use") open.set(block.id ?? `anon:${anon++}`, block.tool);
-    else if (block.type === "tool_result") {
-      if (block.toolUseId) open.delete(block.toolUseId);
-      else {
-        const last = [...open.keys()].reverse().find((key) => key.startsWith("anon:"));
-        if (last) open.delete(last);
-      }
-    }
-  }
-  return [...open.values()].some((tool) => !MESSAGE_TOOLS.has(bareTool(tool)));
-}
-
-/**
- * Whether the Concierge chat shows its typing dots. A turn that took the
- * owner's message shows none: that message's status reaction already says
- * the Concierge is on it (docs/domains/chats.md#status-reaction). Any other
- * turn, such as one bringing back a task's result, shows them until it says
- * its first message, unless it is quiet. Once it has said one they show only
- * while it is in a call other than one that says a message, so a turn that
- * only closes off after its last message (writing its private `done`) shows
- * none.
+ * Whether the Concierge chat shows its typing dots: the Concierge is writing
+ * a message (docs/domains/chats.md#status-reaction). The owner's message it
+ * took shows 👀 for having started; the dots say a message is coming. The
+ * server says how the running turn shows them (`live.writing`):
+ * - `exact`, where the provider says when it writes a message: while it does.
+ * - `simulated`, where it cannot: while a message that just landed is held
+ *   back behind them (`holding`), with no guess from the trace.
+ * A quiet turn shows none until it says something.
  */
 export function showsTyping(
   rows: ChatRow[],
-  live: Pick<LivePreview, "isStreaming" | "runningTurnId" | "quiet" | "snapshot">,
+  live: Pick<LivePreview, "isStreaming" | "runningTurnId" | "quiet" | "writing">,
+  holding = false,
 ): boolean {
-  if (!live.isStreaming) return false;
-  if (turnTookOwnerMessage(rows, live.runningTurnId)) return false;
-  if (!turnHasSpoken(rows, live.runningTurnId)) return !live.quiet;
-  return hasOpenWorkCall(live.snapshot);
+  if (holding) return true;
+  if (!live.isStreaming || live.writing?.mode !== "exact" || !live.writing.writing) return false;
+  return !live.quiet || turnHasSpoken(rows, live.runningTurnId);
 }
 
 // What the last build made, keyed by the message each piece starts from. A
@@ -260,9 +234,14 @@ export function buildConciergeItems(
     previous = message;
   };
 
-  // Where each turn's input came from, when it was not the owner's own words.
-  // The chat draws no line for it: the turn's replies carry it as a label.
+  // Where each turn's input came from, when someone else made the Concierge
+  // speak. The chat draws no line for it: the turn's replies carry it as a
+  // label. The Concierge's own wake-ups (a check, what it follows, its digest)
+  // label nothing.
   const sources = new Map<string, SystemInputSource>();
+  const labelSource = (turnId: string, source: SystemInputSource) => {
+    if (LABELLED_SOURCES.has(source.type)) sources.set(turnId, source);
+  };
   let automaticModel: string | undefined;
   for (const row of rows) {
     if (row.kind === "user") {
@@ -272,7 +251,7 @@ export function buildConciergeItems(
       const sender = row.message.sender;
       if (sender?.kind === "automated") {
         if (row.message.turnId) {
-          sources.set(row.message.turnId, {
+          labelSource(row.message.turnId, {
             type: sender.sourceType ?? "automation",
             name: sender.name,
           });
@@ -298,7 +277,7 @@ export function buildConciergeItems(
       });
       group = null;
     } else if (row.kind === "automated_input") {
-      sources.set(row.turnId, row.source);
+      labelSource(row.turnId, row.source);
     } else if (row.kind === "model_switch") {
       if (row.model === automaticModel) {
         automaticModel = undefined;

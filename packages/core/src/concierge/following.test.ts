@@ -1590,6 +1590,94 @@ describe("follows in several Concierge chats", () => {
     s.stop();
   });
 
+  it("lists a chat's follows for the Tasks panel from what is stored, asking no provider", async () => {
+    const s = setup();
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    await s.following().follow({ source: "github", target: "acme/gadgets" });
+    s.calling.chat = null;
+    await s.following().configure({
+      source: "github",
+      target: "acme/gadgets",
+      kinds: {
+        review_requested: false,
+        your_pr_closed: false,
+        your_ci_failed: false,
+        new_pr_or_issue: false,
+      },
+    });
+    const asked = () => s.calls.filter(([name]) => name === "connector_watch_sources").length;
+    const before = asked();
+    const rows = await s.following().followsIn!("calendar", GUARDIAN_OWNER);
+    expect(asked()).toBe(before);
+    expect(rows.map((r) => [r.label, r.target, r.state])).toEqual([
+      ["GitHub", "acme/widgets", "active"],
+      ["GitHub", "acme/gadgets", "off"],
+    ]);
+    s.stop();
+  });
+
+  it("says a follow is unavailable from sources read in the last 30 s, and never reads them for it", async () => {
+    const options: Parameters<typeof setup>[0] = {};
+    const s = setup(options);
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "gmail" });
+    s.calling.chat = null;
+    options.gmailStatus = "error";
+    // `list` reads the sources, as the connector list does: they are warm now.
+    await s.following().list();
+    const asked = () => s.calls.filter(([name]) => name === "connector_watch_sources").length;
+    const before = asked();
+    const stateIn = async () =>
+      (await s.following().followsIn!("calendar", GUARDIAN_OWNER)).map((r) => r.state);
+    expect(await stateIn()).toEqual(["unavailable"]);
+    // Past the TTL it reads what is stored, rather than wait for the sources.
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(Date.now() + 31_000);
+    expect(await stateIn()).toEqual(["active"]);
+    expect(asked()).toBe(before);
+    s.stop();
+  });
+
+  it("lists only one chat's follows of one owner, and ending them keeps another person's routines", async () => {
+    const s = setup();
+    const ann = "visitor:acct-ann";
+    const annMainChat = mainChatIdOf(ann);
+    s.liveChats.set(annMainChat, { id: annMainChat, name: "Concierge", main: true });
+    s.chatOwners.set(annMainChat, ann);
+    // The guardian follows two repositories from two chats; Ann follows one of them.
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    await s.following().follow({ source: "github", target: "acme/gadgets" });
+    s.calling.chat = annMainChat;
+    await s
+      .action("core:concierge_follow")
+      .execute({ source: "github", target: "acme/widgets" }, {} as never);
+    s.calling.chat = null;
+    expect(await s.following().followsOfChat("calendar", GUARDIAN_OWNER)).toEqual([
+      { source: "github", label: "GitHub", target: "acme/widgets" },
+    ]);
+    // Another owner's follow of the same target is not this chat's.
+    expect(await s.following().followsOfChat("calendar", ann)).toEqual([]);
+
+    expect(await s.following().unfollow("github", "acme/widgets", GUARDIAN_OWNER)).toEqual({
+      removed: true,
+    });
+    expect(await s.following().followsOfChat("calendar", GUARDIAN_OWNER)).toEqual([]);
+    // Ann still follows it, so its routines stay; the guardian's other follow is untouched.
+    expect(keys(s)).toContain(
+      "concierge-follow:github:acme/widgets:provider:event:github.pull_request",
+    );
+    expect(keys(s)).toContain(
+      "concierge-follow:github:acme/gadgets:provider:event:github.pull_request",
+    );
+    // Once Ann ends hers too, the routines go.
+    await s.following().unfollow("github", "acme/widgets", ann);
+    expect(keys(s).some((key) => key?.includes("acme/widgets"))).toBe(false);
+    s.stop();
+  });
+
   const ANN = "visitor:acct-ann";
   const annMain = mainChatIdOf(ANN);
   /** Ann, a dashboard visitor, with her own main Concierge chat. */
