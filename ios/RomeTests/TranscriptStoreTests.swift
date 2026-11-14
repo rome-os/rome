@@ -376,6 +376,21 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(!store.hasOlder)
     }
 
+    /// The list asks for an older page on every scroll frame near the top:
+    /// after a failed fetch it waits a moment before the next one.
+    @Test func aFailedOlderPageIsNotAskedForAgainAtOnce() async {
+        let backend = backendWithLongChat()
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        #expect(store.wantsOlder)
+        backend.messagesError = .server(status: 503, message: nil)
+        await store.loadOlder()
+        #expect(store.olderPage == nil)
+        #expect(!store.wantsOlder, "a failed page is asked for again on the next frame")
+        backend.messagesError = nil
+        #expect(store.hasOlder)
+    }
+
     @Test func reloadKeepsThePagesAlreadyLoaded() async {
         let backend = backendWithLongChat()
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)

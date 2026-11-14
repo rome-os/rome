@@ -113,7 +113,12 @@ private struct ScrollState: CustomStringConvertible {
         workspace.topics.setActivity(.needsYou, for: workspace.mainChatServerID ?? conciergeChatID)
         var samples: [ScrollState] = []
         var justAfterPill: ScrollState?
-        for step in 0..<40 {
+        // At least 4 s, then until the list holds still for half a second:
+        // a busy CI simulator can stall for many seconds, so a fixed count
+        // of samples could end before the fetch has landed.
+        let deadline = Date.now.addingTimeInterval(30)
+        var step = 0
+        while step < 40 || (samples.suffix(5).contains { abs($0.toEnd - samples.last!.toEnd) > 0.5 || abs($0.bottomInset - samples.last!.bottomInset) > 0.5 } && Date.now < deadline) {
             // The late check's answer, a second after the fetch.
             if pill == .comesLate, step == 10 {
                 model.update.debugShow(Self.offered)
@@ -123,6 +128,7 @@ private struct ScrollState: CustomStringConvertible {
             }
             try await Task.sleep(for: .milliseconds(100))
             samples.append(Self.state(scroll))
+            step += 1
         }
         let settled = try #require(samples.last)
         #expect(workspace.concierge.hasOlder, "the fetch should page")
@@ -243,6 +249,15 @@ private func runLoopTurn() {
 private final class Appearances {
     var count: [String: Int] = [:]
     var frames: [String: CGRect] = [:]
+    /// Each row's top within the transcript's content.
+    var tops: [String: CGFloat] = [:]
+
+    /// Where `id` shows on screen: its top in the content less the scroll
+    /// view's own offset, which is what is drawn. SwiftUI's global frame
+    /// catches up with an offset set on the scroll view one update later.
+    func shown(_ id: String, in scroll: UIScrollView) -> CGFloat? {
+        tops[id].map { $0 - scroll.contentOffset.y }
+    }
 }
 
 /// The transcript, counting how often each row comes on screen: a row the
@@ -250,18 +265,35 @@ private final class Appearances {
 private struct AppearHost: View {
     let store: TranscriptStore
     let seen: Appearances
+    /// Rows that come in short and grow a moment later, as a reply's picture
+    /// does once it loads.
+    var grows: Set<String> = []
+    /// Replies taller than the screen; they grow by 240 pt when `growth` is on.
+    var tall: Set<String> = []
+    /// Rows of 180 pt that grow to 420 pt when `growth` is on.
+    var growOnCue: Set<String> = []
+    var growth = Growth()
 
     var body: some View {
         TranscriptList(store: store) { row, previous in
             Group {
-                switch row {
-                case .userText(_, let text, _, let pending): UserBubble(text: text, pending: pending)
-                case .agentText(_, let text, _, let forwarded, let position): AgentBubble(text: text, forwardedFrom: forwarded, position: position)
-                default: EmptyView()
+                if grows.contains(row.id) {
+                    LateGrowingRow()
+                } else if tall.contains(row.id) {
+                    Color.gray.opacity(0.2).frame(height: growth.on ? 2240 : 2000)
+                } else if growOnCue.contains(row.id) {
+                    Color.gray.opacity(0.3).frame(height: growth.on ? 420 : 180)
+                } else {
+                    switch row {
+                    case .userText(_, let text, _, let pending): UserBubble(text: text, pending: pending)
+                    case .agentText(_, let text, _, let forwarded, let position): AgentBubble(text: text, forwardedFrom: forwarded, position: position)
+                    default: EmptyView()
+                    }
                 }
             }
             .onAppear { seen.count[row.id, default: 0] += 1 }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { seen.frames[row.id] = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("transcriptContent")).minY } action: { seen.tops[row.id] = $0 }
             .padding(.top, TranscriptSpacing.top(row, after: previous))
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: 66) }
@@ -316,6 +348,27 @@ private struct AppearHost: View {
     }
 }
 
+/// Turns on the growth of `AppearHost`'s rows that grow on cue.
+@MainActor @Observable
+private final class Growth {
+    var on = false
+}
+
+/// 180 pt, then 420 pt 0.4 s after it first shows: a picture's placeholder,
+/// then the picture.
+private struct LateGrowingRow: View {
+    @State private var loaded = false
+
+    var body: some View {
+        Color.gray.opacity(0.3)
+            .frame(height: loaded ? 420 : 180)
+            .task {
+                try? await Task.sleep(for: .milliseconds(400))
+                loaded = true
+            }
+    }
+}
+
 /// Paging up: an older page lands above the rows on screen, which stay
 /// where they are.
 @MainActor
@@ -343,22 +396,81 @@ private struct AppearHost: View {
             store.stop()
         }
         try await Task.sleep(for: .milliseconds(800))
-        // On the bottom with older pages behind: nothing fetched yet.
+        // On the bottom with older pages behind. A chat this short is within
+        // reach of its top, so it may have fetched one already, which waits
+        // for the top.
+        for _ in 0..<100 where store.loadingOlder || store.placingOlder { try await Task.sleep(for: .milliseconds(10)) }
         let held = store.messages.count
-        #expect(store.hasOlder && held == TranscriptStore.pageSize)
+        #expect(store.hasOlder && held >= TranscriptStore.pageSize)
 
         // Up to the top of what is held.
         let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        // As a drag up does: the list stops following the bottom.
+        NotificationCenter.default.post(name: PerfProbe.flingStarted, object: scroll)
         scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
         try await Task.sleep(for: .milliseconds(100))
         let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
-        let before = try #require(seen.frames[anchorId]).minY
+        let before = try #require(seen.shown(anchorId, in: scroll))
 
         for _ in 0..<200 where store.messages.count == held { try await Task.sleep(for: .milliseconds(10)) }
         #expect(store.messages.count > held, "no older page came")
         try await Task.sleep(for: .milliseconds(600))
-        let after = try #require(seen.frames[anchorId]).minY
+        let after = try #require(seen.shown(anchorId, in: scroll))
         #expect(abs(after - before) < 1, "\(anchorId) moved from \(before) to \(after)")
+    }
+
+    /// A real page holds pictures and cards that take their height only
+    /// after they show: the rows in view stay put through the whole insert,
+    /// and after it, while those rows above grow.
+    @Test func rowsAboveThatGrowLaterDoNotMoveTheRowsInView() async throws {
+        let messages = (0..<160).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index / 2)", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index), long enough to fill a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        let backend = FakeBackend()
+        backend.stored = messages
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        let seen = Appearances()
+        let grows = Set((0..<120).filter { $0 % 3 == 0 }.map { "m\($0):0" })
+        let host = UIHostingController(rootView: AppearHost(store: store, seen: seen, grows: grows))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+            store.stop()
+        }
+        try await Task.sleep(for: .milliseconds(800))
+        for _ in 0..<200 where store.loadingOlder || store.placingOlder { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(800))
+        let held = store.messages.count
+
+        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        // As a drag up does: the list stops following the bottom.
+        NotificationCenter.default.post(name: PerfProbe.flingStarted, object: scroll)
+        scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
+        try await Task.sleep(for: .milliseconds(100))
+        let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
+        let before = try #require(seen.shown(anchorId, in: scroll))
+
+        // Every 10 ms through the insert and the growth after it.
+        var worst: CGFloat = 0
+        var steps = 0
+        var last = before
+        for _ in 0..<200 {
+            try await Task.sleep(for: .milliseconds(10))
+            let now = seen.shown(anchorId, in: scroll) ?? last
+            worst = max(worst, abs(now - before))
+            if abs(now - last) > 1 { steps += 1 }
+            last = now
+        }
+        #expect(store.messages.count > held, "no older page came")
+        #expect(worst < 1, "\(anchorId) strayed up to \(worst) pt from \(before), in \(steps) steps")
     }
 }
 
@@ -408,3 +520,60 @@ private struct AppearHost: View {
     }
 }
 
+
+/// A reply taller than the screen fills it: the list is held by that reply,
+/// not by a row off screen.
+@MainActor
+@Suite(.serialized) struct TallReplyTests {
+    private func show(tall: Set<String>, growOnCue: Set<String>) async throws -> (TranscriptStore, Appearances, Growth, UIScrollView, UIWindow) {
+        let messages = (0..<60).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index / 2)", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index), long enough to fill a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        let backend = FakeBackend()
+        backend.stored = messages
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        let seen = Appearances()
+        let growth = Growth()
+        let host = UIHostingController(rootView: AppearHost(store: store, seen: seen, tall: tall, growOnCue: growOnCue, growth: growth))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        try await Task.sleep(for: .milliseconds(800))
+        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        return (store, seen, growth, scroll, window)
+    }
+
+    /// Puts 300 pt of `id` above the visible area, so it fills the screen.
+    private func scrollInto(_ id: String, seen: Appearances, scroll: UIScrollView) async throws {
+        NotificationCenter.default.post(name: PerfProbe.flingStarted, object: scroll)
+        let top = try #require(seen.tops[id])
+        scroll.setContentOffset(CGPoint(x: 0, y: top + 300 - scroll.adjustedContentInset.top), animated: false)
+        try await Task.sleep(for: .milliseconds(300))
+    }
+
+    @Test func aTallReplyThatGrowsBelowTheScreenDoesNotMove() async throws {
+        let (store, seen, growth, scroll, window) = try await show(tall: ["m50:0"], growOnCue: [])
+        defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil; store.stop() }
+        try await scrollInto("m50:0", seen: seen, scroll: scroll)
+        let before = try #require(seen.shown("m50:0", in: scroll))
+        growth.on = true
+        try await Task.sleep(for: .milliseconds(500))
+        let after = try #require(seen.shown("m50:0", in: scroll))
+        #expect(abs(after - before) < 1, "the reply in view moved from \(before) to \(after)")
+    }
+
+    @Test func aLastTallReplyStaysWhenRowsAboveGrow() async throws {
+        let (store, seen, growth, scroll, window) = try await show(tall: ["m59:0"], growOnCue: Set((40..<58).map { "m\($0):0" }))
+        defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil; store.stop() }
+        try await scrollInto("m59:0", seen: seen, scroll: scroll)
+        let before = try #require(seen.shown("m59:0", in: scroll))
+        growth.on = true
+        try await Task.sleep(for: .milliseconds(500))
+        let after = try #require(seen.shown("m59:0", in: scroll))
+        #expect(abs(after - before) < 1, "the reply in view moved from \(before) to \(after)")
+    }
+}
