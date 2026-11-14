@@ -55,6 +55,24 @@
         }
       }
     },
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Asked before the first voice input in a message field",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome uses the microphone to turn your speech into text"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 使用麦克风将你的语音转成文字"
+          }
+        }
+      }
+    },
     "NSPhotoLibraryAddUsageDescription" : {
       "comment" : "Asked before saving a photo from the viewer",
       "extractionState" : "manual",

@@ -77,7 +77,7 @@ struct ChatScreen: View {
                         ConciergeStarters { store.send($0.text) }
                     }
                     // While a chat thread is open, the composer sends into it.
-                    Composer(text: $draft, placeholder: store.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) {
+                    Composer(text: $draft, placeholder: store.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments, voiceKey: workspace.concierge.sessionId) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
                         if store.send(draft, images: attachments.images, fromComposer: true, thread: store.composerThread) {

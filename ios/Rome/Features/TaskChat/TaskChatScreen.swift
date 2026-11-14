@@ -49,6 +49,7 @@ struct TaskChatScreen: View {
                 stopping: store.stopping,
                 focused: $composerFocused,
                 attachments: attachments,
+                voiceKey: chatId,
                 onSend: {
                     guard !attachments.isPreparing else { return }
                     if store.send(draft, images: attachments.images, fromComposer: true) {

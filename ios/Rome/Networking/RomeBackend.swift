@@ -93,6 +93,10 @@ protocol RomeBackend: AnyObject, Sendable {
     func webSessionCookie() -> HTTPCookie?
     /// The language the server writes in for the guardian: "en" or "zh-CN".
     func setGuardianLanguage(_ code: String) async throws
+    /// Whether the instance offers voice input; nil when it cannot say.
+    func voiceInputInfo() async throws -> VoiceInputInfo?
+    /// The instance's dictation socket, signed in; nil without a real instance.
+    func voiceInputSocket() -> URLRequest?
     func sendFeedback(_ text: String) async throws
     func upgradeCheck() async throws -> UpgradeCheck
     func startUpgrade(target: String) async throws -> UpgradeStarted
@@ -328,6 +332,14 @@ final class LiveBackend: RomeBackend {
         try await client.put("/settings", json: .object(["guardianLanguage": .string(code)]))
     }
 
+    func voiceInputInfo() async throws -> VoiceInputInfo? {
+        try await client.get("/voice-input")
+    }
+
+    func voiceInputSocket() -> URLRequest? {
+        client.socketRequest(VoiceInputWire.socketPath)
+    }
+
     func apps() async throws -> [InstalledApp] {
         let list: AppList = try await client.get("/apps")
         return list.apps
@@ -455,6 +467,9 @@ extension RomeBackend {
     /// Stand-ins (demo, tests) are no guardian of a real instance.
     func isGuardian() async -> Bool { false }
     func setGuardianLanguage(_ code: String) async throws {}
+    /// Stand-ins have no voice input.
+    func voiceInputInfo() async throws -> VoiceInputInfo? { nil }
+    func voiceInputSocket() -> URLRequest? { nil }
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink { throw APIError.notFound }

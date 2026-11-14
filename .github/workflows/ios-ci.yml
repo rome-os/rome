@@ -53,3 +53,41 @@ jobs:
             -skipPackagePluginValidation \
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO
+
+  # Debug builds can play a recording as the microphone for UI tests. Release
+  # must hold no trace of it: no recording source and no launch argument.
+  release-has-no-test-audio:
+    name: Release has no test audio
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26.6
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26.6*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+      - name: Build Release
+        run: |
+          xcodebuild build \
+            -project Rome.xcodeproj \
+            -scheme Rome \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath /tmp/rome-release \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Look for the test audio source
+        run: |
+          binary=$(find /tmp/rome-release/Build/Products -path '*Rome.app/Rome' -type f | head -1)
+          test -n "$binary"
+          for needle in RecordingAudioSource RomeVoiceInputRecording RomeVoiceInputMicrophone; do
+            if strings -a "$binary" | grep -q "$needle" || nm -a "$binary" 2>/dev/null | grep -q "$needle"; then
+              echo "::error::Release binary mentions $needle"
+              exit 1
+            fi
+          done
+          echo "Release binary holds no test audio source."

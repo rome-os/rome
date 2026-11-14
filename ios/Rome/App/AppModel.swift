@@ -178,9 +178,12 @@ final class Workspace {
     let drafts: DraftStore
     /// The newest messages of the main Chat and topic chats, on this phone.
     let transcripts: TranscriptCache
+    /// Voice input in this instance's message fields.
+    let voiceInput: VoiceInputService
 
     init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String, drafts: DraftStore? = nil) {
         self.backend = backend
+        voiceInput = VoiceInputService(backend: backend)
         self.instanceName = instanceName
         self.host = host
         self.accountLabel = accountLabel

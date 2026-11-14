@@ -14,6 +14,10 @@ struct ComposerTextView: UIViewRepresentable {
     var onPasteImages: (([NSItemProvider]) -> Void)?
     /// The text without what an input method is still composing.
     var committedText: Binding<String>? = nil
+    /// Gets the UIKit view, for voice input to type into.
+    var handle: ComposerTextHandle? = nil
+    /// False while voice input listens: the field shows the words as they come.
+    var editable = true
 
     static let maxLines = 6
 
@@ -31,6 +35,7 @@ struct ComposerTextView: UIViewRepresentable {
         // The placeholder is fitted to the width: draw it again when that changes.
         view.contentMode = .redraw
         view.accessibilityLabel = placeholder
+        handle?.view = view
         return view
     }
 
@@ -47,6 +52,8 @@ struct ComposerTextView: UIViewRepresentable {
         if view.placeholder != placeholder { view.placeholder = placeholder }
         view.accessibilityLabel = placeholder
         view.onPasteImages = onPasteImages
+        handle?.view = view
+        if view.isEditable != editable { view.isEditable = editable }
         if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
             DispatchQueue.main.async { committedText.wrappedValue = text }
         }

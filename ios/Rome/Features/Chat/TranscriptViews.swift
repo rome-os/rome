@@ -596,10 +596,16 @@ struct Composer: View {
     @Binding var focused: Bool
     /// Photos to send with the message; nil leaves out the +.
     var attachments: ComposerAttachments? = nil
+    /// The chat this field writes in, so voice input stopped by leaving it
+    /// says why on return; nil keeps no such notice.
+    var voiceKey: String? = nil
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.voiceInput) private var voiceInput
+    @State private var voice = VoiceInputController()
+    @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
     @State private var picked: [PhotosPickerItem] = []
@@ -614,11 +620,18 @@ struct Composer: View {
     private var hasPhotos: Bool { !(attachments?.images.isEmpty ?? true) }
     private var canSend: Bool {
         guard !(attachments?.isPreparing ?? false) else { return false }
+        // Sending waits for the spoken words to land.
+        guard !voice.active else { return false }
         return !committedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let notice = voice.notice {
+                VoiceInputNotice(stop: notice)
+                    .padding(.top, 10)
+                    .padding(.horizontal, 18)
+            }
             if let attachments, !attachments.images.isEmpty || attachments.preparing > 0 {
                 ComposerThumbnails(attachments: attachments)
                     .padding(.top, 10)
@@ -638,8 +651,16 @@ struct Composer: View {
                     onPasteImages: attachments.map { attachments in
                         { providers in Task { await attachments.add(providers: providers) } }
                     },
-                    committedText: $committedText
+                    committedText: $committedText,
+                    handle: textHandle,
+                    editable: !voice.active
                 )
+                if let voiceInput, voiceInput.available {
+                    VoiceInputButton(state: voice.state) {
+                        voice.toggle(service: voiceInput, text: $text, handle: textHandle)
+                    }
+                    .padding(.bottom, controlPadding)
+                }
                 Group {
                     if stopVisible && !canSend {
                         Button(action: onStop) {
@@ -680,6 +701,10 @@ struct Composer: View {
         .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true, frost: Frost.composer)
         .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
         .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+        .task { await voiceInput?.refresh() }
+        .onAppear { voice.arrive(service: voiceInput, chat: voiceKey, text: text) }
+        .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
+        .onChange(of: text) { _, now in voice.textChanged(now) }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: stopVisible)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: attachments?.images.count)

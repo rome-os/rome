@@ -18,6 +18,8 @@
 	     writes to Health, so Rome/Info.plist has no such key. -->
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Debug builds write test data to Health in the Simulator.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Rome uses the microphone to turn your speech into text</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Rome uses the camera for photos you send in a chat.</string>
 	<key>RomeAPNsEnvironment</key>
