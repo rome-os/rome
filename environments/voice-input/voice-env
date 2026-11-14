@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# The only command the voice input verifier calls. Every command prints JSON
+# on stdout; progress and errors go to stderr. See README.md.
+#
+#   voice-env version
+#   voice-env browser --mic <wav> [--permission unset|granted|refused] [--lang en|zh-CN]
+#   voice-env browser stop
+#   voice-env transcriber real
+#   voice-env transcriber stand-in [--text <text>] [--first-ms <n>] [--token-ms <n>]
+#   voice-env transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]
+#   voice-env transcriber status
+#   voice-env network cut|restore
+#   voice-env chats
+#   voice-env messages --chat <id>
+#   voice-env audio-scan
+#   voice-env capture start|stop
+set -euo pipefail
+# shellcheck source=env.sh
+. "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+
+require_up() {
+  [ -f "$BUILD_FILE" ] && docker inspect "$ROME" >/dev/null 2>&1 ||
+    die "the environment is not up. Run environments/voice-input/env.sh up first."
+}
+
+proxy_url() { printf 'http://127.0.0.1:%s/__voice-env' "$PROXY_PORT"; }
+stand_in() { printf 'http://127.0.0.1:%s' "$TRANSCRIBER_CONTROL_PORT"; }
+
+# A Chromium that runs here: VOICE_CHROME, the devShell's, or Nix's.
+chrome_path() {
+  if [ -n "${VOICE_CHROME:-}" ]; then
+    printf '%s' "$VOICE_CHROME"
+  elif command -v chromium >/dev/null 2>&1; then
+    command -v chromium
+  else
+    printf '%s/bin/chromium' "$(nix build --no-link --print-out-paths nixpkgs#chromium 2>/dev/null)"
+  fi
+}
+
+cmd_version() {
+  require_up
+  local transcriber script model
+  transcriber="$(state transcriber || echo stand-in)"
+  model="$(api GET /settings 2>/dev/null | json tierModelMappings.anthropic.large || true)"
+  if [ "$transcriber" = real ]; then
+    script='{"provider":"soniox","model":"stt-rt-v6","url":"'"$SONIOX_URL"'"}'
+  else
+    script="$(curl -fsS "$(stand_in)/script" || echo null)"
+    script='{"provider":"stand-in","url":"'"$STAND_IN_URL"'","script":'"$script"'}'
+  fi
+  node -e '
+    const [build, verifier, transcriber, model] = process.argv.slice(1);
+    const b = JSON.parse(build);
+    console.log(JSON.stringify({
+      product: b.product,
+      environment: b.environment,
+      verifier: JSON.parse(verifier),
+      merged: b.merged,
+      transcriber: JSON.parse(transcriber),
+      model: model || null,
+      dashboard: process.argv[5],
+      builtAt: b.builtAt,
+    }, null, 2));' \
+    "$(cat "$BUILD_FILE")" "$(tree_json environments/voice-input/verifier)" "$script" "$model" "$DASHBOARD"
+}
+
+cmd_browser() {
+  require_up
+  if [ "${1:-}" = stop ]; then
+    stop_browser
+    echo '{"stopped":true}'
+    return
+  fi
+  local mic="" permission=granted lang=en out
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --mic) mic="${2:?--mic needs a wav file}" && shift 2 ;;
+      --permission) permission="${2:?}" && shift 2 ;;
+      --lang) lang="${2:?}" && shift 2 ;;
+      *) die "usage: voice-env browser --mic <wav> [--permission unset|granted|refused] [--lang en|zh-CN]" ;;
+    esac
+  done
+  [ -n "$mic" ] || die "usage: voice-env browser --mic <wav> [--permission unset|granted|refused] [--lang en|zh-CN]"
+  # One browser at a time: a new one replaces the last, keeping the proxy.
+  local old
+  old="$(state browser.pid || true)"
+  [ -z "$old" ] || kill "$old" 2>/dev/null || true
+  out="$(node -e 'process.stdout.write(JSON.stringify({ password: process.argv[1], cookies: JSON.parse(process.argv[2] || "[]") }))' \
+    "$(state guardianPassword)" "$(state cookies || true)" |
+    node "$ENV_DIR/lib/browser.mjs" \
+      --mic "$mic" --permission "$permission" --lang "$lang" \
+      --chrome "$(chrome_path)" --dashboard "$DASHBOARD" \
+      --cdp-port "$CDP_PORT" --proxy-port "$PROXY_PORT" \
+      --profile "$RUN_DIR/chrome-profile" --user "$(state guardianUser)")"
+  local proxy_pid
+  proxy_pid="$(json proxyPid <<<"$out")"
+  [ -n "$proxy_pid" ] || proxy_pid="$(state browser.proxyPid || true)"
+  set_state "{\"browser\":{\"pid\":$(json pid <<<"$out"),\"proxyPid\":${proxy_pid:-null}},\"cookies\":$(json cookies <<<"$out")}"
+  # The session cookie stays in the state file, not on stdout.
+  node -e 'const o = JSON.parse(process.argv[1]); delete o.cookies; console.log(JSON.stringify(o, null, 2))' "$out"
+}
+
+cmd_transcriber() {
+  require_up
+  local mode="${1:-}"
+  shift || true
+  case "$mode" in
+    status)
+      node -e 'console.log(JSON.stringify({ mode: process.argv[1], script: JSON.parse(process.argv[2]), stats: JSON.parse(process.argv[3]) }, null, 2))' \
+        "$(state transcriber || echo stand-in)" "$(curl -fsS "$(stand_in)/script")" "$(curl -fsS "$(stand_in)/stats")"
+      ;;
+    real)
+      load_secrets
+      [ -n "${SONIOX_API_KEY:-}" ] || die "transcriber real needs SONIOX_API_KEY in $SECRETS_FILE"
+      switch_transcriber real
+      echo '{"mode":"real","provider":"soniox"}'
+      ;;
+    stand-in)
+      local body
+      body="$(node -e '
+        const a = process.argv.slice(1); const o = {};
+        for (let i = 0; i < a.length; i += 2) {
+          const k = a[i].replace(/^--/, ""), v = a[i + 1];
+          if (v === undefined) { console.error("missing value for " + a[i]); process.exit(1); }
+          const map = { text: "text", "first-ms": "firstMs", "token-ms": "tokenMs", error: "errorCode", "after-ms": "afterMs", type: "errorType" };
+          if (!map[k]) { console.error("unknown option " + a[i]); process.exit(1); }
+          o[map[k]] = /Ms$|Code$/.test(map[k]) ? Number(v) : v;
+        }
+        o.mode = o.errorCode ? "error" : "text";
+        process.stdout.write(JSON.stringify(o));' -- "$@")" ||
+        die "usage: voice-env transcriber stand-in [--text <t>] [--first-ms <n>] [--token-ms <n>] | --error <code> [--after-ms <n>] [--type <t>]"
+      [ "$(state transcriber || echo stand-in)" = stand-in ] || switch_transcriber stand-in
+      curl -fsS -X PUT --data-binary "$body" "$(stand_in)/script"
+      echo
+      ;;
+    *) die "usage: voice-env transcriber real | stand-in [...] | status" ;;
+  esac
+}
+
+# Rome reads the transcriber from its config at start, so switching rewrites
+# the env file and recreates the container on the same volumes.
+switch_transcriber() {
+  set_state "{\"transcriber\":\"$1\"}"
+  load_secrets
+  write_rome_env
+  log "restarting Rome with the $1 transcriber ..."
+  start_rome
+}
+
+cmd_network() {
+  require_up
+  case "${1:-}" in
+    cut | restore) curl -fsS -X POST "$(proxy_url)/$1" || die "no browser is running. Start one with voice-env browser." ;;
+    *) die "usage: voice-env network cut|restore" ;;
+  esac
+  echo
+}
+
+cmd_chats() {
+  require_up
+  api GET /chat/sessions
+  echo
+}
+
+cmd_messages() {
+  require_up
+  [ "${1:-}" = --chat ] && [ -n "${2:-}" ] || die "usage: voice-env messages --chat <id>"
+  api GET "/chat/sessions/$2/messages" | node "$ENV_DIR/lib/messages.mjs" "$2"
+}
+
+cmd_audio_scan() {
+  require_up
+  local dir=/tmp/voice-env-scan
+  docker exec "$ROME" mkdir -p "$dir"
+  docker cp -q "$ENV_DIR/lib/audio.mjs" "$ROME:$dir/audio.mjs"
+  docker cp -q "$ENV_DIR/lib/audio-scan.mjs" "$ROME:$dir/audio-scan.mjs"
+  docker logs "$ROME" 2>&1 | docker exec -i "$ROME" node "$dir/audio-scan.mjs" \
+    /home/rome /home/user /app/memory /tmp /var/log /run/s6 /run/service
+  docker exec "$ROME" rm -rf "$dir"
+}
+
+cmd_capture() {
+  require_up
+  local ctx="$RUN_DIR/capture.json"
+  case "${1:-}" in
+    start)
+      curl -fsS -X POST "$(proxy_url)/capture/start" >/dev/null ||
+        die "no browser is running. Start one with voice-env browser first, so its traffic can be recorded."
+      curl -fsS -X POST "$(stand_in)/reset" >/dev/null
+      docker rm -f "$CAPTURE" >/dev/null 2>&1 || true
+      docker run -d --name "$CAPTURE" --network "container:$ROME" "$TOOLS_IMAGE" \
+        sh -c "tcpdump -i any -nn -l -tt 'not udp src port 53' & tcpdump -i any -nn -l -tt -vv 'udp src port 53' & wait" >/dev/null
+      printf '{"startedAt":"%s"}' "$(date -u +%FT%T.%3NZ)" >"$ctx"
+      sleep 1
+      printf '{"capturing":true,"startedAt":"%s"}\n' "$(json startedAt <"$ctx")"
+      ;;
+    stop)
+      [ -f "$ctx" ] || die "no capture is running"
+      local tmp
+      tmp="$(mktemp -d)"
+      curl -fsS -X POST "$(proxy_url)/capture/stop" >"$tmp/browser.json"
+      docker logs "$CAPTURE" >"$tmp/dump.txt" 2>/dev/null || true
+      docker rm -f "$CAPTURE" >/dev/null 2>&1 || true
+      local rome_ips stand_in_ip stand_in_stats
+      rome_ips="$(docker inspect -f '{{range .NetworkSettings.Networks}}"{{.IPAddress}}",{{end}}' "$ROME")"
+      stand_in_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$TRANSCRIBER")"
+      stand_in_stats="$(curl -fsS "$(stand_in)/stats" || echo null)"
+      printf '{"startedAt":"%s","rome":[%s],"standInIp":"%s","names":{"%s":"transcriber (stand-in)"},"standIn":%s}' \
+        "$(json startedAt <"$ctx")" "${rome_ips%,}" "$stand_in_ip" "$stand_in_ip" "$stand_in_stats" >"$tmp/context.json"
+      node "$ENV_DIR/lib/capture.mjs" "$tmp/browser.json" "$tmp/dump.txt" "$tmp/context.json"
+      rm -rf "$tmp" "$ctx"
+      ;;
+    *) die "usage: voice-env capture start|stop" ;;
+  esac
+}
+
+case "${1:-}" in
+  version) cmd_version ;;
+  browser) shift && cmd_browser "$@" ;;
+  transcriber) shift && cmd_transcriber "$@" ;;
+  network) shift && cmd_network "$@" ;;
+  chats) cmd_chats ;;
+  messages) shift && cmd_messages "$@" ;;
+  audio-scan) cmd_audio_scan ;;
+  capture) shift && cmd_capture "$@" ;;
+  *) die "usage: voice-env version | browser | transcriber | network | chats | messages | audio-scan | capture (see README.md)" ;;
+esac
