@@ -5,7 +5,6 @@ export type {
   TranscriptionPlace,
   TranscriptionStream,
 } from "./transcriber.js";
-export { createTranscriber } from "./create-transcriber.js";
 export { attachVoiceInputServer } from "./voice-input-server.js";
 export {
   createVoiceInputSource,

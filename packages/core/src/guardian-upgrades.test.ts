@@ -7,11 +7,7 @@ import { attachLiveEventsServer, type LiveEventSources } from "./live-events-ser
 import { attachNodeConsoleServer } from "./desktops/node-console-server.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { attachTerminalServer } from "./terminal-server.js";
-import {
-  attachVoiceInputServer,
-  createVoiceInputSource,
-  type Transcriber,
-} from "./voice-input/index.js";
+import { attachVoiceInputServer, type VoiceInputSource } from "./voice-input/index.js";
 import { guardianAuth } from "./db/schema.js";
 import { createTestDb, type TestDb } from "./test/db.js";
 import { createSession } from "./access/auth.js";
@@ -40,13 +36,12 @@ const noSources: LiveEventSources = {
   subscribeChatTasks: () => () => {},
 };
 
-const silentTranscriber: Transcriber = {
-  place: { provider: "Fake", host: "stt.example" },
-  model: "fake",
-  providerId: "fake",
-  open: () => ({ sendAudio: () => {}, finish: () => {}, abort: () => {} }),
+// Signed in to Rome Cloud, so the voice input socket is served.
+const silentSource: VoiceInputSource = {
+  available: () => true,
+  info: async () => ({ available: true, place: null }),
+  open: async () => ({ ok: false, reason: "service-unavailable" }),
 };
-const silentSource = createVoiceInputSource({ own: silentTranscriber, romeCloud: () => null });
 
 function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
   const handlers = [

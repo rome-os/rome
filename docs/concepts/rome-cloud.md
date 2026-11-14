@@ -85,7 +85,7 @@ Rome credits are an account-wide allowance that Rome Cloud serves through its in
 
 ## Voice input
 
-Rome Cloud provides the transcription service behind dictation in message fields. It holds the provider's credential, so a guardian on a signed-in instance sets nothing up.
+Rome Cloud provides the transcription service behind dictation in message fields. It holds the provider's credential, so a guardian on a signed-in instance sets nothing up. The instance holds no long-lived credential for a transcription provider.
 
 **Contracts:**
 
@@ -94,7 +94,7 @@ Rome Cloud provides the transcription service behind dictation in message fields
 - The audio goes from the browser to the guardian's own Rome and from there to the provider. It never passes through Rome Cloud, and Rome keeps none of it.
 - A refusal carries a reason code, such as `voice_input_rate_limited`. The message field shows it and keeps the words heard so far.
 - Rome Cloud allows voice input per account. For an account it does not allow, both routes answer 403 `voice_input_not_allowed`, and the dashboard shows no voice control and no voice input row in Settings.
-- An instance that is not signed in, or whose credential Rome Cloud refuses, uses its own provider from `ROME_TRANSCRIPTION_*` when it has one. Without either the voice control is absent.
+- An instance that is not signed in has no voice control. One whose credential Rome Cloud refuses asks the guardian to sign in again.
 
 ## Usage reporting
 
@@ -114,7 +114,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 
   A turn takes the trigger of its root session's chain. A routine run records what fired it. A run recorded before runs stored that takes its routine's current trigger. A retried fire has no run of its own, so it takes the trigger shared by the routines with its name, or `unknown` when they differ.
 - A login event records each time the guardian signs in to the instance. Its kind is the sign-in method: `password`, `onboard`, `oauth`, `rome_cloud`, or `rome_cloud_native` for the desktop and mobile apps. An OAuth redeem by a guardian who is already signed in connects a provider and is not a login.
-- A transcription event records one listening session that used a Rome Cloud transcription session. It carries Rome Cloud's session id, the provider, the model, the seconds of audio sent, and why listening stopped. A session on the instance's own provider is not reported. The seconds are the instance's own count of the audio it forwarded, for analytics. What Rome Cloud pays the provider comes from the provider's records.
+- A transcription event records each listening session. It carries Rome Cloud's session id, the provider, the model, the seconds of audio sent, and why listening stopped. The seconds are the instance's own count of the audio it forwarded, for analytics. What Rome Cloud pays the provider comes from the provider's records.
 - A turn event carries the kind of [login](../domains/agents.md#model-provider-login) the turn ran on: `subscription`, `api_credential`, or `rome_credits`. It is left out when Rome cannot tell. Instances older than the field sent `funding` instead, which Rome Cloud still reads.
 - A Codex turn event carries Codex's own turn id. Codex sends the same id on every gateway request, which is the join key for credit charges.
 - Events carry no prompt, output, contact, or routine name. An app appears as its App Store listing id or `first-party:<app id>`. Any other app appears as `local`.
