@@ -277,10 +277,11 @@ Rome's own widget that asks the guardian for where they are right now, once, for
 
 - An agent asks only when the answer needs the guardian's current position. A message that names a place, or a city the agent already knows, needs none.
 - It is asked only where the guardian alone reads the chat. Anywhere else the agent says it cannot ask here, and why.
-- The guardian **shares** or **declines**. Shared, the agent gets the position and how precise it is, never an address. Declined, the agent does not ask again for that answer: it answers without, or asks for a place in a message.
+- The guardian **shares** or **declines**. Shared, the agent gets the position and how precise it is, never an address. Declined, the agent does not ask again for that answer: it answers without, or asks for a place in a message. A later message that needs the position asks again.
+- Where the guardian's device already lets Rome read the position, the client they are looking at shares at once, with no question: the widget shows only that the location was shared, and how precisely. Only where the device has not asked yet does the widget offer Share and Not now, and the device asks for permission on Share. Where the device refuses, the widget says so and Not now declines.
 - A message the guardian sends instead closes it, as declined. Whichever of the guardian's clients answers first answers it, and it then takes no other answer.
-- The client the guardian is looking at reads the position from its device when they press Share, and asks for permission then. It is the one event a client fills in itself.
-- The position reaches that answer only. Rome keeps it nowhere else, and a location share is not a connection.
+- The client reads the position from its device and sends it with the share. It is the one event a client fills in itself.
+- The position reaches that answer only. The chat keeps how the share ended, never where the guardian was, and a location share is not a connection.
 - A coarse position, from a desktop's network or a VPN, reads as an area: the agent says "around" the city.
 
 ## Client

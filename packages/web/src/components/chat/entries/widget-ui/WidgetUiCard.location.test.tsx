@@ -97,3 +97,55 @@ describe("the share-location card", () => {
     expect(await screen.findByText("Not shared")).toBeTruthy();
   });
 });
+
+describe("the share-location card where the browser already decided", () => {
+  const stubPermission = (state: PermissionState) =>
+    Object.defineProperty(navigator, "permissions", {
+      configurable: true,
+      value: { query: async () => ({ state }) },
+    });
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "permissions");
+  });
+
+  it("answers by itself, with no buttons, where the site may read the position", async () => {
+    stubPermission("granted");
+    stubGeolocation({
+      fix: {
+        coords: { latitude: 1, longitude: 2, accuracy: 9 },
+        timestamp: 5,
+      } as GeolocationPosition,
+    });
+    const events = captureEvents();
+    render(
+      <WidgetUiCard widgetId="auto-1" toolUseId="l1" appId="core" ui={ui} text="" waiting={{}} />,
+    );
+    await waitFor(() => expect(events).toHaveLength(1));
+    expect(events[0]).toMatchObject({
+      name: "share-location",
+      context: { latitude: 1, longitude: 2, accuracy: 9, timestamp: 5 },
+    });
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+  });
+
+  it("says the browser refuses, and keeps Not now", async () => {
+    stubPermission("denied");
+    const events = captureEvents();
+    render(
+      <WidgetUiCard widgetId="auto-2" toolUseId="l1" appId="core" ui={ui} text="" waiting={{}} />,
+    );
+    expect(await screen.findByText(/Location access is off/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+    expect(events).toEqual([]);
+  });
+
+  it("shows Share and Not now where the browser will ask", async () => {
+    stubPermission("prompt");
+    const events = captureEvents();
+    render(
+      <WidgetUiCard widgetId="auto-3" toolUseId="l1" appId="core" ui={ui} text="" waiting={{}} />,
+    );
+    expect(await screen.findByRole("button", { name: "Share" })).toBeTruthy();
+    expect(events).toEqual([]);
+  });
+});

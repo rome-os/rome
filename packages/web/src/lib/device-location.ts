@@ -37,6 +37,20 @@ export function readDevicePosition(
   });
 }
 
+/**
+ * Whether the browser already lets this site read the position (`granted`),
+ * refuses it (`denied`), or will ask (`prompt`). A browser that cannot say
+ * reads as `prompt`, so the card asks on Share.
+ */
+export async function geolocationPermission(): Promise<PermissionState> {
+  try {
+    const status = await navigator.permissions?.query({ name: "geolocation" });
+    return status?.state ?? "prompt";
+  } catch {
+    return "prompt";
+  }
+}
+
 /** The accuracy radius as the answered card shows it: meters under a
  *  kilometer, whole kilometers above. */
 export function formatAccuracy(meters: number): string {

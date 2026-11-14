@@ -12,7 +12,7 @@
 	<key>NSHealthShareUsageDescription</key>
 	<string>When your Rome asks, Rome sends the Health data you allow to your Rome and its AI model. Rome never changes your Health data.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>When you press Share on a card in a chat, Rome sends your current location to your Rome and its AI model, for that answer only.</string>
+	<string>When your Agent needs it to answer you, Rome sends your current location to your Rome and your AI model, for that answer only.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Rome saves photos from a chat to your library when you ask it to.</string>
 	<!-- Debug builds only: the -RomeSeedHealth launch argument writes test data

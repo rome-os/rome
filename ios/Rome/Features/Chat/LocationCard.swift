@@ -66,9 +66,19 @@ enum LocationFailure: Error, Equatable, Sendable {
     case unavailable
 }
 
+/// Whether the app may read the phone's position now.
+enum LocationPermission: Equatable, Sendable {
+    /// While Using, or an Allow Once still in force.
+    case granted
+    case denied
+    /// iOS has not asked yet, or an Allow Once has lapsed.
+    case undetermined
+}
+
 /// Reads the phone's position once.
 @MainActor
 protocol DeviceLocating: AnyObject {
+    var permission: LocationPermission { get }
     func currentPosition() async -> Result<SharedPosition, LocationFailure>
 }
 
@@ -86,6 +96,14 @@ final class CoreLocationLocator: NSObject, DeviceLocating, CLLocationManagerDele
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    var permission: LocationPermission {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways: .granted
+        case .notDetermined: .undetermined
+        default: .denied
+        }
     }
 
     func currentPosition() async -> Result<SharedPosition, LocationFailure> {
