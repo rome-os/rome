@@ -41,11 +41,13 @@ function credentials() {
 
 function providerList() {
   const keys = credentials();
-  return PROVIDERS.map(({ id, name, model, pricePerHour, key }) => ({
+  return PROVIDERS.map(({ id, name, model, pricePerHour, priceSource, priceNote, key }) => ({
     id,
     name,
     model,
     pricePerHour,
+    priceSource,
+    priceNote,
     configured: Boolean(keys[key]),
   }));
 }

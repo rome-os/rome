@@ -11,23 +11,35 @@ const WebSocket = require("ws");
 
 export const SAMPLE_RATE = 16000;
 
-// List prices for streaming, in US dollars per hour of audio, as each
-// provider's pricing page gave them on 2026-11-14.
+// Each vendor's own list price for streaming, in US dollars per hour of
+// audio, read from the linked page on 2026-11-14. `priceNote` says what the
+// number assumes when that matters.
 export const PROVIDERS = [
-  { id: "soniox", name: "Soniox", model: "stt-rt-v6", key: "SONIOX_API_KEY", pricePerHour: 0.12 },
+  {
+    id: "soniox",
+    name: "Soniox",
+    model: "stt-rt-v6",
+    key: "SONIOX_API_KEY",
+    pricePerHour: 0.12,
+    priceSource: "https://soniox.com/pricing",
+  },
   {
     id: "openai",
     name: "OpenAI",
     model: "gpt-live-transcribe",
     key: "OPENAI_API_KEY",
     pricePerHour: 1.02,
+    priceSource: "https://developers.openai.com/api/docs/models/gpt-live-transcribe",
+    priceNote: "$0.017 per minute",
   },
   {
     id: "elevenlabs",
     name: "ElevenLabs",
     model: "scribe_v2_realtime",
     key: "ELEVENLABS_API_KEY",
-    pricePerHour: 0.39,
+    pricePerHour: 0.22,
+    priceSource: "https://elevenlabs.io/pricing/api",
+    priceNote: "base tier",
   },
   {
     id: "assemblyai",
@@ -35,6 +47,8 @@ export const PROVIDERS = [
     model: "universal-3-6-pro",
     key: "ASSEMBLYAI_API_KEY",
     pricePerHour: 0.45,
+    priceSource: "https://www.assemblyai.com/pricing",
+    priceNote: "billed while connected",
   },
 ];
 

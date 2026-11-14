@@ -2,14 +2,14 @@
 
 A page for hearing the providers side by side before Rome commits to one. Press start, say one message, press stop. Each provider with a credential gets the same audio at the same time and streams its text back into its own card, with the delay to its first text and its list price per hour.
 
-| Provider | Model | List price for streaming, per hour |
+| Provider | Model | Vendor's list price for streaming, per hour |
 | --- | --- | --- |
-| Soniox | `stt-rt-v6` | $0.12 |
-| OpenAI | `gpt-live-transcribe` | $1.02 |
-| ElevenLabs | `scribe_v2_realtime` | $0.39 |
-| AssemblyAI | `universal-3-6-pro` | $0.45 |
+| Soniox | `stt-rt-v6` | [$0.12](https://soniox.com/pricing) |
+| OpenAI | `gpt-live-transcribe` | [$1.02](https://developers.openai.com/api/docs/models/gpt-live-transcribe) ($0.017 per minute) |
+| ElevenLabs | `scribe_v2_realtime` | [$0.22](https://elevenlabs.io/pricing/api) (base tier) |
+| AssemblyAI | `universal-3-6-pro` | [$0.45](https://www.assemblyai.com/pricing) (billed while connected, not per second of audio) |
 
-Prices were read from each provider's pricing on 2026-11-14.
+Each price was read from the vendor's own page on 2026-11-14.
 
 ## Credentials
 

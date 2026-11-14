@@ -28,6 +28,7 @@
   .model, .meta { color: var(--muted); font-size: 13px; }
   .meta { display: flex; gap: 12px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
   .meta b { color: var(--text); font-weight: 600; }
+  .meta a { color: var(--text); }
   .text { flex: 1; white-space: pre-wrap; word-break: break-word; }
   .text .partial { color: var(--muted); }
   .note { color: var(--muted); font-style: italic; }
@@ -47,7 +48,7 @@
   <div class="grid" id="cards"></div>
   <footer>
     First text is measured from when your voice is first heard to when the provider's first words arrive here, so it includes the trip through the devbox.
-    Prices are each provider's list price for streaming, checked 2026-11-14.
+    Each price is the vendor's own list price for streaming, read on 2026-11-14, and links to the vendor's page.
     <span id="envfile"></span>
   </footer>
 </main>
@@ -75,12 +76,14 @@ function render() {
     const first = s.firstAt ? `${Math.max(0, Math.round(s.firstAt - (voiceAt || pressAt)))} ms` : "–";
     card.innerHTML = `
       <div class="head"><span class="name"></span><span class="model"></span></div>
-      <div class="meta"><span>First text <b class="first"></b></span><span><b class="price"></b> / hour</span></div>
+      <div class="meta"><span>First text <b class="first"></b></span><span><a class="price" target="_blank" rel="noopener"></a></span></div>
       <div class="text"></div>`;
     card.querySelector(".name").textContent = p.name;
     card.querySelector(".model").textContent = p.model;
     card.querySelector(".first").textContent = first;
-    card.querySelector(".price").textContent = `$${p.pricePerHour.toFixed(2)}`;
+    const price = card.querySelector(".price");
+    price.textContent = `$${p.pricePerHour.toFixed(2)} / hour${p.priceNote ? ` (${p.priceNote})` : ""}`;
+    price.href = p.priceSource;
     const text = card.querySelector(".text");
     if (!p.configured) {
       text.innerHTML = `<span class="note">no credential</span>`;
