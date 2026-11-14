@@ -77,7 +77,7 @@ struct InstancesScreen: View {
                             .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(1)
-                        if instance.isVisitor { VisitorBadge().fixedSize() }
+                        if instance.isVisitor { VisitorBadge(fill: Palette.secondaryFill).fixedSize() }
                     }
                     Text(verbatim: instance.host)
                         .romeFont(13)
@@ -310,13 +310,16 @@ struct SearchScreen: View {
 
 /// A Rome shared with this account: its owner put them on its allow-list.
 struct VisitorBadge: View {
+    /// `Palette.secondaryFill` on a second-level page's card.
+    var fill = Palette.fill
+
     var body: some View {
         Text("Visitor")
             .romeFont(11, .semibold)
             .foregroundStyle(Palette.sub)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Palette.fill, in: Capsule())
+            .background(fill, in: Capsule())
             .accessibilityLabel(Text("Visitor"))
     }
 }

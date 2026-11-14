@@ -307,7 +307,7 @@ struct SettingsScreen: View {
                             .foregroundStyle(Palette.fg)
                             .lineLimit(1)
                             .truncationMode(workspace.accountLabel.contains("@") ? .middle : .tail)
-                        if model.currentInstance?.isVisitor == true { VisitorBadge().fixedSize() }
+                        if model.currentInstance?.isVisitor == true { VisitorBadge(fill: Palette.secondaryFill).fixedSize() }
                     }
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)

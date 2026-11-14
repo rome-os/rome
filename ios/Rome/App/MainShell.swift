@@ -252,8 +252,14 @@ struct MainShell: View {
             agentLinkPage = nil
             agentApp = nil
         }
-        // The banner that offers a sign-in must not be covered.
-        .onChange(of: model.sessionExpired) { _, expired in if expired { agentPage = nil } }
+        // The banner that offers a sign-in must not be covered, and a web
+        // view on the expired session shows nothing useful.
+        .onChange(of: model.sessionExpired) { _, expired in
+            guard expired else { return }
+            agentPage = nil
+            openApp = nil
+            page = nil
+        }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
         .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
         .onChange(of: openApp) { _, shown in if shown != nil { Keyboard.dismiss() } }
@@ -474,6 +480,7 @@ struct MainShell: View {
                     show(.chat)
                     workspace.composerPrefills[conciergeChatID] = prompt
                 })
+                .environment(\.offScreen, covered)
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { toggleNavigation() }) { hit in
                     if workspace.isMainChat(hit.session.id) {
@@ -488,8 +495,10 @@ struct MainShell: View {
         }
     }
 
-    /// A pushed page or the Agent page's cover hides the stack's root.
-    private var covered: Bool { !path.isEmpty || agentPage != nil }
+    /// A pushed page, the Agent page's cover or an app's sheet hides the
+    /// stack's root. A sheet leaves the root on screen, so its animations
+    /// would keep running under it.
+    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil }
 
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
