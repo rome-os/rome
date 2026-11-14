@@ -291,6 +291,47 @@ describe("queryPersonalData", () => {
     ).toMatchObject({ aggregate: "latest", value: 100 });
   });
 
+  it("reads older day-only history in another zone by its dates, and says which zone", () => {
+    // The phone keeps day buckets alone for older history; the guardian reads in Los Angeles.
+    const days = query({
+      type: "stepCount",
+      start: "2026-11-10",
+      end: "2026-11-11",
+      timeZone: "America/Los_Angeles",
+      interval: "day",
+    });
+    expect(days.results[0]).toMatchObject({
+      dayZones: [TZ],
+      buckets: [
+        { startISO: "2026-11-10T00:00:00-08:00", value: 8000 },
+        { startISO: "2026-11-11T00:00:00-08:00", value: 6000 },
+      ],
+    });
+    expect(
+      query({
+        type: "stepCount",
+        start: "2026-11-10",
+        end: "2026-11-11",
+        timeZone: "America/Los_Angeles",
+      }).results[0],
+    ).toMatchObject({ value: 14000 });
+  });
+
+  it("says where hourly detail starts, and does not claim an hourly window before it", () => {
+    const answer = query({
+      type: "stepCount",
+      start: "2026-11-09T00:00",
+      end: "2026-11-09T06:00",
+      interval: "hour",
+    });
+    expect((answer.results[0] as { buckets: unknown[] }).buckets).toEqual([]);
+    expect(answer.freshness.stepCount).toMatchObject({
+      hourlyFrom: new Date(NOV_10).toISOString(),
+      coversWindow: false,
+      missingFrom: new Date(NOV_10 - DAY).toISOString(),
+    });
+  });
+
   it("converts units and takes the latest sample", () => {
     expect(
       query({
@@ -329,6 +370,7 @@ describe("queryPersonalData", () => {
     expect(covered.freshness.stepCount).toEqual({
       syncedThrough: new Date(NOV_10 + 2 * DAY).toISOString(),
       earliest: new Date(NOV_10).toISOString(),
+      hourlyFrom: new Date(NOV_10).toISOString(),
       coversWindow: true,
     });
     // History before the earliest reading is not known to be on Rome.

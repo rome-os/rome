@@ -342,6 +342,29 @@ export class PersonalDataRepository {
       .get();
   }
 
+  /** The start of an origin's earliest bucket of one type and width. */
+  earliestOf(
+    source: string,
+    origin: string,
+    type: string,
+    resolution: Resolution,
+  ): number | undefined {
+    return (
+      this.db
+        .select({ at: min(personalDataPoints.startAt) })
+        .from(personalDataPoints)
+        .where(
+          and(
+            eq(personalDataPoints.source, source),
+            eq(personalDataPoints.type, type),
+            eq(personalDataPoints.resolution, resolution),
+            eq(personalDataPoints.origin, origin),
+          ),
+        )
+        .get()?.at ?? undefined
+    );
+  }
+
   /** An origin's points of one type that start in `[from, to)`, or end in it
    *  with `by: "end"`, oldest first. */
   points(

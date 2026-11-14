@@ -6,12 +6,14 @@ import { isValidTimeZone } from "../../lib/timezone.js";
 import type { Resolution, Shape, SourceSpec, TypeSpec } from "./source.js";
 import { typeSpec } from "./source.js";
 import {
+  fromWallClock,
   type Interval,
   isMidnight,
   isoInZone,
   nextPeriod,
   parseBound,
   periodStart,
+  wallClock,
 } from "./zoned-time.js";
 
 export const MAX_BUCKETS = 1000;
@@ -208,22 +210,38 @@ export function readsDayBuckets(
 }
 
 /**
- * One reading per day: the device's day bucket where it has one in the plan's
- * zone, and the day's hours added up where it does not. `deviceOnly` says
- * whether every day came from the device.
+ * One reading per day, from what is stored for it, in this order: the
+ * device's day bucket in the plan's zone, the day's hours added up, and the
+ * device's day bucket in another zone, read as the day with the same date
+ * here. A device keeps only day buckets for older history, and a guardian may
+ * read it in another zone than the device's. `deviceOnly` says whether every
+ * day came from the device, and `otherZones` names the zones of the days
+ * taken from another zone.
  */
 export function mergeDays(
   spec: TypeSpec,
   plan: QueryPlan,
   deviceDays: readonly StoredPoint[],
   hours: readonly StoredPoint[],
-): { days: StoredPoint[]; deviceOnly: boolean } {
-  const fromDevice = deviceDays.filter((day) => day.tz === plan.tz);
-  const covered = new Set(fromDevice.map((day) => day.startAt));
-  const filled = daysFromHours(spec, plan, hours).filter((day) => !covered.has(day.startAt));
+): { days: StoredPoint[]; deviceOnly: boolean; otherZones: string[] } {
+  const inWindow = (at: number) => at >= plan.start && at < plan.end;
+  const sameZone = deviceDays.filter((day) => day.tz === plan.tz && inWindow(day.startAt));
+  const covered = new Set(sameZone.map((day) => day.startAt));
+  const fromHours = daysFromHours(spec, plan, hours).filter((day) => !covered.has(day.startAt));
+  for (const day of fromHours) covered.add(day.startAt);
+  const otherZone: StoredPoint[] = [];
+  for (const day of deviceDays) {
+    if (day.tz === plan.tz) continue;
+    const date = wallClock(day.startAt, day.tz);
+    const startAt = fromWallClock(plan.tz, date.year, date.month, date.day);
+    if (!inWindow(startAt) || covered.has(startAt)) continue;
+    covered.add(startAt);
+    otherZone.push({ ...day, startAt, endAt: nextPeriod(startAt, plan.tz, "day") });
+  }
   return {
-    days: [...fromDevice, ...filled].sort((a, b) => a.startAt - b.startAt),
-    deviceOnly: filled.length === 0,
+    days: [...sameZone, ...fromHours, ...otherZone].sort((a, b) => a.startAt - b.startAt),
+    deviceOnly: fromHours.length === 0,
+    otherZones: [...new Set(otherZone.map((day) => day.tz))],
   };
 }
 
@@ -240,6 +258,8 @@ export interface TypeResult {
   type: string;
   unit: string;
   aggregate: string;
+  /** The zones of device days read as this zone's days with the same date. */
+  dayZones?: string[];
   value?: number;
   count?: number;
   fields?: Record<string, number>;

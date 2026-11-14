@@ -21,6 +21,8 @@ export interface Freshness {
   syncedThrough?: string;
   /** The type's earliest stored reading. */
   earliest?: string;
+  /** For a bucket type, the earliest hour bucket: the start of hourly detail. */
+  hourlyFrom?: string;
   /** Whether the stored readings reach back to the window's start and the
    *  device reported the type complete up to its end. */
   coversWindow: boolean;
@@ -44,6 +46,8 @@ interface ListedRecords {
   nextCursor?: string;
 }
 
+const DAY_MS = 86_400_000;
+
 export function queryPersonalData(
   repo: PersonalDataRepository,
   source: SourceSpec,
@@ -58,7 +62,17 @@ export function queryPersonalData(
     // or a new origin after a sign-in takes over once it has caught up.
     const reading = repo.originFor(source.source, spec.type, plan.start);
     const at = reading?.syncedThroughAt ?? undefined;
-    const earliest = reading?.earliestAt ?? undefined;
+    const answered = reading
+      ? resultFor(repo, source, reading.origin, spec, plan, defaults.now)
+      : { result: emptyResult(spec, plan), hoursOnly: false };
+    // A query that reads only hours (hour buckets, a window that starts
+    // mid-day, the latest reading) reaches back only as far as the hours do:
+    // a device keeps day buckets alone for older history.
+    const hourlyFrom =
+      reading && spec.shape === "bucket"
+        ? repo.earliestOf(source.source, reading.origin, spec.type, "hour")
+        : undefined;
+    const earliest = answered.hoursOnly ? hourlyFrom : (reading?.earliestAt ?? undefined);
     const windowEnd = Math.min(plan.end, defaults.now);
     // The device reports how far it is synced, not how far back its history
     // reaches, so the earliest reading stands in for that: a window that
@@ -66,7 +80,10 @@ export function queryPersonalData(
     const reachesBack = earliest !== undefined && earliest <= plan.start;
     freshness[spec.type] = {
       ...(at !== undefined ? { syncedThrough: new Date(at).toISOString() } : {}),
-      ...(earliest !== undefined ? { earliest: new Date(earliest).toISOString() } : {}),
+      ...(reading?.earliestAt != null
+        ? { earliest: new Date(reading.earliestAt).toISOString() }
+        : {}),
+      ...(hourlyFrom !== undefined ? { hourlyFrom: new Date(hourlyFrom).toISOString() } : {}),
       coversWindow: at !== undefined && at >= windowEnd && reachesBack,
       ...(at === undefined || !reachesBack
         ? { missingFrom: new Date(plan.start).toISOString() }
@@ -74,9 +91,7 @@ export function queryPersonalData(
           ? { missingFrom: new Date(Math.max(at, plan.start)).toISOString() }
           : {}),
     };
-    return reading
-      ? resultFor(repo, source, reading.origin, spec, plan, defaults.now)
-      : emptyResult(spec, plan);
+    return answered.result;
   });
   return {
     startISO: isoInZone(plan.start, plan.tz),
@@ -100,7 +115,7 @@ function resultFor(
   spec: TypeSpec,
   plan: QueryPlan,
   now: number,
-): TypeResult | ListedRecords {
+): { result: TypeResult | ListedRecords; hoursOnly: boolean } {
   const by = spec.bucketBy ?? "start";
   const read = (range: Parameters<PersonalDataRepository["points"]>[3]) =>
     repo.points(source.source, origin, spec.type, { by, ...range });
@@ -114,18 +129,31 @@ function resultFor(
     const page = rows.slice(0, plan.records.limit);
     const last = page.at(-1);
     return {
-      type: spec.type,
-      unit: plan.unit ?? spec.unit,
-      records: page.map((point) => listedRecord(spec, plan, point)),
-      ...(rows.length > page.length && last ? { nextCursor: encodeCursor(last) } : {}),
+      result: {
+        type: spec.type,
+        unit: plan.unit ?? spec.unit,
+        records: page.map((point) => listedRecord(spec, plan, point)),
+        ...(rows.length > page.length && last ? { nextCursor: encodeCursor(last) } : {}),
+      },
+      hoursOnly: false,
     };
   }
-  if (spec.shape !== "bucket") return rollUp(spec, plan, read({ from: plan.start, to: plan.end }));
+  if (spec.shape !== "bucket") {
+    return {
+      result: rollUp(spec, plan, read({ from: plan.start, to: plan.end })),
+      hoursOnly: false,
+    };
+  }
   const hours = read({ from: plan.start, to: plan.end, resolution: "hour" });
   // The latest reading is the last hour's, which a day's average would hide.
-  if (plan.aggregate === "latest") return rollUp(spec, plan, hours);
-  if (!readsDayBuckets(plan, now)) return rollUp(spec, plan, daysFromHours(spec, plan, hours));
-  const deviceDays = read({ from: plan.start, to: plan.end, resolution: "day" });
-  const { days, deviceOnly } = mergeDays(spec, plan, deviceDays, hours);
-  return rollUp(spec, plan, days, deviceOnly);
+  if (plan.aggregate === "latest") return { result: rollUp(spec, plan, hours), hoursOnly: true };
+  if (!readsDayBuckets(plan, now)) {
+    return { result: rollUp(spec, plan, daysFromHours(spec, plan, hours)), hoursOnly: true };
+  }
+  // A day bucket of another zone may start up to a day either side of the window.
+  const deviceDays = read({ from: plan.start - DAY_MS, to: plan.end + DAY_MS, resolution: "day" });
+  const { days, deviceOnly, otherZones } = mergeDays(spec, plan, deviceDays, hours);
+  const result = rollUp(spec, plan, days, deviceOnly);
+  if (otherZones.length > 0) result.dayZones = otherZones;
+  return { result, hoursOnly: false };
 }

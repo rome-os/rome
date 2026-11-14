@@ -100,13 +100,13 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 
 - An ISO time without an offset, and a date, are read in `timeZone`. A date as `end` means the end of that day. With no `start`, the window starts at the local midnight of the day that ends at `end`.
 - A bucket is stored under its type, width and start, whatever key the device sends, and a delete of a bucket key is read the same way.
-- `hour` reads hour buckets. When the window starts at a local midnight, `day` reads the device's day bucket for each day that has one in `timeZone`, and adds up the hours of each other day. Otherwise it adds up hours. `week`, `month` and `total` roll up from days. Weeks start on Monday.
+- `hour` reads hour buckets. When the window starts at a local midnight, `day` reads each day from the device's day bucket in `timeZone`, else from the day's hours added up, else from the device's day bucket in another zone, read as the day with the same date. The reply names such zones in `dayZones`. Otherwise it adds up hours. A device may keep only day buckets for older history. `week`, `month` and `total` roll up from days. Weeks start on Monday.
 - A summed type adds up. An averaged type takes the mean of its daily averages, labelled `avg_of_days`, or of its hours, labelled `avg_of_hours`. `min` and `max` are the exact extremes. `latest` does not fit a summed type, and `sum` does not fit an averaged one.
 - A sample or record belongs to the bucket it starts in. A night of sleep belongs to the day it ends on, as its key says. A record adds up what comes with it, such as minutes per sleep stage, and counts how many there were. An averaged record averages what comes with it too.
 - A bucket with no value is left out, never 0.
 - A batch that refuses a reading of a type does not mark that type synced.
 - `latest` for a bucket type reads the last hour, not a day's average.
-- `freshness` says a type covers the window only when its earliest stored reading reaches back to the window's start and the device reports it synced up to the end. Otherwise `missingFrom` says where coverage is not known.
+- `freshness` says a type covers the window only when its earliest stored reading reaches back to the window's start and the device reports it synced up to the end. A query that reads only hours (`hour`, a window that starts mid-day, `latest`) reaches back only to `hourlyFrom`, the earliest hour bucket. Otherwise `missingFrom` says where coverage is not known.
 - Each type is read from one origin: one whose readings reach back to the window's start, and among those the one that reports the type synced furthest. When none reaches back, the one synced furthest answers. An origin set off is never read. A second device, or a new origin after a sign-in, takes over a window once its backfill reaches it.
 
 ```json
