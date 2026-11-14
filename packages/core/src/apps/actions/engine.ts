@@ -145,6 +145,9 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // roots, outside this action's context.
   "system:publish_event",
   "core:set_agent_name",
+  "core:apps_access_read",
+  "core:apps_access_narrow",
+  "core:apps_access_update",
   "core:show_file",
   "core:app_connection_read",
   "core:app_connection_write",

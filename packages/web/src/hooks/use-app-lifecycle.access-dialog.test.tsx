@@ -137,8 +137,7 @@ describe("the app access dialog", () => {
   describe("share link", () => {
     const SHARE_URL = "https://jessie.romeos.cc/full/apps/%40ray%2Fdemo";
     const shareLink = () => screen.queryByRole("textbox", { name: "Share link" });
-    // Saving reads then writes /api/public-access; both succeed with an empty
-    // config unless a test says otherwise.
+    // Saving writes this app's access; it succeeds unless a test says otherwise.
     let putAccess: (body: unknown) => Response;
     let puts: unknown[] = [];
     // jsdom has no Clipboard API, and the copy button shows only where there is one.
@@ -148,7 +147,9 @@ describe("the app access dialog", () => {
       rs.stubGlobal(
         "fetch",
         rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-          if (String(input) !== "/api/public-access") return new Response("{}", { status: 404 });
+          if (String(input) !== "/api/public-access/%40ray%2Fdemo") {
+            return new Response("{}", { status: 404 });
+          }
           if (init?.method !== "PUT") return new Response("{}", { status: 200 });
           const body = JSON.parse(String(init.body));
           puts.push(body);
@@ -208,7 +209,7 @@ describe("the app access dialog", () => {
 
       const copy = await screen.findByRole("button", { name: "Copy link" });
       await waitFor(() => expect(copy.hasAttribute("disabled")).toBe(false));
-      expect(puts).toEqual([expect.objectContaining({ allowedApps: ["@ray/demo"] })]);
+      expect(puts).toEqual([{ mode: "public", emails: [] }]);
       expect(screen.getByRole("radiogroup")).toBeTruthy();
       expect(screen.queryByText("Save access before sharing this link.")).toBeNull();
       expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
