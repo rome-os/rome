@@ -32,9 +32,8 @@ struct ThreadOverlay: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        ConciergeRow(row: row, info: thread.info(for: row), store: chat, tasks: tasks, inThread: true)
+                        ConciergeRow(row: row, info: thread.info(for: row), store: chat, tasks: tasks, inThread: true, tinted: chat.tinted != nil && row.ownMessageId == chat.tinted)
                             .equatable()
-                            .tinted(chat.tinted != nil && row.ownMessageId == chat.tinted)
                             .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
                     }
                 }
@@ -246,6 +245,12 @@ extension TranscriptRow {
         default: return messageId ?? Self.message(ofPart: id)
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Set on a row whose message is tinted. The bubble or card reads it, so
+    /// the tint hugs its shape and never fills the row's width.
+    @Entry var rowTinted = false
 }
 
 extension View {

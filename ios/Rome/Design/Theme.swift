@@ -138,10 +138,10 @@ extension View {
     /// agent's bubble can run, so the right edges of cards and long bubbles
     /// line up. A light card or a bubble hugs its content inside this
     /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
-    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`.
+    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`. A
+    /// tinted message's tint goes on before the width, so it hugs the bubble.
     func bubbleWidth() -> some View {
-        frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, Metrics.bubbleInset)
+        modifier(BubbleWidth())
     }
 
     /// Put before a card's background: the card takes the whole width
@@ -154,6 +154,17 @@ extension View {
     /// column of `Metrics.readableWidth` at most (DESIGN.md 4).
     func readableColumn() -> some View {
         frame(maxWidth: Metrics.readableWidth).frame(maxWidth: .infinity)
+    }
+}
+
+private struct BubbleWidth: ViewModifier {
+    @Environment(\.rowTinted) private var tinted
+
+    func body(content: Content) -> some View {
+        content
+            .tinted(tinted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, Metrics.bubbleInset)
     }
 }
 

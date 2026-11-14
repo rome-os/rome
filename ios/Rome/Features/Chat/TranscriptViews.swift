@@ -100,6 +100,7 @@ struct UserBubble: View {
     var quote: MessagePart.ReplyQuote? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
+    @Environment(\.rowTinted) private var tinted
 
     private var problem: SendProblem? {
         SendProblem(pending, onRetry: onRetry, onDelete: onDelete)
@@ -151,6 +152,8 @@ struct UserBubble: View {
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
+                // Behind the photos and the bubble, not the row.
+                .tinted(tinted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
