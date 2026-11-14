@@ -159,6 +159,23 @@ import Testing
         return nil
     }
 
+    /// A free-text question as core stores it: `questionCardUi` output for
+    /// `{ id, question, type: "text" }`, copied from core.
+    static let freeTextQuestion = #"[{"type":"pending_interaction","toolUseId":"call_1","appId":"core","render":{"kind":"inline","componentId":"question-card","props":{"questions":[{"id":"city","question":"你想查哪个城市的天气？","type":"text"}]},"builtin":true,"ui":{"components":[{"id":"q0-text","component":"Text","text":"你想查哪个城市的天气？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-own","component":"TextField","label":"你想查哪个城市的天气？","value":{"path":"/answers/0/text"},"variant":"longText","placeholder":{"string":"typeAnswer"}},{"id":"q0","component":"Column","children":["q0-title","q0-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"required","args":{"value":{"path":"/answers/0/text"}}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}}}}]"#
+
+    @Test func aFreeTextQuestionFromCoreIsDrawnAsACard() async throws {
+        guard case .question(let part) = MessagePart.parse(Self.freeTextQuestion).first else { throw CardError.notAQuestion }
+        let card = try #require(part.ui)
+        #expect(card.waits && card.isDrawable)
+        let surface = await waitingSurface(card)
+        let root = try #require(surface.viewModel?.rootNode)
+        #expect(find("q0-own", in: root) != nil)
+        #expect(find("dismiss", in: root) != nil)
+        #expect(find("send", in: root)?.isValid == false)
+        surface.viewModel?.dataModel.set("/answers/0/text", value: .string("杭州"))
+        #expect(find("send", in: surface.viewModel?.rootNode)?.isValid == true)
+    }
+
     @Test func aQuestionCardDescribedAsDataIsDrawnFromItsDescription() throws {
         let card = try questionCard()
         #expect(card.waits)
