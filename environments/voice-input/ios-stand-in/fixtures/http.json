@@ -1,9 +1,7 @@
 {
   "recordedFrom": "the voice-input environment's Rome",
   "product": "ec6d5d38aea0934405003db6e0e53e552970f53f",
-  "cookieNames": [
-    "rome_session"
-  ],
+  "cookieNames": ["rome_session"],
   "fields": {
     "chat": "concierge",
     "topic": "01a1db8f-b3fe-74dc-b914-f734f2651af7",
@@ -853,9 +851,7 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "cloud"
-                ]
+                "missingGrants": ["cloud"]
               },
               "act": {
                 "state": "unsupported"
@@ -879,15 +875,11 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "bot"
-                ]
+                "missingGrants": ["bot"]
               },
               "act": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "bot"
-                ]
+                "missingGrants": ["bot"]
               },
               "watch": {
                 "state": "unsupported"
@@ -908,9 +900,7 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "inbox"
-                ]
+                "missingGrants": ["inbox"]
               },
               "act": {
                 "state": "unsupported"
@@ -934,15 +924,11 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "app"
-                ]
+                "missingGrants": ["app"]
               },
               "act": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "app"
-                ]
+                "missingGrants": ["app"]
               },
               "watch": {
                 "state": "unsupported"
@@ -963,9 +949,7 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "session"
-                ]
+                "missingGrants": ["session"]
               },
               "act": {
                 "state": "unsupported"
@@ -1041,9 +1025,7 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "bot"
-                ]
+                "missingGrants": ["bot"]
               },
               "act": {
                 "state": "unsupported"
@@ -1067,9 +1049,7 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "bot"
-                ]
+                "missingGrants": ["bot"]
               },
               "act": {
                 "state": "unsupported"
@@ -1093,9 +1073,7 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "session"
-                ]
+                "missingGrants": ["session"]
               },
               "act": {
                 "state": "unsupported"
@@ -1119,9 +1097,7 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "account"
-                ]
+                "missingGrants": ["account"]
               },
               "act": {
                 "state": "unsupported"
@@ -1145,9 +1121,7 @@
             "capabilities": {
               "chat": {
                 "state": "needs-auth",
-                "missingGrants": [
-                  "session"
-                ]
+                "missingGrants": ["session"]
               },
               "act": {
                 "state": "unsupported"
@@ -1601,10 +1575,7 @@
           }
         ],
         "rules": {
-          "digestTimes": [
-            "09:00",
-            "18:00"
-          ],
+          "digestTimes": ["09:00", "18:00"],
           "quietHours": null
         }
       }
@@ -1680,12 +1651,7 @@
             "hasFrontend": false,
             "href": null,
             "fullHref": null,
-            "capabilities": [
-              "2 agents",
-              "0 actions",
-              "1 skill",
-              "0 hooks"
-            ],
+            "capabilities": ["2 agents", "0 actions", "1 skill", "0 hooks"],
             "capabilityDetails": {
               "agents": [
                 {
@@ -1736,12 +1702,7 @@
             "hasFrontend": true,
             "href": "/apps/briefing",
             "fullHref": "/full/apps/briefing",
-            "capabilities": [
-              "0 agents",
-              "4 actions",
-              "0 skills",
-              "0 hooks"
-            ],
+            "capabilities": ["0 agents", "4 actions", "0 skills", "0 hooks"],
             "capabilityDetails": {
               "agents": [],
               "actions": [
@@ -1795,12 +1756,7 @@
             "hasFrontend": true,
             "href": "/apps/browser-automation",
             "fullHref": "/full/apps/browser-automation",
-            "capabilities": [
-              "0 agents",
-              "2 actions",
-              "1 skill",
-              "0 hooks"
-            ],
+            "capabilities": ["0 agents", "2 actions", "1 skill", "0 hooks"],
             "capabilityDetails": {
               "agents": [],
               "actions": [
@@ -1851,12 +1807,7 @@
             "hasFrontend": true,
             "href": "/apps/coding",
             "fullHref": "/full/apps/coding",
-            "capabilities": [
-              "1 agent",
-              "1 action",
-              "5 skills",
-              "1 hook"
-            ],
+            "capabilities": ["1 agent", "1 action", "5 skills", "1 hook"],
             "capabilityDetails": {
               "agents": [
                 {
@@ -1929,12 +1880,7 @@
             "hasFrontend": true,
             "href": "/apps/connector",
             "fullHref": "/full/apps/connector",
-            "capabilities": [
-              "0 agents",
-              "16 actions",
-              "1 skill",
-              "0 hooks"
-            ],
+            "capabilities": ["0 agents", "16 actions", "1 skill", "0 hooks"],
             "capabilityDetails": {
               "agents": [],
               "actions": [
@@ -2041,12 +1987,7 @@
             "hasFrontend": true,
             "href": "/apps/dream",
             "fullHref": "/full/apps/dream",
-            "capabilities": [
-              "3 agents",
-              "10 actions",
-              "0 skills",
-              "1 hook"
-            ],
+            "capabilities": ["3 agents", "10 actions", "0 skills", "1 hook"],
             "capabilityDetails": {
               "agents": [
                 {
@@ -2142,12 +2083,7 @@
             "hasFrontend": true,
             "href": "/apps/inbox",
             "fullHref": "/full/apps/inbox",
-            "capabilities": [
-              "1 agent",
-              "1 action",
-              "0 skills",
-              "1 hook"
-            ],
+            "capabilities": ["1 agent", "1 action", "0 skills", "1 hook"],
             "capabilityDetails": {
               "agents": [
                 {
@@ -2199,12 +2135,7 @@
             "hasFrontend": true,
             "href": "/apps/showcases",
             "fullHref": "/full/apps/showcases",
-            "capabilities": [
-              "0 agents",
-              "0 actions",
-              "0 skills",
-              "0 hooks"
-            ],
+            "capabilities": ["0 agents", "0 actions", "0 skills", "0 hooks"],
             "capabilityDetails": {
               "agents": [],
               "actions": [],
@@ -2241,12 +2172,7 @@
             "hasFrontend": true,
             "href": "/apps/skills",
             "fullHref": "/full/apps/skills",
-            "capabilities": [
-              "0 agents",
-              "0 actions",
-              "1 skill",
-              "0 hooks"
-            ],
+            "capabilities": ["0 agents", "0 actions", "1 skill", "0 hooks"],
             "capabilityDetails": {
               "agents": [],
               "actions": [],
@@ -2288,12 +2214,7 @@
             "hasFrontend": true,
             "href": "/apps/system",
             "fullHref": "/full/apps/system",
-            "capabilities": [
-              "1 agent",
-              "23 actions",
-              "2 skills",
-              "1 hook"
-            ],
+            "capabilities": ["1 agent", "23 actions", "2 skills", "1 hook"],
             "capabilityDetails": {
               "agents": [
                 {
@@ -2442,12 +2363,7 @@
             "hasFrontend": true,
             "href": "/apps/workflow-studio",
             "fullHref": "/full/apps/workflow-studio",
-            "capabilities": [
-              "0 agents",
-              "0 actions",
-              "1 skill",
-              "0 hooks"
-            ],
+            "capabilities": ["0 agents", "0 actions", "1 skill", "0 hooks"],
             "capabilityDetails": {
               "agents": [],
               "actions": [],

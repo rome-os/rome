@@ -80,9 +80,7 @@
         "event": "inputs_settled",
         "data": {
           "sessionId": "concierge",
-          "inputIds": [
-            "c22156fc-8285-4a5e-ab14-f377461f8aec"
-          ]
+          "inputIds": ["c22156fc-8285-4a5e-ab14-f377461f8aec"]
         }
       },
       {
