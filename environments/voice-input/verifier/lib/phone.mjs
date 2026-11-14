@@ -47,6 +47,7 @@ export async function phoneDictate({
     aliveLapse: false,
     events: [],
   };
+  let settled = "";
   let startedAt = null;
   let lastAlive = Date.now();
   const since = () => (startedAt === null ? 0 : Date.now() - startedAt);
@@ -61,11 +62,16 @@ export async function phoneDictate({
       }
       result.events.push([since(), event.type]);
       if (event.type === "alive") lastAlive = Date.now();
-      if (event.type === "text" && typeof event.text === "string" && event.text !== result.text) {
-        result.text = event.text;
-        result.samples.push([since(), event.text]);
+      if (event.type === "text") {
+        // `settled` is new final text to append; `pending` replaces the previous guess.
+        settled += event.settled ?? "";
+        const now = settled + (event.pending ?? "");
+        if (now !== result.text) {
+          result.text = now;
+          result.samples.push([since(), now]);
+        }
       }
-      if (event.type === "error") result.error = event.message ?? event.code ?? "error";
+      if (event.type === "error") result.error = event.reason ?? "error";
       if (event.type === "ended") {
         result.ended = true;
         resolve();
