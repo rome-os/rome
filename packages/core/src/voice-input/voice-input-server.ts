@@ -159,12 +159,14 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   // faster than a microphone records it.
   const accept = (chunk: Uint8Array): boolean => {
     if (!pace) return false;
+    const allowed = (pace.sampleRate * 2 * (Date.now() - pace.since + AUDIO_SLACK_MS)) / 1000;
+    if (bytes + chunk.byteLength > allowed) {
+      close({ type: "error", reason: "bad-request" });
+      return false;
+    }
     frames += 1;
     bytes += chunk.byteLength;
-    const allowed = (pace.sampleRate * 2 * (Date.now() - pace.since + AUDIO_SLACK_MS)) / 1000;
-    if (bytes <= allowed) return true;
-    close({ type: "error", reason: "bad-request" });
-    return false;
+    return true;
   };
 
   async function begin(sampleRate: number) {
