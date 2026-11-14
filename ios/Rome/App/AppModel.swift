@@ -640,10 +640,7 @@ final class AppModel {
         didSet {
             if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) }
             // Back on a Rome after the session ran out: Health sync goes on.
-            if phase == .ready, oldValue != .ready {
-                health.instanceOpened()
-                connections.report()
-            }
+            if phase == .ready, oldValue != .ready { health.instanceOpened() }
             if !phase.isSignedIn { stackGame = nil }
             // Signed out, however it came about: the widget offers to make an app.
             if phase == .signedOut, oldValue != .signedOut { WidgetShelf.shared.clear() }
@@ -890,6 +887,8 @@ final class AppModel {
             // The link was for another instance, now open in its place.
             guard self.workspace === workspace else { return }
         }
+        // On a good session, as the workspace's own start is: this Rome learns the phone's connections.
+        connections.report()
         await workspace.start()
     }
 
@@ -1465,6 +1464,8 @@ final class AppModel {
             // The link was for another instance, now open in its place.
             guard self.workspace === workspace else { return }
         }
+        // On a good session, as the workspace's own start is: this Rome learns the phone's connections.
+        connections.report()
         await workspace.start()
     }
 
