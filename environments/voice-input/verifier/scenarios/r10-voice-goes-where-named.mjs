@@ -75,12 +75,15 @@ async function readNamedPlace(ctx, mic) {
       .or(page.getByRole("button", { name }))
       .or(page.getByRole("menuitem", { name }))
       .first();
-    if (await advanced.isVisible({ timeout: 5000 }).catch(() => false)) {
+    // The dashboard renders after load, so wait for the control rather than glance for it.
+    if (
+      await advanced.waitFor({ state: "visible", timeout: 15000 }).then(
+        () => true,
+        () => false,
+      )
+    )
       await advanced.click();
-      await page.waitForLoadState("networkidle").catch(() => {});
-    }
-    const text = await page.locator("body").innerText();
-    const shown = text.includes(place.provider) && text.includes(place.host);
+    const shown = await waitForText(page, [place.provider, place.host], 15000);
     const settingsCheck = required(
       check(
         "Settings names the place",
@@ -104,19 +107,36 @@ function hostname(host) {
   return host.replace(/\s*\(.*\)$/, "").replace(/:\d+$/, "");
 }
 
+/** Whether the page's text holds every one of `parts` within `timeoutMs`. */
+async function waitForText(page, parts, timeoutMs) {
+  const start = Date.now();
+  do {
+    const text = await page.locator("body").innerText();
+    if (parts.every((p) => text.includes(p))) return true;
+    await page.waitForTimeout(500);
+  } while (Date.now() - start < timeoutMs);
+  return false;
+}
+
 /** The host Rome names must be the one the audio actually reached, not merely allowed. */
 function namedHostUsed(capture, place) {
   const name = "audio reaches the named host";
   if (!capture || !place)
     return required(check(name, "not_checked", "no capture or no named place"));
-  const reached = capture.requests.filter((r) => hostname(r.host ?? "") === hostname(place.host));
+  // Only the leg from Rome onward can reach the provider; the browser's leg goes to Rome.
+  const onward = capture.requests.filter((r) => r.from !== "browser");
+  if (onward.length === 0)
+    return required(
+      check(name, "not_checked", "the capture shows no request carrying audio beyond the browser"),
+    );
+  const reached = onward.filter((r) => hostname(r.host ?? "") === hostname(place.host));
   return required(
     check(
       name,
       reached.length > 0 ? "pass" : "fail",
       reached.length > 0
         ? `${reached.length} requests carrying audio reached ${place.host}`
-        : `no request carrying audio reached ${place.host}; audio went to ${[...new Set(capture.requests.map((r) => r.host))].join(", ") || "nowhere captured"}`,
+        : `no request carrying audio reached ${place.host}; beyond the browser it went to ${[...new Set(onward.map((r) => r.host))].join(", ")}`,
     ),
   );
 }
