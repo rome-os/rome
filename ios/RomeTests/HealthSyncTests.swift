@@ -101,11 +101,14 @@ actor FakePersonalDataBackend: PersonalDataBackend {
     /// Each ingest takes the next failure, if any.
     var failures: [PersonalDataFailure] = []
     var rejectUnknown: Set<String> = []
+    /// Types the Rome holds the most of: refused with `type_cap`.
+    var rejectCapped: Set<String> = []
     var gate: CheckedContinuation<Void, Never>?
     var holding = false
 
     func fail(_ failures: PersonalDataFailure...) { self.failures = failures }
     func reject(_ types: Set<String>) { rejectUnknown = types }
+    func cap(_ types: Set<String>) { rejectCapped = types }
     func hold() { holding = true }
     func release() {
         holding = false
@@ -120,8 +123,10 @@ actor FakePersonalDataBackend: PersonalDataBackend {
         if holding { await withCheckedContinuation { gate = $0 } }
         if !failures.isEmpty { throw failures.removeFirst() }
         envelopes.append(envelope)
-        let rejected = envelope.upserts.enumerated().filter { rejectUnknown.contains($0.element.type) }.map {
-            PersonalDataIngestReply.Rejected(index: $0.offset, key: $0.element.key, code: "unknown_type")
+        let rejected = envelope.upserts.enumerated().compactMap { item -> PersonalDataIngestReply.Rejected? in
+            if rejectUnknown.contains(item.element.type) { return .init(index: item.offset, key: item.element.key, code: "unknown_type") }
+            if rejectCapped.contains(item.element.type) { return .init(index: item.offset, key: item.element.key, code: "type_cap") }
+            return nil
         }
         return PersonalDataIngestReply(
             batchId: envelope.batch.id, status: rejected.isEmpty ? "ok" : "partial", inserted: envelope.upserts.count - rejected.count,
@@ -505,6 +510,19 @@ struct SyncRig {
         #expect(await rig.progress.load().unsupported.isEmpty)
     }
 
+    @Test func aTypeTheRomeHoldsTheMostOfIsNeverMarkedSynced() async throws {
+        let rig = SyncRig()
+        await rig.backfill()
+        let marked = await rig.progress.load().syncedThrough["bodyMass"]
+        await rig.backend.cap(["bodyMass"])
+        rig.health.add("bodyMass", id: "m4", start: rig.date("2026-11-09T05:00:00Z"), value: 70)
+        await rig.engine.sync(.manual)
+        #expect(await rig.lastEntry()?.outcome == .partial)
+        let progress = await rig.progress.load()
+        #expect(progress.syncedThrough["bodyMass"] == marked, "refused readings move no mark")
+        #expect(progress.unsupported.contains("bodyMass"), "left out until Sync now tries again")
+    }
+
     @Test func anotherRomeStartsTheHistoryOver() async throws {
         let rig = SyncRig()
         rig.health.add("stepCount", id: "s1", start: rig.date("2026-10-01T02:00:00Z"), value: 100)
@@ -798,10 +816,10 @@ struct SyncRig {
         let rig = Rig()
         let settings = rig.make()
         await settings.setEnabled(true).value
-        _ = rig.origin.id()
+        let origin = rig.origin.id()
         await settings.forgetAccount().value
         #expect(!settings.isEnabled)
-        #expect(rig.origin.read() == nil)
+        #expect(rig.origin.read() == origin, "kept: Delete after the next sign-in still reaches what this phone sent")
         #expect(rig.removedAll == 1, "every Rome's anchors and history")
         #expect(settings.instance == nil)
         #expect(await rig.backend.deletes == 0, "only Delete uploaded data removes the Rome's copy")

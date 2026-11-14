@@ -390,8 +390,8 @@ final class HealthSettings {
     }
 
     /// Sign-out: observers off, background delivery off, every Rome's
-    /// anchors and history and the origin id gone, every switch off. The
-    /// Romes keep what they have: only Delete uploaded data removes it.
+    /// anchors and history gone, every switch off. The origin id is kept,
+    /// so Delete uploaded data still reaches what this phone sent.
     @discardableResult
     func forgetAccount() -> Task<Void, Never> {
         observers.stop()
@@ -400,7 +400,8 @@ final class HealthSettings {
         instance = nil
         isEnabled = false
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Defaults.prefix) { defaults.removeObject(forKey: key) }
-        originStore.remove()
+        // The origin id stays: it names this phone on the Romes, and Delete
+        // after the next sign-in must still reach what it sent there.
         history = []
         activity = SyncActivity()
         let removeAllStores = removeAllStores
@@ -504,7 +505,8 @@ final class SyncSwitchBox: Sendable {
     func set(enabled: Bool) { lock.withLock { $0 = SyncSwitches(enabled: enabled) } }
 }
 
-/// The origin id: made once per account, kept in the Keychain, gone on sign-out.
+/// The origin id: made once per phone and kept in the Keychain, across
+/// sign-outs, so Delete always reaches what this phone sent.
 struct OriginStore: Sendable {
     let read: @Sendable () -> String?
     let write: @Sendable (String) -> Void
