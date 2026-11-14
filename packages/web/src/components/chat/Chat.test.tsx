@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
@@ -1658,6 +1658,41 @@ describe("Chat turn stream lifecycle", () => {
     await user.click(within(dialog).getByRole("button", { name: "navbar.delete" }));
 
     await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("session-1"));
+  });
+
+  describe("after deleting the open chat", () => {
+    const whereTo = async (identity: { forkable?: boolean }) => {
+      mockUseSessionIdentity.mockReturnValue({
+        sessionName: null,
+        pinnedAgentMention: null,
+        archivedAt: null,
+        ...identity,
+      });
+      function Where() {
+        return <output data-testid="where">{useLocation().pathname}</output>;
+      }
+      const user = userEvent.setup();
+      renderChat(
+        <>
+          <Chat sessionId="session-1" />
+          <Where />
+        </>,
+      );
+      await user.click(screen.getByRole("button", { name: "navbar.more" }));
+      await user.click(screen.getByRole("menuitem", { name: "navbar.delete" }));
+      const dialog = screen.getByRole("dialog", { name: "navbar.delete" });
+      await user.click(within(dialog).getByRole("button", { name: "navbar.delete" }));
+      await waitFor(() => expect(screen.getByTestId("where").textContent).not.toBe("/"));
+      return screen.getByTestId("where").textContent;
+    };
+
+    it("opens a new chat when it was an ordinary chat, so the chat list stays in Chat mode", async () => {
+      expect(await whereTo({ forkable: true })).toBe("/chat");
+    });
+
+    it("opens the main chat when it was not an ordinary chat", async () => {
+      expect(await whereTo({ forkable: false })).toBe("/message");
+    });
   });
 
   it("aborts an attached turn stream when the chat unmounts", async () => {
