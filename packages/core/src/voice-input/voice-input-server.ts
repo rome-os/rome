@@ -32,6 +32,10 @@ export const MAX_DICTATION_MS = 10 * 60 * 1000;
 // How long the provider has to send the rest of the text once asked.
 export const FINISH_TIMEOUT_MS = 5_000;
 
+// How long a stopped dictation waits for its source to open. Longer than the
+// Rome Cloud session request's own timeout, so Rome Cloud answers first.
+export const OPEN_TIMEOUT_MS = 12_000;
+
 // A microphone delivers audio no faster than real time. The slack covers
 // frames that arrive in a burst after a network stall.
 const AUDIO_SLACK_MS = 5_000;
@@ -91,12 +95,14 @@ export interface ServeOptions {
   usage?: TranscriptionUsageSink | null;
   maxDictationMs?: number;
   finishTimeoutMs?: number;
+  openTimeoutMs?: number;
 }
 
 /** Runs one dictation over `ws`. Exported for tests. */
 export function serve(ws: WebSocket, options: ServeOptions): void {
   const maxDictationMs = options.maxDictationMs ?? MAX_DICTATION_MS;
   const finishTimeoutMs = options.finishTimeoutMs ?? FINISH_TIMEOUT_MS;
+  const openTimeoutMs = options.openTimeoutMs ?? OPEN_TIMEOUT_MS;
   let stream: TranscriptionStream | null = null;
   let listening: { source: ListeningSource; sampleRate: number; startedAt: number } | null = null;
   // Between `start` and the transcriber opening: audio waits here, in order.
@@ -107,6 +113,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   let timedOut = false;
   let limit: ReturnType<typeof setTimeout> | null = null;
   let finishing: ReturnType<typeof setTimeout> | null = null;
+  let opening: ReturnType<typeof setTimeout> | null = null;
   let finishAsked = false;
   let frames = 0;
   let bytes = 0;
@@ -119,6 +126,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   const settle = (outcome: string) => {
     if (limit) clearTimeout(limit);
     if (finishing) clearTimeout(finishing);
+    if (opening) clearTimeout(opening);
     log.info("voice input stopped", { outcome, frames, bytes });
     reportUsage(outcome);
   };
@@ -163,6 +171,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     starting = true;
     const opened = await options.source.open();
     starting = false;
+    if (opening) clearTimeout(opening);
     if (closed) return;
     if (!opened.ok) {
       close({ type: "error", reason: opened.reason, detail: opened.detail });
@@ -228,10 +237,12 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       return;
     }
     if (starting) {
-      // The stop deadline runs from the stop, whether or not the source has
-      // answered yet.
+      // A stop does not wait forever for the source to open.
       stopAsked = true;
-      armDeadline();
+      opening ??= setTimeout(
+        () => close({ type: "error", reason: "service-unavailable" }),
+        openTimeoutMs,
+      );
       return;
     }
     if (!stream) return close({ type: "error", reason: "bad-request" });
@@ -244,19 +255,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     finishAsked = true;
     if (limit) clearTimeout(limit);
     stream.finish();
-    armDeadline();
-  }
-
-  // Gives up on a source or provider that never answers a stop.
-  function armDeadline() {
-    finishing ??= setTimeout(() => {
+    // Gives up on a provider that never sends the rest.
+    finishing = setTimeout(() => {
       stream?.abort();
-      const reason = timedOut
-        ? "time-limit"
-        : stream
-          ? "provider-unavailable"
-          : "service-unavailable";
-      close({ type: "error", reason });
+      close({ type: "error", reason: timedOut ? "time-limit" : "provider-unavailable" });
     }, finishTimeoutMs);
   }
 
