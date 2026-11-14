@@ -113,8 +113,10 @@ export function locationAnswerPrompt(output: unknown): string {
   const answer = output as Partial<Extract<LocationAnswer, { status: "shared" }>> | null;
   if (answer?.status !== "shared") {
     return (
-      "The guardian chose not to share their location. Don't ask for it again in this turn: " +
-      "answer without it, or ask them in a message which place they mean."
+      "The guardian chose not to share their location for this message. Don't show the card " +
+      "again for it: answer without it, or ask them in a message which place they mean. This " +
+      "covers this message only: when a later message again needs where they are now, call " +
+      "share_location again."
     );
   }
   const coarse = (answer.accuracyMeters ?? Number.POSITIVE_INFINITY) > COARSE_ACCURACY_METERS;

@@ -60,9 +60,9 @@ describe("the share-location answer", () => {
     expect(answer(25_000)).toContain("around <city>");
   });
 
-  it("tells the agent not to ask again in the turn when the guardian declined", () => {
-    expect(locationAnswerPrompt({ status: "declined", dismissed: true })).toContain(
-      "Don't ask for it again",
-    );
+  it("tells the agent a decline covers that message only", () => {
+    const prompt = locationAnswerPrompt({ status: "declined", dismissed: true });
+    expect(prompt).toContain("Don't show the card again for it");
+    expect(prompt).toContain("when a later message again needs where they are now");
   });
 });
