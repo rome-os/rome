@@ -1,6 +1,6 @@
 // Rule 3: over the script, English has at most 8 wrong words in 100, and Mandarin and mixed
 // messages at most 8 wrong characters in 100. Normalisation: lib/text.mjs.
-import { scriptRuns } from "../lib/runs.mjs";
+import { scriptRuns, standInReason, useTranscriber } from "../lib/runs.mjs";
 import { check, notChecked, required, ruleResult } from "../lib/scenario.mjs";
 import { errors, per100 } from "../lib/text.mjs";
 
@@ -11,10 +11,11 @@ export default {
   title: "The text is what you said",
   phase: 1,
   async run(ctx) {
-    if (ctx.transcriber === "stand-in")
-      return notChecked(
-        "the stand-in transcriber returns the written text, so accuracy is not measured; needs a provider credential",
-      );
+    // The stand-in answers with the written text on fixed times, so accuracy is not measured.
+    if (ctx.transcriber === "stand-in") return notChecked(standInReason(ctx));
+    await useTranscriber(ctx);
+    const standIn = standInReason(ctx);
+    if (standIn) return notChecked(standIn);
     const checks = [];
     const info = [];
     const detail = [];

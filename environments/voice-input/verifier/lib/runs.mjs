@@ -69,6 +69,39 @@ export async function useTranscriber(ctx) {
     throw error;
   }
   ctx.memo.transcriberSet = true;
+  ctx.memo.transcriberInUse = await transcriberInUse(ctx);
+}
+
+/**
+ * What speech actually goes to once the transcriber is set: the environment's transcriber, and
+ * the provider and host Rome names, which on the Rome Cloud path come from Rome Cloud.
+ */
+async function transcriberInUse(ctx) {
+  const environment = (await ctx.env.version())?.transcriber ?? null;
+  const opened = await openPage(ctx.env, { mic: setMessages(ctx.script, "B")[0].path });
+  try {
+    const url = new URL("/api/voice-input", opened.page.url()).toString();
+    const response = await opened.page.request.get(url);
+    const body = response.ok() ? await response.json().catch(() => null) : null;
+    return { environment, named: body?.place ?? null, via: body?.via ?? null };
+  } finally {
+    await opened.close();
+  }
+}
+
+/**
+ * Why speech is not reaching a real provider, or null when it is. Rules 2 and 3 measure the
+ * provider, so they refuse the stand-in even when a real transcriber was asked for.
+ */
+export function standInReason(ctx) {
+  if (ctx.transcriber === "stand-in") return "the stand-in transcriber was asked for";
+  const used = ctx.memo.transcriberInUse;
+  if (!used) return null;
+  if (used.environment?.provider === "stand-in")
+    return `the environment's transcriber is the stand-in at ${used.environment.url}, though ${ctx.transcriber} was asked for`;
+  if (/^transcriber(:\d+)?$/.test(used.named?.host ?? ""))
+    return `Rome names ${used.named.provider} at ${used.named.host}, the stand-in's host`;
+  return null;
 }
 
 async function runOne(ctx, message, { checkSend }) {

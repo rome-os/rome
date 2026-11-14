@@ -1,6 +1,6 @@
 // Rule 2: in at least 18 of the 20 script messages, text first appears within 2 s of the first
 // word and is complete within 2 s of the last word.
-import { scriptRuns, textTimes } from "../lib/runs.mjs";
+import { scriptRuns, standInReason, textTimes, useTranscriber } from "../lib/runs.mjs";
 import { check, notChecked, required, ruleResult } from "../lib/scenario.mjs";
 
 export const BAR_SECONDS = 2;
@@ -12,10 +12,11 @@ export default {
   title: "Text appears as you speak",
   phase: 1,
   async run(ctx) {
-    if (ctx.transcriber === "stand-in")
-      return notChecked(
-        "the stand-in transcriber answers on fixed times, so streaming is not measured; needs a provider credential",
-      );
+    // The stand-in answers with the written text on fixed times, so streaming is not measured.
+    if (ctx.transcriber === "stand-in") return notChecked(standInReason(ctx));
+    await useTranscriber(ctx);
+    const standIn = standInReason(ctx);
+    if (standIn) return notChecked(standIn);
     const { runs } = await scriptRuns(ctx);
     const scored = runs.map((run) => {
       if (run.error) return { key: run.key, ok: false, detail: `run broke: ${run.error}` };

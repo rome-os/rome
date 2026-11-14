@@ -13,6 +13,16 @@ function status(result) {
   return result.status.replaceAll("_", " ");
 }
 
+/** The transcriber after the run set it, which the environment's version at the start predates. */
+function inUse(used, atStart) {
+  if (!used) return [part("Transcriber at the start", atStart)];
+  const env = used.environment ?? {};
+  const named = used.named ? `${used.named.provider} at ${used.named.host}` : "no place";
+  return [
+    `- Transcriber in use: the environment's is ${env.provider ?? "unknown"}${env.model ? `, model ${env.model}` : ""}${env.url ? ` at ${env.url}` : ""}; Rome names ${named}${used.via ? `, via ${used.via}` : ""}`,
+  ];
+}
+
 export function renderMarkdown(report) {
   const { underTest, summary } = report;
   const lines = [
@@ -25,8 +35,8 @@ export function renderMarkdown(report) {
     part("Product", underTest.product),
     part("Environment", underTest.environment),
     part("Verifier", underTest.verifier),
-    part("Transcriber", underTest.transcriber),
     `- Transcriber mode asked for: ${report.transcriberMode}`,
+    ...inUse(report.transcriberInUse, underTest.transcriber),
     `- Waits: listening ${report.waits.afterSpeechMs / 1000} s past the last word, ${report.waits.sendCheckMs / 1000} s for a message nobody sent, ${report.waits.sendMs / 1000} s for a sent message, field steady for ${report.waits.steadyMs / 1000} s`,
     `- Started ${report.startedAt}, finished ${report.finishedAt}`,
   ];

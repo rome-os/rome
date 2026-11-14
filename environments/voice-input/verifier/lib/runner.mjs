@@ -103,6 +103,7 @@ export async function verify({
     finishedAt: new Date().toISOString(),
     underTest: version,
     transcriberMode: transcriber,
+    transcriberInUse: ctx.memo.transcriberInUse ?? null,
     dirty,
     waits,
     selection: rules ? { rules } : { phase: phase ?? 1 },
