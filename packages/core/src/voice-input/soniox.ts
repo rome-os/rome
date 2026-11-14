@@ -32,14 +32,16 @@ export function createSonioxTranscriber(options: {
   apiKey: string;
   url?: string;
   model?: string;
+  connectTimeoutMs?: number;
 }): Transcriber {
   const url = options.url ?? SONIOX_DEFAULT_URL;
   const model = options.model ?? SONIOX_DEFAULT_MODEL;
+  const connectTimeoutMs = options.connectTimeoutMs ?? SONIOX_CONNECT_TIMEOUT_MS;
   return {
     place: { provider: "Soniox", host: new URL(url).host },
     model,
     open: ({ sampleRate }, listener) =>
-      openSonioxStream(url, options.apiKey, model, sampleRate, listener),
+      openSonioxStream(url, options.apiKey, model, sampleRate, listener, connectTimeoutMs),
   };
 }
 
@@ -49,6 +51,7 @@ function openSonioxStream(
   model: string,
   sampleRate: number,
   listener: TranscriptionListener,
+  connectTimeoutMs: number,
 ): TranscriptionStream {
   // A long-lived key and a temporary one both go in the header. Soniox
   // refuses the old `api_key` field of the start request from January 2027.
@@ -57,10 +60,12 @@ function openSonioxStream(
   const queued: (Uint8Array | string)[] = [];
   let done = false;
   let finishing = false;
+  // Whether the client is showing unsettled text that a later response may clear.
+  let shown = false;
 
   const connecting = setTimeout(
     () => stop(() => listener.onFailure("unavailable", "connect timed out")),
-    SONIOX_CONNECT_TIMEOUT_MS,
+    connectTimeoutMs,
   );
 
   const stop = (outcome: () => void) => {
@@ -118,8 +123,10 @@ function openSonioxStream(
       if (token.is_final) settled += token.text;
       else pending += token.text;
     }
-    // Each response replaces the unsettled tail, so one with no tokens clears it.
-    if (response.tokens) listener.onText(settled, pending);
+    // Each response replaces the unsettled tail, so one with no tokens clears
+    // whatever was still pending.
+    if (response.tokens && (settled || pending || shown)) listener.onText(settled, pending);
+    shown = pending !== "";
     if (response.finished) stop(() => listener.onEnd());
   });
 
