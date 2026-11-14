@@ -169,7 +169,6 @@ final class CloudAuth {
             .init(name: "app_version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String),
         ]
         var urlRequest = URLRequest(url: origin.appending(path: "oauth2/token"))
-        DevAccess.stamp(&urlRequest)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         urlRequest.httpBody = form.percentEncodedQuery?.data(using: .utf8)
@@ -283,7 +282,6 @@ final class CloudAuth {
         if instance.isVisitor { return try await createVisitorSession(for: instance, at: instanceOrigin, account: stamped, retry: retry) }
 
         var start = URLRequest(url: instanceOrigin.appending(path: "api/auth/cloud/native/start"))
-        DevAccess.stamp(&start)
         start.httpMethod = "POST"
         start.setValue("application/json", forHTTPHeaderField: "Accept")
         let (startData, startStatus) = try await perform(start)
@@ -311,7 +309,6 @@ final class CloudAuth {
         else { throw AuthError.invalidResponse }
 
         var complete = URLRequest(url: instanceOrigin.appending(path: "api/auth/cloud/native/complete"))
-        DevAccess.stamp(&complete)
         complete.httpMethod = "POST"
         complete.setValue("application/json", forHTTPHeaderField: "Accept")
         complete.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -362,7 +359,6 @@ final class CloudAuth {
     /// redeems it, checking its own allow-list, for a `rome_visitor` session.
     private func createVisitorSession(for instance: CloudInstance, at instanceOrigin: URL, account stamped: Int, retry: Bool) async throws -> InstanceSession {
         var start = URLRequest(url: instanceOrigin.appending(path: "api/auth/visitor/native/start"))
-        DevAccess.stamp(&start)
         start.httpMethod = "POST"
         start.setValue("application/json", forHTTPHeaderField: "Accept")
         let (startData, startStatus) = try await perform(start)
@@ -396,7 +392,6 @@ final class CloudAuth {
         else { throw AuthError.invalidResponse }
 
         var complete = URLRequest(url: instanceOrigin.appending(path: "api/auth/visitor/native/complete"))
-        DevAccess.stamp(&complete)
         complete.httpMethod = "POST"
         complete.setValue("application/json", forHTTPHeaderField: "Accept")
         complete.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -428,7 +423,6 @@ final class CloudAuth {
     /// Builds a call to Rome Cloud's device list for this phone's push token.
     nonisolated static func deviceRequest(origin: URL, accessToken: String, method: String, body: Data) -> URLRequest {
         var request = URLRequest(url: origin.appending(path: "api/devices"))
-        DevAccess.stamp(&request)
         request.httpMethod = method
         // Sign-out waits on the removal, so a slow Cloud must not hold it long.
         request.timeoutInterval = 10
@@ -455,7 +449,6 @@ final class CloudAuth {
         endAccount()
         if let credential = store.value(CloudCredential.self, for: Key.credential) {
             var request = URLRequest(url: origin.appending(path: "v1/mobile/session"))
-            DevAccess.stamp(&request)
             request.httpMethod = "DELETE"
             request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
             _ = try? await perform(request)
@@ -487,7 +480,6 @@ final class CloudAuth {
             throw AuthError.cloudUnauthorized
         }
         var request = URLRequest(url: origin.appending(path: path))
-        DevAccess.stamp(&request)
         request.httpMethod = method
         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -504,7 +496,11 @@ final class CloudAuth {
         return (data, status)
     }
 
+    /// Every Cloud request goes out through here, so it is where a Debug build
+    /// adds the test host's access headers.
     private func perform(_ request: URLRequest) async throws -> (Data, Int) {
+        var request = request
+        DevAccess.stamp(&request)
         do {
             let (data, response) = try await http.data(for: request)
             return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
