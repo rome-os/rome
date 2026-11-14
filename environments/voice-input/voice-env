@@ -12,6 +12,7 @@
 #   voice-env transcriber session-cap <seconds>|off
 #   voice-env cloud status | usage | session | provider | minted | sign-in | sign-out
 #   voice-env gate on|off
+#   voice-env logs [--since <time>] [--match <text>]
 #   voice-env network cut|restore
 #   voice-env chats
 #   voice-env messages --chat <id>
@@ -240,6 +241,28 @@ cmd_gate() {
   esac
 }
 
+# Rome's container log, one entry per line. Rome logs JSON; a line that is
+# not JSON is kept as {"text": ...}.
+cmd_logs() {
+  require_up
+  local since="" match=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --since) since="${2:?--since needs a time, such as 2026-11-14T11:00:00Z or 10m}" && shift 2 ;;
+      --match) match="${2:?--match needs text}" && shift 2 ;;
+      *) die "usage: voice-env logs [--since <time>] [--match <text>]" ;;
+    esac
+  done
+  docker logs ${since:+--since "$since"} "$ROME" 2>&1 |
+    node -e '
+      const match = process.argv[1];
+      let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+        const lines = s.split("\n").filter((l) => l && (!match || l.includes(match)))
+          .map((l) => { try { return JSON.parse(l); } catch { return { text: l }; } });
+        console.log(JSON.stringify({ lines }, null, 2));
+      });' "$match"
+}
+
 cmd_network() {
   require_up
   case "${1:-}" in
@@ -315,10 +338,11 @@ case "${1:-}" in
   transcriber) shift && cmd_transcriber "$@" ;;
   cloud) shift && cmd_cloud "$@" ;;
   gate) shift && cmd_gate "$@" ;;
+  logs) shift && cmd_logs "$@" ;;
   network) shift && cmd_network "$@" ;;
   chats) cmd_chats ;;
   messages) shift && cmd_messages "$@" ;;
   audio-scan) cmd_audio_scan ;;
   capture) shift && cmd_capture "$@" ;;
-  *) die "usage: voice-env version | browser | transcriber | cloud | gate | network | chats | messages | audio-scan | capture (see README.md)" ;;
+  *) die "usage: voice-env version | browser | transcriber | cloud | gate | logs | network | chats | messages | audio-scan | capture (see README.md)" ;;
 esac
