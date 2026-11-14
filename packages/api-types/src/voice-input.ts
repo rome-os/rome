@@ -8,7 +8,7 @@ import { z } from "zod";
  * `GET /api/voice-input`. `available` is false when the instance is neither
  * signed in to Rome Cloud nor has its own transcription provider; the voice
  * control is then absent. `via` names where the provider comes from. `place`
- * is null while Rome cannot name it, such as when Rome Cloud cannot be asked.
+ * is null while Rome cannot name it, and `placeUnknown` then says why.
  */
 export const voiceInputInfoSchema = z.object({
   available: z.boolean(),
@@ -21,6 +21,8 @@ export const voiceInputInfoSchema = z.object({
       host: z.string(),
     })
     .nullable(),
+  /** Why `place` is null on Rome Cloud: it cannot be reached, or has no provider set up. */
+  placeUnknown: z.enum(["rome-cloud-unreachable", "rome-cloud-not-configured"]).optional(),
 });
 export type VoiceInputInfo = z.infer<typeof voiceInputInfoSchema>;
 

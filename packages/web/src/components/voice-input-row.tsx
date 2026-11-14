@@ -6,8 +6,8 @@ import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
 /** Names where the dashboard's dictated speech becomes text. */
 export function VoiceInputRow() {
   const { t } = useTranslation("settings");
-  // Rome learns Rome Cloud's place from a listening session, so read it again
-  // each time Settings opens.
+  // Rome Cloud can move voice input to another provider, so read the place
+  // again each time Settings opens.
   const query = useVoiceInputInfo({ refetchOnMount: "always" });
   const info = query.data;
   return (
@@ -35,7 +35,9 @@ function describe(
   if (info.via === "rome-cloud") {
     return place
       ? t("system.voiceInput.placeViaRomeCloud", { provider: place.provider, host: place.host })
-      : t("system.voiceInput.romeCloud");
+      : info.placeUnknown === "rome-cloud-not-configured"
+        ? t("system.voiceInput.romeCloudNotConfigured")
+        : t("system.voiceInput.romeCloudUnreachable");
   }
   return place
     ? t("system.voiceInput.place", { provider: place.provider, host: place.host })

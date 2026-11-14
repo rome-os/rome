@@ -916,7 +916,8 @@
       "place": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, which turns it into text. Rome keeps no audio.",
       "off": "Voice input comes with Rome Cloud. This Rome is not signed in, so message fields have no voice control.",
       "placeViaRomeCloud": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, provided through Rome Cloud. Rome keeps no audio.",
-      "romeCloud": "Speech dictated into a message goes through Rome to a transcription service provided through Rome Cloud. Its name shows here after the first dictation. Rome keeps no audio."
+      "romeCloudUnreachable": "Voice input is provided through Rome Cloud, which cannot be reached right now, so Rome cannot name the transcription service.",
+      "romeCloudNotConfigured": "Voice input is provided through Rome Cloud, which has not set up a transcription service yet."
     }
   },
   "easterEgg": {

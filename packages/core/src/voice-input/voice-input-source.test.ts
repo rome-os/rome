@@ -10,14 +10,19 @@ const own: Transcriber = {
 
 const signedIn = () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" });
 
-function answering(response: () => Response) {
-  let calls = 0;
-  const fetch = (async () => {
-    calls += 1;
-    return response();
+/** Rome Cloud answering each request by its path; `calls` lists the paths asked. */
+function answering(response: (path: string) => Response) {
+  const calls: string[] = [];
+  const fetch = (async (url: URL | string) => {
+    const path = new URL(String(url)).pathname;
+    calls.push(path);
+    return response(path);
   }) as typeof globalThis.fetch;
   return { fetch, calls: () => calls };
 }
+
+const provider = () =>
+  Response.json({ provider: "soniox", host: "stt-rt.soniox.com", model: "stt-rt-v6" });
 
 const granted = () =>
   Response.json({
@@ -49,21 +54,49 @@ describe("voice input source", () => {
     });
   });
 
-  it("prefers Rome Cloud when signed in, and names the place its last session used", async () => {
-    const cloud = answering(granted);
+  it("prefers Rome Cloud when signed in, and names its place before any session", async () => {
+    const cloud = answering((path) =>
+      path === "/v1/transcription/provider" ? provider() : granted(),
+    );
     const source = createVoiceInputSource({ own, romeCloud: signedIn, fetch: cloud.fetch });
-    // Naming the place never asks Rome Cloud for a session.
-    expect(await source.info()).toEqual({ available: true, via: "rome-cloud", place: null });
-    expect(cloud.calls()).toBe(0);
-
-    const opened = await source.open();
-    expect(opened.ok && opened.source.romeCloudSessionId).toBe("session-1");
     expect(await source.info()).toEqual({
       available: true,
       via: "rome-cloud",
       place: { provider: "Soniox", host: "stt-rt.soniox.com" },
     });
-    expect(cloud.calls()).toBe(1);
+    await source.info();
+    // Naming the place mints no session, and is read once a minute at most.
+    expect(cloud.calls()).toEqual(["/v1/transcription/provider"]);
+
+    const opened = await source.open();
+    expect(opened.ok && opened.source.romeCloudSessionId).toBe("session-1");
+    expect(cloud.calls()).toEqual(["/v1/transcription/provider", "/v1/transcription/sessions"]);
+  });
+
+  it("says why it cannot name Rome Cloud's place, and guesses none", async () => {
+    const unset = answering(() =>
+      Response.json({ error: "voice_input_not_configured" }, { status: 503 }),
+    );
+    expect(
+      await createVoiceInputSource({ own, romeCloud: signedIn, fetch: unset.fetch }).info(),
+    ).toEqual({
+      available: true,
+      via: "rome-cloud",
+      place: null,
+      placeUnknown: "rome-cloud-not-configured",
+    });
+
+    const down = answering(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    expect(
+      await createVoiceInputSource({ own, romeCloud: signedIn, fetch: down.fetch }).info(),
+    ).toEqual({
+      available: true,
+      via: "rome-cloud",
+      place: null,
+      placeUnknown: "rome-cloud-unreachable",
+    });
   });
 
   it("falls back to the instance's own provider when Rome Cloud no longer takes the instance", async () => {

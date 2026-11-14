@@ -79,3 +79,50 @@ export async function requestRomeCloudSession(
     },
   };
 }
+
+/** The provider Rome Cloud serves voice input from. */
+export interface RomeCloudProvider {
+  provider: string;
+  host: string;
+  model: string;
+}
+
+export type RomeCloudProviderOutcome =
+  | { kind: "named"; provider: RomeCloudProvider }
+  /** Rome Cloud has no provider set up for voice input. */
+  | { kind: "not-configured" }
+  | { kind: "signed-out" }
+  | { kind: "unavailable"; detail: string };
+
+/** Asks Rome Cloud which provider it serves voice input from. Mints no credential. */
+export async function readRomeCloudProvider(
+  caller: RomeCloudCaller,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): Promise<RomeCloudProviderOutcome> {
+  const token = await caller.bearer();
+  if (!token) return { kind: "signed-out" };
+  let response: Response;
+  try {
+    response = await fetchImpl(new URL("/v1/transcription/provider", caller.origin), {
+      headers: { Authorization: `Bearer ${token}`, "Cache-Control": "no-store" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    return { kind: "unavailable", detail: err instanceof Error ? err.message : String(err) };
+  }
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!response.ok) {
+    const code = isText(body?.error) ? body.error : null;
+    if (response.status === 401 || code === "instance_revoked") return { kind: "signed-out" };
+    if (code === "voice_input_not_configured") return { kind: "not-configured" };
+    return { kind: "unavailable", detail: code ?? `status ${response.status}` };
+  }
+  if (!body || !isText(body.provider) || !isText(body.host) || !isText(body.model)) {
+    return { kind: "unavailable", detail: "malformed provider" };
+  }
+  return {
+    kind: "named",
+    provider: { provider: body.provider, host: body.host, model: body.model },
+  };
+}

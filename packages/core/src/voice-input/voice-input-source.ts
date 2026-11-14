@@ -8,6 +8,7 @@ import { transcriberFor } from "./create-transcriber.js";
 import {
   type RomeCloudCaller,
   type RomeCloudSessionOutcome,
+  readRomeCloudProvider,
   requestRomeCloudSession,
 } from "./rome-cloud-session.js";
 import type { Transcriber, TranscriptionPlace } from "./transcriber.js";
@@ -49,11 +50,14 @@ export interface VoiceInputSourceDeps {
   fetch?: typeof fetch;
 }
 
+// How long Rome trusts the provider Rome Cloud named.
+const PROVIDER_TTL_MS = 60_000;
+
+// Rome Cloud names providers by their lower-case id.
+const PROVIDER_NAMES: Record<string, string> = { soniox: "Soniox" };
+
 export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSource {
-  // The place Rome Cloud named for the last listening session. Settings shows
-  // it; asking for a session only to name the place would waste a credential
-  // and count against the account's session limit.
-  let lastCloudPlace: TranscriptionPlace | null = null;
+  let named: { place: TranscriptionPlace; at: number } | null = null;
 
   const askRomeCloud = async (caller: RomeCloudCaller) => {
     const outcome: RomeCloudSessionOutcome = await requestRomeCloudSession(caller, deps.fetch);
@@ -65,8 +69,41 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
       model: session.model,
     });
     if (!transcriber) return { kind: "unknown-provider" as const, provider: session.provider };
-    lastCloudPlace = transcriber.place;
     return { kind: "granted" as const, transcriber, sessionId: session.sessionId };
+  };
+
+  // The place Rome Cloud serves from, read without minting a credential.
+  const romeCloudInfo = async (caller: RomeCloudCaller): Promise<VoiceInputInfo | null> => {
+    const now = Date.now();
+    if (named && now - named.at < PROVIDER_TTL_MS) {
+      return { available: true, via: "rome-cloud", place: named.place };
+    }
+    named = null;
+    const outcome = await readRomeCloudProvider(caller, deps.fetch);
+    switch (outcome.kind) {
+      case "named": {
+        const { provider, host } = outcome.provider;
+        named = { place: { provider: PROVIDER_NAMES[provider] ?? provider, host }, at: now };
+        return { available: true, via: "rome-cloud", place: named.place };
+      }
+      case "not-configured":
+        return {
+          available: true,
+          via: "rome-cloud",
+          place: null,
+          placeUnknown: "rome-cloud-not-configured",
+        };
+      case "unavailable":
+        log.warn("rome cloud transcription provider unreadable", { detail: outcome.detail });
+        return {
+          available: true,
+          via: "rome-cloud",
+          place: null,
+          placeUnknown: "rome-cloud-unreachable",
+        };
+      case "signed-out":
+        return null;
+    }
   };
 
   return {
@@ -74,8 +111,18 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
 
     async info() {
       const caller = deps.romeCloud();
-      if (caller) return { available: true, via: "rome-cloud", place: lastCloudPlace };
+      const cloud = caller ? await romeCloudInfo(caller) : null;
+      if (cloud) return cloud;
       if (deps.own) return { available: true, via: "instance", place: deps.own.place };
+      // Signed in, but Rome Cloud no longer takes this instance.
+      if (caller) {
+        return {
+          available: true,
+          via: "rome-cloud",
+          place: null,
+          placeUnknown: "rome-cloud-unreachable",
+        };
+      }
       return { available: false, via: null, place: null };
     },
 
