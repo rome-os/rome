@@ -202,7 +202,6 @@ struct HealthAccessScreen: View {
             Text("For everyday wellness, not medical advice.")
                 .romeFont(13)
                 .foregroundStyle(Palette.sub)
-                .padding(.horizontal, 16)
         }
     }
 
@@ -257,11 +256,10 @@ struct HealthStatusRow: View {
                 EmptyView()
             }
         }
-        .padding(.horizontal, 16)
     }
 }
 
-/// One quiet line under a card.
+/// One quiet line under a card, at the card's edge.
 struct NoteLine: View {
     let text: String
 
@@ -270,7 +268,6 @@ struct NoteLine: View {
             .romeFont(13)
             .foregroundStyle(Palette.sub)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 16)
     }
 }
 

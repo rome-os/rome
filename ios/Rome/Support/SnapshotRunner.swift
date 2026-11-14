@@ -26,7 +26,7 @@ enum DebugCommand: Equatable {
     case app(InstalledApp?)
 }
 
-/// Health sync's demo: a few syncs of today and yesterday, and the Rome's copy.
+/// Health sync's demo: a few syncs of today and yesterday.
 enum HealthDemo {
     static func history(now: Date) -> [SyncLogEntry] {
         func entry(_ seq: Int, minutesAgo: Double, _ trigger: SyncTrigger, _ types: [String: Int], history: Bool = false) -> SyncLogEntry {
@@ -46,13 +46,6 @@ enum HealthDemo {
             entry(4, minutesAgo: 60 * 27, .backfill, ["stepCount": 8_900, "heartRate": 8_700, "sleep": 183, "bodyMass": 40], history: true),
         ]
     }
-
-    static let stored = PersonalDataCatalogSource(source: "apple_health", origin: .init(id: "demo", name: "iPhone", platform: "ios"), state: "active", types: [
-        .init(type: "stepCount", pointCount: 4_600, earliest: "2026-05-10"),
-        .init(type: "heartRate", pointCount: 4_500, earliest: "2026-05-10"),
-        .init(type: "sleep", pointCount: 180, earliest: "2026-05-11"),
-        .init(type: "bodyMass", pointCount: 40, earliest: "2026-05-14"),
-    ])
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -200,7 +193,7 @@ enum SnapshotRunner {
             await capture("13-node-requests", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.requests]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            model.health.showDemo(HealthDemo.history(now: .now), stored: HealthDemo.stored)
+            model.health.showDemo(HealthDemo.history(now: .now))
             await capture("13a-node-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
@@ -222,10 +215,10 @@ enum SnapshotRunner {
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
             // The expired session: the status line offers a sign-in.
-            model.health.showDemo([SyncLogEntry(seq: 9, time: .now.addingTimeInterval(-3 * 3600), trigger: .observer, outcome: .error, errorCode: "signed_out")] + HealthDemo.history(now: .now), stored: HealthDemo.stored)
+            model.health.showDemo([SyncLogEntry(seq: 9, time: .now.addingTimeInterval(-3 * 3600), trigger: .observer, outcome: .error, errorCode: "signed_out")] + HealthDemo.history(now: .now))
             await capture("14b-health-sign-in", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
             model.debugCommand = .settings(nil)
-            model.health.showDemo(HealthDemo.history(now: .now), stored: HealthDemo.stored)
+            model.health.showDemo(HealthDemo.history(now: .now))
             // A second command in the same pass would hide this one from the shell.
             try? await Task.sleep(for: .seconds(0.6))
             // On Mac Catalyst a pushed task chat does not pop for these runs

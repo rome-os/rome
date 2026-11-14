@@ -115,8 +115,6 @@ final class HealthSettings {
     private(set) var activity = SyncActivity()
     /// The open Rome's syncs, newest first, at most 30 days.
     private(set) var history: [SyncLogEntry] = []
-    /// What the open Rome holds from this phone, once asked.
-    private(set) var stored: PersonalDataCatalogSource?
     /// Background App Refresh is off for the app.
     private(set) var backgroundRefreshOff = false
 
@@ -210,7 +208,6 @@ final class HealthSettings {
     private func open(_ instance: HealthInstance?) {
         self.instance = instance
         history = []
-        stored = nil
         activity = SyncActivity()
         guard let instance, !instance.isVisitor else {
             lane = nil
@@ -377,7 +374,6 @@ final class HealthSettings {
         lane.switches.set(enabled: false, paused: false)
         isPaused = false
         defaults.removeObject(forKey: Defaults.paused(id))
-        stored = nil
         logged(entry, from: id)
         return true
     }
@@ -398,7 +394,6 @@ final class HealthSettings {
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Defaults.prefix) { defaults.removeObject(forKey: key) }
         originStore.remove()
         history = []
-        stored = nil
         activity = SyncActivity()
         let removeAllStores = removeAllStores
         return Task {
@@ -417,17 +412,6 @@ final class HealthSettings {
         let entries = await lane.log.recent(limit: 500)
         guard self.lane === lane else { return }
         history = entries
-    }
-
-    /// What the open Rome holds from this phone: "since May 2026, 66k readings".
-    func reloadStored() async {
-        #if DEBUG
-        if isDemo { return }
-        #endif
-        guard let lane, let target = await target(lane.instanceId), target.instanceId == lane.instanceId, let origin = originStore.id() else { return }
-        let sources = (try? await target.backend.sources()) ?? []
-        guard self.lane === lane else { return }
-        stored = sources.first { $0.source == Self.sourceId && $0.origin?.id == origin }
     }
 
     // MARK: Engine
@@ -489,10 +473,10 @@ final class HealthSettings {
     }
 
     #if DEBUG
-    /// Demo data for the snapshot runner: a sync history, a status and the Rome's catalog.
+    /// Demo data for the snapshot runner: a sync history and a status.
     @ObservationIgnored private var isDemo = false
 
-    func showDemo(_ entries: [SyncLogEntry], stored: PersonalDataCatalogSource?, enabled: Bool = true, activity: SyncActivity = SyncActivity()) {
+    func showDemo(_ entries: [SyncLogEntry], enabled: Bool = true, activity: SyncActivity = SyncActivity()) {
         isDemo = true
         if instance == nil { instance = HealthInstance(id: "demo", name: "My Rome", isVisitor: false) }
         isEnabled = enabled
@@ -500,7 +484,6 @@ final class HealthSettings {
         isPaused = false
         showsMigrationNote = false
         history = entries
-        self.stored = stored
         self.activity = activity
     }
     #endif

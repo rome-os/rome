@@ -91,16 +91,6 @@
         }
       }
     },
-    "%@ readings" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 条读数"
-          }
-        }
-      }
-    },
     "%@ records" : {
       "localizations" : {
         "zh-Hans" : {
@@ -319,16 +309,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条未读"
-          }
-        }
-      }
-    },
-    ", " : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "、"
           }
         }
       }
@@ -763,6 +743,16 @@
         }
       }
     },
+    "Background" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台"
+          }
+        }
+      }
+    },
     "Battery and network" : {
       "localizations" : {
         "zh-Hans" : {
@@ -859,16 +849,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "建造 Rome"
-          }
-        }
-      }
-    },
-    "By type" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按类型"
           }
         }
       }
@@ -1189,16 +1169,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已整理上下文 · %@"
-          }
-        }
-      }
-    },
-    "Continues next time" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下次继续"
           }
         }
       }
@@ -1983,16 +1953,6 @@
         }
       }
     },
-    "How" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "方式"
-          }
-        }
-      }
-    },
     "How I slept" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2087,16 +2047,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 分钟后"
-          }
-        }
-      }
-    },
-    "In the background" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在后台"
           }
         }
       }
@@ -2197,16 +2147,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上次运行失败"
-          }
-        }
-      }
-    },
-    "Last sync" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上次同步"
           }
         }
       }
@@ -2921,16 +2861,6 @@
         }
       }
     },
-    "On your Rome %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在你的 Rome 上：%@"
-          }
-        }
-      }
-    },
     "Online" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3067,6 +2997,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开任务对话来回答"
+          }
+        }
+      }
+    },
+    "Opened Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Rome 时"
           }
         }
       }
@@ -3571,16 +3511,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "静息心率"
-          }
-        }
-      }
-    },
-    "Result" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "结果"
           }
         }
       }
@@ -4211,16 +4141,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "睡眠"
-          }
-        }
-      }
-    },
-    "Some readings not sent" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "部分读数未发送"
           }
         }
       }
@@ -5423,32 +5343,12 @@
         }
       }
     },
-    "When" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "时间"
-          }
-        }
-      }
-    },
     "When %@ arrives" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "收到 %@ 时"
-          }
-        }
-      }
-    },
-    "When you opened Rome" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开 Rome 时"
           }
         }
       }
@@ -5853,26 +5753,6 @@
         }
       }
     },
-    "since %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自 %@ 起"
-          }
-        }
-      }
-    },
-    "since %@ · %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自 %@ 起 · %@"
-          }
-        }
-      }
-    },
     "some not sent" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5895,36 +5775,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等你回复"
-          }
-        }
-      }
-    },
-    "up to %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "截至 %@"
-          }
-        }
-      }
-    },
-    "up to last night" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "截至昨晚"
-          }
-        }
-      }
-    },
-    "up to yesterday" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "截至昨天"
           }
         }
       }

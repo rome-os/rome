@@ -891,15 +891,15 @@ struct SyncRig {
 
     private func plain(_ text: String) -> String { text.replacingOccurrences(of: "\u{202F}", with: " ") }
 
-    @Test func aSyncSaysHowItCameWhatAndHowMuchNeverAValue() {
+    @Test func aSyncIsOneLineWhenHowAndHowManyNeverAValue() {
         var entry = SyncLogEntry(seq: 3, time: HealthFixtures.now, trigger: .observer, outcome: .ok)
         entry.types = [
             "stepCount": SyncTypeCount(items: 4, start: HealthFixtures.date("2026-11-08T23:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z")),
             "heartRate": SyncTypeCount(items: 3, start: HealthFixtures.date("2026-11-08T23:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z")),
         ]
-        let row = formatter.row(entry)
-        #expect(row.title == "In the background")
-        #expect(plain(row.detail) == "Steps and Heart rate · 7 readings · 7:00 AM–9:00 AM")
+        let line = formatter.line(entry)
+        #expect(plain(line.text) == "Today 6:30 PM · Background · 7 readings")
+        #expect(!line.failed)
     }
 
     @Test func eachTriggerHasItsWords() {
@@ -908,66 +908,23 @@ struct SyncRig {
             entry.history = history
             return formatter.triggerText(entry)
         }
-        #expect(words(.foreground) == "When you opened Rome")
+        #expect(words(.foreground) == "Opened Rome")
         #expect(words(.manual) == "Sync now")
         #expect(words(.observer, history: true) == "History")
     }
 
     @Test func failuresAndSkipsSayWhy() {
-        let locked = SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: .observer, outcome: .skipped, errorCode: "locked")
-        #expect(formatter.detail(locked) == "Skipped · iPhone locked")
-        let signedOut = SyncLogEntry(seq: 2, time: HealthFixtures.now, trigger: .observer, outcome: .error, errorCode: "signed_out")
-        #expect(formatter.row(signedOut).failed)
-        #expect(formatter.detail(signedOut) == "Signed out of your Rome")
+        let locked = SyncLogEntry(seq: 1, time: HealthFixtures.now.addingTimeInterval(-86_400), trigger: .observer, outcome: .skipped, errorCode: "locked")
+        #expect(plain(formatter.line(locked).text) == "Yesterday 6:30 PM · Background · Skipped · iPhone locked")
+        let signedOut = SyncLogEntry(seq: 2, time: HealthFixtures.date("2026-11-03T12:15:00Z"), trigger: .observer, outcome: .error, errorCode: "signed_out")
+        #expect(formatter.line(signedOut).failed)
+        #expect(plain(formatter.line(signedOut).text) == "Nov 3, 8:15 PM · Background · Signed out of your Rome")
+        let deleted = SyncLogEntry(seq: 3, time: HealthFixtures.now, trigger: .manual, outcome: .deleted)
+        #expect(plain(formatter.line(deleted).text) == "Today 6:30 PM · Uploaded data deleted · Sync turned off")
     }
 
-    @Test func quietSyncsAfterTheNewestAddNoRows() {
+    @Test func quietSyncsAfterTheNewestAddNoLines() {
         let entries = (1...4).map { SyncLogEntry(seq: 5 - $0, time: HealthFixtures.now.addingTimeInterval(-Double($0) * 60), trigger: .observer, outcome: .ok) }
-        #expect(formatter.days(entries).flatMap(\.rows).count == 1)
-    }
-
-    @Test func typesSayHowFarTheyHaveSynced() {
-        var entry = SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: .observer, outcome: .ok)
-        entry.types = [
-            "stepCount": SyncTypeCount(items: 2, start: HealthFixtures.date("2026-11-09T00:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z")),
-            "sleep": SyncTypeCount(items: 1, start: HealthFixtures.date("2026-11-08T15:00:00Z"), end: HealthFixtures.date("2026-11-08T23:00:00Z")),
-            "bodyMass": SyncTypeCount(items: 1, start: HealthFixtures.date("2026-11-03T00:00:00Z"), end: HealthFixtures.date("2026-11-03T00:01:00Z")),
-        ]
-        let rows = formatter.types(log: [entry], stored: nil).map { plain($0.text) }
-        #expect(rows == ["Steps · up to 9:00 AM", "Weight · up to Nov 3", "Sleep · up to last night"])
-    }
-
-    @Test func aBucketThatEndsAfterTheSyncSaysUpToTheSync() {
-        // Today's day bucket ends at midnight; the sync ran at 6:30 PM.
-        var entry = SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: .observer, outcome: .ok)
-        entry.types = ["stepCount": SyncTypeCount(items: 2, start: HealthFixtures.date("2026-11-08T16:00:00Z"), end: HealthFixtures.date("2026-11-09T16:00:00Z"))]
-        #expect(formatter.types(log: [entry], stored: nil).map { plain($0.text) } == ["Steps · up to 6:30 PM"])
-        let stored = PersonalDataCatalogSource(source: "apple_health", types: [
-            .init(type: "heartRate", pointCount: 30, earliest: "2026-11-02T16:00:00.000Z", latest: "2026-11-09T16:00:00.000Z", syncedThrough: "2026-11-09T09:00:00.000Z"),
-        ])
-        #expect(formatter.types(log: [], stored: stored).map { plain($0.text) } == ["Heart rate · up to 5:00 PM · since Nov 2026"])
-    }
-
-    @Test func typesFromBeforeADeleteAreGone() {
-        var old = SyncLogEntry(seq: 1, time: HealthFixtures.now.addingTimeInterval(-600), trigger: .observer, outcome: .ok)
-        old.types = ["stepCount": SyncTypeCount(items: 2, start: HealthFixtures.date("2026-11-09T00:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z"))]
-        let deleted = SyncLogEntry(seq: 2, time: HealthFixtures.now, trigger: .manual, outcome: .deleted)
-        #expect(formatter.types(log: [deleted, old], stored: nil).isEmpty)
-    }
-
-    @Test func manyTypesNameTwoAndCountTheRest() {
-        var entry = SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: .observer, outcome: .ok)
-        for (index, type) in ["stepCount", "heartRate", "sleep", "workouts"].enumerated() {
-            entry.types[type] = SyncTypeCount(items: 10 - index, start: HealthFixtures.date("2026-11-09T00:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z"))
-        }
-        #expect(plain(formatter.detail(entry)).hasPrefix("Steps, Heart rate +2 · "))
-    }
-
-    @Test func theRomesCopyIsSummedUp() {
-        let stored = PersonalDataCatalogSource(source: "apple_health", types: [
-            .init(type: "stepCount", pointCount: 60_000, earliest: "2026-05-10"),
-            .init(type: "sleep", pointCount: 6_000, earliest: "2026-05-11"),
-        ])
-        #expect(formatter.storedText(stored) == "since May 2026 · 66K readings")
+        #expect(formatter.lines(entries).count == 1)
     }
 }

@@ -24,6 +24,8 @@ Example: the selected row gets a highlight, not bold text. A secondary control s
 
 Elements of one kind look the same on every screen and line up the same way.
 
+Text around a card (section titles, status lines, footnotes) aligns with the card's left edge.
+
 Example: every page uses the same header row. Section titles align with the card edge. Every control floating over content (header buttons, composer, back-to-bottom) uses the same glass.
 
 ## 5. Glass looks like glass

@@ -246,7 +246,8 @@ struct SettingsScreen: View {
                     Text("Can't check for updates")
                         .romeFont(13)
                         .foregroundStyle(Palette.sub)
-                        .padding(.horizontal, 32)
+                        // At the card's edge, as all text around a card.
+                        .padding(.horizontal, 16)
                         .padding(.top, -18)
                 }
                 SettingsGroup {
