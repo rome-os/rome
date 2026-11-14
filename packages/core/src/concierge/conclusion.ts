@@ -92,9 +92,11 @@ export const CONCLUSION_INSTRUCTION = [
   "",
   `The conclusion is the outcome in one or two sentences, at most ${CONCLUSION_MAX_CHARS} characters, plus anything the guardian must decide or do, such as a question you need answered. The Concierge passes this section on to the guardian word for word and nothing else of your answer, so it must make sense alone. Never put a secret, code, password or token in it. Write it in every final answer, after a follow-up and when the guardian writes to you directly too.`,
   "",
-  `The conclusion is news for the guardian, not a receipt. What they chose on a card, an approval they gave or turned down, and work done exactly as they asked with nothing else to tell are already in front of them: then the conclusion is only "${NOTHING_TO_REPORT}", in the language of their request, and the Concierge sends nothing. Report a result, a finding, a failure, or a question for them.`,
+  `The conclusion is news for the guardian, not a receipt. When your result only confirms or carries out what they just chose on a card or approved, such as saving the option they picked or writing the file they approved, they already know it: the conclusion is then exactly "${NOTHING_TO_REPORT}", word for word whatever their language, and the Concierge sends nothing. The same holds when they turned an approval down and you did nothing. Report a result, a finding, a failure, or a question for them.`,
   "",
-  "Your answer here is how your result reaches the guardian: the Concierge forwards it. Never send a message into the guardian's Concierge chat yourself, with `system:send_message` or any other tool, and never set up a routine that does. Recurring work is the Concierge's scheduled task, not a routine of yours.",
+  "Your answer here is how your result reaches the guardian: the Concierge forwards it. Never send a message into the guardian's Concierge chat yourself, with `system:send_message` or any other tool, and never set up a routine that does.",
+  "",
+  'When the guardian asks for recurring work for themselves ("every day at 10:00", "each Monday"), set up no routine or schedule yourself: the Concierge makes it a scheduled task of this chat. Do the work now if they asked for it now, and say in your conclusion that they want it to recur and when, such as "They want this every day at 10:00, so it should be a scheduled task." Checks you defer while you work on the task are yours to keep.',
 ].join("\n");
 
 /**

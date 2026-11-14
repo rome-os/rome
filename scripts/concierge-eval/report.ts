@@ -9,6 +9,8 @@ export interface Checks {
   decisionAsked?: boolean;
   /** Each expected result reached the owner in a Concierge message. */
   resultReached?: boolean;
+  /** Recurring work became a Concierge schedule, with no routine of a task chat's own. */
+  scheduled?: boolean;
   /** No owner message went unheard, and every task ended as the scenario expects. */
   nothingDropped: boolean;
   /** Why a check failed. */
@@ -45,7 +47,7 @@ interface Metric {
 }
 
 const passed = (c: Checks) =>
-  [c.decisionAsked, c.resultReached, c.nothingDropped].filter((v) => v !== undefined);
+  [c.decisionAsked, c.resultReached, c.scheduled, c.nothingDropped].filter((v) => v !== undefined);
 
 export const METRICS: Metric[] = [
   { name: "Owner msgs", value: (s) => s.metrics.ownerMessages, total: "sum" },
@@ -181,8 +183,19 @@ export function compareMarkdown(
   a: { label: string; rounds: RoundResult[] },
   b: { label: string; rounds: RoundResult[] },
 ): string {
-  const aggA = aggregate(a.rounds);
-  const aggB = aggregate(b.rounds);
+  // Only the scenarios both labels played count, so a new scenario never
+  // shifts the totals.
+  const idsOf = (rs: RoundResult[]) => new Set(rs.flatMap((r) => r.scenarios.map((s) => s.id)));
+  const idsA = idsOf(a.rounds);
+  const idsB = idsOf(b.rounds);
+  const common = (rs: RoundResult[]) =>
+    rs.map((r) => ({
+      ...r,
+      scenarios: r.scenarios.filter((s) => idsA.has(s.id) && idsB.has(s.id)),
+    }));
+  const left = [...new Set([...idsA, ...idsB])].filter((id) => !(idsA.has(id) && idsB.has(id)));
+  const aggA = aggregate(common(a.rounds));
+  const aggB = aggregate(common(b.rounds));
   const delta = (x: Spread, y: Spread) => {
     const d = round2(y.mean - x.mean);
     return d > 0 ? `+${d}` : `${d}`;
@@ -195,6 +208,7 @@ export function compareMarkdown(
   const warnings: string[] = [];
   const versions = new Set([...a.rounds, ...b.rounds].map((r) => r.scenariosVersion));
   if (versions.size > 1) warnings.push("The labels ran different scenario versions.");
+  if (left.length) warnings.push(`Left out, since only one label played them: ${left.join(", ")}.`);
   const models = (rs: RoundResult[]) => [...new Set(rs.flatMap((r) => r.models))].sort().join(", ");
   if (models(a.rounds) !== models(b.rounds))
     warnings.push(`Models differ: ${models(a.rounds)} vs ${models(b.rounds)}.`);

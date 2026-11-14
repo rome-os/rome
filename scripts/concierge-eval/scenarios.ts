@@ -3,7 +3,7 @@
 // Change a scenario and earlier labels stop being comparable: bump
 // SCENARIOS_VERSION so a comparison says so. docs/concierge-eval.md
 
-export const SCENARIOS_VERSION = 1;
+export const SCENARIOS_VERSION = 2;
 
 export interface Step {
   text: string;
@@ -31,10 +31,26 @@ export interface Scenario {
     waitsForExpiry?: boolean;
     /** A file under the default project that must exist, or must not, when the round ends. */
     file?: { name: string; exists: boolean };
+    /**
+     * The work recurs: one of the chat's tasks has a Concierge schedule, and
+     * no task chat set up a routine of its own (a check it defers is fine).
+     */
+    schedule?: boolean;
   };
 }
 
 export const SCENARIOS: Scenario[] = [
+  {
+    id: "daily",
+    about: "Recurring work asked of a task chat becomes a Concierge scheduled task",
+    steps: [
+      { text: "Make it a task: write me a one-line motivational quote." },
+      { text: "Do this every day at 10:00.", replyToResult: true },
+    ],
+    cards: "first",
+    approvals: "approve",
+    expect: { endReason: "done", schedule: true },
+  },
   {
     id: "ask-one",
     about: "A small task whose only job is one question",

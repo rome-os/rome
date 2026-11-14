@@ -262,9 +262,22 @@ describe("the Concierge agent", () => {
       concierge.systemPromptPrefix
         .split("\n")
         .find((line) => line.startsWith("- A turn that ended `by=concierge`")) ?? "";
-    expect(finished).toContain("only repeats what the guardian chose on a card");
+    expect(finished).toContain(
+      "only repeats, confirms or carries out what the guardian chose on a card",
+    );
     expect(finished).toContain("says there is nothing to report");
     expect(finished).toContain("send nothing");
+  });
+
+  it("schedules recurring work itself, never through a task chat", () => {
+    const rule =
+      concierge.systemPromptPrefix
+        .split("\n")
+        .find((line) => line.startsWith("- Recurring work for the guardian")) ?? "";
+    expect(rule).toContain(
+      "make that task a scheduled task yourself with `task_upsert` (`schedule`)",
+    );
+    expect(rule).toContain("never ask a task chat to set it up");
   });
 
   it("mentions a task that ended for no response once, in the digest", () => {

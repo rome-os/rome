@@ -104,6 +104,7 @@ interface ChatRows {
   models: { model: string }[];
   linked: { message_key: string }[];
   taskChats: { session_id: string }[];
+  chatId: string;
 }
 
 function readChat(chatId: string): ChatRows {
@@ -142,6 +143,7 @@ function readChat(chatId: string): ChatRows {
     models: models as unknown as { model: string }[],
     linked: linked as unknown as { message_key: string }[],
     taskChats: taskChats as unknown as { session_id: string }[],
+    chatId,
   };
 }
 
@@ -162,6 +164,31 @@ function decidingTaskChats(sessionIds: string[]): Set<string> {
     },
   ]);
   return new Set([...(questions ?? []), ...(approvals ?? [])].map((r) => r.id));
+}
+
+/** The chat a scenario's rows were read from. */
+const chatOf = (rows: ChatRows) => rows.chatId;
+
+/**
+ * The Concierge schedules of chat `chatId`'s tasks, and the routines its task
+ * chats set up themselves, leaving out the checks they defer.
+ */
+function schedulesOf(chatId: string): { scheduled: number; taskChatRoutines: string[] } {
+  const [scheduled, own] = stack.query<{ name: string }>([
+    {
+      sql: `SELECT r.name FROM routines r JOIN concierge_tasks t
+              ON r.key = 'concierge-task-schedule:' || t.id
+            WHERE t.chat_id = ?`,
+      params: [chatId],
+    },
+    {
+      sql: `SELECT r.name || ' (' || r.action_name || ')' AS name FROM routines r
+            JOIN concierge_tasks t ON r.chat_id = t.session_id
+            WHERE t.chat_id = ? AND r.action_name != 'resume_session'`,
+      params: [chatId],
+    },
+  ]);
+  return { scheduled: (scheduled ?? []).length, taskChatRoutines: (own ?? []).map((r) => r.name) };
 }
 
 function checksFor(
@@ -210,7 +237,11 @@ function checksFor(
     }
   }
   const want = scenario.expect.endReason;
-  const wrong = tasks.filter((t) => t.status !== "ended" || t.endReason !== want);
+  // A scheduled task waits for its next run, as later.
+  const settled = (t: { status: string; endReason: string | null }) =>
+    (t.status === "ended" && t.endReason === want) ||
+    (scenario.expect.schedule === true && t.status === "later");
+  const wrong = tasks.filter((t) => !settled(t));
   if (want === "no_response" && !tasks.some((t) => t.endReason === "no_response")) {
     checks.nothingDropped = false;
     notes.push("no task ended for no response");
@@ -219,6 +250,12 @@ function checksFor(
     notes.push(
       `tasks not done: ${wrong.map((t) => `${t.status}/${t.endReason ?? "-"}`).join(", ")}`,
     );
+  }
+  if (scenario.expect.schedule) {
+    const { scheduled, taskChatRoutines } = schedulesOf(chatOf(rows));
+    checks.scheduled = scheduled > 0 && taskChatRoutines.length === 0;
+    if (scheduled === 0) notes.push("no task of this chat has a schedule");
+    for (const r of taskChatRoutines) notes.push(`a task chat set up routine ${r}`);
   }
   const file = scenario.expect.file;
   if (file && fileExists(file.name) !== file.exists) {
