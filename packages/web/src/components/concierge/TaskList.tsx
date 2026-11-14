@@ -373,6 +373,7 @@ function RoutineRow({ item, now }: { item: TaskListRoutineItem; now: number }) {
         !item.enabled && t("concierge.taskList.routine.paused"),
         item.nextRunAt !== null && formatTaskTime(item.nextRunAt, now, i18n.language),
         failed && t("concierge.taskList.routine.lastFailed"),
+        item.fromTask && t("concierge.taskList.routine.fromTask", { title: item.fromTask.title }),
       )}
       tone={failed ? "destructive" : undefined}
       dimmed={!item.enabled}

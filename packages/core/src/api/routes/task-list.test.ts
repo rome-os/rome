@@ -55,6 +55,8 @@ describe("/chats/:chatId/tasks", () => {
   let taskSource: ConciergeTasks | null;
   /** The `since` each read of the chat's task chat parts asked from. */
   let asked: Array<number | undefined>;
+  /** Who listens for routine changes. */
+  const routineChanges = new Set<(routineId: string) => void>();
   /** Who listens for messages said in a chat. */
   const inserted = new Set<
     (message: { sessionId: string; role: string; content: string }) => void
@@ -84,7 +86,12 @@ describe("/chats/:chatId/tasks", () => {
         return 0;
       },
     } as unknown as ConciergeService;
-    const routineEngine = { onChange: () => () => {} } as unknown as ApiDeps["routineEngine"];
+    const routineEngine = {
+      onChange: (listener: (routineId: string) => void) => {
+        routineChanges.add(listener);
+        return () => routineChanges.delete(listener);
+      },
+    } as unknown as ApiDeps["routineEngine"];
     return new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
       "/",
       chatTaskListRoutes({
@@ -252,6 +259,51 @@ describe("/chats/:chatId/tasks", () => {
     expect((await app().request("/chats/concierge/tasks", ann)).status).toBe(404);
     expect((await app().request("/chats/concierge/tasks", appUser)).status).toBe(401);
     expect((await app().request("/chats/concierge/tasks")).status).toBe(401);
+  });
+
+  it("shows a routine made in one of the chat's task chats, naming its task, and none of another owner's", async () => {
+    const chats = new ChatsWebChatRepository(testDb.db);
+    const taskChat = async (id: string, ownerKey: string) =>
+      chats.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:main",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await taskChat("rome-releases", "guardian");
+    await taskChat("ann-task", "visitor:acct-ann");
+    // The guardian's task, set up a routine in its chat and then ended.
+    const [releases] = await tasks.upsertMany([
+      { title: "Rome releases", sessionId: "rome-releases", state: "done" },
+    ]);
+    // Ann's task, whose chat made a routine of its own.
+    await tasks.upsertMany([{ title: "Ann's digest", sessionId: "ann-task", chatId: "ann-main" }]);
+    await summary("rome-releases", "Summarize Rome releases");
+    await summary("ann-task", "Ann's routine");
+    await summary("concierge", "Daily summary");
+
+    const work = await read("concierge");
+    expect(kindsIn(work).on_its_own).toEqual([
+      "routine Daily summary",
+      "routine Summarize Rome releases",
+    ]);
+    const items = work.groups.find((group) => group.key === "on_its_own")!.items;
+    expect(
+      items.find((item) => item.kind === "routine" && item.name === "Summarize Rome releases"),
+    ).toMatchObject({
+      fromTask: { id: releases!.id, title: "Rome releases" },
+    });
+    expect(
+      items.find((item) => item.kind === "routine" && item.name === "Daily summary"),
+    ).not.toHaveProperty("fromTask");
+    // Ann sees her own task chat's routine, and never the guardian's.
+    expect(kindsIn(await read("ann-main", ann)).on_its_own).toEqual(["routine Ann's routine"]);
   });
 
   it("shows an empty tab with no groups", async () => {
@@ -451,6 +503,32 @@ describe("/chats/:chatId/tasks", () => {
     say("ann-main", '[{"type":"task_chat","chatId":"c1"}]');
     say("concierge", '[{"type":"text","content":"hi"}]');
     say("concierge", '[{"type":"task_chat","chatId":"c1"}]');
+    let text = "";
+    while (!text.includes("tasks_changed")) {
+      text += new TextDecoder().decode((await reader.read()).value);
+    }
+    expect(text).toContain('"chatId":"concierge"');
+    await reader.cancel();
+  });
+
+  it("tells the chat's list to read again when a routine of one of its task chats changes", async () => {
+    await new ChatsWebChatRepository(testDb.db).createSession(
+      "rome-releases",
+      "Rome releases",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:main",
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await tasks.upsertMany([{ title: "Rome releases", sessionId: "rome-releases" }]);
+    const made = await summary("rome-releases", "Summarize Rome releases");
+    const stream = await app().request("/chats/concierge/tasks/events", guardian);
+    const reader = stream.body!.getReader();
+    for (const listener of routineChanges) listener(made);
     let text = "";
     while (!text.includes("tasks_changed")) {
       text += new TextDecoder().decode((await reader.read()).value);

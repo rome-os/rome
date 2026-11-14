@@ -133,6 +133,17 @@ function fixture(): TaskListParts {
         nextRunAt: now + 6 * HOUR,
         lastRun: { status: "error", firedAt: now - 18 * HOUR },
       },
+      {
+        // Made by a task chat's agent before scheduled tasks; its task has ended.
+        kind: "routine",
+        id: "routine-rome-releases",
+        name: "Summarize Rome releases",
+        trigger: { type: "schedule", localTime: "10:00", rrule: "FREQ=DAILY", date: null },
+        enabled: true,
+        nextRunAt: now + 19 * HOUR,
+        lastRun: { status: "success", firedAt: now - 5 * HOUR },
+        fromTask: { id: "task-rome-releases", title: "Rome releases" },
+      },
     ],
   };
 }

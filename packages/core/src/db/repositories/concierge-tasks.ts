@@ -500,6 +500,27 @@ export class ConciergeTasksRepository {
     return rows.filter((task) => task.conciergeChat.id === conciergeChatId);
   }
 
+  /**
+   * The task chats of `owner`'s Concierge chat `conciergeChatId`, each with
+   * its task, ended or archived included. A row belongs to the chat as the
+   * panel reads it, so a row whose topic chat is gone is its main chat's.
+   */
+  async taskChatsOf(
+    conciergeChatId: string,
+    owner: string,
+  ): Promise<Array<{ chatId: string; task: { id: string; title: string } }>> {
+    const ofChat =
+      conciergeChatId === mainChatIdOf(owner)
+        ? eq(conciergeTasks.ownerKey, owner)
+        : and(eq(conciergeTasks.chatId, conciergeChatId), eq(conciergeTasks.ownerKey, owner));
+    const rows = await this.withChat(and(ofChat, isNotNull(conciergeTasks.sessionId)));
+    return rows.flatMap((task) =>
+      task.owner === owner && task.conciergeChat.id === conciergeChatId && task.row.sessionId
+        ? [{ chatId: task.row.sessionId, task: { id: task.row.id, title: task.row.title } }]
+        : [],
+    );
+  }
+
   /** The Concierge's own view: not archived, finished rows only on request. */
   async listForAgent(includeDone: boolean): Promise<ConciergeTaskWithChat[]> {
     return this.withChat(

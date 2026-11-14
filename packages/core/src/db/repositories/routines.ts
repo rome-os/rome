@@ -150,6 +150,15 @@ export class RoutinesRepository {
     return this.db.select().from(routines).where(eq(routines.chatId, chatId));
   }
 
+  /** The routines that work for any of chats `chatIds`, as stored rows, in one read. */
+  async findByChats(chatIds: readonly string[]) {
+    if (chatIds.length === 0) return [];
+    return this.db
+      .select()
+      .from(routines)
+      .where(inArray(routines.chatId, [...chatIds]));
+  }
+
   /** Look up a routine by its caller-assigned `key`. Used by create_routine to
    * reject a duplicate key before insert (the column's UNIQUE constraint is the
    * authoritative backstop). Returns null when the key is unused. */
