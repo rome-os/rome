@@ -75,7 +75,7 @@ jobs:
             -project Rome.xcodeproj \
             -scheme Rome \
             -configuration Release \
-            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath /tmp/rome-release \
             -skipPackagePluginValidation \
             -skipMacroValidation \
