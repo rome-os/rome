@@ -204,6 +204,44 @@ describe("voice input socket", () => {
     ]);
   });
 
+  it("stops after a stretch with nothing heard and says why, keeping the text", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) =>
+      text === ""
+        ? [{ tokens: [], finished: true }]
+        : [{ tokens: [{ text: "hello", is_final: true }] }];
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      quietLimitMs: 100,
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "hello", pending: "" },
+      { type: "error", reason: "no-speech" },
+    ]);
+  });
+
+  it("keeps listening while words keep coming", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, 400, undefined, {
+      quietLimitMs: 150,
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    let word = 0;
+    const speaking = setInterval(
+      () => fake.say({ tokens: [{ text: `w${word++} `, is_final: false }] }),
+      50,
+    );
+    await closed;
+    clearInterval(speaking);
+
+    expect(messages.at(-1)).toEqual({ type: "error", reason: "time-limit" });
+  });
+
   it("closes a dictation whose provider never finishes after the length limit", async () => {
     const fake = await fakeSoniox();
     fake.onText = () => [];
