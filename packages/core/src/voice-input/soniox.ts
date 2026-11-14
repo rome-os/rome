@@ -99,10 +99,15 @@ function openSonioxStream(
 
   ws.on("message", (data, isBinary) => {
     if (isBinary || done) return;
-    let response: SonioxResponse;
+    let parsed: unknown;
     try {
-      response = JSON.parse(data.toString()) as SonioxResponse;
+      parsed = JSON.parse(data.toString());
     } catch {
+      return;
+    }
+    const response = readResponse(parsed);
+    if (!response) {
+      stop(() => listener.onFailure("unavailable", "malformed response"));
       return;
     }
     if (response.error_code !== undefined) {
@@ -125,8 +130,10 @@ function openSonioxStream(
     }
     // Each response replaces the unsettled tail, so one with no tokens clears
     // whatever was still pending.
-    if (response.tokens && (settled || pending || shown)) listener.onText(settled, pending);
-    shown = pending !== "";
+    if (response.tokens && (settled || pending || shown)) {
+      listener.onText(settled, pending);
+      shown = pending !== "";
+    }
     if (response.finished) stop(() => listener.onEnd());
   });
 
@@ -164,4 +171,23 @@ function openSonioxStream(
       stop(() => {});
     },
   };
+}
+
+// A provider message is read before any field of it is used: a malformed one
+// stops the stream rather than throwing out of the socket's handler.
+function readResponse(value: unknown): SonioxResponse | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const response = value as Record<string, unknown>;
+  if (response.error_code !== undefined && typeof response.error_code !== "number") return null;
+  if (response.error_type !== undefined && typeof response.error_type !== "string") return null;
+  if (response.error_message !== undefined && typeof response.error_message !== "string")
+    return null;
+  if (response.tokens !== undefined) {
+    if (!Array.isArray(response.tokens)) return null;
+    for (const token of response.tokens) {
+      if (typeof token !== "object" || token === null || typeof token.text !== "string")
+        return null;
+    }
+  }
+  return response as SonioxResponse;
 }
