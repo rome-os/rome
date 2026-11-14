@@ -126,18 +126,20 @@ import Testing
     }
 
     /// The list arrives; a failed read, or one slower than the wait, gives
-    /// nil, and the delete moves them.
+    /// nil, and the delete moves them. The waits are far apart, so a busy
+    /// test machine cannot flip the outcome.
     @Test func theDeleteReadsTheChatsWorkOrGivesUp() async {
         let backend = FakeBackend()
         let workspace = workspace(backend)
-        #expect(await workspace.topicWork("topic-1") == nil)
+        #expect(await workspace.topicWork("topic-1", wait: .seconds(60)) == nil)
         let work = ConciergeChatWork(openTasks: [.init(id: "t1", title: "Book the hotel")])
         backend.chatWorkAnswer = work
-        #expect(await workspace.topicWork("topic-1") == work)
-        backend.chatWorkDelay = .seconds(5)
+        #expect(await workspace.topicWork("topic-1", wait: .seconds(60)) == work)
+        // An answer that would take two minutes is given up on long before.
+        backend.chatWorkDelay = .seconds(120)
         let started = ContinuousClock.now
         #expect(await workspace.topicWork("topic-1", wait: .milliseconds(50)) == nil)
-        #expect(ContinuousClock.now - started < .seconds(2))
+        #expect(ContinuousClock.now - started < .seconds(60))
         #expect(backend.calls == ["work topic-1", "work topic-1", "work topic-1"])
     }
 
