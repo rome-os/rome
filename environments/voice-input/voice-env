@@ -5,6 +5,8 @@
 #   voice-env version
 #   voice-env browser --mic <wav> [--permission unset|granted|refused] [--lang en|zh-CN]
 #   voice-env browser stop
+#   voice-env desktop --mic <wav> [--permission granted] [--lang en|zh-CN]
+#   voice-env desktop stop
 #   voice-env transcriber real
 #   voice-env transcriber stand-in [--text <text>] [--first-ms <n>] [--token-ms <n>]
 #   voice-env transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]
@@ -59,7 +61,7 @@ cmd_version() {
     in_use="$(cloud_call GET /v1/transcription/provider 2>/dev/null || echo null)"
   fi
   node -e '
-    const [build, verifier, transcriber, model, dashboard, cloud, signIn, gate, inUse] = process.argv.slice(1);
+    const [build, verifier, transcriber, model, dashboard, cloud, signIn, gate, inUse, desktop] = process.argv.slice(1);
     const b = JSON.parse(build);
     console.log(JSON.stringify({
       product: b.product,
@@ -73,11 +75,14 @@ cmd_version() {
       signIn,
       gate,
       cloud: cloud ? JSON.parse(cloud) : null,
+      // The desktop app built from the merged tree: its commit, Electron and the platform it runs on.
+      desktop: desktop ? JSON.parse(desktop) : null,
       dashboard,
       builtAt: b.builtAt,
     }, null, 2));' \
     "$(cat "$BUILD_FILE")" "$(tree_json environments/voice-input/verifier)" "$script" "$model" "$DASHBOARD" \
-    "$(cat "$CLOUD_BUILD_FILE" 2>/dev/null || true)" "$(state signIn || echo cloud)" "$(state cloudGate || echo on)" "$in_use"
+    "$(cat "$CLOUD_BUILD_FILE" 2>/dev/null || true)" "$(state signIn || echo cloud)" "$(state cloudGate || echo on)" "$in_use" \
+    "$(cat "$DESKTOP_BUILD_FILE" 2>/dev/null || true)"
 }
 
 cmd_browser() {
@@ -98,6 +103,7 @@ cmd_browser() {
   done
   [ -n "$mic" ] || die "usage: voice-env browser --mic <wav> [--permission unset|granted|refused] [--lang en|zh-CN]"
   # One browser at a time: a new one replaces the last, keeping the proxy.
+  stop_desktop
   stop_chrome
   out="$(node -e 'process.stdout.write(JSON.stringify({ password: process.argv[1], cookies: JSON.parse(process.argv[2] || "[]") }))' \
     "$(state guardianPassword)" "$(state cookies || true)" |
@@ -112,6 +118,57 @@ cmd_browser() {
   set_state "{\"browser\":{\"pid\":$(json pid <<<"$out"),\"proxyPid\":${proxy_pid:-null}},\"cookies\":$(json cookies <<<"$out")}"
   # The session cookie stays in the state file, not on stdout.
   node -e 'const o = JSON.parse(process.argv[1]); delete o.cookies; console.log(JSON.stringify(o, null, 2))' "$out"
+}
+
+# The desktop app in its container, signed in, with a recording as its
+# microphone. It takes the debugging and proxy ports Chrome uses, so it
+# replaces any browser, and `network cut` works on it the same way.
+cmd_desktop() {
+  require_up
+  if [ "${1:-}" = stop ]; then
+    stop_desktop
+    echo '{"stopped":true}'
+    return
+  fi
+  local usage="usage: voice-env desktop --mic <wav> [--permission granted] [--lang en|zh-CN]"
+  local mic="" permission=granted lang=en out tag
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --mic) mic="${2:?--mic needs a wav file}" && shift 2 ;;
+      --permission) permission="${2:?}" && shift 2 ;;
+      --lang) lang="${2:?}" && shift 2 ;;
+      *) die "$usage" ;;
+    esac
+  done
+  [ -n "$mic" ] && [ -f "$mic" ] || die "$usage"
+  # On macOS, the system settings hold the microphone permission, before the
+  # app's own. Linux has no such setting, and Electron does not honor the
+  # debugging protocol's permission override, so only granted exists here.
+  [ "$permission" = granted ] ||
+    die "the desktop app on Linux has only the granted microphone permission. Unset and refused are macOS system settings; check them by hand."
+  case "$lang" in en) tag=en-US ;; zh-CN) tag=zh-CN ;; *) die "$usage" ;; esac
+  [ -f "$DESKTOP_BUILD_FILE" ] && [ -e "$DESKTOP_TREE/.git" ] ||
+    die "the desktop app is not built. Run env.sh up."
+  stop_browser
+  # --init: xvfb-run waits for a signal from Xvfb that never comes when it is process 1.
+  docker run -d --init --name "$DESKTOP" --memory 3g --network "$NETWORK" \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -p "127.0.0.1:$CDP_PORT:$CDP_PORT" -p "127.0.0.1:$PROXY_PORT:$PROXY_PORT" \
+    -e "ROME_HOST=$ROME" -e "PROXY_PORT=$PROXY_PORT" -e "CDP_PORT=$CDP_PORT" -e "LANG_TAG=$tag" \
+    -e "TREE=$DESKTOP_TREE" -v "$DESKTOP_TREE:$DESKTOP_TREE:ro" \
+    -v "$ENV_DIR/lib:/env-lib:ro" -e "MIC=$(realpath "$mic")" -v "$(realpath "$mic"):$(realpath "$mic"):ro" \
+    "$DESKTOP_IMAGE" bash /env-lib/desktop-run.sh >/dev/null
+  out="$(node -e 'process.stdout.write(JSON.stringify({ password: process.argv[1], cookies: JSON.parse(process.argv[2] || "[]") }))' \
+    "$(state guardianPassword)" "$(state cookies || true)" |
+    node "$ENV_DIR/lib/desktop.mjs" --cdp-port "$CDP_PORT" --dashboard "$DASHBOARD" \
+      --user "$(state guardianUser)" --lang "$tag")" ||
+    die "the desktop app did not come up. Inspect: docker logs $DESKTOP"
+  set_state "{\"cookies\":$(json cookies <<<"$out")}"
+  node -e '
+    const o = JSON.parse(process.argv[1]); delete o.cookies;
+    o.mic = process.argv[2]; o.proxy = "http://127.0.0.1:" + process.argv[3];
+    o.desktop = JSON.parse(process.argv[4]);
+    console.log(JSON.stringify(o, null, 2))' "$out" "$(realpath "$mic")" "$PROXY_PORT" "$(cat "$DESKTOP_BUILD_FILE")"
 }
 
 cmd_transcriber() {
@@ -345,6 +402,7 @@ cmd_capture() {
 case "${1:-}" in
   version) cmd_version ;;
   browser) shift && cmd_browser "$@" ;;
+  desktop) shift && cmd_desktop "$@" ;;
   transcriber) shift && cmd_transcriber "$@" ;;
   cloud) shift && cmd_cloud "$@" ;;
   gate) shift && cmd_gate "$@" ;;
@@ -354,5 +412,5 @@ case "${1:-}" in
   messages) shift && cmd_messages "$@" ;;
   audio-scan) cmd_audio_scan ;;
   capture) shift && cmd_capture "$@" ;;
-  *) die "usage: voice-env version | browser | transcriber | cloud | gate | logs | network | chats | messages | audio-scan | capture (see README.md)" ;;
+  *) die "usage: voice-env version | browser | desktop | transcriber | cloud | gate | logs | network | chats | messages | audio-scan | capture (see README.md)" ;;
 esac

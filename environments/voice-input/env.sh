@@ -71,6 +71,8 @@ API="http://127.0.0.1:4141/api"
 
 # shellcheck source=lib/cloud.sh
 . "$ENV_DIR/lib/cloud.sh"
+# shellcheck source=lib/desktop.sh
+. "$ENV_DIR/lib/desktop.sh"
 
 log() { printf 'env/%s: %s\n' "$NAME" "$*" >&2; }
 die() {
@@ -192,6 +194,7 @@ build_rome_image() {
       .docker/rome-runtime-workspace >/dev/null
   )
   git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
+  build_desktop_shell "$merged"
   umask 077
 
   printf '{"product":{"ref":"%s","commit":"%s"},"environment":{"commit":"%s","dirty":%s},"merged":"%s","builtAt":"%s"}\n' \
@@ -420,9 +423,12 @@ stop_chrome() {
 
 stop_browser() {
   stop_chrome
+  stop_desktop
   local pid
   pid="$(state browser.proxyPid || true)"
   [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
+  # A proxy the state file lost track of would hold the port the desktop app needs.
+  pkill -f "lib/proxy.mjs --port $PROXY_PORT\$" 2>/dev/null || true
   [ ! -f "$STATE_FILE" ] || set_state '{"browser":null}'
 }
 

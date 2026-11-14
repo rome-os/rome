@@ -26,6 +26,7 @@ environments/voice-input/env.sh down              # remove everything up created
 | `rome-env-voice-input-cloud-pg` | Rome Cloud's Postgres | |
 | `rome-env-voice-input-transcriber` | The stand-in transcriber | Rome: `ws://transcriber:8790/transcribe-websocket`; control: `http://127.0.0.1:4781` |
 | `rome-env-voice-input-provider-route` | The route from Rome to real Soniox, which `transcriber route cut` breaks | Rome: `stt-rt.soniox.com:443`, passed through to Soniox; control: `http://127.0.0.1:4785` |
+| `rome-env-voice-input-desktop` | The Rome desktop app, while `voice-env desktop` runs it | debugging: `http://127.0.0.1:4784`; proxy: `http://127.0.0.1:4783` (the same ports as Chrome) |
 | `rome-env-voice-input-capture` | tcpdump in Rome's network namespace, only while a capture runs | |
 
 State, including the guardian's password and session cookie, is in `~/.rome-environments/voice-input/run/` (mode 600). One checkout owns the environment at a time; `ROME_ENV_TAKE_OVER=1` moves it.
@@ -46,6 +47,8 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 | `version` | The product ref and commit, the environment's and the verifier's commits, Rome Cloud's ref and commit (`cloud`), how Rome signs in (`signIn`: `cloud` or `own`), the forced gate (`gate`), the transcriber the environment set up (`soniox` or `stand-in` with its script), `transcriberInUse` (Rome Cloud's answer to `GET /v1/transcription/provider`: the provider, host and model a session gets now; null when Rome is signed out), the model, the dashboard address |
 | `browser --mic <wav> [--permission unset\|granted\|refused] [--lang en\|zh-CN]` | Starts Chrome and prints `cdp`, the address to connect to: `chromium.connectOverCDP(cdp)`, then use `contexts()[0].pages()[0]`, already on the dashboard and signed in as the guardian. A new `browser` replaces the last one. |
 | `browser stop` | Stops Chrome and the proxy |
+| `desktop --mic <wav> [--permission granted] [--lang en\|zh-CN]` | Starts the desktop app and prints `cdp`, as `browser` does: its window is on the dashboard, signed in as the guardian. Also prints `bridgeMicrophone` (whether the app tells the dashboard it gives it the microphone) and `desktop` (the commit, Electron's version and the platform, `linux`). It replaces any browser, and a browser replaces it. Only `granted` exists; see "The desktop app". |
+| `desktop stop` | Stops the desktop app and its proxy |
 | `transcriber stand-in [--text <t>] [--first-ms <n>] [--token-ms <n>]` | The stand-in answers each session with that text, the first token `first-ms` after the first audio and one token every `token-ms` after that |
 | `transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]` | The stand-in answers each session with a Soniox error message `after-ms` after the first audio, then closes |
 | `transcriber real` | Real Soniox: restarts Rome Cloud with `SONIOX_API_KEY` and Soniox's addresses. Rome is untouched. |
@@ -65,6 +68,14 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 | `messages --chat <id>` | The chat's stored messages: role, sender, text, attachments, `inputState`, time |
 | `audio-scan` | Searches the instance for audio and lists each finding with its reason |
 | `capture start` / `capture stop` | Records the browser's and the server's outbound requests; `stop` prints the record and lists in `audio` each request that carried audio and where it went |
+
+### The desktop app
+
+`env.sh up` builds the desktop app (`packages/desktop`) from the same merged tree as the Rome image, unpackaged, into `~/.rome-environments/voice-input/desktop-tree`. `voice-env desktop` runs it on Linux in a container on the environment's network, on an X server with no screen. The app opens the environment's Rome through its own `ROME_DESKTOP_DASHBOARD_URL` override, which a packaged app never reads, at `http://127.0.0.1:4780` as Chrome does: inside the container that address forwards to Rome. The recording plays as the microphone through the same Chromium switches as Chrome's, and every request goes through the environment's proxy, so `network cut` and capture work the same way.
+
+The microphone permission exists here only as granted. On macOS the system settings hold it, ahead of the app's own handler; Linux has no such setting, and Electron does not honor the debugging protocol's permission override (the page's permission query changes, the microphone still opens). Unset and refused are checked by hand on a Mac.
+
+The dashboard's language follows the guardian's saved language once one is saved, in the app as in Chrome; `--lang` sets the language the app reports, which decides only while none is saved.
 
 ### The route to real Soniox
 
