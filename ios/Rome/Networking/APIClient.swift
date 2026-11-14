@@ -251,6 +251,7 @@ final class APIClient: Sendable {
             request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
         }
         request.setValue(Self.originString(origin), forHTTPHeaderField: "Origin")
+        DevAccess.stamp(&request)
     }
 
     /// The live-events upgrade header that marks the phone app's socket.
