@@ -27,11 +27,14 @@ ASSEMBLYAI_API_KEY=...
 ## Running it
 
 ```bash
-environments/voice-input/try/run.sh start   # prints https://devbox.tail28287.ts.net/voice-try
-environments/voice-input/try/run.sh stop
+environments/voice-input/try/public.sh up         # https://voice-try.romeos.dev and https://voice-input.romeos.dev
+environments/voice-input/try/public.sh password   # the guardian's password for voice-input.romeos.dev
+environments/voice-input/try/public.sh down
 ```
 
-`start` runs the server as the user service `voice-try` on 127.0.0.1:4790 and mounts it on the tailnet at `/voice-try`. `VOICE_TRY_PORT` changes the port.
+Both hostnames go through the devbox's Cloudflare Tunnel and sit behind its Cloudflare Access app for `*.romeos.dev`, so only the allowed identity reaches them. `up` runs three containers: the try page, a Rome of its own built from the environment's image and transcribing with real Soniox, and an edge Caddy that Traefik routes `voice-try.rome.localhost` and `voice-input.rome.localhost` to. That Rome is separate from the environment's, so trying voice input never disturbs a verifier run, and `env.sh reset` never wipes it. Its guardian is `guardian`, with a password `up` generates once and keeps in `~/.rome-environments/voice-input/public/` (mode 600).
+
+The server also runs on its own: `node environments/voice-input/try/server.mjs [--port 4790] [--host 127.0.0.1]`.
 
 ## What it does with audio
 

@@ -18,6 +18,8 @@ const { WebSocketServer } = require("ws");
 
 const portArg = process.argv.indexOf("--port");
 const PORT = Number(portArg > 0 ? process.argv[portArg + 1] : 4790);
+const hostArg = process.argv.indexOf("--host");
+const HOST = hostArg > 0 ? process.argv[hostArg + 1] : "127.0.0.1";
 const ENV_FILE = process.env.VOICE_ENV_FILE ?? `${homedir()}/.config/rome/voice.env`;
 const PAGE = new URL("./index.html", import.meta.url);
 
@@ -95,6 +97,6 @@ wss.on("connection", (browser) => {
   });
 });
 
-server.listen(PORT, "127.0.0.1", () =>
-  console.log(`voice try page on http://127.0.0.1:${PORT}, keys from ${ENV_FILE}`),
+server.listen(PORT, HOST, () =>
+  console.log(`voice try page on http://${HOST}:${PORT}, keys from ${ENV_FILE}`),
 );
