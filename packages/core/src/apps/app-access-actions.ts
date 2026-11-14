@@ -4,7 +4,7 @@
 import type { PreviewPayload } from "@rome-os/app-runtime";
 import type { Permissions } from "../access/permissions.js";
 import type { DrizzleDb } from "../db/index.js";
-import { actionExecutionContext } from "./actions/context.js";
+import { askedByGuardian } from "./actions/guardian-turn.js";
 import type { ActionRegistry } from "./actions/types.js";
 import {
   appAccessOf,
@@ -14,6 +14,7 @@ import {
   setAppAccess,
   widensAppAccess,
   type AppAccess,
+  type AppAccessRefusal,
   type ShareableApps,
 } from "./app-permissions.js";
 
@@ -60,35 +61,21 @@ export function registerAppAccessActions(
 ): void {
   const notGuardian = { status: "error" as const, error: "Only the guardian can do this." };
 
-  // Autonomous turns have no session actor, so the stored chat owner decides.
-  const askedByGuardian = async (): Promise<boolean> => {
-    const context = actionExecutionContext.getStore();
-    const actor = context?.actor;
-    if (actor && actor.kind !== "guardian") return false;
-    const thread = context?.channelContext;
-    const owner =
-      thread?.channel === "webchat" && thread.threadId
-        ? await deps.ownerOfChat(thread.threadId)
-        : null;
-    if (thread?.channel === "webchat" && owner !== "guardian") return false;
-    return Boolean(actor) || owner === "guardian";
-  };
+  const asked = () => askedByGuardian((chatId) => deps.ownerOfChat(chatId));
 
   const set = async (args: Record<string, unknown>, onlyNarrow: boolean) => {
-    if (!(await askedByGuardian())) return notGuardian;
+    if (!(await asked())) return notGuardian;
     const appId = String(args.appId ?? "");
     const access = parseAppAccess(args);
     if (isAppAccessRefusal(access)) return { status: "error" as const, error: access.message };
-    if (onlyNarrow) {
-      const before = appAccessOf(await loadAppPermissionsSetting(deps.db), appId);
-      if (widensAppAccess(before, access)) {
-        return {
-          status: "error" as const,
-          error: `This lets more people open "${appId}". Use ${APP_ACCESS_ACTIONS.update}, which asks the guardian first.`,
-        };
-      }
-    }
-    const result = await setAppAccess(deps, appId, access);
+    const refuseWidening = (before: AppAccess): AppAccessRefusal | null =>
+      widensAppAccess(before, access)
+        ? {
+            reason: "widens",
+            message: `This lets more people open "${appId}". Use ${APP_ACCESS_ACTIONS.update}, which asks the guardian first.`,
+          }
+        : null;
+    const result = await setAppAccess(deps, appId, access, onlyNarrow ? refuseWidening : undefined);
     if (isAppAccessRefusal(result)) return { status: "error" as const, error: result.message };
     return { status: "ok" as const, data: { appId, ...result } };
   };
@@ -110,7 +97,7 @@ export function registerAppAccessActions(
       additionalProperties: false,
     },
     execute: async (args) => {
-      if (!(await askedByGuardian())) return notGuardian;
+      if (!(await asked())) return notGuardian;
       const appId = String(args.appId ?? "");
       if (deps.apps.hasPage(appId) === null) {
         return { status: "error", error: `No installed app "${appId}".` };
@@ -147,7 +134,17 @@ export function registerAppAccessActions(
     },
     inputSchema: SET_INPUT,
     execute: (args) => set(args, false),
+    // The engine renders this before `execute` runs, so it checks the guardian
+    // itself and shows nothing about the app to anyone else.
     preview: async (args): Promise<PreviewPayload | undefined> => {
+      if (!(await asked())) {
+        return {
+          kind: "generic",
+          title: "Request not from the guardian",
+          summary:
+            "Approving it changes nothing: only the guardian can change who may open an app.",
+        };
+      }
       const access = parseAppAccess(args);
       if (isAppAccessRefusal(access)) return undefined;
       const appId = String(args.appId ?? "");

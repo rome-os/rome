@@ -437,10 +437,6 @@ export const settingsHandlers = [
     return HttpResponse.json({ ok: true });
   }),
   http.get("/api/public-access", () => HttpResponse.json(publicAccess.config)),
-  http.put("/api/public-access", async ({ request }) => {
-    publicAccess.config = (await request.json()) as PublicAccessConfig;
-    return HttpResponse.json(publicAccess.config);
-  }),
   http.put("/api/public-access/:appId", async ({ params, request }) => {
     const appId = String(params.appId);
     const { mode, emails } = (await request.json()) as { mode: string; emails: string[] };

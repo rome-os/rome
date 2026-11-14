@@ -4,7 +4,13 @@ import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.j
 import { ActionEngine, type ActionRunContext } from "./actions/engine.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { APP_ACCESS_ACTIONS, registerAppAccessActions } from "./app-access-actions.js";
-import { loadAppPermissionsSetting, saveAppPermissionsSetting } from "./app-permissions.js";
+import { SettingsRepository } from "../db/repositories/settings.js";
+import {
+  APP_PERMISSIONS_SETTING_KEY,
+  loadAppPermissions,
+  loadAppPermissionsSetting,
+  type AppPermissionsSetting,
+} from "./app-permissions.js";
 
 type Actor = NonNullable<ActionRunContext["actor"]>;
 
@@ -40,7 +46,7 @@ beforeEach(async () => {
     isFirstPartyAction: (name) => name.startsWith("core:"),
     actionWorkerFork: fork,
   });
-  await saveAppPermissionsSetting(testDb.db, permissions, {
+  await seed({
     allowedApps: [],
     cloudEmailAccess: { notes: ["a@example.test"], other: ["z@example.test"] },
   });
@@ -49,6 +55,11 @@ beforeEach(async () => {
 afterEach(() => {
   testDb.close();
 });
+
+async function seed(setting: AppPermissionsSetting): Promise<void> {
+  await new SettingsRepository(testDb.db).set(APP_PERMISSIONS_SETTING_KEY, setting);
+  await loadAppPermissions(testDb.db, permissions);
+}
 
 const run = (name: string, args: Record<string, unknown>, context: ActionRunContext = {}) =>
   engine.run(name, args, { actor: guardian, ...context });
@@ -81,7 +92,7 @@ describe("core:apps_access_read", () => {
 
 describe("core:apps_access_narrow", () => {
   it("removes an email at once and leaves other apps alone", async () => {
-    await saveAppPermissionsSetting(testDb.db, permissions, {
+    await seed({
       allowedApps: [],
       cloudEmailAccess: { notes: ["a@example.test", "b@example.test"], other: ["z@example.test"] },
     });
@@ -119,8 +130,42 @@ describe("core:apps_access_narrow", () => {
     ]);
   });
 
+  it("makes an app private even when it is not installed or has no page", async () => {
+    expect((await run(APP_ACCESS_ACTIONS.narrow, { appId: "other", mode: "private" })).status).toBe(
+      "ok",
+    );
+    expect(permissions.get("other").listedEmails.size).toBe(0);
+    expect(
+      (await run(APP_ACCESS_ACTIONS.narrow, { appId: "worker", mode: "private" })).status,
+    ).toBe("ok");
+  });
+
+  it("checks widening against the access the write starts from", async () => {
+    await seed({ allowedApps: ["notes"], cloudEmailAccess: {} });
+    const [toPrivate, toList] = await Promise.all([
+      run(APP_ACCESS_ACTIONS.narrow, { appId: "notes", mode: "private" }),
+      run(APP_ACCESS_ACTIONS.narrow, {
+        appId: "notes",
+        mode: "cloud-email",
+        emails: ["a@example.test"],
+      }),
+    ]);
+    expect(toPrivate.status).toBe("ok");
+    expect(toList.status).toBe("error");
+    expect(await loadAppPermissionsSetting(testDb.db)).toEqual({
+      allowedApps: [],
+      cloudEmailAccess: {},
+    });
+  });
+
   it("refuses an app with no page, and a bad email", async () => {
-    expect(await run(APP_ACCESS_ACTIONS.narrow, { appId: "worker", mode: "private" })).toEqual({
+    expect(
+      await run(APP_ACCESS_ACTIONS.narrow, {
+        appId: "worker",
+        mode: "cloud-email",
+        emails: ["a@example.test"],
+      }),
+    ).toEqual({
       status: "error",
       error: 'App "worker" has no page, so it cannot be shared.',
     });
@@ -161,6 +206,29 @@ describe("core:apps_access_update", () => {
     expect(approved.status).toBe("ok");
     expect(permissions.get("@ray/demo").anyoneWithLink).toBe(true);
     expect((await loadAppPermissionsSetting(testDb.db)).allowedApps).toEqual(["@ray/demo"]);
+  });
+
+  it("shows a visitor's request nothing about the app, and approving it changes nothing", async () => {
+    const recorded = await engine.run(
+      APP_ACCESS_ACTIONS.update,
+      { appId: "notes", mode: "public" },
+      { actor: visitor },
+    );
+    if (recorded.status !== "pending_approval") throw new Error(`got ${recorded.status}`);
+    const payload = (await approvals.findById(recorded.approval.approvalId))!.payload as Record<
+      string,
+      unknown
+    >;
+    expect(JSON.stringify(payload.preview)).not.toContain("a@example.test");
+    expect(payload.preview).toMatchObject({ title: "Request not from the guardian" });
+
+    const approved = await engine.run(APP_ACCESS_ACTIONS.update, payload.rootArgs as never, {
+      actor: visitor,
+      replayJournal: payload.replayJournal as never,
+      replayRootExecutionId: payload.rootExecutionId as string,
+    });
+    expect(approved).toEqual({ status: "error", error: "Only the guardian can do this." });
+    expect(permissions.get("notes").anyoneWithLink).toBe(false);
   });
 });
 

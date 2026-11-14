@@ -1,3 +1,4 @@
+import { Mutex } from "async-mutex";
 import { eq } from "drizzle-orm";
 import type { AppAccessMode } from "@rome/api-types/apps";
 import type { DrizzleDb } from "../db/index.js";
@@ -99,8 +100,8 @@ export async function loadAppPermissionsSetting(db: DrizzleDb): Promise<AppPermi
     : DEFAULT_APP_PERMISSIONS_SETTING;
 }
 
-/** Stores the setting and hands the apps' permissions to Access. */
-export async function saveAppPermissionsSetting(
+/** Stores the setting and hands the apps' permissions to Access. Only `setAppAccess` calls it, under its lock. */
+async function saveAppPermissionsSetting(
   db: DrizzleDb,
   permissions: Permissions,
   setting: AppPermissionsSetting,
@@ -125,7 +126,8 @@ export interface AppAccess {
 export type AppAccessRefusal =
   | { reason: "unknown-app"; message: string }
   | { reason: "no-page"; message: string }
-  | { reason: "invalid"; message: string };
+  | { reason: "invalid"; message: string }
+  | { reason: "widens"; message: string };
 
 export function isAppAccessRefusal(value: object): value is AppAccessRefusal {
   return "reason" in value;
@@ -200,26 +202,41 @@ export function checkShareable(apps: ShareableApps, appId: string): AppAccessRef
   return null;
 }
 
+// Every write of the policy goes through this lock, so two writes never start
+// from the same stored policy and the later one never undoes the earlier one.
+const policyWrites = new Mutex();
+
 /**
  * Sets who may open one app and leaves every other app's access as it was.
- * Hands the new permissions to Access before it resolves. Returns the access
- * before and after the change.
+ * Writes are serialized, and `refuse` sees the access as it stands inside the
+ * same write, so a check on it cannot go stale. Hands the new permissions to
+ * Access before it resolves. Returns the access before and after the change.
+ * Making an app private needs no page, so a disabled or uninstalled app's
+ * access can always be removed.
  */
 export async function setAppAccess(
   deps: { db: DrizzleDb; permissions: Permissions; apps: ShareableApps },
   appId: string,
   access: AppAccess,
+  refuse?: (before: AppAccess) => AppAccessRefusal | null,
 ): Promise<{ before: AppAccess; after: AppAccess } | AppAccessRefusal> {
-  const refusal = checkShareable(deps.apps, appId);
-  if (refusal) return refusal;
-  const setting = await loadAppPermissionsSetting(deps.db);
-  const allowedApps = setting.allowedApps.filter((id) => id !== appId);
-  const { [appId]: _dropped, ...cloudEmailAccess } = setting.cloudEmailAccess;
-  if (access.mode === "public") allowedApps.push(appId);
-  if (access.mode === "cloud-email") cloudEmailAccess[appId] = access.emails;
-  const next = { allowedApps: allowedApps.sort(), cloudEmailAccess };
-  await saveAppPermissionsSetting(deps.db, deps.permissions, next);
-  return { before: appAccessOf(setting, appId), after: appAccessOf(next, appId) };
+  if (access.mode !== "private") {
+    const refusal = checkShareable(deps.apps, appId);
+    if (refusal) return refusal;
+  }
+  return policyWrites.runExclusive(async () => {
+    const setting = await loadAppPermissionsSetting(deps.db);
+    const before = appAccessOf(setting, appId);
+    const refusal = refuse?.(before);
+    if (refusal) return refusal;
+    const allowedApps = setting.allowedApps.filter((id) => id !== appId);
+    const { [appId]: _dropped, ...cloudEmailAccess } = setting.cloudEmailAccess;
+    if (access.mode === "public") allowedApps.push(appId);
+    if (access.mode === "cloud-email") cloudEmailAccess[appId] = access.emails;
+    const next = { allowedApps: allowedApps.sort(), cloudEmailAccess };
+    await saveAppPermissionsSetting(deps.db, deps.permissions, next);
+    return { before, after: appAccessOf(next, appId) };
+  });
 }
 
 /** Loads the stored setting into Access at startup. */

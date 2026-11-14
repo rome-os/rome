@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { publicAccessRoutes } from "./public-access.js";
-import { generateCaddyfile } from "../../lib/caddyfile-generator.js";
 import { Permissions } from "../../access/permissions.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
@@ -62,53 +61,10 @@ describe("Public-access API", () => {
     });
   });
 
-  describe("PUT /public-access", () => {
-    it("persists the normalized config and refreshes auth state", async () => {
-      const res = await putConfig(
-        JSON.stringify({
-          allowedApps: ["inbox", "not a slug"],
-          cloudEmailAccess: { inbox: ["Ada@Example.com"] },
-        }),
-      );
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
-
-      // The config survives a round-trip through the DB, normalized.
-      const getRes = await app.request("/public-access");
-      expect(await getRes.json()).toEqual({
-        allowedApps: ["inbox"],
-        cloudEmailAccess: { inbox: ["ada@example.com"] },
-      });
-
-      // The in-memory snapshot read by /api/auth/verify follows the write.
-      expect(permissions.get("inbox").anyoneWithLink).toBe(true);
-      expect([...permissions.get("inbox").listedEmails]).toEqual(["ada@example.com"]);
-    });
-
-    it("stores only the app policy when the body carries the retired enableAccessControl flag", async () => {
-      const res = await putConfig(
-        JSON.stringify({ enableAccessControl: true, allowedApps: ["inbox"] }),
-      );
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
-
-      const stored = await deps.settingsRepo!.get("publicAccess");
-      expect(stored).toEqual({ allowedApps: ["inbox"], cloudEmailAccess: {} });
-      expect(permissions.get("inbox").anyoneWithLink).toBe(true);
-
-      // The proxy shape is independent of the policy: the dashboard stays
-      // reachable and /api/* still goes through the verify probe.
-      const caddyfile = generateCaddyfile();
-      expect(caddyfile).toContain("forward_auth");
-      expect(caddyfile).not.toContain("not_public");
-    });
-
-    it("accepts an empty body (null → defaults)", async () => {
-      const res = await putConfig("not-json");
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
-      expect(permissions.get("inbox").anyoneWithLink).toBe(false);
-    });
+  it("takes no whole-document write", async () => {
+    const res = await putConfig(JSON.stringify({ allowedApps: ["inbox"] }));
+    expect(res.status).toBe(404);
+    expect(permissions.get("inbox").anyoneWithLink).toBe(false);
   });
 
   describe("PUT /public-access/:appId", () => {
@@ -135,7 +91,10 @@ describe("Public-access API", () => {
       });
 
     it("sets one app and keeps the others", async () => {
-      await putConfig(JSON.stringify({ allowedApps: ["inbox"], cloudEmailAccess: {} }));
+      await deps.settingsRepo!.set("publicAccess", {
+        allowedApps: ["inbox"],
+        cloudEmailAccess: {},
+      });
       const res = await putApp("@ray/demo", { mode: "cloud-email", emails: ["Ada@Example.com"] });
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({

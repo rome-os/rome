@@ -1,4 +1,4 @@
-import { actionExecutionContext } from "../apps/actions/context.js";
+import { askedByGuardian } from "../apps/actions/guardian-turn.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { LiveEventEmit } from "../lib/live-event.js";
@@ -38,22 +38,7 @@ export function registerAgentNameAction(
       additionalProperties: false,
     },
     execute: async (args) => {
-      const context = actionExecutionContext.getStore();
-      const actor = context?.actor;
-      if (actor && actor.kind !== "guardian") {
-        return { status: "error", error: "Only the guardian can change the agent name." };
-      }
-      // Autonomous Concierge turns have no session actor. Use the stored chat
-      // owner, never the model's concierge_owner text, to authorize those too.
-      const thread = context?.channelContext;
-      const owner =
-        thread?.channel === "webchat" && thread.threadId
-          ? await deps.ownerOfChat(thread.threadId)
-          : null;
-      if (
-        (thread?.channel === "webchat" && owner !== "guardian") ||
-        (!actor && owner !== "guardian")
-      ) {
+      if (!(await askedByGuardian(deps.ownerOfChat))) {
         return { status: "error", error: "Only the guardian can change the agent name." };
       }
       if (typeof args.name !== "string" || /[\r\n\u2028\u2029]/u.test(args.name)) {

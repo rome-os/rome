@@ -20,7 +20,7 @@ import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
 // refreshes. Persisting one here would leave the stored and enforced policies
 // disagreeing until restart.
 const DEDICATED_ROUTE_KEYS: Record<string, string> = {
-  [APP_PERMISSIONS_SETTING_KEY]: "/api/public-access",
+  [APP_PERMISSIONS_SETTING_KEY]: "/api/public-access/:appId",
   [DASHBOARD_ACCESS_SETTING_KEY]: "/api/dashboard-access",
 };
 
