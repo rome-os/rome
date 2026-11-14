@@ -14,8 +14,15 @@ export const PERSONAL_DATA_QUERY_ACTION = "core:personal_data_query";
 
 const CONNECTION =
   "Where the stored data does not cover the window, the reply's connection names the device " +
-  "connection that reads the rest live, with its state, or not_connected, and, when it cannot " +
-  "read it now, a next step to take in the same reply.";
+  "connection that reads the rest live, with its state, or not_connected, and a next step to " +
+  "take in the same reply.";
+
+// Data can be deleted or change between turns, and a number from earlier in
+// the chat reads as current when it is not.
+const CURRENT_ONLY =
+  "Answer only from this turn's reply or live read: never give a number from earlier in the " +
+  "conversation as current. When the store holds nothing, say so plainly, and that the data " +
+  "may have been deleted.";
 
 export interface PersonalDataActionDeps {
   personalData: PersonalDataRepository;
@@ -40,7 +47,7 @@ export function registerPersonalDataActions(
         "List the guardian's personal data that their devices sync to Rome, such as Apple Health: " +
         "each source, the device it comes from, when it last synced, each type with its unit, " +
         "range and how far it is synced, and the device connection that reads the source live, " +
-        `with its state, or not_connected. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ` +
+        `with its state, or not_connected. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ${CURRENT_ONLY} ` +
         "Runs only in a private chat with the guardian.",
       complexity: "simple",
       speed: "fast",
@@ -80,6 +87,7 @@ export function registerPersonalDataActions(
         "health.stats: types, start, end, interval, aggregate, unit. A bucket with no value is left " +
         "out, never 0. Week, month and total averages are the mean of daily averages " +
         `(aggregate avg_of_days). The reply's freshness says how far each type is synced. ${CONNECTION} ` +
+        `${CURRENT_ONLY} ` +
         "Runs only in a private chat with the guardian.",
       complexity: "simple",
       speed: "fast",
