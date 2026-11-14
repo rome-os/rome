@@ -43,7 +43,10 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
   };
 }
 
-function ports(sessionTools = rs.fn(async () => [])) {
+function ports(
+  sessionTools = rs.fn(async () => []),
+  taskOwner?: (taskId: string) => Promise<string | null>,
+) {
   const run = rs.fn(async () => ({ status: "ok" as const, data: { routineId: "r1" } }));
   const engine = { run } as unknown as ActionEngine;
   const getSession = rs.fn(async () => ({ ownerKey: null }));
@@ -51,6 +54,7 @@ function ports(sessionTools = rs.fn(async () => [])) {
     actionRegistry: registry,
     actionEngine: engine,
     webchatRepo: { getSession } as never,
+    ...(taskOwner ? { taskOwner } : {}),
     sessionTools,
   });
   return { ...built, run, getSession, provided: sessionTools };
@@ -153,8 +157,46 @@ describe("romeToolPorts defer", () => {
   });
 });
 
+describe("romeToolPorts defer for a task", () => {
+  const wake = (taskId: string) => ({
+    kind: "time" as const,
+    name: "check CI",
+    note: "Check the run.",
+    fireAtMs: Date.now() + 60_000,
+    taskId,
+  });
+
+  it("schedules a check for a task of the chat's own owner", async () => {
+    const { defer, run } = ports(undefined, async (id) => (id === "mine" ? "guardian" : null));
+    await defer.schedule(turn(), wake("mine"));
+    expect(run).toHaveBeenCalledWith("create_routine", expect.anything(), expect.anything());
+  });
+
+  it("refuses a task that is not there, or is another owner's, and schedules nothing", async () => {
+    const { defer, run } = ports(undefined, async (id) =>
+      id === "theirs" ? "visitor:acct-ann" : null,
+    );
+    for (const taskId of ["nope", "theirs"]) {
+      await expect(defer.schedule(turn(), wake(taskId))).rejects.toThrow(`No task ${taskId}`);
+    }
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
 describe("romeToolPorts sessionTools", () => {
-  it("serves the tools Rome adds, then propose_routine, to a turn with a speaker", async () => {
+  it("serves no connect_account where the session's own tools show a connect card", async () => {
+    const connectCard = {
+      name: "connect_card",
+      description: "",
+      inputSchema: {},
+      handler: async () => ({ content: [] }),
+    };
+    const { sessionTools } = ports(rs.fn(async () => [connectCard]));
+    const tools = await sessionTools.forTurn(turn(), true);
+    expect(tools.map((tool) => tool.name)).toEqual(["connect_card", "propose_routine"]);
+  });
+
+  it("serves the tools Rome adds, then propose_routine and connect_account, to a turn with a speaker", async () => {
     const extra = {
       name: "extra",
       description: "",
@@ -163,7 +205,7 @@ describe("romeToolPorts sessionTools", () => {
     };
     const { sessionTools, provided } = ports(rs.fn(async () => [extra]));
     const tools = await sessionTools.forTurn(turn(), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["extra", "propose_routine"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["extra", "propose_routine", "connect_account"]);
     expect(provided).toHaveBeenCalledWith(
       expect.objectContaining({
         agentName: "core:main",
@@ -173,15 +215,16 @@ describe("romeToolPorts sessionTools", () => {
     );
   });
 
-  it("serves only propose_routine to a turn with no speaker", async () => {
+  it("serves only propose_routine and connect_account to a turn with no speaker", async () => {
     const { sessionTools, provided } = ports();
     const tools = await sessionTools.forTurn(turn(), false);
-    expect(tools.map((tool) => tool.name)).toEqual(["propose_routine"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["propose_routine", "connect_account"]);
     expect(provided).not.toHaveBeenCalled();
   });
 
-  it("serves no propose_routine where cards draw as plain text", async () => {
+  it("serves only connect_account where cards draw as plain text", async () => {
     const { sessionTools } = ports();
-    expect(await sessionTools.forTurn(turn({ widgets: "plain_text" }), true)).toEqual([]);
+    const tools = await sessionTools.forTurn(turn({ widgets: "plain_text" }), true);
+    expect(tools.map((tool) => tool.name)).toEqual(["connect_account"]);
   });
 });

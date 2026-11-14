@@ -97,6 +97,14 @@ export interface ChatSearchHit {
   createdAt: Date;
 }
 
+// A task chat whose task ended waits on no one: its open cards are closed
+// (concierge/task-cards.ts), and the list, the task card and the Concierge's
+// activity must not say it waits. The session index makes it one lookup.
+export const sessionTaskEnded = sql`exists (
+  select 1 from "concierge_tasks" t
+  where t."session_id" = "rome_sessions"."id" and t."ended_at" is not null
+)`;
+
 /**
  * Whether the session in the current `rome_sessions` row waits on the
  * guardian, read from Chats: a card (question, connect-AI, app component) in
@@ -113,7 +121,7 @@ export interface ChatSearchHit {
  * legacy `sessionAwaitingGuardian` (webchat/repository.ts), for a
  * select over `rome_sessions`.
  */
-export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
+export const chatsSessionAwaitingGuardian = sql<boolean>`(not ${sessionTaskEnded} and (exists (
   select 1 from (
     select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_MESSAGES} u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
@@ -129,17 +137,20 @@ export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
   select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
   where a."status" = 'pending'
   and json_extract(a."payload", '$.channelContext.threadId') is not null
-))`.mapWith(Boolean);
+)))`.mapWith(Boolean);
 
 /**
- * When the session's newest open card was said, unix seconds, or null: the
- * newest card of those {@link chatsSessionAwaitingGuardian} counts open.
- * Pending approvals are read apart, once per call, by the repository's
- * `awaitingGuardianSince`. The Chats version of the legacy
- * `sessionAwaitingCardSince`.
+ * The session's open cards, as a JSON array of { id, messageId, render, at }:
+ * the cards after its last prompt that `chatsSessionAwaitingGuardian` counts
+ * open, `at` in unix seconds. Pending approvals are read apart.
  */
-export const chatsSessionAwaitingCardSince = sql<number | null>`(
-  select max(m."said_at") from (
+export const chatsSessionOpenCards = sql<string | null>`(
+  select json_group_array(json_object(
+    'id', json_extract(part."value", '$.toolUseId'),
+    'messageId', m."key",
+    'render', json(json_extract(part."value", '$.render')),
+    'at', m."said_at"
+  )) from (
     select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_MESSAGES} u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
     and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
@@ -150,6 +161,28 @@ export const chatsSessionAwaitingCardSince = sql<number | null>`(
   and m."seq" > last."cut"
   and m."sender_agent" is not null and json_valid(m."parts")
   and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
+)`;
+
+/**
+ * Every card the session asked and every answer sent to one, as a JSON array
+ * of { type, id, messageId, render, output, at }: the Chats version of the
+ * legacy `sessionInteractions`.
+ */
+export const chatsSessionInteractions = sql<string | null>`(
+  select json_group_array(json_object(
+    'type', json_extract(part."value", '$.type'),
+    'id', json_extract(part."value", '$.toolUseId'),
+    'messageId', m."key",
+    'render', json(json_extract(part."value", '$.render')),
+    'output', json(json_extract(part."value", '$.output')),
+    'at', m."said_at"
+  ))
+  from ${CHAT_MESSAGES} m
+  cross join json_each(m."parts") part
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and json_valid(m."parts")
+  and case when part."type" = 'object' then json_extract(part."value", '$.type') end
+    in ('pending_interaction', 'interaction_result')
 )`;
 
 /**

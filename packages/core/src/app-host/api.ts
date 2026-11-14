@@ -54,6 +54,9 @@ export class AppApiDispatcher {
     request: RomeAppApiRequest,
     context: RomeAppApiDispatchContext = {},
   ): Promise<Response> {
+    // Started before the import and createApiHandler: both run on the main
+    // loop for every request, and slow app code there counts too.
+    const startedAt = performance.now();
     const view = this.catalog.get(appId);
     if (!isResolvedWithApi(view)) {
       throw new Error(`App "${appId}" has no API entrypoint`);
@@ -84,18 +87,31 @@ export class AppApiDispatcher {
       throw new Error(`App "${appId}" API handler must expose handle(request)`);
     }
 
-    createAppLogger("app-api", appId).info("dispatching app api request", {
-      appId,
-      method: request.method,
-      path: request.path,
-      entryPath: app.api.entryPath,
-    });
+    const log = createAppLogger("app-api", appId);
+    const fields = { appId, method: request.method, path: request.path };
+    log.info("dispatching app api request", { ...fields, entryPath: app.api.entryPath });
 
-    return await runWithRomeAppApiRequestContext({ viewer: context.viewer }, () =>
-      handler.handle(request),
-    );
+    // The handler runs on the HTTP process's event loop, so a slow one delays
+    // every other request (#2144). Record how long each took, and warn on a
+    // slow one so a single query names it. A streamed response counts until
+    // its Response is returned, not until the stream ends.
+    let status: number | "threw" = "threw";
+    try {
+      const response = await runWithRomeAppApiRequestContext({ viewer: context.viewer }, () =>
+        handler.handle(request),
+      );
+      status = response.status;
+      return response;
+    } finally {
+      const durationMs = Math.round(performance.now() - startedAt);
+      const level = durationMs >= SLOW_APP_API_REQUEST_MS ? "warn" : "info";
+      log[level]("app api request completed", { ...fields, status, durationMs });
+    }
   }
 }
+
+/** An app API request at least this slow is logged as a warning. */
+const SLOW_APP_API_REQUEST_MS = 1_000;
 
 /** A request from outside the instance (an external webhook, a relay replay,
  * a browser session) has no action worker waiting on it, so its app calls may

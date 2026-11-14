@@ -278,12 +278,9 @@ describe("subscribeTriggerFeed", () => {
     expect(result).toMatchObject({ ok: false, code: "no_connected_account" });
     if (result.ok) throw new Error("expected failure");
     expect(result.message).toContain("Settings → Connections");
-    if (toolkit === "slack") {
-      expect(result.message).not.toContain("connector_connect");
-    } else {
-      expect(result.message).toContain(`connector_connect(${JSON.stringify({ toolkit })})`);
-      expect(result.message).not.toMatch(/can.t be connected from here/);
-    }
+    expect(result.message).toContain(
+      `connect_account tool with ${JSON.stringify({ kind: toolkit })}`,
+    );
   });
 
   it("rejects an ambiguous account rather than guessing which to subscribe", async () => {

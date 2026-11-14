@@ -1,6 +1,8 @@
 node_modules/
 .pnpm-store/
 .obs/
+# pnpm concierge:eval results (docs/concierge-eval.md)
+.concierge-eval/
 .rome/
 dist/
 # rome-web mock-mode build output (dev tool; see packages/web/mock/)

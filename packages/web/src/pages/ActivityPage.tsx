@@ -719,7 +719,9 @@ export default function ActivityPage({
   renderFrame?: (header: ReactNode, body: ReactNode) => ReactNode;
 } = {}) {
   const { t } = useTranslation("activity");
+  // The page lists every approval; the pending count reads only the pending ones.
   const approvalsQuery = useApprovals();
+  const pendingQuery = useApprovals({ status: "pending" });
   const approvals = approvalsQuery.data ?? [];
   const resolveApproval = useResolveApproval();
   const [executionGroups, setExecutionGroups] = useState<ExecutionGroup[]>([]);
@@ -780,7 +782,7 @@ export default function ActivityPage({
     const res = await fetch(`/api/approvals/${id}/retry`, { method: "POST" });
     if (res.ok) {
       await fetchData();
-      await approvalsQuery.refetch();
+      await Promise.all([approvalsQuery.refetch(), pendingQuery.refetch()]);
     }
   }
 
@@ -790,7 +792,7 @@ export default function ActivityPage({
     });
     if (res.ok) {
       await fetchData();
-      await approvalsQuery.refetch();
+      await Promise.all([approvalsQuery.refetch(), pendingQuery.refetch()]);
     }
   }
 
@@ -817,12 +819,12 @@ export default function ActivityPage({
   }, [allItems, statusFilter]);
 
   const stats = useMemo(() => {
-    const pendingApprovals = approvals.filter((a) => a.status === "pending").length;
+    const pendingApprovals = (pendingQuery.data ?? []).length;
     const running = executionGroups.filter((g) => g.rootExecution.status === "running").length;
     const errors = allItems.filter(hasActivityError).length;
     const events = allItems.length;
     return { pendingApprovals, running, errors, events };
-  }, [approvals, executionGroups, allItems]);
+  }, [pendingQuery.data, executionGroups, allItems]);
 
   const updatedLabel = timeAgo(t, new Date(lastFetchedAt).toISOString());
   const itemKey = (item: ActivityItem): string => {
@@ -853,7 +855,7 @@ export default function ActivityPage({
             size="sm"
             onClick={() => {
               void fetchData();
-              void approvalsQuery.refetch();
+              void Promise.all([approvalsQuery.refetch(), pendingQuery.refetch()]);
             }}
           >
             {t("page.refresh")}

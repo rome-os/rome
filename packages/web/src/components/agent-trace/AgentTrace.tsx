@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { TraceEventDto, TraceSegment, TraceSummary } from "@rome/api-types/trace-segments";
 import { Button } from "@/components/ui/button";
+import { hasGuidedErrorCopy } from "@/components/chat/entries/ErrorEventView";
 import { CollapsedTraceSummary, formatDuration } from "./CollapsedTraceSummary";
 import { TraceRunRow } from "./TraceRunRow";
 
@@ -77,7 +78,13 @@ function CollapsedTraceContent({ summary, live }: { summary?: TraceSummary; live
   const { t } = useTranslation("activity");
 
   if (summary?.terminalError) {
-    return <TraceErrorSummary error={summary.terminalError} />;
+    // A guided error shows its guidance beside the trace (`TraceTrigger`), so
+    // the line names the failure without the raw provider text.
+    return (
+      <TraceErrorSummary
+        error={hasGuidedErrorCopy(summary.terminalErrorCode) ? null : summary.terminalError}
+      />
+    );
   }
   if (live) {
     return (
@@ -108,12 +115,14 @@ function StatusPill({ label }: { label: string }) {
   return <span className="text-aux text-muted-foreground">{label}</span>;
 }
 
-function TraceErrorSummary({ error }: { error: string }) {
+function TraceErrorSummary({ error }: { error: string | null }) {
   const { t } = useTranslation("activity");
   return (
     <div className="flex min-w-0 items-center gap-2 text-ui text-destructive-fg">
       <span className="inline-block h-2 w-2 flex-none rounded-full bg-destructive" />
-      <span className="truncate">{t("trace.failedWithReason", { reason: error })}</span>
+      <span className="truncate">
+        {error === null ? t("trace.failed") : t("trace.failedWithReason", { reason: error })}
+      </span>
     </div>
   );
 }

@@ -54,6 +54,16 @@ import Testing
         #expect(TopicChatsStore.title(store.chat("topic-1")) == "Kyoto trip")
     }
 
+    /// As on the web, a named chat's composer says which chat a message goes to.
+    @Test func theComposerNamesTheChatOnceItHasOne() {
+        #expect(TopicChatsStore.composerPlaceholder(nil, replying: false) == "Message")
+        let unnamed = ConciergeChat(id: "topic-1", name: "  ", main: false, unread: 0)
+        #expect(TopicChatsStore.composerPlaceholder(unnamed, replying: false) == "Message")
+        let named = ConciergeChat(id: "topic-1", name: " Kyoto trip ", main: false, unread: 0)
+        #expect(TopicChatsStore.composerPlaceholder(named, replying: false) == "Message in Kyoto trip")
+        #expect(TopicChatsStore.composerPlaceholder(named, replying: true) == "Reply")
+    }
+
     /// A chat read beside the pinned drawer (iPad) loses its badge at once.
     @Test func readingAChatClearsItsBadge() async {
         let backend = FakeBackend()
@@ -123,27 +133,6 @@ import Testing
         let json = #"{"id":"t","title":"T","state":"doing","createdAt":1,"updatedAt":1,"conciergeChat":{"id":"c-2","name":"Trip","main":false}}"#
         let task = try JSONDecoder().decode(ConciergeTask.self, from: Data(json.utf8))
         #expect(task.conciergeChat?.id == "c-2")
-    }
-}
-
-@Suite struct TaskFilterTests {
-    private func task(_ id: String, from chat: ConciergeChat?) -> ConciergeTask {
-        ConciergeTask(
-            id: id, title: id, state: .needsUser, summary: nil, waitingOn: nil, dueAt: nil, rank: nil, chat: nil,
-            conciergeChat: chat, sourceMessageId: nil, createdAt: 1, updatedAt: 1, completedAt: nil, archivedAt: nil, notSynced: nil
-        )
-    }
-
-    @Test func eachChatListsItsOwnTasks() {
-        let main = ConciergeChat(id: conciergeChatID, name: "", main: true)
-        let trip = ConciergeChat(id: "c-trip", name: "Trip", main: false)
-        let tasks = [task("a", from: main), task("b", from: trip), task("c", from: nil)]
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let inMain = TasksStore.group(tasks.filter { TasksStore.belongs($0, toChat: conciergeChatID) }, showAllDone: false, now: now)
-        let inTrip = TasksStore.group(tasks.filter { TasksStore.belongs($0, toChat: "c-trip") }, showAllDone: false, now: now)
-        // A row that names no chat comes from an older server: the main chat's.
-        #expect(Set(inMain.flatMap(\.tasks).map(\.id)) == ["a", "c"])
-        #expect(inTrip.flatMap(\.tasks).map(\.id) == ["b"])
     }
 }
 

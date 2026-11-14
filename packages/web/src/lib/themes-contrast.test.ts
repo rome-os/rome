@@ -148,6 +148,14 @@ const PAIRINGS: Pairing[] = [
   { fg: "primary", bg: "surface", min: AA_TEXT, why: "markdown links in messages" },
   { fg: "primary", bg: "surface-elevated", min: AA_TEXT, why: "link ink in popovers" },
 
+  // `brand` carrying text rather than a fill. `text-brand` paints the project
+  // dashboard's retry action and search matches, the file pane's folder icons,
+  // the `brand` Badge and the selected recurring-schedule label, on the canvas
+  // or a card. The last two sit over a 15% tint of `brand` itself; that is an
+  // alpha fill, which the roster leaves out for the reason given further down.
+  { fg: "brand", bg: "background", min: AA_TEXT, why: "file-pane icons, dashboard retry action" },
+  { fg: "brand", bg: "surface", min: AA_TEXT, why: "search match, schedule label on a card" },
+
   // Solid fill + the label the token names as its partner. Some are unused
   // today; the naming convention still promises them, and the gate is what
   // makes reaching for one later safe.
@@ -240,6 +248,8 @@ const PAIRING_IDS = [
   "primary/background",
   "primary/surface",
   "primary/surface-elevated",
+  "brand/background",
+  "brand/surface",
   "primary-foreground/primary",
   "primary-foreground/primary-hover",
   "brand-fg/brand",
@@ -351,6 +361,16 @@ const KNOWN_FAILURES: KnownFailure[] = [
     pair: "ring/secondary",
     why: "Same ring step against Ember's light secondary fill, which sits close enough to the accent to blunt the inner edge. The other five theme/modes clear the bar.",
     measured: { "ember/light": 2.9 },
+  },
+  {
+    pair: "brand/background",
+    why: "Ember and Ash point `brand` at the identity-locked `--orange-300`, which cannot carry text on a pale canvas without moving the brand value. It predates the pastel themes. Resolving it means splitting brand text from the brand fill there, as the pastel themes do.",
+    measured: { "ember/light": 3, "ash/light": 3.19 },
+  },
+  {
+    pair: "brand/surface",
+    why: "Same brand-pinned step as the pairing above, measured on a card.",
+    measured: { "ember/light": 3.25, "ash/light": 3.28 },
   },
   {
     pair: "ring/input",

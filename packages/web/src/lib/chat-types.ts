@@ -120,6 +120,11 @@ export interface ApprovalRecord {
   status: "pending" | "approved" | "rejected" | "auto_approved";
   executionState?: "idle" | "queued" | "running" | "succeeded" | "failed" | null;
   executionError?: string | null;
+  /**
+   * Who resolved it: `rome:task-ended` when Rome turned it down as its task's
+   * wait ran out, `rome:task-stopped` as its task was stopped.
+   */
+  resolvedBy?: string | null;
 }
 
 export interface DoneEventData {
@@ -174,6 +179,9 @@ export interface ChatMessage {
   /** The title of the task whose chat thread the message is in, when the
    *  thread is a task's. Absent for a thread no task has, and in no thread. */
   chatThreadTitle?: string | null;
+  /** The task chat of the task whose chat thread the message is in, when it
+   *  has one. Absent from servers before it. */
+  chatThreadTaskChatId?: string | null;
   /** Rome's status reaction on a guardian message in a Concierge chat: how
    *  the task it started or was passed on to stands. Absent when it has none. */
   statusReaction?: import("@rome/api-types/concierge").ConciergeStatusReaction | null;

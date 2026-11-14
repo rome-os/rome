@@ -81,7 +81,7 @@ describe("connector_event_ensure action", () => {
     });
     expect(result.status).toBe("error");
     if (result.status === "error") {
-      expect(result.error).toContain('connector_connect({"toolkit":"github"})');
+      expect(result.error).toContain('connect_account tool with {"kind":"github"}');
       expect(result.error).not.toMatch(/can.t be connected from here/);
     }
   });

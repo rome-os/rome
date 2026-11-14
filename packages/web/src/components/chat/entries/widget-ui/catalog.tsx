@@ -1,21 +1,29 @@
 // Rome's A2UI catalog: the components a card described as data may use
 // (`WIDGET_UI_COMPONENTS` in @rome-os/app-runtime), drawn with the dashboard's
 // own tokens. The components from A2UI's basic catalog keep its schemas, so
-// a card reads as A2UI; `Stat` and `Progress` are Rome's.
+// a card reads as A2UI; `Stat` and `Progress` are Rome's, and `TextField`
+// adds Rome's `placeholder`.
 import {
   ButtonApi,
   Catalog,
+  ChoicePickerApi,
   ColumnApi,
   CommonSchemas,
   type ComponentApi,
   ImageApi,
   ListApi,
+  createFunctionImplementation,
+  OrImplementation,
+  RequiredApi,
   RowApi,
   TextApi,
+  TextFieldApi,
 } from "@a2ui/web_core/v0_9";
 import { createComponentImplementation } from "@a2ui/react/v0_9";
 import { createContext, type ReactNode, useContext } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export const ROME_WIDGET_CATALOG_ID = "https://rome.app/a2ui/catalogs/chat-widget/v1.json";
@@ -43,9 +51,44 @@ const ProgressApi = {
   }).strict(),
 };
 
+// Rome's option `description` is a dynamic string, so a bound one is read
+// like the label.
+const ChoiceOptionSchema = ChoicePickerApi.schema.shape.options.element.extend({
+  description: CommonSchemas.DynamicString.optional(),
+});
+
+const ChoicePickerWithDescriptionsApi = {
+  name: "ChoicePicker",
+  schema: ChoicePickerApi.schema.extend({ options: ChoiceOptionSchema.array() }).strict(),
+};
+
+const TextFieldWithPlaceholderApi = {
+  name: "TextField",
+  schema: TextFieldApi.schema
+    .extend({ placeholder: CommonSchemas.DynamicString.optional() })
+    .strict(),
+};
+
+/** True once the card is answered or dismissed: inputs stop taking input and
+ *  buttons are hidden. */
+export const WidgetLockedContext = createContext(false);
+
 /** True while a button's request is in flight: every button is disabled, so
  *  a press is sent once. */
 export const WidgetBusyContext = createContext(false);
+
+/** Rome's `clears`, by component id: the value an input empties when it is
+ *  edited. A2UI's schemas have no such field, so the card hands it here. */
+export const WidgetClearsContext = createContext<ReadonlyMap<string, string>>(new Map());
+
+/** The empty value at `path`: `[]` for a list, `""` otherwise. */
+function clearValue(
+  dataContext: { set(path: string, value: unknown): void },
+  path: string,
+  list: boolean,
+) {
+  dataContext.set(path, list ? [] : "");
+}
 
 const textClass: Record<string, string> = {
   h1: "text-title",
@@ -88,11 +131,20 @@ function children(list: Child[] | undefined, build: (id: string, basePath?: stri
   );
 }
 
-const Text = createComponentImplementation(TextApi, ({ props }) => (
-  <span className={cn("min-w-0 text-foreground", textClass[props.variant ?? "body"])}>
-    {shown(props.text)}
-  </span>
-));
+/** A button's label takes the button's own text colour, as on a primary
+ *  button's fill, rather than the card's. */
+const InButtonContext = createContext(false);
+
+const Text = createComponentImplementation(TextApi, ({ props }) => {
+  const inButton = useContext(InButtonContext);
+  return (
+    <span
+      className={cn("min-w-0", !inButton && "text-foreground", textClass[props.variant ?? "body"])}
+    >
+      {shown(props.text)}
+    </span>
+  );
+});
 
 const Stat = createComponentImplementation(StatApi, ({ props }) => (
   <div className="flex min-w-0 flex-col">
@@ -127,6 +179,16 @@ const Progress = createComponentImplementation(ProgressApi, ({ props }) => {
     </div>
   );
 });
+
+// A2UI's `required` passes a string of spaces; the question card and the iOS
+// app have always treated that as no answer.
+const Required = createFunctionImplementation(RequiredApi, ({ value }) =>
+  typeof value === "string"
+    ? value.trim().length > 0
+    : Array.isArray(value)
+      ? value.length > 0
+      : value !== null && value !== undefined,
+);
 
 /** An image URL a card may load: `https:` only, so it never reads the
  *  instance with the guardian's session, and loads the same on iOS. */
@@ -191,7 +253,9 @@ const List = createComponentImplementation(ListApi, ({ props, buildChild }) => (
 ));
 
 const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChild }) => {
+  const locked = useContext(WidgetLockedContext);
   const busy = useContext(WidgetBusyContext);
+  if (locked) return null;
   return (
     <Button
       size="sm"
@@ -203,24 +267,129 @@ const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChi
             : "outline"
       }
       className="self-start"
-      disabled={busy}
+      disabled={busy || props.isValid === false}
       onClick={() => void props.action?.()}
     >
-      {buildChild(props.child as string)}
+      <InButtonContext.Provider value={true}>
+        {buildChild(props.child as string)}
+      </InButtonContext.Provider>
     </Button>
   );
 });
 
-export const romeWidgetCatalog = new Catalog(ROME_WIDGET_CATALOG_ID, [
-  Text,
-  Stat,
-  Progress,
-  Image,
-  Row,
-  Column,
-  List,
-  WidgetButton,
-  // @a2ui/react types its schemas with the page's zod 4 and web_core with
-  // its own zod 3. Only the types differ: @a2ui/react calls no zod at run
-  // time, and every schema here is web_core's.
-] as unknown as ComponentApi[]);
+// Options read as the question card's chips: a pressed chip is picked.
+const ChoicePicker = createComponentImplementation(
+  ChoicePickerWithDescriptionsApi,
+  ({ props, context }) => {
+    const locked = useContext(WidgetLockedContext);
+    const clears = useContext(WidgetClearsContext).get(context.componentModel.id);
+    const picked = Array.isArray(props.value) ? (props.value as string[]) : [];
+    const multi = props.variant === "multipleSelection";
+    const options = (props.options ?? []) as {
+      label?: unknown;
+      value: string;
+      description?: unknown;
+    }[];
+    const stacked = options.some((o) => shown(o.label).length > 32 || o.description);
+    const choose = (value: string) => {
+      const next = multi
+        ? picked.includes(value)
+          ? picked.filter((v) => v !== value)
+          : [...picked, value]
+        : [value];
+      props.setValue?.(next);
+      if (clears) clearValue(context.dataContext, clears, false);
+    };
+    return (
+      <div
+        role="group"
+        aria-label={props.label ? shown(props.label) : undefined}
+        className={stacked ? "flex flex-col gap-2" : "flex flex-wrap items-center gap-2"}
+      >
+        {options.map((o) => {
+          const selected = picked.includes(o.value);
+          return (
+            <Button
+              key={o.value}
+              type="button"
+              size="sm"
+              variant={selected ? "default" : "outline"}
+              align={stacked ? "start" : "center"}
+              aria-pressed={selected}
+              disabled={locked}
+              onClick={() => choose(o.value)}
+              className={cn(
+                "h-auto min-h-[var(--control-h-sm)] min-w-0 max-w-full whitespace-normal wrap-anywhere",
+                stacked && "w-full text-left",
+                o.description ? "py-2" : null,
+              )}
+            >
+              {o.description ? (
+                <span className="flex min-w-0 flex-col gap-1">
+                  <span>{shown(o.label)}</span>
+                  <span
+                    className={cn(
+                      "text-aux",
+                      selected ? "text-primary-foreground/80" : "text-muted-foreground",
+                    )}
+                  >
+                    {shown(o.description)}
+                  </span>
+                </span>
+              ) : (
+                shown(o.label)
+              )}
+            </Button>
+          );
+        })}
+      </div>
+    );
+  },
+);
+
+const TextField = createComponentImplementation(
+  TextFieldWithPlaceholderApi,
+  ({ props, context }) => {
+    const locked = useContext(WidgetLockedContext);
+    const clears = useContext(WidgetClearsContext).get(context.componentModel.id);
+    const type = (text: string) => {
+      props.setValue?.(text);
+      if (clears && text) clearValue(context.dataContext, clears, true);
+    };
+    const field = {
+      "aria-label": shown(props.label),
+      placeholder: props.placeholder ? shown(props.placeholder) : undefined,
+      value: typeof props.value === "string" ? props.value : "",
+      disabled: locked,
+    };
+    return props.variant === "longText" ? (
+      <Textarea {...field} rows={3} onChange={(e) => type(e.currentTarget.value)} />
+    ) : (
+      <Input {...field} onChange={(e) => type(e.currentTarget.value)} />
+    );
+  },
+);
+
+export const romeWidgetCatalog = new Catalog(
+  ROME_WIDGET_CATALOG_ID,
+  [
+    Text,
+    Stat,
+    Progress,
+    Image,
+    Row,
+    Column,
+    List,
+    WidgetButton,
+    ChoicePicker,
+    TextField,
+    // @a2ui/react types its schemas with the page's zod 4 and web_core with
+    // its own zod 3. Only the types differ: @a2ui/react calls no zod at run
+    // time, and every schema here is web_core's.
+  ] as unknown as ComponentApi[],
+  [
+    // The only functions a card may call, in its `checks`.
+    Required,
+    OrImplementation,
+  ],
+);

@@ -32,13 +32,14 @@ const record = (patch: Partial<ApprovalRecord>): ApprovalRecord => ({
 
 const lastTabStatus = () => mockUseTabStatus.mock.calls.at(-1)?.[0];
 
-function mountCard() {
+function mountCard(settled: "fold" | "full" = "full") {
   return render(
     <ApprovalCard
       approvalId="appr-1"
       preview={{ kind: "generic", title: "Send email", summary: "To the team" }}
       status="pending"
       onResolved={() => {}}
+      settled={settled}
     />,
   );
 }
@@ -87,6 +88,32 @@ describe("ApprovalCard tab status", () => {
     mountCard();
     await waitFor(() => expect(screen.getByText("approvals.status.executing")).toBeTruthy());
     expect(lastTabStatus()).toBe("idle");
+  });
+
+  it("folds once decided to what it asks and how it ended, opening to the whole card", async () => {
+    mockFetchApproval.mockResolvedValue(record({ status: "rejected" }));
+    mountCard("fold");
+    const fold = await screen.findByRole("button", { name: /Send email/ });
+    expect(fold.textContent).toBe("Send emailconcierge.ask.rejected");
+    expect(screen.queryByText("approvals.footer.rejectedNotice")).toBeNull();
+    fold.click();
+    expect(await screen.findByText("approvals.footer.rejectedNotice")).toBeTruthy();
+  });
+
+  it("folds an approval Rome turned down as its task's wait ran out to say so", async () => {
+    mockFetchApproval.mockResolvedValue(
+      record({ status: "rejected", resolvedBy: "rome:task-ended" }),
+    );
+    mountCard("fold");
+    expect(await screen.findByText("concierge.ask.turnedDown")).toBeTruthy();
+  });
+
+  it("folds an approval Rome turned down as its task was stopped to say so", async () => {
+    mockFetchApproval.mockResolvedValue(
+      record({ status: "rejected", resolvedBy: "rome:task-stopped" }),
+    );
+    mountCard("fold");
+    expect(await screen.findByText("concierge.ask.turnedDownStopped")).toBeTruthy();
   });
 
   it("releases the claim once the guardian approves", async () => {

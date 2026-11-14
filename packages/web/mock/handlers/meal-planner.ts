@@ -1,5 +1,6 @@
 import { HttpResponse, http } from "msw";
 import type { TranscriptPart } from "@rome/api-types/chat";
+import { questionCardRender } from "../fixtures/question-card";
 
 // A meal planner app's API and the card it shows in Chat, described as data
 // (`widget` with `ui`). The iOS demo data draws the same card.
@@ -19,6 +20,18 @@ export const mealPlannerHandlers = [
     }),
   ),
   http.post("/api/apps/meal-planner/water", () => {
+    glasses += 1;
+    return HttpResponse.json({ water: glasses });
+  }),
+  // Core's events route. The meal card's water button reaches the app's
+  // `water` above; any other widget's event is taken, as core takes an answer
+  // (mock mode has no agent to start a turn for it).
+  http.post("/api/chat/widgets/:widgetId/events", async ({ request }) => {
+    const { name } = (await request.json()) as { name?: unknown };
+    // Any other event stands for core answering the agent waiting on its widget.
+    if (name !== "water") {
+      return HttpResponse.json({ answered: true });
+    }
     glasses += 1;
     return HttpResponse.json({ water: glasses });
   }),
@@ -80,4 +93,31 @@ export const mealPlannerCard = {
       { id: "water-label", component: "Text", text: "Log a glass of water" },
     ],
   },
+} as TranscriptPart;
+
+// `ask_question`'s card as core stores it: the question card's props, with
+// the same card described as data in `render.ui`, which the dashboard draws.
+export const dinnerQuestion = {
+  type: "pending_interaction",
+  toolUseId: "mock-dinner-question",
+  appId: "core",
+  render: questionCardRender([
+    {
+      id: "dinner",
+      question: "What kind of dinner?",
+      type: "single",
+      options: ["High protein", "Something light"],
+      optionDescriptions: {
+        "High protein": "Chicken, tofu, eggs",
+      },
+      freeText: true,
+    },
+    {
+      id: "avoid",
+      question: "Anything to avoid?",
+      type: "multi",
+      options: ["Spicy", "Seafood", "Dairy"],
+      optional: true,
+    },
+  ]),
 } as TranscriptPart;

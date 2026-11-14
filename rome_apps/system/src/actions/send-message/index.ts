@@ -204,7 +204,12 @@ function getAllowedAttachmentRoots(): string[] {
     readEnvPath("ROME_WEBCHAT_PROJECTS_ROOT") ??
     join(getProfileDir(), "projects");
 
-  return [projectsRoot, join(getProfileDir(), "memory", "channel-attachments")];
+  return [
+    projectsRoot,
+    join(getProfileDir(), "memory", "channel-attachments"),
+    // Files the guardian uploaded in chat (core's asset store).
+    join(getProfileDir(), "assets"),
+  ];
 }
 
 function isPathInside(root: string, candidate: string): boolean {
@@ -242,7 +247,7 @@ async function validateAttachmentSource(source: string): Promise<string> {
 
   if (!allowedRoots.some((root) => root && isPathInside(root, sourceRealPath))) {
     throw new Error(
-      "Attachment source must be under a Rome project workspace or channel attachment directory",
+      "Attachment source must be under a Rome project workspace, chat upload or channel attachment directory",
     );
   }
 

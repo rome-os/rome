@@ -213,6 +213,23 @@ export interface TraceSystemInputEvent extends TraceEventBase {
   type: "system_input";
   label: string;
   content: string;
+  /** Set when the input came from a routine, an app or another agent sent
+   *  into a Concierge chat, or from what it follows. The chat labels the
+   *  turn's replies with it. */
+  source?: SystemInputSource;
+}
+
+/**
+ * Where the input a system turn ran on came from, when the Concierge speaks
+ * on its own rather than answering its owner: something sent it into the
+ * chat, or it is what the Concierge follows (`following` for important
+ * events, `digest` for the digest), or a check it set with `defer` came due
+ * (`check`, named by the check). The chat labels the turn's replies with it.
+ */
+export interface SystemInputSource {
+  type: "routine" | "app" | "agent" | "automation" | "following" | "digest" | "check";
+  /** The routine's, app's or agent's name, or the kind of events followed, when it has one. */
+  name: string | null;
 }
 
 export interface TracePlanUpdateEvent extends TraceEventBase {
@@ -294,6 +311,13 @@ export interface TraceSummary {
   /** Terminal agent error for failed turns. Present only when the trace ended
    *  with an error rather than a user stop. */
   terminalError?: string;
+  /** The failed turn's error code, provider and reason, as its terminal error
+   *  and the stream's `done` event carry them. Present only with
+   *  `terminalError`, and only the ones the error had, so a client can show
+   *  the same guidance after a reload as while the turn ran. */
+  terminalErrorCode?: AgentErrorCode;
+  terminalErrorProvider?: AgentErrorProvider;
+  terminalErrorReason?: AgentErrorReason;
   plan?: AgentPlan;
   /** The model that produced the turn, from the accounting on its terminal
    *  block. Absent while the turn runs and when the terminal recorded none. */
@@ -301,6 +325,10 @@ export interface TraceSummary {
   /** Set when the turn is the first of a session that replaced the chat's
    *  earlier one, so the chat can show where its session changed. */
   sessionRenewal?: TraceSessionRenewal;
+  /** Set when the turn ran on an input a routine, an app or another agent sent
+   *  into the chat, or on what the Concierge follows, so the chat can label
+   *  the turn's replies with it. */
+  automatedInput?: SystemInputSource;
 }
 
 export interface TraceSnapshot {
@@ -326,4 +354,9 @@ export interface TurnFeedback {
   comment: string | null;
   /** Unix seconds. */
   updatedAt: number;
+}
+
+/** `GET /chat/sessions/:sessionId/feedback`: each turn's feedback by turn id; a turn with none is absent. */
+export interface SessionTurnFeedbackResponse {
+  feedback: Record<string, TurnFeedback>;
 }

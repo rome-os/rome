@@ -7,7 +7,10 @@ import { startAfter, testReceipt, testTurnHandle } from "../test/turn-handle.js"
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
-import type { PromptFacts } from "../agent/index.js";
+import type { PromptFacts, UnseenMessage } from "../agent/index.js";
+import { SenderLabels } from "../chats/sender-labels.js";
+import type { SaidMessage } from "../chats/storage/message.js";
+import type { RunLineDeps } from "../connections/speaker-messages.js";
 import type { AgentDefinition } from "../agent/index.js";
 import { claudeStoppedTurnResult, readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
@@ -43,7 +46,8 @@ import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
 const recordMetrics = rs.hoisted(() => rs.fn());
 rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
 
-import type { ModelSessionEvent, RomeTools } from "../agent/index.js";
+import type { ModelSessionEvent, RenewalHandoffs, RomeTools } from "../agent/index.js";
+import { ROME_TOOL_GROUPS } from "../agent/index.js";
 import {
   executeActionTool,
   executeSubagentTool,
@@ -115,7 +119,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { TurnUsageFacts } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
-import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
+import type { UnseenLine } from "../sessions/turn-links.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
   reportOf,
@@ -2355,6 +2359,7 @@ describe("AgentRunner", () => {
       appCatalog?: Pick<AppCatalog, "get">;
       resetPolicy?: ProviderSessionResetPolicy;
       turnLinks?: PromptFacts;
+      runLineDeps?: RunLineDeps;
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2376,7 +2381,7 @@ describe("AgentRunner", () => {
       new ChatsWebChatRepository(testDb.db),
       undefined,
       undefined,
-      undefined,
+      options.runLineDeps,
       resetPolicy ? async () => resetPolicy : undefined,
       sessionOpeningFor({ channelSurface: testChannelSurface }),
     );
@@ -2749,6 +2754,70 @@ describe("AgentRunner", () => {
       expect(messages).toContainEqual(
         expect.objectContaining({ type: "turn_end", status: "interrupted" }),
       );
+      await manager.shutdown();
+    });
+
+    it("sends a header again after a steered input carried another one (A, steered B, then A)", async () => {
+      const prompts: string[] = [];
+      const steered: string[] = [];
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const provider: ModelProvider = {
+        id: "anthropic",
+        builtinTools: new Set(),
+        async openSession(params) {
+          const model = createSessionFromRun(
+            "anthropic",
+            async function* ({ prompt }) {
+              prompts.push(prompt);
+              if (prompts.length === 1) await firstGate;
+              yield { type: "result", content: "ok" };
+            },
+            params,
+          );
+          return {
+            ...model,
+            // A provider takes the input and runs it while the turn goes on.
+            async sendUserInput(input) {
+              void model.sendUserInput(input);
+            },
+            async steerUserInput(input) {
+              steered.push(input.text);
+              releaseFirst();
+              return "accepted" as const;
+            },
+          };
+        },
+      };
+      const manager = createSessions(
+        {
+          ...managerDeps(createTestModelResolver({ providers: [provider] })),
+          stickyHeaders: ["workspace_context"],
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.open({
+        agentName: "test-main",
+        channelThreadKey: "webchat:steered-headers",
+      });
+      const A = "<workspace_context>A</workspace_context>";
+      const B = "<workspace_context>B</workspace_context>";
+
+      const first = session.submit({ prompt: `${A}\n\none` }, { priority: "next" });
+      const firstMessages = collectMessages((await first.turn).events());
+      await rs.waitFor(() => expect(prompts).toHaveLength(1));
+      const second = session.submit({ prompt: `${B}\n\ntwo` }, { priority: "next" });
+      expect(second.landed).toBe("steered");
+      await rs.waitFor(() => expect(steered).toHaveLength(1));
+      await firstMessages;
+      const third = session.submit({ prompt: `${A}\n\nthree` }, { priority: "next" });
+      await collectMessages((await third.turn).events());
+
+      expect(steered[0]).toContain(B);
+      // The thread last read B, so A goes again.
+      expect(prompts.at(-1)).toContain(A);
       await manager.shutdown();
     });
 
@@ -3566,12 +3635,96 @@ describe("AgentRunner", () => {
         );
       });
 
+      it("offers no propose_routine to an agent that delegates its work", async () => {
+        const proposal = { ...tool("Propose a routine."), name: "propose_routine" };
+        sessionTools = [tool("Send one message."), proposal];
+        const found = agentLoader.find("test-renewing")! as { definition: AgentDefinition };
+        const original = found.definition;
+        const provider = new MockModelProvider(replies(2));
+        const runner = renewingRunner(provider);
+        try {
+          await turn(runner);
+          expect(toolNames(provider.sessions[0]!.tools, "ask_user")).toContain("propose_routine");
+          found.definition = { ...original, policy: { ...original.policy, delegatesWork: true } };
+          await turn(runner);
+          const names = toolNames(provider.sessions.at(-1)!.tools, "ask_user");
+          expect(names).toContain("say");
+          expect(names).not.toContain("propose_routine");
+        } finally {
+          found.definition = original;
+        }
+      });
+
       it("keeps the session when only the guardian's profile in the context changes", async () => {
         const runner = renewingRunner(new MockModelProvider(replies(2)));
         const first = await turn(runner, { contextSuffix: "## Guardian\n\nLikes tea." });
         const second = await turn(runner, { contextSuffix: "## Guardian\n\nLikes coffee." });
 
         expect(second).toBe(first);
+      });
+
+      describe("what the chat adds to its session's context", () => {
+        const INSTRUCTION = "## Your conclusion\nEnd every final answer with one.";
+        const taskChat = { channel: "webchat", threadId: "task-chat" };
+        const chatInstructions = async (thread: { threadId?: string } | undefined) =>
+          thread?.threadId === "task-chat" ? INSTRUCTION : null;
+        const system = (provider: MockModelProvider) =>
+          provider.sessions.at(-1)?.config.systemPrompt ?? "";
+        /** A turn that opens the chat's session cold, as a defer's wake-up or an approval's continuation does: by id, with no context of its own. */
+        const continuation = async (runner: AgentRunner, sessionId: string, thread = taskChat) => {
+          await evict(runner);
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: "Continue",
+              sessionId,
+              threadContext: thread,
+              initiatedBy: "system",
+            }),
+          );
+        };
+
+        it("adds it to a task chat's session when the chat opens it", async () => {
+          const provider = new MockModelProvider(replies(1));
+          const runner = renewingRunner(provider, undefined, { chatInstructions });
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: "Hello",
+              channelThreadKey: key,
+              threadContext: taskChat,
+              contextSuffix: "## Guardian\n\nLikes tea.",
+            }),
+          );
+          expect(system(provider)).toContain(INSTRUCTION);
+          expect(system(provider)).toContain("Likes tea.");
+        });
+
+        it("adds it again when the session is evicted and resumed by id with no context of its own", async () => {
+          const provider = new MockModelProvider(replies(2));
+          const runner = renewingRunner(provider, undefined, { chatInstructions });
+          const first = await turn(runner);
+          await continuation(runner, first!);
+          expect(provider.sessions).toHaveLength(2);
+          expect(system(provider)).toContain(INSTRUCTION);
+        });
+
+        it("resumes the same session, since the instruction is no part of the setup", async () => {
+          const provider = new MockModelProvider(replies(3));
+          const runner = renewingRunner(provider, undefined, { chatInstructions });
+          const first = await turn(runner);
+          await continuation(runner, first!);
+          const second = await turn(runner, { sessionId: first! });
+          expect(second).toBe(first);
+        });
+
+        it("adds nothing to another chat's session, resumed or not", async () => {
+          const provider = new MockModelProvider(replies(2));
+          const runner = renewingRunner(provider, undefined, { chatInstructions });
+          const first = await turn(runner);
+          await continuation(runner, first!, { channel: "webchat", threadId: "plain-chat" });
+          expect(system(provider)).not.toContain(INSTRUCTION);
+        });
       });
 
       it("renews the session when a declared MCP server's command or arguments change", async () => {
@@ -3809,6 +3962,518 @@ describe("AgentRunner", () => {
         ]);
         expect(provider.calls[1]?.prompt).toContain("<continuation>");
         expect(provider.calls[2]?.prompt).not.toContain("<continuation>");
+      });
+
+      it("sends a header block again only when it changed, or to a thread that has not read it", async () => {
+        const provider = threadedProvider(5);
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        const say = (name: string, text: string) =>
+          collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="${name}"/>\n\n${text}`,
+              channelThreadKey: key,
+            }),
+          );
+        await say("Main", "one");
+        await say("Main", "two");
+        await say("Home", "three");
+        // Reopened on the same thread, which already read it.
+        await evict(runner);
+        await say("Home", "four");
+        // A setup change starts a new thread, which reads it from its first input.
+        identity.text = "**Agent Name:** YoYo";
+        await evict(runner);
+        await say("Home", "five");
+
+        const prompts = provider.calls.map((call) => call.prompt);
+        expect(prompts[0]).toContain('<concierge_chat id="c1" name="Main"/>');
+        expect(prompts[1]).not.toContain("<concierge_chat");
+        expect(prompts[1]).toContain("two");
+        expect(prompts[2]).toContain('<concierge_chat id="c1" name="Home"/>');
+        expect(provider.sessions[1]?.thread).toEqual({ kind: "resume", modelThreadId: "thread-1" });
+        expect(prompts[3]).not.toContain("<concierge_chat");
+        expect(prompts[4]).toContain('<concierge_chat id="c1" name="Home"/>');
+      });
+
+      it("sends the headers again after the provider compacted the thread", async () => {
+        const provider = threadedProvider(4);
+        const withContext = (usedTokens: number) =>
+          [
+            {
+              type: "result" as const,
+              content: "ok",
+              accounting: {
+                provider: "mock",
+                model: "mock",
+                usage: {
+                  inputTokens: usedTokens,
+                  outputTokens: 1,
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                },
+                context: { usedTokens },
+                costUsd: 0,
+              },
+            },
+          ] as AgentEvent[];
+        provider["responses"][0] = withContext(9_000);
+        provider["responses"][1] = withContext(10_000);
+        // Compacted: the thread holds less than it did a turn ago.
+        provider["responses"][2] = withContext(3_000);
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        for (const text of ["one", "two", "three", "four"]) {
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="Main"/>\n\n${text}`,
+              channelThreadKey: key,
+            }),
+          );
+        }
+        const prompts = provider.calls.map((call) => call.prompt);
+        expect(prompts.map((prompt) => prompt.includes("<concierge_chat"))).toEqual([
+          true,
+          false,
+          false,
+          true,
+        ]);
+      });
+
+      it("sends the headers again after a compaction the provider reported partway through a turn", async () => {
+        const provider = threadedProvider(3);
+        const result = (usedTokens: number) => ({
+          type: "result" as const,
+          content: "ok",
+          accounting: {
+            provider: "mock",
+            model: "mock",
+            usage: {
+              inputTokens: usedTokens,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            context: { usedTokens },
+            costUsd: 0,
+          },
+        });
+        provider["responses"][0] = [result(120_000)];
+        // Compacted partway through, then grew past where the last turn ended.
+        provider["responses"][1] = [
+          { type: "model_context_compacted" } as unknown as AgentEvent,
+          result(130_000),
+        ];
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        for (const text of ["one", "two", "three"]) {
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="Main"/>\n\n${text}`,
+              channelThreadKey: key,
+            }),
+          );
+        }
+        const prompts = provider.calls.map((call) => call.prompt);
+        expect(prompts.map((prompt) => prompt.includes("<concierge_chat"))).toEqual([
+          true,
+          false,
+          true,
+        ]);
+      });
+
+      it("sends the headers again after a turn that did not return a result", async () => {
+        const provider = threadedProvider(3);
+        provider["responses"][1] = [{ type: "error", error: "provider failed" }];
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        for (const name of ["Main", "Home", "Main"]) {
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="${name}"/>\n\nhi`,
+              channelThreadKey: key,
+            }),
+          );
+        }
+        const prompts = provider.calls.map((call) => call.prompt);
+        // The failed turn may or may not have read "Home", so "Main" goes again.
+        expect(prompts[2]).toContain('<concierge_chat id="c1" name="Main"/>');
+      });
+
+      it("sends the headers after a compaction even when the session closes before its next input", async () => {
+        const provider = threadedProvider(4);
+        const withContext = (usedTokens: number) =>
+          [
+            {
+              type: "result" as const,
+              content: "ok",
+              accounting: {
+                provider: "mock",
+                model: "mock",
+                usage: {
+                  inputTokens: usedTokens,
+                  outputTokens: 1,
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                },
+                context: { usedTokens },
+                costUsd: 0,
+              },
+            },
+          ] as AgentEvent[];
+        provider["responses"][0] = withContext(9_000);
+        provider["responses"][1] = withContext(10_000);
+        provider["responses"][2] = withContext(3_000);
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        const say = (text: string) =>
+          collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="Main"/>\n\n${text}`,
+              channelThreadKey: key,
+            }),
+          );
+        await say("one");
+        // An idle close keeps what the thread read.
+        await evict(runner);
+        await say("two");
+        // This turn's thread was compacted, and the session closes before the next input.
+        await say("three");
+        await evict(runner);
+        await say("four");
+        const prompts = provider.calls.map((call) => call.prompt);
+        expect(prompts.map((prompt) => prompt.includes("<concierge_chat"))).toEqual([
+          true,
+          false,
+          false,
+          true,
+        ]);
+      });
+
+      describe("with a handoff", () => {
+        const HANDOFF = "- Agreed: dinner at 7 on Friday, task t-1.";
+        let handoffAgent: { definition: AgentDefinition };
+        let original: AgentDefinition;
+        beforeEach(() => {
+          handoffAgent = agentLoader.find("test-renewing")! as { definition: AgentDefinition };
+          original = handoffAgent.definition;
+          handoffAgent.definition = {
+            ...original,
+            policy: { ...original.policy, handoffOnRenewal: true },
+          };
+        });
+        afterEach(() => {
+          handoffAgent.definition = original;
+        });
+
+        /** The handoff port, recording what it was asked. */
+        function fakeHandoffs(overrides: Partial<RenewalHandoffs> = {}) {
+          const asked = { tidying: [] as (string | undefined)[], fallback: 0, context: 0 };
+          const handoffs: RenewalHandoffs = {
+            timeoutMs: 1_000,
+            tidying: async (chatId, work) => {
+              asked.tidying.push(chatId);
+              return work();
+            },
+            fallback: async () => {
+              asked.fallback += 1;
+              return "- Fallback note.";
+            },
+            context: async () => {
+              asked.context += 1;
+              return {
+                openTasks: "- t-1 · Book dinner · active",
+                recent: [{ senderName: "Guardian", text: "Friday at 7 then", at: new Date(0) }],
+              };
+            },
+            ...overrides,
+          };
+          return { handoffs, asked };
+        }
+
+        /** One cold turn, and every event it streamed. */
+        async function coldTurn(runner: AgentRunner) {
+          await evict(runner);
+          return collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          );
+        }
+
+        it("asks the retired session for a handoff, stores it, and opens the successor with it", async () => {
+          const provider = threadedProvider(4);
+          // The second call is the handoff turn: it answers with the note.
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const { handoffs, asked } = fakeHandoffs();
+          // Every turn the chat, its status marks, pushes and task events hear of.
+          const lifecycle = { started: 0, ended: 0, couldNotStart: 0 };
+          const turnLifecycle = {
+            started: () => void lifecycle.started++,
+            ended: () => void lifecycle.ended++,
+            couldNotStart: () => void lifecycle.couldNotStart++,
+          };
+          const runner = renewingRunner(provider, undefined, { handoffs, turnLifecycle });
+          await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          const renewedEvents = await coldTurn(runner);
+          // Two messages, two turns: the handoff turn is none of them.
+          expect(lifecycle).toEqual({ started: 2, ended: 2, couldNotStart: 0 });
+          // It could not say anything: it served no tool in any group, and refuses `say`.
+          const handoffTools = provider.sessions[1]!.tools;
+          for (const group of ROME_TOOL_GROUPS) expect(handoffTools.listTools(group)).toEqual([]);
+          expect((await handoffTools.callTool("actions", "say", { text: "hi" })).isError).toBe(
+            true,
+          );
+          const renewed = await sessionRepository.current(key, "core:test-renewing");
+
+          // The handoff turn resumed the retired thread with no tools.
+          expect(provider.sessions[1]?.thread).toEqual({
+            kind: "resume",
+            modelThreadId: "thread-1",
+          });
+          expect(provider.sessions[1]?.tools.listTools("actions")).toEqual([]);
+          expect(provider.calls[1]?.prompt).toContain("<handoff_request>");
+          expect(renewed?.handoff).toBe(HANDOFF);
+          expect(asked.tidying).toHaveLength(1);
+          expect(asked.fallback).toBe(0);
+          // The successor's first turn carries it, with the open tasks and recent messages.
+          const firstPrompt = provider.calls[2]?.prompt ?? "";
+          expect(firstPrompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
+          expect(firstPrompt).toContain("<open_tasks>\n- t-1 · Book dinner · active");
+          expect(firstPrompt).toContain("Guardian: Friday at 7 then");
+          // Nothing of the handoff turn reached the chat: one turn, answered by the successor.
+          expect(renewedEvents.filter((event) => event.type === "turn_start")).toHaveLength(1);
+          expect(
+            renewedEvents.some(
+              (event) => event.type === "result" && event.content.includes("dinner"),
+            ),
+          ).toBe(false);
+          expect(renewedEvents.find((event) => event.type === "turn_start")?.sessionId).toBe(
+            renewed?.id,
+          );
+
+          // A later turn of the successor carries it no more.
+          await coldTurn(runner);
+          expect(provider.calls[3]?.prompt).not.toContain("<handoff>");
+        });
+
+        it("writes it with the fallback when the retired session does not answer in time, even if it never closes", async () => {
+          const provider = threadedProvider(3);
+          const open = provider.openSession.bind(provider);
+          provider.openSession = async (params) => {
+            if (params.thread.kind !== "resume") return open(params);
+            provider.sessions.push(params);
+            // A thread that never answers, and whose close never settles.
+            return {
+              providerId: "mock",
+              model: params.config.model,
+              events: (async function* () {
+                await new Promise(() => {});
+              })(),
+              sendUserInput: async () => {},
+              interrupt: async () => {},
+              close: () => new Promise<void>(() => {}),
+            } as ModelSession;
+          };
+          const { handoffs, asked } = fakeHandoffs({ timeoutMs: 20 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          await coldTurn(runner);
+
+          expect(asked.fallback).toBe(1);
+          expect((await sessionRepository.current(key, "core:test-renewing"))?.handoff).toBe(
+            "- Fallback note.",
+          );
+          expect(provider.calls.at(-1)?.prompt).toContain("- Fallback note.");
+        });
+
+        it("renews without a handoff when neither the session nor the fallback writes one", async () => {
+          const provider = threadedProvider(3);
+          provider["responses"][1] = [{ type: "error", error: "thread gone" }];
+          const { handoffs, asked } = fakeHandoffs({ fallback: async () => null });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          await coldTurn(runner);
+
+          const renewed = await sessionRepository.current(key, "core:test-renewing");
+          expect(renewed?.id).not.toBe(
+            first.find((event) => event.type === "turn_start")?.sessionId,
+          );
+          expect(renewed?.handoff).toBeNull();
+          expect(asked.context).toBe(0);
+          expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
+          expect(provider.calls.at(-1)?.prompt).not.toContain("<handoff>");
+        });
+
+        /** Lets a turn end's background renewal run, as a guardian's pause would. */
+        const settleRenewal = () => new Promise((resolve) => setTimeout(resolve, 100));
+
+        /** A result whose last model request read `usedTokens` of context. */
+        const fullResult = (usedTokens: number, content = "ok") =>
+          [
+            {
+              type: "result" as const,
+              content,
+              accounting: {
+                provider: "mock",
+                model: "mock",
+                usage: {
+                  inputTokens: usedTokens,
+                  outputTokens: 1,
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                },
+                context: { usedTokens, windowTokens: 1_000, remainingTokens: 1_000 - usedTokens },
+                costUsd: 0,
+              },
+            },
+          ] as AgentEvent[];
+
+        it("renews a session whose turn ended past the context limit, with a handoff, before the next message", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(900);
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const { handoffs, asked } = fakeHandoffs({ contextLimitTokens: 500 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          expect((await sessionRepository.session(first!))?.contextTokens).toBe(900);
+          // The guardian answers a moment later, after the turn has settled.
+          await settleRenewal();
+
+          // The next message, with no eviction: the renewal ran when the turn ended.
+          const events = await collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          );
+          const start = events.find((event) => event.type === "turn_start");
+          const renewed = await sessionRepository.current(key, "core:test-renewing");
+          expect(renewed?.id).not.toBe(first);
+          expect(renewed?.handoff).toBe(HANDOFF);
+          expect((await sessionRepository.session(first!))?.supersededFor).toBe("context");
+          expect(start && "sessionRenewal" in start ? start.sessionRenewal : undefined).toEqual({
+            reason: "context",
+            sessionId: renewed?.id,
+          });
+          expect(provider.sessions.map((params) => params.thread)).toEqual([
+            { kind: "new" },
+            { kind: "resume", modelThreadId: "thread-1" },
+            { kind: "new" },
+          ]);
+          expect(provider.calls[2]?.prompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
+          expect(asked.tidying).toHaveLength(1);
+        });
+
+        it("does not renew again a successor no turn ran on when the setup changes: it takes the new setup and keeps its handoff", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(900);
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const { handoffs, asked } = fakeHandoffs({ contextLimitTokens: 500 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          // The background renewal writes the successor on no thread.
+          await settleRenewal();
+          await evict(runner);
+          const successor = await sessionRepository.current(key, "core:test-renewing");
+          expect(successor?.id).not.toBe(first);
+          expect(successor?.modelThreadId).toBeNull();
+          const setupBefore = successor?.setup;
+
+          identity.text = "**Agent Name:** YoYo";
+          const events = await collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          );
+          const after = await sessionRepository.current(key, "core:test-renewing");
+          const start = events.find((event) => event.type === "turn_start");
+
+          expect(after?.id).toBe(successor?.id);
+          expect(after?.handoff).toBe(HANDOFF);
+          expect(after?.setup).not.toBe(setupBefore);
+          expect(asked.fallback).toBe(0);
+          // One handoff turn in all: the retired thread was asked once.
+          expect(
+            provider.calls.filter((call) => call.prompt.includes("<handoff_request>")),
+          ).toHaveLength(1);
+          expect(start && "sessionRenewal" in start ? start.sessionRenewal : undefined).toEqual({
+            reason: "context",
+            sessionId: successor?.id,
+          });
+          expect(provider.calls.at(-1)?.prompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
+        });
+
+        it("reuses the handoff it wrote when the fresh session fails to open, and asks the retired thread once", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const open = provider.openSession.bind(provider);
+          let failFresh = false;
+          provider.openSession = async (params) => {
+            if (failFresh && params.thread.kind === "new") {
+              failFresh = false;
+              throw new Error("provider down");
+            }
+            return open(params);
+          };
+          const { handoffs } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          failFresh = true;
+          await evict(runner);
+          await expect(
+            collectMessages(
+              runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+            ),
+          ).rejects.toThrow("provider down");
+          await coldTurn(runner);
+
+          expect(
+            provider.calls.filter((call) => call.prompt.includes("<handoff_request>")),
+          ).toHaveLength(1);
+          expect((await sessionRepository.current(key, "core:test-renewing"))?.handoff).toBe(
+            HANDOFF,
+          );
+        });
+
+        it("steps aside for a message that comes before the session settles, and renews at the next turn end", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(900);
+          provider["responses"][1] = fullResult(950);
+          provider["responses"][2] = [{ type: "result", content: HANDOFF }];
+          const { handoffs } = fakeHandoffs({ contextLimitTokens: 500 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          // At once: the live session takes it, and nothing waits on a renewal.
+          expect(await turn(runner, { live: true })).toBe(first);
+          await settleRenewal();
+          expect((await sessionRepository.session(first!))?.supersededFor).toBe("context");
+        });
+
+        it("keeps a session under the limit, or one an approval holds", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(400);
+          provider["responses"][1] = fullResult(900);
+          const { handoffs, asked } = fakeHandoffs({ contextLimitTokens: 500 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          held.add(first!);
+          expect(await turn(runner, { live: true })).toBe(first);
+          expect(await turn(runner, { live: true })).toBe(first);
+          expect(asked.tidying).toEqual([]);
+          expect((await sessionRepository.current(key, "core:test-renewing"))?.id).toBe(first);
+        });
+
+        it("writes none for an agent whose policy does not ask for one", async () => {
+          handoffAgent.definition = original;
+          const provider = threadedProvider(2);
+          const { handoffs, asked } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          await coldTurn(runner);
+
+          expect(provider.sessions.map((params) => params.thread.kind)).toEqual(["new", "new"]);
+          expect(asked).toEqual({ tidying: [], fallback: 0, context: 0 });
+          expect(provider.calls[1]?.prompt).not.toContain("<handoff>");
+        });
       });
 
       it("starts a fresh session after an instruction change", async () => {
@@ -5686,6 +6351,7 @@ describe("AgentRunner", () => {
       const ambient: UnseenLine = {
         id: 7,
         senderName: "Bob",
+        account: { platform: "discord", id: "bob" },
         text: "ambient update",
         at: new Date("2026-08-03T08:01:00.000Z"),
         fromRome: false,
@@ -5697,6 +6363,8 @@ describe("AgentRunner", () => {
       // already reaches the agent, as webchat's does.
       const promptFacts = chatPromptFacts({
         facts: { unseen: () => [ambient], seen: (ids) => void seen.push(ids) },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface: (channel) =>
           channel === "discord" ? { interactiveCards: false, promptContext: false } : null,
@@ -5743,10 +6411,11 @@ describe("AgentRunner", () => {
         senderName: "Carol",
       });
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const unseen: UnseenLine[] = [
+      const unseen: UnseenMessage[] = [
         {
           id: 7,
-          senderName: "Bob",
+          sender: "Bob",
+          who: null,
           text: "ambient update",
           at,
           fromRome: false,
@@ -5755,7 +6424,8 @@ describe("AgentRunner", () => {
         },
         {
           id: 8,
-          senderName: "Dana",
+          sender: "Dana",
+          who: null,
           text: "second update",
           at,
           fromRome: false,
@@ -5764,8 +6434,9 @@ describe("AgentRunner", () => {
         },
       ];
       const seen: { ids: readonly number[]; sessionId: string; turnId: string }[] = [];
-      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
-        unseen: (sessionId) => (sessionId === conversation.id ? unseen : []),
+      const turnLinks: PromptFacts = {
+        unseen: async (sessionId) => (sessionId === conversation.id ? unseen : []),
+        read: async () => [],
         seen: (ids, sessionId, turnId) => {
           seen.push({ ids, sessionId, turnId });
         },
@@ -5805,7 +6476,7 @@ describe("AgentRunner", () => {
     });
 
     async function linkedPrompt(
-      unseen: UnseenLine[],
+      unseen: UnseenMessage[],
       threadContext: { threadId: string; parentThreadId?: string },
     ): Promise<string> {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
@@ -5822,8 +6493,9 @@ describe("AgentRunner", () => {
         ...(threadContext.parentThreadId ? { parentThreadId: threadContext.parentThreadId } : {}),
         agentName: "main",
       });
-      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
-        unseen: () => unseen,
+      const turnLinks: PromptFacts = {
+        unseen: async () => unseen,
+        read: async () => [],
         seen: () => undefined,
       };
       const prompts: string[] = [];
@@ -5854,13 +6526,14 @@ describe("AgentRunner", () => {
 
     it("leaves the line an ordinary reply quotes out of the catch-up", async () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const target = { id: 1, senderName: "Bob", text: "the question", at };
+      const target = { id: 1, sender: "Bob", who: null, text: "the question", at };
       const prompt = await linkedPrompt(
         [
           { ...target, fromRome: false, quoted: null, quotesOutside: false },
           {
             id: 2,
-            senderName: "Rome",
+            sender: "Rome",
+            who: null,
             text: "the answer",
             at,
             fromRome: true,
@@ -5875,12 +6548,13 @@ describe("AgentRunner", () => {
 
     it("carries the line that started a thread before Rome's first line in it", async () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const starter = { id: 1, senderName: "Bob", text: "start here", at };
+      const starter = { id: 1, sender: "Bob", who: null, text: "start here", at };
       const prompt = await linkedPrompt(
         [
           {
             id: 2,
-            senderName: "Rome",
+            sender: "Rome",
+            who: null,
             text: "on it",
             at,
             fromRome: true,
@@ -5896,9 +6570,10 @@ describe("AgentRunner", () => {
 
     it("carries only the newest 20 unseen lines, and counts the rest", async () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const unseen: UnseenLine[] = Array.from({ length: 21 }, (_, index) => ({
+      const unseen: UnseenMessage[] = Array.from({ length: 21 }, (_, index) => ({
         id: index + 1,
-        senderName: "Participant",
+        sender: "Participant",
+        who: null,
         text: `ambient ${index + 1}`,
         at,
         fromRome: false,
@@ -5921,8 +6596,9 @@ describe("AgentRunner", () => {
         threadId: "wechat-runtime-reply",
         agentName: "main",
       });
-      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
-        unseen: () => [],
+      const turnLinks: PromptFacts = {
+        unseen: async () => [],
+        read: async () => [],
         seen: () => undefined,
       };
       const providerPrompts: string[] = [];
@@ -5959,6 +6635,69 @@ describe("AgentRunner", () => {
       expect(providerPrompts[0]).toContain(
         "<reply_context>\nRome: Jack Ma profile\n</reply_context>",
       );
+    });
+    it("reads who said the turn's message when the turn runs, not when it was queued", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "discord",
+        threadId: "queued-who",
+        agentName: "main",
+      });
+      // What People answers for the sender. The guardian links the account
+      // while the turn waits behind another.
+      let who = "not linked";
+      const turnLinks: PromptFacts = {
+        unseen: async () => [],
+        read: async (ids) =>
+          ids.includes(42) ? [{ id: 42, sender: "Ana", who, text: "hi", at: new Date(0) }] : [],
+        seen: () => undefined,
+      };
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const prompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          prompts.push(input.prompt);
+          if (prompts.length === 1) await held;
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks,
+        keepAliveAcrossTurns: true,
+        runLineDeps: {
+          lines: {
+            recorded: async (_sessionId, platformId) =>
+              platformId === "p-42" ? ({ id: 42 } as SaidMessage) : null,
+            stands: () => false,
+          },
+          links: { prompt: () => {} },
+        },
+      });
+      const run = (prompt: string, platformMessageId?: string) =>
+        collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "discord:queued-who",
+            romeSessionId: conversation.id,
+            ...(platformMessageId ? { platformMessageId } : {}),
+            threadContext: { channel: "discord", threadId: "queued-who", threadType: "group" },
+          }),
+        );
+
+      const first = run("first");
+      await rs.waitFor(() => expect(prompts).toHaveLength(1));
+      const second = run("hi", "p-42");
+      who = "Ana Lopez, inner circle";
+      release();
+      await Promise.all([first, second]);
+
+      expect(prompts[1]).toContain('<current_message from="Ana" who="Ana Lopez, inner circle">');
     });
   });
 
@@ -7927,6 +8666,34 @@ describe("AgentRunner", () => {
         error: expect.stringContaining("cannot suspend"),
       });
       expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
+    });
+
+    it("fails a turn that waits on a card described as data, as any suspended turn", async () => {
+      const payload = { decision: "REPLY", reason: "after the card" };
+      const provider = structuredProvider(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-card",
+          tool: "demo_action",
+          output: { showWidget: true, waits: true, appId: "connector", ui: { components: [] } },
+        };
+        yield { type: "result", content: JSON.stringify(payload), structuredOutput: payload };
+      });
+      const manager = createSessions(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
+      const session = await manager.open({
+        agentName: "test-structured",
+        channelThreadKey: "test:structured-card",
+      });
+
+      const events: AgentEvent[] = [];
+      for await (const msg of (await startAfter(session, { prompt: "Triage." })).events())
+        events.push(msg);
+
+      expect(events.find((event) => event.type === "error")).toMatchObject({
+        error: expect.stringContaining("cannot suspend"),
+      });
     });
 
     it("does not configure provider-native output for an agent without outputSchema", async () => {

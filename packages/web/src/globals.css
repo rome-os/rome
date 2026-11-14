@@ -953,12 +953,13 @@ html.is-electron [data-app-titlebar] {
 /* A Concierge chat's mascot hangs from the title bar and drags the window like
    it, below the bar too. The layer it hangs in spans the page's bar and comes
    after its buttons, so it takes no part, or it would cover them; only the
-   badge drags. Its messages start under the status capsule, which reaches
-   less far below the bar than the floating header does. */
+   badge drags, unless it is the button that opens the chat's tasks, which a
+   drag would swallow. Its messages start under the status capsule, which
+   reaches less far below the bar than the floating header does. */
 html.is-electron [data-titlebar-mascot] {
   -webkit-app-region: initial;
 }
-html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
+html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
   -webkit-app-region: drag;
 }
 @media (width >= 48rem) {
@@ -988,14 +989,16 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
 [data-concierge-transcript] [data-timeline-landed] {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
-/* A status reaction fades in and out (status-reaction.tsx, MARK_FADE_MS). */
-@keyframes rome-mark-fade-in {
+/* A status reaction grows in from 0.6, as a tapback does, and fades out
+   (status-reaction.tsx, MARK_FADE_MS). */
+@keyframes rome-mark-pop-in {
   from {
     opacity: 0;
+    transform: scale(0.6);
   }
 }
 [data-status-reaction] {
-  animation: rome-mark-fade-in 150ms ease-out;
+  animation: rome-mark-pop-in 150ms ease-out;
   transition: opacity 150ms ease-in;
 }
 [data-status-reaction][data-leaving] {

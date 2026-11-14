@@ -7,12 +7,22 @@ enum Palette {
     static let bg = dynamic(0xF4F3EF, 0x0B0907)
     static let sheet = dynamic(0xF4F3EF, 0x120F0D)
     static let elevated = dynamic(0xFFFFFF, 0x191513)
+    /// The status mark's badge: lighter than the page in dark mode, so the emoji reads.
+    static let markFill = dynamic(0xFFFFFF, 0x4B433C)
     static let bubble = dynamic(0xEBE4DA, 0x1C1916)
     static let fill = dynamic(0xEFE9E1, 0x272320)
     static let fillStrong = dynamic(0xE8E1D7, 0x2A2523)
     static let pressed = dynamic(0xF1ECE5, 0x221E1C)
     static let drawer = dynamic(0xECE7DF, 0x050404)
     static let drawerField = dynamic(0xE3DCD1, 0x1E1A17)
+    /// A second-level page (Settings, an app, Apple Health): a sheet over
+    /// Chat or Apps. Gray in light, so white cards stand out; a step above
+    /// the black first level in dark, so its top edge reads.
+    static let secondaryPage = dynamic(0xEBE8E2, 0x1C1916)
+    /// A card on a second-level page: a step above `secondaryPage`.
+    static let secondaryCard = dynamic(0xFFFFFF, 0x2A2623)
+    /// An icon tile or a track inside a `secondaryCard`.
+    static let secondaryFill = dynamic(0xEFE9E1, 0x3A3430)
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
@@ -47,15 +57,8 @@ enum Palette {
     static let healthPink = dynamic(0xFF2D55, 0xFF375F)
 
     /// Letter tiles of apps with no icon, one per app by its name
-    /// (`AppTile.colorIndex`). White letters read on each, light and dark.
-    static let appTiles: [Color] = [
-        dynamic(0xD86F4C, 0xC4603F), // ember
-        dynamic(0x2E8F84, 0x2A8075), // teal
-        dynamic(0x3B74C9, 0x3768B5), // blue
-        dynamic(0x8460C8, 0x7655B4), // violet
-        dynamic(0x4E8B47, 0x467D40), // green
-        dynamic(0xC9506F, 0xB44864), // rose
-    ]
+    /// (`AppTile.colorIndex`), shared with the widget.
+    static let appTiles: [Color] = AppTile.colors
 
     /// The stacking game: its three block tiers from light to deep, the
     /// base's stone, the ground under it, and the dusk its page shifts to
@@ -113,6 +116,9 @@ enum Metrics {
     static let groupRadius: CGFloat = 16
     static let bigCardRadius: CGFloat = 18
     static let bubbleMaxWidthRatio: CGFloat = 0.78
+    /// The room an agent's bubble leaves free on the right, so a long one
+    /// stops short of the column's edge. Every card stops there too.
+    static let bubbleInset: CGFloat = 64
     /// The widest a conversation runs, its page padding included. On a phone
     /// the screen is narrower; on an iPad the column stays this wide and
     /// centered, so a line never runs across the whole screen.
@@ -128,6 +134,22 @@ enum Metrics {
 }
 
 extension View {
+    /// The one width rule of a transcript: left aligned, never wider than an
+    /// agent's bubble can run, so the right edges of cards and long bubbles
+    /// line up. A light card or a bubble hugs its content inside this
+    /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
+    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`.
+    func bubbleWidth() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, Metrics.bubbleInset)
+    }
+
+    /// Put before a card's background: the card takes the whole width
+    /// `bubbleWidth()` leaves it.
+    func fillsBubbleWidth() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     /// Keeps a conversation's rows, composer and banners in one centered
     /// column of `Metrics.readableWidth` at most (DESIGN.md 4).
     func readableColumn() -> some View {
@@ -196,6 +218,13 @@ private struct PageBackground: ViewModifier {
 extension View {
     /// The page background of a page that can sit beside the drawer.
     func pageBackground() -> some View { modifier(PageBackground()) }
+
+    /// The background of a second-level page, which covers Chat or Apps from
+    /// the bottom (DESIGN.md 12). Its header's fade takes the same color.
+    func secondaryPageBackground() -> some View {
+        background(Palette.secondaryPage.ignoresSafeArea())
+            .environment(\.pageBackground, Palette.secondaryPage)
+    }
 
     /// The design's "soft" elevation: a hairline ring plus a faint two-layer drop shadow.
     func softElevation(radius: CGFloat) -> some View {
