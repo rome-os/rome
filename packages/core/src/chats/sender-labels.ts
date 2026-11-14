@@ -7,9 +7,6 @@ import type { PromptMessage, UnseenMessage } from "../agent/index.js";
 import type { BondLevel, Person, PeopleRepository } from "../db/repositories/people.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
 
-/** A message as an agent reads it, with who said it. */
-export type MessageAsRead = PromptMessage;
-
 const BOND_LEVEL_WORDS: Record<BondLevel, string> = {
   guardian: "guardian",
   "inner-circle": "inner circle",
