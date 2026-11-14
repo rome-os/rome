@@ -328,8 +328,9 @@ describe("voice input socket", () => {
 
   it("closes a stopped dictation whose source never answers", async () => {
     const fake = await fakeSoniox();
-    const { client, messages, closed } = await dictation(fake, undefined, 50, {
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
       source: { open: () => new Promise(() => {}) },
+      openTimeoutMs: 50,
     });
 
     client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
