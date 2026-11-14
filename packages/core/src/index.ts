@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
+import { createVoiceInputSource } from "./voice-input/index.js";
 import { resolveCloudAuthEnabled } from "./access/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
@@ -2320,6 +2321,13 @@ async function main() {
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       permissions,
       dashboardAccessState,
+      voiceInput: createVoiceInputSource({
+        romeCloud: () => {
+          const access = romeCloudAccess();
+          return access ? { origin: access.origin, bearer: access.bearer } : null;
+        },
+      }),
+      transcriptionUsage: usageRecorder,
       dashboardAccessStore,
       visitorAllowListSync,
       phoneWatching,

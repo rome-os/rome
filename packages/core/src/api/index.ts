@@ -17,6 +17,8 @@ import { attachLiveEventsServer } from "../live-events-server.js";
 import { attachNodeConsoleServer } from "../desktops/node-console-server.js";
 import { attachDesktopProxy } from "../desktops/desktop-proxy-server.js";
 import { attachAppWebSocket } from "./routes/app-websocket-server.js";
+import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js";
+import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { wechatAppRoutes } from "./routes/wechat-app.js";
@@ -196,6 +198,7 @@ export function buildApp(
   api.route("/", chatSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", voiceInputRoutes(deps));
   api.route("/", conciergeRoutes(deps));
   api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
@@ -356,6 +359,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             nodeConsole.close();
             desktopProxy.close();
             appWebSocket.close();
+            voiceInput.close();
             await webchatRuntime.flushAll();
             // Force-close any active HTTP connections so shutdown is not
             // blocked by in-flight requests (e.g. long-lived SSE streams).
@@ -398,6 +402,13 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
+      const voiceInput = attachVoiceInputServer(
+        server as Server,
+        deps.db,
+        deps.voiceInput ?? NO_VOICE_INPUT,
+        deps.transcriptionUsage ?? null,
+        deps.dashboardAccessState,
+      );
       server.on("error", (err) => {
         log.error("api server error", { error: err.message });
         reject(err);
