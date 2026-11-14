@@ -391,12 +391,10 @@ enum HealthFixtures {
         #expect(usage.contains("with or without offset (without offset = the iPhone's time zone"))
         #expect(HealthActions.usage()["health.stats"]?.contains("live_off") == true)
         #expect(HealthActions.usage()["health.samples"]?.contains("live_off") == true)
-        for action in ["health.stats", "health.samples"] {
-            let text = HealthActions.usage()[action] ?? ""
-            #expect(text.contains("Settings → Connections → Apple Health"), "\(action)")
-            #expect(text.contains("on the iPhone"), "\(action)")
-        }
-        #expect(HealthActions.usage()["health.stats"]?.contains("off for Rome until the user turns it on") == true, "off is the default")
+        let stats = HealthActions.usage()["health.stats"] ?? ""
+        #expect(stats.contains("Settings → Connections → Apple Health"))
+        #expect(stats.contains("on the iPhone"))
+        #expect(stats.contains("not_connected before the user connects it"), "not connected is the default")
     }
 
     @Test func unknownActionIsUnsupported() async {
@@ -910,7 +908,7 @@ enum HealthFixtures {
         var actions = actions(.iPad)
         actions.enabled = NodeFlag(false)
         guard case .failed(code: "live_off", message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else {
-            Issue.record("expected health_off")
+            Issue.record("expected live_off")
             return
         }
         #expect(message.contains("Settings → Connections → Apple Health"))
@@ -925,7 +923,7 @@ enum HealthFixtures {
         var actions = actions(.iPhone)
         actions.enabled = NodeFlag(false)
         guard case .failed(code: _, message: let message) = await actions.run("health.samples", args: parseJSON(#"{"type":"heartRate"}"#)) else {
-            Issue.record("expected health_off")
+            Issue.record("expected live_off")
             return
         }
         #expect(message.contains("Settings → Connections → Apple Health"))

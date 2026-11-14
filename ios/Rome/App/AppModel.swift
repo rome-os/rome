@@ -776,7 +776,8 @@ final class AppModel {
         }
         // Only to a Rome the guardian owns: a visitor's Rome cannot reach this phone.
         connections.send = { [weak self] report in
-            guard let self, self.phase == .ready, self.currentInstance?.isVisitor != true, let backend = self.workspace?.backend else { return }
+            guard let self, self.phase == .ready, let workspace = self.workspace, !workspace.isVisitor else { return }
+            let backend = workspace.backend
             try? await backend.reportDeviceConnections(report)
         }
     }
@@ -1398,10 +1399,11 @@ final class AppModel {
     func connect(_ id: String) async {
         guard let capability = node.registry.capability(id: id) else { return }
         if capability.needsPermission { await capability.requestPermission() }
-        await connections.connect(id)
+        // Sync starts on its own; the card's check reads only the connection.
         if capability.syncSource == HealthSettings.sourceId, health.canSync, !health.isEnabled {
             health.setEnabled(true)
         }
+        await connections.connect(id)
     }
 
     /// Settings, at Apple Health's Sync history.

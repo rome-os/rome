@@ -224,13 +224,37 @@ extension DeviceStatus {
         _ = await eventually { connections.request != nil }
         #expect(connections.request?.capability == "device")
         connections.request?.finish(true)
-        #expect(await answer)
+        #expect(await answer == true)
         #expect(connections.request == nil)
-        #expect(await connections.ask("calendar") == false, "no such capability")
+        #expect(await connections.ask("calendar") == nil, "a capability this build lacks: the link stays a page")
         async let declined = connections.ask("apple_health")
         _ = await eventually { connections.request != nil }
         connections.request?.finish(false)
         connections.request?.finish(true)
         #expect(await declined == false, "the first answer counts")
+    }
+
+    @Test func reportsGoInOrderAndConnectWaitsForItsOwn() async {
+        let rig = HostRig(deviceOn: false)
+        let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)
+        connections.device = { ("dev-1", "iPhone") }
+        var sent: [Bool] = []
+        var held: CheckedContinuation<Void, Never>?
+        connections.send = { report in
+            // The first report is slow, as a PUT can be.
+            if sent.isEmpty, held == nil { await withCheckedContinuation { held = $0 } }
+            sent.append(report.connections.first { $0.capability == "device" }?.live ?? false)
+        }
+        let first = connections.report()
+        _ = await eventually { held != nil }
+        // Another report comes while the first is out: it neither cancels it nor overtakes it.
+        let connecting = Task { await connections.connect("device") }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(sent.isEmpty, "nothing overtakes the slow report")
+        held?.resume()
+        await first.value
+        await connecting.value
+        #expect(sent.first == false)
+        #expect(sent.last == true, "connect returns only once its own report, with Live access on, is sent")
     }
 }

@@ -249,10 +249,10 @@ final class FakeAudit: NodeAuditing, @unchecked Sendable {
         actions.enabled.set(false)
         let executor = NodeExecutor(name: { "iPhone" }, audit: audit, registry: .testing(actions))
         let sent = try reply(await executor.respond(to: envelope("health.stats", #"{"type":"stepCount"}"#), session: NodeSession()))
-        #expect(sent["payload"]?["error"]?["code"]?.string == "health_off")
+        #expect(sent["payload"]?["error"]?["code"]?.string == "live_off")
         #expect(audit.begun.count == 1)
         #expect(audit.ended.first?.outcome == .error)
-        #expect(audit.ended.first?.errorCode == "health_off")
+        #expect(audit.ended.first?.errorCode == "live_off")
         #expect(health.reads == 0 && health.accessRequests == 0)
         // system.info still lists the actions, so an agent can explain.
         let info = try reply(await executor.respond(to: envelope("system.info"), session: NodeSession()))

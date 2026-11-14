@@ -77,7 +77,8 @@ struct WidgetUICardView: View {
             surface.answered = waiting?.answered != nil
             surface.show(part, call: call, press: press, open: { openURL($0) }, connectDevice: { [model] url in
                 // A device connection's link is this app's own authorization, not a page.
-                guard let id = DeviceConnectLink.capability(in: url, origin: model.webURL) else { return nil }
+                // A visitor's Rome cannot reach this phone: the link stays a page.
+                guard model.workspace?.isVisitor != true, let id = DeviceConnectLink.capability(in: url, origin: model.webURL) else { return nil }
                 return await model.connections.ask(id)
             })
             surface.showAnswered(waiting?.answered)

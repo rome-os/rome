@@ -362,6 +362,8 @@ struct ConnectDeviceSheet: View {
             }
         }
         .padding(20)
+        // Mid-connect it stays until the card can check.
+        .interactiveDismissDisabled(connecting)
         .onDisappear { request.finish(false) }
     }
 }

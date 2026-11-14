@@ -124,9 +124,10 @@ final class DeviceConnections {
     // MARK: Card
 
     /// Shows the authorization for `capability` and waits until it is done
-    /// (true) or declined (false).
-    func ask(_ capability: String) async -> Bool {
-        guard node.registry.capability(id: capability) != nil else { return false }
+    /// (true) or declined (false). Nil for a capability this build does not
+    /// have: the link then opens as a page.
+    func ask(_ capability: String) async -> Bool? {
+        guard node.registry.capability(id: capability) != nil else { return nil }
         request?.finish(false)
         return await withCheckedContinuation { continuation in
             var resumed = false
@@ -141,14 +142,16 @@ final class DeviceConnections {
 
     // MARK: Report
 
-    /// Reports every connection now, replacing a report not sent yet. The task is the send, for tests.
+    /// Reports every connection, after the reports before it, so the Rome
+    /// ends on the newest and a caller that waits knows its own has landed.
+    /// The task is the send.
     @discardableResult
     func report() -> Task<Void, Never> {
-        reporting?.cancel()
+        let previous = reporting
         let task = Task { @MainActor [weak self] in
+            await previous?.value
             guard let self, let send = self.send, let device = self.device?() else { return }
             let connections = await self.node.registry.connections()
-            guard !Task.isCancelled else { return }
             await send(DeviceConnectionReport(device: .init(id: device.id, name: device.name, platform: "ios"), connections: connections))
         }
         reporting = task
