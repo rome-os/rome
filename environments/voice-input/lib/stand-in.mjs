@@ -9,13 +9,18 @@
 //                  {"mode":"error","errorCode":503,"errorType":"...","afterMs":0}
 //   GET  /stats    the sessions so far: their start request (key removed),
 //                  how they authenticated, audio bytes received, how they ended
-//   PUT  /keys     {"mintedOnly":true} accepts only temporary keys it minted
+//   PUT  /keys     {"mintedOnly":true} accepts only temporary keys it minted;
+//                  {"sessionCapSeconds":5} ends every temporary key's session
+//                  that long after it starts, sooner than its own cap (null: off)
 //   POST /reset    forget the sessions and the temporary keys
 //
 // Like Soniox, it mints temporary keys on its WebSocket port:
 //   POST /v1/auth/temporary-api-key   Bearer <long-lived key>
 //        {"usage_type":"transcribe_websocket","expires_in_seconds":60,
-//         "client_reference_id":"..."}  ->  201 {"api_key","expires_at"}
+//         "client_reference_id":"...","single_use":true,
+//         "max_session_duration_seconds":1800}  ->  201 {"api_key","expires_at"}
+// A single-use key opens one session. A session on a key with a duration cap
+// ends with the error temp_api_key_session_expired when the cap is reached.
 // With STAND_IN_MINTED_ONLY=1, or after PUT /keys, a session must
 // authenticate with a temporary key, which is what Rome gets from Rome Cloud.
 // Otherwise the long-lived key works too, as a Rome with its own credential
@@ -28,7 +33,8 @@ import { WebSocketServer } from "ws";
 
 const KEY = process.env.STAND_IN_API_KEY ?? "stand-in-key";
 let mintedOnly = process.env.STAND_IN_MINTED_ONLY === "1";
-// Temporary key -> {expiresAt (ms), clientReferenceId}
+let sessionCapSeconds = null;
+// Temporary key -> {expiresAt (ms), clientReferenceId, singleUse, used, maxSessionSeconds}
 const minted = new Map();
 let mints = [];
 const WS_PORT = Number(process.env.STAND_IN_PORT ?? 8790);
@@ -58,7 +64,7 @@ const control = createServer(async (req, res) => {
   const path = new URL(req.url, "http://x").pathname;
   if (req.method === "GET" && path === "/script") return json(res, 200, script);
   if (req.method === "GET" && path === "/stats")
-    return json(res, 200, { mintedOnly, mints, sessions });
+    return json(res, 200, { mintedOnly, sessionCapSeconds, mints, sessions });
   if (req.method === "POST" && path === "/reset") {
     sessions = [];
     mints = [];
@@ -71,9 +77,17 @@ const control = createServer(async (req, res) => {
     for await (const chunk of req) body += chunk;
     try {
       const next = JSON.parse(body);
-      if (typeof next.mintedOnly !== "boolean") throw new Error("mintedOnly is true or false");
-      mintedOnly = next.mintedOnly;
-      return json(res, 200, { mintedOnly });
+      if ("mintedOnly" in next) {
+        if (typeof next.mintedOnly !== "boolean") throw new Error("mintedOnly is true or false");
+        mintedOnly = next.mintedOnly;
+      }
+      if ("sessionCapSeconds" in next) {
+        const cap = next.sessionCapSeconds;
+        if (cap !== null && !(Number.isFinite(cap) && cap > 0))
+          throw new Error("sessionCapSeconds is a positive number or null");
+        sessionCapSeconds = cap;
+      }
+      return json(res, 200, { mintedOnly, sessionCapSeconds });
     } catch (e) {
       return json(res, 400, { error: e.message });
     }
@@ -125,13 +139,31 @@ async function mintTemporaryKey(req, res) {
     return done(400, "invalid_request", "expires_in_seconds is an integer from 1 to 3600.");
   if (m.client_reference_id != null && String(m.client_reference_id).length > 256)
     return done(400, "invalid_request", "client_reference_id is at most 256 characters.");
+  if (m.single_use != null && typeof m.single_use !== "boolean")
+    return done(400, "invalid_request", "single_use is a boolean.");
+  const max = m.max_session_duration_seconds;
+  if (max != null && (!Number.isInteger(max) || max < 1 || max > 18000))
+    return done(
+      400,
+      "invalid_request",
+      "max_session_duration_seconds is an integer from 1 to 18000.",
+    );
   const apiKey = `temp:${randomBytes(24).toString("base64url")}`;
   const expiresAt = Date.now() + seconds * 1000;
-  minted.set(apiKey, { expiresAt, clientReferenceId: m.client_reference_id ?? null });
+  const key = {
+    expiresAt,
+    clientReferenceId: m.client_reference_id ?? null,
+    singleUse: m.single_use === true,
+    used: false,
+    maxSessionSeconds: max ?? null,
+  };
+  minted.set(apiKey, key);
   Object.assign(record, {
     status: 201,
-    clientReferenceId: m.client_reference_id ?? null,
+    clientReferenceId: key.clientReferenceId,
     expiresInSeconds: seconds,
+    singleUse: key.singleUse,
+    maxSessionSeconds: key.maxSessionSeconds,
   });
   json(res, 201, { api_key: apiKey, expires_at: new Date(expiresAt).toISOString() });
 }
@@ -141,7 +173,7 @@ function keyKind(key) {
   if (!key) return null;
   if (key === KEY) return mintedOnly ? null : "long-lived";
   const temp = minted.get(key);
-  if (!temp) return null;
+  if (!temp || (temp.singleUse && temp.used)) return null;
   return temp.expiresAt > Date.now() ? "temporary" : null;
 }
 
@@ -261,8 +293,26 @@ wss.on("connection", (ws, req) => {
       session.auth = offered.filter(([, k]) => keyKind(k)).map(([way]) => way);
       if (!accepted) return fail(401, "unauthenticated", "Incorrect API key provided.");
       session.keyKind = keyKind(accepted[1]);
-      if (session.keyKind === "temporary")
-        session.clientReferenceId = minted.get(accepted[1]).clientReferenceId;
+      if (session.keyKind === "temporary") {
+        const temp = minted.get(accepted[1]);
+        temp.used = true;
+        session.clientReferenceId = temp.clientReferenceId;
+        const caps = [temp.maxSessionSeconds, sessionCapSeconds].filter((c) => c != null);
+        if (caps.length) {
+          session.capSeconds = Math.min(...caps);
+          timers.push(
+            setTimeout(
+              () =>
+                fail(
+                  408,
+                  "temp_api_key_session_expired",
+                  "Temporary API key session expired (max_session_duration_seconds reached).",
+                ),
+              session.capSeconds * 1000,
+            ),
+          );
+        }
+      }
       if (!rest.model || !rest.audio_format)
         return fail(400, "invalid_request", "model and audio_format are required.");
       session.start = rest;

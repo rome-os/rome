@@ -9,6 +9,7 @@
 #   voice-env transcriber stand-in [--text <text>] [--first-ms <n>] [--token-ms <n>]
 #   voice-env transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]
 #   voice-env transcriber status
+#   voice-env transcriber session-cap <seconds>|off
 #   voice-env cloud status | usage | sign-in | sign-out
 #   voice-env network cut|restore
 #   voice-env chats
@@ -135,7 +136,14 @@ cmd_transcriber() {
       curl -fsS -X PUT --data-binary "$body" "$(stand_in)/script"
       echo
       ;;
-    *) die "usage: voice-env transcriber real | stand-in [...] | status" ;;
+    session-cap)
+      local cap="${1:-}"
+      [ "$cap" = off ] && cap=null
+      [[ "$cap" =~ ^([0-9]+(\.[0-9]+)?|null)$ ]] || die "usage: voice-env transcriber session-cap <seconds>|off"
+      curl -fsS -X PUT --data-binary "{\"sessionCapSeconds\":$cap}" "$(stand_in)/keys"
+      echo
+      ;;
+    *) die "usage: voice-env transcriber real | stand-in [...] | status | session-cap <seconds>|off" ;;
   esac
 }
 
