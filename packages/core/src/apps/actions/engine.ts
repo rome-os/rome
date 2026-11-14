@@ -713,9 +713,13 @@ export class ActionEngine {
       const priorRoot = await this.executionsRepo.findById(context.replayRootExecutionId);
       actor = (priorRoot?.actor as SessionActor | null | undefined) ?? undefined;
     }
+    // Only a run main starts itself, such as the inbox hook's, reads the
+    // audience off the chat it names. An app's run, detached or not, names
+    // its caller's chat but carries no audience of its own, so it is shared.
     if (
       context?.audience === undefined &&
       context?.channelContext &&
+      !context.callerAppId &&
       this.placeAudience &&
       this.isTrustedForAudience(action.config.name)
     ) {

@@ -44,6 +44,15 @@ describe("the audience a root run carries", () => {
     expect(result).toEqual({ status: "ok", data: null });
   });
 
+  it("does not read the chat an app's run names, as a detached dispatch does", async () => {
+    const result = await engineWith(true).run(
+      "core:show_file",
+      {},
+      { channelContext: dm, callerAppId: "third-party" },
+    );
+    expect(result).toEqual({ status: "ok", data: null });
+  });
+
   it("keeps an audience the caller states", async () => {
     const result = await engineWith(true).run(
       "core:show_file",
