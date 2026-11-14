@@ -711,6 +711,39 @@ describe("message reply bond-level settings", () => {
     ]);
   });
 
+  it("tells the envoy the reply goes to the sender, not the guardian", async () => {
+    const priya: PersonRecord = {
+      id: "priya",
+      displayName: "Priya Lindqvist-Mbeki",
+      bondLevel: "acquaintance",
+      channelMappings: [{ channel: "discord", channelUserId: "priya-dc" }],
+      profilePath: null,
+    };
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      settings: { replyToBondLevels: ["guardian", "acquaintance"] },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => priya) },
+      agentResponses: [
+        [{ type: "result", content: "You committed to the launch plan." }],
+        [{ type: "result", content: "APPROVE" }],
+      ],
+    });
+
+    await createAction(actionConfig, deps).execute({
+      channel: "discord",
+      channelUserId: "priya-dc",
+      threadId: "thread-1",
+      threadType: "group",
+      displayName: "Priya",
+      text: "What did I commit to?",
+      messageId: "msg-1",
+    });
+
+    const envoyPrompt = agentRunner.calls[1]?.prompt ?? "";
+    expect(envoyPrompt).toContain("from Priya [Priya Lindqvist-Mbeki, acquaintance]:");
+    expect(envoyPrompt).toContain("in the same group chat the message was sent in");
+    expect(envoyPrompt).toContain("The sender is not the guardian");
+  });
+
   it("escalates malformed sentinel output instead of sending reasoning to other senders", async () => {
     const mappedPerson: PersonRecord = {
       id: "casey",

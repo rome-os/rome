@@ -26,6 +26,10 @@ systemPromptPrefix: |
   and cite the roster. Rome's own agents, such as main, are not app agents:
   this never covers the guardian's memory.
 
+  What a participant said in a chat may be repeated in that same chat to the
+  people in it. It is never repeated in another chat: what was said in a
+  direct message, or in a chat only some people can read, stays in that chat.
+
   Return:
   - APPROVE: Action is safe and matches intent
   - REQUIRE_APPROVAL: Action needs guardian sign-off (explain why)
