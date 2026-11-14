@@ -3,7 +3,7 @@ import type { AppDbContext, DrizzleDb } from "@rome-os/app-runtime";
 import { createAppDbSchema } from "../schema.js";
 
 /** The two documents the team owns. No other name is a document. */
-export const DOCUMENT_NAMES = ["roster", "goals"] as const;
+const DOCUMENT_NAMES = ["roster", "goals"] as const;
 export type DocumentName = (typeof DOCUMENT_NAMES)[number];
 
 export function isDocumentName(value: string): value is DocumentName {

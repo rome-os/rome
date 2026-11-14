@@ -54,18 +54,18 @@ function DocumentEditor({ document }: { document: TeamDocument }) {
   }, [body, document]);
 
   return (
-    <section className="flex flex-col gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-4">
+    <section className="flex flex-col gap-2 rounded-12 border border-[var(--border)] bg-[var(--surface-1)] p-4">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-medium">{label.title}</h2>
+        <h2 className="text-section font-medium">{label.title}</h2>
         {savedAt ? (
-          <span className="text-xs text-[var(--muted-foreground)]">
+          <span className="text-aux text-[var(--muted-foreground)]">
             saved {new Date(savedAt).toLocaleString()}
           </span>
         ) : null}
       </div>
-      <p className="text-sm text-[var(--muted-foreground)]">{label.hint}</p>
+      <p className="text-ui text-[var(--muted-foreground)]">{label.hint}</p>
       <textarea
-        className="min-h-56 w-full resize-y rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--background)] p-3 font-mono text-sm"
+        className="min-h-56 w-full resize-y rounded-8 border border-[var(--border)] bg-[var(--background)] p-3 font-mono text-ui"
         value={body}
         placeholder={label.placeholder}
         spellCheck={false}
@@ -75,7 +75,7 @@ function DocumentEditor({ document }: { document: TeamDocument }) {
         <Button onClick={save} disabled={!dirty}>
           {saving ? "Saving…" : "Save"}
         </Button>
-        {error ? <span className="text-sm text-[var(--destructive)]">{error}</span> : null}
+        {error ? <span className="text-ui text-[var(--destructive)]">{error}</span> : null}
       </div>
     </section>
   );
@@ -115,7 +115,7 @@ export default function App(_props: { bootstrap: RomeAppBootstrap }) {
         </PageDescription>
       </PageHeader>
       {error ? (
-        <p className="text-sm text-[var(--destructive)]">{error}</p>
+        <p className="text-ui text-[var(--destructive)]">{error}</p>
       ) : documents ? (
         <div className="flex flex-col gap-4">
           {documents.map((document) => (
@@ -123,7 +123,7 @@ export default function App(_props: { bootstrap: RomeAppBootstrap }) {
           ))}
         </div>
       ) : (
-        <p className="text-sm text-[var(--muted-foreground)]">Loading…</p>
+        <p className="text-ui text-[var(--muted-foreground)]">Loading…</p>
       )}
     </Page>
   );
