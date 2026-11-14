@@ -704,6 +704,7 @@
     "start": "Start voice input",
     "stop": "Stop voice input",
     "finishing": "Finishing voice input",
+    "whyMicrophone": "Rome uses the microphone to turn your speech into text",
     "stopped": {
       "provider-unavailable": "Transcription service unavailable. Listening stopped",
       "provider-refused": "Transcription service refused the request. Listening stopped",

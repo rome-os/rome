@@ -12,16 +12,23 @@ import { ReplyDraftHarness } from "../reply/reply-draft-harness";
 // The browser's microphone, which jsdom does not have.
 const microphone = rs.hoisted(() => ({
   refuse: false,
-  /** While true, the permission prompt never answers. */
+  /** While true, the permission prompt stays open until `answer()`. */
   pending: false,
+  /** Answers the open permission prompt by allowing the microphone. */
+  answer: null as (() => void) | null,
   /** The audio still in the capture buffer when listening stops. */
   tail: null as ArrayBuffer | null,
   closed: 0,
   onAudio: null as ((chunk: ArrayBuffer) => void) | null,
 }));
 rs.mock("@/lib/voice-input/microphone", () => ({
-  openMicrophone: async (onAudio: (chunk: ArrayBuffer) => void) => {
-    if (microphone.pending) await new Promise(() => {});
+  openMicrophone: async (onAudio: (chunk: ArrayBuffer) => void, onAsk?: () => void) => {
+    if (microphone.pending) {
+      onAsk?.();
+      await new Promise<void>((resolve) => {
+        microphone.answer = resolve;
+      });
+    }
     if (microphone.refuse) throw new DOMException("denied", "NotAllowedError");
     microphone.onAudio = onAudio;
     return {
@@ -101,6 +108,7 @@ beforeEach(() => {
   localStorage.clear();
   microphone.refuse = false;
   microphone.pending = false;
+  microphone.answer = null;
   microphone.tail = null;
   FakeSocket.opens = true;
   microphone.closed = 0;
@@ -429,6 +437,19 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(field().value).toBe("hello");
     expect(screen.getByRole("status").textContent).toBe(notice);
     expect(microphone.closed).toBe(1);
+  });
+
+  it("says what the microphone is for while the browser asks for it", async () => {
+    microphone.pending = true;
+    renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    expect((await screen.findByRole("status")).textContent).toBe(
+      "Rome uses the microphone to turn your speech into text",
+    );
+
+    await act(async () => microphone.answer?.());
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop voice input" })).toBeTruthy();
   });
 
   it("says why when Rome Cloud refuses voice input", async () => {

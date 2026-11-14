@@ -53,8 +53,22 @@ const ROME_CLOUD_REASONS = new Set([
 ]);
 
 /** Why listening stopped without the guardian's stop. Renders nothing when there is no reason. */
-export function VoiceInputNotice({ notice }: { notice: DictationStop | null }) {
+export function VoiceInputNotice({
+  notice,
+  asking = false,
+}: {
+  notice: DictationStop | null;
+  /** While the browser asks for the microphone, the notice says what Rome uses it for. */
+  asking?: boolean;
+}) {
   const { t } = useTranslation("chat");
+  if (asking) {
+    return (
+      <div role="status" className="mb-2 text-aux text-muted-foreground">
+        {t("voiceInput.whyMicrophone")}
+      </div>
+    );
+  }
   if (!notice) return null;
   const { reason, detail } = notice;
   const text =
