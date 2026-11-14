@@ -14,7 +14,7 @@ environments/voice-input/env.sh down              # remove everything up created
 
 `up` merges the product ref with this branch in a throwaway checkout and builds the production Rome image there, so product code never lands on `voice-input`. `VOICE_PRODUCT_REF` picks the product (default `origin/main`); a product branch is the usual choice, such as `VOICE_PRODUCT_REF=origin/<branch> env.sh up`. `--no-build` reuses the last image.
 
-`up` also checks out Rome Cloud at `VOICE_CLOUD_REF` (default `origin/voice-input-transcription-sessions`) from `~/workspace/rome-cloud` into `~/.rome-environments/voice-input/rome-cloud`, installs it and migrates its own database.
+`up` also checks out Rome Cloud at `VOICE_CLOUD_REF` (default `origin/main`) from `~/workspace/rome-cloud` into `~/.rome-environments/voice-input/rome-cloud`, installs it and migrates its own database.
 
 `up` creates these containers on the network `rome-env-voice-input`:
 
