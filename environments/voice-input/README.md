@@ -91,7 +91,7 @@ The app signs in with `ROME_LOCAL_ORIGIN=http://127.0.0.1:4790`, `ROME_LOCAL_USE
 - **Fixtures.** `voice-env ios-record` records them in `ios-stand-in/fixtures`; nobody edits them by hand. For the recording only, Rome's model is `stand-in-model.mjs`, which calls `chat_start` when a message holds `[stand-in: start a task]`, so the main Chat gets a task card and a thread. `http.json` lists the four message fields (`chat`, `topic`, `task`, `thread`) and every answer; a route asked twice answers as it did last. `events.json` holds the live events a typed send made.
 - **A typed send** answers as the recorded one did, adds the message to later history loads of that chat, and replays the recorded events on `/ws/events` with the new text.
 - **`/ws/voice-input`** speaks the product's protocol: `start` with `sampleRate` 16000 (any other is `bad-request`), binary PCM frames, `stop`. It sends `alive` every second, one settled word of the transcript per 300 ms of audio, the rest at `stop`, then `ended`; `no-speech` after 30 s of silence.
-- **Control.** `GET /__stand-in/health`, `GET /__stand-in/stats` (requests, routes asked that were not recorded, voice sessions), and `POST /__stand-in/voice {transcript?, error?: {reason, detail?, afterMs?} | null}`.
+- **Control.** `GET /__stand-in/health`, `GET /__stand-in/stats` (requests, routes asked that were not recorded, voice sessions), and `POST /__stand-in/voice {transcript?, error?: {reason, detail?, afterMs?} | null}`. A posted error ends only the next voice session; `--voice-error` ends every one.
 
 A route the app asks that was not recorded answers 404 `unrecorded` and is logged; add it to `record.mjs` and record again.
 

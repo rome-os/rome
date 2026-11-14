@@ -10,6 +10,8 @@
 // Control (not part of Rome's API):
 //   GET  /__stand-in/health
 //   POST /__stand-in/voice   {transcript?, error?: {reason, detail?, afterMs?} | null}
+//     (an error posted here ends only the next voice session; --voice-error ends every one)
+//     an error set here ends the next voice session only; --voice-error ends every one
 //   GET  /__stand-in/stats   {requests, unrecorded, voiceSessions}
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
@@ -36,6 +38,7 @@ const voice = {
   error: args["voice-error"]
     ? { reason: args["voice-error"], afterMs: Number(args["voice-error-after-ms"] ?? 0) }
     : null,
+  armed: null,
 };
 const stats = { requests: 0, unrecorded: [], voiceSessions: [] };
 
@@ -117,7 +120,7 @@ const server = createServer(async (req, res) => {
   if (path === "/__stand-in/voice" && req.method === "POST") {
     const body = await readBody(req);
     if (typeof body.transcript === "string") voice.transcript = body.transcript;
-    if ("error" in body) voice.error = body.error;
+    if ("error" in body) voice.armed = body.error;
     return send(res, 200, voice);
   }
 
@@ -288,7 +291,8 @@ function serveVoice(socket) {
   };
   stats.voiceSessions.push(record);
   const words = voice.transcript.split(/(?<=\s)/);
-  const error = voice.error;
+  const error = voice.armed ?? voice.error;
+  voice.armed = null;
   let started = false;
   let sentWords = 0;
   let audioMs = 0;
