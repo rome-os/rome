@@ -5,19 +5,74 @@ import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 
-/** What core's own widget makes of one of its events: the output that answers
- *  the agent waiting on it. */
-type CoreHandler = (context: Record<string, unknown>) => Record<string, unknown>;
+/** What core's own widget makes of one of its events: an answer for the agent
+ *  waiting on it, a link for the client to open, or neither, which leaves the
+ *  widget open. A Response is sent as it is, such as a refusal. */
+type CoreReply = { answer: unknown } | { open: string } | { ok: true } | Response;
+
+/** What a core handler may read while it decides. */
+interface CoreIo {
+  /** The connections, as `GET /api/connections` lists them to the caller. */
+  connections(): Promise<ConnectionStatus[]>;
+  /** The origin the caller reached Rome at, for turning a path into a link. */
+  origin: string;
+}
+
+type CoreHandler = (context: Record<string, unknown>, io: CoreIo) => Promise<CoreReply>;
+
+/** A connection as `GET /api/connections` lists it, in the fields the connect
+ *  card reads. */
+interface ConnectionStatus {
+  connectionKind: string;
+  kindLabel?: string;
+  state: "working" | "broken" | null;
+  connect: { url: string | null; available: boolean; unavailableReason: string | null } | null;
+}
 
 /**
  * The widgets core owns, by kind, and how each handles its events. The question
  * card's Send answers the agent with what was picked and typed, and its Dismiss
- * declines. Core turns the answer into what the agent reads when the turn starts.
+ * declines. The connect card's Connect opens the connection kind's
+ * authorization page, or answers at once when the connection is working; its
+ * Check answers once the connection is working; its Dismiss declines. Core
+ * turns the answer into what the agent reads when the turn starts.
  */
 const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
   "question-card": {
-    send: (context) => context,
-    dismiss: () => ({ dismissed: true }),
+    send: async (context) => ({ answer: context }),
+    dismiss: async () => ({ answer: { dismissed: true } }),
+  },
+  "connect-card": {
+    connect: async (context, io) => {
+      const kind = String(context.kind ?? "");
+      const ofKind = (await io.connections()).filter((c) => c.connectionKind === kind);
+      if (ofKind.some((c) => c.state === "working")) {
+        return { answer: { kind, status: "connected" } };
+      }
+      // A kind can list more than one connection; any one with a link starts it.
+      const connect = ofKind.find((c) => c.connect?.available && c.connect.url)?.connect;
+      if (!connect?.url) {
+        const reason =
+          ofKind.find((c) => c.connect?.unavailableReason)?.connect?.unavailableReason ??
+          `${kind} can't be connected from the chat on this instance.`;
+        return Response.json({ error: reason }, { status: 409 });
+      }
+      return { open: connect.url };
+    },
+    check: async (context, io) => {
+      const kind = String(context.kind ?? "");
+      const connections = (await io.connections()).filter((c) => c.connectionKind === kind);
+      if (connections.some((c) => c.state === "working")) {
+        return { answer: { kind, status: "connected" } };
+      }
+      // Pressed before the authorization landed: say so, so the press shows.
+      const label = connections[0]?.kindLabel ?? kind;
+      return Response.json(
+        { error: `${label} isn't connected yet. Finish authorizing, then try again.` },
+        { status: 409 },
+      );
+    },
+    dismiss: async (context) => ({ answer: { kind: context.kind, dismissed: true } }),
   },
 };
 
@@ -131,7 +186,29 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
       const handle = CORE_WIDGETS[widget.componentId ?? ""]?.[STORED_EVENT_NAMES[name] ?? name];
       if (!handle) return c.json({ error: "This widget declares no such event" }, 400);
       if (!widget.waits) return c.json({ error: "The agent does not wait on this widget" }, 400);
-      return answer(to, widget, widgetId, handle(context), body?.turn);
+      // The origin the guardian reached Rome at, which a link to a page of
+      // this instance joins.
+      const origin = getExternalRequestOrigin(c.req.raw).origin;
+      const reply = await handle(context, {
+        origin,
+        connections: async () => {
+          const res = await deps.forward(
+            new Request(new URL("/api/connections", c.req.url), { headers }),
+            c.env,
+          );
+          const listed = (await res.json().catch(() => null)) as {
+            connections?: ConnectionStatus[];
+          } | null;
+          return res.ok ? (listed?.connections ?? []) : [];
+        },
+      });
+      if (reply instanceof Response) return reply;
+      if ("answer" in reply) return answer(to, widget, widgetId, reply.answer, body?.turn);
+      if ("open" in reply) {
+        const open = vetLink(reply.open, origin);
+        return c.json(open ? { open } : {});
+      }
+      return c.json({});
     }
     if (!isWidgetAppPath(name)) return c.json({ error: "The event is not a path in the app" }, 400);
     const reply = await to(`/api/apps/${encodeURIComponent(widget.appId)}/${name}`, context);

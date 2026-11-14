@@ -24,6 +24,7 @@ import {
   type RoutineActivationGate,
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
+import { connectAccountTools } from "./connect-account-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 
 export interface RomeToolPortsDeps {
@@ -208,6 +209,12 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           runAction: (name: string, input: unknown): Promise<ActionResult> =>
             actions.run(turn, name, input),
         }),
+        // A session whose own tools already show a connect card (the
+        // Concierge's `connect_card`) keeps that one, so the agent has one way
+        // to ask for a connection.
+        ...(provided.some((tool) => tool.name === "connect_card")
+          ? []
+          : connectAccountTools({ widgets: turn.widgets, hasSpeaker })),
       ];
     },
   };
