@@ -43,10 +43,11 @@ BUILD_TREE="$RUN_DIR/agent-tree"
 # is the head of the chief of staff agent's pull request.
 # The refs merged into the build, in order, separated by spaces. Each is a
 # pull request as #<number>, a remote branch as origin/<branch>, or any commit.
-AGENT_REFS="${COS_AGENT_REF:-#2130 #2169 #2170}"
+AGENT_REFS="${COS_AGENT_REF:-#2130 #2169}"
 # A note `version` carries for a ref, as JSON keyed by the ref, for what the
 # ref's own state does not say.
-REF_NOTES="${COS_REF_NOTES:-{\"#2170\":\"unmerged, not yet read by Ouou\"\}}"
+REF_NOTES="${COS_REF_NOTES:-}"
+[ -n "$REF_NOTES" ] || REF_NOTES='{}'
 # The one model every tier runs on, cheapest first to keep the bill down. A run
 # that needs a stronger model sets COS_MODEL, in the shell or the secrets file.
 DEFAULT_MODEL=claude-haiku-5-5
