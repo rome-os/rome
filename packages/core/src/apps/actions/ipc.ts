@@ -39,6 +39,7 @@ export interface IpcRequestMessage {
 export type IpcCallerActionContext = Pick<
   ActionExecutionStore,
   | "actor"
+  | "audience"
   | "channelContext"
   | "sharedContext"
   | "sessionId"
@@ -264,6 +265,7 @@ export class IpcRpc {
       ) {
         request.callerActionContext = {
           actor: actionContext.actor,
+          audience: actionContext.audience,
           channelContext: actionContext.channelContext,
           sharedContext: actionContext.sharedContext,
           sessionId: actionContext.sessionId,

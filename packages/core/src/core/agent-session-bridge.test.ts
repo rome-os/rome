@@ -571,8 +571,9 @@ describe("AgentSessionBridge working dir", () => {
       guardianFacing: true,
       toolEnv: { ROME_CHANNEL: "telegram" },
       spanAttributes: { "channel.name": "telegram" },
+      audience: "shared" as const,
     };
-    const { acquired, runTurn } = setup({}, undefined, () => stated);
+    const { acquired, runTurn } = setup({}, undefined, async () => stated);
     const forged = {
       drawsCards: true,
       guardianFacing: false,
@@ -957,5 +958,52 @@ describe("AgentSessionBridge answer recording", () => {
 
     await rs.waitFor(() => expect(turnEnd()).toBeDefined());
     expect(JSON.stringify(turnEnd())).not.toContain("replyDelivery");
+  });
+});
+
+describe("AgentSessionBridge turn audience", () => {
+  async function runFrom(callerActionContext: Record<string, unknown> | undefined) {
+    const started: Array<{ parentAudience?: string }> = [];
+    const session = {
+      key: { agentName: "main", channelThreadKey: "telegram:dm" },
+      sessionId: "session-1",
+      submit: submitStartingTurn,
+      startTurn: (_input: unknown, options: { parentAudience?: string }) => {
+        started.push(options);
+        return testTurnHandle({
+          turnId: "turn-1",
+          events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
+        }) as unknown as AgentTurnHandle;
+      },
+    } as unknown as AgentSession;
+    const manager = { open: async () => session, find: () => session } as unknown as Sessions;
+    const child = new FakeChild();
+    new AgentSessionBridge(manager).attach(
+      new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+      child as unknown as ChildProcess,
+    );
+    child.emit("message", {
+      type: "rpc_request",
+      reqId: "request-1",
+      method: "agent.session.runTurn",
+      ...(callerActionContext ? { callerActionContext } : {}),
+      params: {
+        key: session.key,
+        input: { prompt: "how many steps today?" },
+        init: { threadContext: { channel: "telegram", threadId: "dm" } },
+      },
+    });
+    await rs.waitFor(() => expect(started).toHaveLength(1));
+    return started[0].parentAudience;
+  }
+
+  it("keeps the audience main read for the action that asked, such as a guardian's direct message", async () => {
+    expect(await runFrom({ audience: "private" })).toBe("private");
+    expect(await runFrom({ audience: "shared" })).toBe("shared");
+  });
+
+  it("reads a turn as shared when main read no audience for its caller", async () => {
+    expect(await runFrom({ actor: { kind: "guardian", userId: "seat" } })).toBe("shared");
+    expect(await runFrom(undefined)).toBe("shared");
   });
 });

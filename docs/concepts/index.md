@@ -14,7 +14,7 @@ Browse by domain:
 - [`actions.md`](actions.md) — Actions, Action results, Suspensions, Actor. *The primary unit of executable behavior, its result envelope, and the session identity accountable for it.*
 - [`host-execution.md`](host-execution.md) — Host jobs. *Privileged scripts whose lifetime belongs to the host service outside Rome.*
 - [`skills.md`](skills.md) — Skills. *Instructional documents that teach agents how to perform tasks.*
-- [`data.md`](data.md) — Memory, Projects, Routines, Database. *Where state and knowledge live.*
+- [`data.md`](data.md) — Memory, Projects, Routines, Personal data, Database. *Where state and knowledge live.*
 
 ## Entry candidates
 

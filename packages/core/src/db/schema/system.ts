@@ -1459,3 +1459,122 @@ export const connectionGrants = sqliteTable(
       .where(sql`${table.accountId} IS NOT NULL AND ${table.state} != 'unauthorized'`),
   ],
 );
+
+// Personal data: readings the guardian's devices push to Rome, such as Apple
+// Health. Every row is personal data. Concept: docs/personal-data.md. All access
+// goes through packages/core/src/personal-data/repository.ts.
+
+// One stored reading. A sender's key names it, unique per source and origin,
+// so a repeat of the same key replaces the reading instead of adding one.
+export const personalDataPoints = sqliteTable(
+  "personal_data_points",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    type: text("type").notNull(),
+    shape: text("shape").notNull(), // bucket | sample | record
+    // hour | day for a bucket, null otherwise.
+    resolution: text("resolution"),
+    // Milliseconds since the epoch, UTC.
+    startAt: integer("start_at").notNull(),
+    endAt: integer("end_at").notNull(),
+    // The IANA zone the device was in, so a day bucket keeps its local meaning.
+    tz: text("tz").notNull(),
+    // The sum for a cumulative type, the average for the rest.
+    value: real("value"),
+    unit: text("unit"),
+    fields: text("fields", { mode: "json" }).$type<Record<string, number>>(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, string>>(),
+    dedupeKey: text("dedupe_key").notNull(),
+    // A hash of the stored fields: an upsert with the same hash changes nothing.
+    contentHash: text("content_hash").notNull(),
+    // The ingest that last wrote the row.
+    ingestId: integer("ingest_id").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_personal_data_points_key").on(table.source, table.origin, table.dedupeKey),
+    index("idx_personal_data_points_query").on(
+      table.source,
+      table.type,
+      table.resolution,
+      table.startAt,
+    ),
+  ],
+);
+
+// The catalog: one row per source, origin and type, kept current by every
+// ingest so reading the catalog never scans points.
+export const personalDataTypes = sqliteTable(
+  "personal_data_types",
+  {
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    type: text("type").notNull(),
+    shape: text("shape").notNull(),
+    unit: text("unit"),
+    resolutions: text("resolutions", { mode: "json" }).$type<string[]>().notNull(),
+    earliestAt: integer("earliest_at"),
+    latestAt: integer("latest_at"),
+    // What the device reports as complete, not the latest point: a day with no
+    // steps still counts as synced.
+    syncedThroughAt: integer("synced_through_at"),
+    pointCount: integer("point_count").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.source, table.origin, table.type] })],
+);
+
+// One row per source and origin: the device that sends it and how its syncs go.
+export const personalDataSources = sqliteTable(
+  "personal_data_sources",
+  {
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    originName: text("origin_name"),
+    platform: text("platform"),
+    appVersion: text("app_version"),
+    state: text("state").notNull(), // active | paused | off
+    firstSyncAt: integer("first_sync_at"),
+    lastSyncAt: integer("last_sync_at"),
+    lastResult: text("last_result"), // ok | partial | error
+    lastErrorCode: text("last_error_code"),
+    // The source's short text for the Agent, written by core, never by the device.
+    note: text("note"),
+  },
+  (table) => [primaryKey({ columns: [table.source, table.origin] })],
+);
+
+// The server's ingest log, kept 90 days. It counts and ranges, and never holds
+// a reading's value.
+export const personalDataIngests = sqliteTable(
+  "personal_data_ingests",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    // Null for a row no batch wrote, such as a delete.
+    batchId: text("batch_id"),
+    trigger: text("trigger"),
+    receivedAt: integer("received_at").notNull(),
+    itemCount: integer("item_count").notNull().default(0),
+    inserted: integer("inserted").notNull().default(0),
+    updated: integer("updated").notNull().default(0),
+    unchanged: integer("unchanged").notNull().default(0),
+    deleted: integer("deleted").notNull().default(0),
+    rejected: integer("rejected").notNull().default(0),
+    rangeStartAt: integer("range_start_at"),
+    rangeEndAt: integer("range_end_at"),
+    durationMs: integer("duration_ms"),
+    status: text("status").notNull(), // ok | partial | deleted
+    errorCode: text("error_code"),
+    // The answer the batch got, returned again for a repeat of the same batch.
+    // It holds counts and rejected item codes, never a value.
+    response: text("response", { mode: "json" }).$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    uniqueIndex("uq_personal_data_ingests_batch").on(table.source, table.origin, table.batchId),
+    index("idx_personal_data_ingests_received").on(table.source, table.receivedAt),
+  ],
+);

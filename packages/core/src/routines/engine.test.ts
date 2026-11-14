@@ -267,6 +267,57 @@ describe("RoutineEngine worker admission", () => {
   });
 });
 
+describe("RoutineEngine fire audience", () => {
+  let testDb: TestDb;
+  beforeEach(() => {
+    testDb = createTestDb();
+  });
+  afterEach(() => testDb.close());
+
+  it("fires with the audience of the routine's chat, and shared for a routine of no chat", async () => {
+    const routines = new RoutinesRepository(testDb.db, async (chatId) =>
+      chatId === "guardian-chat" ? "private" : "shared",
+    );
+    const run = rs.fn(async () => ({ status: "ok", data: null }));
+    const engine = new RoutineEngine(
+      routines,
+      new RoutineRunsRepository(testDb.db),
+      { run } as unknown as ActionEngine,
+      0,
+      systemClock,
+    );
+    const inChat = await routines.create({
+      name: "steps",
+      trigger: { type: "manual" },
+      actionName: "core:personal_data_query",
+      args: { source: "apple_health", type: "stepCount" },
+      madeIn: "guardian-chat",
+    });
+    const nowhere = await routines.create({
+      name: "noop",
+      trigger: { type: "manual" },
+      actionName: "noop",
+      args: {},
+    });
+
+    await engine.runNow(inChat);
+    await engine.runNow(nowhere);
+
+    expect(run).toHaveBeenNthCalledWith(
+      1,
+      "core:personal_data_query",
+      expect.anything(),
+      expect.objectContaining({ audience: "private" }),
+    );
+    expect(run).toHaveBeenNthCalledWith(
+      2,
+      "noop",
+      expect.anything(),
+      expect.objectContaining({ audience: "shared" }),
+    );
+  });
+});
+
 describe("RoutineEngine fire context", () => {
   let testDb: TestDb;
 

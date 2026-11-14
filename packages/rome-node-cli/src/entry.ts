@@ -15,6 +15,12 @@ import {
   stopDaemon,
 } from "@rome-os/node-core/client";
 import { commandHelp } from "./help.js";
+import {
+  isPersonalAction,
+  knownNotPersonal,
+  personalDataRefusal,
+  turnIsShared,
+} from "./audience.js";
 import { copyRequest } from "./copy.js";
 import { CLI_AUDIT_HINT, cliAuditPath, runAudit } from "./audit.js";
 import type { ConnectUi } from "./connect-ui.js";
@@ -347,6 +353,16 @@ async function main(): Promise<void> {
       else await client.removeDevice(deviceId);
       process.stdout.write(`${JSON.stringify({ type: "response", ok: true, result: {} })}\n`);
       return;
+    }
+    if (command === "run" && turnIsShared(process.env) && !knownNotPersonal(action)) {
+      const info = isPersonalAction(action, undefined)
+        ? undefined
+        : await client.describe(deviceId);
+      if (isPersonalAction(action, info)) {
+        process.stdout.write(`${JSON.stringify(personalDataRefusal())}\n`);
+        process.exitCode = 1;
+        return;
+      }
     }
     if (values.input !== undefined || values.output !== undefined) {
       const output = values.output ?? "-";

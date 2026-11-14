@@ -37,6 +37,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     sharedContext: () => undefined,
     pushLevel: () => undefined,
     actor: () => undefined,
+    audience: () => "shared",
     reportedTask: () => undefined,
     inTurn: (fn) => fn(),
     ...overrides,
@@ -54,6 +55,7 @@ function ports(
     actionRegistry: registry,
     actionEngine: engine,
     webchatRepo: { getSession } as never,
+    placeAudience: async (context) => (context?.threadId === "shared-chat" ? "shared" : "private"),
     ...(taskOwner ? { taskOwner } : {}),
     sessionTools,
   });
@@ -226,5 +228,35 @@ describe("romeToolPorts sessionTools", () => {
     const { sessionTools } = ports();
     const tools = await sessionTools.forTurn(turn({ widgets: "plain_text" }), true);
     expect(tools.map((tool) => tool.name)).toEqual(["connect_account"]);
+  });
+});
+
+describe("romeToolPorts actions carry the turn's audience", () => {
+  const audienceOfRun = (run: ReturnType<typeof ports>["run"]) =>
+    (run.mock.calls.at(-1) as unknown as [string, unknown, { audience?: string }])[2].audience;
+
+  it("hands a private turn in a private chat on as private", async () => {
+    const { actions, run } = ports();
+    await actions.run(turn({ audience: () => "private" }), "send_message", {});
+    expect(audienceOfRun(run)).toBe("private");
+  });
+
+  it("reads the chat again on each call, so a chat that became shared narrows the turn", async () => {
+    const { actions, run } = ports();
+    await actions.run(
+      turn({
+        audience: () => "private",
+        threadContext: () => ({ channel: "webchat", threadId: "shared-chat" }),
+      }),
+      "send_message",
+      {},
+    );
+    expect(audienceOfRun(run)).toBe("shared");
+  });
+
+  it("never widens a shared turn", async () => {
+    const { actions, run } = ports();
+    await actions.run(turn({ audience: () => "shared" }), "send_message", {});
+    expect(audienceOfRun(run)).toBe("shared");
   });
 });

@@ -946,6 +946,13 @@
       "when": 1794585260462,
       "tag": "0135_chat_messages_by_key",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "6",
+      "when": 1794634719246,
+      "tag": "0136_personal_data",
+      "breakpoints": true
     }
   ]
 }

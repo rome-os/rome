@@ -28,6 +28,7 @@ import type {
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
+import { narrowerAudience } from "../agent/index.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import {
@@ -215,10 +216,20 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           const openedKey = req.sessionId
             ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
             : req.key.channelThreadKey;
+          const stated = await this.openingFor(openedKey ?? "", sessionInit.threadContext);
+          // The session reads no more privately than the caller main read,
+          // so its shell agrees with its turns. A session already live keeps
+          // the reading it opened with.
+          const audience = narrowerAudience(
+            stated.audience,
+            ctx.callerActionContext?.audience ?? "shared",
+          );
           const opening = {
             ...sessionInit,
             // Stated here, never taken from the worker's request.
-            ...this.openingFor(openedKey ?? "", sessionInit.threadContext),
+            ...stated,
+            audience,
+            toolEnv: { ...stated.toolEnv, ROME_TURN_AUDIENCE: audience },
             kind: sessionInit.threadContext ? ("conversation" as const) : ("action" as const),
             workingDir,
             isSubagent: true,
@@ -303,6 +314,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const handle = await session.submit(req.input, {
           priority: "after",
           ...(actor ? { actor } : {}),
+          // The turn is never more private than the turn or chat that ran
+          // the action asking for it, as main read it. Without that reading,
+          // such as for an action a third-party app runs, the turn is shared.
+          parentAudience: ctx.callerActionContext?.audience ?? "shared",
           threadContext: req.init?.threadContext,
           sharedContext: req.init?.sharedContext,
           romeSessionId,

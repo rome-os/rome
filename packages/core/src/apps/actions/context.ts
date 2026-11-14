@@ -24,6 +24,10 @@ export interface ActionExecutionStore {
   callerAppId?: string;
   engine?: ActionEngine;
   channelContext?: ThreadContext;
+  /** Who can read the turn or chat that started the chain, as main read it.
+   *  Inherited like the actor. A turn an action starts takes it as its
+   *  starter's; the personal-data check never reads it. */
+  audience?: "private" | "shared";
   sharedContext?: Record<string, unknown>;
   sessionId?: string;
   turnId?: string;

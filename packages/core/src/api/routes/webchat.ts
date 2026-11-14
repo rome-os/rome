@@ -1953,7 +1953,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const source = await deps.agentSessionManager.open(
         { agentName, channelThreadKey },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...(await deps.sessionOpeningFor(channelThreadKey, threadContext)),
           kind: "conversation",
           workingDir,
           threadContext,
@@ -4493,7 +4493,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           channelThreadKey,
         },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...(await deps.sessionOpeningFor(channelThreadKey, threadContext)),
           kind: "conversation",
           workingDir,
           threadContext,
@@ -5358,7 +5358,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const opened = await deps.agentSessionManager.open(
         { agentName: session.agentName ?? "main", channelThreadKey },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...(await deps.sessionOpeningFor(channelThreadKey, threadContext)),
           kind: "conversation",
           workingDir,
           threadContext,

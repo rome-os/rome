@@ -4,13 +4,15 @@
 // Vocabulary: docs/domains/agents.md#rome-tools.
 
 import type { ThreadContext } from "@rome-os/app-runtime";
-import type {
-  AgentAction,
-  AgentActions,
-  DeferTool,
-  RomeTool,
-  SessionTools,
-  TurnFacts,
+import type { PlaceAudience } from "./place-audience.js";
+import {
+  type AgentAction,
+  type AgentActions,
+  narrowerAudience,
+  type DeferTool,
+  type RomeTool,
+  type SessionTools,
+  type TurnFacts,
 } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
 import type { Action, ActionRegistry, ActionResult } from "../apps/actions/types.js";
@@ -35,6 +37,8 @@ export interface RomeToolPortsDeps {
   eventSources?: EventSources;
   /** Whose a dashboard chat is, for a wake scheduled in one. */
   webchatRepo?: Pick<WebChatRepository, "getSession">;
+  /** Who can read a chat. Absent, every chat is shared. */
+  placeAudience?: PlaceAudience;
   /** The tools Rome adds for an agent. When absent, a session carries none. */
   sessionTools?: SessionToolsProvider;
   /**
@@ -97,6 +101,12 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           return actionEngine.run(action.config.name, input as Record<string, unknown>, {
             initiator: `agent:${turn.agentName}`,
             ...(actor ? { actor } : {}),
+            // Read again on each call, so a chat that opens to visitors after
+            // the turn started reads no personal data.
+            audience: narrowerAudience(
+              turn.audience(),
+              (await deps.placeAudience?.(turn.threadContext())) ?? "shared",
+            ),
             channelContext: turn.threadContext(),
             sharedContext: turn.sharedContext(),
             sessionId: turn.sessionId,
