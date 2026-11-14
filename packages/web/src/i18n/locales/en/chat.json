@@ -447,6 +447,10 @@
     "dismiss": "Dismiss",
     "send": "Send"
   },
+  "deviceConnectCard": {
+    "connected": "Connected",
+    "notConnected": "Not connected"
+  },
   "appComponent": {
     "dismiss": "Dismiss",
     "widgetUnavailable": "Could not read this card's data. {{text}}",

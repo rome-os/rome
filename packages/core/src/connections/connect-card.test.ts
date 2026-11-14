@@ -92,6 +92,13 @@ describe("connect_account for a device kind", () => {
     });
     expect(ui && checkWidgetUi(ui)).toEqual([]);
     expect(JSON.stringify(ui)).toContain('"context":{"kind":"apple_health","device":true}');
+    const texts = (ui?.components ?? []).flatMap((c) => ("text" in c ? [c.text] : []));
+    expect(texts).toEqual([
+      "Connect Apple Health",
+      "So your Rome can read the Apple Health data you allow.",
+      "Not now",
+      "Connect",
+    ]);
     expect(deviceConnectToolOutput(device, false)).toContain("Rome app");
   });
 });

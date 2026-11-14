@@ -136,6 +136,14 @@ function vetLink(link: unknown, origin: string): string | undefined {
 }
 
 /** The names a question card stored before its events were its own. */
+/**
+ * Events a core card takes with no button for them: a device's connect card
+ * gets `check` from the device's app once its flow ends.
+ */
+const CORE_UNSHOWN_EVENTS: Record<string, readonly string[]> = {
+  "connect-card": ["check"],
+};
+
 const STORED_EVENT_NAMES: Record<string, string> = {
   "rome:answer": "send",
   "rome:dismiss": "dismiss",
@@ -200,7 +208,9 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     }
     const widget = readWidget(message.chatId, message.content);
     if (!widget) return c.json({ error: "No widget with this id" }, 404);
-    if (!eventNames(widget.components).has(name)) {
+    const unshown =
+      widget.appId === "core" && CORE_UNSHOWN_EVENTS[widget.componentId ?? ""]?.includes(name);
+    if (!eventNames(widget.components).has(name) && !unshown) {
       return c.json({ error: "This widget declares no such event" }, 400);
     }
 

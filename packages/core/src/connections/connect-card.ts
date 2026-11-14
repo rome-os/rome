@@ -26,7 +26,8 @@ export function deviceConnectPath(kind: string): string {
  * answer the agent once the connection is working.
  */
 export function connectCardUi(kind: string, kindLabel: string, device = false): WidgetUi {
-  const context: Record<string, string | boolean> = device ? { kind, device: true } : { kind };
+  if (device) return deviceConnectCardUi(kind, kindLabel);
+  const context = { kind };
   return {
     components: [
       { id: "root", component: "Column", children: ["title", "note", "actions"] },
@@ -34,9 +35,7 @@ export function connectCardUi(kind: string, kindLabel: string, device = false): 
       {
         id: "note",
         component: "Text",
-        text: device
-          ? `Press Connect and turn on ${kindLabel} in the Rome app on your device, then come back and press I've authorized.`
-          : `Press Connect and authorize ${kindLabel} in the page that opens, then come back and press I've authorized.`,
+        text: `Press Connect and authorize ${kindLabel} in the page that opens, then come back and press I've authorized.`,
         variant: "caption",
       },
       {
@@ -60,6 +59,44 @@ export function connectCardUi(kind: string, kindLabel: string, device = false): 
         action: { event: { name: "check", context } },
       },
       { id: "check-label", component: "Text", text: "I've authorized" },
+      {
+        id: "connect",
+        component: "Button",
+        child: "connect-label",
+        variant: "primary",
+        action: { event: { name: "connect", context } },
+      },
+      { id: "connect-label", component: "Text", text: "Connect" },
+    ],
+  };
+}
+
+/**
+ * The card for a device kind. The device's app runs the flow and sends
+ * `check` itself when it ends, so the card offers no button for it, and core
+ * takes that event without one (`CORE_UNSHOWN_EVENTS` in widget-events).
+ */
+function deviceConnectCardUi(kind: string, label: string): WidgetUi {
+  const context = { kind, device: true };
+  return {
+    components: [
+      { id: "root", component: "Column", children: ["title", "note", "actions"] },
+      { id: "title", component: "Text", text: `Connect ${label}`, variant: "h4" },
+      {
+        id: "note",
+        component: "Text",
+        text: `So your Rome can read the ${label} data you allow.`,
+        variant: "caption",
+      },
+      { id: "actions", component: "Row", children: ["dismiss", "connect"], justify: "end" },
+      {
+        id: "dismiss",
+        component: "Button",
+        child: "dismiss-label",
+        variant: "default",
+        action: { event: { name: "dismiss", context } },
+      },
+      { id: "dismiss-label", component: "Text", text: "Not now" },
       {
         id: "connect",
         component: "Button",

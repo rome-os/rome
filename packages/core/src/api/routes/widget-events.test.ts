@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { widgetEventRoutes } from "./widget-events.js";
+import { connectCardUi } from "../../connections/connect-card.js";
 
 const button = (id: string, name: string, context?: unknown) => ({
   id,
@@ -628,14 +629,9 @@ describe("an event on the connect card for a device kind", () => {
       kind: "inline",
       componentId: "connect-card",
       props: { kind: "apple_health", label: "Apple Health", device: true },
-      ui: {
-        components: [
-          { id: "root", component: "Column", children: ["connect", "check", "dismiss"] },
-          button("connect", "connect", context),
-          button("check", "check", context),
-          button("dismiss", "dismiss", context),
-        ],
-      },
+      // The card core draws, which has no button for check: the device's app
+      // sends it once its flow ends.
+      ui: connectCardUi("apple_health", "Apple Health", true),
     },
   };
   const health = (state: string) => [{ capability: "apple_health", title: "Apple Health", state }];
@@ -673,6 +669,18 @@ describe("an event on the connect card for a device kind", () => {
     expect(working.forwarded[0]?.body).toMatchObject({
       parts: [{ output: { kind: "apple_health", status: "connected" } }],
     });
+  });
+
+  it("takes check with no button for it only on core's own card", async () => {
+    const appCard = { ...deviceCard, appId: "connector" };
+    const { fire } = setup(
+      { m: { chatId: "c1", content: [appCard] } },
+      "guardian",
+      undefined,
+      [],
+      health("working"),
+    );
+    expect((await fire("m", { name: "check", context })).status).toBe(400);
   });
 
   it("reads the card as a device's from what core stored, whatever context the client sends", async () => {
