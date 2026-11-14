@@ -57,6 +57,7 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 | `cloud minted` | `{"count"}`: the temporary keys the stand-in has minted since it started or was reset |
 | `gate on` / `gate off` | Forces Rome Cloud's `voice_input` gate for every account (`FEATURE_GATE_VOICE_INPUT`) and restarts Rome Cloud. `on` after `up` and `reset`. |
 | `cloud sign-in` / `cloud sign-out` | Restarts Rome on the same data, signed in to Rome Cloud (the default after `up` and `reset`) or not signed in (see below). Prints `cloud status`. |
+| `logs [--since <time>] [--match <text>]` | `{"lines": [...]}`: Rome's container log since a time (`docker logs --since`, such as `2026-11-14T11:00:00Z` or `10m`), only the lines containing `match`. Rome logs JSON, so each line is its parsed entry; a line that is not JSON comes as `{"text"}`. |
 | `network cut` / `network restore` | Drops every open connection of the browser and refuses new ones, or lets them through again |
 | `chats` | The dashboard's chats, from `GET /api/chat/sessions` |
 | `messages --chat <id>` | The chat's stored messages: role, sender, text, attachments, `inputState`, time |
