@@ -2,7 +2,7 @@
 // A fake `cos-env` for the verifier's own tests: the same commands, with a scripted stand-in
 // agent instead of Discord and Rome. State lives in the JSON file COS_FAKE_STATE. The
 // stand-in is COS_FAKE_AGENT: "good", or "fail-<rule>" to break exactly that rule.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { respond } from "./stand-in.mjs";
@@ -136,6 +136,10 @@ switch (command) {
     console.log(JSON.stringify(found));
     break;
   }
+  case "logs":
+    mkdirSync(positionals[0], { recursive: true });
+    writeFileSync(join(positionals[0], "rome.log"), `fake logs since ${values.since}\n`);
+    break;
   case "rome":
     // renew-session keeps the agent's knowledge; only a restart or a cold start re-wakes it.
     if (positionals[0] === "renew-session" && process.env.COS_FAKE_NO_RENEW) {

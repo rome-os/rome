@@ -50,6 +50,7 @@ export function renderMarkdown(report) {
     part("Verifier", underTest.verifier),
     `- Model: ${typeof underTest.model === "object" && underTest.model !== null ? `\`${JSON.stringify(underTest.model)}\`` : (underTest.model ?? "unknown")}`,
     `- Judge: ${report.judge}`,
+    `- Rome's logs: ${report.logs === "logs" ? "`logs/` beside this report" : report.logs}`,
     `- Waits: reply ${report.waits.replyMs / 1000} s, A1 ${report.waits.a1Ms / 1000} s, poll ${report.waits.pollMs / 1000} s`,
   ];
   if (report.dirty.length > 0) {

@@ -30,7 +30,7 @@ Each run first calls `cos-env reset`, then hands the agent the seeded team with 
 
 ## The report
 
-Each run writes `report.json` and `report.md` to `~/.rome-environments/chief-of-staff/runs/<time>-<agent commit>/`, with the seed it handed the agent beside them. The report opens with how many of the messages sent to the agent it answered, then states:
+Each run writes `report.json` and `report.md` to `~/.rome-environments/chief-of-staff/runs/<time>-<agent commit>/`, with the seed it handed the agent and Rome's logs for the run (`cos-env logs`, with memory stats) beside them. The report opens with how many of the messages sent to the agent it answered, then states:
 
 - The commits under test: Rome, the agent (`rome_apps/chief-of-staff/`), the environment and the verifier, each marked when it had uncommitted changes. The first three come from `cos-env version`. The verifier reads its own.
 - The model the test Rome ran on, the judge, the rules version and the waits used.
@@ -98,6 +98,7 @@ The verifier drives the environment (`environments/chief-of-staff/`) only throug
 - **`cos-env read --dm <member>`** reads the private chat (`dm-<member>`) that stands in for that member's direct messages with the agent.
 - **`cos-env post --thread <message id>`** posts in the thread started from that message. The thread is created with `--chat <name>`; once it exists `--chat` is optional.
 - **`cos-env post --as <member>:2`** posts from a second account of the same person. The leg is required: if the command ever fails, K3's two-account leg reports as not checked and K3 does not pass.
+- **`cos-env logs <dir> --since <time>`** copies Rome's logs since the run started, with memory stats, into the run folder.
 - **`cos-env rome renew-session --chat <name>`** renews the agent's session. When the environment cannot renew it, the command exits with an explanation, and K6's renewal leg reports as not checked.
 - **Chats**: `general` and `standup` are readable by all three members, `leads` by `member1` and `member2` only, and `dm-member1` to `dm-member3` are the private chats. All are named for the agent.
 

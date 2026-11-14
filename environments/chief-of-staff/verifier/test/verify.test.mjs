@@ -1,7 +1,7 @@
 // The verifier against its fake cos-env: the good stand-in passes every phase 1 rule, and
 // each failing stand-in fails its own rule and no other.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -67,6 +67,10 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.match(markdown, /\| K1 Team \| pass/);
     assert.match(markdown, /Rules other than K3: 7 of 7 pass\./);
     assert.match(markdown, /K3 by leg: 4 of 4 pass\./);
+    assert.ok(
+      existsSync(join(outDir, "logs/rome.log")),
+      "Rome's logs are copied beside the report",
+    );
     assert.match(markdown, /^Answered (\d+) of \1 messages sent to the agent\.$/m);
   });
 

@@ -157,6 +157,15 @@ export async function verify({
     });
   }
 
+  // Rome's logs sit beside the report so a silent or failing run can be traced. A copy that
+  // fails is noted in the report, not fatal: the scores stand without it.
+  let logs = "logs";
+  try {
+    await env.logs(join(dir, "logs"), startedAt.toISOString());
+  } catch (error) {
+    logs = `not copied: ${error.message}`;
+  }
+
   const report = {
     rulesVersion: RULES_VERSION,
     startedAt: startedAt.toISOString(),
@@ -172,6 +181,7 @@ export async function verify({
     liveness: { questionId: liveness.questionId, replyId: liveness.reply?.id ?? null },
     stopped: live ? null : NOT_ANSWERING,
     answered,
+    logs,
     summary: summarize(results),
     results,
   };

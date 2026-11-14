@@ -59,6 +59,10 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
     async rename({ as, displayName }) {
       await call(["rename", "--as", as, displayName]);
     },
+    /** Copies Rome's logs since `since` (an ISO time), with memory stats, into `dir`. */
+    async logs(dir, since) {
+      await call(["logs", dir, "--since", since]);
+    },
     async reset() {
       await call(["reset"]);
     },
