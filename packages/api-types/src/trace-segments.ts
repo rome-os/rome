@@ -355,3 +355,8 @@ export interface TurnFeedback {
   /** Unix seconds. */
   updatedAt: number;
 }
+
+/** `GET /chat/sessions/:sessionId/feedback`: each turn's feedback by turn id; a turn with none is absent. */
+export interface SessionTurnFeedbackResponse {
+  feedback: Record<string, TurnFeedback>;
+}
