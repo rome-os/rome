@@ -14,8 +14,10 @@ final class TranscriptStore {
     let kind: Kind
     private let backend: RomeBackend
 
-    private(set) var messages: [ChatMessage] = []
-    private(set) var pending: [PendingSend] = []
+    // The properties with a `didSet` are what `rows` is built from: each
+    // change builds the rows again, once, so a read is a plain property read.
+    private(set) var messages: [ChatMessage] = [] { didSet { rebuildRows() } }
+    private(set) var pending: [PendingSend] = [] { didSet { rebuildRows() } }
     private(set) var loaded = false
     /// A read of the chat worked at least once (or it was made just now), so
     /// an empty transcript is a chat with nothing in it, not one that failed
@@ -82,6 +84,8 @@ final class TranscriptStore {
     private var seen: [String: Int] = [:]
     private var tokens: [UUID] = []
     private var approvalPolls: [String: Task<Void, Never>] = [:]
+    /// What the rows do when acted on; the same object for the store's life.
+    let actions = ChatActions()
     /// Where a send is kept until the server takes it.
     var drafts: ChatDrafts?
     /// Where the newest messages are kept across launches: the main Chat and
@@ -104,6 +108,7 @@ final class TranscriptStore {
         self.backend = backend
         share = ChatShareFlow(backend: backend)
         share.chat = self
+        actions.store = self
     }
 
     /// Answers given to cards, as stored.
@@ -111,22 +116,50 @@ final class TranscriptStore {
         TranscriptBuilder.answers(in: messages)
     }
 
-    var rows: [TranscriptRow] {
+    /// What the transcript draws, built again whenever one of its inputs
+    /// changes (`rebuildRows`), never on a read.
+    private(set) var rows: [TranscriptRow] = []
+    /// Whether there are no rows: what a screen reads that only needs to
+    /// know that, so a new row does not draw it again.
+    private(set) var rowsEmpty = true
+    /// What each text row draws from its message, built with the rows.
+    private(set) var rowInfo: [String: RowInfo] = [:]
+
+    func info(for row: TranscriptRow) -> RowInfo { rowInfo[row.id] ?? RowInfo() }
+
+    /// A merge changes the messages and the sends together: one rebuild after both.
+    @ObservationIgnored private var rowsHeld = false
+
+    private func rebuildRows() {
+        guard !rowsHeld else { return }
+        PerfProbe.count("rowBuild")
         let answers = answers
-        return TranscriptBuilder.rows(
+        let built = TranscriptBuilder.rows(
             messages: visibleMessages,
             pending: pending,
             answers: answers,
             options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping)
         )
+        // An equal list is not stored: no reader is told of a change that is none.
+        if built != rows { rows = built }
+        if built.isEmpty != rowsEmpty { rowsEmpty = built.isEmpty }
+        let infos = RowInfo.build(rows: built, messages: messages, pending: pending, kind: kind)
+        if infos != rowInfo { rowInfo = infos }
+        thread?.rebuildRows(chatMessages: messages)
+    }
+
+    /// The dots are the only part of the rows that how the turn writes
+    /// decides: the rows change only when they come or go.
+    private func typingInputChanged() {
+        if showsTyping != (rows.last == .typing) { rebuildRows() }
     }
 
     /// How the running turn shows the typing dots, as the server last said
     /// (`message_writing`); nil when no turn runs.
-    private(set) var writing: (turnId: String, mode: WritingMode, writing: Bool)?
+    private(set) var writing: (turnId: String, mode: WritingMode, writing: Bool)? { didSet { typingInputChanged() } }
     /// New messages of a `simulated` turn waiting behind the dots, oldest
     /// first, each with how long it waits.
-    private(set) var held: [(id: String, wait: Duration)] = []
+    private(set) var held: [(id: String, wait: Duration)] = [] { didSet { rebuildRows() } }
     @ObservationIgnored private var holdWork: Task<Void, Never>?
 
     /// Whether the Chat shows its typing dots: the Concierge is writing a
@@ -231,6 +264,22 @@ final class TranscriptStore {
         holdWork?.cancel()
         holdWork = nil
         held = []
+    }
+
+    /// Stops the store for good: its workspace closes, its chat goes, or
+    /// the workspace lets go of it (`mayBeDropped`). A screen that comes
+    /// back starts a store with `start()` after a `stop()`.
+    func close() {
+        stop()
+    }
+
+    /// Nothing would be lost if the workspace let go of this store: no
+    /// screen runs it, no send of the guardian's is held or on its way, and
+    /// no share is open. Reopened, the chat loads again (a topic chat from
+    /// the copy kept on disk first).
+    var mayBeDropped: Bool {
+        tokens.isEmpty && !onScreen && pending.isEmpty && resending.isEmpty
+            && !share.isSelecting && !share.coversChat && !share.creating
     }
 
     func reload() async {
@@ -345,56 +394,115 @@ final class TranscriptStore {
     /// rows and turns that tie within a second keep the order they first
     /// arrived in; the order never changes when the same rows arrive again.
     private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
+        rowsHeld = true
+        defer {
+            rowsHeld = false
+            rebuildRows()
+        }
+        // A copy of a message already held, with the same turn and time,
+        // keeps its place: every key the order goes by is unchanged, so it
+        // replaces the held one where it stands, with no sort. Streaming and
+        // live edits of a message take this path.
+        if !incoming.isEmpty, let placed = placedInPlace(incoming) {
+            if placed != messages { messages = placed }
+            if persist { cache?.save(chat: sessionId, messages: messages) }
+            return
+        }
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for var message in incoming {
-            if message.knowsThreads {
-                instanceKnowsThreads = true
-            } else if let held = byID[message.id], held.knowsThreads {
-                // A live insert leaves the thread out: keep the one already known.
-                message.chatThreadId = held.chatThreadId
-                message.chatThreadTitle = held.chatThreadTitle
-                message.knowsThreads = true
+        for message in incoming {
+            byID[message.id] = completed(message, held: byID[message.id]) { root in
+                byID.values.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
             }
-            // A copy that leaves the title out keeps the one already known, and a
-            // message of a thread takes its title from the thread.
-            if message.chatThreadTitle == nil, let root = message.chatThreadId {
-                if let held = byID[message.id], held.chatThreadId == root, let title = held.chatThreadTitle {
-                    message.chatThreadTitle = title
-                } else {
-                    message.chatThreadTitle = byID.values.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
-                }
-            }
-            // A placement that came before its message lands with it.
-            if let placed = parkedPlacements.removeValue(forKey: message.id) {
-                message.chatThreadId = placed.root
-                message.chatThreadTitle = placed.title
-                message.knowsThreads = true
-            }
-            byID[message.id] = message
             if seen[message.id] == nil {
                 seen[message.id] = seen.count
             }
         }
-        let all = Array(byID.values)
+        messages = Self.ordered(Array(byID.values), seen: seen)
+        let stored = Set(messages.map(\.id))
+        if pending.contains(where: { stored.contains($0.id) }) { pending.removeAll { stored.contains($0.id) } }
+        if persist { cache?.save(chat: sessionId, messages: messages) }
+    }
+
+    /// `incoming` put in place of the messages it updates, or nil when one
+    /// of them is new or moved to another turn or time and the order must be
+    /// worked out again.
+    private func placedInPlace(_ incoming: [ChatMessage]) -> [ChatMessage]? {
+        var placed = messages
+        for message in incoming {
+            guard let index = placed.firstIndex(where: { $0.id == message.id }),
+                  placed[index].turnId == message.turnId, placed[index].createdAt == message.createdAt
+            else { return nil }
+            placed[index] = completed(message, held: placed[index]) { root in
+                placed.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
+            }
+        }
+        return placed
+    }
+
+    /// An incoming copy with what the chat already knows about it: its
+    /// thread, the thread's title, a placement that came before it.
+    private func completed(_ incoming: ChatMessage, held: ChatMessage?, threadTitle: (String) -> String?) -> ChatMessage {
+        var message = incoming
+        if message.knowsThreads {
+            instanceKnowsThreads = true
+        } else if let held, held.knowsThreads {
+            // A live insert leaves the thread out: keep the one already known.
+            message.chatThreadId = held.chatThreadId
+            message.chatThreadTitle = held.chatThreadTitle
+            message.knowsThreads = true
+        }
+        // A copy that leaves the title out keeps the one already known, and a
+        // message of a thread takes its title from the thread.
+        if message.chatThreadTitle == nil, let root = message.chatThreadId {
+            if let held, held.chatThreadId == root, let title = held.chatThreadTitle {
+                message.chatThreadTitle = title
+            } else {
+                message.chatThreadTitle = threadTitle(root)
+            }
+        }
+        // A placement that came before its message lands with it.
+        if let placed = parkedPlacements.removeValue(forKey: message.id) {
+            message.chatThreadId = placed.root
+            message.chatThreadTitle = placed.title
+            message.knowsThreads = true
+        }
+        return message
+    }
+
+    /// The server's order: turns by when they started, then by when they
+    /// first arrived; in a turn, rows by time, then by arrival. Each
+    /// message's keys are worked out once, not on every comparison.
+    static func ordered(_ all: [ChatMessage], seen: [String: Int]) -> [ChatMessage] {
+        struct Keys {
+            let turn: String
+            let date: Date
+            let arrival: Int
+        }
+        let keys = all.map { Keys(turn: $0.turnId ?? $0.id, date: $0.date, arrival: seen[$0.id] ?? Int.max) }
         var turnStart: [String: Date] = [:]
         var turnArrival: [String: Int] = [:]
-        for message in all {
-            let key = message.turnId ?? message.id
-            turnStart[key] = min(turnStart[key] ?? message.date, message.date)
-            turnArrival[key] = min(turnArrival[key] ?? Int.max, seen[message.id]!)
+        for key in keys {
+            turnStart[key.turn] = min(turnStart[key.turn] ?? key.date, key.date)
+            turnArrival[key.turn] = min(turnArrival[key.turn] ?? Int.max, key.arrival)
         }
-        messages = all.sorted { a, b in
-            let keyA = a.turnId ?? a.id, keyB = b.turnId ?? b.id
-            let startA = turnStart[keyA]!, startB = turnStart[keyB]!
-            if startA != startB { return startA < startB }
+        struct Sorted {
+            let index: Int
+            let start: Date
+            let turnArrival: Int
+            let turn: String
+            let date: Date
+            let arrival: Int
+        }
+        let sorted = keys.enumerated().map { index, key in
+            Sorted(index: index, start: turnStart[key.turn]!, turnArrival: turnArrival[key.turn]!, turn: key.turn, date: key.date, arrival: key.arrival)
+        }.sorted { a, b in
+            if a.start != b.start { return a.start < b.start }
             // Ids are random, so comparing them would decide a tie by chance.
-            if keyA != keyB { return turnArrival[keyA]! < turnArrival[keyB]! }
+            if a.turn != b.turn { return a.turnArrival < b.turnArrival }
             if a.date != b.date { return a.date < b.date }
-            return seen[a.id]! < seen[b.id]!
+            return a.arrival < b.arrival
         }
-        let stored = Set(messages.map(\.id))
-        pending.removeAll { stored.contains($0.id) }
-        if persist { cache?.save(chat: sessionId, messages: messages) }
+        return sorted.map { all[$0.index] }
     }
 
     // MARK: Live events
@@ -427,10 +535,13 @@ final class TranscriptStore {
                 messages[index].statusReaction = reaction
             }
         case .messageThread(let id, let messageId, let root, let title) where id == sessionId:
-            if let index = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[index].chatThreadId = root
-                messages[index].chatThreadTitle = title
-                messages[index].knowsThreads = true
+            if messages.contains(where: { $0.id == messageId }) {
+                editMessages { messages in
+                    guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
+                    messages[index].chatThreadId = root
+                    messages[index].chatThreadTitle = title
+                    messages[index].knowsThreads = true
+                }
             } else {
                 parkedPlacements[messageId] = (root, title)
             }
@@ -438,9 +549,11 @@ final class TranscriptStore {
             settle(card)
         case .threadRetired(let id, let root) where id == sessionId:
             // Its task left the chat: the thread's messages lose their label.
-            for index in messages.indices where messages[index].chatThreadId == root {
-                messages[index].chatThreadId = nil
-                messages[index].chatThreadTitle = nil
+            editMessages { messages in
+                for index in messages.indices where messages[index].chatThreadId == root {
+                    messages[index].chatThreadId = nil
+                    messages[index].chatThreadTitle = nil
+                }
             }
         case .reconnected:
             resync()
@@ -451,20 +564,31 @@ final class TranscriptStore {
 
     /// Puts a settled card in place of the card of every part that shows it.
     func settle(_ card: JSONValue) {
-        for index in messages.indices {
-            if let content = TaskAskCard.settling(content: messages[index].content, with: card) {
-                messages[index].content = content
+        editMessages { messages in
+            for index in messages.indices {
+                if let content = TaskAskCard.settling(content: messages[index].content, with: card) {
+                    messages[index].content = content
+                }
             }
         }
         thread?.settle(card)
     }
 
+    /// Changes several messages at once, so the rows are built once for all.
+    private func editMessages(_ edit: (inout [ChatMessage]) -> Void) {
+        var edited = messages
+        edit(&edited)
+        if edited != messages { messages = edited }
+    }
+
     /// Shows an answer or a decision the instance took before it announces
     /// it: the cards that show `id` take `outcome`.
     private func settle(kind: String, id: String, outcome: JSONValue) {
-        for index in messages.indices {
-            if let content = TaskAskCard.settling(content: messages[index].content, kind: kind, id: id, outcome: outcome) {
-                messages[index].content = content
+        editMessages { messages in
+            for index in messages.indices {
+                if let content = TaskAskCard.settling(content: messages[index].content, kind: kind, id: id, outcome: outcome) {
+                    messages[index].content = content
+                }
             }
         }
     }
@@ -519,6 +643,10 @@ final class TranscriptStore {
     /// The title of the task whose chat thread `message` is in, or nil when
     /// it is in no task's thread.
     func taskThreadTitle(of message: ChatMessage) -> String? {
+        Self.taskThreadTitle(of: message, in: messages)
+    }
+
+    static func taskThreadTitle(of message: ChatMessage, in messages: [ChatMessage]) -> String? {
         guard let root = message.chatThreadId else { return nil }
         if let title = message.chatThreadTitle { return title }
         return messages.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
@@ -847,7 +975,7 @@ final class TranscriptStore {
     /// Resends: a stored message the instance did not take, by its id, and
     /// the `inputId` of the copy sent in its place. Recorded when the copy
     /// goes and kept with the chat's drafts, so a relaunch knows the pair.
-    private(set) var resends: [String: String] = [:]
+    private(set) var resends: [String: String] = [:] { didSet { rebuildRows() } }
     @ObservationIgnored private var resendsRead = false
     /// Stored messages whose files are being read back for a resend.
     private var resending: Set<String> = []
@@ -1015,12 +1143,6 @@ final class TranscriptStore {
             guard !Task.isCancelled else { return }
             self?.notice = nil
         }
-    }
-
-    /// Rome's mark on a stored guardian message.
-    func statusMark(ofRow row: TranscriptRow) -> StatusMark? {
-        guard kind == .concierge, case .userText(_, _, _, nil) = row, let id = row.messageId else { return nil }
-        return message(id)?.statusReaction.flatMap(StatusMark.init(rawValue:))
     }
 
     /// What the load-error bar shows: nil for no bar.

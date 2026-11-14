@@ -261,12 +261,14 @@ final class LiveEventsSocket: LiveEventSource {
 
     private func receive(_ task: URLSessionWebSocketTask, generation current: Int) {
         task.receive { [weak self] result in
+            // Read here, off the main actor: only the typed event goes over.
+            let frame: LiveFrame? = if case .success(.string(let text)) = result { Self.frame(text) } else { nil }
             Task { @MainActor in
                 guard let self, self.generation == current else { return }
                 switch result {
-                case .success(let message):
+                case .success:
                     self.attempt = 0
-                    if case .string(let text) = message { self.handle(text) }
+                    if let frame { self.handle(frame) }
                     self.receive(task, generation: current)
                 case .failure:
                     self.resync.dropped()
@@ -297,28 +299,51 @@ final class LiveEventsSocket: LiveEventSource {
         task.send(.string(frame)) { _ in }
     }
 
-    private func handle(_ text: String) {
-        guard let data = text.data(using: .utf8),
-              let frame = try? JSONDecoder().decode(JSONValue.self, from: data),
-              let topic = frame["topic"]?.string
-        else { return }
-        if frame["type"]?.string == "subscribed" {
+    private func handle(_ frame: LiveFrame) {
+        switch frame {
+        case .subscribed(let topic):
             guard resync.confirmed(topic) else { return }
             for subscription in Array(subscriptions.values) where subscription.topic == topic {
                 subscription.handler(.reconnected)
             }
-            return
-        }
-        guard frame["type"]?.string == "event",
-              let name = frame["event"]?.string,
-              let event = Self.decode(name: name, data: frame["data"])
-        else { return }
-        for subscription in subscriptions.values where subscription.topic == topic {
-            subscription.handler(event)
+        case .event(let topic, let event):
+            for subscription in subscriptions.values where subscription.topic == topic {
+                subscription.handler(event)
+            }
         }
     }
 
-    static func decode(name: String, data: JSONValue?) -> LiveEvent? {
+    /// One frame of the socket, read: a topic confirmed, or an event on it.
+    enum LiveFrame: Sendable {
+        case subscribed(topic: String)
+        case event(topic: String, LiveEvent)
+    }
+
+    /// The frame's `data` decoded straight from the text as a typed model.
+    private struct Envelope<Model: Decodable>: Decodable {
+        let data: Model
+    }
+
+    /// Reads a frame. It runs off the main actor: a frame can hold a whole
+    /// message, and its decode would take the main thread's time.
+    nonisolated static func frame(_ text: String) -> LiveFrame? {
+        guard let data = text.data(using: .utf8),
+              let frame = try? JSONDecoder().decode(JSONValue.self, from: data),
+              let topic = frame["topic"]?.string
+        else { return nil }
+        if frame["type"]?.string == "subscribed" { return .subscribed(topic: topic) }
+        guard frame["type"]?.string == "event", let name = frame["event"]?.string else { return nil }
+        // A message or a task is decoded from the text itself, not encoded
+        // from its JSON value and decoded again.
+        let event: LiveEvent? = switch name {
+        case "message_insert": (try? JSONDecoder().decode(Envelope<ChatMessage>.self, from: data)).map { .messageInsert($0.data) }
+        case "task_upsert": (try? JSONDecoder().decode(Envelope<TaskUpsertEvent>.self, from: data)).map { .taskUpsert($0.data.task) }
+        default: decode(name: name, data: frame["data"])
+        }
+        return event.map { .event(topic: topic, $0) }
+    }
+
+    nonisolated static func decode(name: String, data: JSONValue?) -> LiveEvent? {
         guard let data else { return nil }
         switch name {
         case "session_running":

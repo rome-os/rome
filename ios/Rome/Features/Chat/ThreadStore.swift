@@ -14,15 +14,17 @@ final class ThreadStore {
     let anchor: ChatMessage
     /// The thread's first message, as the server names it; the anchor's own
     /// id while it is alone, so a reply placed under it is recognised.
-    private(set) var root: String
+    private(set) var root: String { didSet { rebuildRows() } }
     /// Messages of the thread the chat does not hold, from the read.
-    private(set) var older: [ChatMessage]
+    private(set) var older: [ChatMessage] { didSet { rebuildRows() } }
     private(set) var loaded = false
 
     @ObservationIgnored private weak var chat: TranscriptStore?
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private var tokens: [UUID] = []
     @ObservationIgnored private var loads = 0
+    /// Set while `load` changes the root and the messages, which rebuild once after both.
+    @ObservationIgnored private var rowsHeld = false
 
     init(anchor: ChatMessage, chat: TranscriptStore, backend: RomeBackend, older: [ChatMessage] = []) {
         self.anchor = anchor
@@ -30,6 +32,7 @@ final class ThreadStore {
         self.backend = backend
         root = older.first?.chatThreadId ?? anchor.threadRoot
         self.older = older
+        rebuildRows()
     }
 
     /// The thread's messages, oldest first: the chat's own copies, then any
@@ -90,8 +93,12 @@ final class ThreadStore {
         do {
             let thread = try await backend.thread(sessionId: sessionId, messageId: anchor.id)
             guard mine == loads else { return }
+            // The root and the messages arrive together: one rebuild for both.
+            rowsHeld = true
             if let first = thread.first?.chatThreadId { root = first }
             older = thread
+            rowsHeld = false
+            rebuildRows()
         } catch {
             // The thread stays as it is shown.
         }
@@ -119,11 +126,13 @@ final class ThreadStore {
 
     /// Puts a settled card in place in the messages the read brought.
     func settle(_ card: JSONValue) {
-        for index in older.indices {
-            if let content = TaskAskCard.settling(content: older[index].content, with: card) {
-                older[index].content = content
+        var settled = older
+        for index in settled.indices {
+            if let content = TaskAskCard.settling(content: settled[index].content, with: card) {
+                settled[index].content = content
             }
         }
+        if settled != older { older = settled }
     }
 
     /// Oldest first; messages written in the same second keep the order they came in.
@@ -136,11 +145,25 @@ final class ThreadStore {
     }
 
     /// The rows the thread shows: the chat's bubbles and cards, without
-    /// thread labels. Answers are read over the thread's own older messages
-    /// and the chat's together, in order, so a card on one and its answer on
-    /// the other still meet.
-    func rows(chatMessages: [ChatMessage]) -> [TranscriptRow] {
-        let answers = TranscriptBuilder.answers(in: Self.ordered(older + chatMessages))
-        return TranscriptBuilder.rows(messages: messages, pending: pendingResends, answers: answers, options: .init())
+    /// thread labels. Built again when the thread's messages change, and by
+    /// the chat whenever its own do (`TranscriptStore.rebuildRows`).
+    private(set) var rows: [TranscriptRow] = []
+    /// What each text row draws from its message, built with the rows.
+    private(set) var rowInfo: [String: RowInfo] = [:]
+
+    func info(for row: TranscriptRow) -> RowInfo { rowInfo[row.id] ?? RowInfo() }
+
+    /// Answers are read over the thread's own older messages and the chat's
+    /// together, in order, so a card on one and its answer on the other
+    /// still meet.
+    func rebuildRows(chatMessages: [ChatMessage]? = nil) {
+        guard !rowsHeld else { return }
+        let answers = TranscriptBuilder.answers(in: Self.ordered(older + (chatMessages ?? chat?.messages ?? [])))
+        let held = messages
+        let resends = pendingResends
+        let built = TranscriptBuilder.rows(messages: held, pending: resends, answers: answers, options: .init())
+        if built != rows { rows = built }
+        let infos = RowInfo.build(rows: built, messages: held, pending: resends, kind: chat?.kind ?? .concierge)
+        if infos != rowInfo { rowInfo = infos }
     }
 }

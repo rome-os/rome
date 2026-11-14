@@ -250,7 +250,7 @@ struct ErrorLine: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if error.offersUsage, !isVisitor, let openUsage {
-                    Button(action: openUsage) {
+                    Button { openUsage.run(()) } label: {
                         Text("See usage")
                             .romeFont(CardScale.caption, .semibold)
                             .foregroundStyle(Palette.primaryText)
@@ -271,7 +271,7 @@ struct ErrorLine: View {
 
 extension EnvironmentValues {
     /// Opens Settings, where each AI tool's usage shows. Nil where there is no Settings.
-    @Entry var openUsage: (@MainActor () -> Void)? = nil
+    @Entry var openUsage: ShellAction<Void, Void>? = nil
 }
 
 /// The load-error bar: "Couldn't load this chat" with Retry, or with a

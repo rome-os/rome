@@ -24,7 +24,11 @@ struct ConciergeStarters: View {
     /// Only before the chat has anything in it, a message being sent
     /// included, and only once a read showed it empty: never under a failed load.
     static func visible(loaded: Bool, rows: [TranscriptRow]) -> Bool {
-        loaded && rows.isEmpty
+        visible(loaded: loaded, empty: rows.isEmpty)
+    }
+
+    static func visible(loaded: Bool, empty: Bool) -> Bool {
+        loaded && empty
     }
 
     var body: some View {

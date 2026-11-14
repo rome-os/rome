@@ -8,7 +8,6 @@ struct TaskChatScreen: View {
     let initialTitle: String
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(AppModel.self) private var model
     /// Kept on the workspace, so a failed send's bubble and Retry are still
     /// there when the guardian comes back, and the draft waits for it to load.
     private var store: TranscriptStore { workspace.taskStore(chatId) }
@@ -130,14 +129,20 @@ struct TaskChatScreen: View {
     @ViewBuilder
     private func transcript(_ store: TranscriptStore) -> some View {
         let briefID = store.brief?.id
+        let agentName = workspace.agentDisplayName
         TranscriptList(
             store: store,
             composerFocused: composerFocused,
             alignTop: true,
             footer: store.running && store.loaded ? AnyView(runningLine(store)) : nil
         ) { row, previous in
-            taskRow(row, store: store, briefID: briefID)
-                .shareSelectable(row, share: store.share, top: spacing(row, after: previous), placement: isBrief(row, briefID) ? .corner : nil)
+            // A row that draws nothing takes no space either: a row view of
+            // its own would still take the spacing above it.
+            if TaskChatRow.draws(row, briefID: briefID) {
+                TaskChatRow(row: row, info: store.info(for: row), briefID: briefID, agentName: agentName, store: store)
+                    .equatable()
+                    .shareSelectable(row, share: store.share, top: Self.spacing(row, after: previous, briefID: briefID), placement: isBrief(row, briefID) ? .corner : nil)
+            }
         }
         .onTapGesture { composerFocused = false }
     }
@@ -155,8 +160,52 @@ struct TaskChatScreen: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder
-    private func taskRow(_ row: TranscriptRow, store: TranscriptStore, briefID: String?) -> some View {
+    /// The brief opens the chat as a card, though it is the guardian's message.
+    private func isBrief(_ row: TranscriptRow, _ briefID: String?) -> Bool {
+        guard let briefID, case .userText(let id, _, _, _) = row else { return false }
+        return id.hasPrefix(briefID + ":")
+    }
+
+    /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.
+    private static func spacing(_ row: TranscriptRow, after previous: TranscriptRow?, briefID: String?) -> CGFloat {
+        guard let previous else { return 12 }
+        if case .separator = row { return 20 }
+        if case .separator(let id, _) = previous {
+            // Directly under a hidden separator: the brief starts the page.
+            return id == "sep-\(briefID ?? "")" ? 4 : 14
+        }
+        if case .agentText = row, case .agentText = previous { return 3 }
+        return 12
+    }
+}
+
+/// One row of a task chat. It draws from values (`row`, `info`, the brief's
+/// id, the Concierge's name) and acts through the store's `ChatActions`, so
+/// a row whose values did not change is not drawn again.
+private struct TaskChatRow: View, Equatable {
+    let row: TranscriptRow
+    let info: RowInfo
+    let briefID: String?
+    let agentName: String
+    let store: TranscriptStore
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.row == b.row && a.info == b.info && a.briefID == b.briefID && a.agentName == b.agentName && a.store === b.store
+    }
+
+    /// Whether a task chat draws the row at all: not the brief's time line,
+    /// nor the rows only a Concierge chat shows.
+    static func draws(_ row: TranscriptRow, briefID: String?) -> Bool {
+        switch row {
+        case .separator(let id, _): briefID.map { id != "sep-\($0)" } ?? true
+        case .taskAsk, .threadLabel, .sourceLabel, .sessionRenewal: false
+        default: true
+        }
+    }
+
+    var body: some View {
+        let _ = PerfProbe.count("taskRowBody")
+        let actions = store.actions
         switch row {
         case .separator(let id, let date):
             // The brief opens the chat; no time line above it.
@@ -168,21 +217,21 @@ struct TaskChatScreen: View {
         case .userText(let id, let text, let images, let pending):
             if let briefID, id.hasPrefix(briefID + ":") {
                 BriefCard(text: text)
-            } else if let message = row.messageId.flatMap(store.message), message.saidByAgent {
+            } else if info.saidByAgent {
                 // The Concierge relays the guardian's words: their side, its name.
-                ConciergeBubble(name: message.sender?.name ?? model.workspace?.agentDisplayName ?? AgentName.fallback, text: text, menu: menu(row))
+                ConciergeBubble(name: info.senderName ?? agentName, text: text, menu: menu)
             } else {
-                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(row))
+                UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu)
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu(row))
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu)
         case .tools, .approval, .question, .webOnly, .routineDraft, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
         case .error(_, let error):
             ErrorLine(error: error)
         case .notice(_, let text):
             NoticeLine(text: text)
-        case .taskCard(_, let id, let title, _, _):
+        case .taskCard(_, _, let title, _, _):
             TaskCard(title: title) {}
         case .taskAsk, .threadLabel, .sourceLabel:
             // Only a Concierge chat shows a task's question alone, or thread labels.
@@ -195,29 +244,11 @@ struct TaskChatScreen: View {
         }
     }
 
-    /// The brief opens the chat as a card, though it is the guardian's message.
-    private func isBrief(_ row: TranscriptRow, _ briefID: String?) -> Bool {
-        guard let briefID, case .userText(let id, _, _, _) = row else { return false }
-        return id.hasPrefix(briefID + ":")
-    }
-
     /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.
-    private func menu(_ row: TranscriptRow) -> BubbleMenu {
-        let message = row.messageId.flatMap(store.message)
-        let onShare: (() -> Void)? = message?.turnId == nil ? nil : { store.share.begin(fromRow: row.id) }
-        return BubbleMenu(date: message?.date, onShare: onShare)
-    }
-
-    /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.
-    private func spacing(_ row: TranscriptRow, after previous: TranscriptRow?) -> CGFloat {
-        guard let previous else { return 12 }
-        if case .separator = row { return 20 }
-        if case .separator(let id, _) = previous {
-            // Directly under a hidden separator: the brief starts the page.
-            return id == "sep-\(store.brief?.id ?? "")" ? 4 : 14
-        }
-        if case .agentText = row, case .agentText = previous { return 3 }
-        return 12
+    private var menu: BubbleMenu {
+        let actions = store.actions
+        let onShare: (() -> Void)? = info.canShare ? { [rowId = row.id] in actions.share(fromRow: rowId) } : nil
+        return BubbleMenu(date: info.date, onShare: onShare)
     }
 }
 

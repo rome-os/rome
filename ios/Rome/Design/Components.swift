@@ -193,12 +193,21 @@ struct Spinner: View {
     }
 }
 
+extension EnvironmentValues {
+    /// The page is mounted but covered or faded out (Chat under another
+    /// section, a pushed page, the Agent page's cover). A frame-driven
+    /// animation pauses then: it would draw every frame for no one.
+    @Entry var offScreen = false
+}
+
 /// Three dots that rise in turn: the agent is writing.
 struct TypingDots: View {
     @State private var start = Date()
+    @Environment(\.offScreen) private var offScreen
 
     var body: some View {
-        TimelineView(.animation) { context in
+        TimelineView(.animation(paused: offScreen)) { context in
+            let _ = PerfProbe.count("dotsTick")
             let elapsed = context.date.timeIntervalSince(start)
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { index in

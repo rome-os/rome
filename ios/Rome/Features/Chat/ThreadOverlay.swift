@@ -11,15 +11,15 @@ struct ThreadOverlay: View {
     let tasks: TasksStore
     /// The chat's name and status, as its header shows them.
     let name: String
-    var activity: ConciergeActivity? = nil
-    let onOpenChat: (String, String) -> Void
+    /// Read by the header copy, so a status change redraws it alone.
+    var activity: () -> ConciergeActivity? = { nil }
     let onClose: () -> Void
 
     @State private var shown = false
     @State private var visibleHeight: CGFloat = 0
 
     var body: some View {
-        let rows = thread.rows(chatMessages: chat.messages)
+        let rows = thread.rows
         ZStack {
             Rectangle()
                 .fill(.ultraThinMaterial)
@@ -32,7 +32,8 @@ struct ThreadOverlay: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: openFromRow, inThread: true)
+                        ConciergeRow(row: row, info: thread.info(for: row), store: chat, tasks: tasks, inThread: true)
+                            .equatable()
                             .tinted(chat.tinted != nil && row.ownMessageId == chat.tinted)
                             .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
                     }
@@ -74,22 +75,13 @@ struct ThreadOverlay: View {
         }
     }
 
-    /// A chat opened from a row inside the view: the view closes first, or the
-    /// chat would be pushed under it.
-    private var openFromRow: (String, String) -> Void {
-        { id, title in
-            chat.closeThread()
-            onOpenChat(id, title)
-        }
-    }
-
     /// The chat's own header, laid over it unchanged: the same identity in
     /// the middle, still, and the close button where the "…" sits.
     private var header: some View {
         HStack(alignment: .center) {
             // Where the drawer button sits below, so the identity keeps its place.
             Color.clear.frame(width: 44, height: 44)
-            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, still: true) }
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity(), still: true) }
             GlassCircleButton(accessibilityLabel: "Close", action: close) {
                 Image(systemName: "xmark").romeFont(15, .semibold)
             }

@@ -102,8 +102,9 @@ final class Workspace {
     private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
-    /// Each opened topic chat's transcript, kept while the instance is open so
-    /// coming back to a chat does not load it from the top again.
+    /// The opened topic chats' transcripts, the newest `keptStores` of them
+    /// kept while the instance is open, so coming back to a chat does not
+    /// load it from the top again.
     @ObservationIgnored private var topicStores: [String: TranscriptStore] = [:]
     /// Goes up per topic chat when it must show its newest rows: a tapped push.
     private(set) var topicLatest: [String: Int] = [:]
@@ -116,6 +117,14 @@ final class Workspace {
     /// The Concierge's own name; nil until read, or when none is set.
     private(set) var agentName: String?
     @ObservationIgnored private var nameWatch: UUID?
+    /// The actions of each window's shell. Their closures hold the shell,
+    /// and the shell holds this workspace: `stop()` empties them all, so a
+    /// closed workspace is freed however its shells left the screen.
+    @ObservationIgnored private var shells: [ObjectIdentifier: ShellActions] = [:]
+
+    func register(_ actions: ShellActions) { shells[ObjectIdentifier(actions)] = actions }
+
+    func unregister(_ actions: ShellActions) { shells[ObjectIdentifier(actions)] = nil }
     /// Whose session this is. Apps, the update page, AI tool usage, approvals
     /// and the instance's own settings are the guardian's; a visitor never sees
     /// them. Unknown (not read yet, or unreadable) is treated as the guardian,
@@ -214,13 +223,53 @@ final class Workspace {
     }
 
     func topicStore(_ chatId: String) -> TranscriptStore {
+        Self.used(chatId, in: &recentTopics)
         if let store = topicStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .concierge, backend: backend)
         store.drafts = ChatDrafts(store: drafts, chat: chatId)
         store.cache = transcripts
         store.showCached()
         topicStores[chatId] = store
+        trimStoresSoon()
         return store
+    }
+
+    /// How many topic chats, and how many task chats, keep their transcript
+    /// in memory once the guardian has left them.
+    static let keptStores = 8
+    /// The topic and task chats by when they were last opened, newest last.
+    @ObservationIgnored private var recentTopics: [String] = []
+    @ObservationIgnored private var recentTasks: [String] = []
+
+    private static func used(_ chatId: String, in recent: inout [String]) {
+        guard recent.last != chatId else { return }
+        recent.removeAll { $0 == chatId }
+        recent.append(chatId)
+    }
+
+    /// After the view update that made a store: closing one changes state
+    /// that views read.
+    private func trimStoresSoon() {
+        Task { @MainActor [weak self] in self?.trimStores() }
+    }
+
+    /// Past `keptStores`, the chats opened longest ago let go of their
+    /// transcripts, oldest first, except one that would lose something
+    /// (`TranscriptStore.mayBeDropped`).
+    func trimStores() {
+        Self.trim(&topicStores, recent: &recentTopics)
+        Self.trim(&taskStores, recent: &recentTasks)
+    }
+
+    private static func trim(_ stores: inout [String: TranscriptStore], recent: inout [String]) {
+        var excess = stores.count - keptStores
+        for chatId in recent where excess > 0 {
+            guard let store = stores[chatId], store.mayBeDropped else { continue }
+            stores[chatId] = nil
+            store.close()
+            excess -= 1
+        }
+        recent.removeAll { stores[$0] == nil }
     }
 
     /// Starts a topic chat, then sends it its first message, in that order.
@@ -237,10 +286,12 @@ final class Workspace {
     }
 
     func taskStore(_ chatId: String) -> TranscriptStore {
+        Self.used(chatId, in: &recentTasks)
         if let store = taskStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .task, backend: backend)
         store.drafts = ChatDrafts(store: drafts, chat: chatId)
         taskStores[chatId] = store
+        trimStoresSoon()
         return store
     }
 
@@ -309,7 +360,7 @@ final class Workspace {
 
     private func dropTopic(_ chatId: String) {
         topics.remove(chatId)
-        topicStores.removeValue(forKey: chatId)?.stop()
+        topicStores.removeValue(forKey: chatId)?.close()
     }
 
     /// Archives a task chat and drops it from the task list and the cards.
@@ -332,7 +383,7 @@ final class Workspace {
 
     private func dropTaskChat(_ chatId: String) {
         tasks.forget(chat: chatId)
-        taskStores.removeValue(forKey: chatId)?.stop()
+        taskStores.removeValue(forKey: chatId)?.close()
     }
 
     /// A tapped push for a topic chat: its newest rows, fetched again.
@@ -412,7 +463,7 @@ final class Workspace {
     /// store starts once the id is known.
     private func useMainChat(_ id: String) {
         guard !id.isEmpty, id != concierge.sessionId else { return }
-        concierge.stop()
+        concierge.close()
         drafts.move(chat: concierge.sessionId, to: id)
         let store = TranscriptStore(sessionId: id, kind: .concierge, backend: backend)
         store.drafts = ChatDrafts(store: drafts, chat: id)
@@ -486,10 +537,12 @@ final class Workspace {
         if let nameWatch { backend.events.unsubscribe(nameWatch) }
         nameWatch = nil
         tasks.stop()
-        concierge.stop()
+        concierge.close()
         topics.stop()
-        for store in topicStores.values { store.stop() }
-        for store in taskStores.values { store.stop() }
+        for store in topicStores.values { store.close() }
+        for store in taskStores.values { store.close() }
+        for actions in shells.values { actions.reset() }
+        shells = [:]
         backend.events.pause()
         transcripts.flush()
     }
