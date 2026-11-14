@@ -137,10 +137,17 @@ final class TopicChatsStore {
     /// "Message", and a reply to a message reads "Reply".
     static func composerPlaceholder(_ chat: ConciergeChat?, replying: Bool) -> String {
         if replying { return String(localized: "Reply") }
-        guard let name = chat?.name.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
-            return String(localized: "Message")
-        }
-        return String(localized: "Message in \(name)")
+        return composerName(chat).map(messageIn) ?? String(localized: "Message")
+    }
+
+    /// The name the composer's placeholder shows: nil for a chat with no name yet.
+    static func composerName(_ chat: ConciergeChat?) -> String? {
+        guard let name = chat?.name.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        return name
+    }
+
+    nonisolated static func messageIn(_ name: String) -> String {
+        String(localized: "Message in \(name)")
     }
 
     /// The topic chats of a `GET /concierge/chats` list, in its order.

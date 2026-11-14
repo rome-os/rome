@@ -245,7 +245,9 @@ private struct TopicComposer: View {
 
     var body: some View {
         let chat = chatId.flatMap(workspace.topics.chat)
-        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), focused: $focused, attachments: attachments, onSend: onSend)
+        // Only "Message in <name>" is fitted; a reply keeps "Reply".
+        let name = replying ? nil : TopicChatsStore.composerName(chat)
+        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, onSend: onSend)
     }
 }
 
