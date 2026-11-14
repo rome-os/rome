@@ -5,6 +5,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LAST_CHAT_KEY, MODE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import i18n from "@/i18n";
+import { deleteSession } from "@/lib/chat-api";
 import { AppGrid, STORAGE_KEY } from "./AppGrid";
 
 const SESSIONS_KEY = ["chat-sessions", "active", "mine"];
@@ -89,5 +90,38 @@ describe("the rail's Chat entry", () => {
     seedChatListMode({ mode: "chat", lastChat: "mine" });
     const { tile } = mountRail([{ id: "old" }], ["chat-sessions", "archived", "mine"]);
     expect(tile().getAttribute("href")).toBe("/chat/mine");
+  });
+
+  describe("when the remembered chat is deleted", () => {
+    const ALL_KEY = ["chat-sessions", "all", "default"];
+    // A list the search dialog left behind, which nothing refetches while it is closed.
+    const mountWithStaleAllList = () => {
+      seedChatListMode({ mode: "chat", lastChat: "mine" });
+      const rail = mountRail([{ id: "mine" }, { id: "other" }]);
+      act(() => rail.queryClient.setQueryData(ALL_KEY, [{ id: "mine" }, { id: "other" }]));
+      expect(rail.tile().getAttribute("href")).toBe("/chat/mine");
+      return rail;
+    };
+
+    it("opens a blank chat, though a list that is not in use still holds it", async () => {
+      const { queryClient, tile } = mountWithStaleAllList();
+
+      await act(async () => deleteSession("mine"));
+
+      expect(tile().getAttribute("href")).toBe("/chat");
+      expect(queryClient.getQueryData<Array<{ id: string }>>(ALL_KEY)).toEqual([{ id: "other" }]);
+    });
+
+    it("keeps the chat when the delete did not go through", async () => {
+      rs.stubGlobal(
+        "fetch",
+        rs.fn(async () => new Response("no", { status: 500 })),
+      );
+      const { tile } = mountWithStaleAllList();
+
+      await act(async () => deleteSession("mine"));
+
+      expect(tile().getAttribute("href")).toBe("/chat/mine");
+    });
   });
 });
