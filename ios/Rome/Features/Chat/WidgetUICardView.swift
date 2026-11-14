@@ -72,7 +72,7 @@ private struct WidgetCardBody: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.connectDevice) private var connectDevice
 
-    private var locked: Bool { waiting?.answered != nil || surface.sent }
+    private var locked: Bool { waiting?.answered != nil || surface.sent || surface.autoSharing }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -134,6 +134,10 @@ private struct WidgetCardBody: View {
             })
             surface.showAnswered(waiting?.answered)
             await surface.load()
+            await surface.shareIfAllowed()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            Task { await surface.shareIfAllowed() }
         }
         .onChange(of: waiting?.answered) {
             surface.answered = waiting?.answered != nil
@@ -162,6 +166,14 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var locating = false
     /// Where Share on the share-location card reads the position.
     var locator: DeviceLocating = CoreLocationLocator.shared
+    /// Whether the guardian is looking at the app, so a share-location card
+    /// may answer itself.
+    var appActive: () -> Bool = { UIApplication.shared.applicationState == .active }
+    /// A share-location card answering itself, or about to: it shows no buttons.
+    @Published private(set) var autoSharing = false
+    /// The share-location cards this app answered by itself, so a card drawn
+    /// again does not send a second share.
+    private static var autoShared: Set<String> = []
     /// Whether the card the agent waits on is answered, as stored.
     var answered = false
 
@@ -218,6 +230,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             return send("updateDataModel", ["surfaceId": surfaceId, "path": .string("/\(token)"), "value": value])
         }
         viewModel = created ? processor.surfaceGroupModel.surfacesMap[part.toolUseId] : nil
+        autoSharing = mayShareItself && (locator.permission == .granted || Self.autoShared.contains(autoKey))
         undrawable = viewModel == nil
         clears = WidgetClears(targets: targets) { [weak self] path, list in
             self?.viewModel?.dataModel.set(path, value: list ? .array([]) : .string(""))
@@ -294,7 +307,38 @@ final class WidgetSurface: ObservableObject, ActionHandling {
 
     nonisolated func handle(error: RendererError, from surfaceID: String) {}
 
-    private func press(_ name: String, body: Rome.JSONValue) async {
+    private var autoKey: String { "\(part?.widgetId ?? "")/\(part?.toolUseId ?? "")" }
+
+    /// An open share-location card the agent waits on.
+    private var mayShareItself: Bool {
+        guard let part else { return false }
+        return part.waits && !answered && !sent && LocationCard.isLocationCard(part)
+    }
+
+    /// Answers an open share-location card at once where the app may already
+    /// read the position and the guardian is looking at it; says so where
+    /// iOS refuses, leaving Not now; otherwise leaves Share to ask.
+    func shareIfAllowed() async {
+        guard mayShareItself, !Self.autoShared.contains(autoKey) else { return }
+        switch locator.permission {
+        case .granted:
+            guard appActive() else { return }
+            Self.autoShared.insert(autoKey)
+            autoSharing = true
+            await press(LocationCard.shareEvent, body: .object([:]), auto: true)
+            autoSharing = false
+        case .denied:
+            autoSharing = false
+            sendFailed = true
+            refusal = LocationCard.failureText(.denied)
+        case .undetermined:
+            autoSharing = false
+        }
+    }
+
+    /// `auto` is a share the card sends itself: a refusal from core then says
+    /// nothing, since another client answered first.
+    private func press(_ name: String, body: Rome.JSONValue, auto: Bool = false) async {
         // Core decides what every event means; the card only sends it.
         let waits = part?.waits == true
         guard let send, !busy, !(waits && (answered || sent)) else { return }
@@ -338,6 +382,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             if let url = reply.open { open(url) }
             if waits && reply.answered { sent = true } else { await load() }
         } catch {
+            if auto { return }
             sendFailed = true
             if case APIError.server(_, let message?) = error, !message.isEmpty { refusal = message } else { refusal = nil }
         }

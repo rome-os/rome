@@ -8,26 +8,31 @@ import Testing
 @MainActor @Suite struct LocationCardTests {
     private final class StubLocator: DeviceLocating {
         let result: Result<SharedPosition, LocationFailure>
+        let permission: LocationPermission
         var reads = 0
-        init(_ result: Result<SharedPosition, LocationFailure>) { self.result = result }
+        init(_ result: Result<SharedPosition, LocationFailure>, permission: LocationPermission = .undetermined) {
+            self.result = result
+            self.permission = permission
+        }
         func currentPosition() async -> Result<SharedPosition, LocationFailure> {
             reads += 1
             return result
         }
     }
 
-    private func card() throws -> WidgetUIPart {
-        let parsed = MessagePart.parse(JSONValue.array([DemoBackend.locationCard("l1", reason: "To find coffee near you")]).prettyText)
+    private func card(_ id: String = "l1") throws -> WidgetUIPart {
+        let parsed = MessagePart.parse(JSONValue.array([DemoBackend.locationCard(id, reason: "To find coffee near you")]).prettyText)
         guard case .widgetUI(let part) = parsed.first else { throw CardError.notACard }
         return part
     }
 
     private enum CardError: Error { case notACard }
 
-    private func surface(_ locator: StubLocator, sent: Box<[JSONValue]>) async throws -> WidgetSurface {
+    private func surface(_ locator: StubLocator, sent: Box<[JSONValue]>, card id: String = "l1", active: Bool = true) async throws -> WidgetSurface {
         let surface = WidgetSurface()
         surface.locator = locator
-        surface.show(try card(), call: { _, _, _ in throw APIError.notFound }, press: { name, context in
+        surface.appActive = { active }
+        surface.show(try card(id), call: { _, _, _ in throw APIError.notFound }, press: { name, context in
             sent.value.append(.object(["name": .string(name), "context": context]))
             return WidgetEventReply(answered: true)
         })
@@ -89,6 +94,50 @@ import Testing
         for _ in 0..<50 where sent.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(sent.value.first?["name"]?.string == "decline")
         #expect(locator.reads == 0)
+    }
+
+    private let fix = SharedPosition(latitude: 1, longitude: 2, accuracy: 9, takenAt: Date(timeIntervalSince1970: 5))
+
+    @Test func aCardTheAppMayAlreadyLocateAnswersItselfWithNoButtons() async throws {
+        let sent = Box<[JSONValue]>([])
+        let surface = try await surface(StubLocator(.success(fix), permission: .granted), sent: sent, card: "auto-granted")
+        // Decided when the card is drawn, so its buttons never show.
+        #expect(surface.autoSharing)
+        await surface.shareIfAllowed()
+        #expect(sent.value.first?["name"]?.string == "share-location")
+        #expect(sent.value.first?["context"]?["accuracy"]?.number == 9)
+        #expect(surface.sent)
+        // Drawn again, it sends no second share.
+        await surface.shareIfAllowed()
+        #expect(sent.value.count == 1)
+    }
+
+    @Test func onlyTheAppInFrontAnswersByItself() async throws {
+        let sent = Box<[JSONValue]>([])
+        let surface = try await surface(StubLocator(.success(fix), permission: .granted), sent: sent, card: "auto-background", active: false)
+        await surface.shareIfAllowed()
+        #expect(sent.value.isEmpty)
+        surface.appActive = { true }
+        await surface.shareIfAllowed()
+        #expect(sent.value.count == 1)
+    }
+
+    @Test func aRefusedPermissionShowsWhyAndLeavesNotNow() async throws {
+        let sent = Box<[JSONValue]>([])
+        let surface = try await surface(StubLocator(.failure(.denied), permission: .denied), sent: sent, card: "auto-denied")
+        await surface.shareIfAllowed()
+        #expect(!surface.autoSharing)
+        #expect(surface.refusal == LocationCard.failureText(.denied))
+        #expect(sent.value.isEmpty)
+    }
+
+    @Test func aPermissionNotYetAskedLeavesShareToAsk() async throws {
+        let locator = StubLocator(.success(fix))
+        let sent = Box<[JSONValue]>([])
+        let surface = try await surface(locator, sent: sent, card: "auto-undetermined")
+        await surface.shareIfAllowed()
+        #expect(!surface.autoSharing)
+        #expect(sent.value.isEmpty && locator.reads == 0)
     }
 
     @Test func anAnsweredCardSaysHowItEnded() {
