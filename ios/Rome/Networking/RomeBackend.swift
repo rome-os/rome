@@ -59,6 +59,9 @@ protocol RomeBackend: AnyObject, Sendable {
     /// and the question card by answering the agent.
     func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply
     func markRead(sessionId: String) async
+    /// The chat's read mark, `lastSeenActivityAt`: an ISO time, or nil when
+    /// the chat has none or it cannot be read.
+    func readMark(sessionId: String) async -> String?
     func sessions() async throws -> [ChatSession]
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
     func interrupt(turnId: String) async throws
@@ -218,6 +221,11 @@ final class LiveBackend: RomeBackend {
 
     func markRead(sessionId: String) async {
         _ = try? await client.post("/chat/sessions/\(escape(sessionId))/read")
+    }
+
+    func readMark(sessionId: String) async -> String? {
+        let session: SessionReadMark? = try? await client.get("/chat/sessions/\(escape(sessionId))")
+        return session?.lastSeenActivityAt
     }
 
     func sessions() async throws -> [ChatSession] {
@@ -452,6 +460,8 @@ extension RomeBackend {
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] { throw APIError.notFound }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
+    /// Demo data and test doubles have no read mark: no unread line.
+    func readMark(sessionId: String) async -> String? { nil }
     /// Stand-ins (demo, tests) are no guardian of a real instance.
     func isGuardian() async -> Bool { false }
     func setGuardianLanguage(_ code: String) async throws {}

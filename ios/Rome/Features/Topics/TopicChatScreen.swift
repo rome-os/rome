@@ -138,6 +138,8 @@ struct TopicChatScreen: View {
     /// page's sheet, the Agent page or the drawer.
     private func markRead(_ store: TranscriptStore) {
         guard visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId) else { return }
+        // Before the read: the open reads where the unread messages start.
+        store.beginOpen()
         store.markRead()
         workspace.topics.markRead(store.sessionId)
     }

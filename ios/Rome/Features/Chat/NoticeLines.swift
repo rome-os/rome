@@ -59,6 +59,24 @@ struct SourceLabelLine: View {
     }
 }
 
+/// "New messages" between two hairlines, above the first message that was
+/// unread when the chat opened. Plain: not tappable.
+struct UnreadDivider: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Rectangle().fill(Palette.hair).frame(height: 1)
+            Text("New messages")
+                .romeFont(12, .medium)
+                .foregroundStyle(Palette.sub)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Rectangle().fill(Palette.hair).frame(height: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 /// A faint centered line where the chat's agent session was renewed, with
 /// why. Plain: not tappable.
 struct SessionRenewalLine: View {

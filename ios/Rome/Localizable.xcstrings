@@ -2251,6 +2251,16 @@
         }
       }
     },
+    "New messages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以下为新消息"
+          }
+        }
+      }
+    },
     "New messages. Scroll to the latest message" : {
       "localizations" : {
         "zh-Hans" : {

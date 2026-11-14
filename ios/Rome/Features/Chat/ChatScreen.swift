@@ -54,6 +54,7 @@ struct ChatScreen: View {
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
+        .background { ChatLeaveWatch(store: store) }
         .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, onThread: { store.reopenThread($0) }, prefill: Binding(
             get: { workspace.composerPrefills[conciergeChatID] },
             set: { workspace.composerPrefills[conciergeChatID] = $0 }
@@ -174,6 +175,20 @@ extension Workspace {
     /// What the Concierge is doing in the main chat.
     var mainChatActivity: ConciergeActivity? {
         topics.activity(for: mainChatServerID ?? conciergeChatID)
+    }
+}
+
+/// Closes the main Chat's open when another page or a sheet covers it, so
+/// coming back opens it again; the drawer over it does not. It reads
+/// `offScreen` itself, so the change never draws Chat's body again.
+private struct ChatLeaveWatch: View {
+    let store: TranscriptStore
+    @Environment(\.offScreen) private var offScreen
+
+    var body: some View {
+        Color.clear.onChange(of: offScreen) { _, hidden in
+            if hidden { store.endOpen() }
+        }
     }
 }
 
@@ -344,6 +359,8 @@ struct ConciergeRow: View, Equatable {
             NoticeLine(text: text)
         case .sessionRenewal(_, let reason, let sessionId):
             SessionRenewalLine(reason: reason)
+        case .unreadDivider:
+            UnreadDivider()
         }
     }
 }

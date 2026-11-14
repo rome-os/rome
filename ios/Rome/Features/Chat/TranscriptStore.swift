@@ -57,6 +57,11 @@ final class TranscriptStore {
     private(set) var stopped = false
     /// Bumps when a new message arrives, so the view can scroll or count it.
     private(set) var arrivals = 0
+    /// The first message that was unread when the chat opened: the rows put
+    /// "New messages" above it. It stays while the chat is open, once read
+    /// too. Nil when nothing was unread, until the read mark is known, and
+    /// while the unread run may reach into an older page not loaded yet.
+    private(set) var unreadFrom: String? { didSet { if unreadFrom != oldValue { rebuildRows() } } }
     /// A short line about an action that failed (Stop, an answer), shown for a few seconds.
     private(set) var notice: String?
     @ObservationIgnored private var noticeWork: Task<Void, Never>?
@@ -96,6 +101,23 @@ final class TranscriptStore {
     private var fromCache = false
     /// How many messages a page holds, the newest page included.
     static let pageSize = 40
+
+    // An open of a Concierge chat (`beginOpen`) until it closes (`endOpen`).
+    /// Reads the chat's read mark before the open marks it read.
+    @ObservationIgnored private var openRead: Task<Void, Never>?
+    /// The read mark at open, in whole seconds; nil until read, or when none.
+    @ObservationIgnored private var openMark: Int?
+    /// The rows hold what the chat held at open: the first fetch since is in.
+    @ObservationIgnored private var openFetched = false
+    /// Messages that arrived live during the open: never unread.
+    @ObservationIgnored private var openLive: Set<String> = []
+    /// The agent messages that were unread at open, fixed once both of the
+    /// above are known; older pages add theirs.
+    @ObservationIgnored private var openUnread: Set<String>?
+    /// The longest a read waits for the read mark.
+    @ObservationIgnored var readMarkWait: Duration = .seconds(2)
+    /// `start()` ran and no fetch has worked since.
+    @ObservationIgnored private var needsFetch = true
     private var resyncWork: Task<Void, Never>?
     private var resyncAgain = false
 
@@ -138,7 +160,7 @@ final class TranscriptStore {
             messages: visibleMessages,
             pending: pending,
             answers: answers,
-            options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping)
+            options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping, unreadFrom: unreadFrom)
         )
         // An equal list is not stored: no reader is told of a change that is none.
         if built != rows { rows = built }
@@ -217,6 +239,7 @@ final class TranscriptStore {
     func start() {
         guard tokens.isEmpty else { return }
         closed = false
+        needsFetch = true
         tokens.append(backend.events.subscribe(LiveTopic.chat(sessionId)) { [weak self] event in
             self?.handle(event)
         })
@@ -264,6 +287,7 @@ final class TranscriptStore {
         holdWork?.cancel()
         holdWork = nil
         held = []
+        endOpen()
     }
 
     /// Stops the store for good: its workspace closes, its chat goes, or
@@ -313,6 +337,11 @@ final class TranscriptStore {
             loaded = true
             readOnce = true
             loadError = nil
+            needsFetch = false
+            if openRead != nil, !openFetched {
+                openFetched = true
+                settleUnread()
+            }
             if reopening != nil { await resolveReopening() }
             await refreshRunning()
         } catch let error as APIError {
@@ -367,6 +396,12 @@ final class TranscriptStore {
         merge(page.messages)
         cursor = page.nextCursor
         hasOlder = page.nextCursor != nil
+        // An older page was never live: its unread messages count.
+        if var unread = openUnread, let openMark {
+            unread.formUnion(UnreadAtOpen.unread(page.messages.filter { !openLive.contains($0.id) }, mark: openMark))
+            openUnread = unread
+            unreadFrom = UnreadAtOpen.first(in: messages, unread: unread, hasOlder: hasOlder)
+        }
         // The list keeps the rows in view still while this is set; hold it
         // through the layout that places the page above them.
         try? await Task.sleep(for: .milliseconds(150))
@@ -374,14 +409,76 @@ final class TranscriptStore {
     }
 
     func markRead() {
-        Task { await backend.markRead(sessionId: sessionId) }
+        // A read before the open's read mark is known would erase it.
+        let waiting = openRead
+        Task {
+            if let waiting {
+                await waiting.value
+                // The chat closed, or opened again, while it waited: a read
+                // now would clear messages the guardian never saw.
+                guard openRead == waiting else { return }
+            }
+            await backend.markRead(sessionId: sessionId)
+        }
     }
 
     /// Whether the guardian sees this chat now. The main Chat stays mounted,
     /// hidden, under the other pages, so being mounted is not being seen:
     /// its replies count as read only while it shows, and once it shows again.
     var onScreen = false {
-        didSet { if onScreen, !oldValue { markRead() } }
+        didSet {
+            if onScreen, !oldValue {
+                beginOpen()
+                markRead()
+            }
+        }
+    }
+
+    /// The chat opened: the main Chat came on screen after being left, or a
+    /// topic chat's screen appeared. Reads the chat's read mark before the
+    /// open marks it read, so the rows can show where the unread messages
+    /// start. `markRead` waits for it, at most `readMarkWait`. Once an open:
+    /// a second call does nothing until `endOpen()`.
+    func beginOpen() {
+        guard kind == .concierge, openRead == nil else { return }
+        // A store that runs and fetched since it started is current; else
+        // what it holds waits for the next fetch.
+        openFetched = loaded && !needsFetch && !tokens.isEmpty
+        let backend = backend
+        let sessionId = sessionId
+        let wait = readMarkWait
+        openRead = Task { [weak self] in
+            let read = Task { await backend.readMark(sessionId: sessionId) }
+            let timer = Task {
+                try? await Task.sleep(for: wait)
+                read.cancel()
+            }
+            let mark = await read.value
+            timer.cancel()
+            guard let self, !Task.isCancelled else { return }
+            self.openMark = RomeDate.parse(mark).map { UnreadAtOpen.second($0) }
+            self.settleUnread()
+        }
+    }
+
+    /// The chat closed: the line goes, and the next open looks again.
+    func endOpen() {
+        openRead?.cancel()
+        openRead = nil
+        openMark = nil
+        openFetched = false
+        openLive = []
+        openUnread = nil
+        unreadFrom = nil
+    }
+
+    /// Fixes what was unread at open, once the read mark and the rows held
+    /// at open are both known.
+    private func settleUnread() {
+        guard openUnread == nil, openFetched, let openMark else { return }
+        let unread = UnreadAtOpen.unread(messages.filter { !openLive.contains($0.id) }, mark: openMark)
+        openUnread = unread
+        unreadFrom = UnreadAtOpen.first(in: messages, unread: unread, hasOlder: hasOlder)
     }
 
     /// New replies came in, or the list appeared: read, if the chat shows.
@@ -518,6 +615,7 @@ final class TranscriptStore {
             // Only a message that arrives live may wait behind the dots: never
             // history, a catch-up read on return, or an older page.
             if isNew { hold(message, after: newest) }
+            if isNew, openRead != nil { openLive.insert(message.id) }
             merge([message])
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
         case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
@@ -1332,5 +1430,28 @@ final class TranscriptStore {
                 toolCalls[traceMessageId] = []
             }
         }
+    }
+}
+
+/// What was unread when a Concierge chat opened, by the server's rule: an
+/// agent message is unread when it was made after the chat's read mark. Both
+/// times are whole seconds, so a message in the mark's own second is read.
+enum UnreadAtOpen {
+    static func second(_ date: Date) -> Int { Int(date.timeIntervalSince1970.rounded(.down)) }
+
+    /// The agent messages of `messages` made after `mark`.
+    static func unread(_ messages: [ChatMessage], mark: Int) -> Set<String> {
+        Set(messages.filter { $0.role == "assistant" && second($0.date) > mark }.map(\.id))
+    }
+
+    /// The first of `unread` the chat draws, in the chat's order; nil when
+    /// none is drawn. A page holds whole turns, so while older pages remain
+    /// and the oldest loaded turn has an unread message, the run may start
+    /// on an older page: nil until it loads.
+    static func first(in messages: [ChatMessage], unread: Set<String>, hasOlder: Bool) -> String? {
+        guard !unread.isEmpty, let oldest = messages.first else { return nil }
+        let oldestTurn = oldest.turnId ?? oldest.id
+        if hasOlder, messages.contains(where: { unread.contains($0.id) && ($0.turnId ?? $0.id) == oldestTurn }) { return nil }
+        return messages.first { unread.contains($0.id) && TranscriptBuilder.isReply($0, parts: $0.parts) }?.id
     }
 }
