@@ -322,11 +322,24 @@ remove_rome() {
   docker volume rm "$HOME_VOLUME" "$MEMORY_VOLUME" "$USER_VOLUME" >/dev/null 2>&1 || true
 }
 
-stop_browser() {
-  local pid
-  for pid in "$(state browser.pid || true)" "$(state browser.proxyPid || true)"; do
-    [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
+# Chrome forks away from the pid it was started as, so every Chrome on the
+# environment's profile is stopped by its profile path.
+stop_chrome() {
+  pkill -f -- "--user-data-dir=$RUN_DIR/chrome-profile" 2>/dev/null || true
+  local attempts=0
+  while pgrep -f -- "--user-data-dir=$RUN_DIR/chrome-profile" >/dev/null; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 25 ] || pkill -9 -f -- "--user-data-dir=$RUN_DIR/chrome-profile" 2>/dev/null || true
+    [ "$attempts" -lt 50 ] || die "a Chrome on $RUN_DIR/chrome-profile will not stop"
+    sleep 0.2
   done
+}
+
+stop_browser() {
+  stop_chrome
+  local pid
+  pid="$(state browser.proxyPid || true)"
+  [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
   [ ! -f "$STATE_FILE" ] || set_state '{"browser":null}'
 }
 
