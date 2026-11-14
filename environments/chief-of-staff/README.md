@@ -59,7 +59,9 @@ Run them from the repository root inside `nix develop`.
 | `environments/chief-of-staff/env.sh down` | Deletes the members' webhooks and removes the Rome container, its volumes and its image. The test chats' messages stay |
 | `environments/chief-of-staff/env.sh seed <dir>` | The same as `cos-env seed <dir>` |
 
-`up` builds Rome from this branch with the refs in `COS_AGENT_REF` merged on top, in order, separated by spaces: `#<pull request>`, `origin/<branch>`, or a commit. It defaults to `#2130 #2169`: the agent and the envoy verdict change. `version` lists each ref with its commit, its pull request's state and title when it is one, and any note `COS_REF_NOTES` (JSON keyed by ref) gives it. The merge happens in a throwaway checkout, so none of it lands on this branch.
+`up` builds Rome from this branch with the refs in `COS_AGENT_REF` merged on top, in order, separated by spaces: `#<pull request>`, `origin/<branch>`, or a commit. It defaults to `#2173`. Set it empty to build this branch as it is. `version` lists each ref with its commit, its pull request's state and title when it is one, and any note `COS_REF_NOTES` (JSON keyed by ref) gives it. The merge happens in a throwaway checkout, so none of it lands on this branch.
+
+The agent's app lives in its own private repository, `zhangfand/chief-of-staff`. Once Rome is up, `up` fetches it on the devbox with `gh`, at `COS_APP_REF` (default `main`), copies the checkout into the container at `/home/rome/app-sources/chief-of-staff`, and installs it from source through `POST /api/apps`, the install `system:app_management` runs. The devbox's GitHub sign-in does the fetch, so no GitHub token enters the container. `COS_APP_REPO` points at another repository. `version` reports the app's repository, ref and commit under `app`. The installed app lives on Rome's home volume, so it survives restarts.
 
 ### cos-env
 

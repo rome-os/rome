@@ -16,7 +16,9 @@ umask 077
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$ENV_DIR" rev-parse --show-toplevel)"
 
-NAME=chief-of-staff
+# ROME_ENV_NAME runs a second, separate copy (its own container, volumes and
+# state folder), for checking a build without touching the one in use.
+NAME="${ROME_ENV_NAME:-chief-of-staff}"
 STATE_DIR="${ROME_ENV_STATE_DIR:-$HOME/.rome-environments/$NAME}"
 # Secrets come from one 1Password item, read with a service account scoped to
 # the development vault. The secrets file is the fallback when the devbox has no
@@ -36,14 +38,20 @@ ROME="rome-env-${NAME}-rome"
 HOME_VOLUME="rome-env-${NAME}-home"
 MEMORY_VOLUME="rome-env-${NAME}-memory"
 USER_VOLUME="rome-env-${NAME}-user"
-# A throwaway checkout where this branch is merged with the agent's ref, so the
-# test Rome carries the agent without the agent's code ever landing on this branch.
+# A throwaway checkout where this branch is merged with Rome changes under test,
+# so they never land on this branch.
 BUILD_TREE="$RUN_DIR/agent-tree"
-# The agent under test. It lives on its own branch, not on this one. The default
-# is the head of the chief of staff agent's pull request.
-# The refs merged into the build, in order, separated by spaces. Each is a
+# Rome changes merged into the build, in order, separated by spaces. Each is a
 # pull request as #<number>, a remote branch as origin/<branch>, or any commit.
-AGENT_REFS="${COS_AGENT_REF:-#2130 #2169}"
+# Empty builds this branch as it is.
+AGENT_REFS="${COS_AGENT_REF-#2173}"
+# The chief of staff app, from its own private repository, installed into the
+# running Rome the way a guardian installs an app from source. The devbox's
+# GitHub sign-in fetches it, so no token enters the container.
+APP_REPO="${COS_APP_REPO:-zhangfand/chief-of-staff}"
+APP_REF="${COS_APP_REF:-main}"
+APP_SRC="$RUN_DIR/app-src"
+APP_PATH_IN_ROME=/home/rome/app-sources/chief-of-staff
 # A note `version` carries for a ref, as JSON keyed by the ref, for what the
 # ref's own state does not say.
 REF_NOTES="${COS_REF_NOTES:-}"
@@ -409,6 +417,39 @@ connect_agent_bot() {
   [ "$status" = "done" ] || die "Rome did not take the agent's bot token (${error:-$status})"
 }
 
+# Fetches the app's repository at APP_REF on the devbox, copies the checkout
+# into the container, and installs it from source through Rome's app API, the
+# same install `system:app_management` runs.
+install_app() {
+  if [ -d "$APP_SRC/.git" ]; then
+    git -C "$APP_SRC" fetch --quiet origin || die "cannot fetch $APP_REPO. Is gh signed in with access to it?"
+  else
+    rm -rf "$APP_SRC"
+    gh repo clone "$APP_REPO" "$APP_SRC" -- --quiet || die "cannot clone $APP_REPO. Is gh signed in with access to it?"
+  fi
+  local commit
+  commit="$(git -C "$APP_SRC" rev-parse --verify --quiet "origin/$APP_REF^{commit}" || git -C "$APP_SRC" rev-parse --verify --quiet "$APP_REF^{commit}")" ||
+    die "$APP_REPO has no ref \"$APP_REF\". Set COS_APP_REF to a branch or commit."
+  git -C "$APP_SRC" checkout --quiet --detach "$commit"
+  git -C "$APP_SRC" clean --quiet -fdx
+  log "installing $APP_REPO at ${commit:0:9} into Rome ..."
+  docker exec "$ROME" sh -c "rm -rf '$APP_PATH_IN_ROME' && mkdir -p '$(dirname "$APP_PATH_IN_ROME")'"
+  docker cp --quiet "$APP_SRC/." "$ROME:$APP_PATH_IN_ROME"
+  # The copy keeps the devbox's owner and modes, and Rome runs as rome.
+  docker exec "$ROME" sh -c "chown -R rome:rome '$(dirname "$APP_PATH_IN_ROME")' && chmod -R u+rwX,go+rX '$APP_PATH_IN_ROME'"
+  local result phase
+  result="$(printf '{"source":{"mode":"source","path":"%s"}}' "$APP_PATH_IN_ROME" | api POST /apps)" ||
+    die "Rome refused to install $APP_REPO: $result"
+  phase="$(json phase <<<"$result")"
+  [ -z "$(json error <<<"$result")" ] || die "installing $APP_REPO ended $phase: $(json error <<<"$result")"
+  log "installed $(json appId <<<"$result"), $phase"
+  node -e '
+    const fs = require("fs"); const f = process.argv[1];
+    const s = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : {};
+    s.app = { repo: process.argv[2], ref: process.argv[3], commit: process.argv[4], installedAt: new Date().toISOString() };
+    fs.writeFileSync(f, JSON.stringify(s) + "\n", { mode: 0o600 });' "$STATE_FILE" "$APP_REPO" "$APP_REF" "$commit"
+}
+
 link_agent() {
   local agent_id connection
   agent_id="$(state agent.id)"
@@ -420,7 +461,7 @@ link_agent() {
   [ -n "$connection" ] || die "Rome lists no connected account for the agent's bot $agent_id"
   log "linking the $COS_AGENT_NAME agent to the connected account ..."
   printf '{"agent":"%s"}' "$COS_AGENT_NAME" | api PUT "/connected-accounts/discord/$agent_id/agent" >/dev/null ||
-    die "Rome refused to link \"$COS_AGENT_NAME\". Is the agent's app in this checkout? GET /api/agents lists the loaded agents."
+    die "Rome refused to link \"$COS_AGENT_NAME\". Did $APP_REPO install? GET /api/agents lists the loaded agents."
   node -e '
     const fs = require("fs"); const f = process.argv[1];
     const s = JSON.parse(fs.readFileSync(f, "utf8")); s.connection = process.argv[2];
@@ -491,9 +532,11 @@ cmd_up() {
   start_rome
   if [ -n "$(api GET /connected-accounts | json accounts.0)" ]; then
     log "Rome already holds the connection, keeping it"
+    install_app
     link_agent
   else
     connect_agent_bot
+    install_app
     link_agent
     let_chats_hear_bots
   fi
@@ -579,7 +622,7 @@ put_document() {
     const fs = require("fs");
     process.stdout.write(JSON.stringify({ body: fs.readFileSync(process.argv[1], "utf8") }));' "$file" |
     api PUT "/apps/$COS_AGENT_APP/documents/$document" >/dev/null ||
-    die "Rome refused to write the $document document. Is the $COS_AGENT_APP app in this checkout?"
+    die "Rome refused to write the $document document. Did $APP_REPO install?"
 }
 
 # Gives each member a webhook in each chat it is in, links all of a member's
@@ -775,13 +818,14 @@ cos_version() {
   # rome is the main commit the test Rome sits on, agent and environment the
   # refs merged on top of it, all recorded when the image was built.
   node -e '
-    const [build, verifier, login, model, memory, previous] = process.argv.slice(1);
+    const [build, verifier, login, model, memory, previous, app] = process.argv.slice(1);
     const b = JSON.parse(build);
     console.log(JSON.stringify({
       rome: b.rome,
       agent: b.agent,
       environment: b.environment,
       tree: b.tree ?? null,
+      app: app ? JSON.parse(app) : null,
       memory: {
         current: memory ? JSON.parse(memory) : null,
         previous: previous ? JSON.parse(previous) : null,
@@ -795,7 +839,7 @@ cos_version() {
       builtAt: b.builtAt,
     }, null, 2));' \
     "$(cat "$BUILD_FILE")" "$(tree_json environments/chief-of-staff/verifier)" "$login" "$model" \
-    "$(rome_memory 2>/dev/null)" "$(previous_memory)"
+    "$(rome_memory 2>/dev/null)" "$(previous_memory)" "$(node -e 'try{const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).app;if(a)process.stdout.write(JSON.stringify({...a,dirty:false}))}catch{}' "$STATE_FILE")"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
