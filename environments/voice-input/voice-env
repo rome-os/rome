@@ -82,9 +82,7 @@ cmd_browser() {
   done
   [ -n "$mic" ] || die "usage: voice-env browser --mic <wav> [--permission unset|granted|refused] [--lang en|zh-CN]"
   # One browser at a time: a new one replaces the last, keeping the proxy.
-  local old
-  old="$(state browser.pid || true)"
-  [ -z "$old" ] || kill "$old" 2>/dev/null || true
+  stop_chrome
   out="$(node -e 'process.stdout.write(JSON.stringify({ password: process.argv[1], cookies: JSON.parse(process.argv[2] || "[]") }))' \
     "$(state guardianPassword)" "$(state cookies || true)" |
     node "$ENV_DIR/lib/browser.mjs" \

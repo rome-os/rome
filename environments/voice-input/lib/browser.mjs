@@ -69,6 +69,17 @@ if (!(await proxyUp().catch(() => false))) {
 }
 
 // A fresh profile per launch, so no permission or cookie carries over.
+// Refuse a debugging port something else holds, or the verifier would
+// connect to that other browser instead of this one.
+const cdpTaken = await fetch(`http://127.0.0.1:${args["cdp-port"]}/json/version`).then(
+  () => true,
+  () => false,
+);
+if (cdpTaken)
+  fail(
+    `port ${args["cdp-port"]} is already taken; stop whatever holds it (ss -ltnp | grep ${args["cdp-port"]})`,
+  );
+
 // The permission is written into the profile before Chrome starts, as if the
 // guardian had answered Chrome's prompt on an earlier visit. A permission set
 // over the debugging protocol would end when that connection closes.
