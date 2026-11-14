@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { errors, per100, tokens } from "./text.mjs";
+import { errors, errorsWithin, per100, tokens } from "./text.mjs";
 
 describe("tokens", () => {
   it("ignores case, punctuation and spelling region in English", () => {
@@ -58,5 +58,23 @@ describe("errors", () => {
       ]),
       10,
     );
+  });
+});
+
+describe("errorsWithin", () => {
+  it("finds a sentence anywhere in the text", () => {
+    assert.deepEqual(errorsWithin("the quick fox", "so the quick fox ran", "en"), {
+      wrong: 0,
+      of: 3,
+    });
+  });
+  it("counts a changed word in the best stretch", () => {
+    assert.deepEqual(errorsWithin("the quick fox", "so the slow fox ran", "en"), {
+      wrong: 1,
+      of: 3,
+    });
+  });
+  it("counts every token of a missing sentence", () => {
+    assert.equal(errorsWithin("明天开会", "今天天气很好", "zh").wrong >= 3, true);
   });
 });

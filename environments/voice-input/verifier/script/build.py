@@ -1,6 +1,10 @@
 """Builds the voice input script from selection.json.
 
     nix-shell script/shell.nix --run "python3 -I script/build.py [out_dir]"
+    nix-shell script/shell.nix --run "python3 -I script/build.py --long-b [out_dir]"
+
+`--long-b` builds only set B's long message and adds it to an existing manifest, leaving
+the other recordings as they are.
 
 Reads only the rows it needs from each dataset's parquet file over HTTP range
 requests, and writes one WAV per message plus manifest.json to out_dir
@@ -131,9 +135,19 @@ def write_wav(path, samples):
 
 
 def main():
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/.rome-environments/voice-input/script")
+    args = [a for a in sys.argv[1:] if a != "--long-b"]
+    out_dir = args[0] if args else os.path.expanduser("~/.rome-environments/voice-input/script")
     os.makedirs(out_dir, exist_ok=True)
     sel = json.load(open(os.path.join(HERE, "selection.json")))
+    if "--long-b" in sys.argv:
+        path = os.path.join(out_dir, "manifest.json")
+        manifest = json.load(open(path))
+        manifest["longB"] = build_long_b(sel, out_dir)
+        with open(path, "w") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        print(path)
+        return
     by_source = {}
     for m in sel["messages"]:
         if "file" in m:
@@ -169,6 +183,7 @@ def main():
         print(f"{m['key']}: speech {LEAD_S + start:.2f}-{LEAD_S + end:.2f} s", file=sys.stderr)
 
     manifest["long"] = build_long(sel, out_dir)
+    manifest["longB"] = build_long_b(sel, out_dir)
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
         f.write("\n")
@@ -229,6 +244,50 @@ def build_long(sel, out_dir):
         "lastWordAt": sentences[-1]["endsAt"],
         "sentences": sentences,
         "text": "".join(s["text"] for s in sentences),
+    }
+
+
+def build_long_b(sel, out_dir):
+    """Set B's long message: each sentence synthesized, with two pauses at the thirds."""
+    spec = sel["longB"]
+    voice = sel["sources"][spec["source"]]["voice"]
+    n = len(spec["sentences"])
+    thirds = {n // 3, 2 * n // 3}
+    parts = [silence(LEAD_S)]
+    sentences = []
+    pauses = []
+    t = LEAD_S
+    for i, text in enumerate(spec["sentences"]):
+        if i in thirds:
+            parts.append(silence(spec["pauseSeconds"] - GAP_S))
+            pauses.append(round(t - GAP_S, 3))
+            t += spec["pauseSeconds"] - GAP_S
+        samples = synthesize(voice, text)
+        start, end = speech_bounds(samples)
+        clip = samples[int(start * RATE) : int(end * RATE)]
+        sentences.append({"text": text, "startsAt": round(t, 3), "endsAt": round(t + len(clip) / RATE, 3)})
+        parts += [clip, silence(GAP_S)]
+        t += len(clip) / RATE + GAP_S
+    parts.append(silence(TAIL_S))
+    audio = np.concatenate(parts)
+    wav = f"{spec['key']}.wav"
+    sha = write_wav(os.path.join(out_dir, wav), audio)
+    print(f"{spec['key']}: {len(audio) / RATE:.1f} s", file=sys.stderr)
+    return {
+        "key": spec["key"],
+        "language": spec["language"],
+        "set": spec["set"],
+        "source": spec["source"],
+        "synthesized": True,
+        "note": spec["note"],
+        "wav": wav,
+        "sha256": sha,
+        "seconds": round(len(audio) / RATE, 3),
+        "pausesAt": pauses,
+        "firstWordAt": sentences[0]["startsAt"],
+        "lastWordAt": sentences[-1]["endsAt"],
+        "sentences": sentences,
+        "text": " ".join(s["text"] for s in sentences),
     }
 
 

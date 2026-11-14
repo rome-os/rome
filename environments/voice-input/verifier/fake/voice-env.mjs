@@ -3,7 +3,7 @@
 // environments/voice-input/voice-env prints. VOICE_FAKE_STATE names the state file and
 // VOICE_FAKE_URL the stand-in's address. `reset` stands in for `env.sh reset`.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { delimiter, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
@@ -26,6 +26,7 @@ const { values, positionals } = parseArgs({
     lang: { type: "string", default: "en" },
     text: { type: "string" },
     error: { type: "string" },
+    "after-ms": { type: "string" },
     chat: { type: "string" },
     match: { type: "string" },
   },
@@ -88,6 +89,28 @@ async function startBrowser() {
   const port = await freePort();
   // Profiles live beside the state file, so a test's folder holds everything it made.
   const profile = mkdtempSync(join(dirname(statePath), "chrome-"));
+  // As the environment does: the permission is in the profile before Chrome starts, and unset
+  // leaves Chrome's own prompt.
+  const setting = { unset: 0, granted: 1, refused: 2 }[values.permission];
+  mkdirSync(join(profile, "Default"));
+  writeFileSync(
+    join(profile, "Default", "Preferences"),
+    JSON.stringify({
+      intl: {
+        accept_languages: values.lang === "zh-CN" ? "zh-CN,zh" : "en-US,en",
+        selected_languages: values.lang === "zh-CN" ? "zh-CN,zh" : "en-US,en",
+      },
+      profile: {
+        content_settings: {
+          exceptions: {
+            media_stream_mic: setting
+              ? { [`${baseUrl},*`]: { setting, last_modified: "13300000000000000" } }
+              : {},
+          },
+        },
+      },
+    }),
+  );
   const chromium = chromiumOnPath();
   const capped = systemdWorks()
     ? [SYSTEMD_RUN, "--user", "--scope", "--quiet", "-p", "MemoryMax=2G", "--", chromium]
@@ -100,13 +123,17 @@ async function startBrowser() {
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${profile}`,
       "--no-first-run",
-      "--use-fake-ui-for-media-stream",
       "--use-fake-device-for-media-stream",
       ...(values.mic ? [`--use-file-for-fake-audio-capture=${values.mic}%noloop`] : []),
       `--lang=${values.lang}`,
+      `--accept-lang=${values.lang}`,
       `${baseUrl}/`,
     ],
-    { detached: true, stdio: "ignore" },
+    {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, LANGUAGE: values.lang.replace("-", "_") },
+    },
   );
   child.unref();
   updateState(statePath, (s) => {
@@ -160,6 +187,7 @@ switch (command) {
         mode: positionals[0],
         text: values.text ?? "",
         error: values.error ?? null,
+        afterMs: values["after-ms"] ? Number(values["after-ms"]) : undefined,
       };
     });
     break;
@@ -172,6 +200,10 @@ switch (command) {
     break;
   }
   case "network":
+    updateState(statePath, (s) => {
+      s.networkCut = positionals[0] === "cut";
+    });
+    print({ network: positionals[0] });
     break;
   case "capture":
     if (positionals[0] === "start") {

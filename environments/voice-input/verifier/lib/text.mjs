@@ -133,3 +133,27 @@ export function per100(pool) {
   const of = pool.reduce((sum, p) => sum + p.of, 0);
   return of === 0 ? null : Math.round((wrong / of) * 1000) / 10;
 }
+
+/**
+ * How well `part` appears somewhere in `whole`: the fewest wrong tokens over any stretch of
+ * `whole`, and how many tokens `part` has. Rule 4 finds the first and last sentences this way,
+ * and rule 7 the words heard before a stop.
+ */
+export function errorsWithin(part, whole, language) {
+  const ref = tokens(part, language);
+  const hyp = tokens(whole ?? "", language);
+  // Edit distance where the stretch of `whole` may start and end anywhere at no cost.
+  let prev = new Array(hyp.length + 1).fill(0);
+  for (let i = 1; i <= ref.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= hyp.length; j++) {
+      row[j] = Math.min(
+        prev[j] + 1,
+        row[j - 1] + 1,
+        prev[j - 1] + (ref[i - 1] === hyp[j - 1] ? 0 : 1),
+      );
+    }
+    prev = row;
+  }
+  return { wrong: Math.min(...prev), of: ref.length };
+}

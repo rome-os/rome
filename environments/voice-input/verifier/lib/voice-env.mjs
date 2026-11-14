@@ -45,10 +45,11 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
      * Points Rome at the real transcriber, or at the stand-in. The stand-in returns `text`
      * as the transcript of whatever it hears, or the Soniox error `errorCode`.
      */
-    transcriber: async ({ mode, text, errorCode }) => {
+    transcriber: async ({ mode, text, errorCode, afterMs }) => {
       const args = ["transcriber", mode];
       if (text !== undefined) args.push("--text", text);
       if (errorCode !== undefined) args.push("--error", String(errorCode));
+      if (afterMs !== undefined) args.push("--after-ms", String(afterMs));
       await exec(command, args);
     },
     /**
@@ -66,6 +67,8 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
     logs: (match) => json(["logs", "--match", match]),
     /** The transcriber's counters, such as `decoyConnections`: connections on the signed-out settings' key. */
     transcriberStatus: () => json(["transcriber", "status"]),
+    /** Cuts the browser's network (`cut`): open connections drop and new ones are refused; `restore` lets them through. */
+    network: (state) => exec(command, ["network", state]),
     /** Turns Rome Cloud's voice input gate `on` or `off` for the test account. */
     gate: (state) => exec(command, ["gate", state]),
     /** `{ status, body }`: Rome Cloud's answer to `POST /v1/transcription/sessions` as the instance. */

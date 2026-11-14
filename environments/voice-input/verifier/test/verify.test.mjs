@@ -15,6 +15,10 @@ import { execFileSync } from "node:child_process";
 
 // The fake records usage at once, so rule 11 need not wait long for it to settle.
 process.env.VERIFY_USAGE_QUIET_MS ??= "1500";
+// The stand-in product stops listening this many seconds after the last word, as 30 s of
+// silence would on the real one. Rule 11 listens 10 s past the short script's last word.
+const SILENCE_S = 12;
+process.env.VERIFY_SILENCE_S ??= String(SILENCE_S);
 const fakeEnv = fileURLToPath(new URL("../fake/voice-env.mjs", import.meta.url));
 
 /** Every test folder, so their Chromes die even when a test times out or the run is killed. */
@@ -35,6 +39,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 const PHASE_1 = ["2", "3", "5", "6", "10", "11"];
+const PHASE_2 = ["4", "7", "8", "9"];
 
 /**
  * A short copy of the script: per set, two English, one Mandarin and one mixed message, with
@@ -46,7 +51,17 @@ function shortScript(dir) {
   const messages = real.messages
     .filter((m) => keep.test(m.key))
     .map((m) => ({ ...m, firstWordAt: 0.2, lastWordAt: 0.6 }));
-  writeFileSync(join(dir, "manifest.json"), JSON.stringify({ sources: real.sources, messages }));
+  // The long messages keep their text and sentences, spoken over 3 s instead of 3 minutes.
+  const short = (m) => m && { ...m, firstWordAt: 0.2, lastWordAt: 3, seconds: 4 };
+  writeFileSync(
+    join(dir, "manifest.json"),
+    JSON.stringify({
+      sources: real.sources,
+      messages,
+      long: short(real.long),
+      longB: short(real.longs.find((m) => m.set === "B")),
+    }),
+  );
   return loadScript(dir);
 }
 
@@ -56,7 +71,7 @@ async function runAgainst(variant, options = {}) {
   const dir = mkdtempSync(join(tmpdir(), `voice-verify-${variant}-`));
   testDirs.push(dir);
   const statePath = join(dir, "state.json");
-  writeFileSync(statePath, JSON.stringify(emptyState(variant)));
+  writeFileSync(statePath, JSON.stringify({ ...emptyState(variant), silenceSeconds: SILENCE_S }));
   const script = shortScript(dir);
   const standIn = await startStandIn({ statePath, script });
   const env = { ...process.env, VOICE_FAKE_STATE: statePath, VOICE_FAKE_URL: standIn.url };
@@ -88,14 +103,21 @@ async function runAgainst(variant, options = {}) {
 
 const statuses = (report) => Object.fromEntries(report.results.map((r) => [r.rule, r.status]));
 
-describe("verify against the stand-in product", { concurrency: 3, timeout: 480000 }, () => {
+describe("verify against the stand-in product", { concurrency: 3, timeout: 600000 }, () => {
   for (const variant of VARIANTS) {
     it(`scores ${variant}`, async () => {
-      const { report } = await runAgainst(variant);
       const broken = variant === "good" ? [] : [variant.slice("fail-".length).replace(/\D+$/, "")];
+      // A broken variant is scored on its own phase's rules; the good one on every rule.
+      const rules =
+        variant === "good"
+          ? [...PHASE_1, ...PHASE_2]
+          : PHASE_2.includes(broken[0])
+            ? PHASE_2
+            : PHASE_1;
+      const { report } = await runAgainst(variant, { rules });
       assert.deepEqual(
         statuses(report),
-        Object.fromEntries(PHASE_1.map((r) => [r, broken.includes(r) ? "fail" : "pass"])),
+        Object.fromEntries(rules.map((r) => [r, broken.includes(r) ? "fail" : "pass"])),
         JSON.stringify(
           report.results.map((r) => [r.rule, r.reason]),
           null,
@@ -106,7 +128,7 @@ describe("verify against the stand-in product", { concurrency: 3, timeout: 48000
   }
 
   it("leaves rules 2 and 3 not checked on the stand-in transcriber", async () => {
-    const { report } = await runAgainst("good", { transcriber: "stand-in" });
+    const { report } = await runAgainst("good", { transcriber: "stand-in", rules: PHASE_1 });
     assert.deepEqual(
       statuses(report),
       {

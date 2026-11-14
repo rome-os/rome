@@ -63,6 +63,21 @@ export async function voiceForm(page, { timeoutMs = 15000 } = {}) {
   return { control, form, field };
 }
 
+/**
+ * Waits until the control says it is listening, after the start action. Throws when it does not
+ * within `timeoutMs`.
+ */
+export async function waitForListening(page, control, { timeoutMs = 5000 } = {}) {
+  const start = Date.now();
+  while (!(await isListening(control))) {
+    if (Date.now() - start > timeoutMs)
+      throw new Error(
+        `the control did not show listening within ${timeoutMs / 1000} s of the start action`,
+      );
+    await page.waitForTimeout(50);
+  }
+}
+
 /** Whether the voice control says it is listening, from `aria-pressed`. */
 export async function isListening(control) {
   return (await control.getAttribute("aria-pressed")) === "true";

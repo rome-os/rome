@@ -24,6 +24,13 @@ export function loadScript(dir = DEFAULT_SCRIPT_DIR) {
     sources: manifest.sources,
     messages: manifest.messages.map(withPath),
     long: manifest.long ? withPath(manifest.long) : null,
+    // Rule 4's long messages: set A's real speech, and set B's synthesized one when built.
+    longs: [
+      manifest.long && { set: "A", ...manifest.long },
+      manifest.longB && { set: "B", ...manifest.longB },
+    ]
+      .filter(Boolean)
+      .map(withPath),
   };
 }
 
