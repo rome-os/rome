@@ -51,8 +51,8 @@
   },
   "deviceConnect": {
     "title": "连接 {{title}}",
-    "onDevice": "请在{{device}}上连接 {{title}}：打开那台设备上的 Rome App，在“设置 › 连接”里打开它。然后回到聊天，点“I've authorized”。",
-    "connected": "{{title}} 已在{{device}}上连接。回到聊天，点“I've authorized”。",
+    "onDevice": "请在{{device}}上连接 {{title}}：打开那台设备上的 Rome App，在“设置 › 连接”里打开它。然后回到聊天，告诉 Agent 已连接。",
+    "connected": "{{title}} 已在{{device}}上连接。回到聊天，告诉 Agent 已连接。",
     "yourDevice": "你的设备"
   },
   "connections": {

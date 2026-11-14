@@ -51,8 +51,8 @@
   },
   "deviceConnect": {
     "title": "Connect {{title}}",
-    "onDevice": "Connect {{title}} on {{device}}: open the Rome app there and turn it on under Settings › Connections. Then go back to the chat and press I've authorized.",
-    "connected": "{{title}} is connected on {{device}}. Go back to the chat and press I've authorized.",
+    "onDevice": "Connect {{title}} on {{device}}: open the Rome app there and turn it on under Settings › Connections. Then go back to the chat and say it's done.",
+    "connected": "{{title}} is connected on {{device}}. Go back to the chat and say it's done.",
     "yourDevice": "your device"
   },
   "connections": {

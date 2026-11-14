@@ -1,25 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import {
-  chatReadByGuardianAlone,
-  locationAnswerPrompt,
-  sharedLocationAnswer,
-} from "./location-card.js";
-
-describe("chatReadByGuardianAlone", () => {
-  const concierge = { id: "c", agentName: "core:concierge", ownerKey: null, triggerKind: null };
-  const common = { id: "x", agentName: null, ownerKey: null, triggerKind: null };
-
-  it("reads the guardian's private chats as theirs alone, whoever else may open the dashboard", () => {
-    expect(chatReadByGuardianAlone(concierge, true)).toBe(true);
-    expect(chatReadByGuardianAlone({ ...concierge, ownerKey: "visitor:a" }, false)).toBe(false);
-  });
-
-  it("reads a common chat as the guardian's alone only while no visitor may open the dashboard", () => {
-    expect(chatReadByGuardianAlone(common, false)).toBe(true);
-    expect(chatReadByGuardianAlone(common, true)).toBe(false);
-    expect(chatReadByGuardianAlone(null, false)).toBe(false);
-  });
-});
+import { locationAnswerPrompt, sharedLocationAnswer } from "./location-card.js";
 
 describe("the share-location answer", () => {
   it("keeps a position and rounds its accuracy", () => {

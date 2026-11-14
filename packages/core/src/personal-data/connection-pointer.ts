@@ -10,6 +10,9 @@ import type {
 /** How personal data finds a device connection. */
 export type ConnectionLookup = Pick<DeviceConnectionsRepository, "byId" | "feeding">;
 
+/** A gap up to this long is answered from the store; a wider one is read live. */
+export const LIVE_READ_GAP_MS = 60 * 60 * 1000;
+
 /** Finds none: a store read with no device connections. */
 export const NO_CONNECTIONS: ConnectionLookup = {
   byId: () => undefined,
@@ -63,7 +66,10 @@ export function connectionPointer(
  * connection works, otherwise what to turn on. The query carries it so the step does not hang on prompt
  * prose alone; the catalog lists the pointer without it.
  */
-export function withNextStep(pointer: ConnectionPointer): ConnectionPointer & { next?: string } {
+export function withNextStep(
+  pointer: ConnectionPointer,
+  gapMs = Number.POSITIVE_INFINITY,
+): ConnectionPointer & { next?: string } {
   const fresh = "In this same reply, answer from the stored data and say how fresh it is";
   if (pointer.state === "not_connected") {
     return {
@@ -89,9 +95,19 @@ export function withNextStep(pointer: ConnectionPointer): ConnectionPointer & { 
         "allow it in the device's settings.",
     };
   }
-  // Working: the device reads the gap now, and is often in front just after
-  // it connected, while a backfill is still landing. A check scheduled for
-  // later would answer long after the data arrived.
+  // Working, and the store lags by minutes: a live read would cost more than
+  // it adds (in the Concierge, a task chat per question).
+  if (gapMs <= LIVE_READ_GAP_MS) {
+    return {
+      ...pointer,
+      next:
+        `${fresh}, which is under an hour behind. Read live only when the guardian asks about the ` +
+        "last minutes, and schedule no later check.",
+    };
+  }
+  // Working with a wider gap: the device reads it now, and is often in front
+  // just after it connected, while a backfill is still landing. A check
+  // scheduled for later would answer long after the data arrived.
   return {
     ...pointer,
     next:

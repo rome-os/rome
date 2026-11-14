@@ -8,31 +8,12 @@ import {
   type LocationAnswer,
   locationCardUi,
 } from "@rome/api-types/location-card";
-import { GUARDIAN_OWNER, ownerOf } from "./owner.js";
-import { type ChatPrivacyRow, privateOwnerOf } from "./privacy.js";
 
 /** Above this accuracy radius, in meters, the agent names only the area. */
 export const COARSE_ACCURACY_METERS = 3_000;
 
 /** The longest reason the card shows. */
 const MAX_REASON_LENGTH = 200;
-
-/**
- * Whether a dashboard chat is read by the guardian alone, so a position said
- * in it reaches nobody else. A chat private to the guardian (their Concierge's
- * chats, its task chats and their children) is. Any other chat opens for every
- * dashboard user, so it is only while nobody but the guardian may open the
- * dashboard.
- */
-export function chatReadByGuardianAlone(
-  chat: ChatPrivacyRow | null,
-  visitorsAllowed: boolean,
-): boolean {
-  if (!chat) return false;
-  const privateTo = privateOwnerOf(chat);
-  if (privateTo !== null) return privateTo === GUARDIAN_OWNER;
-  return ownerOf(chat) === GUARDIAN_OWNER && !visitorsAllowed;
-}
 
 /** The reason `share_location` was called with, or why it can't show the card. */
 export function parseShareLocationInput(

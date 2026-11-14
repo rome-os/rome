@@ -74,6 +74,8 @@ export function queryPersonalData(
   // The origin of the first type the store does not cover, or null when that
   // type has no origin at all.
   let gapOrigin: string | null | undefined;
+  // How much of the window the store lacks, for the widest gap of any type.
+  let gapMs = 0;
   const results = plan.types.map((spec) => {
     // Each type reads the origin that covers the window, so a second device
     // or a new origin after a sign-in takes over once it has caught up.
@@ -108,8 +110,10 @@ export function queryPersonalData(
           ? { missingFrom: new Date(Math.max(at, plan.start)).toISOString() }
           : {}),
     };
-    if (!freshness[spec.type].coversWindow && gapOrigin === undefined) {
-      gapOrigin = reading?.origin ?? null;
+    if (!freshness[spec.type].coversWindow) {
+      if (gapOrigin === undefined) gapOrigin = reading?.origin ?? null;
+      const missingFrom = freshness[spec.type].missingFrom;
+      if (missingFrom) gapMs = Math.max(gapMs, windowEnd - Date.parse(missingFrom));
     }
     return answered.result;
   });
@@ -128,6 +132,7 @@ export function queryPersonalData(
               repo.connectionIdOf(source.source, gapOrigin ?? undefined),
               connections,
             ),
+            gapMs,
           ),
         }
       : {}),
