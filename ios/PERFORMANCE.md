@@ -15,7 +15,6 @@ Examples of these principles:
 - **Cache pure parsing by its input with `ParseCache`.** Markdown parses while streaming fell from 8 to 2 per run.
 - **Update a known item in place.** A streamed message whose turn and time are unchanged keeps its place, instead of sorting the whole chat again.
 - **Store derived lists and rebuild them when an input changes.** `TranscriptStore.rows` was computed on every read, about four times per body.
-- **Put many rows in over several frames.** An older page of 40 messages laid out at once took about 55 ms on a phone, a stall mid-fling; four messages a frame take about 10 (`TranscriptStore.olderChunk`, measured with `ROME_PERF=paging`).
 - **A view reads only its own state.** The chat's header and banners read the status and notices themselves, so a status change no longer redraws the transcript.
 
 ## Must follow

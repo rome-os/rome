@@ -366,8 +366,9 @@ private struct LateGrowingRow: View {
         }
         try await Task.sleep(for: .milliseconds(800))
         // On the bottom with older pages behind. A chat this short is within
-        // reach of its top, so it may have fetched one already.
-        for _ in 0..<100 where store.loadingOlder || store.olderPage != nil || store.placingOlder { try await Task.sleep(for: .milliseconds(10)) }
+        // reach of its top, so it may have fetched one already, which waits
+        // for the top.
+        for _ in 0..<100 where store.loadingOlder || store.placingOlder { try await Task.sleep(for: .milliseconds(10)) }
         let held = store.messages.count
         #expect(store.hasOlder && held >= TranscriptStore.pageSize)
 
@@ -414,7 +415,7 @@ private struct LateGrowingRow: View {
             store.stop()
         }
         try await Task.sleep(for: .milliseconds(800))
-        for _ in 0..<200 where store.loadingOlder || store.olderPage != nil || store.placingOlder { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<200 where store.loadingOlder || store.placingOlder { try await Task.sleep(for: .milliseconds(10)) }
         try await Task.sleep(for: .milliseconds(800))
         let held = store.messages.count
 

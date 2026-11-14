@@ -86,8 +86,11 @@ final class DemoBackend: RomeBackend {
         // once their record comes.
         let pairs = ProcessInfo.processInfo.environment["ROME_DEMO_PAIRS"].flatMap(Int.init)
         let picture = assets["projects/demo/trip/hotel.jpg"]
+        // A deeper history starts before the oldest demo message (3 days ago),
+        // so its pages go in above the rows, as a real chat's do.
+        let first = pairs.map { Date.now.addingTimeInterval(-4 * 86400 - Double($0) * 600) } ?? start
         for index in 0..<(pairs ?? 60) {
-            let at = start.addingTimeInterval(Double(index) * 600 - Double(max(0, (pairs ?? 60) - 60)) * 600)
+            let at = first.addingTimeInterval(Double(index) * 600)
             earlier.append(user("long-u\(index)", "第 \(index + 1) 个问题：今天有什么要注意的？", at: at))
             guard pairs != nil else {
                 earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))

@@ -366,14 +366,10 @@ final class TranscriptStore {
         transcriptScrollLog.notice("older page fetched in \(Int(Date.now.timeIntervalSince(asked) * 1000), privacy: .public) ms")
     }
 
-    /// How many messages of an older page go in per frame. A whole page laid
-    /// out at once took about 55 ms on a phone, a visible stall mid-fling;
-    /// four take about 10.
-    static let olderChunk = 4
-
-    /// Puts the fetched older page above the rows, a few messages a frame,
-    /// newest first. The list calls it once no finger is on it: a page placed
-    /// under a moving finger pushes the rows in view down.
+    /// Puts the fetched older page above the rows, in one step. The list
+    /// calls it once the guardian reaches the top, with no finger on it: the
+    /// page goes in once, so the scroll indicator moves once, and the list
+    /// holds the rows in view where they are.
     func placeOlderPage() async {
         guard let page = olderPage, !placingOlder else { return }
         olderPage = nil
@@ -382,22 +378,11 @@ final class TranscriptStore {
         }
         PerfProbe.count("olderPlaced")
         placingOlder = true
-        // The next page can be fetched while this one goes in.
+        placedAt = CACurrentMediaTime()
+        merge(page.messages)
         cursor = page.nextCursor
-        var rest = page.messages[...]
-        while !rest.isEmpty {
-            let chunk = rest.suffix(Self.olderChunk)
-            rest = rest.dropLast(chunk.count)
-            placedAt = CACurrentMediaTime()
-            merge(Array(chunk))
-            // With the last chunk, so the spinner above the rows goes in the
-            // same layout and the list holds both.
-            if rest.isEmpty { hasOlder = page.nextCursor != nil }
-            // One layout a frame.
-            else { try? await Task.sleep(for: .milliseconds(16)) }
-        }
-        // The list keeps the rows in view still while this is set; hold it
-        // through the layout that places the last chunk above them.
+        hasOlder = page.nextCursor != nil
+        // Held through the layout that places the page above the rows.
         try? await Task.sleep(for: .milliseconds(150))
         placingOlder = false
     }
