@@ -91,6 +91,8 @@ export type RomeCloudProviderOutcome =
   | { kind: "named"; provider: RomeCloudProvider }
   /** Rome Cloud has no provider set up for voice input. */
   | { kind: "not-configured" }
+  /** The account may not use voice input. */
+  | { kind: "not-allowed" }
   | { kind: "signed-out" }
   | { kind: "unavailable"; detail: string };
 
@@ -116,6 +118,7 @@ export async function readRomeCloudProvider(
     const code = isText(body?.error) ? body.error : null;
     if (response.status === 401 || code === "instance_revoked") return { kind: "signed-out" };
     if (code === "voice_input_not_configured") return { kind: "not-configured" };
+    if (code === "voice_input_not_allowed") return { kind: "not-allowed" };
     return { kind: "unavailable", detail: code ?? `status ${response.status}` };
   }
   if (!body || !isText(body.provider) || !isText(body.host) || !isText(body.model)) {

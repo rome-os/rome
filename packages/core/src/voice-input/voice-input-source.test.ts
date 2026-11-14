@@ -116,4 +116,29 @@ describe("voice input source", () => {
     expect(await source.open()).toEqual({ ok: false, reason: "service-unavailable" });
     expect(source.available()).toBe(true);
   });
+
+  it("has no voice input for an account Rome Cloud does not allow", async () => {
+    const gated = answering(() =>
+      Response.json({ error: "voice_input_not_allowed" }, { status: 403 }),
+    );
+    const source = createVoiceInputSource({ own: null, romeCloud: signedIn, fetch: gated.fetch });
+    expect(await source.info()).toEqual({ available: false, via: null, place: null });
+    expect(gated.calls()).toEqual(["/v1/transcription/provider"]);
+  });
+
+  it("keeps the instance's own provider for an account Rome Cloud does not allow", async () => {
+    const gated = answering(() =>
+      Response.json({ error: "voice_input_not_allowed" }, { status: 403 }),
+    );
+    const source = createVoiceInputSource({ own, romeCloud: signedIn, fetch: gated.fetch });
+    expect(await source.info()).toEqual({
+      available: true,
+      via: "instance",
+      place: { provider: "Soniox", host: "transcriber:8790" },
+    });
+    expect(await source.open()).toEqual({
+      ok: true,
+      source: { transcriber: own, romeCloudSessionId: null },
+    });
+  });
 });

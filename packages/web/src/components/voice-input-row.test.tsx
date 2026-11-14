@@ -24,8 +24,9 @@ async function rowText(info: VoiceInputInfo): Promise<string> {
       <VoiceInputRow />
     </QueryClientProvider>,
   );
-  await waitFor(() => expect(screen.queryByText("Loading...")).toBeNull());
-  return screen.getByText("Voice input").parentElement?.parentElement?.textContent ?? "";
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+  await waitFor(() => expect(client.getQueryState(["voice-input"])?.status).toBe("success"));
+  return document.body.textContent ?? "";
 }
 
 describe("the voice input row in Settings", () => {
@@ -35,6 +36,7 @@ describe("the voice input row in Settings", () => {
       via: "rome-cloud",
       place: { provider: "Soniox", host: "stt-rt.soniox.com" },
     });
+    expect(text).toContain("Voice input");
     expect(text).toContain(
       "Speech dictated into a message goes through Rome to Soniox at stt-rt.soniox.com, provided through Rome Cloud.",
     );
@@ -51,9 +53,7 @@ describe("the voice input row in Settings", () => {
     expect(text).not.toContain("Soniox");
   });
 
-  it("asks for no provider credential when voice input is off", async () => {
-    const text = await rowText({ available: false, via: null, place: null });
-    expect(text).toContain("Voice input comes with Rome Cloud.");
-    expect(text).not.toMatch(/key|credential/i);
+  it("says nothing about voice input where there is none, such as an account Rome Cloud does not allow", async () => {
+    expect(await rowText({ available: false, via: null, place: null })).toBe("");
   });
 });

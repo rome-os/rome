@@ -101,6 +101,8 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
           place: null,
           placeUnknown: "rome-cloud-unreachable",
         };
+      case "not-allowed":
+        return { available: false, via: null, place: null };
       case "signed-out":
         return null;
     }
@@ -112,7 +114,8 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
     async info() {
       const caller = deps.romeCloud();
       const cloud = caller ? await romeCloudInfo(caller) : null;
-      if (cloud) return cloud;
+      // The gate lives in Rome Cloud: the instance's own provider is not gated.
+      if (cloud && (cloud.available || !deps.own)) return cloud;
       if (deps.own) return { available: true, via: "instance", place: deps.own.place };
       // Signed in, but Rome Cloud no longer takes this instance.
       if (caller) {
@@ -137,6 +140,8 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
               source: { transcriber: outcome.transcriber, romeCloudSessionId: outcome.sessionId },
             };
           case "refused":
+            // An account Rome Cloud does not allow still has the instance's own provider.
+            if (outcome.code === "voice_input_not_allowed" && deps.own) break;
             log.warn("rome cloud refused a transcription session", { code: outcome.code });
             return { ok: false, reason: "service-refused", detail: outcome.code };
           case "unavailable":
@@ -148,7 +153,7 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
             });
             return { ok: false, reason: "service-unavailable" };
           case "signed-out":
-            // Rome Cloud no longer takes this instance: its own provider, if any.
+            // Rome Cloud does not take this instance: its own provider, if any.
             break;
         }
       }
