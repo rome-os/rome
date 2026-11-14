@@ -76,7 +76,7 @@ The same rules on both sides, in `lib/audio.mjs`:
 - An encrypted connection: an upload of at least 4096 bytes in each of 3 or more different seconds. A single burst, such as a model request, does not count. This is a judgment from sizes and timing; each record says which rule decided it.
 - Rome's connection to the stand-in: the stand-in's own count of audio bytes received.
 
-Browser side: Chrome sends every request through the environment's proxy, loopback included. Server side: tcpdump in Rome's network namespace records packet sizes only, never payload. A connection counts as Rome's outbound when it leaves from an ephemeral port of Rome's container; hosts come from Rome's own DNS answers, and the environment names the stand-in and Rome Cloud (`cloud (Rome Cloud)`) itself.
+Browser side: Chrome sends every request through the environment's proxy, loopback included. Server side: tcpdump in Rome's network namespace records packet sizes only, never payload. A connection counts as Rome's outbound when it leaves from an ephemeral port of Rome's container; hosts come from Rome's own DNS answers, and the environment names the stand-in `transcriber` and Rome Cloud `cloud` itself, by the host names Rome dials them at.
 
 ### audio-scan
 

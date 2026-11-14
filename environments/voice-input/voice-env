@@ -300,9 +300,9 @@ cmd_capture() {
       stand_in_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$TRANSCRIBER")"
       stand_in_stats="$(curl -fsS "$(stand_in)/stats" || echo null)"
       cloud_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CLOUD" 2>/dev/null || true)"
-      printf '{"startedAt":"%s","rome":[%s],"standInIp":"%s","names":{"%s":"transcriber (stand-in)"%s},"standIn":%s}' \
+      printf '{"startedAt":"%s","rome":[%s],"standInIp":"%s","names":{"%s":"transcriber"%s},"standIn":%s}' \
         "$(json startedAt <"$ctx")" "${rome_ips%,}" "$stand_in_ip" "$stand_in_ip" \
-        "${cloud_ip:+,\"$cloud_ip\":\"cloud (Rome Cloud)\"}" "$stand_in_stats" >"$tmp/context.json"
+        "${cloud_ip:+,\"$cloud_ip\":\"cloud\"}" "$stand_in_stats" >"$tmp/context.json"
       node "$ENV_DIR/lib/capture.mjs" "$tmp/browser.json" "$tmp/dump.txt" "$tmp/context.json"
       rm -rf "$tmp" "$ctx"
       ;;
