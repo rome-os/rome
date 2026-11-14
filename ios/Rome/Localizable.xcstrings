@@ -2951,6 +2951,16 @@
         }
       }
     },
+    "Only to a Rome you own" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅同步到你拥有的 Rome"
+          }
+        }
+      }
+    },
     "Only when" : {
       "localizations" : {
         "zh-Hans" : {

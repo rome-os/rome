@@ -35,20 +35,70 @@ enum HealthSyncStatus: Equatable, Sendable {
     }
 }
 
-/// Apple Health's Sync with Rome: the switch, Pause, what the sync is
-/// doing, and its history. Off until the guardian turns it on. The same
-/// switch decides whether Rome may read Health live through iPhone use
-/// (`HealthCapability` reads `flag`).
+/// The Rome Health would sync to: the one open now.
+struct HealthInstance: Equatable, Sendable {
+    let id: String
+    let name: String
+    /// A visitor has no personal data to send to someone else's Rome.
+    let isVisitor: Bool
+}
+
+/// Where one Rome's sync keeps its anchors and its history.
+struct HealthStores: Sendable {
+    let log: SyncLogging
+    let progress: ProgressStoring
+
+    /// Application Support/personal-data/<instance>/, one folder per Rome.
+    static var root: URL { URL.applicationSupportDirectory.appending(path: "personal-data") }
+
+    static func files(for instanceId: String) -> HealthStores {
+        let safe = instanceId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_."))) ?? instanceId
+        let folder = root.appending(path: safe)
+        return HealthStores(
+            log: SyncLog(url: folder.appending(path: "sync-history.jsonl")),
+            progress: AnchorStore(url: folder.appending(path: "\(HealthSettings.sourceId)-progress.json"))
+        )
+    }
+
+    static func removeAllFiles() {
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
+/// One Rome's sync: its engine, anchors and history. Only the open Rome's
+/// lane runs; another Rome's waits, untouched, until it is open again.
+final class HealthLane: Sendable {
+    let instanceId: String
+    let engine: SyncEngine
+    let source: AppleHealthSource
+    let log: SyncLogging
+    let switches: SyncSwitchBox
+
+    init(instanceId: String, engine: SyncEngine, source: AppleHealthSource, log: SyncLogging, switches: SyncSwitchBox) {
+        self.instanceId = instanceId
+        self.engine = engine
+        self.source = source
+        self.log = log
+        self.switches = switches
+    }
+}
+
+/// Apple Health's Sync with Rome, per Rome: each Rome has its own switch
+/// (off until turned on there), anchors, history and Delete, and only the
+/// Rome open now syncs. The same switch decides whether that Rome may read
+/// Health live through iPhone use (`HealthCapability` reads `flag`).
 @MainActor
 @Observable
 final class HealthSettings {
     enum Defaults {
-        static let enabled = "personalData.health.enabled"
-        static let paused = "personalData.health.paused"
+        static func enabled(_ instance: String) -> String { "personalData.health.enabled.\(instance)" }
+        static func paused(_ instance: String) -> String { "personalData.health.paused.\(instance)" }
         /// Set once when the old "Allow Rome to read Health" was on, so the
         /// page says sync is new; gone once sync is turned on.
         static let migrationNote = "personalData.health.migrationNote"
         static let lastSignInNotice = "personalData.health.lastSignInNotice"
+        /// Every key of this account starts so.
+        static let prefix = "personalData.health."
         /// The switch before sync, under iPhone use: read once, then removed.
         static let oldSwitch = "nodeHealthEnabled"
     }
@@ -56,17 +106,22 @@ final class HealthSettings {
     nonisolated static let originKey = "personalData.originId"
     nonisolated static let sourceId = "apple_health"
 
-    private(set) var isEnabled: Bool
-    private(set) var isPaused: Bool
+    /// The Rome open now; nil before one opens or after sign-out.
+    private(set) var instance: HealthInstance?
+    private(set) var isEnabled = false
+    private(set) var isPaused = false
     /// "Health now syncs to your Rome. Turn on Sync to keep using it."
     private(set) var showsMigrationNote: Bool
     private(set) var activity = SyncActivity()
-    /// Newest first, at most 30 days.
+    /// The open Rome's syncs, newest first, at most 30 days.
     private(set) var history: [SyncLogEntry] = []
-    /// What the Rome holds from this phone, once asked.
+    /// What the open Rome holds from this phone, once asked.
     private(set) var stored: PersonalDataCatalogSource?
     /// Background App Refresh is off for the app.
     private(set) var backgroundRefreshOff = false
+
+    /// The switch can be turned on: a Rome the guardian owns is open.
+    var canSync: Bool { instance.map { !$0.isVisitor } ?? false }
 
     var status: HealthSyncStatus {
         HealthSyncStatus.make(
@@ -76,26 +131,33 @@ final class HealthSettings {
     }
 
     /// Read by the live `health.*` actions on the executor's threads.
-    @ObservationIgnored let flag: NodeFlag
+    @ObservationIgnored let flag = NodeFlag()
     @ObservationIgnored let reader: HealthReading
+    @ObservationIgnored private let sync: HealthSyncReading
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private let log: SyncLogging
-    @ObservationIgnored private let source: any PersonalDataSource
+    @ObservationIgnored private let stores: @Sendable (String) -> HealthStores
+    @ObservationIgnored private let removeAllStores: @Sendable () -> Void
     @ObservationIgnored private let observers: HealthObserving
-    @ObservationIgnored private let target: @Sendable () async -> PersonalDataTarget?
+    @ObservationIgnored private let target: @Sendable (String) async -> PersonalDataTarget?
     @ObservationIgnored private let originStore: OriginStore
     @ObservationIgnored private let device: DeviceKind
     @ObservationIgnored private let notifies: Bool
-    @ObservationIgnored private(set) var engine: SyncEngine!
+    @ObservationIgnored private let protectedData: @Sendable () async -> Bool
+    @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored private let pause: @Sendable (TimeInterval) async throws -> Void
+    /// The open Rome's sync; nil without one, or for a visitor.
+    @ObservationIgnored private(set) var lane: HealthLane?
     /// A tapped "sign in again" notification opens Sync history.
     @ObservationIgnored var onOpenHistory: (() -> Void)?
 
+    /// `target`: where an instance's batches go, by its id; nil unless that
+    /// instance is the one open, so another Rome never receives anything.
     init(
         reader: HealthReading = LiveHealth(),
         sync: HealthSyncReading = LiveHealthSync(),
         observers: HealthObserving = HealthObservers(),
-        log: SyncLogging = SyncLog(),
-        progress: ProgressStoring = AnchorStore(url: AnchorStore.defaultURL(source: HealthSettings.sourceId)),
+        stores: @escaping @Sendable (String) -> HealthStores = HealthStores.files(for:),
+        removeAllStores: @escaping @Sendable () -> Void = HealthStores.removeAllFiles,
         originStore: OriginStore = .keychain,
         defaults: UserDefaults = .standard,
         device: DeviceKind = .current,
@@ -103,47 +165,91 @@ final class HealthSettings {
         protectedData: (@Sendable () async -> Bool)? = nil,
         now: @escaping @Sendable () -> Date = { Date() },
         pause: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
-        target: @escaping @Sendable () async -> PersonalDataTarget?
+        instance: HealthInstance? = nil,
+        target: @escaping @Sendable (String) async -> PersonalDataTarget?
     ) {
         self.reader = reader
+        self.sync = sync
         self.observers = observers
-        self.log = log
+        self.stores = stores
+        self.removeAllStores = removeAllStores
         self.defaults = defaults
         self.originStore = originStore
         self.device = device
         self.notifies = notifies
         self.target = target
+        self.protectedData = protectedData ?? { await MainActor.run { UIApplication.shared.isProtectedDataAvailable } }
+        self.now = now
+        self.pause = pause
         // The old switch covered "read when your Rome asks", not "upload
         // history": sync starts off for everyone, with one line saying so.
         if defaults.object(forKey: Defaults.oldSwitch) as? Bool == true {
             defaults.set(true, forKey: Defaults.migrationNote)
         }
         defaults.removeObject(forKey: Defaults.oldSwitch)
-        let on = defaults.object(forKey: Defaults.enabled) as? Bool ?? false
-        isEnabled = on
-        let paused = defaults.bool(forKey: Defaults.paused)
-        isPaused = paused
-        showsMigrationNote = !on && defaults.bool(forKey: Defaults.migrationNote)
-        flag = NodeFlag(on)
-        let source = AppleHealthSource(reader: sync, store: progress)
-        self.source = source
-        let enabled = SyncSwitchBox(enabled: on, paused: paused)
-        switchesBox = enabled
-        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-        let deviceName = device.name
-        engine = SyncEngine(
-            source: source, target: target, log: log,
-            origin: { originStore.id().map { .init(id: $0, name: deviceName, platform: "ios", appVersion: appVersion) } },
-            switches: { enabled.value },
-            protectedData: protectedData ?? { await MainActor.run { UIApplication.shared.isProtectedDataAvailable } },
-            now: now, pause: pause,
-            onActivity: { [weak self] activity in await self?.setActivity(activity) },
-            onLogged: { [weak self] entry in await self?.logged(entry) }
-        )
+        showsMigrationNote = defaults.bool(forKey: Defaults.migrationNote)
+        open(instance)
     }
 
-    /// The switches as the engine's threads read them.
-    @ObservationIgnored private let switchesBox: SyncSwitchBox
+    // MARK: The open Rome
+
+    /// Another Rome opened, or none is. Its own switch, anchors and history
+    /// take over; the last Rome's sync stops where it is and goes on from
+    /// there the next time that Rome is open.
+    func select(_ instance: HealthInstance?) {
+        guard instance != self.instance else { return }
+        if let instance, instance.id == self.instance?.id, instance.isVisitor == self.instance?.isVisitor {
+            self.instance = instance
+            return
+        }
+        if let old = lane { Task { await old.engine.quiesce() } }
+        open(instance)
+        Task { await reloadHistory() }
+    }
+
+    private func open(_ instance: HealthInstance?) {
+        self.instance = instance
+        history = []
+        stored = nil
+        activity = SyncActivity()
+        guard let instance, !instance.isVisitor else {
+            lane = nil
+            isEnabled = false
+            isPaused = false
+            flag.set(false)
+            observers.stop()
+            return
+        }
+        isEnabled = defaults.bool(forKey: Defaults.enabled(instance.id))
+        isPaused = defaults.bool(forKey: Defaults.paused(instance.id))
+        if isEnabled { showsMigrationNote = false }
+        flag.set(isEnabled)
+        lane = makeLane(instance.id, enabled: isEnabled, paused: isPaused)
+        if isEnabled { startObservers() } else { observers.stop() }
+    }
+
+    private func makeLane(_ instanceId: String, enabled: Bool, paused: Bool) -> HealthLane {
+        let stores = stores(instanceId)
+        let source = AppleHealthSource(reader: sync, store: stores.progress)
+        let switches = SyncSwitchBox(enabled: enabled, paused: paused)
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let deviceName = device.name
+        let originStore = originStore
+        let target = target
+        let engine = SyncEngine(
+            source: source,
+            // Only this Rome, and only while it is the one open.
+            target: { await target(instanceId).flatMap { $0.instanceId == instanceId ? $0 : nil } },
+            log: stores.log,
+            origin: { originStore.id().map { .init(id: $0, name: deviceName, platform: "ios", appVersion: appVersion) } },
+            switches: { switches.value },
+            protectedData: protectedData,
+            now: now, pause: pause,
+            onActivity: { [weak self] activity in await self?.setActivity(activity, from: instanceId) },
+            onLogged: { [weak self] entry in await self?.logged(entry, from: instanceId) }
+        )
+        return HealthLane(instanceId: instanceId, engine: engine, source: source, log: stores.log, switches: switches)
+    }
 
     // MARK: Launch and foreground
 
@@ -157,44 +263,57 @@ final class HealthSettings {
     /// The app came to the front: a catch-up, at most every 15 minutes.
     func foreground() {
         backgroundRefreshOff = UIApplication.shared.backgroundRefreshStatus == .denied
-        guard isEnabled, !isPaused else { return }
-        Task { await engine.sync(.foreground) }
+        guard isEnabled, !isPaused, let engine = lane?.engine else { return }
+        run { await engine.sync(.foreground) }
     }
 
     /// A Rome opened: a foreground catch-up, since one asked at launch may
     /// have found no Rome yet. After the session ran out, or on a Rome that
     /// was updated, sync goes on from the saved anchors at once.
     func instanceOpened() {
-        guard isEnabled, !isPaused else { return }
+        guard isEnabled, !isPaused, let engine = lane?.engine else { return }
         let stuck = [.needsSignIn, .needsUpdate].contains(status)
-        let engine = engine!
-        Task {
+        run {
             if stuck { await engine.signedIn() }
             await engine.sync(stuck ? .manual : .foreground)
         }
     }
 
+    /// A sync the app starts in front keeps going for the half minute iOS
+    /// grants after the guardian leaves, so a week of history in progress
+    /// is usually finished and kept.
+    @discardableResult
+    private func run(_ work: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        Task { @MainActor in
+            let hold = BackgroundHold("health-sync")
+            await work()
+            hold.end()
+        }
+    }
+
     // MARK: Switches
 
-    /// Sync with Rome. On asks iOS for access if it never has, then starts
-    /// the backfill. Off stops the observers and tells the Rome, which keeps
-    /// what it has until Delete. The task is the whole of it, for tests.
+    /// Sync with Rome, for the open Rome. On asks iOS for access if it never
+    /// has, then starts the backfill. Off stops the observers and tells the
+    /// Rome, which keeps what it has until Delete. The task is the whole of
+    /// it, for tests.
     @discardableResult
     func setEnabled(_ on: Bool) -> Task<Void, Never> {
+        guard let lane, let id = instance?.id else { return Task {} }
         isEnabled = on
-        defaults.set(on, forKey: Defaults.enabled)
+        defaults.set(on, forKey: Defaults.enabled(id))
         flag.set(on)
-        switchesBox.set(enabled: on, paused: on ? false : isPaused)
+        lane.switches.set(enabled: on, paused: on ? false : isPaused)
         if on {
             isPaused = false
-            defaults.removeObject(forKey: Defaults.paused)
+            defaults.removeObject(forKey: Defaults.paused(id))
             showsMigrationNote = false
             defaults.removeObject(forKey: Defaults.migrationNote)
         }
-        let engine = engine!
+        let engine = lane.engine
         let reader = reader
         if on {
-            return Task {
+            return run {
                 if await reader.shouldRequestAccess() { try? await reader.requestAccess() }
                 self.startObservers()
                 await engine.signedIn()
@@ -205,7 +324,7 @@ final class HealthSettings {
         return Task {
             // A sync under way stops before its next read or batch.
             await engine.quiesce()
-            await self.tellRome("off")
+            await self.tellRome("off", lane: lane)
         }
     }
 
@@ -213,13 +332,14 @@ final class HealthSettings {
     /// catches up.
     @discardableResult
     func setPaused(_ paused: Bool) -> Task<Void, Never> {
+        guard let lane, let id = instance?.id else { return Task {} }
         isPaused = paused
-        defaults.set(paused, forKey: Defaults.paused)
-        switchesBox.set(enabled: isEnabled, paused: paused)
-        let engine = engine!
-        return Task {
+        defaults.set(paused, forKey: Defaults.paused(id))
+        lane.switches.set(enabled: isEnabled, paused: paused)
+        let engine = lane.engine
+        return run {
             if paused { await engine.quiesce() }
-            await self.tellRome(paused ? "paused" : "active")
+            await self.tellRome(paused ? "paused" : "active", lane: lane)
             if !paused { await engine.sync(.manual) }
         }
     }
@@ -227,63 +347,63 @@ final class HealthSettings {
     /// Sync now: not throttled, and it waits for a sync under way.
     @discardableResult
     func syncNow() -> Task<Void, Never> {
-        let engine = engine!
-        return Task { await engine.sync(.manual) }
+        guard let engine = lane?.engine else { return Task {} }
+        return run { await engine.sync(.manual) }
     }
 
-    /// Delete uploaded data: everything this phone sent goes from the Rome,
-    /// the anchors go, and sync turns off. False when the Rome could not be
-    /// reached, and nothing changed.
+    /// Delete uploaded data: everything this phone sent goes from the open
+    /// Rome, its anchors go, and its sync turns off. Other Romes keep theirs.
+    /// False when the Rome could not be reached, and nothing changed.
     func deleteUploaded() async -> Bool {
-        guard let target = await target(), let origin = originStore.id() else { return false }
+        guard let lane, let id = instance?.id, let target = await target(id), target.instanceId == id, let origin = originStore.id() else { return false }
         // Nothing may reach the Rome after the delete: a sync under way stops
         // first, and the engine is idle before the request goes.
-        let before = switchesBox.value
-        switchesBox.set(enabled: false, paused: before.paused)
-        await engine.quiesce()
+        let before = lane.switches.value
+        lane.switches.set(enabled: false, paused: before.paused)
+        await lane.engine.quiesce()
         do {
             _ = try await target.backend.deleteOrigin(source: Self.sourceId, origin: origin)
         } catch {
-            switchesBox.set(enabled: before.enabled, paused: before.paused)
+            lane.switches.set(enabled: before.enabled, paused: before.paused)
             return false
         }
+        await lane.source.reset()
+        let entry = await lane.log.append(SyncLogEntry(seq: 0, time: Date(), trigger: .manual, outcome: .deleted))
+        guard self.lane === lane else { return true }
         observers.stop()
         isEnabled = false
-        defaults.set(false, forKey: Defaults.enabled)
+        defaults.set(false, forKey: Defaults.enabled(id))
         flag.set(false)
-        switchesBox.set(enabled: false, paused: false)
+        lane.switches.set(enabled: false, paused: false)
         isPaused = false
-        defaults.removeObject(forKey: Defaults.paused)
-        await source.reset()
+        defaults.removeObject(forKey: Defaults.paused(id))
         stored = nil
-        let entry = await log.append(SyncLogEntry(seq: 0, time: Date(), trigger: .manual, outcome: .deleted))
-        await logged(entry)
+        logged(entry, from: id)
         return true
     }
 
-    /// Sign-out: observers off, background delivery off, anchors, the
-    /// history and the origin id gone, sync off. The Rome keeps what it has:
-    /// only Delete uploaded data removes it.
+    /// Sign-out: observers off, background delivery off, every Rome's
+    /// anchors and history and the origin id gone, every switch off. The
+    /// Romes keep what they have: only Delete uploaded data removes it.
     @discardableResult
     func forgetAccount() -> Task<Void, Never> {
         observers.stop()
+        let old = lane
+        lane = nil
+        instance = nil
         isEnabled = false
         isPaused = false
         showsMigrationNote = false
         flag.set(false)
-        switchesBox.set(enabled: false, paused: false)
-        for key in [Defaults.enabled, Defaults.paused, Defaults.migrationNote, Defaults.lastSignInNotice] { defaults.removeObject(forKey: key) }
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Defaults.prefix) { defaults.removeObject(forKey: key) }
         originStore.remove()
         history = []
         stored = nil
-        let engine = engine!
-        let source = source
-        let log = log
+        activity = SyncActivity()
+        let removeAllStores = removeAllStores
         return Task {
-            await engine.quiesce()
-            await engine.signedIn()
-            await source.reset()
-            await log.removeAll()
+            if let old { await old.engine.quiesce() }
+            removeAllStores()
         }
     }
 
@@ -293,25 +413,33 @@ final class HealthSettings {
         #if DEBUG
         if isDemo { return }
         #endif
-        history = await log.recent(limit: 500)
+        guard let lane else { return }
+        let entries = await lane.log.recent(limit: 500)
+        guard self.lane === lane else { return }
+        history = entries
     }
 
-    /// What the Rome holds from this phone: "since May 2026, 66k readings".
+    /// What the open Rome holds from this phone: "since May 2026, 66k readings".
     func reloadStored() async {
         #if DEBUG
         if isDemo { return }
         #endif
-        guard let target = await target(), let origin = originStore.id() else { return }
+        guard let lane, let target = await target(lane.instanceId), target.instanceId == lane.instanceId, let origin = originStore.id() else { return }
         let sources = (try? await target.backend.sources()) ?? []
+        guard self.lane === lane else { return }
         stored = sources.first { $0.source == Self.sourceId && $0.origin?.id == origin }
     }
 
     // MARK: Engine
 
     private func startObservers() {
-        let engine = engine!
         observers.start { done in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                // The Rome open when HealthKit wakes the app, if its switch is on.
+                guard let self, let engine = self.lane?.engine, self.isEnabled else {
+                    done()
+                    return
+                }
                 let hold = BackgroundHold("health-sync")
                 let background = UIApplication.shared.applicationState == .background
                 await engine.sync(.observer, budget: background ? SyncEngine.backgroundBudget : nil)
@@ -321,16 +449,18 @@ final class HealthSettings {
         }
     }
 
-    private func tellRome(_ state: String) async {
-        guard let target = await target(), let origin = originStore.id() else { return }
+    private func tellRome(_ state: String, lane: HealthLane) async {
+        guard let target = await target(lane.instanceId), target.instanceId == lane.instanceId, let origin = originStore.id() else { return }
         try? await target.backend.setState(source: Self.sourceId, origin: origin, state: state)
     }
 
-    private func setActivity(_ activity: SyncActivity) {
+    private func setActivity(_ activity: SyncActivity, from instanceId: String) {
+        guard lane?.instanceId == instanceId else { return }
         self.activity = activity
     }
 
-    private func logged(_ entry: SyncLogEntry) {
+    private func logged(_ entry: SyncLogEntry, from instanceId: String) {
+        guard lane?.instanceId == instanceId else { return }
         history.insert(entry, at: 0)
         if entry.outcome == .error, entry.errorCode == "signed_out" { noticeSignIn() }
     }
@@ -364,6 +494,7 @@ final class HealthSettings {
 
     func showDemo(_ entries: [SyncLogEntry], stored: PersonalDataCatalogSource?, enabled: Bool = true, activity: SyncActivity = SyncActivity()) {
         isDemo = true
+        if instance == nil { instance = HealthInstance(id: "demo", name: "My Rome", isVisitor: false) }
         isEnabled = enabled
         flag.set(enabled)
         isPaused = false

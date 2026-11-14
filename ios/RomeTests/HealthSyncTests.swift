@@ -621,20 +621,55 @@ struct SyncRig {
 
 @MainActor
 @Suite(.serialized) struct HealthSettingsTests {
-    final class Rig {
+    /// One fake Rome and one set of stores per instance, kept across launches.
+    final class Rig: @unchecked Sendable {
+        static let home = HealthInstance(id: "inst-1", name: "Home", isVisitor: false)
+        static let work = HealthInstance(id: "inst-2", name: "Work", isVisitor: false)
+
         let defaults = UserDefaults(suiteName: "rome-health-\(UUID().uuidString)")!
         let reader = FakeHealth()
-        let backend = FakePersonalDataBackend()
-        let log = MemorySyncLog()
+        let health = FakeHealthSync()
         let observers = FakeObservers()
         let origin = OriginStore.memory()
+        private let lock = NSLock()
+        private var backends: [String: FakePersonalDataBackend] = [:]
+        private var stores: [String: (log: MemorySyncLog, progress: MemoryProgressStore)] = [:]
+        private(set) var removedAll = 0
 
-        @MainActor func make() -> HealthSettings {
-            let backend = backend
-            return HealthSettings(
-                reader: reader, sync: FakeHealthSync(), observers: observers, log: log, progress: MemoryProgressStore(),
+        func backend(_ id: String) -> FakePersonalDataBackend {
+            lock.withLock {
+                if let backend = backends[id] { return backend }
+                let backend = FakePersonalDataBackend()
+                backends[id] = backend
+                return backend
+            }
+        }
+
+        func log(_ id: String) -> MemorySyncLog { store(id).log }
+
+        private func store(_ id: String) -> (log: MemorySyncLog, progress: MemoryProgressStore) {
+            lock.withLock {
+                if let store = stores[id] { return store }
+                let store = (log: MemorySyncLog(), progress: MemoryProgressStore())
+                stores[id] = store
+                return store
+            }
+        }
+
+        var backend: FakePersonalDataBackend { backend(Self.home.id) }
+        var log: MemorySyncLog { log(Self.home.id) }
+
+        @MainActor func make(_ instance: HealthInstance? = Rig.home) -> HealthSettings {
+            HealthSettings(
+                reader: reader, sync: health, observers: observers,
+                stores: { id in
+                    let store = self.store(id)
+                    return HealthStores(log: store.log, progress: store.progress)
+                },
+                removeAllStores: { self.lock.withLock { self.stores = [:]; self.removedAll += 1 } },
                 originStore: origin, defaults: defaults, device: .iPhone, notifies: false, protectedData: { true },
-                target: { PersonalDataTarget(instanceId: "inst-1", backend: backend) }
+                instance: instance,
+                target: { id in PersonalDataTarget(instanceId: id, backend: self.backend(id)) }
             )
         }
     }
@@ -653,8 +688,8 @@ struct SyncRig {
         #expect(!settings.flag.isOn, "live health reads follow it")
         await settings.setEnabled(true).value
         #expect(settings.flag.isOn)
+        #expect(rig.observers.starts == 1, "HealthKit may wake the app now")
         #expect(rig.make().isEnabled, "kept across launches")
-        #expect(rig.observers.starts == 1)
         #expect(await rig.backend.envelopes.isEmpty == false, "turning it on starts the backfill")
     }
 
@@ -673,8 +708,9 @@ struct SyncRig {
         let rig = Rig()
         let settings = rig.make()
         await settings.setEnabled(true).value
+        let stops = rig.observers.stops
         await settings.setEnabled(false).value
-        #expect(rig.observers.stops == 1)
+        #expect(rig.observers.stops == stops + 1)
         #expect(await rig.backend.states == ["off"])
     }
 
@@ -734,9 +770,60 @@ struct SyncRig {
         #expect(!settings.isEnabled)
         #expect(!settings.flag.isOn)
         #expect(rig.origin.read() == nil)
-        #expect(await rig.log.entries.isEmpty)
+        #expect(rig.removedAll == 1, "every Rome's anchors and history")
+        #expect(settings.instance == nil)
         #expect(await rig.backend.deletes == 0, "only Delete uploaded data removes the Rome's copy")
         #expect(!rig.make().isEnabled)
+    }
+
+    @Test func eachRomeHasItsOwnSwitchAndOnlyTheOpenOneSyncs() async {
+        let rig = Rig()
+        let settings = rig.make()
+        await settings.setEnabled(true).value
+        let toHome = await rig.backend(Rig.home.id).envelopes.count
+        #expect(toHome > 0)
+        settings.select(Rig.work)
+        #expect(!settings.isEnabled, "off on a Rome until it is turned on there")
+        #expect(!settings.flag.isOn, "and so are live reads")
+        #expect(settings.history.isEmpty)
+        await settings.setEnabled(true).value
+        #expect(await !rig.backend(Rig.work.id).envelopes.isEmpty, "turned on there, it syncs there")
+        #expect(await rig.backend(Rig.home.id).envelopes.count == toHome, "the Rome left behind gets nothing")
+        // Back home: its own switch and anchors, a catch-up and no new history.
+        settings.select(Rig.home)
+        #expect(settings.isEnabled)
+        await settings.syncNow().value
+        let homeLog = await rig.log(Rig.home.id).entries
+        #expect(homeLog.last?.trigger == .manual)
+        #expect(homeLog.last?.history == false, "a catch-up from its anchors, not a new 6 months")
+        #expect(rig.make(Rig.work).isEnabled, "each Rome's switch is kept")
+    }
+
+    @Test func deleteReachesOnlyTheOpenRome() async {
+        let rig = Rig()
+        let settings = rig.make()
+        await settings.setEnabled(true).value
+        settings.select(Rig.work)
+        await settings.setEnabled(true).value
+        #expect(await settings.deleteUploaded())
+        #expect(await rig.backend(Rig.work.id).deletes == 1)
+        #expect(await rig.backend(Rig.home.id).deletes == 0)
+        #expect(rig.make(Rig.home).isEnabled, "the other Rome keeps syncing")
+    }
+
+    @Test func aVisitorsRomeCannotSync() async {
+        let rig = Rig()
+        let settings = rig.make(HealthInstance(id: "friend", name: "A friend's Rome", isVisitor: true))
+        #expect(!settings.canSync)
+        await settings.setEnabled(true).value
+        #expect(!settings.isEnabled)
+        #expect(await rig.backend("friend").envelopes.isEmpty)
+    }
+
+    @Test func noRomeOpenMeansNoSync() async {
+        let settings = Rig().make(nil)
+        #expect(!settings.canSync)
+        #expect(!settings.isEnabled)
     }
 
     @Test func theStatusComesFromTheSwitchesAndTheNewestSync() {

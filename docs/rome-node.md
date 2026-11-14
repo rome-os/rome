@@ -617,8 +617,9 @@ gets `busy` before it is recorded or Health is read, and `system.info` is always
 answered.
 
 **Settings → Apple Health** is a row that shows On, Off, Paused or Needs
-sign-in and opens the Apple Health page. Its switch, **Sync with Rome**, is off by
-default and decides both ways Health reaches Rome: the background sync, and the
+sign-in and opens the Apple Health page. Its switch, **Sync with Rome**, belongs to
+the Rome open now, is off by default on each Rome, and decides both ways Health
+reaches that Rome: the background sync, and the
 live `health.*` actions, which fail with `health_off` while it is off. Turning it
 on while iOS has never been asked shows the system's access sheet at once, then
 starts the history backfill. Health values go to the user's Rome and to the AI

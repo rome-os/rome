@@ -68,17 +68,13 @@ protocol SyncLogging: Sendable {
 actor SyncLog: SyncLogging {
     static let retention: TimeInterval = 30 * 24 * 3600
 
-    static var defaultURL: URL {
-        URL.applicationSupportDirectory.appending(path: "sync-history.jsonl")
-    }
-
     private let url: URL
     private let now: @Sendable () -> Date
     private var opened = false
     private var nextSeq = 1
     private var filePath: String { url.path(percentEncoded: false) }
 
-    init(url: URL = SyncLog.defaultURL, now: @escaping @Sendable () -> Date = { Date() }) {
+    init(url: URL, now: @escaping @Sendable () -> Date = { Date() }) {
         self.url = url
         self.now = now
     }

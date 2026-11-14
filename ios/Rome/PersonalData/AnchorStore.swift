@@ -45,10 +45,6 @@ protocol ProgressStoring: Sendable {
 }
 
 actor AnchorStore: ProgressStoring {
-    static func defaultURL(source: String) -> URL {
-        URL.applicationSupportDirectory.appending(path: "personal-data/\(source)-progress.json")
-    }
-
     private let url: URL
     private var cached: SyncProgress?
 

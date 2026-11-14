@@ -30,8 +30,8 @@ final class TokenBox: Sendable {
 private final class TargetBox: @unchecked Sendable {
     @MainActor weak var model: AppModel?
 
-    func resolve() async -> PersonalDataTarget? {
-        await MainActor.run { model?.personalDataTarget() }
+    func resolve(_ instanceId: String) async -> PersonalDataTarget? {
+        await MainActor.run { model?.personalDataTarget(instanceId) }
     }
 }
 
@@ -636,7 +636,13 @@ final class AppModel {
         }
     }
     private(set) var instances: [CloudInstance] = []
-    private(set) var currentInstanceID: String?
+    private(set) var currentInstanceID: String? {
+        // Each Rome has its own Health sync: the one open now syncs.
+        didSet {
+            guard currentInstanceID != oldValue else { return }
+            health.select(currentInstanceID.flatMap { id in (instances.first { $0.id == id } ?? Self.rememberedInstance().flatMap { $0.id == id ? $0 : nil }).map(Self.healthInstance) })
+        }
+    }
     private(set) var signInError: String?
     /// The instance to sign in to once from a browser before the phone can,
     /// set with its error.
@@ -712,7 +718,9 @@ final class AppModel {
         self.instanceConfiguration = instanceConfiguration
         push = PushCenter(registry: cloud)
         let target = TargetBox()
-        let health = HealthSettings(target: { await target.resolve() })
+        // The Rome the app opens is the one Health syncs to, from launch on:
+        // HealthKit can wake the app before any screen shows.
+        let health = HealthSettings(instance: Self.rememberedInstance().map(Self.healthInstance), target: { await target.resolve($0) })
         self.health = health
         let device = DeviceKind.current
         node = NodeHost(credentials: cloud, registry: NodeCapabilityRegistry(capabilities: [
@@ -1292,15 +1300,22 @@ final class AppModel {
 
     /// Where Health sync sends: the Rome open now, else the one opened last,
     /// with this phone's guardian session. A visitor has no personal data to send.
-    fileprivate func personalDataTarget() -> PersonalDataTarget? {
+    static func healthInstance(_ instance: CloudInstance) -> HealthInstance {
+        HealthInstance(id: instance.id, name: instance.name, isVisitor: instance.isVisitor)
+    }
+
+    /// Where `instanceId`'s Health sync sends: that Rome, with this phone's
+    /// guardian session, and only while it is the one open (or, before any
+    /// opens, the one the app opens next). Any other Rome gets nothing.
+    fileprivate func personalDataTarget(_ instanceId: String) -> PersonalDataTarget? {
         #if DEBUG
         // A local Rome signed in with ROME_LOCAL_*: its own session, no Rome Cloud.
-        if currentInstanceID == "local", let box = tokenBox, let origin = currentInstance.flatMap({ URL(string: $0.origin) }) {
+        if instanceId == "local", currentInstanceID == "local", let box = tokenBox, let origin = currentInstance.flatMap({ URL(string: $0.origin) }) {
             return PersonalDataTarget(instanceId: "local", backend: PersonalDataClient(client: APIClient(origin: origin, token: { box.token })))
         }
         #endif
         guard cloud.hasCredential else { return nil }
-        guard let instance = currentInstance ?? Self.rememberedInstance(), !instance.isVisitor,
+        guard let instance = currentInstanceID == nil ? Self.rememberedInstance() : currentInstance, instance.id == instanceId, !instance.isVisitor,
               let origin = URL(string: instance.origin), let session = cloud.storedSession(for: instance),
               session.cookie == InstanceSession.guardianCookie
         else { return nil }

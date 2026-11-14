@@ -134,13 +134,24 @@ struct HealthAccessScreen: View {
         return VStack(alignment: .leading, spacing: 8) {
             SettingsGroup {
                 HStack(spacing: 12) {
-                    Text("Sync with Rome").romeFont(17).foregroundStyle(Palette.fg)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sync with Rome").romeFont(17).foregroundStyle(Palette.fg)
+                        // Each Rome has its own switch: this one is for the Rome open now.
+                        if let instance = health.instance {
+                            Text(verbatim: instance.isVisitor ? String(localized: "Only to a Rome you own") : instance.name)
+                                .romeFont(13)
+                                .foregroundStyle(Palette.sub)
+                                .lineLimit(1)
+                        }
+                    }
                     Spacer(minLength: 8)
                     Toggle("Sync with Rome", isOn: Binding(get: { health.isEnabled }, set: { on in health.setEnabled(on) }))
                         .labelsHidden()
                         .tint(Palette.primary)
+                        .disabled(!health.canSync)
                 }
                 .padding(.horizontal, 16)
+                .padding(.vertical, 8)
                 .frame(minHeight: 52)
                 .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
                 .accessibilityElement(children: .combine)
