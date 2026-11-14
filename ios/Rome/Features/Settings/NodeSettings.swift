@@ -78,6 +78,7 @@ struct NodeSettingsScreen: View {
                             .romeFont(13)
                             .foregroundStyle(Palette.sub)
                     }
+                    .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
                     .accessibilityElement(children: .combine)
                 }
                 SettingsGroup(header: "What Rome can do") {

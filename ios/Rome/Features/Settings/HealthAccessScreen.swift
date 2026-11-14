@@ -41,8 +41,6 @@ struct HealthStatusLine: Equatable {
             text = String(localized: "Can't sync while \(device.name) is locked"); action = nil; failed = false
         case .needsSignIn:
             text = String(localized: "Sign in again to keep Health syncing"); action = .signIn; failed = true
-        case .needsUpdate:
-            text = String(localized: "Your Rome needs an update to sync Health"); action = nil; failed = true
         case .failed:
             text = String(localized: "Last sync failed"); action = .retry; failed = true
         }
@@ -74,6 +72,7 @@ struct HealthAccessScreen: View {
                 VStack(alignment: .leading, spacing: 26) {
                     header
                     toggleCard(health)
+                    capabilities
                     dataFlow
                     Button { openURL(Self.privacyURL) } label: {
                         Text("Privacy Policy")
@@ -160,6 +159,32 @@ struct HealthAccessScreen: View {
         }
     }
 
+    private var capabilities: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsGroup(header: "What your Rome can do") {
+                CapabilityRow(
+                    symbol: "figure.run", title: "Plan fat-loss workouts",
+                    request: String(localized: "Plan my workouts so I lose 3 kg by March."),
+                    reply: String(localized: "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan.")
+                )
+                CapabilityRow(
+                    symbol: "bed.double", title: "Understand your sleep",
+                    request: String(localized: "Why have I felt so tired lately?"),
+                    reply: String(localized: "Your deep sleep dropped over the last two weeks, and your HRV fell with it.")
+                )
+                CapabilityRow(
+                    symbol: "waveform.path.ecg", title: "Notice heart trends",
+                    request: String(localized: "Has my resting heart rate changed this month?"),
+                    reply: String(localized: "It's 4 bpm higher than last month, mostly on days you slept under 6 hours."), last: true
+                )
+            }
+            Text("For everyday wellness, not medical advice.")
+                .romeFont(13)
+                .foregroundStyle(Palette.sub)
+                .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
+        }
+    }
+
     private var dataFlow: some View {
         SettingsGroup(header: "Where your data goes") {
             HStack(alignment: .top, spacing: 4) {
@@ -209,6 +234,7 @@ struct HealthStatusRow: View {
                 EmptyView()
             }
         }
+        .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
     }
 
     private func action(_ title: LocalizedStringKey, perform: @escaping () -> Void) -> some View {
@@ -236,7 +262,7 @@ private struct PlainRow<Trailing: View>: View {
     }
 }
 
-/// One quiet line under a card, at the card's edge.
+/// One quiet line under a card, in line with its row text.
 struct NoteLine: View {
     let text: String
 
@@ -245,6 +271,42 @@ struct NoteLine: View {
             .romeFont(13)
             .foregroundStyle(Palette.sub)
             .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
+    }
+}
+
+/// One thing the Rome can do with Health, as a short chat: the request in the
+/// guardian's bubble and the Rome's answer in its own, both the real chat's.
+private struct CapabilityRow: View {
+    let symbol: String
+    let title: LocalizedStringKey
+    let request: String
+    let reply: String
+    var last = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                Image(systemName: symbol)
+                    .romeFont(20)
+                    .foregroundStyle(Palette.sub)
+                    .frame(width: 30, alignment: .center)
+                    .accessibilityHidden(true)
+                Text(title).romeFont(16, .semibold).foregroundStyle(Palette.fg)
+                Spacer(minLength: 0)
+            }
+            VStack(spacing: 8) {
+                UserBubble(text: request, pending: nil)
+                AgentBubble(text: reply, forwardedFrom: nil, position: .single)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -55,16 +55,21 @@ enum AppLanguage {
 
 /// An inset group: a white rounded card with hairline rows.
 struct SettingsGroup<Content: View>: View {
+    /// Text around a card (its header, a status line, a footer) starts where
+    /// the card's row text does, as in iOS inset-grouped lists.
+    static var textInset: CGFloat { 16 }
+
     var header: LocalizedStringKey? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let header {
-                // At the card's edge, like every section title.
+                // In line with the rows' text, like every section header.
                 Text(header)
                     .romeFont(13, .medium)
                     .foregroundStyle(Palette.sub)
+                    .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
             }
             VStack(spacing: 0, content: content)
                 .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
@@ -246,8 +251,8 @@ struct SettingsScreen: View {
                     Text("Can't check for updates")
                         .romeFont(13)
                         .foregroundStyle(Palette.sub)
-                        // At the card's edge, as all text around a card.
-                        .padding(.horizontal, 16)
+                        // In line with the card's row text, as all text around a card.
+                        .padding(.horizontal, 16 + SettingsGroup<EmptyView>.textInset)
                         .padding(.top, -18)
                 }
                 SettingsGroup {

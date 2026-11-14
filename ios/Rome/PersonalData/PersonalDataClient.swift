@@ -65,8 +65,6 @@ struct PersonalDataEnvelope: Encodable, Sendable {
 enum PersonalDataFailure: Error, Equatable, Sendable {
     /// The session is over and could not be renewed.
     case signedOut
-    /// The Rome has no `/api/personal-data` routes: it needs an update.
-    case needsUpdate
     /// Too many requests; try again after this many seconds, when it said.
     case rateLimited(TimeInterval?)
     /// The network, a timeout or the server: worth trying again later.
@@ -167,9 +165,6 @@ struct PersonalDataClient: PersonalDataBackend {
         case 200..<300: return reply
         case 429: throw .rateLimited(reply.retryAfter)
         case 408, 500...: throw .retryable("http_\(reply.status)")
-        case 404 where reply.errorCode == nil:
-            // A route the Rome does not have answers Hono's plain 404.
-            throw .needsUpdate
         default: throw .refused(status: reply.status, code: reply.errorCode)
         }
     }

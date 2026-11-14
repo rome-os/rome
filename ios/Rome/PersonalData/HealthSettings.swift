@@ -15,7 +15,6 @@ enum HealthSyncStatus: Equatable, Sendable {
     case synced(Date)
     case locked
     case needsSignIn
-    case needsUpdate
     case failed
 
     /// From the switches, what the engine is doing, and the newest sync in the log.
@@ -24,7 +23,6 @@ enum HealthSyncStatus: Equatable, Sendable {
         if activity.running { return activity.historyMonth.map(HealthSyncStatus.syncingHistory) ?? .syncing }
         switch (newest?.outcome, newest?.errorCode) {
         case (.error?, "signed_out"?): return .needsSignIn
-        case (.error?, "needs_update"?): return .needsUpdate
         case (.skipped?, "locked"?): return .locked
         case (.error?, _): return .failed
         default: break
@@ -259,11 +257,11 @@ final class HealthSettings {
     }
 
     /// A Rome opened: a foreground catch-up, since one asked at launch may
-    /// have found no Rome yet. After the session ran out, or on a Rome that
-    /// was updated, sync goes on from the saved anchors at once.
+    /// have found no Rome yet. After the session ran out, sync goes on from
+    /// the saved anchors at once.
     func instanceOpened() {
         guard isEnabled, let engine = lane?.engine else { return }
-        let stuck = [.needsSignIn, .needsUpdate].contains(status)
+        let stuck = status == .needsSignIn
         run {
             if stuck { await engine.signedIn() }
             await engine.sync(stuck ? .manual : .foreground)

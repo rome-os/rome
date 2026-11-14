@@ -41,7 +41,7 @@ struct SyncLogEntry: Codable, Equatable, Identifiable, Sendable {
     var trigger: SyncTrigger
     var outcome: SyncOutcome
     /// Why it was skipped or failed: `locked`, `no_access`,
-    /// `signed_out`, `needs_update`, `network`, `rate_limited`…
+    /// `signed_out`, `network`, `rate_limited`…
     var errorCode: String?
     var types: [String: SyncTypeCount] = [:]
     var batches = 0

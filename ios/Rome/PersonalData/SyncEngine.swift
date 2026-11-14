@@ -57,8 +57,6 @@ actor SyncEngine {
     private var retryTask: Task<Void, Never>?
     /// The session is over: only the guardian can fix it, so nothing retries.
     private(set) var signedOut = false
-    /// The Rome has no personal-data routes.
-    private(set) var needsUpdate = false
 
     init(
         source: any PersonalDataSource,
@@ -160,7 +158,6 @@ actor SyncEngine {
     /// The guardian signed in again: the next sync may try.
     func signedIn() {
         signedOut = false
-        needsUpdate = false
         retryAt = nil
         failures = 0
     }
@@ -195,7 +192,7 @@ actor SyncEngine {
         if trigger == .foreground, !asked, let lastRunAt, started.timeIntervalSince(lastRunAt) < Self.foregroundThrottle { return }
         if !asked, let retryAt, started < retryAt { return }
         // Only the guardian can end these: a background wake does not try.
-        if (signedOut || needsUpdate), !served.contains(.manual), !served.contains(.foreground) { return }
+        if signedOut, !served.contains(.manual), !served.contains(.foreground) { return }
         var entry = SyncLogEntry(seq: 0, time: started, trigger: trigger, outcome: .ok)
         guard await protectedData() else {
             entry.outcome = .skipped
@@ -237,7 +234,6 @@ actor SyncEngine {
             failures = 0
             retryAt = nil
             signedOut = false
-            needsUpdate = false
         } catch is Stop {
             entry.outcome = .interrupted
         } catch let failure as PersonalDataFailure {
@@ -272,10 +268,6 @@ actor SyncEngine {
         case .signedOut, .noInstance:
             entry.errorCode = "signed_out"
             signedOut = true
-            cancelRetries()
-        case .needsUpdate:
-            entry.errorCode = "needs_update"
-            needsUpdate = true
             cancelRetries()
         case .rateLimited(let after):
             entry.errorCode = "rate_limited"

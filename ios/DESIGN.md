@@ -24,9 +24,9 @@ Example: the selected row gets a highlight, not bold text. A secondary control s
 
 Elements of one kind look the same on every screen and line up the same way.
 
-Text around a card (section titles, status lines, footnotes) aligns with the card's left edge.
+Text around a card (section headers, footers, status lines) aligns with the card's content inset, as in iOS inset-grouped lists.
 
-Example: every page uses the same header row. Section titles align with the card edge. Every control floating over content (header buttons, composer, back-to-bottom) uses the same glass.
+Example: every page uses the same header row. A section header starts where its card's row text does. Every control floating over content (header buttons, composer, back-to-bottom) uses the same glass.
 
 ## 5. Glass looks like glass
 

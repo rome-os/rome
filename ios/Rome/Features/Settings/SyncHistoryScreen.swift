@@ -95,7 +95,6 @@ struct SyncHistoryFormatter {
     func failureText(_ code: String?) -> String {
         switch code {
         case "signed_out": return String(localized: "Signed out of your Rome")
-        case "needs_update": return String(localized: "Your Rome needs an update")
         case "network": return String(localized: "Couldn't reach your Rome")
         case "rate_limited": return String(localized: "Too many syncs, trying later")
         case "health_failed": return String(localized: "Couldn't read Health")

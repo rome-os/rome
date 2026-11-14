@@ -1813,6 +1813,16 @@
         }
       }
     },
+    "For everyday wellness, not medical advice." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用于日常健康管理，不构成医疗建议。"
+          }
+        }
+      }
+    },
     "Get notified when Rome has something for you" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1839,6 +1849,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "习惯打卡"
+          }
+        }
+      }
+    },
+    "Has my resting heart rate changed this month?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我这个月的静息心率有变化吗？"
           }
         }
       }
@@ -1973,6 +1993,16 @@
         }
       }
     },
+    "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我查看了你的步数、体能训练、静息心率和体重。这是一份 12 周计划。"
+          }
+        }
+      }
+    },
     "I turn bigger jobs into tasks and tell you when they're done." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2067,6 +2097,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收到的登录信息无效"
+          }
+        }
+      }
+    },
+    "It's 4 bpm higher than last month, mostly on days you slept under 6 hours." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "比上个月高了 4 次/分钟，主要出现在睡眠不足 6 小时的日子。"
           }
         }
       }
@@ -2751,6 +2791,16 @@
         }
       }
     },
+    "Notice heart trends" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留意心率趋势"
+          }
+        }
+      }
+    },
     "Notifications" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3057,6 +3107,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "照片"
+          }
+        }
+      }
+    },
+    "Plan fat-loss workouts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "规划减脂锻炼"
+          }
+        }
+      }
+    },
+    "Plan my workouts so I lose 3 kg by March." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我规划锻炼，争取三月前减 3 公斤。"
           }
         }
       }
@@ -4805,6 +4875,16 @@
         }
       }
     },
+    "Understand your sleep" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "了解你的睡眠"
+          }
+        }
+      }
+    },
     "Unsupported request" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5163,6 +5243,16 @@
         }
       }
     },
+    "What your Rome can do" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 能做什么"
+          }
+        }
+      }
+    },
     "When %@ arrives" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5189,6 +5279,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的数据去向"
+          }
+        }
+      }
+    },
+    "Why have I felt so tired lately?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我最近为什么总是很累？"
           }
         }
       }
@@ -5363,22 +5463,12 @@
         }
       }
     },
-    "Your Rome needs an update" : {
+    "Your deep sleep dropped over the last two weeks, and your HRV fell with it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你的 Rome 需要更新"
-          }
-        }
-      }
-    },
-    "Your Rome needs an update to sync Health" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的 Rome 需要更新才能同步健康数据"
+            "value" : "过去两周你的深度睡眠减少了，心率变异性也随之下降。"
           }
         }
       }

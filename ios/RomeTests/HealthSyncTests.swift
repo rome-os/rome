@@ -444,14 +444,6 @@ struct SyncRig {
         #expect(await rig.lastEntry()?.outcome == .ok, "after sign-in it goes on from the saved anchors")
     }
 
-    @Test func aRomeWithoutTheRouteNeedsAnUpdate() async throws {
-        let rig = SyncRig()
-        await rig.backend.fail(.needsUpdate)
-        await rig.engine.sync(.manual)
-        #expect(await rig.lastEntry()?.errorCode == "needs_update")
-        #expect(await rig.engine.needsUpdate)
-    }
-
     @Test func theForegroundSyncsAtMostEveryFifteenMinutes() async throws {
         let rig = SyncRig()
         await rig.backfill()
@@ -858,7 +850,6 @@ struct SyncRig {
         #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: nil, lastGood: nil) == .waiting)
         #expect(HealthSyncStatus.make(enabled: true, activity: SyncActivity(running: true, historyMonth: HealthFixtures.now), newest: nil, lastGood: nil) == .syncingHistory(HealthFixtures.now))
         #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.error, "signed_out"), lastGood: nil) == .needsSignIn)
-        #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.error, "needs_update"), lastGood: nil) == .needsUpdate)
         #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.skipped, "locked"), lastGood: nil) == .locked)
         #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.error, "network"), lastGood: nil) == .failed)
         #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.ok), lastGood: entry(.ok)) == .synced(HealthFixtures.now))
