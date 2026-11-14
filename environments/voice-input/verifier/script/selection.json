@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "sources": {
+    "fleurs-en_us": {
+      "parquet": "https://huggingface.co/api/datasets/google/fleurs/parquet/en_us/test/0.parquet",
+      "dataset": "google/fleurs, config en_us, split test",
+      "licence": "CC BY 4.0",
+      "homepage": "https://huggingface.co/datasets/google/fleurs",
+      "synthesized": false
+    },
+    "fleurs-cmn_hans_cn": {
+      "parquet": "https://huggingface.co/api/datasets/google/fleurs/parquet/cmn_hans_cn/test/0.parquet",
+      "dataset": "google/fleurs, config cmn_hans_cn, split test",
+      "licence": "CC BY 4.0",
+      "homepage": "https://huggingface.co/datasets/google/fleurs",
+      "synthesized": false
+    },
+    "ascend": {
+      "parquet": "https://huggingface.co/api/datasets/CAiRE/ASCEND/parquet/main/test/0.parquet",
+      "dataset": "CAiRE/ASCEND, split test",
+      "licence": "CC BY-SA 4.0",
+      "homepage": "https://huggingface.co/datasets/CAiRE/ASCEND",
+      "synthesized": false
+    }
+  },
+  "messages": [
+    {
+      "key": "en-1",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "11374239868879585530.wav",
+      "text": "The hot chocolate is up to Belgian standards. Fruit juices are pricey but excellent."
+    },
+    {
+      "key": "en-2",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "10903101168349732260.wav",
+      "text": "The pyramid sound and light show is one of the most interesting things in the area for kids."
+    },
+    {
+      "key": "en-3",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "11853072634976133891.wav",
+      "text": "These couples may choose to make an adoption plan for their baby."
+    },
+    {
+      "key": "en-4",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "10481451226514948764.wav",
+      "text": "Women: It is recommended that any women travellers say that they are married, regardless of actual marital status."
+    },
+    {
+      "key": "en-5",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "10492135991603561867.wav",
+      "text": "In some areas boiling water for a minute is enough, in others several minutes are needed."
+    },
+    {
+      "key": "en-6",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "1116140877447157610.wav",
+      "text": "Travellers are strongly advised to be aware of any risk of severe weather affecting their area as they may affect any travel plans."
+    },
+    {
+      "key": "en-7",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "10492761258488775721.wav",
+      "text": "Anyone who's going to drive at high latitudes or over mountain passes should consider the possibility of snow, ice, or freezing temperatures."
+    },
+    {
+      "key": "en-8",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "12382404601461539160.wav",
+      "text": "On some routes, the larger companies have their own planes, but for other routes and smaller firms there was a problem."
+    },
+    {
+      "key": "zh-1",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "11031078104467854733.wav",
+      "text": "你也可以咨询除贵国以外其他政府的建议，但他们的建议是为他们的公民而制定的。"
+    },
+    {
+      "key": "zh-2",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "10836453965609915738.wav",
+      "text": "若想从最佳角度欣赏香港的美景，可以离开该岛，前往对面的九龙海滨。"
+    },
+    {
+      "key": "zh-3",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "11980122233546007204.wav",
+      "text": "在外围岛屿，可能无法使用信用卡，但可以使用英美货币；请事先与房主联系，确认可接受的付款方式。"
+    },
+    {
+      "key": "zh-4",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "1153780427490892865.wav",
+      "text": "与所有南非国家公园一样，该公园每天都收取养护费和门票费。"
+    },
+    {
+      "key": "zh-5",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "10970596972697016742.wav",
+      "text": "在某些航线上，大型公司有自己的飞机，但对于其他航线和小公司来说，就有问题了。"
+    },
+    {
+      "key": "zh-6",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "11109877895501140381.wav",
+      "text": "对儿童来说，金字塔的声光表演是该地区最有趣的活动之一。"
+    },
+    {
+      "key": "zh-7",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "10134195680525011353.wav",
+      "text": "这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。"
+    },
+    {
+      "key": "zh-8",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "10400579561005332584.wav",
+      "text": "具体说来，据说可以通过正确解读微表情来判断一个人是否在撒谎。"
+    },
+    {
+      "key": "mixed-1",
+      "language": "mixed",
+      "source": "ascend",
+      "file": "ses1_spk17_L4538_831.4400_4.5200.wav",
+      "text": "深圳啊或者是上海这种比较大的城市会有更多opportunity"
+    },
+    {
+      "key": "mixed-2",
+      "language": "mixed",
+      "source": "ascend",
+      "file": "ses1_spk3_L6681_301.920_6.780.wav",
+      "text": "所以我我现在主要在做啊就是dialogue system相关就对话系统的研究"
+    },
+    {
+      "key": "mixed-3",
+      "language": "mixed",
+      "source": "ascend",
+      "file": "ses1_spk3_L6615_208.560_5.780.wav",
+      "text": "就是像那些就是没有deadline的时候也不会那么stress"
+    },
+    {
+      "key": "mixed-4",
+      "language": "mixed",
+      "source": "ascend",
+      "file": "ses2_spk17_L10821_261.1700_6.6200.wav",
+      "text": "所以你平时就现在大部分时间还是tennis就打网球"
+    }
+  ],
+  "long": {
+    "key": "long-1",
+    "language": "zh",
+    "source": "fleurs-cmn_hans_cn",
+    "targetSeconds": 180,
+    "pauseSeconds": 5,
+    "pauses": 2,
+    "note": "Assembled from consecutive FLEURS Mandarin test recordings (several speakers) with 0.4 s gaps, and two 5 s pauses at one third and two thirds."
+  }
+}

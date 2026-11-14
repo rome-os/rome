@@ -1,0 +1,404 @@
+{
+  "selectionVersion": 1,
+  "sampleRate": 48000,
+  "sources": {
+    "fleurs-en_us": {
+      "parquet": "https://huggingface.co/api/datasets/google/fleurs/parquet/en_us/test/0.parquet",
+      "dataset": "google/fleurs, config en_us, split test",
+      "licence": "CC BY 4.0",
+      "homepage": "https://huggingface.co/datasets/google/fleurs",
+      "synthesized": false
+    },
+    "fleurs-cmn_hans_cn": {
+      "parquet": "https://huggingface.co/api/datasets/google/fleurs/parquet/cmn_hans_cn/test/0.parquet",
+      "dataset": "google/fleurs, config cmn_hans_cn, split test",
+      "licence": "CC BY 4.0",
+      "homepage": "https://huggingface.co/datasets/google/fleurs",
+      "synthesized": false
+    },
+    "ascend": {
+      "parquet": "https://huggingface.co/api/datasets/CAiRE/ASCEND/parquet/main/test/0.parquet",
+      "dataset": "CAiRE/ASCEND, split test",
+      "licence": "CC BY-SA 4.0",
+      "homepage": "https://huggingface.co/datasets/CAiRE/ASCEND",
+      "synthesized": false
+    }
+  },
+  "messages": [
+    {
+      "key": "en-1",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "11374239868879585530.wav",
+      "text": "The hot chocolate is up to Belgian standards. Fruit juices are pricey but excellent.",
+      "wav": "en-1.wav",
+      "sha256": "825a52cb3bf4aa720c9b5576310fa936b83e7e10c0550a827035e9d2c6b29d31",
+      "seconds": 13.42,
+      "firstWordAt": 1.74,
+      "lastWordAt": 6.98
+    },
+    {
+      "key": "en-2",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "10903101168349732260.wav",
+      "text": "The pyramid sound and light show is one of the most interesting things in the area for kids.",
+      "wav": "en-2.wav",
+      "sha256": "ab8e85ea5a2acc9f949e6b0090f0b8530baa11dba82c6d03d6cf03dab0061191",
+      "seconds": 15.34,
+      "firstWordAt": 1.16,
+      "lastWordAt": 9.3
+    },
+    {
+      "key": "en-3",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "11853072634976133891.wav",
+      "text": "These couples may choose to make an adoption plan for their baby.",
+      "wav": "en-3.wav",
+      "sha256": "aec130caa97e1b451015216a1e5df047ca44c07a2757e8805f84f90826ed144f",
+      "seconds": 13.84,
+      "firstWordAt": 1.32,
+      "lastWordAt": 7.18
+    },
+    {
+      "key": "en-4",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "10481451226514948764.wav",
+      "text": "Women: It is recommended that any women travellers say that they are married, regardless of actual marital status.",
+      "wav": "en-4.wav",
+      "sha256": "03530bd163bb6268b14723f51d12a4810de0cbc220f3c9243c8e8887a36e604e",
+      "seconds": 17.14,
+      "firstWordAt": 1.92,
+      "lastWordAt": 9.84
+    },
+    {
+      "key": "en-5",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "10492135991603561867.wav",
+      "text": "In some areas boiling water for a minute is enough, in others several minutes are needed.",
+      "wav": "en-5.wav",
+      "sha256": "5dd690397f378ae87562577a5b656c2577ae179142b85efbc25fb1bea1afe8bf",
+      "seconds": 12.64,
+      "firstWordAt": 1.02,
+      "lastWordAt": 6.44
+    },
+    {
+      "key": "en-6",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "1116140877447157610.wav",
+      "text": "Travellers are strongly advised to be aware of any risk of severe weather affecting their area as they may affect any travel plans.",
+      "wav": "en-6.wav",
+      "sha256": "0e7fed2543a37eeed5a15ec0b45be967f18a2367ee12a04c6fc7e7cedfb26920",
+      "seconds": 14.32,
+      "firstWordAt": 1.28,
+      "lastWordAt": 8.24
+    },
+    {
+      "key": "en-7",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "10492761258488775721.wav",
+      "text": "Anyone who's going to drive at high latitudes or over mountain passes should consider the possibility of snow, ice, or freezing temperatures.",
+      "wav": "en-7.wav",
+      "sha256": "38e5aeb3986258a26cad10080c905b9f25c521bebbce88faa9564072b34af7da",
+      "seconds": 15.58,
+      "firstWordAt": 1.32,
+      "lastWordAt": 8.22
+    },
+    {
+      "key": "en-8",
+      "language": "en",
+      "source": "fleurs-en_us",
+      "file": "12382404601461539160.wav",
+      "text": "On some routes, the larger companies have their own planes, but for other routes and smaller firms there was a problem.",
+      "wav": "en-8.wav",
+      "sha256": "8647a724e01951b239662e5a80477f2932774257508bfd2871f51f55f3690eee",
+      "seconds": 16.36,
+      "firstWordAt": 2.8,
+      "lastWordAt": 8.34
+    },
+    {
+      "key": "zh-1",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "11031078104467854733.wav",
+      "text": "你也可以咨询除贵国以外其他政府的建议，但他们的建议是为他们的公民而制定的。",
+      "wav": "zh-1.wav",
+      "sha256": "bbce56bd4e66f37d2a9a57c9aff908892a83e7cca2dddc352c9eef481ed9daa3",
+      "seconds": 15.16,
+      "firstWordAt": 1.8,
+      "lastWordAt": 9.02
+    },
+    {
+      "key": "zh-2",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "10836453965609915738.wav",
+      "text": "若想从最佳角度欣赏香港的美景，可以离开该岛，前往对面的九龙海滨。",
+      "wav": "zh-2.wav",
+      "sha256": "1f538ddbecb8ff5c814304e51a7f28ceeb192e4833ea37f40818dcf29a2e3d7c",
+      "seconds": 16.9,
+      "firstWordAt": 2.8,
+      "lastWordAt": 8.5
+    },
+    {
+      "key": "zh-3",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "11980122233546007204.wav",
+      "text": "在外围岛屿，可能无法使用信用卡，但可以使用英美货币；请事先与房主联系，确认可接受的付款方式。",
+      "wav": "zh-3.wav",
+      "sha256": "20480274eb1d26191322dd7c6ee92782f50db57c9fa115bab83db66db859ae8b",
+      "seconds": 17.38,
+      "firstWordAt": 2.46,
+      "lastWordAt": 11.14
+    },
+    {
+      "key": "zh-4",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "1153780427490892865.wav",
+      "text": "与所有南非国家公园一样，该公园每天都收取养护费和门票费。",
+      "wav": "zh-4.wav",
+      "sha256": "990a976fcc1700339158a73f2894a58b8f8b28607e3d04b657b5005044414c3a",
+      "seconds": 16.18,
+      "firstWordAt": 1.18,
+      "lastWordAt": 9.16
+    },
+    {
+      "key": "zh-5",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "10970596972697016742.wav",
+      "text": "在某些航线上，大型公司有自己的飞机，但对于其他航线和小公司来说，就有问题了。",
+      "wav": "zh-5.wav",
+      "sha256": "87218fe00d8b6cfcf300b48bdb06ceaa1e411476eb2aba7c8e9a04059c54f555",
+      "seconds": 13.9,
+      "firstWordAt": 1.62,
+      "lastWordAt": 7.12
+    },
+    {
+      "key": "zh-6",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "11109877895501140381.wav",
+      "text": "对儿童来说，金字塔的声光表演是该地区最有趣的活动之一。",
+      "wav": "zh-6.wav",
+      "sha256": "d96c29e61c5e3430386b92649e17f31a704c9b1952deeed2004ebf8b8c411996",
+      "seconds": 17.9,
+      "firstWordAt": 1.38,
+      "lastWordAt": 8.3
+    },
+    {
+      "key": "zh-7",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "10134195680525011353.wav",
+      "text": "这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+      "wav": "zh-7.wav",
+      "sha256": "303a3277646bd007d95043be0011a641033fadc724bad5737d651429c0b9a3a7",
+      "seconds": 13.84,
+      "firstWordAt": 1.9,
+      "lastWordAt": 6.98
+    },
+    {
+      "key": "zh-8",
+      "language": "zh",
+      "source": "fleurs-cmn_hans_cn",
+      "file": "10400579561005332584.wav",
+      "text": "具体说来，据说可以通过正确解读微表情来判断一个人是否在撒谎。",
+      "wav": "zh-8.wav",
+      "sha256": "1203a5932183929741195e0ec6cc61204696f773b8c39d2d890495ece38591c9",
+      "seconds": 13.9,
+      "firstWordAt": 1.88,
+      "lastWordAt": 7.36
+    },
+    {
+      "key": "mixed-1",
+      "language": "mixed",
+      "source": "ascend",
+      "file": "ses1_spk17_L4538_831.4400_4.5200.wav",
+      "text": "深圳啊或者是上海这种比较大的城市会有更多opportunity",
+      "wav": "mixed-1.wav",
+      "sha256": "4093c6d7091aa8f9ae1eacb91952456e1be220ddd5fec5017a769ef1a2a10012",
+      "seconds": 11.52,
+      "firstWordAt": 1.24,
+      "lastWordAt": 5.52
+    },
+    {
+      "key": "mixed-2",
+      "language": "mixed",
+      "source": "ascend",
+      "file": "ses1_spk3_L6681_301.920_6.780.wav",
+      "text": "所以我我现在主要在做啊就是dialogue system相关就对话系统的研究",
+      "wav": "mixed-2.wav",
+      "sha256": "0887b0b91f0657bb1bd62555a85f343bb56cc732f2d1c03239d17eca36a35b0b",
+      "seconds": 13.78,
+      "firstWordAt": 1.16,
+      "lastWordAt": 7.54
+    },
+    {
+      "key": "mixed-3",
+      "language": "mixed",
+      "source": "ascend",
+      "file": "ses1_spk3_L6615_208.560_5.780.wav",
+      "text": "就是像那些就是没有deadline的时候也不会那么stress",
+      "wav": "mixed-3.wav",
+      "sha256": "c2722983fd205a577ed2b59c0d7b86e7335294aec046050c81ee787911a3a466",
+      "seconds": 12.78,
+      "firstWordAt": 1.08,
+      "lastWordAt": 6.46
+    },
+    {
+      "key": "mixed-4",
+      "language": "mixed",
+      "source": "ascend",
+      "file": "ses2_spk17_L10821_261.1700_6.6200.wav",
+      "text": "所以你平时就现在大部分时间还是tennis就打网球",
+      "wav": "mixed-4.wav",
+      "sha256": "0f4e1af8acff5decfdfc92ed14e8668e2d43d29a30b1365d15d9be1db6c1d022",
+      "seconds": 13.62,
+      "firstWordAt": 1.0,
+      "lastWordAt": 7.56
+    }
+  ],
+  "long": {
+    "key": "long-1",
+    "language": "zh",
+    "source": "fleurs-cmn_hans_cn",
+    "note": "Assembled from consecutive FLEURS Mandarin test recordings (several speakers) with 0.4 s gaps, and two 5 s pauses at one third and two thirds.",
+    "wav": "long-1.wav",
+    "sha256": "4edff0b8fda3da787e4383b804dbc1b21daa3471c3ed3733638e21777dfef1f6",
+    "seconds": 179.02,
+    "pausesAt": [46.04, 123.92],
+    "firstWordAt": 1.0,
+    "lastWordAt": 172.62,
+    "sentences": [
+      {
+        "file": "10026684690566417990.wav",
+        "text": "“这并不是告别。这是一个篇章的结束，也是新篇章的开始。”",
+        "startsAt": 1.0,
+        "endsAt": 7.42
+      },
+      {
+        "file": "10040380210557600780.wav",
+        "text": "钙、钾等元素属于金属，银和金等元素当然也是金属。",
+        "startsAt": 7.82,
+        "endsAt": 13.24
+      },
+      {
+        "file": "10056338555786085046.wav",
+        "text": "科学家们可以得出结论，暗物质对其他暗物质的影响方式与普通物质相同。",
+        "startsAt": 13.64,
+        "endsAt": 22.34
+      },
+      {
+        "file": "10073099671796350432.wav",
+        "text": "大多数现代科研望远镜都是巨型设施，位于大气条件优良的偏远地区。",
+        "startsAt": 22.74,
+        "endsAt": 35.06
+      },
+      {
+        "file": "10142207404499844309.wav",
+        "text": "当所有可用的资源在一个组织的职能部门之间得到有效利用时，创造力和独创性就会发生。",
+        "startsAt": 35.46,
+        "endsAt": 41.48
+      },
+      {
+        "file": "10144930991730701959.wav",
+        "text": "他随后被转送到剑桥的阿登布鲁克医院。",
+        "startsAt": 41.88,
+        "endsAt": 46.04
+      },
+      {
+        "file": "10154699825088384418.wav",
+        "text": "巴黎人是出了名的以自我中心、粗鲁和傲慢。",
+        "startsAt": 51.04,
+        "endsAt": 54.9
+      },
+      {
+        "file": "1017060882143751441.wav",
+        "text": "有些人认为他是对的，但也有很多人持相反意见；他们认为太阳系是围绕着地球运转的，太阳也是（甚至其他恒星也是）。",
+        "startsAt": 55.3,
+        "endsAt": 70.98
+      },
+      {
+        "file": "10182944938509562796.wav",
+        "text": "就像月球对地球施加拉力，引起潮汐一样，银河系也对人马座星系施加着作用力。",
+        "startsAt": 71.38,
+        "endsAt": 84.22
+      },
+      {
+        "file": "10234433636571543908.wav",
+        "text": "自由派人士对重建工作的批判主要集中在把重建合同授予了视为华盛顿内部人士的这一做法。",
+        "startsAt": 84.62,
+        "endsAt": 97.42
+      },
+      {
+        "file": "10279011772105822622.wav",
+        "text": "摩尔多瓦的首都是基希讷乌。当地语言是罗马尼亚语，但俄语也被广泛使用。",
+        "startsAt": 97.82,
+        "endsAt": 103.82
+      },
+      {
+        "file": "10325486695909573217.wav",
+        "text": "因此，很可能这个符号只是作为一个标签添加的。",
+        "startsAt": 104.22,
+        "endsAt": 111.66
+      },
+      {
+        "file": "10369927130798325266.wav",
+        "text": "在昆达里尼瑜伽中，昆达里尼能量（启迪能量）通过瑜伽姿势、呼吸练习、念语和视觉形象被唤醒。",
+        "startsAt": 112.06,
+        "endsAt": 123.92
+      },
+      {
+        "file": "10480388653191520950.wav",
+        "text": "这座城市与该国其他城市形成了鲜明对比，因为它更多的是阿拉伯风格，而不是非洲风格。",
+        "startsAt": 128.92,
+        "endsAt": 134.96
+      },
+      {
+        "file": "10481669967989866997.wav",
+        "text": "在中东温暖的气候中，房子并不是多重要。",
+        "startsAt": 135.36,
+        "endsAt": 138.74
+      },
+      {
+        "file": "10540148133747674396.wav",
+        "text": "它会攻击任何进入水中的东西；即使像霸王龙之类的巨型恐龙也不是它的对手。",
+        "startsAt": 139.14,
+        "endsAt": 147.46
+      },
+      {
+        "file": "10544065594858743613.wav",
+        "text": "宇宙中的一切都由物质构成，而所有的物质都由被称为原子的微小粒子组成。",
+        "startsAt": 147.86,
+        "endsAt": 153.62
+      },
+      {
+        "file": "10571681330551714048.wav",
+        "text": "它让玩家可以通过在空中移动设备来控制电子游戏中的运动和操作。",
+        "startsAt": 154.02,
+        "endsAt": 159.38
+      },
+      {
+        "file": "1061358881165519725.wav",
+        "text": "他没有设定削减数额，只是表示将根据中国的经济产出来决定数额。",
+        "startsAt": 159.78,
+        "endsAt": 164.72
+      },
+      {
+        "file": "10651933140664828475.wav",
+        "text": "阴暗面下面的地壳薄一些，高地下的地壳厚一些。",
+        "startsAt": 165.12,
+        "endsAt": 172.62
+      }
+    ],
+    "text": "“这并不是告别。这是一个篇章的结束，也是新篇章的开始。”钙、钾等元素属于金属，银和金等元素当然也是金属。科学家们可以得出结论，暗物质对其他暗物质的影响方式与普通物质相同。大多数现代科研望远镜都是巨型设施，位于大气条件优良的偏远地区。当所有可用的资源在一个组织的职能部门之间得到有效利用时，创造力和独创性就会发生。他随后被转送到剑桥的阿登布鲁克医院。巴黎人是出了名的以自我中心、粗鲁和傲慢。有些人认为他是对的，但也有很多人持相反意见；他们认为太阳系是围绕着地球运转的，太阳也是（甚至其他恒星也是）。就像月球对地球施加拉力，引起潮汐一样，银河系也对人马座星系施加着作用力。自由派人士对重建工作的批判主要集中在把重建合同授予了视为华盛顿内部人士的这一做法。摩尔多瓦的首都是基希讷乌。当地语言是罗马尼亚语，但俄语也被广泛使用。因此，很可能这个符号只是作为一个标签添加的。在昆达里尼瑜伽中，昆达里尼能量（启迪能量）通过瑜伽姿势、呼吸练习、念语和视觉形象被唤醒。这座城市与该国其他城市形成了鲜明对比，因为它更多的是阿拉伯风格，而不是非洲风格。在中东温暖的气候中，房子并不是多重要。它会攻击任何进入水中的东西；即使像霸王龙之类的巨型恐龙也不是它的对手。宇宙中的一切都由物质构成，而所有的物质都由被称为原子的微小粒子组成。它让玩家可以通过在空中移动设备来控制电子游戏中的运动和操作。他没有设定削减数额，只是表示将根据中国的经济产出来决定数额。阴暗面下面的地壳薄一些，高地下的地壳厚一些。"
+  }
+}
