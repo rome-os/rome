@@ -348,7 +348,16 @@ set_chat() {
 # Every test chat hears every bot message, since webhook authors count as bots. Every
 # other chat setting keeps Rome's default.
 let_chats_hear_bots() {
-  local name
+  local name tries=0
+  # Rome sets a rule only on a chat whose kind it knows, from a message there
+  # or from its platform's listing. Listing the connection's chats records each
+  # kind, once the Discord client is ready to list them.
+  until api GET "/chat-settings?connectionId=$(state connection)&limit=50" |
+    node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>process.exit(JSON.parse(s).items?.length?0:1))'; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 30 ] || die "Rome lists no Discord chats for the agent's connected account"
+    sleep 2
+  done
   while IFS= read -r name; do
     set_chat "$name" '{"activation":{"botMessages":"all"}}'
   done < <(all_chat_names)
@@ -361,6 +370,14 @@ set_model() {
   log "running the agent on $model ..."
   printf '{"tierModelMappings":{"anthropic":{"large":"%s","medium":"%s","small":"%s"}}}' \
     "$model" "$model" "$model" | api PUT /settings >/dev/null
+}
+
+# The agent answers only the bond levels the guardian picks on the Inbox page,
+# the guardian alone by default. The team are acquaintances, so the agent
+# answers them, and still not a stranger.
+let_agent_answer_team() {
+  log "letting the agent answer the team ..."
+  printf '{"replyToBondLevels":["guardian","inner-circle","acquaintance"]}' | api PUT /settings >/dev/null
 }
 
 cmd_up() {
@@ -384,6 +401,7 @@ cmd_up() {
     let_chats_hear_bots
   fi
   set_model
+  let_agent_answer_team
   log "ready. Drive it with environments/chief-of-staff/cos-env. Hand it the team with: cos-env seed <dir>"
 }
 
@@ -442,8 +460,9 @@ put_document() {
 
 # Gives each member a webhook in each chat it is in, links all of a member's
 # webhooks to one person, sets the names the members post under, and hands the
-# agent the roster and goals. team.json maps each member to a person:
-# { "member1": { "displayName": "...", "bondLevel": "..." }, ... }. member1:2,
+# agent the roster and goals. team.json is the verifier's team, whose members
+# each name an account and a person: { "members": [{ "account": "member1",
+# "name": "...", "bondLevel"?: "..." }, ...] }, acquaintance when unset. member1:2,
 # member1's second account, belongs to member1's person and posts under the same
 # name until renamed. The roster and goals are markdown the agent reads through
 # its own documents.
@@ -464,9 +483,11 @@ cmd_seed() {
   done < <(all_chat_names)
   printf '{%s}' "$plan" | discord webhooks
   for member in "${MEMBERS[@]}"; do
-    display="$(json "$member.displayName" <"$dir/team.json")"
-    bond="$(json "$member.bondLevel" <"$dir/team.json")"
-    [ -n "$display" ] || die "team.json has no displayName for $member"
+    read -r bond display < <(node -e '
+      const team = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const m = (team.members ?? []).find((m) => m.account === process.argv[2]);
+      if (m?.name) process.stdout.write(`${m.bondLevel ?? "acquaintance"} ${m.name}\n`);' \
+      "$dir/team.json" "$member") || die "team.json names no person for $member"
     # Every webhook of the member, its second account's included, is one of its accounts.
     accounts="$(node -e '
       const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -476,7 +497,7 @@ cmd_seed() {
       process.stdout.write(JSON.stringify(ids.map((id) => ({ channel: "discord", channelUserId: id }))));' \
       "$STATE_FILE" "$member")"
     log "linking $member to $display ..."
-    printf '{"displayName":"%s","bondLevel":"%s","accounts":%s}' "$display" "${bond:-other}" "$accounts" |
+    printf '{"displayName":"%s","bondLevel":"%s","accounts":%s}' "$display" "$bond" "$accounts" |
       api POST /people >/dev/null || die "Rome did not create a person for $display"
     discord rename "$member" "$display"
     [ "$member" != member1 ] || discord rename "member1:2" "$display"

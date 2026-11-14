@@ -14,6 +14,9 @@ import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 const API = "https://discord.com/api/v10";
 // Discord error codes this script reacts to.
 const UNKNOWN_CHANNEL = 10003;
+// The Discord message types a person writes: a plain message and a reply.
+const DEFAULT_MESSAGE = 0;
+const REPLY_MESSAGE = 19;
 // The prefix of every webhook this environment makes, so a reset finds its own.
 const WEBHOOK_PREFIX = "cos-";
 
@@ -144,7 +147,8 @@ async function messagesAfter(bot, channelId, since) {
     after = all.at(-1).id;
     if (page.length < 100) break;
   }
-  return all;
+  // Discord's own notices, such as a member joining the server, are not chat.
+  return all.filter((m) => m.type === DEFAULT_MESSAGE || m.type === REPLY_MESSAGE);
 }
 
 // The ids of every thread under `channelId`, open or archived, public or private.

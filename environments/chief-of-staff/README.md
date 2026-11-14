@@ -7,6 +7,7 @@ A Rome container of its own, built from this checkout, connected to a test Disco
 - The chief of staff agent reading and answering in Discord chats, through today's Discord bot connection.
 - Attribution to the right person, including a member with two accounts and a member whose display name changes mid-run, since every webhook a member posts through is linked to that member's person.
 - The agent hearing other bots: every test chat has `activation.botMessages` set to `all`, because Discord marks webhook messages as bot messages.
+- The agent answering the team: `up` sets the Inbox page's reply-to setting to the guardian, inner circle and acquaintances, and `seed` links the members as acquaintances unless `team.json` names another bond level. Every answer to a member still passes the envoy check, as in production, which can hold it for the guardian's approval.
 - Renewal: the agent's answers survive a renewed session and a Rome restart.
 
 ## Differences from production
