@@ -74,7 +74,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { ConciergeChats } from "./ConciergeEntry";
 import { isElectronShell } from "@/lib/electron-shell";
 import { STANDALONE_DISPLAY_QUERY } from "@/lib/media-query";
-import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
+import { emitSessionsChanged, useArchiveSession, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
@@ -525,6 +525,11 @@ export function RecentChats({
   const recountConciergeChats = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
   }, [queryClient]);
+  // A read in the open Concierge chat recounts here too. In Concierge mode the
+  // section's own listener does.
+  useSessionsChanged(() => {
+    if (hasConcierge && mode === "chat") recountConciergeChats();
+  });
   useLiveEvents(
     chatSessionTopic(conciergeChatId ?? ""),
     { message_insert: { schema: z.unknown(), fn: recountConciergeChats } },

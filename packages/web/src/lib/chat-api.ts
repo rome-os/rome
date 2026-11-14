@@ -432,15 +432,22 @@ export async function updateSessionProject(
  * Deletes a chat. For a topic chat, `followsAndTasks: "stop"` ends its follows
  * and stops its open tasks; without it they move to the main chat.
  */
+/** Fired on `window` once a delete has gone through, with the chat's id as `detail`. */
+export const CHAT_SESSION_DELETED_EVENT = "rome:chat-session-deleted";
+
 export async function deleteSession(
   sessionId: string,
   options: { followsAndTasks?: "stop" } = {},
 ): Promise<void> {
   const query = options.followsAndTasks ? `?followsAndTasks=${options.followsAndTasks}` : "";
-  await fetch(`/api/chat/sessions/${sessionId}${query}`, {
+  const res = await fetch(`/api/chat/sessions/${sessionId}${query}`, {
     method: "DELETE",
     credentials: "include",
   });
+  // A chat that was already gone is gone too, for every list that still shows it.
+  if (res.ok || res.status === 404) {
+    window.dispatchEvent(new CustomEvent(CHAT_SESSION_DELETED_EVENT, { detail: sessionId }));
+  }
 }
 
 export async function markSessionRead(

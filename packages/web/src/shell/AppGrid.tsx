@@ -1,7 +1,6 @@
 import { AppWindow, ExternalLink, Info, MessageCircle, Pin, PinOff, Search } from "lucide-react";
 import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { AppOrigin, InstalledAppCard } from "@rome/api-types/apps";
 import {
@@ -14,7 +13,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useChatListModeForShell, useLastOrdinaryChatId } from "@/hooks/use-chat-list-mode";
-import { findCachedChatSession, hasCachedChatSessions } from "@/hooks/use-chat-sessions";
+import { useChatSessionMayExist } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { railChatHref } from "@/lib/chat-list-mode";
 import { isElectronShell } from "@/lib/electron-shell";
@@ -190,13 +189,9 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const tileClass = railLinkClass(labelled);
   // Chat opens the main chat in Concierge mode, else the ordinary chat last
   // opened here, which is a blank chat once it is gone from the loaded lists.
-  const queryClient = useQueryClient();
   const chatListMode = useChatListModeForShell(true, "concierge");
   const lastOrdinaryChatId = useLastOrdinaryChatId();
-  const lastOrdinaryChatExists =
-    lastOrdinaryChatId === null ||
-    !hasCachedChatSessions(queryClient) ||
-    findCachedChatSession(queryClient, lastOrdinaryChatId) !== undefined;
+  const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
   const entryHref = (entry: BuiltinNavEntry): string =>
     entry.id === "chat"
       ? railChatHref(chatListMode, lastOrdinaryChatId, lastOrdinaryChatExists)

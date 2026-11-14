@@ -4,8 +4,13 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useEffect } from "react";
-import { listSessions, type SessionScope, type SessionStatusFilter } from "@/lib/chat-api";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import {
+  CHAT_SESSION_DELETED_EVENT,
+  listSessions,
+  type SessionScope,
+  type SessionStatusFilter,
+} from "@/lib/chat-api";
 import type { ChatSession } from "@/lib/chat-types";
 import { CHAT_SESSIONS_CHANGED_EVENT } from "@/lib/session-events";
 
@@ -29,11 +34,39 @@ export function findCachedChatSession(
   return undefined;
 }
 
-/** Whether this tab has loaded any chat list, so a chat's absence from them means something. */
-export function hasCachedChatSessions(queryClient: QueryClient): boolean {
-  return queryClient
-    .getQueriesData<ChatSession[]>({ queryKey: CHAT_SESSIONS_QUERY_KEY })
-    .some(([, list]) => list !== undefined);
+/**
+ * False when the lists this tab has loaded show the chat is gone: it is in none
+ * of them, and one of them is not the archived list, which does not hold a
+ * chat that is not archived. True when a list holds it, and when no list can
+ * say. Never fetches.
+ */
+function chatSessionMayExist(queryClient: QueryClient, id: string): boolean {
+  let proves = false;
+  for (const [key, list] of queryClient.getQueriesData<ChatSession[]>({
+    queryKey: CHAT_SESSIONS_QUERY_KEY,
+  })) {
+    if (!list) continue;
+    if (list.some((session) => session.id === id)) return true;
+    if (key[1] !== "archived") proves = true;
+  }
+  return !proves;
+}
+
+/** {@link chatSessionMayExist}, kept current as this tab's chat lists change. True for no id. */
+export function useChatSessionMayExist(id: string | null): boolean {
+  const queryClient = useQueryClient();
+  // Holds the deletion listener, so a delete reaches every cached list while the
+  // rail shows even when no list is on screen.
+  useEffect(() => retainSessionsChangedInvalidation(queryClient), [queryClient]);
+  const subscribe = useCallback(
+    (onChange: () => void) => queryClient.getQueryCache().subscribe(onChange),
+    [queryClient],
+  );
+  return useSyncExternalStore(
+    subscribe,
+    () => id === null || chatSessionMayExist(queryClient, id),
+    () => true,
+  );
 }
 
 const pendingInvalidations = new WeakMap<QueryClient, Promise<void>>();
@@ -56,10 +89,12 @@ export function invalidateChatSessions(queryClient: QueryClient): Promise<void> 
 }
 
 /**
- * The one window listener per client that turns a sessions-changed event into
- * an invalidation, and how many `useChatSessions` consumers hold it. One
- * invalidation reaches every list under the prefix, so a listener per consumer
- * would refetch each list once per mounted consumer.
+ * The one pair of window listeners per client, and how many consumers hold
+ * them. One turns a sessions-changed event into an invalidation, which reaches
+ * every list under the prefix, so a listener per consumer would refetch each
+ * list once per mounted consumer. The other drops a deleted chat from every
+ * cached list, since a delete edits only the list on screen and an invalidation
+ * refetches only the lists in use.
  */
 const sessionsChangedSubscriptions = new WeakMap<
   QueryClient,
@@ -72,10 +107,20 @@ function retainSessionsChangedInvalidation(queryClient: QueryClient): () => void
     const listener = () => {
       void invalidateChatSessions(queryClient);
     };
+    const onDeleted = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      queryClient.setQueriesData<ChatSession[]>({ queryKey: CHAT_SESSIONS_QUERY_KEY }, (list) =>
+        list?.filter((session) => session.id !== id),
+      );
+    };
     window.addEventListener(CHAT_SESSIONS_CHANGED_EVENT, listener);
+    window.addEventListener(CHAT_SESSION_DELETED_EVENT, onDeleted);
     subscription = {
       count: 0,
-      stop: () => window.removeEventListener(CHAT_SESSIONS_CHANGED_EVENT, listener),
+      stop: () => {
+        window.removeEventListener(CHAT_SESSIONS_CHANGED_EVENT, listener);
+        window.removeEventListener(CHAT_SESSION_DELETED_EVENT, onDeleted);
+      },
     };
     sessionsChangedSubscriptions.set(queryClient, subscription);
   }
