@@ -1,5 +1,16 @@
 # @rome-os/app-runtime
 
+## [0.11.4](https://github.com/rome-os/rome/compare/app-runtime-v0.11.3...app-runtime-v0.11.4) (2026-11-14)
+
+
+### Features
+
+* **app-runtime:** an app's card described as data can wait for an answer ([#2125](https://github.com/rome-os/rome/issues/2125)) ([db1fc76](https://github.com/rome-os/rome/commit/db1fc766c67cde539e4ab44ac4b6f38b62a029e8))
+* **app-runtime:** describe the ask-user card as data, with inputs and an answer ([#2068](https://github.com/rome-os/rome/issues/2068)) ([4d5c71a](https://github.com/rome-os/rome/commit/4d5c71a63d09e295f988c23c4946c296a4dcccb0))
+* **app-runtime:** let an action describe its chat card as data ([#2065](https://github.com/rome-os/rome/issues/2065)) ([dd9d29b](https://github.com/rome-os/rome/commit/dd9d29b2c9e94a04fd83f5725d4937b417ad30a4))
+* **app-runtime:** let an app action show its card in the dashboard chat without waiting ([#2038](https://github.com/rome-os/rome/issues/2038)) ([98bca00](https://github.com/rome-os/rome/commit/98bca0038c677c34a26075e557f4f55765df2329))
+* **connections:** grant apps bounded Feishu document reads ([#2113](https://github.com/rome-os/rome/issues/2113)) ([8c2f831](https://github.com/rome-os/rome/commit/8c2f831249066b1b0aaa6df6ebf179d0ab1a7acf))
+
 ## [0.11.3](https://github.com/rome-os/rome/compare/app-runtime-v0.11.2...app-runtime-v0.11.3) (2026-11-11)
 
 

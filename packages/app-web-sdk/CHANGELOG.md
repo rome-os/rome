@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.1](https://github.com/rome-os/rome/compare/app-web-sdk-v0.4.0...app-web-sdk-v0.4.1) (2026-11-14)
+
+
+### Features
+
+* **app-runtime:** let an app action show its card in the dashboard chat without waiting ([#2038](https://github.com/rome-os/rome/issues/2038)) ([98bca00](https://github.com/rome-os/rome/commit/98bca0038c677c34a26075e557f4f55765df2329))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.3.0 to ^0.3.11
+
 ## [0.4.0](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.7...app-web-sdk-v0.4.0) (2026-11-03)
 
 
