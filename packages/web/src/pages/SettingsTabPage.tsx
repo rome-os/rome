@@ -8,6 +8,7 @@ import {
   SectionTitle,
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
+import { VoiceInputRow } from "@/components/voice-input-row";
 import { ComputerUseRow } from "@/components/computer-use-section";
 import { SpokenRecapsRows } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
@@ -908,6 +909,7 @@ function AdvancedSection({
             <SystemVersionRow />
             <SystemDiagnosisRow details={<RelayHealthSection />} />
             <ComputerUseRow />
+            <VoiceInputRow />
           </FormRows>
         </Section>
         <FeaturesSection />

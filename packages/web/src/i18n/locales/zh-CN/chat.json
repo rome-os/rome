@@ -699,5 +699,17 @@
     "channel": "渠道",
     "sendMessage": "发送消息",
     "action": "动作"
+  },
+  "voiceInput": {
+    "start": "开始语音输入",
+    "stop": "停止语音输入",
+    "stopped": {
+      "provider-unavailable": "转写服务不可用，已停止收听",
+      "provider-refused": "转写服务拒绝了请求，已停止收听",
+      "bad-request": "出错，已停止收听",
+      "microphone-blocked": "麦克风被阻止，请在浏览器的网站设置中允许",
+      "microphone-missing": "未找到麦克风",
+      "connection-lost": "与 Rome 的连接已断开，已停止收听"
+    }
   }
 }

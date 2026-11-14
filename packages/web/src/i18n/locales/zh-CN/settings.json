@@ -908,7 +908,14 @@
     "restartTimeoutTitle": "升级耗时超出预期",
     "restartTimeoutBody": "{{name}} 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。",
-    "close": "关闭"
+    "close": "关闭",
+    "voiceInput": {
+      "title": "语音输入",
+      "loading": "加载中...",
+      "loadFailed": "语音输入信息加载失败",
+      "place": "口述的消息经由 Rome 发送到 {{provider}}（{{host}}）转为文字。Rome 不保存任何音频。",
+      "off": "未配置转写服务，因此消息输入框没有语音输入按钮。"
+    }
   },
   "easterEgg": {
     "closeLabel": "关闭高级彩蛋",

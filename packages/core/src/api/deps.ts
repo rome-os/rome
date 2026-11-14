@@ -1,4 +1,5 @@
 import type { AgentNameEvents } from "../people/agent-name.js";
+import type { Transcriber } from "../voice-input/index.js";
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
@@ -238,6 +239,8 @@ export interface ApiDeps {
   visitorAllowListSync: VisitorAllowListSync;
   /** The chats the guardian's phone app holds open on the live-events socket. */
   phoneWatching?: PhoneWatching;
+  /** Where dictated speech becomes text. Absent when the instance configures no provider. */
+  transcriber?: Transcriber | null;
   /** Whether the guardian is at a web dashboard, from its signals on the live-events socket. */
   dashboardActivity?: DashboardActivity;
   /** Webhook relay drainer — present so the Integrations settings route can

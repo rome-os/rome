@@ -699,5 +699,17 @@
     "channel": "Channel",
     "sendMessage": "Send a message",
     "action": "Action"
+  },
+  "voiceInput": {
+    "start": "Start voice input",
+    "stop": "Stop voice input",
+    "stopped": {
+      "provider-unavailable": "Transcription service unavailable. Listening stopped",
+      "provider-refused": "Transcription service refused the request. Listening stopped",
+      "bad-request": "Listening stopped after an error",
+      "microphone-blocked": "Microphone blocked. Allow it in the browser's site settings",
+      "microphone-missing": "No microphone found",
+      "connection-lost": "Connection to Rome lost. Listening stopped"
+    }
   }
 }

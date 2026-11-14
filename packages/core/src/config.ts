@@ -18,6 +18,15 @@ function isWssDrainUrl(value: string): boolean {
   }
 }
 
+function isWsUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "ws:" || u.protocol === "wss:";
+  } catch {
+    return false;
+  }
+}
+
 const configSchema = z.object({
   // Statsig server secret key. When present, the cloud-auth rollout gate
   // (`rome_cloud_auth`) is evaluated against Statsig live on each /login, keyed
@@ -116,6 +125,18 @@ const configSchema = z.object({
 
   // Observability
   otelExporterEndpoint: z.string().optional(),
+
+  // Voice input. Absent hides the dashboard's voice control. `url` overrides
+  // the provider's own streaming address, which is how a test environment
+  // points Rome at a stand-in transcriber.
+  voiceInput: z
+    .object({
+      provider: z.enum(["soniox"]),
+      apiKey: z.string().min(1),
+      url: z.string().refine(isWsUrl, "must be a ws:// or wss:// URL").optional(),
+      model: z.string().min(1).optional(),
+    })
+    .optional(),
 
   // Webhook relay drainer. Absent unless explicitly configured. When present, a
   // persistent WS client drains buffered webhooks from the Cloudflare relay and
@@ -227,6 +248,22 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   // Observability
   if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
     raw.otelExporterEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  }
+
+  // Voice input. Built when any ROME_TRANSCRIPTION_* var is set, so a partial set
+  // fails boot instead of quietly hiding the voice control.
+  if (
+    env.ROME_TRANSCRIPTION_PROVIDER ||
+    env.ROME_TRANSCRIPTION_API_KEY ||
+    env.ROME_TRANSCRIPTION_URL ||
+    env.ROME_TRANSCRIPTION_MODEL
+  ) {
+    raw.voiceInput = {
+      provider: env.ROME_TRANSCRIPTION_PROVIDER,
+      apiKey: env.ROME_TRANSCRIPTION_API_KEY,
+      ...(env.ROME_TRANSCRIPTION_URL && { url: env.ROME_TRANSCRIPTION_URL }),
+      ...(env.ROME_TRANSCRIPTION_MODEL && { model: env.ROME_TRANSCRIPTION_MODEL }),
+    };
   }
 
   // Webhook relay drainer. Build the object only when a RELAY_DRAIN_* var is

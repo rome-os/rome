@@ -908,7 +908,14 @@
     "restartTimeoutTitle": "The upgrade is taking longer than expected",
     "restartTimeoutBody": "{{name}} hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud.",
-    "close": "Close"
+    "close": "Close",
+    "voiceInput": {
+      "title": "Voice input",
+      "loading": "Loading...",
+      "loadFailed": "Failed to load voice input",
+      "place": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, which turns it into text. Rome keeps no audio.",
+      "off": "No transcription provider is configured, so message fields have no voice control."
+    }
   },
   "easterEgg": {
     "closeLabel": "Close advanced easter egg",

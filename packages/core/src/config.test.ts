@@ -27,6 +27,10 @@ const CONFIG_ENV_KEYS = [
   "OTEL_EXPORTER_OTLP_ENDPOINT",
   "RELAY_DRAIN_URL",
   "RELAY_DRAIN_KEY",
+  "ROME_TRANSCRIPTION_PROVIDER",
+  "ROME_TRANSCRIPTION_API_KEY",
+  "ROME_TRANSCRIPTION_URL",
+  "ROME_TRANSCRIPTION_MODEL",
 ] as const;
 
 beforeEach(() => {
@@ -205,6 +209,33 @@ describe("loadConfig()", () => {
     rs.stubEnv("RELAY_DRAIN_URL", "wss://relay.example/c/mb1");
 
     expect(() => loadConfig()).toThrow(/Invalid configuration/);
+  });
+
+  it("leaves voice input off unless a provider is configured", () => {
+    expect(loadConfig().voiceInput).toBeUndefined();
+  });
+
+  it("reads the voice input provider, credential and address override", () => {
+    rs.stubEnv("ROME_TRANSCRIPTION_PROVIDER", "soniox");
+    rs.stubEnv("ROME_TRANSCRIPTION_API_KEY", "key-1");
+    rs.stubEnv("ROME_TRANSCRIPTION_URL", "ws://127.0.0.1:9100/transcribe-websocket");
+    expect(loadConfig().voiceInput).toEqual({
+      provider: "soniox",
+      apiKey: "key-1",
+      url: "ws://127.0.0.1:9100/transcribe-websocket",
+    });
+  });
+
+  it("fails boot on a voice input provider without a credential", () => {
+    rs.stubEnv("ROME_TRANSCRIPTION_PROVIDER", "soniox");
+    expect(() => loadConfig()).toThrow(/voiceInput/);
+  });
+
+  it("fails boot on a voice input address that is not ws or wss", () => {
+    rs.stubEnv("ROME_TRANSCRIPTION_PROVIDER", "soniox");
+    rs.stubEnv("ROME_TRANSCRIPTION_API_KEY", "key-1");
+    rs.stubEnv("ROME_TRANSCRIPTION_URL", "https://stt.example");
+    expect(() => loadConfig()).toThrow(/ws:\/\/ or wss:\/\//);
   });
 
   it("leaves the action-worker process cap to the host unless overridden", () => {
