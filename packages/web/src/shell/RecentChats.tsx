@@ -464,7 +464,9 @@ export function RecentChats({
     isError,
     refetch,
     update: updateSessions,
-  } = useChatSessions(statusFilter, scope);
+    // Its status stream runs only while it shows, so coming back to Chat reads
+    // the list again. A chat switch keeps it mounted.
+  } = useChatSessions(statusFilter, scope, { refetchOnShow: true });
   // Cached rows show at once and a failed refetch keeps them, so the skeleton
   // is only for a list that has never loaded.
   const phase: LoadPhase = isError ? "error" : cachedSessions ? "ready" : "loading";

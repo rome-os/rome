@@ -125,6 +125,24 @@ describe("listWatchSources", () => {
     );
   });
 
+  it("asks every adapter's service at once, and keeps the adapters' order", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const { watch } = await listWatchSources(
+      deps({
+        composioAccount: async (service) => {
+          inFlight += 1;
+          most = Math.max(most, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, service === "gmail" ? 20 : 1));
+          inFlight -= 1;
+          return `${service}@example.com`;
+        },
+      }),
+    );
+    expect(most).toBeGreaterThan(1);
+    expect(watch.map((w) => w.service)).toEqual(ADAPTERS.map((a) => a.source));
+  });
+
   it("says what is missing: a connection, the relay, or the account's identity", async () => {
     const off = await listWatchSources(
       deps({ githubToken: async () => null, composioSignedIn: async () => false }),
