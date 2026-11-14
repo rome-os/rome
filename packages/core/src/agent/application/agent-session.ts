@@ -253,6 +253,9 @@ export interface SendTurnOptions {
   /** The message `replyTo` names, as Rome holds it where the turn's session
    *  stands, or null when Rome holds none. Read only with `promptFacts`. */
   quoted?: PromptMessage | null;
+  /** The message the turn answers, as Rome holds it where the turn's session
+   *  stands, or null when Rome holds none. Read only with `promptFacts`. */
+  current?: PromptMessage | null;
   initiatedBy?: "user" | "system";
   /** Pushes the messages said in the turn at this level (RunParams.pushLevel). */
   pushLevel?: PushLevel;
@@ -2002,6 +2005,7 @@ interface TurnSink {
   romeSessionId: string;
   replyTo?: MessageReplyReference;
   quoted?: PromptMessage | null;
+  current?: PromptMessage | null;
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
   actor?: TurnActor;
@@ -3540,6 +3544,7 @@ class AgentSessionImpl implements AgentSession {
       romeSessionId: options?.romeSessionId ?? this.sessionId,
       replyTo: options?.replyTo,
       quoted: options?.quoted ?? null,
+      current: options?.current ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
       actor: options?.actor,
@@ -3732,7 +3737,7 @@ class AgentSessionImpl implements AgentSession {
       // The prompt facts answer null where it catches up on nothing.
       const unseen =
         this.kind === "conversation" && sink.threadContext
-          ? (this.deps.promptFacts?.unseen(sink.romeSessionId) ?? null)
+          ? ((await this.deps.promptFacts?.unseen(sink.romeSessionId)) ?? null)
           : null;
       if (unseen) {
         unseenMessageIds = unseen.map((message) => message.id);
@@ -3740,6 +3745,7 @@ class AgentSessionImpl implements AgentSession {
           unseen,
           quoted: sink.quoted,
           replyTo: sink.replyTo,
+          current: sink.current,
         });
       }
       // Every turn, subagents included: the folder is where the work happens.

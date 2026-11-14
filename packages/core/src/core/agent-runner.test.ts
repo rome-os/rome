@@ -7,7 +7,8 @@ import { startAfter, testReceipt, testTurnHandle } from "../test/turn-handle.js"
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
-import type { PromptFacts } from "../agent/index.js";
+import type { PromptFacts, UnseenMessage } from "../agent/index.js";
+import { SenderLabels } from "../chats/sender-labels.js";
 import type { AgentDefinition } from "../agent/index.js";
 import { claudeStoppedTurnResult, readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
@@ -116,7 +117,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { TurnUsageFacts } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
-import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
+import type { UnseenLine } from "../sessions/turn-links.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
   reportOf,
@@ -6347,6 +6348,7 @@ describe("AgentRunner", () => {
       const ambient: UnseenLine = {
         id: 7,
         senderName: "Bob",
+        account: { platform: "discord", id: "bob" },
         text: "ambient update",
         at: new Date("2026-08-03T08:01:00.000Z"),
         fromRome: false,
@@ -6358,6 +6360,7 @@ describe("AgentRunner", () => {
       // already reaches the agent, as webchat's does.
       const promptFacts = chatPromptFacts({
         facts: { unseen: () => [ambient], seen: (ids) => void seen.push(ids) },
+        labels: new SenderLabels({ byAccount: async () => null }),
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface: (channel) =>
           channel === "discord" ? { interactiveCards: false, promptContext: false } : null,
@@ -6404,10 +6407,10 @@ describe("AgentRunner", () => {
         senderName: "Carol",
       });
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const unseen: UnseenLine[] = [
+      const unseen: UnseenMessage[] = [
         {
           id: 7,
-          senderName: "Bob",
+          sender: "Bob",
           text: "ambient update",
           at,
           fromRome: false,
@@ -6416,7 +6419,7 @@ describe("AgentRunner", () => {
         },
         {
           id: 8,
-          senderName: "Dana",
+          sender: "Dana",
           text: "second update",
           at,
           fromRome: false,
@@ -6425,8 +6428,8 @@ describe("AgentRunner", () => {
         },
       ];
       const seen: { ids: readonly number[]; sessionId: string; turnId: string }[] = [];
-      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
-        unseen: (sessionId) => (sessionId === conversation.id ? unseen : []),
+      const turnLinks: PromptFacts = {
+        unseen: async (sessionId) => (sessionId === conversation.id ? unseen : []),
         seen: (ids, sessionId, turnId) => {
           seen.push({ ids, sessionId, turnId });
         },
@@ -6466,7 +6469,7 @@ describe("AgentRunner", () => {
     });
 
     async function linkedPrompt(
-      unseen: UnseenLine[],
+      unseen: UnseenMessage[],
       threadContext: { threadId: string; parentThreadId?: string },
     ): Promise<string> {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
@@ -6483,8 +6486,8 @@ describe("AgentRunner", () => {
         ...(threadContext.parentThreadId ? { parentThreadId: threadContext.parentThreadId } : {}),
         agentName: "main",
       });
-      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
-        unseen: () => unseen,
+      const turnLinks: PromptFacts = {
+        unseen: async () => unseen,
         seen: () => undefined,
       };
       const prompts: string[] = [];
@@ -6515,13 +6518,13 @@ describe("AgentRunner", () => {
 
     it("leaves the line an ordinary reply quotes out of the catch-up", async () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const target = { id: 1, senderName: "Bob", text: "the question", at };
+      const target = { id: 1, sender: "Bob", text: "the question", at };
       const prompt = await linkedPrompt(
         [
           { ...target, fromRome: false, quoted: null, quotesOutside: false },
           {
             id: 2,
-            senderName: "Rome",
+            sender: "Rome",
             text: "the answer",
             at,
             fromRome: true,
@@ -6536,12 +6539,12 @@ describe("AgentRunner", () => {
 
     it("carries the line that started a thread before Rome's first line in it", async () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const starter = { id: 1, senderName: "Bob", text: "start here", at };
+      const starter = { id: 1, sender: "Bob", text: "start here", at };
       const prompt = await linkedPrompt(
         [
           {
             id: 2,
-            senderName: "Rome",
+            sender: "Rome",
             text: "on it",
             at,
             fromRome: true,
@@ -6557,9 +6560,9 @@ describe("AgentRunner", () => {
 
     it("carries only the newest 20 unseen lines, and counts the rest", async () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const unseen: UnseenLine[] = Array.from({ length: 21 }, (_, index) => ({
+      const unseen: UnseenMessage[] = Array.from({ length: 21 }, (_, index) => ({
         id: index + 1,
-        senderName: "Participant",
+        sender: "Participant",
         text: `ambient ${index + 1}`,
         at,
         fromRome: false,
@@ -6582,8 +6585,8 @@ describe("AgentRunner", () => {
         threadId: "wechat-runtime-reply",
         agentName: "main",
       });
-      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
-        unseen: () => [],
+      const turnLinks: PromptFacts = {
+        unseen: async () => [],
         seen: () => undefined,
       };
       const providerPrompts: string[] = [];

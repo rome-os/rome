@@ -2,6 +2,8 @@
 // inbound replies and WebChat replies both build their block here, so the
 // agent reads one format wherever the reply came from.
 
+import { xmlAttr } from "./prompt.js";
+
 /** One quoted line: `[ISO] Sender: text`. The timestamp is left out when the message has none. */
 export function replyContextLine(message: {
   createdAt?: Date;
@@ -17,9 +19,11 @@ export function replyContextSection(line: string): string[] {
   return ["<reply_context>", line, "</reply_context>"];
 }
 
-/** The `<current_message>` block around the turn's prompt, one string per line. */
-export function currentMessageSection(prompt: string): string[] {
-  return ["<current_message>", prompt, "</current_message>"];
+/** The `<current_message>` block around the turn's prompt, one string per
+ *  line, naming who said it when `from` is given. */
+export function currentMessageSection(prompt: string, from?: string | null): string[] {
+  const open = from ? `<current_message from="${xmlAttr(from)}">` : "<current_message>";
+  return [open, prompt, "</current_message>"];
 }
 
 /** Puts a replied-to line ahead of the prompt it answers. */

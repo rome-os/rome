@@ -78,6 +78,7 @@ Every account Rome has heard of, and every account with a link or a dismissal, e
 The one question Participation asks People about a sender. The answer is a person with their bond level, or nobody.
 
 - A stranger and a dismissed account both answer nobody. The difference matters only to the guardian, in which accounts are shown for them to decide about.
+- Participation asks it about the sender of every message an agent reads, each time it reads one.
 
 ## Decided against
 

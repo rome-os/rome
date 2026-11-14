@@ -17,7 +17,7 @@ interface ContextMessage {
 function contextMessage(message: PromptMessage): ContextMessage {
   return {
     id: String(message.id),
-    sender: message.senderName,
+    sender: message.sender,
     text: message.text,
     createdAt: message.at,
   };
@@ -35,9 +35,10 @@ function contextLine(message: ContextMessage): string {
  * A turn's prompt with what the agent catches up on ahead of it: the messages
  * said where its session stands that it has not seen, the last 20 shown and
  * the rest counted, after the message that started the thread when a message
- * of Rome's quotes one from outside it, then the message the turn replies to.
- * The message replied to is not repeated among the unseen ones. With nothing
- * to catch up on, the prompt is unchanged.
+ * of Rome's quotes one from outside it, then the message the turn replies to,
+ * then the turn's own message with who said it. The message replied to is not
+ * repeated among the unseen ones. With nothing to catch up on and no sender
+ * named, the prompt is unchanged.
  */
 export function catchUpPrompt(
   prompt: string,
@@ -47,6 +48,8 @@ export function catchUpPrompt(
     quoted?: PromptMessage | null;
     /** The platform's reference to the message the turn replies to. */
     replyTo?: MessageReplyReference;
+    /** The message the turn answers, as Rome holds it, or null when Rome holds none. */
+    current?: PromptMessage | null;
   },
 ): string {
   const { unseen } = facts;
@@ -68,7 +71,11 @@ export function catchUpPrompt(
   const notifications = [
     ...(threadStarter ? [contextMessage(threadStarter)] : []),
     ...shown.map(contextMessage),
-  ].filter((message) => message.id !== repliedTo?.id);
+  ].filter(
+    (message) =>
+      message.id !== repliedTo?.id && !(facts.current && message.id === String(facts.current.id)),
+  );
+  const from = facts.current?.sender?.trim() || null;
 
   const sections: string[] = [];
   if (notifications.length > 0 || omitted > 0) {
@@ -80,7 +87,7 @@ export function catchUpPrompt(
     );
   }
   if (repliedTo) sections.push(...replyContextSection(contextLine(repliedTo)));
-  if (sections.length === 0) return prompt;
-  sections.push(...currentMessageSection(prompt));
+  if (sections.length === 0 && !from) return prompt;
+  sections.push(...currentMessageSection(prompt, from));
   return sections.join("\n");
 }

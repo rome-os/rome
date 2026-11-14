@@ -3,6 +3,8 @@ import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
+import { SenderLabels } from "../chats/sender-labels.js";
+import { PeopleRepository } from "../db/repositories/people.js";
 import { placeIn, type ChatRef } from "../chats/storage/place.js";
 import { Speakers } from "../sessions/speakers.js";
 import { createTestDb, type TestDb } from "../test/db.js";
@@ -66,11 +68,20 @@ describe("SpeakerMessages", () => {
 
     expect(await lines.recorded("speaker-1", "7")).toMatchObject({ id: asked });
     expect(await lines.recorded("nobody", "7")).toBeNull();
+    const labels = new SenderLabels(new PeopleRepository(testDb.db));
     expect(
-      await runLines(lines, "speaker-1", { platformMessageId: "7", replyTo: { messageId: "6" } }),
-    ).toMatchObject({ prompt: asked, quoted: { text: "earlier", senderName: "Wei" } });
-    expect(await runLines(undefined, "speaker-1", { platformMessageId: "7" })).toEqual({
+      await runLines(lines, labels, "speaker-1", {
+        platformMessageId: "7",
+        replyTo: { messageId: "6" },
+      }),
+    ).toMatchObject({
+      prompt: asked,
+      current: { id: asked, text: "what now?", sender: "Wei (not linked)" },
+      quoted: { text: "earlier", sender: "Wei (not linked)" },
+    });
+    expect(await runLines(undefined, labels, "speaker-1", { platformMessageId: "7" })).toEqual({
       prompt: null,
+      current: null,
       quoted: null,
     });
   });

@@ -26,6 +26,8 @@ The agent's working memory of a chat: a view built from the chat's messages, not
 - In the open chat the view is the open chat's messages, where each thread shows as the message it was opened from. Messages said in threads are not mixed in, and a thread opened from no message of the chat is not in this view. The agent reaches it by reading the chat's other threads.
 - Whoever writes chooses the place. Mentioning the agent in a thread hands it a task with the thread as its context. Asking in the open chat gives it the chat around the question.
 - How far back "recent" reaches is the agent's own bound.
+- Every message the agent reads names who said it: the name the message showed, then People's answer to [who is this](people.md#who-is-this), a person with their bond level or nobody. A message from an account with a [delegate link](people.md#delegate-link) says it is an agent acting for that person.
+- Participation asks People at every read and never keeps the answer on the message, so a link the guardian makes or removes shows from the next wake. It never takes a person from the name a message showed.
 - Beyond the default view, the agent can read more of the chat on its own judgement: further back, the chat around a thread, other threads in the chat.
 
 ## Reply
