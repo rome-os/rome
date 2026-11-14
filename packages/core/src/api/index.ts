@@ -17,7 +17,7 @@ import { attachLiveEventsServer } from "../live-events-server.js";
 import { attachNodeConsoleServer } from "../desktops/node-console-server.js";
 import { attachDesktopProxy } from "../desktops/desktop-proxy-server.js";
 import { attachAppWebSocket } from "./routes/app-websocket-server.js";
-import { attachVoiceInputServer } from "../voice-input/index.js";
+import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js";
 import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
@@ -405,7 +405,8 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
       const voiceInput = attachVoiceInputServer(
         server as Server,
         deps.db,
-        deps.transcriber ?? null,
+        deps.voiceInput ?? NO_VOICE_INPUT,
+        deps.transcriptionUsage ?? null,
         deps.dashboardAccessState,
       );
       server.on("error", (err) => {

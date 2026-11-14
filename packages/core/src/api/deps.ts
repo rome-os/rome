@@ -1,8 +1,8 @@
 import type { AgentNameEvents } from "../people/agent-name.js";
-import type { Transcriber } from "../voice-input/index.js";
+import type { VoiceInputSource } from "../voice-input/index.js";
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
-import type { LoginUsageSink } from "../usage/recorder.js";
+import type { LoginUsageSink, TranscriptionUsageSink } from "../usage/recorder.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
 import type { createNodeDevicesService } from "../desktops/node-devices.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
@@ -239,8 +239,8 @@ export interface ApiDeps {
   visitorAllowListSync: VisitorAllowListSync;
   /** The chats the guardian's phone app holds open on the live-events socket. */
   phoneWatching?: PhoneWatching;
-  /** Where dictated speech becomes text. Absent when the instance configures no provider. */
-  transcriber?: Transcriber | null;
+  /** Where each listening session's speech becomes text: Rome Cloud, or the instance's own provider. */
+  voiceInput?: VoiceInputSource;
   /** Whether the guardian is at a web dashboard, from its signals on the live-events socket. */
   dashboardActivity?: DashboardActivity;
   /** Webhook relay drainer — present so the Integrations settings route can
@@ -264,6 +264,8 @@ export interface ApiDeps {
   isCloudAuthEnabled: () => Promise<boolean>;
   /** Reports each guardian sign-in to Rome Cloud as a usage event. */
   loginUsage: LoginUsageSink;
+  /** Reports each listening session on a Rome Cloud transcription session. */
+  transcriptionUsage?: TranscriptionUsageSink;
   /** Use-side registry. Present but with zero registered descriptors in
    *  this phase — later phases register real integrations and route through it. */
   connectionRegistry?: ConnectionRegistry;

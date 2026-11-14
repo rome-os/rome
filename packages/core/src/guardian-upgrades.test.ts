@@ -7,7 +7,11 @@ import { attachLiveEventsServer, type LiveEventSources } from "./live-events-ser
 import { attachNodeConsoleServer } from "./desktops/node-console-server.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { attachTerminalServer } from "./terminal-server.js";
-import { attachVoiceInputServer, type Transcriber } from "./voice-input/index.js";
+import {
+  attachVoiceInputServer,
+  createVoiceInputSource,
+  type Transcriber,
+} from "./voice-input/index.js";
 import { guardianAuth } from "./db/schema.js";
 import { createTestDb, type TestDb } from "./test/db.js";
 import { createSession } from "./access/auth.js";
@@ -38,8 +42,10 @@ const noSources: LiveEventSources = {
 
 const silentTranscriber: Transcriber = {
   place: { provider: "Fake", host: "stt.example" },
+  model: "fake",
   open: () => ({ sendAudio: () => {}, finish: () => {}, abort: () => {} }),
 };
+const silentSource = createVoiceInputSource({ own: silentTranscriber, romeCloud: () => null });
 
 function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
   const handlers = [
@@ -49,7 +55,7 @@ function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
     attachNodeConsoleServer(server, db, () =>
       createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),
     ),
-    attachVoiceInputServer(server, db, silentTranscriber, new DashboardAccessState()),
+    attachVoiceInputServer(server, db, silentSource, null, new DashboardAccessState()),
   ];
   return { close: () => handlers.forEach((handler) => handler.close()) };
 }

@@ -1081,7 +1081,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           onChange={handleFileSelection}
         />
         <ReplyBar />
-        <VoiceInputNotice reason={voice.notice} />
+        <VoiceInputNotice notice={voice.notice} />
         {/* flow-root keeps the tray's bottom margin inside this box, so the
             measured height is the full space the tray takes from the input. */}
         <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">

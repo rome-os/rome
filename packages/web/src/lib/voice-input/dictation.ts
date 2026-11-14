@@ -18,14 +18,20 @@ export type DictationStopReason =
   | "microphone-failed"
   | "connection-lost";
 
+/** Why listening stopped, with Rome Cloud's reason code for `service-refused`. */
+export interface DictationStop {
+  reason: DictationStopReason;
+  detail?: string;
+}
+
 export interface DictationHandlers {
   /** All the text heard so far, settled and pending, each time it changes. */
   onText(text: string): void;
   /**
-   * Called once, last. `text` is everything heard. `reason` is null when the
+   * Called once, last. `text` is everything heard. `stop` is null when the
    * guardian stopped and the provider sent the rest of the text.
    */
-  onDone(text: string, reason: DictationStopReason | null): void;
+  onDone(text: string, stop: DictationStop | null): void;
 }
 
 export interface Dictation {
@@ -94,10 +100,10 @@ export function startDictation(
     }
   };
 
-  const finish = (reason: DictationStopReason | null) => {
+  const finish = (reason: DictationStopReason | null, detail?: string) => {
     if (done) return;
     teardown();
-    handlers.onDone(heard(), reason);
+    handlers.onDone(heard(), reason ? { reason, ...(detail ? { detail } : {}) } : null);
   };
 
   const send = (message: VoiceInputClientMessage) => socket?.send(JSON.stringify(message));
@@ -146,7 +152,7 @@ export function startDictation(
         } else if (message.data.type === "ended") {
           finish(null);
         } else {
-          finish(message.data.reason);
+          finish(message.data.reason, message.data.detail);
         }
       };
       socket.onclose = () => finish(stopping ? null : "connection-lost");

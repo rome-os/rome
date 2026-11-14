@@ -125,7 +125,11 @@ function mockFetch(info: VoiceInputInfo) {
   }) as typeof fetch);
 }
 
-const SONIOX: VoiceInputInfo = { place: { provider: "Soniox", host: "stt-rt.soniox.com" } };
+const SONIOX: VoiceInputInfo = {
+  available: true,
+  via: "rome-cloud",
+  place: { provider: "Soniox", host: "stt-rt.soniox.com" },
+};
 
 const composers = {
   chat: (onSend: () => void) => <ChatComposer onSend={onSend} />,
@@ -158,8 +162,8 @@ async function startListening() {
 }
 
 describe.each(["chat", "concierge"] as const)("voice input in the %s message field", (kind) => {
-  it("has no voice control when the instance has no transcription provider", async () => {
-    renderComposer(kind, { place: null });
+  it("has no voice control without Rome Cloud or the instance's own provider", async () => {
+    renderComposer(kind, { available: false, via: null, place: null });
     await waitFor(() =>
       expect(globalThis.fetch).toHaveBeenCalledWith("/api/voice-input", expect.anything()),
     );
@@ -287,6 +291,27 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
       "Transcription service unavailable. Listening stopped",
     );
     expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
+  });
+
+  it("says why when Rome Cloud refuses voice input", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "error", reason: "service-refused", detail: "voice_input_rate_limited" });
+
+    expect(field().value).toBe("");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Too many voice inputs in the last minute. Try again shortly",
+    );
+  });
+
+  it("names a Rome Cloud reason the dashboard has no words for", async () => {
+    renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "error", reason: "service-refused", detail: "account_suspended" });
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Rome Cloud refused voice input (account_suspended). Listening stopped",
+    );
   });
 
   it("says how to allow a refused microphone", async () => {

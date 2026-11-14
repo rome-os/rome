@@ -4,8 +4,15 @@
 
 import { z } from "zod";
 
-/** `GET /api/voice-input`. `place` is null when the instance has no transcription provider. */
+/**
+ * `GET /api/voice-input`. `available` is false when the instance is neither
+ * signed in to Rome Cloud nor has its own transcription provider; the voice
+ * control is then absent. `via` names where the provider comes from. `place`
+ * is null while Rome cannot name it, such as when Rome Cloud cannot be asked.
+ */
 export const voiceInputInfoSchema = z.object({
+  available: z.boolean(),
+  via: z.enum(["rome-cloud", "instance"]).nullable(),
   place: z
     .object({
       /** The provider's name, such as "Soniox". */
@@ -39,6 +46,10 @@ export const voiceInputStopReasonSchema = z.enum([
   "provider-unavailable",
   /** The provider refused Rome's credential or the request. */
   "provider-refused",
+  /** Rome Cloud refused a transcription session; `detail` carries its reason code. */
+  "service-refused",
+  /** Rome Cloud could not be reached for a transcription session. */
+  "service-unavailable",
   /** The client broke the socket's message order. */
   "bad-request",
   /** One dictation reached Rome's length limit; the text heard so far still arrives. */
@@ -55,6 +66,11 @@ export type VoiceInputStopReason = z.infer<typeof voiceInputStopReasonSchema>;
 export const voiceInputServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), settled: z.string(), pending: z.string() }),
   z.object({ type: z.literal("ended") }),
-  z.object({ type: z.literal("error"), reason: voiceInputStopReasonSchema }),
+  z.object({
+    type: z.literal("error"),
+    reason: voiceInputStopReasonSchema,
+    /** Rome Cloud's reason code with `service-refused`, such as `voice_input_rate_limited`. */
+    detail: z.string().max(64).optional(),
+  }),
 ]);
 export type VoiceInputServerMessage = z.infer<typeof voiceInputServerMessageSchema>;

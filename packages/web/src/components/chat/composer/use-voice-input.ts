@@ -5,7 +5,7 @@ import { isElectronShell } from "@/lib/electron-shell";
 import {
   type Dictation,
   type DictationDeps,
-  type DictationStopReason,
+  type DictationStop,
   startDictation,
 } from "@/lib/voice-input/dictation";
 
@@ -62,7 +62,7 @@ export function useVoiceInput({
 }) {
   const info = useVoiceInputInfo();
   const [state, setState] = useState<VoiceInputState>("idle");
-  const [notice, setNotice] = useState<DictationStopReason | null>(null);
+  const [notice, setNotice] = useState<DictationStop | null>(null);
   const anchorRef = useRef<Anchor | null>(null);
   const dictationRef = useRef<Dictation | null>(null);
   const valueRef = useRef(value);
@@ -128,11 +128,11 @@ export function useVoiceInput({
               anchor.before + spokenInsertion(anchor.before, heard, anchor.after) + anchor.after,
             );
         },
-        onDone: (heard, reason) => {
+        onDone: (heard, stop) => {
           dictationRef.current = null;
           commit(heard);
           setState("idle");
-          setNotice(reason);
+          setNotice(stop);
         },
       },
       deps,
@@ -147,11 +147,11 @@ export function useVoiceInput({
 
   return {
     /**
-     * False hides the voice control: the instance has no transcription
-     * provider, or this is the desktop app, which cannot open the microphone
-     * yet.
+     * False hides the voice control: the instance is neither signed in to
+     * Rome Cloud nor has its own provider, or this is the desktop app, which
+     * cannot open the microphone yet.
      */
-    available: Boolean(info.data?.place) && !isElectronShell(),
+    available: Boolean(info.data?.available) && !isElectronShell(),
     state,
     /** Why listening last stopped on its own, or null. */
     notice,

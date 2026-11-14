@@ -17,7 +17,9 @@ import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import type { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
-import type { Transcriber, TranscriptionFailure, TranscriptionStream } from "./transcriber.js";
+import type { TranscriptionUsageSink } from "../usage/recorder.js";
+import type { TranscriptionFailure, TranscriptionStream } from "./transcriber.js";
+import type { ListeningSource, VoiceInputSource } from "./voice-input-source.js";
 
 const log = createLogger("voice-input");
 
@@ -36,13 +38,15 @@ const STOP_REASON: Record<TranscriptionFailure, VoiceInputStopReason> = {
 };
 
 /**
- * Serves `/ws/voice-input` to whoever may use the dashboard. Without a
- * transcriber the path answers 404, as the voice control is then absent.
+ * Serves `/ws/voice-input` to whoever may use the dashboard. Without any
+ * source of transcription the path answers 404, as the voice control is then
+ * absent.
  */
 export function attachVoiceInputServer(
   httpServer: Server,
   db: DrizzleDb,
-  transcriber: Transcriber | null,
+  source: VoiceInputSource,
+  usage: TranscriptionUsageSink | null,
   dashboardAccess?: Pick<DashboardAccessState, "isCloudEmailAllowed">,
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
@@ -51,14 +55,14 @@ export function attachVoiceInputServer(
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (url.pathname !== VOICE_INPUT_SOCKET_PATH) return;
     socket.on("error", () => socket.destroy());
-    if (!transcriber) {
+    if (!source.available()) {
       rejectUpgrade(socket, 404, "Not Found");
       return;
     }
     void gateUpgrade(req, socket, db, dashboardAccess)
       .then((caller) => {
         if (!caller || socket.destroyed) return;
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, transcriber));
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, { source, usage }));
       })
       .catch((err) => {
         log.error("voice input upgrade failed", {
@@ -76,14 +80,23 @@ export function attachVoiceInputServer(
   };
 }
 
+export interface ServeOptions {
+  source: Pick<VoiceInputSource, "open">;
+  usage?: TranscriptionUsageSink | null;
+  maxDictationMs?: number;
+  finishTimeoutMs?: number;
+}
+
 /** Runs one dictation over `ws`. Exported for tests. */
-export function serve(
-  ws: WebSocket,
-  transcriber: Transcriber,
-  maxDictationMs = MAX_DICTATION_MS,
-  finishTimeoutMs = FINISH_TIMEOUT_MS,
-): void {
+export function serve(ws: WebSocket, options: ServeOptions): void {
+  const maxDictationMs = options.maxDictationMs ?? MAX_DICTATION_MS;
+  const finishTimeoutMs = options.finishTimeoutMs ?? FINISH_TIMEOUT_MS;
   let stream: TranscriptionStream | null = null;
+  let listening: { source: ListeningSource; sampleRate: number; startedAt: number } | null = null;
+  // Between `start` and the transcriber opening: audio waits here, in order.
+  let starting = false;
+  const early: Uint8Array[] = [];
+  let stopAsked = false;
   let closed = false;
   let timedOut = false;
   let limit: ReturnType<typeof setTimeout> | null = null;
@@ -94,24 +107,89 @@ export function serve(
   const reply = (message: VoiceInputServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
   };
+  const settle = (outcome: string) => {
+    if (limit) clearTimeout(limit);
+    if (finishing) clearTimeout(finishing);
+    log.info("voice input stopped", { outcome, frames, bytes });
+    reportUsage(outcome);
+  };
   const close = (last: VoiceInputServerMessage) => {
     if (closed) return;
     closed = true;
-    if (limit) clearTimeout(limit);
-    if (finishing) clearTimeout(finishing);
     reply(last);
     ws.close(1000);
-    log.info("voice input stopped", { outcome: last.type, frames, bytes });
+    settle(last.type === "error" ? last.reason : last.type);
   };
+
+  // Usage is reported only for a Rome Cloud session: Rome Cloud does not
+  // count what the instance's own provider served.
+  function reportUsage(status: string) {
+    const sessionId = listening?.source.romeCloudSessionId;
+    if (!listening || !sessionId || !options.usage) return;
+    const { transcriber } = listening.source;
+    options.usage.recordTranscription({
+      sessionId,
+      provider: transcriber.place.provider.toLowerCase(),
+      model: transcriber.model,
+      // PCM s16le mono: two bytes a sample.
+      seconds: Math.round((bytes / 2 / listening.sampleRate) * 10) / 10,
+      status,
+      durationMs: Date.now() - listening.startedAt,
+    });
+  }
+
+  const sendAudio = (chunk: Uint8Array) => {
+    frames += 1;
+    bytes += chunk.byteLength;
+    stream?.sendAudio(chunk);
+  };
+
+  async function begin(sampleRate: number) {
+    starting = true;
+    const opened = await options.source.open();
+    starting = false;
+    if (closed) return;
+    if (!opened.ok) {
+      close({ type: "error", reason: opened.reason, detail: opened.detail });
+      return;
+    }
+    const { transcriber } = opened.source;
+    listening = { source: opened.source, sampleRate, startedAt: Date.now() };
+    log.info("voice input started", {
+      provider: transcriber.place.provider,
+      via: opened.source.romeCloudSessionId ? "rome-cloud" : "instance",
+      sampleRate,
+    });
+    stream = transcriber.open(
+      { sampleRate },
+      {
+        onText: (settled, pending) => {
+          if (!closed) reply({ type: "text", settled, pending });
+        },
+        onEnd: () => close(timedOut ? { type: "error", reason: "time-limit" } : { type: "ended" }),
+        onFailure: (failure, detail) => {
+          log.warn("voice input provider failed", { failure, detail });
+          close({ type: "error", reason: STOP_REASON[failure] });
+        },
+      },
+    );
+    for (const chunk of early.splice(0)) sendAudio(chunk);
+    limit = setTimeout(() => {
+      timedOut = true;
+      finish();
+    }, maxDictationMs);
+    if (stopAsked) finish();
+  }
 
   ws.on("message", (data: RawData, isBinary) => {
     if (closed) return;
     if (isBinary) {
+      if (starting) {
+        early.push(toBytes(data));
+        return;
+      }
       if (!stream) return close({ type: "error", reason: "bad-request" });
-      const chunk = toBytes(data);
-      frames += 1;
-      bytes += chunk.byteLength;
-      stream.sendAudio(chunk);
+      sendAudio(toBytes(data));
       return;
     }
     let parsed: unknown;
@@ -123,29 +201,17 @@ export function serve(
     const message = voiceInputClientMessageSchema.safeParse(parsed);
     if (!message.success) return close({ type: "error", reason: "bad-request" });
     if (message.data.type === "start") {
-      if (stream) return close({ type: "error", reason: "bad-request" });
-      log.info("voice input started", {
-        provider: transcriber.place.provider,
-        sampleRate: message.data.sampleRate,
+      if (stream || starting) return close({ type: "error", reason: "bad-request" });
+      void begin(message.data.sampleRate).catch((err: unknown) => {
+        log.error("voice input could not start", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        close({ type: "error", reason: "provider-unavailable" });
       });
-      stream = transcriber.open(
-        { sampleRate: message.data.sampleRate },
-        {
-          onText: (settled, pending) => {
-            if (!closed) reply({ type: "text", settled, pending });
-          },
-          onEnd: () =>
-            close(timedOut ? { type: "error", reason: "time-limit" } : { type: "ended" }),
-          onFailure: (failure, detail) => {
-            log.warn("voice input provider failed", { failure, detail });
-            close({ type: "error", reason: STOP_REASON[failure] });
-          },
-        },
-      );
-      limit = setTimeout(() => {
-        timedOut = true;
-        finish();
-      }, maxDictationMs);
+      return;
+    }
+    if (starting) {
+      stopAsked = true;
       return;
     }
     if (!stream) return close({ type: "error", reason: "bad-request" });
@@ -164,11 +230,9 @@ export function serve(
   }
 
   ws.on("close", () => {
-    if (limit) clearTimeout(limit);
-    if (finishing) clearTimeout(finishing);
     if (!closed) {
       closed = true;
-      log.info("voice input stopped", { outcome: "client-closed", frames, bytes });
+      settle("client-closed");
     }
     stream?.abort();
   });

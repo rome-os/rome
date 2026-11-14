@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { WebSocket, WebSocketServer } from "ws";
 import type { VoiceInputServerMessage } from "@rome/api-types/voice-input";
 import { createSonioxTranscriber } from "./soniox.js";
-import { serve } from "./voice-input-server.js";
+import type { TranscriptionUsageSink } from "../usage/recorder.js";
+import { type ServeOptions, serve } from "./voice-input-server.js";
+import { createVoiceInputSource, type VoiceInputSource } from "./voice-input-source.js";
 
 // A stand-in for Soniox's real-time endpoint. Each test scripts what it says.
 interface FakeSoniox {
@@ -66,12 +68,24 @@ async function fakeSoniox(): Promise<FakeSoniox> {
   return fake;
 }
 
-/** Rome's dictation socket in front of the fake, and a client connected to it. */
-async function dictation(fake: FakeSoniox, maxDictationMs?: number, finishTimeoutMs?: number) {
+/** The instance's own Soniox key, as `ROME_TRANSCRIPTION_*` configures it. */
+function ownSource(fake: FakeSoniox): Pick<VoiceInputSource, "open"> {
   const transcriber = createSonioxTranscriber({ apiKey: "key-1", url: fake.url });
+  return { open: async () => ({ ok: true, source: { transcriber, romeCloudSessionId: null } }) };
+}
+
+/** Rome's dictation socket in front of the fake, and a client connected to it. */
+async function dictation(
+  fake: FakeSoniox,
+  maxDictationMs?: number,
+  finishTimeoutMs?: number,
+  options: Partial<ServeOptions> = {},
+) {
   const http: Server = createServer();
   const wss = new WebSocketServer({ server: http });
-  wss.on("connection", (ws) => serve(ws, transcriber, maxDictationMs, finishTimeoutMs));
+  wss.on("connection", (ws) =>
+    serve(ws, { source: ownSource(fake), maxDictationMs, finishTimeoutMs, ...options }),
+  );
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   servers.push({
     close: () => {
@@ -225,5 +239,124 @@ describe("voice input socket", () => {
     client.close();
 
     await until(() => fake.closed());
+  });
+});
+
+describe("voice input on Rome Cloud", () => {
+  /** Rome Cloud's session route, answering `answer`, after `delayMs`. */
+  function romeCloud(answer: () => Response, delayMs = 0) {
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    const fetch = (async (url: URL | string, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
+      await new Promise((r) => setTimeout(r, delayMs));
+      return answer();
+    }) as typeof globalThis.fetch;
+    return { requests, fetch };
+  }
+
+  function usageSink() {
+    const recorded: Parameters<TranscriptionUsageSink["recordTranscription"]>[0][] = [];
+    return { recorded, recordTranscription: (event: (typeof recorded)[0]) => recorded.push(event) };
+  }
+
+  it("takes each session's provider from Rome Cloud and reports the seconds it used", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const cloud = romeCloud(
+      () =>
+        Response.json({
+          sessionId: "session-1",
+          provider: "soniox",
+          url: fake.url,
+          model: "stt-rt-v6",
+          token: "temporary-1",
+          expiresAt: "2026-11-14T03:35:00Z",
+        }),
+      30,
+    );
+    const source = createVoiceInputSource({
+      own: null,
+      romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
+      fetch: cloud.fetch,
+    });
+    const usage = usageSink();
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      source,
+      usage,
+    });
+
+    // Audio and the stop both come before Rome Cloud answers.
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(Buffer.alloc(32_000, 1));
+    client.send(Buffer.alloc(16_000, 2));
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+
+    expect(cloud.requests).toEqual([
+      {
+        url: "https://cloud.example/v1/transcription/sessions",
+        authorization: "Bearer instance-1",
+      },
+    ]);
+    expect(fake.authorization()).toBe("Bearer temporary-1");
+    expect(
+      fake.received.map((frame) => (frame.kind === "audio" ? frame.bytes.length : "text")),
+    ).toEqual(["text", 32_000, 16_000, "text"]);
+    expect(messages).toEqual([{ type: "ended" }]);
+    expect(usage.recorded).toEqual([
+      expect.objectContaining({
+        sessionId: "session-1",
+        provider: "soniox",
+        model: "stt-rt-v6",
+        seconds: 1.5,
+        status: "ended",
+      }),
+    ]);
+  });
+
+  it("stops with Rome Cloud's reason when it refuses a session", async () => {
+    const fake = await fakeSoniox();
+    const cloud = romeCloud(() =>
+      Response.json(
+        { error: "voice_input_rate_limited", message: "Too many voice input sessions" },
+        { status: 429 },
+      ),
+    );
+    const source = createVoiceInputSource({
+      own: null,
+      romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
+      fetch: cloud.fetch,
+    });
+    const usage = usageSink();
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      source,
+      usage,
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "error", reason: "service-refused", detail: "voice_input_rate_limited" },
+    ]);
+    expect(fake.received).toEqual([]);
+    expect(usage.recorded).toEqual([]);
+  });
+
+  it("reports no usage for a session on the instance's own provider", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const usage = usageSink();
+    const { client, closed } = await dictation(fake, undefined, undefined, { usage });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(Buffer.alloc(3_200, 1));
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+
+    expect(usage.recorded).toEqual([]);
   });
 });

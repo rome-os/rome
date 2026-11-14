@@ -1,12 +1,9 @@
 import { Hono } from "hono";
-import type { VoiceInputInfo } from "@rome/api-types/voice-input";
 import type { ApiDeps } from "../deps.js";
+import { NO_VOICE_INPUT } from "../../voice-input/index.js";
 
-export function voiceInputRoutes(deps: Pick<ApiDeps, "transcriber">): Hono {
+export function voiceInputRoutes(deps: Pick<ApiDeps, "voiceInput">): Hono {
   const app = new Hono();
-  app.get("/voice-input", (c) => {
-    const body: VoiceInputInfo = { place: deps.transcriber?.place ?? null };
-    return c.json(body);
-  });
+  app.get("/voice-input", async (c) => c.json(await (deps.voiceInput ?? NO_VOICE_INPUT).info()));
   return app;
 }

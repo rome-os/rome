@@ -711,7 +711,15 @@
       "microphone-missing": "未找到麦克风",
       "connection-lost": "与 Rome 的连接已断开，已停止收听",
       "microphone-failed": "麦克风无法启动，已停止收听",
-      "time-limit": "已达到时长上限，已停止收听"
+      "time-limit": "已达到时长上限，已停止收听",
+      "service-refused": "Rome Cloud 拒绝了语音输入（{{code}}），已停止收听",
+      "service-unavailable": "无法连接 Rome Cloud，已停止收听"
+    },
+    "romeCloud": {
+      "voice_input_rate_limited": "最近一分钟语音输入次数过多，请稍后再试",
+      "voice_input_not_configured": "Rome Cloud 尚未开通语音输入，已停止收听",
+      "provider_unavailable": "Rome Cloud 的转写服务暂不可用，已停止收听",
+      "insufficient_credits": "Rome 额度不足，无法使用语音输入，已停止收听"
     }
   }
 }

@@ -1,7 +1,7 @@
 import { Mic, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import type { DictationStopReason } from "@/lib/voice-input/dictation";
+import type { DictationStop } from "@/lib/voice-input/dictation";
 import type { VoiceInputState } from "./use-voice-input";
 
 /**
@@ -38,13 +38,27 @@ export function VoiceInputButton({
   );
 }
 
+// Rome Cloud's reason codes the dashboard words itself. Any other code shows
+// in the general refusal sentence.
+const ROME_CLOUD_REASONS = new Set([
+  "voice_input_rate_limited",
+  "voice_input_not_configured",
+  "provider_unavailable",
+  "insufficient_credits",
+]);
+
 /** Why listening stopped without the guardian's stop. Renders nothing when there is no reason. */
-export function VoiceInputNotice({ reason }: { reason: DictationStopReason | null }) {
+export function VoiceInputNotice({ notice }: { notice: DictationStop | null }) {
   const { t } = useTranslation("chat");
-  if (!reason) return null;
+  if (!notice) return null;
+  const { reason, detail } = notice;
+  const text =
+    reason === "service-refused" && detail && ROME_CLOUD_REASONS.has(detail)
+      ? t(`voiceInput.romeCloud.${detail}`)
+      : t(`voiceInput.stopped.${reason}`, { code: detail ?? "" });
   return (
     <div role="status" className="mb-2 text-aux text-muted-foreground">
-      {t(`voiceInput.stopped.${reason}`)}
+      {text}
     </div>
   );
 }

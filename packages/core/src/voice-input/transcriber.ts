@@ -1,5 +1,5 @@
 // The transcription port: where speech becomes text. Each provider is one
-// adapter file beside this one; `create-transcriber.ts` picks it from config.
+// adapter file beside this one; `create-transcriber.ts` picks it by name.
 
 /** Where speech becomes text, as the guardian sees it. */
 export interface TranscriptionPlace {
@@ -33,6 +33,8 @@ export interface TranscriptionStream {
 
 export interface Transcriber {
   readonly place: TranscriptionPlace;
+  /** The provider's model, as usage names it. */
+  readonly model: string;
   /** Opens one stream. Audio sent before the provider answers is held and sent in order. */
   open(options: { sampleRate: number }, listener: TranscriptionListener): TranscriptionStream;
 }

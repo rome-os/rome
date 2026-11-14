@@ -914,7 +914,9 @@
       "loading": "Loading...",
       "loadFailed": "Failed to load voice input",
       "place": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, which turns it into text. Rome keeps no audio.",
-      "off": "No transcription provider is configured, so message fields have no voice control."
+      "off": "Voice input comes with Rome Cloud. This Rome is not signed in, so message fields have no voice control.",
+      "placeViaRomeCloud": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, provided through Rome Cloud. Rome keeps no audio.",
+      "romeCloud": "Speech dictated into a message is turned into text by a service provided through Rome Cloud. Rome keeps no audio."
     }
   },
   "easterEgg": {

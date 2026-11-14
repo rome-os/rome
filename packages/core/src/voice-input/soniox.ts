@@ -27,16 +27,12 @@ export function createSonioxTranscriber(options: {
   model?: string;
 }): Transcriber {
   const url = options.url ?? SONIOX_DEFAULT_URL;
+  const model = options.model ?? SONIOX_DEFAULT_MODEL;
   return {
     place: { provider: "Soniox", host: new URL(url).host },
+    model,
     open: ({ sampleRate }, listener) =>
-      openSonioxStream(
-        url,
-        options.apiKey,
-        options.model ?? SONIOX_DEFAULT_MODEL,
-        sampleRate,
-        listener,
-      ),
+      openSonioxStream(url, options.apiKey, model, sampleRate, listener),
   };
 }
 
@@ -47,6 +43,8 @@ function openSonioxStream(
   sampleRate: number,
   listener: TranscriptionListener,
 ): TranscriptionStream {
+  // A long-lived key and a temporary one both go in the header. Soniox
+  // refuses the old `api_key` field of the start request from January 2027.
   const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` } });
   // Audio and the end frame wait here until the start request is out.
   const queued: (Uint8Array | string)[] = [];
@@ -70,8 +68,6 @@ function openSonioxStream(
   ws.on("open", () => {
     ws.send(
       JSON.stringify({
-        // Deprecated in favor of the header, but a stand-in may still read it.
-        api_key: apiKey,
         model,
         audio_format: "pcm_s16le",
         sample_rate: sampleRate,
