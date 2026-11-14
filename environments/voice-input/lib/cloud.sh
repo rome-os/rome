@@ -171,14 +171,17 @@ remove_cloud_data() {
   [ ! -f "$STATE_FILE" ] || set_state '{"cloud":null}'
 }
 
-# Asks Rome Cloud for a transcription session as Rome does: from inside
-# Rome's container, with a token from Rome's signer. Prints the answer.
-cloud_session() {
-  docker exec "$ROME" sh -c 'cd /opt/rome/packages/core && node --input-type=module -e "
+# Calls Rome Cloud as Rome does: from inside Rome's container, with a token
+# from Rome's signer. Prints {status, body}, with any minted key removed.
+#   cloud_call POST /v1/transcription/sessions
+cloud_call() {
+  docker exec -e "CALL_METHOD=$1" -e "CALL_PATH=$2" "$ROME" sh -c 'cd /opt/rome/packages/core && node --input-type=module -e "
     const { requestSignerToken } = await import(\"@rome-os/node-core/signer\");
     const token = await requestSignerToken(process.env.ROME_SIGNER_SOCKET);
-    const r = await fetch(process.env.PANTHEON_BASE_ORIGIN + \"/v1/transcription/sessions\", {
-      method: \"POST\", headers: { authorization: \"Bearer \" + token, \"content-type\": \"application/json\" }, body: \"{}\" });
+    const method = process.env.CALL_METHOD;
+    const r = await fetch(process.env.PANTHEON_BASE_ORIGIN + process.env.CALL_PATH, {
+      method, headers: { authorization: \"Bearer \" + token, \"content-type\": \"application/json\" },
+      body: method === \"GET\" ? undefined : \"{}\" });
     const text = await r.text();
     let body; try { body = JSON.parse(text); } catch { body = { text }; }
     if (body && typeof body.token === \"string\") body.token = \"(removed)\";

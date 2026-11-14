@@ -10,7 +10,7 @@
 #   voice-env transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]
 #   voice-env transcriber status
 #   voice-env transcriber session-cap <seconds>|off
-#   voice-env cloud status | usage | session | minted | sign-in | sign-out
+#   voice-env cloud status | usage | session | provider | minted | sign-in | sign-out
 #   voice-env gate on|off
 #   voice-env network cut|restore
 #   voice-env chats
@@ -42,7 +42,7 @@ chrome_path() {
 
 cmd_version() {
   require_up
-  local transcriber script model
+  local transcriber script model in_use=null
   transcriber="$(state transcriber || echo stand-in)"
   model="$(api GET /settings 2>/dev/null | json tierModelMappings.anthropic.large || true)"
   if [ "$transcriber" = real ]; then
@@ -51,8 +51,12 @@ cmd_version() {
     script="$(curl -fsS "$(stand_in)/script" || echo null)"
     script='{"provider":"stand-in","url":"'"$STAND_IN_URL"'","script":'"$script"'}'
   fi
+  # What Rome Cloud gives Rome now: the provider, host and model a session uses.
+  if [ "$(state signIn || echo cloud)" = cloud ]; then
+    in_use="$(cloud_call GET /v1/transcription/provider 2>/dev/null || echo null)"
+  fi
   node -e '
-    const [build, verifier, transcriber, model, dashboard, cloud, signIn, gate] = process.argv.slice(1);
+    const [build, verifier, transcriber, model, dashboard, cloud, signIn, gate, inUse] = process.argv.slice(1);
     const b = JSON.parse(build);
     console.log(JSON.stringify({
       product: b.product,
@@ -60,6 +64,8 @@ cmd_version() {
       verifier: JSON.parse(verifier),
       merged: b.merged,
       transcriber: JSON.parse(transcriber),
+      // GET /v1/transcription/provider as Rome asks it; null when Rome is signed out.
+      transcriberInUse: JSON.parse(inUse || "null"),
       model: model || null,
       signIn,
       gate,
@@ -68,7 +74,7 @@ cmd_version() {
       builtAt: b.builtAt,
     }, null, 2));' \
     "$(cat "$BUILD_FILE")" "$(tree_json environments/voice-input/verifier)" "$script" "$model" "$DASHBOARD" \
-    "$(cat "$CLOUD_BUILD_FILE" 2>/dev/null || true)" "$(state signIn || echo cloud)" "$(state cloudGate || echo on)"
+    "$(cat "$CLOUD_BUILD_FILE" 2>/dev/null || true)" "$(state signIn || echo cloud)" "$(state cloudGate || echo on)" "$in_use"
 }
 
 cmd_browser() {
@@ -201,7 +207,8 @@ cmd_cloud() {
         from usage_events where type = 'transcription' and instance_id = '$instance_id'" |
         node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => console.log(JSON.stringify({ events: JSON.parse(s) }, null, 2)))'
       ;;
-    session) cloud_session ;;
+    session) cloud_call POST /v1/transcription/sessions ;;
+    provider) cloud_call GET /v1/transcription/provider ;;
     minted)
       curl -fsS "$(stand_in)/stats" |
         node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => console.log(JSON.stringify({ count: JSON.parse(s).mints.filter((m) => m.status === 201).length })))'
@@ -221,7 +228,7 @@ cmd_cloud() {
       start_rome
       "$0" cloud status
       ;;
-    *) die "usage: voice-env cloud status | usage | session | minted | sign-in | sign-out" ;;
+    *) die "usage: voice-env cloud status | usage | session | provider | minted | sign-in | sign-out" ;;
   esac
 }
 

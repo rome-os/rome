@@ -284,17 +284,27 @@ start_signer() {
     "$IMAGE" /opt/rome/packages/signer/dist/main.js >/dev/null
 }
 
+# Rome's own Google Chrome (the one its agents browse with) checks for and
+# downloads browser components from these hosts, in uploads a capture could
+# mistake for audio. Chrome's ComponentUpdatesEnabled policy did not stop the
+# checks, so Rome's container resolves the hosts to nowhere instead. Nothing
+# else in Rome uses them.
+CHROME_UPDATE_HOSTS=(update.googleapis.com edgedl.me.gvt1.com redirector.gvt1.com dl.google.com)
+
 # The same container settings as a hosted Rome's docker-compose.yml, with its
 # public port on loopback only, where the environment's Chrome reaches it.
 start_rome() {
   docker rm -f "$ROME" >/dev/null 2>&1 || true
   start_signer
+  local blocked=() host
+  for host in "${CHROME_UPDATE_HOSTS[@]}"; do blocked+=(--add-host "$host:0.0.0.0"); done
   docker run -d --name "$ROME" --restart unless-stopped --memory 6g \
     --network "$NETWORK" \
     -p "127.0.0.1:$DASHBOARD_PORT:8080" \
     --env-file "$ROME_ENV_FILE" -e ROME_SIGNER_SOCKET=/run/rome-signer/signer.sock \
     -v "$HOME_VOLUME:/home/rome" -v "$MEMORY_VOLUME:/app/memory" -v "$USER_VOLUME:/home/user" \
     -v "$SIGNER_SOCKET_VOLUME:/run/rome-signer:ro" \
+    "${blocked[@]}" \
     --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor=unconfined --shm-size 1g \
     "$IMAGE" >/dev/null
   wait_for_rome

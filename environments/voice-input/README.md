@@ -42,7 +42,7 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 
 | Command | What it does |
 | --- | --- |
-| `version` | The product ref and commit, the environment's and the verifier's commits, Rome Cloud's ref and commit (`cloud`), how Rome signs in (`signIn`: `cloud` or `own`), the transcriber (`soniox` or `stand-in` with its script), the model, the dashboard address |
+| `version` | The product ref and commit, the environment's and the verifier's commits, Rome Cloud's ref and commit (`cloud`), how Rome signs in (`signIn`: `cloud` or `own`), the forced gate (`gate`), the transcriber the environment set up (`soniox` or `stand-in` with its script), `transcriberInUse` (Rome Cloud's answer to `GET /v1/transcription/provider`: the provider, host and model a session gets now; null when Rome is signed out), the model, the dashboard address |
 | `browser --mic <wav> [--permission unset\|granted\|refused] [--lang en\|zh-CN]` | Starts Chrome and prints `cdp`, the address to connect to: `chromium.connectOverCDP(cdp)`, then use `contexts()[0].pages()[0]`, already on the dashboard and signed in as the guardian. A new `browser` replaces the last one. |
 | `browser stop` | Stops Chrome and the proxy |
 | `transcriber stand-in [--text <t>] [--first-ms <n>] [--token-ms <n>]` | The stand-in answers each session with that text, the first token `first-ms` after the first audio and one token every `token-ms` after that |
@@ -52,6 +52,10 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 | `transcriber status` | The mode, the stand-in's script, and each session it has served: the start request (key removed), how the key was sent, audio bytes received, how it ended |
 | `cloud status` | `{"signedIn", "ownCredential"}`. `signedIn`: Rome points at the environment's Rome Cloud, and its signer key is registered there on an active instance. `ownCredential`: Rome's config holds `ROME_TRANSCRIPTION_API_KEY`. |
 | `cloud usage` | `{"events": [{"provider", "model", "seconds", "at"}]}`: the voice usage events Rome Cloud stored for this instance, oldest first. `seconds` is the audio's length. |
+| `cloud session` | `{"status", "body"}`: Rome Cloud's answer to `POST /v1/transcription/sessions`, asked as Rome asks it (from Rome's container, with a token from Rome's signer). A minted key in the body is replaced by `(removed)`. |
+| `cloud provider` | `{"status", "body"}`: Rome Cloud's answer to `GET /v1/transcription/provider`, asked the same way |
+| `cloud minted` | `{"count"}`: the temporary keys the stand-in has minted since it started or was reset |
+| `gate on` / `gate off` | Forces Rome Cloud's `voice_input` gate for every account (`FEATURE_GATE_VOICE_INPUT`) and restarts Rome Cloud. `on` after `up` and `reset`. |
 | `cloud sign-in` / `cloud sign-out` | Restarts Rome signed in to Rome Cloud with no provider credential (the default after `up` and `reset`), or not signed in with its own credential for the transcriber. Prints `cloud status`. |
 | `network cut` / `network restore` | Drops every open connection of the browser and refuses new ones, or lets them through again |
 | `chats` | The dashboard's chats, from `GET /api/chat/sessions` |
@@ -73,8 +77,8 @@ The same rules on both sides, in `lib/audio.mjs`:
 
 - An audio content type, or a body that starts with an audio file's signature (WAV, Ogg, WebM, FLAC, MP3, MP4/M4A, AAC), or base64 of one inside JSON.
 - A WebSocket the environment can read (plain `ws://`, such as the dashboard's own): 4096 bytes or more of binary frames from the client, or base64 audio in a text frame.
-- An encrypted connection: an upload of at least 4096 bytes in each of 3 or more different seconds. A single burst, such as a model request, does not count. This is a judgment from sizes and timing; each record says which rule decided it.
-- Rome's connection to the stand-in: the stand-in's own count of audio bytes received.
+- An encrypted connection: an upload of at least 4096 bytes in each of 3 or more different seconds within 10 seconds, on one connection. A single burst, such as a model request, does not count, nor do small uploads spread over minutes, such as Chrome's update checks. This is a judgment from sizes and timing; each record says which rule decided it.
+- Rome's connection to the stand-in: the stand-in's own count of audio bytes received on that connection, matched by Rome's port. The capture lists Rome's outbound traffic one connection at a time, so each listening session is its own record.
 
 Browser side: Chrome sends every request through the environment's proxy, loopback included. Server side: tcpdump in Rome's network namespace records packet sizes only, never payload. A connection counts as Rome's outbound when it leaves from an ephemeral port of Rome's container; hosts come from Rome's own DNS answers, and the environment names the stand-in `transcriber` and Rome Cloud `cloud` itself, by the host names Rome dials them at.
 
@@ -95,4 +99,5 @@ Searches `/home/rome` (the profile folder, which holds the database `rome.db` an
 - The browser's traffic goes through a proxy on the devbox; a guardian's goes straight out.
 - The transcriber is a stand-in unless `transcriber real` is set. The stand-in returns scripted text, not what the recording says, and its temporary keys are its own random strings, not Soniox's.
 - Without a model login, the agent cannot answer, so a sent message is stored with `inputState` `failed` and an error from the agent follows it. With a login, every tier runs on Haiku.
-- Rome's own server-side Chrome runs as in production and makes its own requests to Google, which show in server captures.
+- Rome's own server-side Chrome runs as in production and makes its own requests to Google, which show in server captures. Its component updater is the exception: Rome's container resolves `update.googleapis.com`, `edgedl.me.gvt1.com`, `redirector.gvt1.com` and `dl.google.com` to nowhere, because its update checks are uploads a capture could mistake for audio. Chrome's `ComponentUpdatesEnabled` policy did not stop them.
+- Rome Cloud's voice input gate is forced through its environment for every account, not set per account in Statsig.
