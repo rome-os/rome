@@ -1293,6 +1293,12 @@ final class AppModel {
     /// Where Health sync sends: the Rome open now, else the one opened last,
     /// with this phone's guardian session. A visitor has no personal data to send.
     fileprivate func personalDataTarget() -> PersonalDataTarget? {
+        #if DEBUG
+        // A local Rome signed in with ROME_LOCAL_*: its own session, no Rome Cloud.
+        if currentInstanceID == "local", let box = tokenBox, let origin = currentInstance.flatMap({ URL(string: $0.origin) }) {
+            return PersonalDataTarget(instanceId: "local", backend: PersonalDataClient(client: APIClient(origin: origin, token: { box.token })))
+        }
+        #endif
         guard cloud.hasCredential else { return nil }
         guard let instance = currentInstance ?? Self.rememberedInstance(), !instance.isVisitor,
               let origin = URL(string: instance.origin), let session = cloud.storedSession(for: instance),
@@ -1301,14 +1307,23 @@ final class AppModel {
         let box = TokenBox()
         box.use(session)
         let cloud = cloud
+        let renewal = RenewalNote()
         let client = APIClient(origin: origin, token: { box.token }, cookieName: { box.cookieName }, configuration: instanceConfiguration(), renew: {
             // A background wake can renew a session past its time, as long
-            // as Rome Cloud still knows this phone.
-            guard let renewed = try? await cloud.session(for: instance, forceRefresh: true) else { return false }
-            box.use(renewed)
-            return true
+            // as Rome Cloud still knows this phone. Cloud or the network
+            // being down is not the end of the sign-in.
+            do {
+                let renewed = try await cloud.session(for: instance, forceRefresh: true)
+                box.use(renewed)
+                renewal.note(transient: false)
+                return true
+            } catch {
+                let ended: [AuthError] = [.cloudUnauthorized, .accessDenied, .accessRevoked, .notOwner, .sessionRejected]
+                renewal.note(transient: !((error as? AuthError).map(ended.contains) ?? false))
+                return false
+            }
         })
-        return PersonalDataTarget(instanceId: instance.id, backend: PersonalDataClient(client: client))
+        return PersonalDataTarget(instanceId: instance.id, backend: PersonalDataClient(client: client, renewal: renewal))
     }
 
     /// Settings, at Apple Health's Sync history.

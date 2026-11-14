@@ -161,14 +161,16 @@ final class HealthSettings {
         Task { await engine.sync(.foreground) }
     }
 
-    /// A Rome opened. After the session ran out, or on a Rome that was
-    /// updated, sync goes on from the saved anchors.
+    /// A Rome opened: a foreground catch-up, since one asked at launch may
+    /// have found no Rome yet. After the session ran out, or on a Rome that
+    /// was updated, sync goes on from the saved anchors at once.
     func instanceOpened() {
-        guard isEnabled, !isPaused, [.needsSignIn, .needsUpdate].contains(status) else { return }
+        guard isEnabled, !isPaused else { return }
+        let stuck = [.needsSignIn, .needsUpdate].contains(status)
         let engine = engine!
         Task {
-            await engine.signedIn()
-            await engine.sync(.manual)
+            if stuck { await engine.signedIn() }
+            await engine.sync(stuck ? .manual : .foreground)
         }
     }
 
@@ -201,7 +203,8 @@ final class HealthSettings {
         }
         observers.stop()
         return Task {
-            await engine.cancelRetries()
+            // A sync under way stops before its next read or batch.
+            await engine.quiesce()
             await self.tellRome("off")
         }
     }
@@ -215,7 +218,7 @@ final class HealthSettings {
         switchesBox.set(enabled: isEnabled, paused: paused)
         let engine = engine!
         return Task {
-            if paused { await engine.cancelRetries() }
+            if paused { await engine.quiesce() }
             await self.tellRome(paused ? "paused" : "active")
             if !paused { await engine.sync(.manual) }
         }
@@ -233,9 +236,15 @@ final class HealthSettings {
     /// reached, and nothing changed.
     func deleteUploaded() async -> Bool {
         guard let target = await target(), let origin = originStore.id() else { return false }
+        // Nothing may reach the Rome after the delete: a sync under way stops
+        // first, and the engine is idle before the request goes.
+        let before = switchesBox.value
+        switchesBox.set(enabled: false, paused: before.paused)
+        await engine.quiesce()
         do {
             _ = try await target.backend.deleteOrigin(source: Self.sourceId, origin: origin)
         } catch {
+            switchesBox.set(enabled: before.enabled, paused: before.paused)
             return false
         }
         observers.stop()
@@ -245,7 +254,6 @@ final class HealthSettings {
         switchesBox.set(enabled: false, paused: false)
         isPaused = false
         defaults.removeObject(forKey: Defaults.paused)
-        await engine.cancelRetries()
         await source.reset()
         stored = nil
         let entry = await log.append(SyncLogEntry(seq: 0, time: Date(), trigger: .manual, outcome: .deleted))
@@ -272,7 +280,7 @@ final class HealthSettings {
         let source = source
         let log = log
         return Task {
-            await engine.cancelRetries()
+            await engine.quiesce()
             await engine.signedIn()
             await source.reset()
             await log.removeAll()

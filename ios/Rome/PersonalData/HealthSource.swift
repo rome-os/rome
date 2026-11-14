@@ -50,12 +50,22 @@ enum HealthSyncPlan {
 
     /// How far the backfill reaches back.
     static let historyDays = 183
+    /// The history goes in chunks of this many days, newest first.
+    static let historyChunkDays = 7
     /// A deleted sample names no time: this many recent days are computed again.
     static let deletionDays = 7
     static let dailyReconcileDays = 7
     static let weeklyReconcileDays = 90
     /// How long the sleep map keeps a segment.
     static let sleepMapDays = 60
+    /// The delta tracks samples that start this many days before sync was
+    /// turned on, or later. HealthKit has no "anchor as of now" without
+    /// reading what the anchor covers, so a narrow window keeps taking it
+    /// cheap; a later sample that starts earlier still is caught by the reconcile.
+    static let deltaOverlapDays = 7
+
+    /// Where a backfill's delta window starts.
+    static func deltaFrom(_ start: Date) -> Date { start.addingTimeInterval(-Double(deltaOverlapDays) * 86_400) }
 }
 
 // MARK: - Reading
@@ -91,10 +101,12 @@ struct HealthChanges: Equatable, Sendable {
 }
 
 protocol HealthSyncReading: Sendable {
-    /// The type's anchor as of now, without reading its samples.
-    func currentAnchor(_ type: HealthSyncType) async throws -> Data
-    /// Samples added and deleted since `anchor`, and the anchor after them.
-    func changes(_ type: HealthSyncType, since anchor: Data) async throws -> HealthChanges
+    /// The type's anchor as of now, over the samples that start at `from`
+    /// or later: reading it reads those samples, so `from` keeps it short.
+    func currentAnchor(_ type: HealthSyncType, from: Date) async throws -> Data
+    /// Samples starting at `from` or later that were added or deleted since
+    /// `anchor`, and the anchor after them.
+    func changes(_ type: HealthSyncType, since anchor: Data, from: Date) async throws -> HealthChanges
     /// Whole local hours or days of the window, only those with a value.
     func buckets(_ type: HealthSyncType, _ resolution: BucketResolution, in window: DateInterval, calendar: Calendar) async throws -> [HealthBucketValue]
     /// The samples that start in the window: sparse quantities, mindful
@@ -127,7 +139,14 @@ actor AppleHealthSource: PersonalDataSource {
     func beginRun(trigger: SyncTrigger, instanceId: String, now: Date) async throws {
         run = (trigger, now, false, false)
         var progress = await store.load()
-        if trigger == .manual { progress.unsupported = [] }
+        if trigger == .manual, !progress.unsupported.isEmpty, let backfill = progress.backfill {
+            // Types this Rome once refused were left out of the history: it is
+            // read again, so no type is synced through without its months.
+            // The Rome takes the rest again as unchanged.
+            progress.unsupported = []
+            let calendar = calendar()
+            progress.backfill?.cursor = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: backfill.start)) ?? backfill.start
+        }
         guard progress.instanceId != instanceId || progress.backfill == nil else {
             await store.save(progress)
             return
@@ -136,7 +155,8 @@ actor AppleHealthSource: PersonalDataSource {
         // now, before the history is read, so a change made during the
         // backfill comes through the next delta.
         var fresh = SyncProgress(instanceId: instanceId)
-        for type in plan { fresh.anchors[type.name] = try await reader.currentAnchor(type) }
+        let from = HealthSyncPlan.deltaFrom(now)
+        for type in plan { fresh.anchors[type.name] = try await reader.currentAnchor(type, from: from) }
         let calendar = calendar()
         let today = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 1, to: today) ?? now
@@ -164,6 +184,8 @@ actor AppleHealthSource: PersonalDataSource {
     }
 
     func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async {
+        // Reset meanwhile: what the chunk read belongs to progress that is gone.
+        guard run != nil else { return }
         let before = await store.load()
         var progress = chunk.commit
         for type in unsupported {
@@ -195,15 +217,16 @@ actor AppleHealthSource: PersonalDataSource {
         var chunk = SyncChunk(kind: .delta, commit: progress)
         let calendar = calendar()
         let floor = progress.backfill?.floor ?? calendar.date(byAdding: .day, value: -HealthSyncPlan.historyDays, to: now) ?? now
+        let from = HealthSyncPlan.deltaFrom(progress.backfill?.start ?? now)
         for type in active(progress) {
             let anchor: Data
             if let saved = progress.anchors[type.name] {
                 anchor = saved
             } else {
-                chunk.commit.anchors[type.name] = try await reader.currentAnchor(type)
+                chunk.commit.anchors[type.name] = try await reader.currentAnchor(type, from: from)
                 continue
             }
-            let changes = try await reader.changes(type, since: anchor)
+            let changes = try await reader.changes(type, since: anchor, from: from)
             chunk.commit.anchors[type.name] = changes.anchor
             switch type.shape {
             case .bucket:
@@ -281,11 +304,12 @@ actor AppleHealthSource: PersonalDataSource {
 
     // MARK: History
 
-    /// One month back from the cursor, every type.
+    /// A week back from the cursor, every type: a few thousand items at
+    /// most, so a background wake can finish one and keep it.
     private func history(_ progress: SyncProgress, backfill: SyncProgress.Backfill) async throws -> SyncChunk {
         let calendar = calendar()
-        let monthBack = calendar.date(byAdding: .month, value: -1, to: backfill.cursor) ?? backfill.cursor
-        let start = max(backfill.floor, calendar.startOfDay(for: monthBack))
+        let weekBack = calendar.date(byAdding: .day, value: -HealthSyncPlan.historyChunkDays, to: backfill.cursor) ?? backfill.cursor
+        let start = max(backfill.floor, calendar.startOfDay(for: weekBack))
         let window = DateInterval(start: start, end: backfill.cursor)
         var chunk = SyncChunk(kind: .backfill, historyMonth: start, commit: progress)
         for type in active(progress) {
@@ -313,6 +337,9 @@ actor AppleHealthSource: PersonalDataSource {
         if start <= backfill.floor {
             // The last month of history: from the floor to the backfill's
             // start is in, and the deltas carry on from there with no gap.
+            // The history is fresh, so the first reconcile waits its turn.
+            chunk.commit.lastDailyReconcile = backfill.start
+            chunk.commit.lastWeeklyReconcile = backfill.start
             let through = max(backfill.start, progress.deltaThrough ?? backfill.start)
             for type in active(progress) {
                 chunk.marks.append(.init(type: type.name, syncedThrough: WireTime.string(through)))
@@ -429,7 +456,9 @@ actor AppleHealthSource: PersonalDataSource {
     static func bucketKey(_ type: String, _ resolution: BucketResolution, _ start: Date, calendar: Calendar) -> String {
         switch resolution {
         case .hour: return "\(type):hour:\(WireTime.string(start))"
-        case .day: return "\(type):day:\(WireTime.day(start, calendar: calendar))"
+        // The bucket's start instant, as the Rome keys it: a local date alone
+        // reads as UTC midnight there, and a delete would miss its bucket.
+        case .day: return "\(type):day:\(WireTime.string(start))"
         }
     }
 

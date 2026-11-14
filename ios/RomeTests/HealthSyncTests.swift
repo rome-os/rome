@@ -44,17 +44,17 @@ final class FakeHealthSync: HealthSyncReading, @unchecked Sendable {
         }
     }
 
-    func currentAnchor(_ type: HealthSyncType) async throws -> Data {
+    func currentAnchor(_ type: HealthSyncType, from: Date) async throws -> Data {
         try read()
         return lock.withLock { anchor(version) }
     }
 
-    func changes(_ type: HealthSyncType, since anchor: Data) async throws -> HealthChanges {
+    func changes(_ type: HealthSyncType, since anchor: Data, from: Date) async throws -> HealthChanges {
         try read()
         let since = version(anchor)
         return lock.withLock {
             HealthChanges(
-                added: (stored[type.name] ?? []).filter { $0.version > since }.map(\.record),
+                added: (stored[type.name] ?? []).filter { $0.version > since && $0.record.start >= from }.map(\.record),
                 deleted: (deletions[type.name] ?? []).filter { $0.version > since }.map(\.id),
                 anchor: self.anchor(version)
             )
@@ -178,7 +178,9 @@ struct SyncRig {
     let source: AppleHealthSource
     let engine: SyncEngine
 
-    init() {
+    /// `pause`: how the engine waits for a retry or a background deadline;
+    /// by default a retry never fires by itself in a test.
+    init(pause: @escaping @Sendable (TimeInterval) async throws -> Void = { _ in try await Task.sleep(for: .seconds(3600)) }) {
         let calendar = calendar
         source = AppleHealthSource(reader: health, store: progress, calendar: { calendar })
         let backend = backend, flags = flags, clock = clock
@@ -191,8 +193,7 @@ struct SyncRig {
             protectedData: { flags.unlocked },
             now: { clock.now },
             random: { 0.5 },
-            // A retry never fires by itself in a test.
-            pause: { _ in try await Task.sleep(for: .seconds(3600)) }
+            pause: pause
         )
     }
 
@@ -205,6 +206,22 @@ struct SyncRig {
     }
 
     func lastEntry() async -> SyncLogEntry? { await log.entries.last }
+
+    /// Steps in three different weeks, so the history sends three chunks.
+    func addThreeWeeks() {
+        for (index, day) in ["2026-11-09", "2026-11-01", "2026-10-25"].enumerated() {
+            health.add("stepCount", id: "w\(index)", start: date("\(day)T02:00:00Z"), value: 100)
+        }
+    }
+
+    /// Until the backend holds a batch.
+    func waitUntilHeld() async {
+        for _ in 0..<500 {
+            if await backend.gate != nil { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("no batch was held")
+    }
 }
 
 // MARK: - Source and engine
@@ -227,9 +244,9 @@ struct SyncRig {
         let upserts = await rig.backend.upserts
         let keys = Set(upserts.map(\.key))
         #expect(keys.contains("stepCount:hour:2026-11-09T01:00:00Z"))
-        #expect(keys.contains("stepCount:day:2026-11-09"))
-        #expect(keys.contains("stepCount:day:2026-09-01"))
-        #expect(!keys.contains("stepCount:day:2026-03-01"), "nothing older than 6 months")
+        #expect(keys.contains("stepCount:day:2026-11-08T16:00:00Z"))
+        #expect(keys.contains("stepCount:day:2026-08-31T16:00:00Z"))
+        #expect(!keys.contains("stepCount:day:2026-02-28T16:00:00Z"), "nothing older than 6 months")
         #expect(upserts.first { $0.key == "stepCount:hour:2026-11-09T01:00:00Z" }?.value == 800, "an hour sums its samples")
         let night = try #require(upserts.first { $0.key == "sleep:night:2026-11-09" })
         #expect(night.value == 360)
@@ -309,7 +326,7 @@ struct SyncRig {
         await rig.engine.sync(.manual)
         let fresh = await rig.backend.envelopes.dropFirst(sent)
         let keys = Set(fresh.flatMap(\.upserts).map(\.key))
-        #expect(keys == ["stepCount:hour:2026-11-09T03:00:00Z", "stepCount:day:2026-11-09"])
+        #expect(keys == ["stepCount:hour:2026-11-09T03:00:00Z", "stepCount:day:2026-11-08T16:00:00Z"])
         #expect(fresh.last?.types.contains { $0.type == "stepCount" } == true, "each type says how far it has synced")
         #expect(fresh.flatMap(\.deletes).isEmpty)
     }
@@ -331,7 +348,7 @@ struct SyncRig {
         await rig.engine.sync(.manual)
         let deletes = await rig.backend.deleteKeys
         #expect(deletes.contains("stepCount:hour:2026-11-08T02:00:00Z"))
-        #expect(deletes.contains("stepCount:day:2026-11-08"))
+        #expect(deletes.contains("stepCount:day:2026-11-07T16:00:00Z"))
     }
 
     @Test func theAnchorMovesOnlyOnceTheRomeHasTheBatch() async throws {
@@ -454,11 +471,13 @@ struct SyncRig {
         #expect(await rig.lastEntry()?.outcome == .partial)
         let progress = await rig.progress.load()
         #expect(progress.unsupported.contains("bodyMass"))
-        // Updated, the Rome takes it, and the saved anchor still has the reading.
+        // Updated, the Rome takes it: the saved anchor still has the reading,
+        // and the history is read again (the Rome counts the repeat as unchanged).
         await rig.backend.reject([])
         let before = await rig.backend.upserts.filter { $0.key == "bodyMass:m3" }.count
         await rig.engine.sync(.manual)
-        #expect(await rig.backend.upserts.filter { $0.key == "bodyMass:m3" }.count == before + 1)
+        #expect(await rig.backend.upserts.filter { $0.key == "bodyMass:m3" }.count > before)
+        #expect(await rig.progress.load().unsupported.isEmpty)
     }
 
     @Test func anotherRomeStartsTheHistoryOver() async throws {
@@ -466,9 +485,9 @@ struct SyncRig {
         rig.health.add("stepCount", id: "s1", start: rig.date("2026-10-01T02:00:00Z"), value: 100)
         await rig.backfill()
         rig.flags.set(instance: "inst-2")
-        let before = await rig.backend.upserts.filter { $0.key == "stepCount:day:2026-10-01" }.count
+        let before = await rig.backend.upserts.filter { $0.key == "stepCount:day:2026-09-30T16:00:00Z" }.count
         await rig.engine.sync(.manual)
-        #expect(await rig.backend.upserts.filter { $0.key == "stepCount:day:2026-10-01" }.count == before + 1)
+        #expect(await rig.backend.upserts.filter { $0.key == "stepCount:day:2026-09-30T16:00:00Z" }.count == before + 1)
         #expect(await rig.progress.load().instanceId == "inst-2")
     }
 
@@ -485,12 +504,109 @@ struct SyncRig {
         let rig = SyncRig()
         rig.health.add("stepCount", id: "s1", start: rig.date("2026-11-05T02:00:00Z"), value: 100)
         await rig.backfill()
-        let progress = await rig.progress.load()
-        #expect(progress.lastDailyReconcile == nil, "the history covers it")
         await rig.engine.sync(.manual)
-        #expect(await rig.progress.load().lastWeeklyReconcile != nil)
-        let resent = await rig.backend.upserts.filter { $0.key == "stepCount:day:2026-11-05" }.count
-        #expect(resent == 2, "once in the history, once in the reconcile")
+        #expect(await rig.backend.upserts.filter { $0.key == "stepCount:day:2026-11-04T16:00:00Z" }.count == 1, "the history is fresh: no reconcile yet")
+        rig.clock.advance(86_400 + 60)
+        await rig.engine.sync(.manual)
+        let resent = await rig.backend.upserts.filter { $0.key == "stepCount:day:2026-11-04T16:00:00Z" }.count
+        #expect(resent == 2, "a day later, the last week once more")
+        #expect(await rig.progress.load().lastWeeklyReconcile == HealthFixtures.now, "the 90 days wait a week")
+    }
+
+    @Test func aWakeBeforeAnyRomeIsOpenLeavesNoTraceAndBlocksNothing() async throws {
+        let health = FakeHealthSync()
+        let log = MemorySyncLog()
+        let backend = FakePersonalDataBackend()
+        let open = Flags()
+        open.set(instance: "")
+        let engine = SyncEngine(
+            source: AppleHealthSource(reader: health, store: MemoryProgressStore()),
+            target: { open.instance.isEmpty ? nil : PersonalDataTarget(instanceId: open.instance, backend: backend) },
+            log: log,
+            origin: { .init(id: "origin-1", name: "iPhone", platform: "ios", appVersion: "1.6.0") },
+            switches: { open.switches }, protectedData: { true }
+        )
+        await engine.sync(.observer)
+        await engine.sync(.foreground)
+        #expect(await log.entries.isEmpty, "HealthKit's observers fire at launch, before the Rome opens")
+        #expect(await !engine.signedOut)
+        await engine.sync(.manual)
+        #expect(await log.entries.last?.errorCode == "no_instance")
+        open.set(instance: "inst-1")
+        await engine.sync(.foreground)
+        #expect(await log.entries.last?.outcome == .ok, "the launch wake did not use up the foreground throttle")
+    }
+
+    @Test func pausingStopsABackfillUnderWayAndKeepsNothingOfIt() async throws {
+        let rig = SyncRig()
+        rig.addThreeWeeks()
+        await rig.backend.hold()
+        let run = Task { await rig.engine.sync(.backfill) }
+        await rig.waitUntilHeld()
+        let cursor = try #require(await rig.progress.load().backfill?.cursor)
+        rig.flags.set(paused: true)
+        await rig.backend.release()
+        await run.value
+        #expect(await rig.backend.envelopes.count == 1, "the batch already sent, and nothing after it")
+        #expect(await rig.lastEntry()?.outcome == .interrupted)
+        #expect(await rig.progress.load().backfill?.cursor == cursor, "the week is read again after Resume")
+        let reads = rig.health.readCount
+        await rig.engine.sync(.manual)
+        #expect(rig.health.readCount == reads, "paused reads nothing")
+    }
+
+    @Test func aDeleteWaitsForTheSyncUnderWayAndNoLateBatchBringsAnythingBack() async throws {
+        let rig = SyncRig()
+        rig.addThreeWeeks()
+        await rig.backend.hold()
+        let run = Task { await rig.engine.sync(.backfill) }
+        await rig.waitUntilHeld()
+        // Delete: stop and wait, then the Rome's DELETE, then reset.
+        let quiet = Task { await rig.engine.quiesce() }
+        try await Task.sleep(for: .milliseconds(50))
+        await rig.backend.release()
+        await quiet.value
+        let sent = await rig.backend.envelopes.count
+        await rig.source.reset()
+        await run.value
+        #expect(sent == 1, "the batch in flight landed before the delete; nothing after it")
+        #expect(await rig.backend.envelopes.count == sent)
+        #expect(await rig.progress.load() == SyncProgress(), "no late confirmation restores the old progress")
+    }
+
+    @Test func aBackgroundWakeStopsWaitingWhenItsTimeIsUp() async throws {
+        let rig = SyncRig(pause: { try await Task.sleep(for: .seconds($0)) })
+        rig.addThreeWeeks()
+        await rig.backend.hold()
+        let foreground = Task { await rig.engine.sync(.manual) }
+        await rig.waitUntilHeld()
+        let started = Date()
+        await rig.engine.sync(.observer, budget: 0.2)
+        #expect(Date().timeIntervalSince(started) < 5, "HealthKit's completion is not held by a long foreground run")
+        await rig.backend.release()
+        await foreground.value
+    }
+
+    @Test func aTypeTheRomeLearnsLaterGetsItsHistoryBeforeItsMark() async throws {
+        let rig = SyncRig()
+        await rig.backend.reject(["bodyMass"])
+        rig.health.add("bodyMass", id: "old", start: rig.date("2026-10-01T00:00:00Z"), value: 70)
+        await rig.backfill()
+        #expect(await rig.progress.load().unsupported == ["bodyMass"])
+        await rig.backend.reject([])
+        let sent = await rig.backend.envelopes.count
+        await rig.engine.sync(.manual)
+        let fresh = Array(await rig.backend.envelopes.dropFirst(sent))
+        #expect(fresh.flatMap(\.upserts).contains { $0.key == "bodyMass:old" }, "its history is read again")
+        let marked = fresh.enumerated().filter { $0.element.types.contains { $0.type == "bodyMass" } }
+        #expect(marked.map(\.offset) == [fresh.count - 1], "synced through only once its history is in")
+    }
+
+    @Test func dayBucketsAreKeyedByTheirStartInstant() {
+        let calendar = HealthFixtures.calendar("Asia/Shanghai")
+        let midnight = HealthFixtures.date("2026-11-08T16:00:00Z")
+        #expect(AppleHealthSource.bucketKey("stepCount", .day, midnight, calendar: calendar) == "stepCount:day:2026-11-08T16:00:00Z")
+        #expect(AppleHealthSource.bucketKey("stepCount", .hour, midnight, calendar: calendar) == "stepCount:hour:2026-11-08T16:00:00Z")
     }
 
     @Test func nightsBelongToTheDayTheyEndOn() {
@@ -710,6 +826,32 @@ struct SyncRig {
         ]
         let rows = formatter.types(log: [entry], stored: nil).map { plain($0.text) }
         #expect(rows == ["Steps · up to 9:00 AM", "Weight · up to Nov 3", "Sleep · up to last night"])
+    }
+
+    @Test func aBucketThatEndsAfterTheSyncSaysUpToTheSync() {
+        // Today's day bucket ends at midnight; the sync ran at 6:30 PM.
+        var entry = SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: .observer, outcome: .ok)
+        entry.types = ["stepCount": SyncTypeCount(items: 2, start: HealthFixtures.date("2026-11-08T16:00:00Z"), end: HealthFixtures.date("2026-11-09T16:00:00Z"))]
+        #expect(formatter.types(log: [entry], stored: nil).map { plain($0.text) } == ["Steps · up to 6:30 PM"])
+        let stored = PersonalDataCatalogSource(source: "apple_health", types: [
+            .init(type: "heartRate", pointCount: 30, earliest: "2026-11-02T16:00:00.000Z", latest: "2026-11-09T16:00:00.000Z", syncedThrough: "2026-11-09T09:00:00.000Z"),
+        ])
+        #expect(formatter.types(log: [], stored: stored).map { plain($0.text) } == ["Heart rate · up to 5:00 PM · since Nov 2026"])
+    }
+
+    @Test func typesFromBeforeADeleteAreGone() {
+        var old = SyncLogEntry(seq: 1, time: HealthFixtures.now.addingTimeInterval(-600), trigger: .observer, outcome: .ok)
+        old.types = ["stepCount": SyncTypeCount(items: 2, start: HealthFixtures.date("2026-11-09T00:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z"))]
+        let deleted = SyncLogEntry(seq: 2, time: HealthFixtures.now, trigger: .manual, outcome: .deleted)
+        #expect(formatter.types(log: [deleted, old], stored: nil).isEmpty)
+    }
+
+    @Test func manyTypesNameTwoAndCountTheRest() {
+        var entry = SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: .observer, outcome: .ok)
+        for (index, type) in ["stepCount", "heartRate", "sleep", "workouts"].enumerated() {
+            entry.types[type] = SyncTypeCount(items: 10 - index, start: HealthFixtures.date("2026-11-09T00:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z"))
+        }
+        #expect(plain(formatter.detail(entry)).hasPrefix("Steps, Heart rate +2 · "))
     }
 
     @Test func theRomesCopyIsSummedUp() {

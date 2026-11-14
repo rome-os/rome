@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+let personalDataLog = Logger(subsystem: "cc.romeos.mobile", category: "PersonalData")
 
 // Runs one source's syncs: one at a time, triggers that arrive meanwhile
 // merged into one follow-up, a throttle on the foreground, batches with caps,
@@ -40,7 +43,15 @@ actor SyncEngine {
 
     private var running = false
     private var pending: Set<SyncTrigger> = []
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    /// Callers waiting for the follow-up run, by id: a background caller
+    /// stops waiting when its budget runs out.
+    private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    /// Callers waiting for the engine to go idle (`quiesce`).
+    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Goes up on every Off, Pause, Delete and sign-out: a run started under
+    /// an older generation stops before its next read or batch, and keeps
+    /// nothing it read.
+    private var generation = 0
     private var lastRunAt: Date?
     private var failures = 0
     private var retryAt: Date?
@@ -85,23 +96,60 @@ actor SyncEngine {
     /// asked for while one runs joins the next run, which serves every
     /// trigger that waited. `budget`: seconds a background wake may take.
     func sync(_ trigger: SyncTrigger, budget: TimeInterval? = nil) async {
+        // One deadline for the whole wake, follow-up runs included.
+        let deadline = budget.map { now().addingTimeInterval($0) }
         if running {
             pending.insert(trigger)
-            await withCheckedContinuation { waiters.append($0) }
+            await waitForFollowUp(until: deadline)
             return
         }
         running = true
         var triggers: Set<SyncTrigger> = [trigger]
         while true {
-            await run(Self.lead(triggers), served: triggers, budget: budget)
+            // A follow-up the guardian is waiting on is not held to a background budget.
+            let limit = triggers.isSubset(of: [.observer, .retry]) ? deadline : nil
+            await run(Self.lead(triggers), served: triggers, deadline: limit)
             guard !pending.isEmpty else { break }
             triggers = pending
             pending = []
         }
         running = false
         let held = waiters
-        waiters = []
-        for waiter in held { waiter.resume() }
+        waiters = [:]
+        for waiter in held.values { waiter.resume() }
+        let idle = idleWaiters
+        idleWaiters = []
+        for waiter in idle { waiter.resume() }
+    }
+
+    /// Waits for the run that serves this caller; a caller with a deadline
+    /// stops waiting there, so a background wake never outlasts its time.
+    private func waitForFollowUp(until deadline: Date?) async {
+        let id = UUID()
+        if let deadline {
+            let delay = max(0, deadline.timeIntervalSince(now()))
+            let pause = pause
+            Task { [weak self] in
+                try? await pause(delay)
+                await self?.release(id)
+            }
+        }
+        await withCheckedContinuation { waiters[id] = $0 }
+    }
+
+    private func release(_ id: UUID) {
+        waiters.removeValue(forKey: id)?.resume()
+    }
+
+    /// Stops what runs and waits until nothing does: Off, Pause, Delete and
+    /// sign-out call it first, so no batch reaches the Rome after they act
+    /// and no late confirmation brings old progress back.
+    func quiesce() async {
+        generation += 1
+        pending = []
+        cancelRetries()
+        guard running else { return }
+        await withCheckedContinuation { idleWaiters.append($0) }
     }
 
     /// The trigger a merged run is named after: what the guardian asked for wins.
@@ -128,16 +176,27 @@ actor SyncEngine {
 
     // MARK: One run
 
-    private func run(_ trigger: SyncTrigger, served: Set<SyncTrigger>, budget: TimeInterval?) async {
+    /// Why a run stops before it has read everything.
+    private struct Stop: Error {}
+
+    /// Throws `Stop` when the run may not read or send any more: sync was
+    /// turned off or paused, the generation moved on, or time is up.
+    private func checkGoing(_ generation: Int, deadline: Date?) async throws {
+        let state = await switches()
+        guard state.enabled, !state.paused, generation == self.generation else { throw Stop() }
+        if let deadline, now() >= deadline { throw Stop() }
+    }
+
+    private func run(_ trigger: SyncTrigger, served: Set<SyncTrigger>, deadline: Date?) async {
         let state = await switches()
         guard state.enabled, !state.paused else { return }
+        let myGeneration = generation
         let started = now()
         let asked = served.contains(.manual) || served.contains(.backfill)
         if trigger == .foreground, !asked, let lastRunAt, started.timeIntervalSince(lastRunAt) < Self.foregroundThrottle { return }
         if !asked, let retryAt, started < retryAt { return }
         // Only the guardian can end these: a background wake does not try.
         if (signedOut || needsUpdate), !served.contains(.manual), !served.contains(.foreground) { return }
-        lastRunAt = started
         var entry = SyncLogEntry(seq: 0, time: started, trigger: trigger, outcome: .ok)
         guard await protectedData() else {
             entry.outcome = .skipped
@@ -146,26 +205,31 @@ actor SyncEngine {
             return
         }
         guard let target = await target(), let origin = await origin() else {
-            entry.outcome = .error
-            entry.errorCode = "signed_out"
-            signedOut = true
-            await finish(entry)
+            // No Rome open yet, as when HealthKit's observers fire at launch:
+            // the next sync finds one. Sign-out turns sync off, so this is
+            // never an ended session. Only Sync now says so.
+            if served.contains(.manual) {
+                entry.outcome = .skipped
+                entry.errorCode = "no_instance"
+                await finish(entry)
+            }
             return
         }
+        // Counted only once a Rome was there to sync with.
+        lastRunAt = started
         await onActivity(SyncActivity(running: true, historyMonth: await source.historyCursor()))
-        let deadline = budget.map { started.addingTimeInterval($0) }
         do {
             try await source.beginRun(trigger: trigger, instanceId: target.instanceId, now: started)
             var index = 0
             while true {
-                if let deadline, now() >= deadline {
-                    entry.outcome = .interrupted
-                    break
-                }
+                try await checkGoing(myGeneration, deadline: deadline)
                 guard let chunk = try await source.nextChunk() else { break }
                 if chunk.kind == .backfill { entry.history = true }
                 await onActivity(SyncActivity(running: true, historyMonth: chunk.historyMonth))
-                let unsupported = try await send(chunk, origin: origin, trigger: trigger, backend: target.backend, index: &index, entry: &entry)
+                let unsupported = try await send(chunk, origin: origin, trigger: trigger, backend: target.backend, index: &index, entry: &entry, generation: myGeneration, deadline: deadline)
+                // Off, Pause or Delete meanwhile: the chunk is not kept, so
+                // a reset that follows is never undone by it.
+                try await checkGoing(myGeneration, deadline: nil)
                 await source.confirm(chunk, unsupported: unsupported)
                 for (type, count) in chunk.counts { entry.types[type] = Self.merged(entry.types[type], count) }
                 if !unsupported.isEmpty { entry.outcome = .partial }
@@ -175,6 +239,8 @@ actor SyncEngine {
             retryAt = nil
             signedOut = false
             needsUpdate = false
+        } catch is Stop {
+            entry.outcome = .interrupted
         } catch let failure as PersonalDataFailure {
             fail(&entry, failure, trigger: trigger)
         } catch HealthReadError.locked {
@@ -182,7 +248,12 @@ actor SyncEngine {
             entry.errorCode = "locked"
         } catch is CancellationError {
             entry.outcome = .interrupted
+        } catch HealthReadError.unavailable {
+            entry.outcome = .error
+            entry.errorCode = "health_unavailable"
         } catch {
+            // Never a value: HealthKit's errors name a type or a reason.
+            personalDataLog.error("sync failed reading Health: \(String(describing: error), privacy: .public)")
             entry.outcome = .error
             entry.errorCode = "health_failed"
         }
@@ -245,11 +316,14 @@ actor SyncEngine {
     /// all of it. Returns the types the Rome does not know.
     private func send(
         _ chunk: SyncChunk, origin: PersonalDataEnvelope.Origin, trigger: SyncTrigger, backend: any PersonalDataBackend,
-        index: inout Int, entry: inout SyncLogEntry
-    ) async throws(PersonalDataFailure) -> Set<String> {
+        index: inout Int, entry: inout SyncLogEntry, generation: Int, deadline: Date?
+    ) async throws -> Set<String> {
         let batches = Self.batches(chunk)
         var unsupported = Set<String>()
         for (number, batch) in batches.enumerated() {
+            // Before every request: a long chunk stops as soon as sync is
+            // off, paused or deleted, or the wake's time is up.
+            try await checkGoing(generation, deadline: deadline)
             let last = number == batches.count - 1
             let envelope = PersonalDataEnvelope(
                 source: source.id, origin: origin,

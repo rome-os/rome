@@ -109,7 +109,10 @@ struct SyncHistoryFormatter {
 
     private func typesText(_ types: [String: SyncTypeCount]) -> String {
         let names = types.filter { $0.value.items > 0 }.sorted { $0.value.items > $1.value.items }.map { NodeActivityFormatter.typeName($0.key) }
-        let shown = Array(names.prefix(Self.maxTypes)).formatted(.list(type: .and).locale(locale))
+        // "Steps and Heart rate", or "Steps, Heart rate +3" when there are more.
+        let shown = names.count > Self.maxTypes
+            ? names.prefix(Self.maxTypes).joined(separator: String(localized: ", "))
+            : Array(names).formatted(.list(type: .and).locale(locale))
         let more = names.count - Self.maxTypes
         return more > 0 ? String(localized: "\(shown) +\(more)") : shown
     }
@@ -151,13 +154,21 @@ struct SyncHistoryFormatter {
     func types(log: [SyncLogEntry], stored: PersonalDataCatalogSource?) -> [SyncTypeRow] {
         var latest: [String: Date] = [:]
         var earliest: [String: Date] = [:]
+        // A bucket's end can be ahead of the sync, as today's day ends at
+        // midnight: a type has synced up to when it was read, no further.
         for entry in log {
+            // Only what is on the Rome now: nothing from before a delete.
+            if entry.outcome == .deleted { break }
             for (type, count) in entry.types where count.items > 0 {
-                if let end = count.end { latest[type] = max(latest[type] ?? end, end) }
+                if let end = count.end.map({ min($0, entry.time) }) { latest[type] = max(latest[type] ?? end, end) }
             }
         }
         for type in stored?.types ?? [] where (type.pointCount ?? 0) > 0 {
-            if let end = RomeDate.parse(type.latest) ?? Self.dayDate(type.latest, calendar: calendar) { latest[type.type] = max(latest[type.type] ?? end, end) }
+            if var end = RomeDate.parse(type.latest) ?? Self.dayDate(type.latest, calendar: calendar) {
+                if let through = RomeDate.parse(type.syncedThrough) { end = min(end, through) }
+                end = min(end, now)
+                latest[type.type] = max(latest[type.type] ?? end, end)
+            }
             if let start = RomeDate.parse(type.earliest) ?? Self.dayDate(type.earliest, calendar: calendar) { earliest[type.type] = start }
         }
         let order = HealthSyncPlan.all.map(\.name)
@@ -289,11 +300,14 @@ struct SyncHistoryScreen: View {
     private func actions(_ health: HealthSettings) -> some View {
         SettingsGroup {
             if health.isEnabled {
-                Button { health.syncNow() } label: {
-                    ActionRow(title: "Sync now", busy: health.activity.running)
+                // Paused reads nothing: Resume is the way back.
+                if !health.isPaused {
+                    Button { health.syncNow() } label: {
+                        ActionRow(title: "Sync now", busy: health.activity.running)
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .disabled(health.activity.running)
                 }
-                .buttonStyle(RowPressStyle())
-                .disabled(health.isPaused || health.activity.running)
                 Button { health.setPaused(!health.isPaused) } label: {
                     ActionRow(title: health.isPaused ? "Resume" : "Pause")
                 }

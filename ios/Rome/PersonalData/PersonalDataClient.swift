@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // The instance's personal-data routes (`/api/personal-data/*`, guardian session only):
 // the phone pushes readings there and reads what the Rome holds. Contract:
@@ -90,9 +91,21 @@ struct PersonalDataTarget: Sendable {
     let backend: any PersonalDataBackend
 }
 
+/// Why the last session renewal failed: only an answer from Rome Cloud
+/// that the sign-in is over counts as signed out. A network or Cloud outage
+/// is worth trying again.
+final class RenewalNote: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: false)
+
+    var wasTransient: Bool { state.withLock { $0 } }
+    func note(transient: Bool) { state.withLock { $0 = transient } }
+}
+
 /// The routes over the instance's `APIClient`.
 struct PersonalDataClient: PersonalDataBackend {
     let client: APIClient
+    /// Set by the client's renewal, when it has one.
+    var renewal: RenewalNote? = nil
 
     func ingest(_ envelope: PersonalDataEnvelope) async throws(PersonalDataFailure) -> PersonalDataIngestReply {
         let body: Data
@@ -143,6 +156,7 @@ struct PersonalDataClient: PersonalDataBackend {
         do {
             reply = try await client.raw(method, path, json: body)
         } catch APIError.unauthorized {
+            if renewal?.wasTransient == true { throw .retryable("network") }
             throw .signedOut
         } catch is CancellationError {
             throw .retryable("cancelled")

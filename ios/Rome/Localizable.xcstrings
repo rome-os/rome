@@ -323,6 +323,16 @@
         }
       }
     },
+    ", " : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "、"
+          }
+        }
+      }
+    },
     "5 actions → 1 skill" : {
       "localizations" : {
         "zh-Hans" : {

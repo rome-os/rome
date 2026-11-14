@@ -12,16 +12,21 @@ final class LiveHealthSync: HealthSyncReading, @unchecked Sendable {
 
     // MARK: Anchors
 
-    func currentAnchor(_ type: HealthSyncType) async throws -> Data {
-        // Nothing starts in the far future, so this reads no sample: only
-        // the anchor, which marks where the store is now.
-        let predicate = HKQuery.predicateForSamples(withStart: .distantFuture, end: nil, options: .strictStartDate)
-        let (_, _, anchor) = try await anchored(try sampleType(type), predicate: predicate, anchor: nil)
+    func currentAnchor(_ type: HealthSyncType, from: Date) async throws -> Data {
+        // An anchored query hands out its anchor only after reading what it
+        // covers, so it covers the samples from `from` on. A type iOS has not
+        // decided on yet has no anchor: once it is allowed, its first delta
+        // reads it from `from`.
+        guard let (_, _, anchor) = try await undecidedIsEmpty({
+            try await anchored(try sampleType(type), predicate: Self.from(from), anchor: nil)
+        }) else { return Data() }
         return try Self.archive(anchor)
     }
 
-    func changes(_ type: HealthSyncType, since anchor: Data) async throws -> HealthChanges {
-        let (added, deleted, next) = try await anchored(try sampleType(type), predicate: nil, anchor: Self.unarchive(anchor))
+    func changes(_ type: HealthSyncType, since anchor: Data, from: Date) async throws -> HealthChanges {
+        guard let (added, deleted, next) = try await undecidedIsEmpty({
+            try await anchored(try sampleType(type), predicate: Self.from(from), anchor: Self.unarchive(anchor))
+        }) else { return HealthChanges(anchor: anchor) }
         return HealthChanges(
             added: added.compactMap { Self.record($0, type) },
             deleted: deleted.map { $0.uuid.uuidString },
@@ -46,6 +51,21 @@ final class LiveHealthSync: HealthSyncReading, @unchecked Sendable {
         }
     }
 
+    /// A type whose read access iOS has not decided on yet reads as no data,
+    /// as a denied one does (HealthKit hides denials), so one undecided type
+    /// never stops the others.
+    private func undecidedIsEmpty<T>(_ read: () async throws -> T) async throws -> T? {
+        do {
+            return try await read()
+        } catch let error as HKError where error.code == .errorAuthorizationNotDetermined {
+            return nil
+        }
+    }
+
+    private static func from(_ date: Date) -> NSPredicate {
+        HKQuery.predicateForSamples(withStart: date, end: nil, options: .strictStartDate)
+    }
+
     static func archive(_ anchor: HKQueryAnchor?) throws -> Data {
         guard let anchor else { return Data() }
         return try NSKeyedArchiver.archivedData(withRootObject: anchor, requiringSecureCoding: true)
@@ -58,6 +78,10 @@ final class LiveHealthSync: HealthSyncReading, @unchecked Sendable {
     // MARK: Buckets
 
     func buckets(_ type: HealthSyncType, _ resolution: BucketResolution, in window: DateInterval, calendar: Calendar) async throws -> [HealthBucketValue] {
+        try await undecidedIsEmpty { try await readBuckets(type, resolution, in: window, calendar: calendar) } ?? []
+    }
+
+    private func readBuckets(_ type: HealthSyncType, _ resolution: BucketResolution, in window: DateInterval, calendar: Calendar) async throws -> [HealthBucketValue] {
         guard let quantityType = LiveHealth.quantityType(type.type), let unit = type.type.units.first else { throw HealthReadError.unavailable }
         let component: Calendar.Component = resolution == .hour ? .hour : .day
         guard let start = calendar.dateInterval(of: component, for: window.start)?.start else { return [] }
@@ -100,6 +124,10 @@ final class LiveHealthSync: HealthSyncReading, @unchecked Sendable {
     // MARK: Records
 
     func records(_ type: HealthSyncType, in window: DateInterval) async throws -> [HealthRecord] {
+        try await undecidedIsEmpty { try await readRecords(type, in: window) } ?? []
+    }
+
+    private func readRecords(_ type: HealthSyncType, in window: DateInterval) async throws -> [HealthRecord] {
         let sampleType = try sampleType(type)
         let predicate = HKQuery.predicateForSamples(withStart: window.start, end: window.end, options: .strictStartDate)
         let descriptor = HKSampleQueryDescriptor(
