@@ -9,7 +9,9 @@
 #   voice-env transcriber stand-in [--text <text>] [--first-ms <n>] [--token-ms <n>]
 #   voice-env transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]
 #   voice-env transcriber status
-#   voice-env cloud status | usage | sign-in | sign-out
+#   voice-env transcriber session-cap <seconds>|off
+#   voice-env cloud status | usage | session | minted | sign-in | sign-out
+#   voice-env gate on|off
 #   voice-env network cut|restore
 #   voice-env chats
 #   voice-env messages --chat <id>
@@ -50,7 +52,7 @@ cmd_version() {
     script='{"provider":"stand-in","url":"'"$STAND_IN_URL"'","script":'"$script"'}'
   fi
   node -e '
-    const [build, verifier, transcriber, model, dashboard, cloud, signIn] = process.argv.slice(1);
+    const [build, verifier, transcriber, model, dashboard, cloud, signIn, gate] = process.argv.slice(1);
     const b = JSON.parse(build);
     console.log(JSON.stringify({
       product: b.product,
@@ -60,12 +62,13 @@ cmd_version() {
       transcriber: JSON.parse(transcriber),
       model: model || null,
       signIn,
+      gate,
       cloud: cloud ? JSON.parse(cloud) : null,
       dashboard,
       builtAt: b.builtAt,
     }, null, 2));' \
     "$(cat "$BUILD_FILE")" "$(tree_json environments/voice-input/verifier)" "$script" "$model" "$DASHBOARD" \
-    "$(cat "$CLOUD_BUILD_FILE" 2>/dev/null || true)" "$(state signIn || echo cloud)"
+    "$(cat "$CLOUD_BUILD_FILE" 2>/dev/null || true)" "$(state signIn || echo cloud)" "$(state cloudGate || echo on)"
 }
 
 cmd_browser() {
@@ -135,7 +138,14 @@ cmd_transcriber() {
       curl -fsS -X PUT --data-binary "$body" "$(stand_in)/script"
       echo
       ;;
-    *) die "usage: voice-env transcriber real | stand-in [...] | status" ;;
+    session-cap)
+      local cap="${1:-}"
+      [ "$cap" = off ] && cap=null
+      [[ "$cap" =~ ^([0-9]+(\.[0-9]+)?|null)$ ]] || die "usage: voice-env transcriber session-cap <seconds>|off"
+      curl -fsS -X PUT --data-binary "{\"sessionCapSeconds\":$cap}" "$(stand_in)/keys"
+      echo
+      ;;
+    *) die "usage: voice-env transcriber real | stand-in [...] | status | session-cap <seconds>|off" ;;
   esac
 }
 
@@ -191,6 +201,11 @@ cmd_cloud() {
         from usage_events where type = 'transcription' and instance_id = '$instance_id'" |
         node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => console.log(JSON.stringify({ events: JSON.parse(s) }, null, 2)))'
       ;;
+    session) cloud_session ;;
+    minted)
+      curl -fsS "$(stand_in)/stats" |
+        node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => console.log(JSON.stringify({ count: JSON.parse(s).mints.filter((m) => m.status === 201).length })))'
+      ;;
     sign-in | sign-out)
       local next=cloud
       [ "$1" = sign-out ] && next=own
@@ -206,7 +221,23 @@ cmd_cloud() {
       start_rome
       "$0" cloud status
       ;;
-    *) die "usage: voice-env cloud status | usage | sign-in | sign-out" ;;
+    *) die "usage: voice-env cloud status | usage | session | minted | sign-in | sign-out" ;;
+  esac
+}
+
+# Rome Cloud reads its forced gate at start, so switching restarts it.
+cmd_gate() {
+  require_up
+  case "${1:-}" in
+    on | off)
+      set_state "{\"cloudGate\":\"$1\"}"
+      load_secrets
+      write_cloud_env
+      log "restarting Rome Cloud with voice input $1 for every account ..."
+      start_cloud
+      printf '{"gate":"%s"}\n' "$1"
+      ;;
+    *) die "usage: voice-env gate on|off" ;;
   esac
 }
 
@@ -284,10 +315,11 @@ case "${1:-}" in
   browser) shift && cmd_browser "$@" ;;
   transcriber) shift && cmd_transcriber "$@" ;;
   cloud) shift && cmd_cloud "$@" ;;
+  gate) shift && cmd_gate "$@" ;;
   network) shift && cmd_network "$@" ;;
   chats) cmd_chats ;;
   messages) shift && cmd_messages "$@" ;;
   audio-scan) cmd_audio_scan ;;
   capture) shift && cmd_capture "$@" ;;
-  *) die "usage: voice-env version | browser | transcriber | cloud | network | chats | messages | audio-scan | capture (see README.md)" ;;
+  *) die "usage: voice-env version | browser | transcriber | cloud | gate | network | chats | messages | audio-scan | capture (see README.md)" ;;
 esac

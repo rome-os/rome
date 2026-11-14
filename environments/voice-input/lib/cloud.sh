@@ -9,7 +9,7 @@ CLOUD_PG="rome-env-${NAME}-cloud-pg"
 CLOUD_PG_VOLUME="rome-env-${NAME}-cloud-pg"
 CLOUD_RUNNER_IMAGE="node:24-bookworm"
 CLOUD_REPO="${ROME_CLOUD_REPO:-$HOME/workspace/rome-cloud}"
-CLOUD_REF="${VOICE_CLOUD_REF:-origin/voice-input-transcription-sessions}"
+CLOUD_REF="${VOICE_CLOUD_REF:-origin/voice-input-gate}"
 CLOUD_DIR="$STATE_DIR/rome-cloud"
 CLOUD_ENV_FILE="$RUN_DIR/cloud.env"
 CLOUD_BUILD_FILE="$RUN_DIR/cloud-build.json"
@@ -49,7 +49,7 @@ cloud_kept() { [ ! -f "$CLOUD_ENV_FILE" ] || sed -n "s/^$1=//p" "$CLOUD_ENV_FILE
 
 # Rewritten on every start, so the transcriber switch reaches Rome Cloud.
 write_cloud_env() {
-  local jwt token_key relay_key mode
+  local jwt token_key relay_key mode gate
   jwt="$(cloud_kept PANTHEON_JWT_SECRET)"
   token_key="$(cloud_kept PANTHEON_OAUTH_TOKEN_ENCRYPTION_KEY)"
   relay_key="$(cloud_kept RELAY_SIGNING_KEY)"
@@ -57,6 +57,7 @@ write_cloud_env() {
   [ -n "$token_key" ] || token_key="$(openssl rand -hex 32)"
   [ -n "$relay_key" ] || relay_key="$(node -e "const {privateKey}=require('crypto').generateKeyPairSync('ed25519');console.log(JSON.stringify(privateKey.export({format:'jwk'})))")"
   mode="$(state transcriber || true)"
+  gate="$(state cloudGate || true)"
   {
     echo "DATABASE_URL=postgresql://pantheon:pantheon@${CLOUD_PG}:5432/pantheon"
     echo "PANTHEON_JWT_SECRET=$jwt"
@@ -70,6 +71,8 @@ write_cloud_env() {
     echo "CLICKHOUSE_INSTANCE_PASSWORD=none"
     echo "RELAY_ORIGIN=https://relay.invalid"
     echo "RELAY_SIGNING_KEY=$relay_key"
+    # Voice input's per-account gate, forced for every account without Statsig.
+    echo "FEATURE_GATE_VOICE_INPUT=${gate:-on}"
     echo "TRANSCRIPTION_PROVIDER=soniox"
     if [ "$mode" = real ]; then
       [ -n "${SONIOX_API_KEY:-}" ] || die "transcriber real needs SONIOX_API_KEY in $SECRETS_FILE"
@@ -166,6 +169,21 @@ remove_cloud_data() {
   docker rm -f "$CLOUD" "$CLOUD_PG" >/dev/null 2>&1 || true
   docker volume rm "$CLOUD_PG_VOLUME" >/dev/null 2>&1 || true
   [ ! -f "$STATE_FILE" ] || set_state '{"cloud":null}'
+}
+
+# Asks Rome Cloud for a transcription session as Rome does: from inside
+# Rome's container, with a token from Rome's signer. Prints the answer.
+cloud_session() {
+  docker exec "$ROME" sh -c 'cd /opt/rome/packages/core && node --input-type=module -e "
+    const { requestSignerToken } = await import(\"@rome-os/node-core/signer\");
+    const token = await requestSignerToken(process.env.ROME_SIGNER_SOCKET);
+    const r = await fetch(process.env.PANTHEON_BASE_ORIGIN + \"/v1/transcription/sessions\", {
+      method: \"POST\", headers: { authorization: \"Bearer \" + token, \"content-type\": \"application/json\" }, body: \"{}\" });
+    const text = await r.text();
+    let body; try { body = JSON.parse(text); } catch { body = { text }; }
+    if (body && typeof body.token === \"string\") body.token = \"(removed)\";
+    console.log(JSON.stringify({ status: r.status, body }, null, 2));
+  "'
 }
 
 # Points the stand-in at Rome Cloud's temporary keys, or back at the

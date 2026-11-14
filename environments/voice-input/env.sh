@@ -97,7 +97,11 @@ json() {
     });' "$1"
 }
 
-state() { [ -f "$STATE_FILE" ] && json "$1" <"$STATE_FILE"; }
+# One field of the state file. Fails when it is absent, so `state x || echo d` gives a default.
+state() {
+  local value
+  [ -f "$STATE_FILE" ] && value="$(json "$1" <"$STATE_FILE")" && [ -n "$value" ] && printf '%s' "$value"
+}
 
 # Merges a JSON object into the state file.
 set_state() {
@@ -342,6 +346,7 @@ cmd_up() {
   load_secrets
   [ -n "$(state transcriber || true)" ] || set_state '{"transcriber":"stand-in"}'
   [ -n "$(state signIn || true)" ] || set_state '{"signIn":"cloud"}'
+  [ -n "$(state cloudGate || true)" ] || set_state '{"cloudGate":"on"}'
   if [ "$build" = 1 ] || [ -z "$(image_sha)" ]; then build_rome_image; fi
   build_tools_image
   ensure_network
@@ -398,7 +403,7 @@ cmd_reset() {
   remove_rome
   log "wiping Rome Cloud's account, sessions and usage ..."
   remove_cloud_data
-  set_state '{"guardianPassword":null,"cookies":null,"transcriber":"stand-in","signIn":"cloud"}'
+  set_state '{"guardianPassword":null,"cookies":null,"transcriber":"stand-in","signIn":"cloud","cloudGate":"on"}'
   cmd_up --no-build
 }
 
