@@ -80,10 +80,46 @@ final class DemoBackend: RomeBackend {
     private func lengthenMainChat() {
         let start = Date.now.addingTimeInterval(-2 * 86400)
         var earlier: [ChatMessage] = []
-        for index in 0..<60 {
-            let at = start.addingTimeInterval(Double(index) * 600)
+        // `ROME_DEMO_PAIRS` makes it deeper and mixed like a real chat, for
+        // paging through many pages (`ROME_PERF=paging`): long Markdown,
+        // pictures that load after they show, and approval cards that fill in
+        // once their record comes.
+        let pairs = ProcessInfo.processInfo.environment["ROME_DEMO_PAIRS"].flatMap(Int.init)
+        let picture = assets["projects/demo/trip/hotel.jpg"]
+        // A deeper history starts before the oldest demo message (3 days ago),
+        // so its pages go in above the rows, as a real chat's do.
+        let first = pairs.map { Date.now.addingTimeInterval(-4 * 86400 - Double($0) * 600) } ?? start
+        for index in 0..<(pairs ?? 60) {
+            let at = first.addingTimeInterval(Double(index) * 600)
             earlier.append(user("long-u\(index)", "第 \(index + 1) 个问题：今天有什么要注意的？", at: at))
-            earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))
+            guard pairs != nil else {
+                earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))
+                continue
+            }
+            switch index % 6 {
+            case 0:
+                let items = (1...(3 + index % 7)).map { "\($0). 下午三点和设计团队过首页文案，记得带上上周的反馈。" }.joined(separator: "\n")
+                earlier.append(agent("## 第 \(index + 1) 个回答\n\n\(items)\n\n| 事项 | 时间 | 谁 |\n|---|---|---|\n| 首页文案 | 15:00 | 设计 |\n| 周报 | 17:30 | 我 |", at: at.addingTimeInterval(30)))
+            case 2:
+                // A path of its own, so the picture is not cached and loads late.
+                let path = "projects/demo/deep/pic-\(index).jpg"
+                assets[path] = picture
+                earlier.append(agent("第 \(index + 1) 个回答：这是现场的照片。\n\n![现场](/api/projects/asset/pic.jpg?path=\(path.replacingOccurrences(of: "/", with: "%2F")))\n\n看起来没问题。", at: at.addingTimeInterval(30)))
+            case 3:
+                let id = "ap-deep-\(index)"
+                approvals[id] = ApprovalRecord(id: id, status: index % 12 == 3 ? "approved" : "pending")
+                earlier.append(parts([.object([
+                    "type": .string("approval_card"), "approvalId": .string(id), "actionName": .string("calendar:create_event"), "status": .string("pending"),
+                    "preview": .object(["kind": .string("generic"), "title": .string("添加日程"), "summary": .string(""), "fields": .array([
+                        .object(["label": .string("标题"), "value": .string("第 \(index + 1) 次例会")]),
+                        .object(["label": .string("时间"), "value": .string("明天 15:00–15:30")]),
+                    ])]),
+                ])], at: at.addingTimeInterval(30), session: conciergeChatID))
+            case 5:
+                earlier.append(agent("第 \(index + 1) 个回答：上午的会议改到了下午，地点不变。会后需要把讨论的要点整理成文档发给大家，截止时间是周五。", at: at.addingTimeInterval(30)))
+            default:
+                earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))
+            }
         }
         let digest = (1...24).map { "\($0). 今天的邮件摘要第 \($0) 条：项目进度、会议时间和需要你回复的事项。" }.joined(separator: "\n")
         messages[conciergeChatID] = earlier + (messages[conciergeChatID] ?? []) + [agent(digest, at: .now.addingTimeInterval(-60))]
