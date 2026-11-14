@@ -838,6 +838,11 @@ struct TranscriptList<Row: View>: View {
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         row(item, index > 0 ? rows[index - 1] : nil)
+                            // Where each row sits in the content, so the rows in
+                            // view stay put when rows above them change height.
+                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.contentSpace)).minY } action: { [scrollHandle] top in
+                                scrollHandle.rowMoved(item.id, top: top, canAnchor: item.canAnchor)
+                            }
                             .id(item.id)
                     }
                     if let footer {
@@ -861,6 +866,7 @@ struct TranscriptList<Row: View>: View {
                 // screen: for that frame the rows sat far below their place, a
                 // drop on every open. A list that fills its space needs no inset.
                 .frame(minHeight: visibleHeight, alignment: alignTop ? .top : .bottom)
+                .coordinateSpace(.named(Self.contentSpace))
                 .background(ScrollViewFinder(handle: scrollHandle))
                 .modifier(LegacyContentMoves(monitor: legacyScroll, space: Self.scrollSpace, visibleHeight: visibleHeight) {
                     Task { await store.loadOlder() }
@@ -894,6 +900,13 @@ struct TranscriptList<Row: View>: View {
                     await store.loadOlder()
                 }
             }
+            .onChange(of: following, initial: true) { _, following in
+                // At the bottom the anchor holds the end. Only on iOS 18 and
+                // later: before, an older page waits for the scroll to rest
+                // and the anchor holds it.
+                scrollHandle.keepsRows = !following && Self.placesInGlide
+            }
+            .onChange(of: rows.count) { scrollHandle.keepRows(Set(rows.map(\.id))) }
             .onChange(of: lazy, initial: true) { _, now in
                 if now { lazyLocked = true }
             }
@@ -959,24 +972,22 @@ struct TranscriptList<Row: View>: View {
             .modifier(DistanceFromBottom(visibleHeight: visibleHeight, showing: $showsBackToBottom, bottomVisible: $bottomVisible, onNearTop: {
                 if store.wantsOlder { Task { await store.loadOlder() } }
             }, onContentChange: { old, new in
-                // An older page went in above the rows in view: move the offset
-                // by what the content grew and the scroll did not follow, so the
-                // rows stay where they are, mid-glide too.
                 // Content that shrank under a resting list can leave its offset
                 // past the new end: a gap under the last row, or a blank list,
                 // until a scroll. Bring the offset back to the end.
                 if new.contentHeight < old.contentHeight { scrollHandle.clampToEnd() }
+                // Rows that go in above, or grow there, are held by the row in
+                // view (`ScrollHandle.rowMoved`).
                 guard store.placingOlder else { return }
-                let grew = new.contentHeight - old.contentHeight
                 PerfProbe.sample("pageLayoutMs", (CACurrentMediaTime() - store.placedAt) * 1000)
                 PerfProbe.sample("pageFromTopPt", old.fromTop)
                 transcriptScrollLog.notice("older page went in \(old.fromTop, privacy: .public) from the top, finger \(fingerDown, privacy: .public), rest \(atRest, privacy: .public)")
-                if grew > 1 { scrollHandle.hold(from: old.offset, grew: grew, contentHeight: new.contentHeight) }
             }))
         }
     }
 
     private static var scrollSpace: String { "transcript" }
+    private static var contentSpace: String { "transcriptContent" }
 
     private static var placesInGlide: Bool {
         if #available(iOS 18, *) { return true }
@@ -1044,13 +1055,13 @@ private struct FollowBottom: ViewModifier {
         if #available(iOS 18, *) {
             content
                 // The role nearest the scroll view wins over the general anchor.
-                // An older page placed above is held by its own offset shift
-                // (`ScrollHandle.hold`), which works in a glide as well. Both
-                // anchors hold the top unless the list follows the bottom, and
-                // while a page goes in: from iOS 27 the general `.bottom` also
-                // moves the offset on a size change, to the end of the content.
-                .defaultScrollAnchor(following && !holdOlder ? .bottom : .top, for: .sizeChanges)
-                .defaultScrollAnchor(following && !holdOlder ? .bottom : .top)
+                // Rows that go in or grow above the rows in view are held by
+                // the row in view (`ScrollHandle.rowMoved`), in a glide too. Both
+                // anchors hold the top unless the list follows the bottom: from
+                // iOS 27 the general `.bottom` also moves the offset on a size
+                // change, to the end of the content.
+                .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
+                .defaultScrollAnchor(following ? .bottom : .top)
                 #if DEBUG
                 // `ROME_PERF=paging` flings in code, with no finger: it says
                 // when one starts, as a drag would.
@@ -1073,11 +1084,16 @@ private struct FollowBottom: ViewModifier {
                             following = true
                             return
                         }
+                        let wasJumping = jumping
                         jumping = false
                         if old == .interacting || old == .decelerating {
                             following = bottomVisible
                         } else if bottomVisible {
                             following = true
+                        } else if old == .animating && !wasJumping {
+                            // A scroll that came to rest away from the bottom,
+                            // such as a tap on the status bar.
+                            following = false
                         }
                     default:
                         break
@@ -1103,67 +1119,116 @@ final class ScrollHandle {
     weak var view: UIScrollView? {
         didSet {
             guard view !== oldValue else { return }
-            // Fires inside the layout that gives the scroll view its new size,
-            // so an offset set here shows in the same frame.
+            // Both fire inside the layout that gives the scroll view its new
+            // size, so an offset set there shows in the same frame.
             sizeWatch = view?.observe(\.contentSize) { [weak self] _, _ in
-                MainActor.assumeIsolated { _ = self?.placePending() }
+                MainActor.assumeIsolated { self?.keepAnchor() }
             }
             offsetWatch = view?.observe(\.contentOffset) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.keepPlaced() }
+                MainActor.assumeIsolated { self?.offsetMoved() }
             }
         }
     }
     private var sizeWatch: NSKeyValueObservation?
     private var offsetWatch: NSKeyValueObservation?
-    /// Where the offset goes once the content reaches a height.
-    private var pending: (offset: CGFloat, contentHeight: CGFloat)?
-    /// The offset just placed, kept for the rest of that layout: SwiftUI sets
-    /// its own offset after the size, which put the list at the bottom.
-    private var placed: CGFloat?
     /// The glide was stopped to jump to the bottom: the rest that follows is
     /// not where the guardian left the list.
     var stoppedForJump = false
 
-    /// Moves the offset from `offset` by `grew` once the scroll view holds
-    /// `contentHeight` of content, without stopping a glide: an older page
-    /// went in above the rows in view. From iOS 27 the geometry reading comes
-    /// before the scroll view takes the new size, and an offset set then is
-    /// lost, so it waits for the size. A second page that comes before the
-    /// first is placed adds to it.
-    func hold(from offset: CGFloat, grew: CGFloat, contentHeight: CGFloat) {
-        pending = ((pending?.offset ?? offset) + grew, contentHeight)
-        guard !placePending() else { return }
-        // The watch on the size places it. One that never comes, such as a
-        // size taken back before it was set, is dropped after a moment.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, let pending = self.pending, pending.contentHeight == contentHeight else { return }
-                transcriptScrollLog.notice("content never reached \(contentHeight, privacy: .public), offset left at \(self.view?.contentOffset.y ?? 0, privacy: .public)")
-                self.pending = nil
+    /// The rows in view stay where they are while rows above them change
+    /// height: an older page going in, a picture that loads, a card that
+    /// fills in. On while the list is away from the bottom; at the bottom the
+    /// list follows the newest row instead.
+    var keepsRows = false {
+        didSet { if keepsRows, !oldValue, !inLayout, let view { pickAnchor(view) } }
+    }
+    /// Each row's top within the content, by row id, as last laid out.
+    private var rowTops: [String: CGFloat] = [:]
+    /// Rows the list can be kept still by.
+    private var anchorable: Set<String> = []
+    /// The row kept still, the first one below the top of the visible area,
+    /// and its top as last laid out. Picked between layouts only: in one, the
+    /// rows going in report before the rows they go above.
+    private var anchor: (id: String, top: CGFloat)?
+    /// Where the anchor row shows, from the scroll view's top, for the rest of
+    /// a layout that moved it: from iOS 27 SwiftUI reports the layout before
+    /// the scroll view takes the new size, and sets an offset of its own after.
+    private var held: (id: String, y: CGFloat)?
+    private var inLayout = false
+    private var setting = false
+
+    /// A row was laid out with its top at `top` within the content.
+    func rowMoved(_ id: String, top: CGFloat, canAnchor: Bool) {
+        let before = rowTops[id]
+        rowTops[id] = top
+        if canAnchor { anchorable.insert(id) }
+        guard let view else { return }
+        if !inLayout {
+            inLayout = true
+            // The layout is over by the next main-queue turn.
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.layoutEnded() }
             }
         }
+        guard keepsRows, let before, let anchor, anchor.id == id, abs(top - before) > 0.5 else { return }
+        if held == nil { held = (id, before - view.contentOffset.y) }
+        keepAnchor()
     }
 
-    /// Places the pending offset if the content has its height. Returns whether it did.
-    private func placePending() -> Bool {
-        guard let view, let pending, abs(view.contentSize.height - pending.contentHeight) < 1 else { return false }
-        self.pending = nil
-        placed = pending.offset
-        // No glide frame runs before the next main-queue turn.
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.placed = nil }
+    private func layoutEnded() {
+        keepAnchor()
+        if let held, let view, let top = rowTops[held.id] {
+            // How far the held row ended from where it showed: 0 unless clamped at the end.
+            PerfProbe.count("rowsKept")
+            PerfProbe.sample("keptOffPt", abs(top - view.contentOffset.y - held.y))
         }
-        let dy = pending.offset - view.contentOffset.y
-        guard abs(dy) > 1 else { return true }
-        view.contentOffset.y += dy
-        transcriptScrollLog.notice("shifted by \(dy, privacy: .public) to \(view.contentOffset.y, privacy: .public)")
-        return true
+        held = nil
+        inLayout = false
+        if keepsRows, let view { pickAnchor(view) }
     }
 
-    private func keepPlaced() {
-        guard let view, let placed, abs(view.contentOffset.y - placed) > 1 else { return }
-        transcriptScrollLog.notice("offset moved to \(view.contentOffset.y, privacy: .public) as the page went in, kept at \(placed, privacy: .public)")
-        view.contentOffset.y = placed
+    /// Puts the held row back where it showed.
+    private func keepAnchor() {
+        guard let view, let held, let top = rowTops[held.id] else { return }
+        // Never past the end: content below that shrank takes the rows down.
+        let end = max(view.contentSize.height + view.adjustedContentInset.bottom - view.bounds.height, -view.adjustedContentInset.top)
+        let target = min(top - held.y, end)
+        let dy = target - view.contentOffset.y
+        guard abs(dy) > 0.5 else { return }
+        setting = true
+        view.contentOffset.y = target
+        setting = false
+        transcriptScrollLog.notice("kept \(held.id, privacy: .public) still: shifted by \(dy, privacy: .public) to \(target, privacy: .public)")
+    }
+
+    private func offsetMoved() {
+        guard !setting, let view else { return }
+        if held != nil {
+            keepAnchor()
+        } else if keepsRows && !inLayout {
+            // A scroll: the row kept still is the one now at the top.
+            pickAnchor(view)
+        }
+    }
+
+    /// The first row whose top is a third of the way down the visible area or
+    /// lower: away from the edge where rows go in, whose spacing changes with
+    /// the row put above it.
+    private func pickAnchor(_ view: UIScrollView) {
+        let visible = view.bounds.height - view.adjustedContentInset.top - view.adjustedContentInset.bottom
+        let visibleTop = view.contentOffset.y + view.adjustedContentInset.top + max(0, visible) / 3
+        var best: (id: String, top: CGFloat)?
+        for (id, top) in rowTops where top >= visibleTop && top < (best?.top ?? .infinity) && anchorable.contains(id) {
+            best = (id, top)
+        }
+        anchor = best
+    }
+
+    /// Forgets rows no longer in the list.
+    func keepRows(_ ids: Set<String>) {
+        rowTops = rowTops.filter { ids.contains($0.key) }
+        anchorable.formIntersection(ids)
+        if let anchor, !ids.contains(anchor.id) { self.anchor = nil }
     }
 
     /// Moves an offset left past the end of the content back to the end. A

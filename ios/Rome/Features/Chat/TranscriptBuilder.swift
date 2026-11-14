@@ -116,6 +116,13 @@ enum TranscriptRow: Identifiable, Hashable {
         }
     }
 
+    /// The list can be kept still by this row: it stays while rows go in
+    /// around it. A time separator comes and goes with the gap above it.
+    var canAnchor: Bool {
+        if case .separator = self { return false }
+        return true
+    }
+
     /// A part row's id is `<message id>:<part index>`.
     static func message(ofPart id: String) -> String? {
         guard let colon = id.lastIndex(of: ":") else { return nil }
