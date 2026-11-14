@@ -711,7 +711,7 @@
       "microphone-missing": "未找到麦克风",
       "connection-lost": "与 Rome 的连接已断开，已停止收听",
       "microphone-failed": "麦克风无法启动，已停止收听",
-      "time-limit": "已收听 10 分钟，自动停止"
+      "time-limit": "已达到时长上限，已停止收听"
     }
   }
 }

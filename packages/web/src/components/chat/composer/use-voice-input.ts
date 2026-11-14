@@ -23,15 +23,24 @@ interface Anchor {
 const HAN = /\p{Script=Han}/u;
 
 /**
- * The spoken text as it lands after `before`: a space separates it from a
- * word typed right before the cursor, as a guardian typing it would add one.
- * Chinese takes none.
+ * Whether a space belongs between `left` and `right`, as a guardian typing
+ * would add one: before a word, after anything but a space. Chinese takes none.
  */
-export function spokenInsertion(before: string, heard: string): string {
-  const text = heard.trimStart();
-  if (!text || !before || /\s$/.test(before)) return text;
-  if (HAN.test(text[0]) || HAN.test(before[before.length - 1])) return text;
-  return ` ${text}`;
+function needsSpace(left: string, right: string): boolean {
+  if (!left || /\s/.test(left) || HAN.test(left) || HAN.test(right)) return false;
+  return /[\p{L}\p{N}]/u.test(right);
+}
+
+/**
+ * The spoken text as it lands between `before` and `after`: a space separates
+ * it from a word right before or right after the cursor. Chinese takes none.
+ */
+export function spokenInsertion(before: string, heard: string, after = ""): string {
+  const text = heard.trim();
+  if (!text) return "";
+  const lead = needsSpace(before.slice(-1), text[0]) ? " " : "";
+  const trail = needsSpace(text.slice(-1), after[0] ?? "") ? " " : "";
+  return lead + text + trail;
 }
 
 /**
@@ -66,7 +75,7 @@ export function useVoiceInput({
       const anchor = anchorRef.current;
       anchorRef.current = null;
       if (!anchor) return;
-      const insertion = spokenInsertion(anchor.before, heard);
+      const insertion = spokenInsertion(anchor.before, heard, anchor.after);
       // Back to the field and selection as they were, so the spoken text
       // replaces the selection the way typing would, and undo brings it back.
       flushSync(() => {
@@ -115,7 +124,9 @@ export function useVoiceInput({
         onText: (heard) => {
           const anchor = anchorRef.current;
           if (anchor)
-            setValue(anchor.before + spokenInsertion(anchor.before, heard) + anchor.after);
+            setValue(
+              anchor.before + spokenInsertion(anchor.before, heard, anchor.after) + anchor.after,
+            );
         },
         onDone: (heard, reason) => {
           dictationRef.current = null;

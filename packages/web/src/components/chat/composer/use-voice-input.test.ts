@@ -8,9 +8,16 @@ describe("spokenInsertion", () => {
     expect(spokenInsertion("", " buy milk")).toBe("buy milk");
   });
 
+  it("separates spoken words from a word right after the cursor", () => {
+    expect(spokenInsertion("Hello ", "there", "world")).toBe("there ");
+    expect(spokenInsertion("Hello", "there", " world")).toBe(" there");
+    expect(spokenInsertion("Hello", "there", ".")).toBe(" there");
+  });
+
   it("adds no space around Chinese", () => {
     expect(spokenInsertion("备注", "买牛奶")).toBe("买牛奶");
     expect(spokenInsertion("Note", "买牛奶")).toBe("买牛奶");
     expect(spokenInsertion("买", "milk")).toBe("milk");
+    expect(spokenInsertion("", "买", "牛奶")).toBe("买");
   });
 });

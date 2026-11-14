@@ -711,7 +711,7 @@
       "microphone-missing": "No microphone found",
       "connection-lost": "Connection to Rome lost. Listening stopped",
       "microphone-failed": "Microphone could not start. Listening stopped",
-      "time-limit": "Listening stopped after 10 minutes"
+      "time-limit": "Listening stopped at the time limit"
     }
   }
 }
