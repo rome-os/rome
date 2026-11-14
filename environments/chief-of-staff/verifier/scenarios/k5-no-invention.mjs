@@ -51,19 +51,26 @@ export default {
     const inventionCheck =
       invented.length > 0
         ? check("zero invented answers", "fail", invented.join("; "), evidence)
-        : ungraded.length > 0
+        : answers.length === 0
           ? check(
               "zero invented answers",
               "not_checked",
-              `judge gave no verdict: ${ungraded.join("; ")}`,
+              "no answer to judge, so silence alone invented nothing",
               evidence,
             )
-          : check(
-              "zero invented answers",
-              "pass",
-              `${ctx.k5Questions.length} questions, ${unknownCount} about things nobody said`,
-              evidence,
-            );
+          : ungraded.length > 0
+            ? check(
+                "zero invented answers",
+                "not_checked",
+                `judge gave no verdict: ${ungraded.join("; ")}`,
+                evidence,
+              )
+            : check(
+                "zero invented answers",
+                "pass",
+                `${ctx.k5Questions.length} questions, ${unknownCount} about things nobody said`,
+                evidence,
+              );
     const sourceCheck =
       unsourced.length > 0
         ? check(

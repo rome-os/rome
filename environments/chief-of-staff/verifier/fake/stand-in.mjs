@@ -96,6 +96,7 @@ function answer(state, message, breaks) {
 /** The stand-in's reply to `message`, as `{ chat, thread, text, delaySeconds }`, or null. */
 export function respond({ agent, state, message }) {
   if (agent === "silent") return null;
+  if (agent === "quiet" && !/are you around/i.test(message.text)) return null;
   const breaks = agent.startsWith("fail-") ? agent.slice("fail-".length) : null;
   const text = answer(state, message, breaks);
   const thread = breaks === "A5" ? null : message.thread;

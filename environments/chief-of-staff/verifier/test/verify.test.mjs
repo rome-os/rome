@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { cosEnv } from "../lib/cos-env.mjs";
 import { makeJudge, parseVerdict } from "../lib/judge.mjs";
-import { selectScenarios, verify } from "../lib/runner.mjs";
+import { NOT_ANSWERING, selectScenarios, verify } from "../lib/runner.mjs";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
 const PHASE_1 = ["K1", "K2", "K3", "K5", "K6", "K7", "A1", "A5"];
@@ -67,6 +67,7 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.match(markdown, /\| K1 Team \| pass/);
     assert.match(markdown, /Rules other than K3: 7 of 7 pass\./);
     assert.match(markdown, /K3 by leg: 4 of 4 pass\./);
+    assert.match(markdown, /^Answered (\d+) of \1 messages sent to the agent\.$/m);
   });
 
   it("reports a group-chat attribution failure as waiting on a design decision", async () => {
@@ -124,10 +125,26 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     );
   });
 
-  it("does not pass K7 on silence alone", async () => {
-    const { report } = await runAgainst("silent", { rules: ["K7"] });
-    assert.deepEqual(statuses(report), { K7: "not_checked" });
-    assert.match(report.results[0].reason, /no answer to any of the 2 probes/);
+  it("stops and scores nothing when the agent does not answer the opening mention", async () => {
+    const { report, outDir } = await runAgainst("silent");
+    assert.equal(report.stopped, NOT_ANSWERING);
+    assert.deepEqual(report.results, []);
+    assert.deepEqual(report.answered, { sent: 1, answered: 0 });
+    assert.match(
+      readFileSync(join(outDir, "report.md"), "utf8"),
+      /Answered 0 of 1 messages sent to the agent\.\n\nStopped: agent not answering/,
+    );
+  });
+
+  it("does not pass a check that only finds nothing wrong when the agent answered nothing", async () => {
+    // The quiet stand-in answers the opening mention and nothing after it.
+    const { report } = await runAgainst("quiet", { rules: ["K5", "K7", "A5"] });
+    const s = statuses(report);
+    assert.equal(s.K7, "not_checked");
+    assert.equal(s.A5, "not_checked");
+    const k5 = report.results.find((r) => r.rule === "K5");
+    assert.equal(k5.checks.find((c) => c.name === "zero invented answers").status, "not_checked");
+    assert.equal(report.answered.answered, 1);
   });
 
   it("refuses a dirty tree unless allowed", async () => {

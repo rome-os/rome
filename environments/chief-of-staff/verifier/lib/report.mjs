@@ -34,9 +34,13 @@ export function renderMarkdown(report) {
   const lines = [
     `# Chief of staff verifier run, ${report.startedAt}`,
     "",
-    `Rules version ${report.rulesVersion}.`,
+    `Answered ${report.answered.answered} of ${report.answered.sent} messages sent to the agent.`,
     "",
-    ...summaryLines(report),
+    ...(report.stopped
+      ? [
+          `Stopped: ${report.stopped}. No rule was scored. The opening mention in general (${report.liveness.questionId}) got no answer within the reply wait.`,
+        ]
+      : [`Rules version ${report.rulesVersion}.`, "", ...summaryLines(report)]),
     "",
     "## Under test",
     "",

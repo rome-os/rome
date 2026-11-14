@@ -6,9 +6,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RULES_VERSION, SCENARIOS } from "../scenarios/index.mjs";
 import { renderMarkdown } from "./report.mjs";
+import { ask } from "./scenario.mjs";
 import { loadK5Questions, loadTeam, writeSeed } from "./seed.mjs";
 
 const verifierDir = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/** The mention that opens every run. A run whose agent does not answer it scores nothing. */
+export const LIVENESS_TEXT = "Good morning, are you around today?";
+export const NOT_ANSWERING = "agent not answering, environment or Rome fault until shown otherwise";
 
 export const DEFAULT_RUNS_DIR = join(homedir(), ".rome-environments/chief-of-staff/runs");
 
@@ -111,9 +116,16 @@ export async function verify({
   for (const member of team.members)
     await env.rename({ as: member.account, displayName: member.name });
 
-  const ctx = { env, judge, team, k5Questions: loadK5Questions(), waits, memo: {}, log };
+  const answered = { sent: 0, answered: 0 };
+  const ctx = { env, judge, team, k5Questions: loadK5Questions(), waits, memo: {}, log, answered };
+  const liveness = await ask(ctx, {
+    as: team.members[0].account,
+    chat: "general",
+    text: LIVENESS_TEXT,
+  });
+  const live = Boolean(liveness.reply);
   const results = [];
-  for (const scenario of scenarios) {
+  for (const scenario of live ? scenarios : []) {
     log(`running ${scenario.rule} ${scenario.title}`);
     let result;
     try {
@@ -135,7 +147,7 @@ export async function verify({
     });
     log(`${scenario.rule}: ${result.status}`);
   }
-  for (const rule of missing) {
+  for (const rule of live ? missing : []) {
     results.push({
       rule,
       status: "not_checked",
@@ -157,6 +169,9 @@ export async function verify({
       "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. The real direct-message path is checked by hand in the live trial.",
     ],
     selection: rules ? { rules } : { phase: phase ?? 1 },
+    liveness: { questionId: liveness.questionId, replyId: liveness.reply?.id ?? null },
+    stopped: live ? null : NOT_ANSWERING,
+    answered,
     summary: summarize(results),
     results,
   };

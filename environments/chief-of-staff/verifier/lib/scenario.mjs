@@ -20,6 +20,10 @@ export async function ask(ctx, { as, chat, thread, text, watch, timeoutMs }) {
     pollMs: ctx.waits.pollMs,
   });
   ctx.log(`${as} asked ${questionId}; reply ${reply ? reply.id : "none"}`);
+  if (ctx.answered) {
+    ctx.answered.sent += 1;
+    if (reply) ctx.answered.answered += 1;
+  }
   return { questionId, reply };
 }
 

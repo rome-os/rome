@@ -51,6 +51,14 @@ try {
     outDir: values.out,
     log: (line) => process.stderr.write(`${line}\n`),
   });
+  if (report.stopped) {
+    console.log(report.stopped);
+    console.log(`report: ${join(outDir, "report.md")}`);
+    process.exit(2);
+  }
+  console.log(
+    `answered ${report.answered.answered} of ${report.answered.sent} messages sent to the agent`,
+  );
   for (const r of report.results)
     console.log(`${r.rule}\t${r.status}${r.partial ? " (partly checked)" : ""}\t${r.reason}`);
   console.log(`report: ${join(outDir, "report.md")}`);
