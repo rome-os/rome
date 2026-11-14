@@ -189,11 +189,3 @@ cloud_call() {
   "'
 }
 
-# Points the stand-in at Rome Cloud's temporary keys, or back at the
-# long-lived key, to match how Rome signs in.
-apply_stand_in_keys() {
-  local minted=false
-  [ "$(state signIn || echo cloud)" = cloud ] && minted=true
-  curl -fsS -X PUT --data-binary "{\"mintedOnly\":$minted}" \
-    "http://127.0.0.1:$TRANSCRIBER_CONTROL_PORT/keys" >/dev/null
-}
