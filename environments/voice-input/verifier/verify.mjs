@@ -30,17 +30,18 @@ const { values } = parseArgs({
     "send-check": { type: "string", default: "60" },
     "send-wait": { type: "string", default: "10" },
     steady: { type: "string", default: "1.5" },
+    languages: { type: "string" },
     secrets: { type: "string", default: join(homedir(), ".config/rome/voice.env") },
   },
 });
 
-/** Sets each `NAME=value` line of `file` that the environment does not already set. */
+/** Sets each `NAME=value` line of `file` that the environment does not already set. An empty value sets nothing, so a later line can. */
 function loadSecrets(file) {
   if (!existsSync(file)) return;
   for (const line of readFileSync(file, "utf8").split("\n")) {
     const match = line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)=(.*)$/);
-    if (match && process.env[match[1]] === undefined)
-      process.env[match[1]] = match[2].trim().replace(/^(["'])(.*)\1$/, "$2");
+    const value = match?.[2].trim().replace(/^(["'])(.*)\1$/, "$2");
+    if (value && process.env[match[1]] === undefined) process.env[match[1]] = value;
   }
 }
 
@@ -52,9 +53,12 @@ try {
   const script = loadScript(values.script);
   if (PROVIDERS[values.transcriber]) {
     loadSecrets(values.secrets);
+    const languages = values.languages?.split(",").map((l) => l.trim());
     const { outDir } = await compare({
       provider: values.transcriber,
-      script,
+      script: languages
+        ? { ...script, messages: script.messages.filter((m) => languages.includes(m.language)) }
+        : script,
       rules: rules ?? ["2", "3"],
       runsDir: values["runs-dir"],
       outDir: values.out,

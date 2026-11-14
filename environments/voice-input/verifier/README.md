@@ -36,6 +36,7 @@ The verifier scores voice input against rule set V4 (`~/.rome-environments/voice
 | `--send-check <s>` | How long after listening stops rule 5 waits for a message nobody sent | 60 |
 | `--send-wait <s>` | How long to wait for a message after the send action | 10 |
 | `--steady <s>` | How long the field must stay unchanged before it is read | 1.5 |
+| `--languages <list>` | With a provider name, compare only messages in these languages, such as `mixed` | all |
 | `--out <dir>` | Write the report here instead of the runs folder | |
 
 It exits 0 when no rule fails, 1 when a rule fails, and 2 when it could not run. A phase 1 run takes about 35 minutes, most of it rule 5's 60-second wait after each of set B's 20 messages.
