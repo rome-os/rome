@@ -9,7 +9,6 @@ CREATE TABLE `device_connections` (
 	`operations` text NOT NULL,
 	`permission` text NOT NULL,
 	`live` integer NOT NULL,
-	`feeds` text,
 	`last_seen_at` integer NOT NULL,
 	PRIMARY KEY(`device_id`, `capability`)
 );
