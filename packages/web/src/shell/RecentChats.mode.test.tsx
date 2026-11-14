@@ -124,10 +124,21 @@ describe("the Chat / Concierge switch", () => {
     await screen.findByRole("link", { name: "My chat" });
     const group = screen.getByRole("radiogroup", { name: "Chat list mode" });
     const [first, second] = within(group).getAllByRole("radio");
-    expect([first.textContent, second.textContent]).toEqual(["Chat", "Concierge"]);
+    expect([first.textContent, second.textContent]).toEqual(["Chat", "Agent"]);
     expect(first.getAttribute("aria-checked")).toBe("true");
     expect(first.querySelector("svg")).toBeTruthy();
     expect(second.querySelector("svg")).toBeTruthy();
+  });
+
+  it("sits on the header's right, just before the list menu", async () => {
+    serve([chat("mine", "My chat")]);
+    open("/chat/mine");
+    await screen.findByRole("link", { name: "My chat" });
+    const group = screen.getByRole("radiogroup", { name: "Chat list mode" });
+    const menu = screen.getByRole("button", { name: "List settings" });
+    expect(group.parentElement).toBe(menu.parentElement);
+    expect(group.nextElementSibling).toBe(menu);
+    expect(group.parentElement?.contains(document.querySelector(".text-section"))).toBe(false);
   });
 
   it("is absent without a Concierge, and the list keeps task chats under their project", async () => {
@@ -160,7 +171,7 @@ describe("the Chat / Concierge switch", () => {
       ];
       open("/chat/unlisted");
       await screen.findByRole("link", { name: "Main chat" });
-      expect(radio("Concierge").getAttribute("aria-checked")).toBe("true");
+      expect(radio("Agent").getAttribute("aria-checked")).toBe("true");
       await waitFor(() => expect(stored()).toBe("concierge"));
     });
 
@@ -178,7 +189,7 @@ describe("the Chat / Concierge switch", () => {
       const user = userEvent.setup();
       open("/chat/mine");
       await screen.findByRole("link", { name: "My chat" });
-      await user.click(radio("Concierge"));
+      await user.click(radio("Agent"));
       await screen.findByRole("link", { name: "Main chat" });
       expect(screen.queryByRole("link", { name: "My chat" })).toBeNull();
       expect(stored()).toBe("concierge");
@@ -194,13 +205,13 @@ describe("the Chat / Concierge switch", () => {
       const user = userEvent.setup();
       const first = open("/chat/mine");
       await screen.findByRole("link", { name: "My chat" });
-      await user.click(radio("Concierge"));
+      await user.click(radio("Agent"));
       await screen.findByRole("link", { name: "Main chat" });
       first.unmount();
 
       open("/chat/mine");
       await screen.findByRole("link", { name: "Main chat" });
-      expect(radio("Concierge").getAttribute("aria-checked")).toBe("true");
+      expect(radio("Agent").getAttribute("aria-checked")).toBe("true");
       expect(screen.queryByRole("link", { name: "My chat" })).toBeNull();
     });
 
@@ -233,7 +244,7 @@ describe("the Chat / Concierge switch", () => {
       seedChatListMode({ mode: "chat" });
       const view = open("/chat/mine");
       await screen.findByRole("link", { name: "My chat" });
-      await user.click(radio("Concierge"));
+      await user.click(radio("Agent"));
       expect(stored()).toBe("concierge");
       view.unmount();
 
@@ -366,12 +377,12 @@ describe("Concierge mode", () => {
     expect(screen.getByTestId("state").textContent).toBe('{"conciergeTopic":true}');
   });
 
-  it("titles the list Concierge, not the name the guardian gave their agent", async () => {
+  it("titles the list Agent, not the name the guardian gave their agent", async () => {
     seedChatListMode({ mode: "concierge" });
     serve([mainChat()], { agentName: "Milo" });
     open("/chat/unlisted");
     await screen.findByRole("link", { name: "Main chat" });
-    expect(document.querySelector(".text-section")?.textContent).toBe("Concierge");
+    expect(document.querySelector(".text-section")?.textContent).toBe("Agent");
     expect(screen.queryByText("Milo")).toBeNull();
   });
 
@@ -475,8 +486,8 @@ describe("the dots on the switch", () => {
       serve([chat("mine", "My chat")]);
       const view = open("/chat/mine");
       await screen.findByRole("link", { name: "My chat" });
-      const dot = within(radio("Concierge")).getByRole("img", {
-        name: "Unread Concierge messages or a task waiting for you",
+      const dot = within(radio("Agent")).getByRole("img", {
+        name: "Unread Agent messages or a task waiting for you",
       });
       expect(dot.className).toContain("bg-destructive");
       view.unmount();
@@ -489,8 +500,8 @@ describe("the dots on the switch", () => {
     serve([task("t1", "Book flights", { awaitingGuardian: true }), chat("mine", "My chat")]);
     open("/chat/mine");
     await screen.findByRole("link", { name: "My chat" });
-    const dot = await within(radio("Concierge")).findByRole("img", {
-      name: /Unread Concierge messages or a task waiting for you/,
+    const dot = await within(radio("Agent")).findByRole("img", {
+      name: /Unread Agent messages or a task waiting for you/,
     });
     expect(dot.className).toContain("bg-destructive");
   });
@@ -507,7 +518,7 @@ describe("the dots on the switch", () => {
     open("/chat/mine");
     await screen.findByRole("link", { name: "My chat" });
     await act(async () => {});
-    expect(screen.queryByRole("img", { name: /Unread Concierge/ })).toBeNull();
+    expect(screen.queryByRole("img", { name: /Unread Agent/ })).toBeNull();
   });
 
   it("clears the red dot when a read in Chat mode says the unread messages were read", async () => {
@@ -516,16 +527,14 @@ describe("the dots on the switch", () => {
     concierge.chats = unreadChats(1, 0);
     serve([chat("mine", "My chat")]);
     open("/chat/mine");
-    await within(radio("Concierge")).findByRole("img", { name: /Unread Concierge messages/ });
+    await within(radio("Agent")).findByRole("img", { name: /Unread Agent messages/ });
 
     // The server counts them read, and the open chat says so.
     concierge.chats = unreadChats(0, 0);
     act(() => emitSessionsChanged());
 
     await waitFor(() =>
-      expect(
-        within(radio("Concierge")).queryByRole("img", { name: /Unread Concierge/ }),
-      ).toBeNull(),
+      expect(within(radio("Agent")).queryByRole("img", { name: /Unread Agent/ })).toBeNull(),
     );
   });
 
@@ -535,7 +544,7 @@ describe("the dots on the switch", () => {
     serve([chat("mine", "My chat", { running: true })]);
     open("/chat/mine");
     await screen.findByRole("link", { name: "My chat" });
-    expect(screen.queryAllByRole("img", { name: /Unread Concierge|replying/ })).toEqual([]);
+    expect(screen.queryAllByRole("img", { name: /Unread Agent|replying/ })).toEqual([]);
   });
 
   it("puts a primary dot on Chat in Concierge mode while an ordinary chat is replying", async () => {
@@ -547,7 +556,7 @@ describe("the dots on the switch", () => {
     const dot = await within(radio("Chat")).findByRole("img", { name: "A chat is replying" });
     expect(dot.className).toContain("bg-primary");
     // Concierge's own unread dot belongs to the other mode.
-    expect(screen.queryByRole("img", { name: /Unread Concierge messages/ })).toBeNull();
+    expect(screen.queryByRole("img", { name: /Unread Agent messages/ })).toBeNull();
   });
 
   it("ignores a task chat or a topic chat that is replying", async () => {
