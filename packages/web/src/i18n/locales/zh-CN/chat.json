@@ -713,7 +713,8 @@
       "microphone-failed": "麦克风无法启动，已停止收听",
       "time-limit": "已达到时长上限，已停止收听",
       "service-refused": "Rome Cloud 拒绝了语音输入（{{code}}），已停止收听",
-      "service-unavailable": "无法连接 Rome Cloud，已停止收听"
+      "service-unavailable": "无法连接 Rome Cloud，已停止收听",
+      "service-signed-out": "Rome Cloud 不接受此 Rome 的登录，请重新登录 Rome Cloud，已停止收听"
     },
     "romeCloud": {
       "voice_input_rate_limited": "最近一分钟语音输入次数过多，请稍后再试",

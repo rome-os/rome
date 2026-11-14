@@ -2270,8 +2270,11 @@ export function Chat({
   // refused rather than filed into a draft no one sees.
   const sharingRef = useRef(false);
   sharingRef.current = shareMode && Boolean(mainSessionId);
-  // For the same reason it stops listening: no one could see it listen.
-  const composerHidden = sharingRef.current;
+  // A narrow workspace shows the open tool pane in place of the chat.
+  const toolTasksHost = useToolTasks();
+  const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
+  // Either one stops listening: no one could see it listen.
+  const composerHidden = sharingRef.current || paneCoversChat;
   useEffect(() => {
     if (composerHidden) composerRef.current?.stopVoiceInput();
   }, [composerHidden, composerRef]);
@@ -2577,9 +2580,6 @@ export function Chat({
   // middle centred over the chat. Only its pieces take the pointer, so the
   // messages under the gaps stay reachable. The thread view floats the same
   // header with its close button on the right.
-  // A narrow workspace shows the open tool pane in place of the chat.
-  const toolTasksHost = useToolTasks();
-  const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
   const floatingHeader = (trailing: ReactNode) => (
     <div
       data-concierge-header

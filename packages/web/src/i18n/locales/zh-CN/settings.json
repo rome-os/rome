@@ -915,7 +915,8 @@
       "place": "口述的消息经由 Rome 发送到 {{provider}}（{{host}}）转为文字。Rome 不保存任何音频。",
       "placeViaRomeCloud": "口述的消息经由 Rome 发送到 {{provider}}（{{host}}）转为文字，该服务由 Rome Cloud 提供。Rome 不保存任何音频。",
       "romeCloudUnreachable": "语音输入由 Rome Cloud 提供。目前无法连接 Rome Cloud，因此 Rome 无法显示转写服务的名称。",
-      "romeCloudNotConfigured": "语音输入由 Rome Cloud 提供，但 Rome Cloud 尚未开通转写服务。"
+      "romeCloudNotConfigured": "语音输入由 Rome Cloud 提供，但 Rome Cloud 尚未开通转写服务。",
+      "romeCloudSignedOut": "语音输入由 Rome Cloud 提供，但 Rome Cloud 不接受此 Rome 的登录。请重新登录 Rome Cloud 后使用。"
     }
   },
   "easterEgg": {

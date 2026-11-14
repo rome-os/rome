@@ -52,9 +52,10 @@ export interface DictationDeps {
   openSocket(): DictationSocket;
 }
 
-// After a stop, how long the rest of the text may take before the field keeps
-// what it has.
-const FINISH_TIMEOUT_MS = 5_000;
+// After a stop, how long Rome may take to answer before the field keeps what it
+// has. Longer than Rome's own bound on a stop, which waits up to 12 s for the
+// source to open and 5 s more for the provider, so Rome's reason arrives first.
+const STOP_TIMEOUT_MS = 20_000;
 
 function socketUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -155,8 +156,9 @@ export function startDictation(
           finish(message.data.reason, message.data.detail);
         }
       };
-      socket.onclose = () => finish(stopping ? null : "connection-lost");
-      socket.onerror = () => finish(stopping ? null : "connection-lost");
+      // Only `ended` says the text is complete.
+      socket.onclose = () => finish("connection-lost");
+      socket.onerror = () => finish("connection-lost");
     })
     .catch((error: unknown) => {
       const name = error instanceof DOMException ? error.name : "";
@@ -181,7 +183,7 @@ export function startDictation(
       }
       // Whatever Rome and the socket do from here, the field gets its text
       // back within the timeout.
-      finishTimer = setTimeout(() => finish(null), FINISH_TIMEOUT_MS);
+      finishTimer = setTimeout(() => finish("connection-lost"), STOP_TIMEOUT_MS);
       void microphone.finish().then(() => {
         audioDone = true;
         sendStop();

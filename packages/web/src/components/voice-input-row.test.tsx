@@ -53,6 +53,16 @@ describe("the voice input row in Settings", () => {
     expect(text).not.toContain("Soniox");
   });
 
+  it("asks the guardian to sign in again when Rome Cloud does not accept this Rome", async () => {
+    const text = await rowText({
+      available: true,
+      via: "rome-cloud",
+      place: null,
+      placeUnknown: "rome-cloud-signed-out",
+    });
+    expect(text).toContain("Sign in to Rome Cloud again");
+  });
+
   it("says nothing about voice input where there is none, such as an account Rome Cloud does not allow", async () => {
     expect(await rowText({ available: false, via: null, place: null })).toBe("");
   });

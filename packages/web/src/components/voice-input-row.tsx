@@ -45,7 +45,9 @@ function describe(
       ? t("system.voiceInput.placeViaRomeCloud", { provider: place.provider, host: place.host })
       : info.placeUnknown === "rome-cloud-not-configured"
         ? t("system.voiceInput.romeCloudNotConfigured")
-        : t("system.voiceInput.romeCloudUnreachable");
+        : info.placeUnknown === "rome-cloud-signed-out"
+          ? t("system.voiceInput.romeCloudSignedOut")
+          : t("system.voiceInput.romeCloudUnreachable");
   }
   // The instance's own provider always has a place.
   return place ? t("system.voiceInput.place", { provider: place.provider, host: place.host }) : "";

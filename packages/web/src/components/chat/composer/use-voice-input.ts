@@ -44,6 +44,19 @@ export function spokenInsertion(before: string, heard: string, after = ""): stri
 }
 
 /**
+ * Inserts `text` at `el`'s selection the way typing does: the browser fires
+ * the input event and records one undo step. The browser inserts into the
+ * focused element, so this does nothing unless focus reached `el`.
+ */
+function insertNatively(el: HTMLTextAreaElement, text: string): boolean {
+  return (
+    document.activeElement === el &&
+    typeof document.execCommand === "function" &&
+    document.execCommand("insertText", false, text)
+  );
+}
+
+/**
  * Dictation into a composer's textarea. While listening, the heard text shows
  * at the cursor and the field is read-only. When listening ends the text is
  * inserted the way typing inserts it, as one edit, so one undo removes it and
@@ -67,8 +80,16 @@ export function useVoiceInput({
   const dictationRef = useRef<Dictation | null>(null);
   const valueRef = useRef(value);
   valueRef.current = value;
+  // Waits for a hidden field to show again, to insert the spoken text natively.
+  const waitingRef = useRef<ResizeObserver | null>(null);
 
-  useEffect(() => () => dictationRef.current?.cancel(), []);
+  useEffect(
+    () => () => {
+      dictationRef.current?.cancel();
+      waitingRef.current?.disconnect();
+    },
+    [],
+  );
 
   const commit = useCallback(
     (heard: string) => {
@@ -88,24 +109,34 @@ export function useVoiceInput({
         el.setSelectionRange(anchor.start, anchor.end);
       }
       if (!insertion) return;
-      // The browser's own insertion is what typing does: it fires the input
-      // event and records one undo step. It acts on the focused element, so
-      // it runs only when focus reached the field.
-      if (
-        el &&
-        document.activeElement === el &&
-        typeof document.execCommand === "function" &&
-        document.execCommand("insertText", false, insertion)
-      ) {
-        return;
-      }
-      setValue(anchor.before + insertion + anchor.after);
+      if (el && insertNatively(el, insertion)) return;
+      const spoken = anchor.before + insertion + anchor.after;
+      setValue(spoken);
+      // A hidden field cannot take focus, as when share mode or a card hides
+      // the composer. The draft keeps the text meanwhile, and once the field
+      // shows the text goes in again natively, so one undo still removes it.
+      if (!el || typeof ResizeObserver === "undefined") return;
+      const waiting = new ResizeObserver(() => {
+        if (el.getClientRects().length === 0) return;
+        waiting.disconnect();
+        waitingRef.current = null;
+        // The guardian changed the field first: their edit stands.
+        if (valueRef.current !== spoken) return;
+        flushSync(() => setValue(anchor.original));
+        el.focus();
+        el.setSelectionRange(anchor.start, anchor.end);
+        if (!insertNatively(el, insertion)) setValue(spoken);
+      });
+      waitingRef.current = waiting;
+      waiting.observe(el);
     },
     [setValue, textareaRef],
   );
 
   const start = useCallback(() => {
     if (dictationRef.current) return;
+    waitingRef.current?.disconnect();
+    waitingRef.current = null;
     const el = textareaRef.current;
     const current = valueRef.current;
     const startAt = el ? el.selectionStart : current.length;

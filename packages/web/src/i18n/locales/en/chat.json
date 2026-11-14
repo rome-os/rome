@@ -713,7 +713,8 @@
       "microphone-failed": "Microphone could not start. Listening stopped",
       "time-limit": "Listening stopped at the time limit",
       "service-refused": "Rome Cloud refused voice input ({{code}}). Listening stopped",
-      "service-unavailable": "Rome Cloud could not be reached. Listening stopped"
+      "service-unavailable": "Rome Cloud could not be reached. Listening stopped",
+      "service-signed-out": "Rome Cloud does not accept this Rome's sign-in. Sign in to Rome Cloud again. Listening stopped"
     },
     "romeCloud": {
       "voice_input_rate_limited": "Too many voice inputs in the last minute. Try again shortly",

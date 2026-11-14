@@ -270,13 +270,33 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     expect(field().readOnly).toBe(true);
 
-    act(() => rs.advanceTimersByTime(5_000));
+    // Rome's own bound on a stop runs out first, so its reason would arrive.
+    act(() => rs.advanceTimersByTime(17_000));
+    expect(field().readOnly).toBe(true);
+    act(() => rs.advanceTimersByTime(3_000));
     rs.useRealTimers();
 
     expect(field().readOnly).toBe(false);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
     expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
       "disabled",
       false,
+    );
+  });
+
+  it("keeps the words heard and says the connection was lost when it drops after a stop", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    act(() => socket.onclose?.());
+
+    expect(field().value).toBe("hello the");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
     );
   });
 
@@ -347,5 +367,64 @@ describe("voice input when a card locks the chat message field", () => {
 
     await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
     expect(microphone.closed).toBe(1);
+  });
+
+  it("inserts text heard behind the lock as one undoable edit once the field shows again", async () => {
+    // jsdom renders nothing, so the hidden field is staged: it has no boxes and
+    // cannot take focus until it shows.
+    let hidden = false;
+    const observers: Array<() => void> = [];
+    rs.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(readonly callback: () => void) {
+          observers.push(() => this.callback());
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const realFocus = HTMLTextAreaElement.prototype.focus;
+    rs.spyOn(HTMLTextAreaElement.prototype, "focus").mockImplementation(function (
+      this: HTMLTextAreaElement,
+    ) {
+      if (!hidden) realFocus.call(this);
+    });
+    rs.spyOn(HTMLTextAreaElement.prototype, "getClientRects").mockImplementation(
+      () => ({ length: hidden ? 0 : 1 }) as DOMRectList,
+    );
+    const execCommand = rs.spyOn(document, "execCommand");
+    mockFetch(SONIOX);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ChatComposer onSend={rs.fn()} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(tree(null));
+    const field = () => document.querySelector("form textarea") as HTMLTextAreaElement;
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+
+    hidden = true;
+    (document.activeElement as HTMLElement | null)?.blur();
+    rerender(tree("Answer the card above to continue."));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    socket.say({ type: "ended" });
+
+    // The draft keeps the words while the field is hidden.
+    expect(field().value).toBe("hello");
+    expect(execCommand).not.toHaveBeenCalled();
+
+    hidden = false;
+    rerender(tree(null));
+    act(() => {
+      for (const observe of observers) observe();
+    });
+
+    expect(execCommand).toHaveBeenCalledWith("insertText", false, "hello");
+    expect(field().value).toBe("hello");
   });
 });
