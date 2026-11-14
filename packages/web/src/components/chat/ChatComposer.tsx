@@ -433,6 +433,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // A hidden box measures zero, so a locked composer waits and resizes again
   // once the lock lifts.
   const locked = lockedReason !== null && lockedReason !== undefined;
+  // A lock hides the field and its voice control, so listening ends with it.
+  const stopVoice = voice.stop;
+  useEffect(() => {
+    if (locked) stopVoice();
+  }, [locked, stopVoice]);
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el || locked) return;

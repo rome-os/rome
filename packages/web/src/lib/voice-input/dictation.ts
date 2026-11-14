@@ -72,6 +72,8 @@ export function startDictation(
   let pending = "";
   let done = false;
   let stopping = false;
+  // Set once the microphone's last audio has gone out, so `stop` may follow it.
+  let audioDone = false;
   let microphone: Microphone | null = null;
   let socket: DictationSocket | null = null;
   let finishTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,14 +103,12 @@ export function startDictation(
   const send = (message: VoiceInputClientMessage) => socket?.send(JSON.stringify(message));
 
   const sendStop = () => {
-    if (socket?.readyState !== WebSocket.OPEN) return;
-    send({ type: "stop" });
-    finishTimer = setTimeout(() => finish(null), FINISH_TIMEOUT_MS);
+    if (audioDone && socket?.readyState === WebSocket.OPEN) send({ type: "stop" });
   };
 
   void deps
     .openMicrophone((chunk) => {
-      if (done || stopping) return;
+      if (done || audioDone) return;
       if (socket?.readyState === WebSocket.OPEN) socket.send(chunk);
       else queued.push(chunk);
     })
@@ -127,7 +127,7 @@ export function startDictation(
       socket.onopen = () => {
         send({ type: "start", sampleRate: opened.sampleRate });
         for (const chunk of queued.splice(0)) socket?.send(chunk);
-        if (stopping) sendStop();
+        sendStop();
       };
       socket.onmessage = (event: MessageEvent) => {
         if (typeof event.data !== "string") return;
@@ -167,14 +167,19 @@ export function startDictation(
     stop() {
       if (done || stopping) return;
       stopping = true;
-      microphone?.close();
       // Without a socket nothing was sent, so nothing more can come back. A
       // microphone that opens later is closed by the `done` check.
-      if (!socket) {
+      if (!socket || !microphone) {
         finish(null);
         return;
       }
-      sendStop();
+      // Whatever Rome and the socket do from here, the field gets its text
+      // back within the timeout.
+      finishTimer = setTimeout(() => finish(null), FINISH_TIMEOUT_MS);
+      void microphone.finish().then(() => {
+        audioDone = true;
+        sendStop();
+      });
     },
     cancel() {
       if (!done) teardown();

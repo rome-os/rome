@@ -20,6 +20,16 @@ class PcmCapture extends AudioWorkletProcessor {
     this.sum = 0;
     this.count = 0;
     this.position = 0;
+    // "flush" posts the samples short of a full buffer, then "flushed".
+    this.port.onmessage = (event) => {
+      if (event.data !== "flush") return;
+      if (this.filled > 0) {
+        const rest = this.buffer.slice(0, this.filled);
+        this.port.postMessage(rest.buffer, [rest.buffer]);
+        this.filled = 0;
+      }
+      this.port.postMessage("flushed");
+    };
   }
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
@@ -48,7 +58,12 @@ registerProcessor("rome-pcm-capture", PcmCapture);
 
 export interface Microphone {
   readonly sampleRate: number;
-  /** Releases the microphone. Safe to call more than once. */
+  /**
+   * Stops listening, hands the last captured audio to `onAudio`, then
+   * releases the microphone. Resolves once the last chunk is out.
+   */
+  finish(): Promise<void>;
+  /** Releases the microphone at once, dropping audio not yet handed over. Safe to call more than once. */
   close(): void;
 }
 
@@ -78,21 +93,39 @@ export async function openMicrophone(onAudio: (chunk: ArrayBuffer) => void): Pro
     const capture = new AudioWorkletNode(context, "rome-pcm-capture", {
       processorOptions: { targetRate },
     });
-    capture.port.onmessage = (event: MessageEvent<ArrayBuffer>) => onAudio(event.data);
+    let flushed: (() => void) | null = null;
+    capture.port.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
+      if (typeof event.data === "string") flushed?.();
+      else onAudio(event.data);
+    };
     source.connect(capture);
     let closed = false;
     const opened = context;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      capture.port.onmessage = null;
+      source.disconnect();
+      capture.disconnect();
+      for (const track of stream.getTracks()) track.stop();
+      void opened.close();
+    };
     return {
       sampleRate: targetRate,
-      close() {
+      async finish() {
         if (closed) return;
-        closed = true;
-        capture.port.onmessage = null;
-        source.disconnect();
-        capture.disconnect();
         for (const track of stream.getTracks()) track.stop();
-        void opened.close();
+        source.disconnect();
+        await new Promise<void>((resolve) => {
+          flushed = resolve;
+          // The audio thread answers within one render quantum; this only
+          // guards a context that has already stopped.
+          setTimeout(resolve, 500);
+          capture.port.postMessage("flush");
+        });
+        close();
       },
+      close,
     };
   } catch (error) {
     for (const track of stream.getTracks()) track.stop();

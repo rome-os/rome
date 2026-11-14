@@ -27,6 +27,9 @@ const MAX_FRAME_BYTES = 256 * 1024;
 // Bounds what one forgotten open microphone costs on the provider's bill.
 export const MAX_DICTATION_MS = 10 * 60 * 1000;
 
+// How long the provider has to send the rest of the text once asked.
+export const FINISH_TIMEOUT_MS = 5_000;
+
 const STOP_REASON: Record<TranscriptionFailure, VoiceInputStopReason> = {
   unavailable: "provider-unavailable",
   refused: "provider-refused",
@@ -78,11 +81,13 @@ export function serve(
   ws: WebSocket,
   transcriber: Transcriber,
   maxDictationMs = MAX_DICTATION_MS,
+  finishTimeoutMs = FINISH_TIMEOUT_MS,
 ): void {
   let stream: TranscriptionStream | null = null;
   let closed = false;
   let timedOut = false;
   let limit: ReturnType<typeof setTimeout> | null = null;
+  let finishing: ReturnType<typeof setTimeout> | null = null;
   let frames = 0;
   let bytes = 0;
 
@@ -93,6 +98,7 @@ export function serve(
     if (closed) return;
     closed = true;
     if (limit) clearTimeout(limit);
+    if (finishing) clearTimeout(finishing);
     reply(last);
     ws.close(1000);
     log.info("voice input stopped", { outcome: last.type, frames, bytes });
@@ -138,16 +144,28 @@ export function serve(
       );
       limit = setTimeout(() => {
         timedOut = true;
-        stream?.finish();
+        finish();
       }, maxDictationMs);
       return;
     }
     if (!stream) return close({ type: "error", reason: "bad-request" });
-    stream.finish();
+    finish();
   });
+
+  // Asks the provider for the rest of the text, and gives up on a provider
+  // that never answers.
+  function finish() {
+    if (!stream || finishing) return;
+    stream.finish();
+    finishing = setTimeout(() => {
+      stream?.abort();
+      close({ type: "error", reason: timedOut ? "time-limit" : "provider-unavailable" });
+    }, finishTimeoutMs);
+  }
 
   ws.on("close", () => {
     if (limit) clearTimeout(limit);
+    if (finishing) clearTimeout(finishing);
     if (!closed) {
       closed = true;
       log.info("voice input stopped", { outcome: "client-closed", frames, bytes });

@@ -158,5 +158,7 @@ export function useVoiceInput({
     /** While true, the field is read-only and sending waits. */
     active: state !== "idle",
     toggle: state === "listening" ? stop : start,
+    /** Stops listening as the stop control does. Does nothing while idle. */
+    stop,
   };
 }

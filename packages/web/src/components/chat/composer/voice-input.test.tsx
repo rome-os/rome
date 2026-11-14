@@ -14,6 +14,8 @@ const microphone = rs.hoisted(() => ({
   refuse: false,
   /** While true, the permission prompt never answers. */
   pending: false,
+  /** The audio still in the capture buffer when listening stops. */
+  tail: null as ArrayBuffer | null,
   closed: 0,
   onAudio: null as ((chunk: ArrayBuffer) => void) | null,
 }));
@@ -24,6 +26,10 @@ rs.mock("@/lib/voice-input/microphone", () => ({
     microphone.onAudio = onAudio;
     return {
       sampleRate: 16000,
+      finish: async () => {
+        if (microphone.tail) onAudio(microphone.tail);
+        microphone.closed += 1;
+      },
       close: () => {
         microphone.closed += 1;
       },
@@ -38,6 +44,8 @@ class FakeSocket {
   static CLOSING = 2;
   static CLOSED = 3;
   static last: FakeSocket | null = null;
+  /** False keeps every socket connecting, as a stalled handshake does. */
+  static opens = true;
   readyState = FakeSocket.CONNECTING;
   binaryType = "blob";
   sent: Array<string | ArrayBuffer> = [];
@@ -48,6 +56,7 @@ class FakeSocket {
   constructor(readonly url: string) {
     FakeSocket.last = this;
     queueMicrotask(() => {
+      if (!FakeSocket.opens) return;
       this.readyState = FakeSocket.OPEN;
       this.onopen?.();
     });
@@ -91,6 +100,8 @@ beforeAll(async () => {
 beforeEach(() => {
   microphone.refuse = false;
   microphone.pending = false;
+  microphone.tail = null;
+  FakeSocket.opens = true;
   microphone.closed = 0;
   FakeSocket.last = null;
   rs.stubGlobal("WebSocket", FakeSocket);
@@ -98,6 +109,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  rs.useRealTimers();
   cleanup();
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
@@ -177,8 +189,8 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(
       screen.getByRole("button", { name: "Start voice input" }).getAttribute("aria-pressed"),
     ).toBe("false");
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
     expect(microphone.closed).toBe(1);
-    expect(socket.textSent.at(-1)).toEqual({ type: "stop" });
     socket.say({ type: "ended" });
 
     expect(field().value).toBe("Note: buy milk");
@@ -235,6 +247,35 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(FakeSocket.last).toBeNull();
   });
 
+  it("sends the last captured audio before asking for the rest of the text", async () => {
+    renderComposer(kind);
+    const socket = await startListening();
+    microphone.tail = new Uint8Array([7, 7]).buffer;
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(socket.sent.at(-2)).toBe(microphone.tail);
+  });
+
+  it("gives the field back when Rome never answers a stop", async () => {
+    FakeSocket.opens = false;
+    const { field } = renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(FakeSocket.last).not.toBeNull());
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    expect(field().readOnly).toBe(true);
+
+    act(() => rs.advanceTimersByTime(5_000));
+    rs.useRealTimers();
+
+    expect(field().readOnly).toBe(false);
+    expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
   it("keeps the words heard and says why when the transcriber stops listening", async () => {
     const { field } = renderComposer(kind);
     const socket = await startListening();
@@ -259,5 +300,27 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
       ),
     );
     expect(FakeSocket.last).toBeNull();
+  });
+});
+
+describe("voice input when a card locks the chat message field", () => {
+  it("stops listening, so the microphone does not stay open behind the lock", async () => {
+    mockFetch(SONIOX);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ChatComposer onSend={rs.fn()} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(tree(null));
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "half a", pending: "" });
+
+    rerender(tree("Answer the card above to continue."));
+
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(microphone.closed).toBe(1);
   });
 });
