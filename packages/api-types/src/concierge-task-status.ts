@@ -4,7 +4,7 @@
 // Server, web and iOS read it through `taskStatus`, as they read a chat's
 // activity through `conciergeActivity`. docs/domains/chats.md#task
 
-import type { ConciergeStatusReaction, ConciergeTaskState } from "./concierge.js";
+import type { ConciergeTaskState } from "./concierge.js";
 
 /** The four states a task is in, one at a time. */
 export const CONCIERGE_TASK_STATUSES = ["needs_you", "active", "later", "ended"] as const;
@@ -144,44 +144,4 @@ export function taskStatusOfDto(task: {
     default:
       return { status: "ended", endReason: "done" };
   }
-}
-
-/** What a guardian message's status reaction follows from. */
-export interface MessageMarkFacts {
-  /** Whether the turn that took the message answered it; null when no turn took it. */
-  answered: boolean | null;
-  /** Whether that turn failed, by an error or a crash, before it answered. A stop or a newer input is no failure. */
-  turnFailed?: boolean;
-  /**
-   * The status of each task made for the message, and whether Rome gave up
-   * telling the Concierge its result, so its owner was never told.
-   */
-  tasks: readonly (ConciergeTaskStatusResult & { reportLost?: boolean })[];
-}
-
-/**
- * A guardian message's status reaction (docs/domains/chats.md#status-reaction):
- * working only while the Concierge works for it now, that is while its turn
- * has not answered it or a task made for it is active, its report included;
- * failed when its turn failed, a task made for it ended failed, or Rome gave
- * up telling the result of a task not stopped since, once none of its tasks
- * is still open; else none. A task that waits for its owner or for later,
- * such as a scheduled task between runs, shows none. A task that ended for
- * no response shows none, even when Rome gave up telling it.
- */
-export function messageStatusReaction(facts: MessageMarkFacts): ConciergeStatusReaction | null {
-  if (facts.answered === false || facts.tasks.some((task) => task.status === "active")) {
-    return "working";
-  }
-  if (facts.tasks.some((task) => task.status !== "ended")) return null;
-  const failed =
-    facts.turnFailed === true ||
-    facts.tasks.some(
-      (task) =>
-        task.endReason === "failed" ||
-        (task.reportLost === true &&
-          task.endReason !== "stopped" &&
-          task.endReason !== "no_response"),
-    );
-  return failed ? "failed" : null;
 }

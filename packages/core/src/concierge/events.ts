@@ -386,12 +386,9 @@ export function startConciergeEvents(
     // A turn cut short with nothing carrying it on was stopped by its owner:
     // the messages it took stay stopped, and the next turn is told so.
     await tasks.repo
-      .answerTurns(chatId, running, new Date(), {
-        stopped: status === "interrupted",
-        failed: status === "error",
-      })
+      .answerTurns(chatId, running, new Date(), { stopped: status === "interrupted" })
       .catch((error: unknown) =>
-        log.warn("failed to settle turn status reactions", {
+        log.warn("failed to settle the messages a turn took", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         }),

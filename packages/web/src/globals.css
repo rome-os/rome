@@ -996,23 +996,23 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
   border-radius: var(--rome-radius-16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
-/* A status reaction grows in from 0.6, as a tapback does, and fades out
-   (status-reaction.tsx, MARK_FADE_MS). */
+/* A reaction grows in from 0.6, as a tapback does, and fades out
+   (reaction.tsx, MARK_FADE_MS). */
 @keyframes rome-mark-pop-in {
   from {
     opacity: 0;
     transform: scale(0.6);
   }
 }
-[data-status-reaction] {
+[data-reaction] {
   animation: rome-mark-pop-in 150ms ease-out;
   transition: opacity 150ms ease-in;
 }
-[data-status-reaction][data-leaving] {
+[data-reaction][data-leaving] {
   opacity: 0;
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-status-reaction] {
+  [data-reaction] {
     animation: none;
     transition: none;
   }

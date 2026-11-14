@@ -409,6 +409,18 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return thread;
   }
 
+  override async setMessageReaction(
+    sessionId: string,
+    messageId: string,
+    reaction: string | null,
+  ): Promise<boolean> {
+    const standing = this.standingOf(sessionId);
+    if (!standing || !this.lines.setReaction(standing.place.chat, messageId, reaction))
+      return false;
+    this.emitMessageReaction({ sessionId, messageId, reaction });
+    return true;
+  }
+
   override async chatThreadOf(sessionId: string, messageId: string): Promise<string | null> {
     const standing = this.standingOf(sessionId);
     return standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;
@@ -1208,6 +1220,7 @@ interface LineRow {
   turn_sender_id: string | null;
   source_id: string | null;
   chat_thread_id: string | null;
+  reaction: string | null;
   line_order: number;
   seq: number;
 }
@@ -1225,6 +1238,7 @@ function storedLine(row: LineRow): TranscriptLine {
     role: row.role,
     content: row.content,
     chatThreadId: row.chat_thread_id,
+    ...(row.reaction === null ? {} : { reaction: row.reaction }),
     createdAt: new Date(row.created_at * 1000),
   };
 }
@@ -1255,7 +1269,7 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       m.sender_name, COALESCE(m.sender_agent, m.sender_account_id) AS turn_sender_id,
       CASE WHEN m.sender_agent IS NOT NULL THEN m.sender_agent
            WHEN m.sender_account_id GLOB 'automated::*' THEN m.sender_account_id END AS source_id,
-      m.chat_thread_id AS chat_thread_id,
+      m.chat_thread_id AS chat_thread_id, m.reaction AS reaction,
       -- A turn's first prompt goes before its trace in the same second; every
       -- other line goes after it, in the order it was said, as a steered
       -- input after the card it answers.
@@ -1289,7 +1303,7 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
       json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
-      NULL AS chat_thread_id,
+      NULL AS chat_thread_id, NULL AS reaction,
       -- A session in no chat keeps its rows in the order they were written;
       -- beside a chat's lines, a trace goes after its turn's first prompt.
       CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,

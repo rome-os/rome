@@ -206,6 +206,7 @@ export interface ConciergeDeps {
     | "getReplyTarget"
     | "addBackendMessage"
     | "placeInChatThread"
+    | "setMessageReaction"
     | "setSessionTrigger"
     | "listProjects"
     | "onMessageInserted"
@@ -697,14 +698,14 @@ export class ConciergeService {
 
   /**
    * A retired Concierge chat is archived or deleted now, and its tasks are
-   * `mainChatId`'s. A deleted one's status reactions go with it. Finished rows stay on the retired chat, so no row write
+   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
    * tells the activity that their task chats now move the main chat.
    */
   async chatGone(chatId: string, mainChatId: string, deleted = false): Promise<void> {
-    // A deleted chat's messages are gone, and their marks with them.
+    // A deleted chat's messages are gone, and the turns that took them with them.
     if (deleted) {
       await this.deps.tasks.repo.forgetMessages(chatId).catch((error: unknown) =>
-        log.warn("failed to forget a deleted chat's status reactions", {
+        log.warn("failed to forget a deleted chat's turns", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         }),

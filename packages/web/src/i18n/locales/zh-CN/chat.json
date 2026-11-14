@@ -107,10 +107,7 @@
         "tidyingUp": "正在整理上下文"
       }
     },
-    "statusReaction": {
-      "working": "正在处理",
-      "failed": "未完成"
-    },
+    "reaction": "表情回应",
     "taskList": {
       "title": "任务",
       "close": "关闭任务",
