@@ -1,5 +1,6 @@
 import { hasLink } from "../lib/checks.mjs";
 import { ask, check, ruleResult } from "../lib/scenario.mjs";
+import { goalsSheet, rosterSheet } from "../lib/seed.mjs";
 
 export default {
   rule: "K5",
@@ -7,6 +8,8 @@ export default {
   phase: 1,
   async run(ctx) {
     const as = ctx.team.members[0].account;
+    // An answer may add true facts from the team's documents; only facts found nowhere invent.
+    const documents = `${rosterSheet(ctx.team)}\n\n${goalsSheet(ctx.team)}`;
     const invented = [];
     const unsourced = [];
     const ungraded = [];
@@ -26,6 +29,7 @@ export default {
               task: "answers-question",
               question: question.q,
               sheet: question.a,
+              documents,
               answer: reply.text,
             }
           : {

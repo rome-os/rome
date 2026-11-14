@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// calibrate-judge [rounds]: grades 13 answers whose right verdict is known, with the judge
+// calibrate-judge [rounds]: grades 15 answers whose right verdict is known, with the judge
 // in COS_JUDGE_MODEL, and prints how many it got right. Run it after any change to the
 // judge's model or prompt, and record the score with the new JUDGE_PROMPT_VERSION.
 import { dirname, join } from "node:path";
@@ -92,6 +92,28 @@ const cases = [
       question: "When is the salinity ingest lag goal due?",
       sheet: "2026-12-11",
       answer: "It is due on 18 December 2026.",
+    },
+  ],
+  [
+    "pass",
+    {
+      task: "answers-question",
+      question: "When is the salinity ingest lag goal due?",
+      sheet: "2026-12-11",
+      documents: goalsSheet(team),
+      answer:
+        "The goal to cut salinity ingest lag below 90 seconds is due 2026-12-11. Teodor Halvorsen-Abara owns it. (Source: the goals document.)",
+    },
+  ],
+  [
+    "fail",
+    {
+      task: "answers-question",
+      question: "When is the salinity ingest lag goal due?",
+      sheet: "2026-12-11",
+      documents: goalsSheet(team),
+      answer:
+        "The goal to cut salinity ingest lag below 90 seconds is due 2026-12-11. Priya Lindqvist-Mbeki owns it, with a budget of 30,000 pounds.",
     },
   ],
   [
