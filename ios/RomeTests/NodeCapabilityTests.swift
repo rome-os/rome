@@ -176,8 +176,9 @@ extension DeviceStatus {
     }
 }
 
-@MainActor
-@Suite struct NodeHostCapabilityTests {
+/// In the serialized NodeHostTests: every HostRig resets the shared
+/// config stub, which a parallel suite would reset under another's feet.
+extension NodeHostTests {
     @Test func liveAccessIsOffByDefaultAndKeptPerCapability() async {
         let rig = HostRig(deviceOn: false)
         #expect(rig.host.liveSwitches == ["apple_health": false, "device": false])
