@@ -37,9 +37,11 @@ for (const line of lines) {
   if (!romeIps.has(src) || romeIps.has(dst) || dst.startsWith("127.")) continue;
   if (Number(sport) < EPHEMERAL) continue;
   const len = Number(/length (\d+)/.exec(rest)?.[1] ?? 0);
-  const key = `${dst}:${dport}`;
+  // One flow per connection, so separate requests to one host are judged apart.
+  const key = `${sport}>${dst}:${dport}`;
   const flow = flows.get(key) ?? {
-    address: key,
+    address: `${dst}:${dport}`,
+    sourcePort: Number(sport),
     bytesUp: 0,
     packets: 0,
     upBySecond: {},
@@ -54,15 +56,18 @@ for (const line of lines) {
   flows.set(key, flow);
 }
 
-const standInAudio = (context.standIn?.sessions ?? []).reduce((n, s) => n + s.audioBytes, 0);
+const standInSessions = context.standIn?.sessions ?? [];
 const server = [...flows.values()].map((f) => {
   const ip = f.address.slice(0, f.address.lastIndexOf(":"));
   const host = names[ip] ?? null;
   let carriesAudio = false;
   let evidence;
-  if (ip === context.standInIp) {
-    carriesAudio = standInAudio > 0;
-    evidence = `the stand-in transcriber received ${standInAudio} bytes of audio in ${context.standIn?.sessions?.length ?? 0} sessions`;
+  // A connection to the stand-in is judged by what the stand-in received on it.
+  const session =
+    ip === context.standInIp && standInSessions.find((s) => s.client?.port === f.sourcePort);
+  if (session) {
+    carriesAudio = session.audioBytes > 0;
+    evidence = `the stand-in transcriber received ${session.audioBytes} bytes of audio on this connection`;
   } else {
     const seconds = sustainedUpload(f.upBySecond);
     carriesAudio = seconds > 0;
@@ -72,6 +77,7 @@ const server = [...flows.values()].map((f) => {
   }
   return {
     address: f.address,
+    sourcePort: f.sourcePort,
     host,
     bytesUp: f.bytesUp,
     packets: f.packets,

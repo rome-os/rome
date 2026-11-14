@@ -190,6 +190,11 @@ wss.on("connection", (ws, req) => {
     startedAt: new Date().toISOString(),
     auth: null,
     start: null,
+    // Rome's end of the connection, so a capture can match its packets.
+    client: {
+      address: req.socket.remoteAddress?.replace(/^::ffff:/, ""),
+      port: req.socket.remotePort,
+    },
     audioBytes: 0,
     audioFrames: 0,
     tokensSent: 0,

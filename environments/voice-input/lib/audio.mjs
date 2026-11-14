@@ -7,12 +7,15 @@
 //   frames from the client counts as audio, since the dashboard has no other
 //   reason to stream binary data upward.
 // - Encrypted traffic, where nothing inside is visible: a sustained upload,
-//   at least SUSTAINED_BYTES in each of SUSTAINED_SECONDS different seconds,
-//   counts as audio. A burst, such as a model request, does not.
+//   at least SUSTAINED_BYTES in each of SUSTAINED_SECONDS different seconds
+//   within SUSTAINED_WINDOW seconds of each other, on one connection, counts
+//   as audio. A burst, such as a model request, does not, nor do small
+//   uploads spread over minutes, such as a browser's update checks.
 
 export const AUDIO_MIN_BYTES = 4096;
 export const SUSTAINED_BYTES = 4096;
 export const SUSTAINED_SECONDS = 3;
+export const SUSTAINED_WINDOW = 10;
 
 const SIGNATURES = [
   [
@@ -73,8 +76,17 @@ export function base64AudioIn(text) {
 }
 
 export function sustainedUpload(upBySecond) {
-  const seconds = Object.values(upBySecond ?? {}).filter((n) => n >= SUSTAINED_BYTES).length;
-  return seconds >= SUSTAINED_SECONDS ? seconds : 0;
+  const busy = Object.entries(upBySecond ?? {})
+    .filter(([, n]) => n >= SUSTAINED_BYTES)
+    .map(([s]) => Number(s))
+    .sort((a, b) => a - b);
+  // The most busy seconds that fit in one window.
+  let most = 0;
+  for (let i = 0, j = 0; j < busy.length; j++) {
+    while (busy[j] - busy[i] >= SUSTAINED_WINDOW) i++;
+    most = Math.max(most, j - i + 1);
+  }
+  return most >= SUSTAINED_SECONDS ? most : 0;
 }
 
 // Reads WebSocket frames sent by the client (masked) as they stream past,
