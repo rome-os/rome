@@ -461,6 +461,16 @@
         }
       }
     },
+    "Accounts and services" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账户与服务"
+          }
+        }
+      }
+    },
     "Active" : {
       "localizations" : {
         "zh-Hans" : {
@@ -517,6 +527,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "所有 AI 工具都已达上限"
+          }
+        }
+      }
+    },
+    "All live reads" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部实时读取"
           }
         }
       }
@@ -821,16 +841,6 @@
         }
       }
     },
-    "Battery, network, temperature" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "电池、网络、温度"
-          }
-        }
-      }
-    },
     "Best %lld" : {
       "localizations" : {
         "zh-Hans" : {
@@ -897,26 +907,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "建造 Rome"
-          }
-        }
-      }
-    },
-    "Can Rome use this iPad" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许 Rome 使用这台 iPad"
-          }
-        }
-      }
-    },
-    "Can Rome use this iPhone" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许 Rome 使用这台 iPhone"
           }
         }
       }
@@ -1197,6 +1187,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接没有开始"
+          }
+        }
+      }
+    },
+    "Connections" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接"
           }
         }
       }
@@ -1641,12 +1641,12 @@
         }
       }
     },
-    "Device status" : {
+    "Device" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "设备状态"
+            "value" : "设备"
           }
         }
       }
@@ -2199,6 +2199,36 @@
         }
       }
     },
+    "Live access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时访问"
+          }
+        }
+      }
+    },
+    "Live access is off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时访问已关闭"
+          }
+        }
+      }
+    },
+    "Live reads" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时读取"
+          }
+        }
+      }
+    },
     "Loading" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2409,16 +2439,6 @@
         }
       }
     },
-    "Needs access" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要授权"
-          }
-        }
-      }
-    },
     "Needs approval" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2519,6 +2539,16 @@
         }
       }
     },
+    "Newest data %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新数据：%@"
+          }
+        }
+      }
+    },
     "No AI tool is available" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2569,12 +2599,12 @@
         }
       }
     },
-    "No activity yet" : {
+    "No live reads yet" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "还没有活动"
+            "value" : "还没有实时读取"
           }
         }
       }
@@ -2615,6 +2645,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有网络连接"
+          }
+        }
+      }
+    },
+    "No new Health data for 3 days. Health access may be off: Health app → your picture → Apps → Rome." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已有 3 天没有新的健康数据，健康访问可能已关闭：“健康”App → 你的头像 → App → Rome。"
           }
         }
       }
@@ -2695,6 +2735,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不可用"
+          }
+        }
+      }
+    },
+    "Not connected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未连接"
           }
         }
       }
@@ -2909,16 +2959,6 @@
         }
       }
     },
-    "Only what Rome asks for" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅 Rome 请求的内容"
-          }
-        }
-      }
-    },
     "Only when" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3055,6 +3095,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在打开你的 Rome"
+          }
+        }
+      }
+    },
+    "Opens Connections on the web" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在网页上打开连接"
           }
         }
       }
@@ -3249,16 +3299,6 @@
         }
       }
     },
-    "Reads" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "读取"
-          }
-        }
-      }
-    },
     "Recent" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3269,12 +3309,12 @@
         }
       }
     },
-    "Recent activity" : {
+    "Recent live reads" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最近活动"
+            "value" : "最近的实时读取"
           }
         }
       }
@@ -3769,16 +3809,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发送反馈"
-          }
-        }
-      }
-    },
-    "Sends" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "发送"
           }
         }
       }
@@ -4493,16 +4523,6 @@
         }
       }
     },
-    "The Health data you allow" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你允许的健康数据"
-          }
-        }
-      }
-    },
     "The latest is %@." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4629,6 +4649,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法在这里开始连接"
+          }
+        }
+      }
+    },
+    "This iPad" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPad"
+          }
+        }
+      }
+    },
+    "This iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone"
           }
         }
       }
@@ -5031,16 +5071,6 @@
         }
       }
     },
-    "Uses Apple Health's setting" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用“Apple 健康”的设置"
-          }
-        }
-      }
-    },
     "VO₂ max" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5197,16 +5227,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "体重"
-          }
-        }
-      }
-    },
-    "What Rome can do" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 可以做什么"
           }
         }
       }
@@ -5381,6 +5401,36 @@
         }
       }
     },
+    "Your Rome can read it only while this is on and Rome is open." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有在此开关打开且 Rome 处于打开状态时，你的 Rome 才能读取。"
+          }
+        }
+      }
+    },
+    "Your Rome can read the Health data you allow, to answer questions about your activity, sleep and heart." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 可以读取你允许的健康数据，回答关于活动、睡眠和心脏的问题。"
+          }
+        }
+      }
+    },
+    "Your Rome can read this phone's battery, network and temperature." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 可以读取这台手机的电量、网络和温度。"
+          }
+        }
+      }
+    },
     "Your Rome couldn't take it" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5541,32 +5591,12 @@
         }
       }
     },
-    "iOS access" : {
+    "iOS asks which data Rome may read. You can change it later in the Health app." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "iOS 权限"
-          }
-        }
-      }
-    },
-    "iPad use" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iPad 使用"
-          }
-        }
-      }
-    },
-    "iPhone use" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iPhone 使用"
+            "value" : "iOS 会询问 Rome 可以读取哪些数据，之后可在“健康”App 中更改。"
           }
         }
       }

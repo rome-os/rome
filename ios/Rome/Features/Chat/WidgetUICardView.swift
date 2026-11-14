@@ -26,6 +26,7 @@ struct WidgetUICardView: View {
 
     @StateObject private var surface = WidgetSurface()
     @Environment(\.openURL) private var openURL
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -74,7 +75,11 @@ struct WidgetUICardView: View {
         .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
         .task(id: part) {
             surface.answered = waiting?.answered != nil
-            surface.show(part, call: call, press: press, open: { openURL($0) })
+            surface.show(part, call: call, press: press, open: { openURL($0) }, connectDevice: { [model] url in
+                // A device connection's link is this app's own authorization, not a page.
+                guard let id = DeviceConnectLink.capability(in: url, origin: model.webURL) else { return nil }
+                return await model.connections.ask(id)
+            })
             surface.showAnswered(waiting?.answered)
             await surface.load()
         }
@@ -109,6 +114,9 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     private var call: ((String, String, Rome.JSONValue?) async throws -> ConnectReply)?
     private var send: ((String, Rome.JSONValue) async throws -> WidgetEventReply)?
     private var open: (URL) -> Void = { _ in }
+    /// Runs the app's own authorization for a device connection's link: nil
+    /// for any other link, else whether it was connected.
+    private var connectDevice: (URL) async -> Bool? = { _ in nil }
     /// Only the newest read writes the data: a slow read must not land after
     /// a newer one and put back an older value.
     private var reads = 0
@@ -117,9 +125,11 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         _ part: WidgetUIPart,
         call: @escaping (String, String, Rome.JSONValue?) async throws -> ConnectReply,
         press: @escaping (String, Rome.JSONValue) async throws -> WidgetEventReply = { _, _ in throw APIError.notFound },
-        open: @escaping (URL) -> Void = { _ in }
+        open: @escaping (URL) -> Void = { _ in },
+        connectDevice: @escaping (URL) async -> Bool? = { _ in nil }
     ) {
         self.open = open
+        self.connectDevice = connectDevice
         guard self.part != part else { return }
         self.part = part
         self.call = call
@@ -233,7 +243,13 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         busy = true
         defer { busy = false }
         do {
-            let reply = try await send(name, body)
+            var reply = try await send(name, body)
+            // A device connection's link runs the app's own authorization,
+            // and the card checks once it is done: core reads the report.
+            if let url = reply.open, let connected = await connectDevice(url) {
+                guard connected else { return }
+                reply = try await send("check", body)
+            }
             // A link the reply names opens; a card core says is answered is
             // sent, and any other card reads its data again, and that read
             // says whether the card's data failed.

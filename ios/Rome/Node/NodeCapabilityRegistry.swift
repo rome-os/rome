@@ -35,6 +35,7 @@ struct NodeCapabilityRegistry: Sendable {
         var list: [JSONValue] = []
         for capability in capabilities {
             list.append(.object([
+                "id": .string(capability.id),
                 "prefix": .string(capability.prefix),
                 "title": .string(capability.name),
                 "state": .string(await capability.state().wire),
@@ -43,6 +44,28 @@ struct NodeCapabilityRegistry: Sendable {
             ]))
         }
         return .array(list)
+    }
+
+    func capability(id: String) -> (any NodeCapability)? {
+        capabilities.first { $0.id == id }
+    }
+
+    /// Each capability as a device connection, for the report to the Rome:
+    /// what it is, what it can do, and its permission and Live access now.
+    func connections() async -> [DeviceConnectionReport.Connection] {
+        var list: [DeviceConnectionReport.Connection] = []
+        for capability in capabilities {
+            list.append(DeviceConnectionReport.Connection(
+                capability: capability.id,
+                title: capability.name,
+                prefix: capability.prefix,
+                personal: capability.personal,
+                operations: capability.actions.map { .init(name: $0.name, access: $0.access.rawValue) },
+                permission: await capability.permission().rawValue,
+                live: capability.live.isOn
+            ))
+        }
+        return list
     }
 
     /// Settings' list: each capability with its state.

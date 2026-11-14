@@ -266,7 +266,7 @@ struct ActionFailure: Error {
 
 struct HealthActions: Sendable {
     let reader: HealthReading
-    /// Apple Health's Sync with Rome. Off: the health actions are refused
+    /// Apple Health's Live access. Off: the health actions are refused
     /// before Health is touched.
     var enabled = NodeFlag(true)
     var now: @Sendable () -> Date = { Date() }
@@ -302,19 +302,19 @@ struct HealthActions: Sendable {
                 workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
                 sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
                 A type the user has not allowed, or that has no data, has no value. \
-                Apple Health is off for Rome until the user turns it on: Settings → Apple Health → Sync with Rome in the Rome app on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+                Fails with live_off while Live access to Apple Health is off on the \(name), and with not_connected before the user connects it; only the user can change that, in the Rome app on the \(name): Settings → Connections → Apple Health. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
                 """,
             "health.samples": """
                 Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
                 limit 1-1000 (default 100), order desc (default) | asc by start, cursor (nextCursor of the previous reply), \
                 sources (array of app names or bundle ids), includeMetadata (bool, default false), activity (workouts only). \
-                A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn on Settings → Apple Health → Sync with Rome in the Rome app on the \(name). Example: {"type":"heartRate","start":"2026-11-08","limit":50}
+                A reply with nextCursor has more. Fails with live_off or not_connected as health.stats does. Example: {"type":"heartRate","start":"2026-11-08","limit":50}
                 """,
         ]
     }
 
     static func off(_ device: DeviceKind) -> NodeActionResult {
-        .failed(code: "health_off", message: "Apple Health is off for Rome on this \(device.name). The user must turn on Settings → Apple Health → Sync with Rome in the Rome app on the \(device.name).")
+        .failed(code: "live_off", message: "Live access to Apple Health is off on this \(device.name). Only the user can turn it on, in the Rome app on the \(device.name): Settings → Connections → Apple Health.")
     }
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {

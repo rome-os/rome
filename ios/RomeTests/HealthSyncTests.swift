@@ -736,9 +736,7 @@ struct SyncRig {
         let rig = Rig()
         let settings = rig.make()
         #expect(!settings.isEnabled)
-        #expect(!settings.flag.isOn, "live health reads follow it")
         await settings.setEnabled(true).value
-        #expect(settings.flag.isOn)
         #expect(rig.observers.starts == 1, "HealthKit may wake the app now")
         #expect(rig.make().isEnabled, "kept across launches")
         #expect(await rig.backend.envelopes.isEmpty == false, "turning it on starts the backfill")
@@ -755,14 +753,14 @@ struct SyncRig {
         #expect(rig.reader.accessRequests == 1)
     }
 
-    @Test func turningSyncOffTellsTheRomeAndStopsTheObservers() async {
+    @Test func turningSyncOffPausesTheSourceAndStopsTheObservers() async {
         let rig = Rig()
         let settings = rig.make()
         await settings.setEnabled(true).value
         let stops = rig.observers.stops
         await settings.setEnabled(false).value
         #expect(rig.observers.stops == stops + 1)
-        #expect(await rig.backend.states == ["off"])
+        #expect(await rig.backend.states == ["active", "paused"], "paused: the Rome keeps answering from what it has")
     }
 
     @Test func onAgainGoesOnFromTheAnchorsWithNoNewHistory() async {
@@ -773,7 +771,7 @@ struct SyncRig {
         await settings.setEnabled(false).value
         await settings.setEnabled(true).value
         #expect(await rig.log.entries.last?.history == false, "on again: a catch-up from the anchors")
-        #expect(await rig.backend.states == ["off"], "off tells the Rome; on again, the next batch says it")
+        #expect(await rig.backend.states == ["active", "paused", "active"], "each switch goes to the source row")
     }
 
     @Test func deletingUploadedDataTurnsSyncOffAndLogsIt() async {
@@ -783,7 +781,6 @@ struct SyncRig {
         #expect(await settings.deleteUploaded())
         #expect(await rig.backend.deletes == 1)
         #expect(!settings.isEnabled)
-        #expect(!settings.flag.isOn)
         #expect(await rig.log.entries.last?.outcome == .deleted)
     }
 
@@ -803,7 +800,6 @@ struct SyncRig {
         _ = rig.origin.id()
         await settings.forgetAccount().value
         #expect(!settings.isEnabled)
-        #expect(!settings.flag.isOn)
         #expect(rig.origin.read() == nil)
         #expect(rig.removedAll == 1, "every Rome's anchors and history")
         #expect(settings.instance == nil)
@@ -819,7 +815,6 @@ struct SyncRig {
         #expect(toHome > 0)
         settings.select(Rig.work)
         #expect(!settings.isEnabled, "off on a Rome until it is turned on there")
-        #expect(!settings.flag.isOn, "and so are live reads")
         #expect(settings.history.isEmpty)
         await settings.setEnabled(true).value
         #expect(await !rig.backend(Rig.work.id).envelopes.isEmpty, "turned on there, it syncs there")
@@ -866,7 +861,7 @@ struct SyncRig {
         await off.value
         await on.value
         await sync.value
-        #expect(await !rig.backend.states.contains("off"), "on again before the off went out")
+        #expect(await rig.backend.states.last == "active", "on again before the pause went out")
     }
 
     @Test func deleteReachesOnlyTheOpenRome() async {
@@ -911,9 +906,9 @@ struct SyncRig {
     }
 
     @Test func theSettingsRowSaysWhenSyncNeedsASignIn() {
-        #expect(HealthRowState(status: .needsSignIn).value == "Needs sign-in")
-        #expect(HealthRowState(status: .off).value == "Off")
-        #expect(HealthRowState(status: .synced(.now)).value == "On")
+        #expect(ConnectionRowValue.text(connected: true, live: true, sync: .needsSignIn) == "Needs sign-in")
+        #expect(ConnectionRowValue.text(connected: true, live: false, sync: .off) == "Off")
+        #expect(ConnectionRowValue.text(connected: true, live: false, sync: .synced(.now)) == "On")
     }
 
     @Test func theStatusLineOffersSignInOrRetry() {

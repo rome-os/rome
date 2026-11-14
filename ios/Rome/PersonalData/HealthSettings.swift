@@ -31,6 +31,33 @@ enum HealthSyncStatus: Equatable, Sendable {
     }
 }
 
+/// How new the open Rome's Health data is. iOS hides a revoked Health
+/// permission, so data that stopped coming is the only sign of one.
+struct HealthFreshness: Equatable {
+    /// The end of the newest data sent, by the sync history.
+    let newest: Date?
+    /// Syncs keep running, but nothing new for three days.
+    let stale: Bool
+
+    static let staleAfter: TimeInterval = 3 * 86_400
+
+    init(history: [SyncLogEntry], enabled: Bool, now: Date) {
+        let sent = history.filter { [.ok, .partial, .interrupted].contains($0.outcome) }
+        newest = sent.flatMap { $0.types.values.filter { $0.items > 0 }.compactMap(\.end) }.max()
+        // A sync must have run lately: an old date alone says only that none did.
+        guard enabled, let lastSync = sent.first?.time, now.timeIntervalSince(lastSync) < 86_400 else {
+            stale = false
+            return
+        }
+        if let newest {
+            stale = now.timeIntervalSince(newest) > Self.staleAfter
+        } else {
+            // Nothing ever came, over syncs that began three days ago.
+            stale = sent.last.map { now.timeIntervalSince($0.time) > Self.staleAfter } ?? false
+        }
+    }
+}
+
 /// The Rome Health would sync to: the one open now.
 struct HealthInstance: Equatable, Sendable {
     let id: String
@@ -81,13 +108,13 @@ final class HealthLane: Sendable {
 
 /// Apple Health's Sync with Rome, per Rome: each Rome has its own switch
 /// (off until turned on there), anchors, history and Delete, and only the
-/// Rome open now syncs. The same switch decides whether that Rome may read
-/// Health live through iPhone use (`HealthCapability` reads `flag`).
+/// Rome open now syncs. Live reads are not here: they follow the Health
+/// connection's Live access, one per phone (`NodeHost`).
 @MainActor
 @Observable
 final class HealthSettings {
     enum Defaults {
-        static func enabled(_ instance: String) -> String { "personalData.health.enabled.\(instance)" }
+        static func enabled(_ instance: String) -> String { "personalData.health.sync.\(instance)" }
         static let lastSignInNotice = "personalData.health.lastSignInNotice"
         /// Every key of this account starts so.
         static let prefix = "personalData.health."
@@ -103,6 +130,10 @@ final class HealthSettings {
     /// The open Rome's syncs, newest first, at most 30 days.
     private(set) var history: [SyncLogEntry] = []
 
+    /// The newest data the open Rome has from this phone, and whether it is
+    /// old enough to say Health access may be off.
+    func freshness(now: Date = Date()) -> HealthFreshness { HealthFreshness(history: history, enabled: isEnabled, now: now) }
+
     /// The switch can be turned on: a Rome the guardian owns is open.
     var canSync: Bool { instance.map { !$0.isVisitor } ?? false }
 
@@ -113,8 +144,6 @@ final class HealthSettings {
         )
     }
 
-    /// Read by the live `health.*` actions on the executor's threads.
-    @ObservationIgnored let flag = NodeFlag()
     @ObservationIgnored let reader: HealthReading
     @ObservationIgnored private let sync: HealthSyncReading
     @ObservationIgnored private let defaults: UserDefaults
@@ -122,6 +151,7 @@ final class HealthSettings {
     @ObservationIgnored private let removeAllStores: @Sendable () -> Void
     @ObservationIgnored private let observers: HealthObserving
     @ObservationIgnored private let target: @Sendable (String) async -> PersonalDataTarget?
+    @ObservationIgnored private let connectionId: @Sendable () async -> String?
     @ObservationIgnored private let originStore: OriginStore
     @ObservationIgnored private let device: DeviceKind
     @ObservationIgnored private let notifies: Bool
@@ -149,6 +179,7 @@ final class HealthSettings {
         now: @escaping @Sendable () -> Date = { Date() },
         pause: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
         instance: HealthInstance? = nil,
+        connectionId: @escaping @Sendable () async -> String? = { nil },
         target: @escaping @Sendable (String) async -> PersonalDataTarget?
     ) {
         self.reader = reader
@@ -161,6 +192,7 @@ final class HealthSettings {
         self.device = device
         self.notifies = notifies
         self.target = target
+        self.connectionId = connectionId
         self.protectedData = protectedData ?? { await MainActor.run { UIApplication.shared.isProtectedDataAvailable } }
         self.now = now
         self.pause = pause
@@ -190,12 +222,10 @@ final class HealthSettings {
         guard let instance, !instance.isVisitor else {
             lane = nil
             isEnabled = false
-            flag.set(false)
             observers.stop()
             return
         }
         isEnabled = defaults.bool(forKey: Defaults.enabled(instance.id))
-        flag.set(isEnabled)
         lane = makeLane(instance.id, enabled: isEnabled)
         if isEnabled { startObservers() } else { observers.stop() }
     }
@@ -214,6 +244,7 @@ final class HealthSettings {
             target: { await target(instanceId).flatMap { $0.instanceId == instanceId ? $0 : nil } },
             log: stores.log,
             origin: { originStore.id().map { .init(id: $0, name: deviceName, platform: "ios", appVersion: appVersion) } },
+            connectionId: connectionId,
             switches: { switches.value },
             protectedData: protectedData,
             now: now, pause: pause,
@@ -274,7 +305,6 @@ final class HealthSettings {
         guard let lane, let id = instance?.id else { return Task {} }
         isEnabled = on
         defaults.set(on, forKey: Defaults.enabled(id))
-        flag.set(on)
         lane.switches.set(enabled: on)
         let engine = lane.engine
         let reader = reader
@@ -285,6 +315,9 @@ final class HealthSettings {
                 await engine.signedIn()
                 // The first time, the history; after that, a catch-up from the anchors.
                 await engine.sync(.manual)
+                // The source row is the one record of sync state: back to
+                // active, where an earlier Off left it off.
+                if lane.switches.value.enabled { await self.tellRome("active", lane: lane) }
             }
         }
         observers.stop()
@@ -294,7 +327,8 @@ final class HealthSettings {
             // Turned on again meanwhile: an `off` now would hide what the
             // phone has just sent.
             guard !lane.switches.value.enabled else { return }
-            await self.tellRome("off", lane: lane)
+            // Paused, not off: the Rome keeps answering from what it has.
+            await self.tellRome("paused", lane: lane)
         }
     }
 
@@ -331,7 +365,6 @@ final class HealthSettings {
         guard self.lane === lane else { return true }
         observers.stop()
         isEnabled = false
-        flag.set(false)
         logged(entry, from: id)
         return true
     }
@@ -346,7 +379,6 @@ final class HealthSettings {
         lane = nil
         instance = nil
         isEnabled = false
-        flag.set(false)
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Defaults.prefix) { defaults.removeObject(forKey: key) }
         originStore.remove()
         history = []
@@ -436,7 +468,6 @@ final class HealthSettings {
         isDemo = true
         if instance == nil { instance = HealthInstance(id: "demo", name: "My Rome", isVisitor: false) }
         isEnabled = enabled
-        flag.set(enabled)
         history = entries
         self.activity = activity
     }

@@ -1,58 +1,52 @@
 import Foundation
 
-/// Apple Health, read live while the app is open: `health.stats` and
-/// `health.samples` (HealthActions.swift). It has no switch of its own: it
-/// follows Apple Health's Sync with Rome, so one choice covers both the
-/// synced data and the live reads.
+/// Apple Health: read live while the app is open (`health.stats`,
+/// `health.samples` in HealthActions.swift), and synced into the Rome's
+/// personal data, which `HealthSettings` does per Rome. Its Live access is
+/// its own switch, apart from Sync: one per phone.
 struct HealthCapability: NodeCapability {
+    static let id = "apple_health"
+
     let health: HealthActions
 
-    /// `enabled`: Sync with Rome, which `HealthSettings` keeps.
-    init(health: HealthActions, enabled: NodeFlag) {
+    init(health: HealthActions, live: NodeFlag) {
         var health = health
-        health.enabled = enabled
+        health.enabled = live
         self.health = health
     }
 
+    var id: String { Self.id }
     let prefix = "health"
     let name = "Apple Health"
     var title: LocalizedStringResource { "Apple Health" }
     let symbol = "heart"
+    var summary: LocalizedStringResource { "Your Rome can read the Health data you allow, to answer questions about your activity, sleep and heart." }
     let personal = true
-    var switchKind: NodeCapabilitySwitch { .follows(.health) }
+    let needsPermission = true
+    var syncSource: String? { HealthSettings.sourceId }
+    var live: NodeFlag { health.enabled }
 
     var actions: [NodeActionSpec] {
         let usage = HealthActions.usage(health.device)
         return ["health.stats", "health.samples"].map { NodeActionSpec(name: $0, usage: usage[$0] ?? "") }
     }
 
-    var detail: NodeCapabilityDetail {
-        NodeCapabilityDetail(
-            reads: "The Health data you allow",
-            leaves: "Only what Rome asks for",
-            systemAccess: "Health app → your picture → Apps → Rome"
-        )
+    /// HealthKit hides whether read access was granted: a refusal looks the
+    /// same as a type with no data. So the Rome is always told `unknown`.
+    func permission() async -> NodePermission { .unknown }
+
+    /// Waiting only while iOS was never asked.
+    func state() async -> NodeCapabilityState {
+        guard live.isOn else { return .off }
+        return await health.reader.shouldRequestAccess() ? .needsPermission : .on
     }
 
-    func state() async -> NodeCapabilityState {
-        guard health.enabled.isOn else { return .off }
-        return await health.reader.shouldRequestAccess() ? .needsPermission : .on
+    func requestPermission() async {
+        if await health.reader.shouldRequestAccess() { try? await health.reader.requestAccess() }
     }
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
         await health.run(action, args: args)
-    }
-
-    func refusal(_ state: NodeCapabilityState, device: DeviceKind) -> NodeActionResult {
-        switch state {
-        case .off: return HealthActions.off(device)
-        case .needsPermission:
-            return .failed(
-                code: "health_no_permission",
-                message: "iOS has not been asked for Health access on this \(device.name). The user must open Settings → Apple Health in the Rome app on the \(device.name) and allow it."
-            )
-        case .on: return .failed(code: "unsupported_action", message: "This \(device.name) does not support this action.")
-        }
     }
 
     // MARK: Activity

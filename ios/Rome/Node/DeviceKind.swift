@@ -27,18 +27,11 @@ enum DeviceKind: Sendable, Equatable {
         }
     }
 
-    /// Settings' group for this device.
-    var groupTitle: LocalizedStringKey {
+    /// Settings → Connections' group for this device's connections.
+    var thisDevice: LocalizedStringKey {
         switch self {
-        case .iPhone: return "iPhone use"
-        case .iPad: return "iPad use"
-        }
-    }
-
-    var useSwitchTitle: LocalizedStringKey {
-        switch self {
-        case .iPhone: return "Can Rome use this iPhone"
-        case .iPad: return "Can Rome use this iPad"
+        case .iPhone: return "This iPhone"
+        case .iPad: return "This iPad"
         }
     }
 }

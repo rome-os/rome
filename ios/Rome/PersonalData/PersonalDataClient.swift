@@ -55,6 +55,9 @@ struct PersonalDataEnvelope: Encodable, Sendable {
     var version = 1
     let source: String
     let origin: Origin
+    /// `<deviceId>:<capability>`: the device connection that reads the same
+    /// data live. Absent, the Rome keeps what it has.
+    var connectionId: String? = nil
     let batch: Batch
     let types: [TypeMark]
     let upserts: [PersonalDataPoint]

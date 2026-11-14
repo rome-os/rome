@@ -46,6 +46,33 @@ enum HealthDemo {
             entry(4, minutesAgo: 60 * 27, .backfill, ["stepCount": 8_900, "heartRate": 8_700, "sleep": 183, "bodyMass": 40], history: true),
         ]
     }
+
+    /// Syncs that keep running with nothing new since four days ago.
+    static func stale(now: Date) -> [SyncLogEntry] {
+        var old = SyncLogEntry(seq: 3, time: now.addingTimeInterval(-4 * 86_400), trigger: .observer, outcome: .ok)
+        old.types["stepCount"] = SyncTypeCount(items: 4, start: old.time.addingTimeInterval(-3600), end: old.time)
+        return [
+            SyncLogEntry(seq: 5, time: now.addingTimeInterval(-20 * 60), trigger: .foreground, outcome: .ok),
+            SyncLogEntry(seq: 4, time: now.addingTimeInterval(-86_400), trigger: .foreground, outcome: .ok),
+            old,
+        ]
+    }
+
+    /// Live reads an Agent made today.
+    static func liveReads(now: Date) -> [NodeAuditEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ action: String, _ args: String, count: Int? = nil) -> NodeAuditEntry {
+            NodeAuditEntry(
+                seq: seq, time: now.addingTimeInterval(-minutesAgo * 60), from: "rome", action: action, args: args,
+                outcome: .ok, errorCode: nil, count: count, windowStart: nil, windowEnd: nil, durationMs: 120
+            )
+        }
+        return [
+            entry(4, minutesAgo: 8, "health.stats", #"{"types":["stepCount","activeEnergyBurned"]}"#),
+            entry(3, minutesAgo: 95, "health.stats", #"{"type":"sleep","start":"2026-11-13T18:00","end":"2026-11-14T12:00"}"#),
+            entry(2, minutesAgo: 180, "health.samples", #"{"type":"heartRate","limit":50}"#, count: 50),
+            entry(1, minutesAgo: 60 * 26, "health.stats", #"{"type":"restingHeartRate","interval":"day"}"#),
+        ]
+    }
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -190,32 +217,45 @@ enum SnapshotRunner {
             await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .settings([.instances]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            await capture("13-node-requests", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.requests]) }
-            model.debugCommand = .settings(nil)
-            try? await Task.sleep(for: .seconds(0.6))
+            // Connections: Health connected with Live access and Sync on, Device off.
+            let health = HealthCapability.id
             model.health.showDemo(HealthDemo.history(now: .now))
-            await capture("13a-node-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device]) }
+            model.connections.showDemo(authorized: [health: true])
+            model.node.showDemo(live: [health: true], recent: HealthDemo.liveReads(now: .now))
+            await capture("13-connections", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            await capture("13b-node-capability-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device, .capability("device")]) }
-            model.debugCommand = .settings(nil)
-            try? await Task.sleep(for: .seconds(0.6))
-            await capture("13c-node-capability-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device, .capability("health")]) }
-            model.debugCommand = .settings(nil)
-            try? await Task.sleep(for: .seconds(0.6))
-            await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health, .syncHistory]) }
-            model.debugCommand = .settings(nil)
-            try? await Task.sleep(for: .seconds(0.6))
-            // The Apple Health page is longer than a screen: its top and its end.
+            // The Health page is longer than a screen: its top and its end.
             model.debugHealthScroll = nil
-            await capture("14-health-access", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
-            await capture("16-health-access-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
+            await capture("14-connection-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health)]) }
+            await capture("16-connection-health-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
             model.debugHealthScroll = nil
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13d-live-reads", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .liveReads(health)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .syncHistory]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
             // The expired session: the status line offers a sign-in.
             model.health.showDemo([SyncLogEntry(seq: 9, time: .now.addingTimeInterval(-3 * 3600), trigger: .observer, outcome: .error, errorCode: "signed_out")] + HealthDemo.history(now: .now))
-            await capture("14b-health-sign-in", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
+            await capture("14b-health-sign-in", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Syncs that bring nothing new for days: Health access may be off.
+            model.health.showDemo(HealthDemo.stale(now: .now))
+            await capture("14c-health-stale", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Not connected yet: the authorization's one button.
+            model.health.showDemo([], enabled: false)
+            model.connections.showDemo(authorized: [:])
+            model.node.showDemo(live: [:], recent: [])
+            await capture("14d-health-not-connected", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13c-connection-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(DeviceCapability.id)]) }
             model.debugCommand = .settings(nil)
             model.health.showDemo(HealthDemo.history(now: .now))
             // A second command in the same pass would hide this one from the shell.

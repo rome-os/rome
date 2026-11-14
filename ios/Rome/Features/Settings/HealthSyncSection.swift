@@ -1,18 +1,5 @@
 import SwiftUI
 
-/// What the Apple Health row in Settings shows on its right.
-struct HealthRowState: Equatable {
-    let status: HealthSyncStatus
-
-    var value: String {
-        switch status {
-        case .off: return String(localized: "Off")
-        case .needsSignIn: return String(localized: "Needs sign-in")
-        default: return String(localized: "On")
-        }
-    }
-}
-
 /// The line under Sync with Rome, and the text button at its end: Sync
 /// now while all is well, Retry or Sign in when a sync failed.
 struct HealthStatusLine: Equatable {
@@ -56,62 +43,16 @@ struct HealthStatusLine: Equatable {
     }
 }
 
-/// Settings → Apple Health: Sync with Rome, how it stands, what Rome
-/// promises about the data, its history, and what Rome can do with it.
-struct HealthAccessScreen: View {
+/// Apple Health's Sync, on its connection page: the open Rome's switch,
+/// how it stands, how new its data is, what Rome promises about the data,
+/// and its history. A visitor's Rome has none: Health syncs only to a Rome
+/// the guardian owns.
+struct HealthSyncSection: View {
     let onHistory: () -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let health = model.health
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    header
-                    toggleCard(health)
-                    capabilities
-                        .id("end")
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 32)
-            }
-            .softTopScrollEdge()
-            #if DEBUG
-            // The snapshot runner reads the page's end too.
-            .onChange(of: model.debugHealthScroll) { _, id in
-                if let id { proxy.scrollTo(id, anchor: .bottom) }
-            }
-            #endif
-        }
-        .floatingTopBar { PageHeader(title: "", inSheet: true) }
-        .secondaryPageBackground()
-        .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
-    }
-
-    // MARK: Pieces
-
-    private var header: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "heart.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(Palette.healthPink)
-                .accessibilityHidden(true)
-            Text("Apple Health")
-                .romeFont(28, .bold)
-                .tracking(-0.6)
-                .foregroundStyle(Palette.fg)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
-    }
-
-    /// The switch, the status line under it, and Sync history. A visitor's
-    /// Rome has none: Health syncs only to a Rome the guardian owns.
-    @ViewBuilder
-    private func toggleCard(_ health: HealthSettings) -> some View {
         if health.instance?.isVisitor != true {
             let rome = health.instance?.name
             let line = HealthStatusLine(health.status, rome: rome, device: model.node.device)
@@ -127,6 +68,13 @@ struct HealthAccessScreen: View {
                 }
                 if let text = line.text {
                     HealthStatusRow(line: line, text: text, running: health.activity.running)
+                }
+                if health.isEnabled, let fresh = HealthFreshnessLine(health.freshness()) {
+                    Text(verbatim: fresh.text)
+                        .romeFont(13)
+                        .foregroundStyle(fresh.warning ? Palette.destructive : Palette.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
                 }
                 // What Rome promises about Health, in one line, with the policy behind it.
                 Text("Read only · Never sold or used for ads or training · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)")
@@ -149,8 +97,29 @@ struct HealthAccessScreen: View {
             }
         }
     }
+}
 
-    private var capabilities: some View {
+/// How new the synced data is, or that Health access may be off.
+struct HealthFreshnessLine: Equatable {
+    let text: String
+    let warning: Bool
+
+    init?(_ freshness: HealthFreshness, now: Date = Date(), locale: Locale = .current) {
+        if freshness.stale {
+            text = String(localized: "No new Health data for 3 days. Health access may be off: Health app → your picture → Apps → Rome.")
+            warning = true
+        } else if let newest = freshness.newest {
+            text = String(localized: "Newest data \(HealthStatusLine.ago(newest, now: now, locale: locale))")
+            warning = false
+        } else {
+            return nil
+        }
+    }
+}
+
+/// What the Rome can do with Health, as three short chats.
+struct HealthChats: View {
+    var body: some View {
         SettingsGroup(header: "What your Rome can do") {
             CapabilityRow(
                 symbol: "figure.run", title: "Plan fat-loss workouts",
@@ -169,7 +138,6 @@ struct HealthAccessScreen: View {
             )
         }
     }
-
 }
 
 /// The sync's status under the switch, with Sign in or Retry when it needs one.
@@ -208,24 +176,6 @@ struct HealthStatusRow: View {
             .buttonStyle(PressScaleStyle())
     }
 }
-
-/// A card's only row: a title and its control, no icon.
-private struct PlainRow<Trailing: View>: View {
-    let title: LocalizedStringKey
-    @ViewBuilder let trailing: () -> Trailing
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(title).romeFont(17).foregroundStyle(Palette.fg)
-            Spacer(minLength: 8)
-            trailing()
-        }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 52)
-        .contentShape(Rectangle())
-    }
-}
-
 
 /// One thing the Rome can do with Health, as a short chat: the request in the
 /// guardian's bubble and the Rome's answer in its own, both the real chat's.

@@ -3,12 +3,12 @@ import Testing
 @testable import Rome
 
 extension NodeCapabilityRegistry {
-    /// Health over `actions` (its own switch unless `health` is given) and
-    /// Device status, which answers `status`.
+    /// Health over `actions` (its Live access unless `health` is given) and
+    /// Device, which answers `status`.
     static func testing(_ actions: HealthActions, health: NodeFlag? = nil, device: NodeFlag = NodeFlag(), status: DeviceStatus = .fixture) -> NodeCapabilityRegistry {
         NodeCapabilityRegistry(capabilities: [
-            HealthCapability(health: actions, enabled: health ?? actions.enabled),
-            DeviceCapability(enabled: device, device: actions.device, read: { status }),
+            HealthCapability(health: actions, live: health ?? actions.enabled),
+            DeviceCapability(live: device, device: actions.device, read: { status }),
         ])
     }
 }
@@ -43,10 +43,11 @@ extension DeviceStatus {
         let executor = NodeExecutor(name: { "iPhone" }, audit: FakeAudit(), registry: .testing(HealthFixtures.actions(FakeHealth()), device: device))
         let result = try #require(try await reply(executor, "system.info")["payload"]?["result"])
         #expect(result["actions"]?.array?.compactMap(\.string) == ["system.info", "health.stats", "health.samples", "device.status"])
-        #expect(result["usage"]?["device.status"]?.string?.contains("device_off") == true)
+        #expect(result["usage"]?["device.status"]?.string?.contains("live_off") == true)
         #expect(result["usage"]?["health.stats"]?.string?.isEmpty == false)
         let capabilities = try #require(result["capabilities"]?.array)
         #expect(capabilities.map { $0["prefix"]?.string } == ["health", "device"])
+        #expect(capabilities.map { $0["id"]?.string } == ["apple_health", "device"])
         #expect(capabilities[0]["personal"]?.bool == true)
         #expect(capabilities[1]["personal"]?.bool == false)
         #expect(capabilities[0]["state"]?.string == "on")
@@ -54,13 +55,13 @@ extension DeviceStatus {
         #expect(capabilities[1]["actions"]?.array?.compactMap(\.string) == ["device.status"])
     }
 
-    @Test func deviceStatusIsRefusedUntilItsSwitchIsOnAndAuditedEitherWay() async throws {
+    @Test func deviceStatusIsRefusedUntilItsLiveAccessIsOnAndAuditedEitherWay() async throws {
         let audit = FakeAudit()
         let device = NodeFlag(false)
         let executor = NodeExecutor(name: { "iPhone" }, audit: audit, registry: .testing(HealthFixtures.actions(FakeHealth()), device: device))
         let off = try await reply(executor, "device.status")
-        #expect(off["payload"]?["error"]?["code"]?.string == "device_off")
-        #expect(off["payload"]?["error"]?["message"]?.string?.contains("Settings → iPhone use → Device status") == true)
+        #expect(off["payload"]?["error"]?["code"]?.string == "live_off")
+        #expect(off["payload"]?["error"]?["message"]?.string?.contains("Settings → Connections → Device") == true)
         device.set(true)
         let on = try await reply(executor, "device.status")
         let result = try #require(on["payload"]?["result"])
@@ -69,7 +70,7 @@ extension DeviceStatus {
         #expect(result["network"]?.string == "wifi")
         #expect(result["thermalState"]?.string == "nominal")
         #expect(audit.begun.count == 2)
-        #expect(audit.ended.map(\.errorCode) == ["device_off", nil])
+        #expect(audit.ended.map(\.errorCode) == ["live_off", nil])
     }
 
     @Test func deviceStatusTakesNoArguments() async throws {
@@ -86,20 +87,60 @@ extension DeviceStatus {
         #expect(audit.begun.count == 2)
     }
 
-    @Test func healthOnWithIOSNeverAskedNeedsAccess() async throws {
+    @Test func healthLiveWithIOSNeverAskedIsNotConnected() async throws {
         let health = FakeHealth()
         health.neverAsked = true
         let executor = NodeExecutor(name: { "iPhone" }, audit: FakeAudit(), registry: .testing(HealthFixtures.actions(health)))
         let sent = try await reply(executor, "health.stats", #"{"type":"stepCount"}"#)
-        #expect(sent["payload"]?["error"]?["code"]?.string == "health_no_permission")
+        #expect(sent["payload"]?["error"]?["code"]?.string == "not_connected")
+        #expect(sent["payload"]?["error"]?["message"]?.string?.contains("Settings → Connections → Apple Health") == true)
         #expect(health.reads == 0)
     }
 
-    @Test func healthFollowsAppleHealthsSwitch() {
-        let capability = HealthCapability(health: HealthFixtures.actions(FakeHealth()), enabled: NodeFlag())
-        #expect(capability.switchKind == .follows(.health))
-        #expect(capability.ownFlag == nil)
-        #expect(DeviceCapability(enabled: NodeFlag()).switchKind == .own(defaultsKey: DeviceCapability.defaultsKey))
+    @Test func eachCapabilityDeclaresItsConnection() async {
+        let health = FakeHealth()
+        let registry = NodeCapabilityRegistry.testing(HealthFixtures.actions(health), health: NodeFlag(true), device: NodeFlag(false))
+        let list = await registry.connections()
+        #expect(list.map(\.capability) == ["apple_health", "device"])
+        #expect(list[0] == .init(
+            capability: "apple_health", title: "Apple Health", prefix: "health", personal: true,
+            operations: [.init(name: "health.stats", access: "read"), .init(name: "health.samples", access: "read")],
+            permission: "unknown", live: true
+        ), "HealthKit hides read access: always unknown")
+        #expect(list[1] == .init(
+            capability: "device", title: "Device", prefix: "device", personal: false,
+            operations: [.init(name: "device.status", access: "read")], permission: "not_needed", live: false
+        ))
+        #expect(registry.capability(id: "apple_health")?.needsPermission == true)
+        #expect(registry.capability(id: "device")?.needsPermission == false)
+        #expect(registry.capability(id: "apple_health")?.syncSource == "apple_health")
+        #expect(registry.capability(id: "device")?.syncSource == nil)
+    }
+
+    @Test func theReportHasTheShapeTheRomeTakes() throws {
+        let report = DeviceConnectionReport(
+            device: .init(id: "dev-1", name: "iPhone", platform: "ios"),
+            connections: [.init(capability: "device", title: "Device", prefix: "device", personal: false, operations: [.init(name: "device.status", access: "read")], permission: "not_needed", live: true)]
+        )
+        let json = parseJSON(String(decoding: try JSONEncoder().encode(report), as: UTF8.self))
+        #expect(json["version"]?.number == 1)
+        #expect(json["device"]?["id"]?.string == "dev-1")
+        #expect(json["device"]?["platform"]?.string == "ios")
+        #expect(json["connections"]?.array?.first?["permission"]?.string == "not_needed")
+        #expect(json["connections"]?.array?.first?["operations"]?.array?.first?["access"]?.string == "read")
+        #expect(DeviceConnections.connectionId(device: "DEV-1", capability: "apple_health") == "dev-1:apple_health")
+        #expect(DeviceConnections.connectionId(device: nil, capability: "apple_health") == nil)
+    }
+
+    @Test func aCardsLinkNamesTheCapabilityOnThisRomeOnly() throws {
+        let origin = try #require(URL(string: "https://me.romeos.cc"))
+        func id(_ text: String) -> String? { DeviceConnectLink.capability(in: URL(string: text)!, origin: origin) }
+        #expect(id("https://me.romeos.cc/connections/device/apple_health") == "apple_health")
+        #expect(id("https://me.romeos.cc/connections/device/device/") == "device")
+        #expect(id("https://other.romeos.cc/connections/device/apple_health") == nil, "another host is a page")
+        #expect(id("https://me.romeos.cc/connections/device/") == nil)
+        #expect(id("https://me.romeos.cc/connections/device/a/b") == nil)
+        #expect(id("https://me.romeos.cc/settings/connections") == nil)
     }
 
     @Test func recentActivityTakesItsWordsFromTheCapability() {
@@ -110,39 +151,86 @@ extension DeviceStatus {
         let read = formatter.row(entry("device.status", outcome: .ok))
         #expect(read.title == "Battery and network")
         #expect(read.detail == "Read")
-        let off = formatter.row(entry("device.status", outcome: .error, error: "device_off"))
-        #expect(off.detail == "Device status is off")
+        let off = formatter.row(entry("device.status", outcome: .error, error: "live_off"))
+        #expect(off.detail == "Live access is off")
         #expect(off.failed)
         let unknown = formatter.row(entry("calendar.events", outcome: .error, error: "unsupported_action"))
         #expect(unknown.title == "Unsupported request")
         #expect(unknown.detail == "calendar.events")
     }
 
-    @Test func rowsSayOnOffOrNeedsAccess() {
-        #expect(NodeCapabilityRowState(.on).value == "On")
-        #expect(NodeCapabilityRowState(.off).value == "Off")
-        #expect(NodeCapabilityRowState(.needsPermission).value == "Needs access")
-        #expect(NodeCapabilityRowState(nil).value == "Off")
+    @Test func rowsSayNotConnectedOnOrOff() {
+        #expect(ConnectionRowValue.text(connected: false, live: false, sync: nil) == "Not connected")
+        #expect(ConnectionRowValue.text(connected: true, live: true, sync: nil) == "On")
+        #expect(ConnectionRowValue.text(connected: true, live: false, sync: nil) == "Off")
+        #expect(ConnectionRowValue.text(connected: true, live: false, sync: .waiting) == "On", "Sync alone is on")
+        #expect(ConnectionRowValue.text(connected: true, live: false, sync: .off) == "Off")
+        #expect(ConnectionRowValue.text(connected: true, live: true, sync: .needsSignIn) == "Needs sign-in")
     }
 
-    @Test func theStatusLineNamesTheDeviceAndWhetherRomeCanReachIt() {
-        #expect(NodeStatusLine.text(device: "iPhone", status: .online, enabled: true) == "iPhone · Online")
-        #expect(NodeStatusLine.text(device: "iPhone", status: .off, enabled: true) == "iPhone · Offline · available while Rome is open")
-        #expect(NodeStatusLine.text(device: "iPhone", status: .off, enabled: false) == "iPhone · Off")
-        #expect(NodeStatusLine.text(device: "iPhone", status: .stopped(.superseded), enabled: true) == "iPhone · Replaced")
+    @Test func theStatusLineSaysWhetherRomeCanReachThePhone() {
+        #expect(NodeStatusLine.words(.online) == "Online")
+        #expect(NodeStatusLine.words(.off) == "Offline · available while Rome is open")
+        #expect(NodeStatusLine.words(.stopped(.superseded)) == "Replaced")
     }
 }
 
 @MainActor
 @Suite struct NodeHostCapabilityTests {
-    @Test func aCapabilitysOwnSwitchIsOffByDefaultAndKept() async {
-        let rig = HostRig()
-        #expect(rig.host.capabilitySwitches["device"] == false)
-        #expect(rig.host.capabilitySwitches["health"] == nil, "Health follows Apple Health's switch")
-        rig.host.setCapability("device", on: true)
-        #expect(rig.defaults.bool(forKey: DeviceCapability.defaultsKey))
-        #expect(rig.makeHost().capabilitySwitches["device"] == true, "kept across launches")
-        rig.host.setCapability("health", on: true)
-        #expect(rig.host.capabilitySwitches["health"] == nil, "no switch of its own to set")
+    @Test func liveAccessIsOffByDefaultAndKeptPerCapability() async {
+        let rig = HostRig(deviceOn: false)
+        #expect(rig.host.liveSwitches == ["apple_health": false, "device": false])
+        var changes = 0
+        rig.host.onLiveChanged = { changes += 1 }
+        rig.host.setLive("device", on: true)
+        #expect(rig.defaults.bool(forKey: NodeHost.Defaults.live("device")))
+        #expect(changes == 1, "a change is reported")
+        #expect(rig.makeHost().liveSwitches["device"] == true, "kept across launches")
+        #expect(rig.makeHost().liveSwitches["apple_health"] == false)
+        rig.host.setLive("calendar", on: true)
+        #expect(rig.host.liveSwitches["calendar"] == nil, "no such capability")
+    }
+
+    @Test func connectingMarksItTurnsLiveOnAndReports() async {
+        let rig = HostRig(deviceOn: false)
+        let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)
+        var reports: [DeviceConnectionReport] = []
+        connections.device = { ("dev-1", "iPhone") }
+        connections.send = { reports.append($0) }
+        let health = rig.host.registry.capability(id: "apple_health")!
+        let device = rig.host.registry.capability(id: "device")!
+        #expect(!connections.isConnected(health) && !connections.isConnected(device))
+        await connections.connect("apple_health")
+        #expect(connections.isConnected(health))
+        #expect(rig.host.liveSwitches["apple_health"] == true)
+        #expect(DeviceConnections(node: rig.makeHost(), defaults: rig.defaults).isConnected(health), "kept across launches")
+        #expect(!reports.isEmpty, "reported before it returns")
+        #expect(reports.last?.connections.first { $0.capability == "apple_health" }?.live == true)
+        #expect(reports.last?.device.id == "dev-1")
+        // Device needs no permission: connected while its Live access is on.
+        rig.host.setLive("device", on: true)
+        #expect(connections.isConnected(device))
+        // Health stays connected with both switches off: the page keeps its switches.
+        rig.host.setLive("apple_health", on: false)
+        #expect(connections.isConnected(health))
+        connections.forgetAccount()
+        #expect(!connections.isConnected(health))
+    }
+
+    @Test func aCardWaitsForTheAuthorizationOrItsDecline() async {
+        let rig = HostRig(deviceOn: false)
+        let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)
+        async let answer = connections.ask("device")
+        _ = await eventually { connections.request != nil }
+        #expect(connections.request?.capability == "device")
+        connections.request?.finish(true)
+        #expect(await answer)
+        #expect(connections.request == nil)
+        #expect(await connections.ask("calendar") == false, "no such capability")
+        async let declined = connections.ask("apple_health")
+        _ = await eventually { connections.request != nil }
+        connections.request?.finish(false)
+        connections.request?.finish(true)
+        #expect(await declined == false, "the first answer counts")
     }
 }

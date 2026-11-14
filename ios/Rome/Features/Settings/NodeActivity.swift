@@ -75,6 +75,9 @@ struct NodeActivityFormatter {
         case "invalid_args": return String(localized: "Invalid request")
         case "unsupported_type": return String(localized: "Not a supported type")
         case "unsupported_action": return String(localized: "Not supported")
+        case "live_off": return String(localized: "Live access is off")
+        case "not_connected": return String(localized: "Not connected")
+        // Older entries, from before Live access.
         case "health_off": return String(localized: "Apple Health is off")
         case "health_no_permission": return String(localized: "No access to Health")
         case "device_off": return String(localized: "Device status is off")

@@ -32,6 +32,8 @@ actor SyncEngine {
     private let target: @Sendable () async -> PersonalDataTarget?
     private let log: SyncLogging
     private let origin: @Sendable () async -> PersonalDataEnvelope.Origin?
+    /// The device connection that reads the same data live, named on every batch.
+    private let connectionId: @Sendable () async -> String?
     private let switches: @Sendable () async -> SyncSwitches
     private let protectedData: @Sendable () async -> Bool
     private let now: @Sendable () -> Date
@@ -63,6 +65,7 @@ actor SyncEngine {
         target: @escaping @Sendable () async -> PersonalDataTarget?,
         log: SyncLogging,
         origin: @escaping @Sendable () async -> PersonalDataEnvelope.Origin?,
+        connectionId: @escaping @Sendable () async -> String? = { nil },
         switches: @escaping @Sendable () async -> SyncSwitches,
         protectedData: @escaping @Sendable () async -> Bool,
         now: @escaping @Sendable () -> Date = { Date() },
@@ -75,6 +78,7 @@ actor SyncEngine {
         self.target = target
         self.log = log
         self.origin = origin
+        self.connectionId = connectionId
         self.switches = switches
         self.protectedData = protectedData
         self.now = now
@@ -319,13 +323,14 @@ actor SyncEngine {
     ) async throws -> Set<String> {
         let batches = Self.batches(chunk)
         var unsupported = Set<String>()
+        let connectionId = await connectionId()
         for (number, batch) in batches.enumerated() {
             // Before every request: a long chunk stops as soon as sync is
             // off or deleted, or the wake's time is up.
             try await checkGoing(generation, deadline: deadline)
             let last = number == batches.count - 1
             let envelope = PersonalDataEnvelope(
-                source: source.id, origin: origin,
+                source: source.id, origin: origin, connectionId: connectionId,
                 batch: .init(id: UUID().uuidString.lowercased(), trigger: trigger.rawValue, index: index, last: last),
                 types: last ? chunk.marks : [],
                 upserts: batch.upserts, deletes: batch.deletes.map { .init(key: $0) }

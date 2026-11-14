@@ -3,22 +3,24 @@ import Network
 import UIKit
 
 /// The phone's battery, network and temperature: `device.status`. It needs no
-/// iOS permission and reads no Wi-Fi name (that would need location). Its
-/// own switch is off by default, like everything else Rome can use.
+/// iOS permission, reads no Wi-Fi name (that would need location) and does
+/// not sync. Its Live access is off until turned on, or connected from a card.
 struct DeviceCapability: NodeCapability {
-    static let defaultsKey = "nodeDeviceStatusEnabled"
+    static let id = "device"
 
-    let enabled: NodeFlag
+    let live: NodeFlag
     var device = DeviceKind.iPhone
     var read: @Sendable () async -> DeviceStatus = { await DeviceStatus.live() }
 
+    var id: String { Self.id }
     let prefix = "device"
-    let name = "Device status"
-    var title: LocalizedStringResource { "Device status" }
+    let name = "Device"
+    var title: LocalizedStringResource { "Device" }
     let symbol = "battery.75percent"
+    var summary: LocalizedStringResource { "Your Rome can read this phone's battery, network and temperature." }
     let personal = false
-    var switchKind: NodeCapabilitySwitch { .own(defaultsKey: Self.defaultsKey) }
-    var ownFlag: NodeFlag? { enabled }
+    let needsPermission = false
+    var syncSource: String? { nil }
 
     var actions: [NodeActionSpec] {
         [NodeActionSpec(
@@ -27,21 +29,13 @@ struct DeviceCapability: NodeCapability {
                 No arguments. The \(device.name)'s battery and network now: batteryLevel (0 to 1), batteryState \
                 (charging | unplugged | full | unknown), lowPowerMode, network (wifi | cellular | wired | none | other), \
                 expensive, constrained (Low Data Mode), thermalState (nominal | fair | serious | critical), osVersion, appVersion. \
-                Off for Rome until the user turns it on in Settings → \(device.name) use → Device status in the Rome app on the \(device.name). \
-                While it is off the request fails with device_off. Example: {}
+                Fails with live_off while Live access to Device is off: only the user can turn it on, in the Rome app on the \(device.name): \
+                Settings → Connections → Device. Example: {}
                 """
         )]
     }
 
-    var detail: NodeCapabilityDetail {
-        NodeCapabilityDetail(
-            reads: "Battery, network, temperature",
-            leaves: "Only what Rome asks for",
-            systemAccess: nil
-        )
-    }
-
-    func state() async -> NodeCapabilityState { enabled.isOn ? .on : .off }
+    func permission() async -> NodePermission { .notNeeded }
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
         guard action == "device.status" else {

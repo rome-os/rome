@@ -640,7 +640,10 @@ final class AppModel {
         didSet {
             if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) }
             // Back on a Rome after the session ran out: Health sync goes on.
-            if phase == .ready, oldValue != .ready { health.instanceOpened() }
+            if phase == .ready, oldValue != .ready {
+                health.instanceOpened()
+                connections.report()
+            }
             if !phase.isSignedIn { stackGame = nil }
             // Signed out, however it came about: the widget offers to make an app.
             if phase == .signedOut, oldValue != .signedOut { WidgetShelf.shared.clear() }
@@ -711,6 +714,8 @@ final class AppModel {
     let node: NodeHost
     /// Apple Health's Sync with Rome.
     let health: HealthSettings
+    /// This phone's device connections, reported to the open Rome.
+    let connections: DeviceConnections
     /// Settings opened at these pages, as a tapped "sign in again" notice asks.
     private(set) var settingsRequest = SettingsRequest(serial: 0, routes: [])
     /// Light, dark or automatic, for the whole app; kept across sign-out.
@@ -745,15 +750,35 @@ final class AppModel {
         let target = TargetBox()
         // The Rome the app opens is the one Health syncs to, from launch on:
         // HealthKit can wake the app before any screen shows.
-        let health = HealthSettings(instance: Self.rememberedInstance().map(Self.healthInstance), target: { await target.resolve($0) })
+        let health = HealthSettings(
+            instance: Self.rememberedInstance().map(Self.healthInstance),
+            // The Health connection of this phone, which reads the same data live.
+            connectionId: { await MainActor.run { DeviceConnections.connectionId(device: cloud.deviceCredential?.deviceSessionId, capability: HealthCapability.id) } },
+            target: { await target.resolve($0) }
+        )
         self.health = health
         let device = DeviceKind.current
         node = NodeHost(credentials: cloud, registry: NodeCapabilityRegistry(capabilities: [
-            HealthCapability(health: HealthActions(reader: health.reader, device: device), enabled: health.flag),
-            DeviceCapability(enabled: NodeFlag(), device: device),
+            HealthCapability(health: HealthActions(reader: health.reader, device: device), live: NodeFlag()),
+            DeviceCapability(live: NodeFlag(), device: device),
         ]), device: device)
+        connections = DeviceConnections(node: node)
         target.model = self
         node.onCredentialRejected = { [weak self] in self?.nodeCredentialRejected() }
+        // A live Health answer leaves the app in front: the sync catches up,
+        // at most every 15 minutes. Live results themselves are never stored.
+        node.onAnswered = { [weak health] action in
+            if action.hasPrefix("health.") { health?.foreground() }
+        }
+        connections.device = { [weak self] in
+            guard let id = self?.cloud.deviceCredential?.deviceSessionId else { return nil }
+            return (id.lowercased(), UIDevice.current.name)
+        }
+        // Only to a Rome the guardian owns: a visitor's Rome cannot reach this phone.
+        connections.send = { [weak self] report in
+            guard let self, self.phase == .ready, self.currentInstance?.isVisitor != true, let backend = self.workspace?.backend else { return }
+            try? await backend.reportDeviceConnections(report)
+        }
     }
 
     // MARK: Launch
@@ -1255,6 +1280,7 @@ final class AppModel {
         KeptIdentity.removeAll()
         // The device's switches and its Recent activity.
         node.forgetAccount()
+        connections.forgetAccount()
         // Health sync's switch, anchors, history and origin; the Rome keeps what it has.
         health.forgetAccount()
     }
@@ -1366,9 +1392,21 @@ final class AppModel {
         return PersonalDataTarget(instanceId: instance.id, backend: PersonalDataClient(client: client, renewal: renewal))
     }
 
+    /// One authorization, from Settings or a card: iOS's permission where
+    /// one is needed, then Live access on, and for Health its Sync for the
+    /// open Rome, then the report.
+    func connect(_ id: String) async {
+        guard let capability = node.registry.capability(id: id) else { return }
+        if capability.needsPermission { await capability.requestPermission() }
+        await connections.connect(id)
+        if capability.syncSource == HealthSettings.sourceId, health.canSync, !health.isEnabled {
+            health.setEnabled(true)
+        }
+    }
+
     /// Settings, at Apple Health's Sync history.
     func openHealthHistory() {
-        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.health, .syncHistory])
+        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.connections, .connection(HealthCapability.id), .syncHistory])
     }
 
     /// The pages to open, once: the shell takes them when it shows.
@@ -1523,6 +1561,9 @@ final class AppModel {
         appearance.apply()
         node.setActive(true)
         health.foreground()
+        // iOS Settings may have changed a permission meanwhile.
+        node.permissionsChanged()
+        connections.report()
         // Back in front on a chat counts as opening it: its delivered pushes go.
         if let visibleChat {
             clearDelivered(for: visibleChat)

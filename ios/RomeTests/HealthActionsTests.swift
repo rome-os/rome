@@ -389,11 +389,11 @@ enum HealthFixtures {
         #expect(usage.contains("clipped to the window or bucket"))
         #expect(usage.contains("previous day 18:00 to 12:00"))
         #expect(usage.contains("with or without offset (without offset = the iPhone's time zone"))
-        #expect(HealthActions.usage()["health.stats"]?.contains("health_off") == true)
-        #expect(HealthActions.usage()["health.samples"]?.contains("health_off") == true)
+        #expect(HealthActions.usage()["health.stats"]?.contains("live_off") == true)
+        #expect(HealthActions.usage()["health.samples"]?.contains("live_off") == true)
         for action in ["health.stats", "health.samples"] {
             let text = HealthActions.usage()[action] ?? ""
-            #expect(text.contains("Settings → Apple Health → Sync with Rome in the Rome app"), "\(action)")
+            #expect(text.contains("Settings → Connections → Apple Health"), "\(action)")
             #expect(text.contains("on the iPhone"), "\(action)")
         }
         #expect(HealthActions.usage()["health.stats"]?.contains("off for Rome until the user turns it on") == true, "off is the default")
@@ -426,10 +426,10 @@ enum HealthFixtures {
         actions.enabled.set(false)
         for (action, args) in [("health.stats", #"{"type":"stepCount"}"#), ("health.samples", #"{"type":"heartRate"}"#), ("health.stats", "{}"), ("health.stats", #"{"type":"bloodType"}"#)] {
             let result = await actions.run(action, args: parseJSON(args))
-            #expect(HealthFixtures.code(result) == "health_off", "\(action) \(args)")
+            #expect(HealthFixtures.code(result) == "live_off", "\(action) \(args)")
         }
         guard case .failed(code: _, message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else { return }
-        #expect(message.contains("Settings → Apple Health → Sync with Rome in the Rome app"), "the agent is told where the user turns it on")
+        #expect(message.contains("Settings → Connections → Apple Health"), "the agent is told where the user turns it on")
         #expect(message.contains("on the iPhone"))
         #expect(health.accessRequests == 0 && health.reads == 0)
         // Other actions are not Health's to refuse.
@@ -909,16 +909,16 @@ enum HealthFixtures {
     @Test func anIPadTellsTheAgentWhereItsSwitchIs() async {
         var actions = actions(.iPad)
         actions.enabled = NodeFlag(false)
-        guard case .failed(code: "health_off", message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else {
+        guard case .failed(code: "live_off", message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else {
             Issue.record("expected health_off")
             return
         }
-        #expect(message.contains("Settings → Apple Health → Sync with Rome in the Rome app"))
+        #expect(message.contains("Settings → Connections → Apple Health"))
         #expect(!message.contains("iPhone"))
         for text in HealthActions.usage(.iPad).values {
             #expect(!text.contains("iPhone") && !text.contains("phone's"), "\(text.prefix(40))")
         }
-        #expect(HealthActions.usage(.iPad)["health.stats"]?.contains("Settings → Apple Health → Sync with Rome in the Rome app") == true)
+        #expect(HealthActions.usage(.iPad)["health.stats"]?.contains("Settings → Connections → Apple Health") == true)
     }
 
     @Test func anIPhoneStillSaysIPhone() async {
@@ -928,7 +928,7 @@ enum HealthFixtures {
             Issue.record("expected health_off")
             return
         }
-        #expect(message.contains("Settings → Apple Health → Sync with Rome in the Rome app"))
+        #expect(message.contains("Settings → Connections → Apple Health"))
     }
 
     @Test func theAuditRefusalNamesTheDevice() async throws {
@@ -948,7 +948,7 @@ enum HealthFixtures {
         #expect(DeviceKind.iPad.name == "iPad")
         #expect(DeviceKind.iPad.symbol == "ipad")
         #expect(DeviceKind.iPhone.symbol == "iphone")
-        #expect(DeviceKind.iPad.useSwitchTitle == LocalizedStringKey("Can Rome use this iPad"))
-        #expect(DeviceKind.iPhone.groupTitle == LocalizedStringKey("iPhone use"))
+        #expect(DeviceKind.iPad.thisDevice == LocalizedStringKey("This iPad"))
+        #expect(DeviceKind.iPhone.thisDevice == LocalizedStringKey("This iPhone"))
     }
 }

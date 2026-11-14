@@ -109,13 +109,12 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
-/// Board 3: account, AI tool usage, Apple Health and iPhone use, the app's
+/// Board 3: account, AI tool usage, Connections, the app's
 /// own settings and links, sign out. Groups carry no titles.
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
-    let onHealth: () -> Void
-    let onDevice: () -> Void
+    let onConnections: () -> Void
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
@@ -140,7 +139,7 @@ struct SettingsScreen: View {
                     }
                     .padding(.horizontal, 16)
                 }
-                NodeSettingsGroup(onHealth: onHealth, onDevice: onDevice)
+                SettingsGroup { ConnectionsRow(action: onConnections) }
                     .padding(.horizontal, 16)
                 SettingsGroup {
                     SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {

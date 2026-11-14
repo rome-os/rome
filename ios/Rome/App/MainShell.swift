@@ -21,12 +21,12 @@ enum MainSection: Hashable {
 /// Pages pushed inside the Settings sheet.
 enum SettingsRoute: Hashable {
     case instances
-    case requests
-    case health
-    /// iPhone use (iPad use on an iPad): Rome's use of this device.
-    case device
-    /// One thing iPhone use can do, by its prefix.
-    case capability(String)
+    /// This phone's connections.
+    case connections
+    /// One connection's page, by its id.
+    case connection(String)
+    /// One connection's live reads, by its id.
+    case liveReads(String)
     /// Apple Health → Sync history.
     case syncHistory
 }
@@ -201,6 +201,13 @@ struct MainShell: View {
         }
         .sheet(isPresented: $showSettings) {
             settingsSheet
+        }
+        // A connect card's device connection: its authorization, then the card checks.
+        .sheet(item: Binding(get: { model.connections.request }, set: { if $0 == nil { model.connections.request?.finish(false) } })) { request in
+            ConnectDeviceSheet(request: request)
+                .presentationDetents([.medium])
+                .presentationBackground(Palette.sheet)
+                .presentationCornerRadius(22)
         }
         #if DEBUG
         .overlay {
@@ -552,15 +559,14 @@ struct MainShell: View {
         }
     }
 
-    /// Settings slides up with its own stack, so its pages (instances, Apple
-    /// Health, iPhone use) push inside the sheet and the X closes all of it.
+    /// Settings slides up with its own stack, so its pages (instances,
+    /// Connections) push inside the sheet and the X closes all of it.
     private var settingsSheet: some View {
         NavigationStack(path: $settingsPath) {
             SettingsScreen(
                 workspace: workspace,
                 onInstances: { settingsPath.append(.instances) },
-                onHealth: { settingsPath.append(.health) },
-                onDevice: { settingsPath.append(.device) },
+                onConnections: { settingsPath.append(.connections) },
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -570,17 +576,20 @@ struct MainShell: View {
                         showSettings = false
                         show(.chat)
                     })
-                case .requests:
-                    NodeRequestsScreen()
-                case .health:
-                    HealthAccessScreen(onHistory: { settingsPath.append(.syncHistory) })
-                case .device:
-                    NodeSettingsScreen(
-                        onRequests: { settingsPath.append(.requests) },
-                        onCapability: { settingsPath.append(.capability($0)) }
+                case .connections:
+                    ConnectionsScreen(
+                        isVisitor: workspace.isVisitor,
+                        onConnection: { settingsPath.append(.connection($0)) },
+                        onWeb: { if let web = model.webURL { settingsPage = InstancePages.connections(origin: web) } }
                     )
-                case .capability(let prefix):
-                    NodeCapabilityScreen(prefix: prefix, onFollow: { settingsPath.append($0) })
+                case .connection(let id):
+                    ConnectionScreen(
+                        id: id,
+                        onActivity: { settingsPath.append(.liveReads(id)) },
+                        onHistory: { settingsPath.append(.syncHistory) }
+                    )
+                case .liveReads(let id):
+                    NodeRequestsScreen(capability: id)
                 case .syncHistory:
                     SyncHistoryScreen()
                 }

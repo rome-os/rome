@@ -2,15 +2,17 @@ import Foundation
 import os
 import SwiftUI
 
-// One thing Rome can do with this phone as a rome-node device, such as
-// reading Apple Health live or reading the battery. Node is only the channel
-// and the audit log: each capability is one file in `Capabilities/` that
-// answers its own actions, and the registry lists them in display order.
+// One thing Rome can do with this phone, such as reading Apple Health or the
+// battery. Each is one device connection: "Apple Health · iPhone". Node is
+// only the channel and the audit log: each capability is one file in
+// `Capabilities/` that answers its own actions and declares what the
+// connection report says about it, and the registry lists them in display
+// order.
 
 enum NodeCapabilityState: Equatable, Sendable {
-    /// Rome's switch for it is off.
+    /// Its Live access is off.
     case off
-    /// The switch is on, but iOS has not granted access, or was never asked.
+    /// Live access is on, but iOS has not granted access, or was never asked.
     case needsPermission
     case on
 
@@ -24,54 +26,61 @@ enum NodeCapabilityState: Equatable, Sendable {
     }
 }
 
+/// Whether iOS lets the app read what a capability reads.
+enum NodePermission: String, Equatable, Sendable {
+    case granted
+    /// iOS says no. HealthKit never says so: it hides a refusal.
+    case denied
+    /// It needs no iOS permission.
+    case notNeeded = "not_needed"
+    /// iOS was never asked.
+    case unknown
+}
+
+enum NodeAccess: String, Sendable, Equatable {
+    case read
+    case write
+}
+
 struct NodeActionSpec: Sendable, Equatable {
     /// Starts with the capability's prefix and a dot, such as `health.stats`.
     let name: String
     /// English, for the Agent: what `system.info` gives in `usage`.
     let usage: String
-}
-
-/// Where a capability's switch lives.
-enum NodeCapabilitySwitch: Sendable, Equatable {
-    /// Its own switch on its detail page, kept under this key, off by default.
-    case own(defaultsKey: String)
-    /// Another page's switch, which the detail page links to (Health follows
-    /// Apple Health's Sync with Rome).
-    case follows(SettingsRoute)
-}
-
-/// What a capability's detail page says.
-struct NodeCapabilityDetail: Sendable {
-    /// What it reads on the phone.
-    let reads: LocalizedStringResource
-    /// What leaves the phone, and where it goes.
-    let leaves: LocalizedStringResource
-    /// Where iOS's own access for it is set, when a link cannot open it;
-    /// nil when it needs no iOS access.
-    let systemAccess: LocalizedStringResource?
+    var access: NodeAccess = .read
 }
 
 protocol NodeCapability: Sendable {
+    /// The connection's id, the same on every phone: `apple_health`, `device`.
+    var id: String { get }
     /// The action names' prefix: "health", "device".
     var prefix: String { get }
-    /// The name an Agent reads in `system.info`, in English.
+    /// The name an Agent reads in `system.info` and the connection report, in English.
     var name: String { get }
     var title: LocalizedStringResource { get }
     /// An SF Symbol.
     var symbol: String { get }
+    /// What the connection lets the Rome do, in one line, for its page and
+    /// the authorization step.
+    var summary: LocalizedStringResource { get }
     /// Reads the guardian's personal data: refused in a shared chat by the
     /// `rome-node` CLI.
     var personal: Bool { get }
     var actions: [NodeActionSpec] { get }
-    var switchKind: NodeCapabilitySwitch { get }
-    /// The flag behind an `.own` switch, which `NodeHost` keeps; nil for one that follows another page.
-    var ownFlag: NodeFlag? { get }
-    var detail: NodeCapabilityDetail { get }
+    /// The personal-data source it syncs into; nil for one that is read live only.
+    var syncSource: String? { get }
+    /// It needs an iOS permission, which its authorization asks for first.
+    var needsPermission: Bool { get }
+    /// Its Live access: one switch per phone, since the phone cannot tell
+    /// which Rome sends a live request.
+    var live: NodeFlag { get }
+    func permission() async -> NodePermission
+    /// Off without Live access; waiting while iOS has not granted it.
     func state() async -> NodeCapabilityState
+    /// Shows iOS's own prompt, for one that needs a permission.
+    func requestPermission() async
     /// Called only after the audit record is written and the state is `.on`.
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult
-    /// What the Agent reads when the capability is off or lacks access.
-    func refusal(_ state: NodeCapabilityState, device: DeviceKind) -> NodeActionResult
     /// The Recent activity row's title: what was asked, in words, never a
     /// value. Nil when the entry is not one of its actions.
     func activityTitle(_ entry: NodeAuditEntry) -> String?
@@ -81,17 +90,26 @@ protocol NodeCapability: Sendable {
 }
 
 extension NodeCapability {
+    func state() async -> NodeCapabilityState {
+        guard live.isOn else { return .off }
+        switch await permission() {
+        case .granted, .notNeeded: return .on
+        case .denied, .unknown: return .needsPermission
+        }
+    }
+
+    /// What the Agent reads when Live access is off or iOS has not granted it.
     func refusal(_ state: NodeCapabilityState, device: DeviceKind) -> NodeActionResult {
         switch state {
         case .off:
             return .failed(
-                code: "\(prefix)_off",
-                message: "\(name) is off for Rome on this \(device.name). The user must turn it on in Settings → \(device.name) use → \(name) in the Rome app on the \(device.name)."
+                code: "live_off",
+                message: "Live access to \(name) is off on this \(device.name). Only the user can turn it on, in the Rome app on the \(device.name): Settings → Connections → \(name)."
             )
         case .needsPermission:
             return .failed(
-                code: "\(prefix)_no_permission",
-                message: "Rome has no iOS access for \(name) on this \(device.name). The user must allow it in the Rome app on the \(device.name)."
+                code: "not_connected",
+                message: "\(name) is not connected on this \(device.name): iOS has not given Rome access. The user must connect it in the Rome app on the \(device.name): Settings → Connections → \(name)."
             )
         case .on:
             return .failed(code: "unsupported_action", message: "This \(device.name) does not support this action.")
@@ -100,7 +118,7 @@ extension NodeCapability {
 
     func activityDetail(_ entry: NodeAuditEntry, formatter: NodeActivityFormatter) -> String? { nil }
 
-    var ownFlag: NodeFlag? { nil }
+    func requestPermission() async {}
 
     func handles(_ action: String) -> Bool { actions.contains { $0.name == action } }
 }
