@@ -1,4 +1,7 @@
+import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
+import { questionCardRender } from "../fixtures/question-card";
+import type { Question } from "@rome/api-types/question-card";
 import type {
   ChatId,
   ChatSettings,
@@ -18,6 +21,7 @@ import { http, HttpResponse } from "msw";
 import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
+  type ConciergeChatWorkResponse,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
@@ -49,7 +53,7 @@ import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { connectorHandlers } from "./connector";
-import { mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
+import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -59,11 +63,40 @@ import { connections } from "./connections-store";
 
 /** Connected accounts left by a disconnect in this session, each with its
  *  agent. Core keeps them, so Envoys lists them as disconnected. */
+/** The questions of the mock `ask_question` card: one per layout the card takes. */
+const WAITLIST_QUESTIONS: Question[] = [
+  {
+    id: "tone",
+    question: "How should the rewrite read?",
+    type: "single",
+    options: ["Warm", "Plain", "Playful"],
+    freeText: true,
+  },
+  {
+    id: "keep",
+    question: "What should the new opening keep?",
+    type: "multi",
+    options: [
+      "The line about not holding it all in your head",
+      "The pricing note",
+      "The beta thank-you",
+    ],
+    freeText: true,
+  },
+  {
+    id: "avoid",
+    question: "Anything to avoid?",
+    type: "text",
+    optional: true,
+  },
+];
+
 const disconnectedAccounts: ConnectedAccountEntry[] = [];
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
+import { taskListHandlers } from "./task-list";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -77,6 +110,8 @@ import {
   CONCIERGE_MORNING_DIGEST,
   CONCIERGE_RELEASE_DIGEST,
   CONCIERGE_TRIP_PLAN,
+  TASK_CHAT_ANSWER_WITH_CONCLUSION,
+  TASK_CHAT_CONCLUSION,
 } from "../fixtures/concierge-messages";
 
 // Fixtures are typed against the same types the fetch sites parse into
@@ -249,7 +284,14 @@ function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
     ...(turnEnd?.type === "turn_end" && turnEnd.status === "interrupted"
       ? { stoppedByUser: true }
       : {}),
-    ...(failed && lastError?.type === "error" ? { terminalError: lastError.error } : {}),
+    ...(failed && lastError?.type === "error"
+      ? {
+          terminalError: lastError.error,
+          ...(lastError.code ? { terminalErrorCode: lastError.code } : {}),
+          ...(lastError.provider ? { terminalErrorProvider: lastError.provider } : {}),
+          ...(lastError.reason ? { terminalErrorReason: lastError.reason } : {}),
+        }
+      : {}),
     ...(model ? { model } : {}),
   };
 }
@@ -368,8 +410,66 @@ const transcripts: Record<string, ChatMessage[]> = {
     ...turn(CONCIERGE_CHAT_ID, 8, "2026-08-07T12:40:00.000Z", "How much have I eaten today?", [
       mealPlannerCard,
       text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
+      dinnerQuestion,
     ]),
+    // A finished task is reported by forwarding only its conclusion; the chip opens the task chat.
+    ...turn(CONCIERGE_CHAT_ID, 9, "2026-08-07T13:00:00.000Z", "How are the Lisbon flights going?", [
+      {
+        type: "text",
+        content: TASK_CHAT_CONCLUSION,
+        format: "long",
+        forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
+      } as TranscriptPart,
+    ]),
+    // A task's thread: the Concierge's reply in it carries the task's label.
+    {
+      id: `${CONCIERGE_CHAT_ID}-thread-1`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-thread-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("I found three tables for Friday at 7.")]),
+      createdAt: "2026-08-07T13:01:00.000Z",
+      chatThreadId: "mock-thread-table",
+      chatThreadTitle: "Book a table for Friday",
+    },
+    // A routine made the Concierge speak: its reply carries the routine's name.
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-trace`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "trace",
+      content: "[]",
+      createdAt: "2026-08-07T13:02:00.000Z",
+      traceSummary: {
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        automatedInput: { type: "routine", name: "Daily summary" },
+      },
+    },
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-reply`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
+      createdAt: "2026-08-07T13:02:01.000Z",
+    },
+    // The owner's latest message, which the Concierge is still working on: it
+    // carries the working status reaction, as a live turn sets it.
+    {
+      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T13:05:00.000Z", "Book the 9:40 one", [])[0]!,
+      statusReaction: "working",
+    },
   ],
+  // The task chat the conclusion above came from: the full answer, then its conclusion.
+  "mock-chat-lisbon": turn(
+    "mock-chat-lisbon",
+    1,
+    "2026-08-07T09:20:00.000Z",
+    "Compare round-trip fares to Lisbon for 1–7 March and tell me what to book.",
+    [text(TASK_CHAT_ANSWER_WITH_CONCLUSION)],
+  ),
   "mock-task-question": turn(
     "mock-task-question",
     1,
@@ -380,22 +480,15 @@ const transcripts: Record<string, ChatMessage[]> = {
         type: "pending_interaction",
         toolUseId: "mock-task-tone",
         appId: "core",
-        render: {
-          kind: "inline",
-          builtin: true,
-          componentId: "question-card",
-          props: {
-            questions: [
-              {
-                id: "tone",
-                question: "Which tone should the launch email use?",
-                type: "single",
-                options: ["Warm", "Plain"],
-                freeText: true,
-              },
-            ],
+        render: questionCardRender([
+          {
+            id: "tone",
+            question: "Which tone should the launch email use?",
+            type: "single",
+            options: ["Warm", "Plain"],
+            freeText: true,
           },
-        },
+        ]),
       },
     ],
   ),
@@ -598,9 +691,10 @@ const transcripts: Record<string, ChatMessage[]> = {
         },
       ],
     ),
-    // A turn parked on an unresolved `ask_question` card. `appId` is the "core"
-    // sentinel and `builtin` routes the render to rome-web's own QuestionCard
-    // rather than an app bundle in a shadow root.
+    // A turn parked on an unresolved `ask_question` card, as core stores it:
+    // the questions and the card described from them. `appId` is the "core"
+    // sentinel and `builtin` routes the render to the question card rather
+    // than an app bundle in a shadow root.
     //
     // One question per branch the card lays out differently, so reading this
     // transcript in mock mode covers all three. The `multi` option past 32
@@ -616,39 +710,7 @@ const transcripts: Record<string, ChatMessage[]> = {
           type: "pending_interaction",
           toolUseId: "mock-chat-2-ask-1",
           appId: "core",
-          render: {
-            kind: "inline",
-            componentId: "question-card",
-            builtin: true,
-            props: {
-              questions: [
-                {
-                  id: "tone",
-                  question: "How should the rewrite read?",
-                  type: "single",
-                  options: ["Warm", "Plain", "Playful"],
-                  freeText: true,
-                },
-                {
-                  id: "keep",
-                  question: "What should the new opening keep?",
-                  type: "multi",
-                  options: [
-                    "The line about not holding it all in your head",
-                    "The pricing note",
-                    "The beta thank-you",
-                  ],
-                  freeText: true,
-                },
-                {
-                  id: "avoid",
-                  question: "Anything to avoid?",
-                  type: "text",
-                  optional: true,
-                },
-              ],
-            },
-          },
+          render: questionCardRender(WAITLIST_QUESTIONS),
         },
       ],
     ),
@@ -852,6 +914,9 @@ const session = (
 const chatSessions: ChatSession[] = [
   // The guardian's main chat, which Chat and `/` open at /message.
   session(CONCIERGE_CHAT_ID, "Main chat", "default", CONCIERGE_AGENT_ID),
+  // Topic chats, which the Concierge section lists under the main chat.
+  session("mock-topic-travel", "Travel planning", "default", CONCIERGE_AGENT_ID),
+  session("mock-topic-news", "Weekly news digest", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {
@@ -865,6 +930,13 @@ const chatSessions: ChatSession[] = [
     unread: true,
     model: "gpt-5.6-sol",
     reasoningEffort: "xhigh",
+  },
+  { ...session("mock-chat-lisbon", "Lisbon flights"), triggerKind: "concierge" },
+  // A task chat that is still working, for the chat list's Tasks section.
+  {
+    ...session("mock-task-running", "Compare standing desks"),
+    triggerKind: "concierge",
+    running: true,
   },
   { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
@@ -884,6 +956,9 @@ const chatSessions: ChatSession[] = [
     },
   },
 ];
+
+/** Unread agent messages per topic chat, so the chat list's Concierge dot shows. */
+const topicChatUnread: Record<string, number> = { "mock-topic-travel": 2 };
 
 const messageText = (message: ChatMessage): string =>
   (JSON.parse(message.content) as TranscriptPart[])
@@ -1207,6 +1282,7 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 });
 
 export const handlers = [
+  ...appDocumentAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
   // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
   // section shows the account row rather than a reconnect prompt.
@@ -1253,7 +1329,7 @@ export const handlers = [
           id: s.id,
           name: s.name,
           main: s.id === CONCIERGE_CHAT_ID,
-          unread: 0,
+          unread: topicChatUnread[s.id] ?? 0,
           activity: { kind: "idle" as const },
         })),
     } satisfies ConciergeChatsResponse),
@@ -1270,6 +1346,10 @@ export const handlers = [
       },
     );
   }),
+  // Mock mode runs no turns and follows nothing, so a topic chat has nothing to move or stop.
+  http.get("/api/concierge/chats/:chatId/follows-and-tasks", () =>
+    HttpResponse.json({ follows: [], openTasks: [] } satisfies ConciergeChatWorkResponse),
+  ),
   http.get("/api/concierge/tasks", () =>
     HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
   ),
@@ -1648,6 +1728,7 @@ export const handlers = [
   // orders its own routes internally, so they can be appended in any order —
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
+  ...taskListHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,

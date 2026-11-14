@@ -6,6 +6,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 - Before building, testing or running the app, read [`README.md`](README.md); it covers the simulator, Mac Catalyst, demo data and a local Rome.
 - Before designing or changing a screen, read [`DESIGN.md`](DESIGN.md), the interface principles every screen follows.
+- Before changing the transcript, a list, a store or anything that runs while a chat streams, read [`PERFORMANCE.md`](PERFORMANCE.md), and measure the change with `ROME_PERF`.
 - When changing a screen, run the snapshot pass in [`README.md`](README.md#snapshots) and look at both the light and dark images.
 - When reading a new wire field, add it to `Rome/Networking/Models.swift` as optional, so an older server keeps decoding.
 - When adding text, use `romeFont(_:_:)` from `Rome/Design/Typography.swift`, never `.font(.system(size:))`, so it scales with Dynamic Type.
@@ -23,6 +24,10 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 **A WebSocket from `URLSessionWebSocketTask` sends no `Origin`, and the server refuses a cookie session on the socket without one.** The REST calls still work, so the app looks fine but never receives a live event. `APIClient.socketRequest` sets `Origin` to the instance's own origin; keep it.
 
 **The server never announces the guardian's own message on `chat.session:<id>`.** A pending bubble waits for a fetch, not an event. `TranscriptStore` marks it sent when the POST returns and reloads the newest page.
+
+**A turn that fails in the middle leaves no reply, only its trace.** The instance stores a model error as a reply (an `error` part) only when the model could not be resolved before the turn ran. A failure after that (a provider limit, a crash) is in the trace message's `turnStatus: "error"` and `terminalError`, and in the guardian message's `statusReaction`. `TranscriptBuilder` draws a line from the trace unless a stored error part has the same turn, so a failure never shows twice and never shows nothing.
+
+**A task's question or approval in the Chat is drawn from its part's `card`, never from the task chat.** The instance fills `card` into every `task_chat` part that shows one, each time it hands the message out, and `chat_card_settled` replaces it live (`TaskAskCard`). A part with no `card` (an older instance) draws as one quiet "no longer available" line; there is no paging fallback. A card takes an answer only when it is the task's newest, has no outcome, and `ConciergeTask.waitId` names it with the task `needs_you` (`TaskAskMode`).
 
 **A stored `approval_card` part always says `pending`.** Only `GET /approvals/:id` knows whether it was answered, so a card shows its buttons only after that record arrives.
 
@@ -47,5 +52,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 **The swipe home starts on the transcript and reads as a drag away from the bottom.** So does Notification Center pulled down over the app. Rows refetched on return then land below the screen, which looks like a stale chat. `TranscriptList` goes by whether the bottom was on screen when the app resigned active, and a tapped push always shows the newest rows.
 
 **A fling's glide wins over `ScrollViewReader.scrollTo`.** The tap reaches the button and `scrollTo` runs, but the list keeps decelerating the other way, so a tap mid-glide seems to do nothing. A Simulator tap after a slow drag does not show it; a real fling does. `ScrollHandle` stops the `UIScrollView`'s deceleration before scrolling, and older pages wait until the jump lands, because content that grows under the scroll animation moves its target.
+
+**A page that stays mounted keeps its animations running.** Chat stays in the tree, faded out, under the other sections, and a `TimelineView(.animation)` draws every frame there for no one. Pass `paused: offScreen`; see [`PERFORMANCE.md`](PERFORMANCE.md).
 
 **A system switch ignores the Simulator panel's `tap`.** The tap has no duration, and a `Toggle` waits for a touch that lasts. Use `touch_path` with two samples at the same point about 120 ms apart; the simulator log (`xcrun simctl spawn booted log show`) tells whether the app received anything.

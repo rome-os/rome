@@ -53,12 +53,17 @@ test.describe("desktop", () => {
     expect(await railWidth(page)).toBe(64);
   });
 
-  test("the Chat tile stays lit on an open chat", async ({ page }) => {
+  test("the Chat tile stays lit on an open chat, and opens the list's mode", async ({ page }) => {
     await page.goto("/chat/mock-chat-build-app");
-    // The tile opens the main chat, and lights on any chat.
-    await expect(page.locator('aside nav a[href="/message"]')).toHaveClass(/shadow-1/, {
-      timeout: 30_000,
-    });
+    const tile = page.locator('aside nav a[aria-label="Chat"]');
+    // The tile lights on any chat.
+    await expect(tile).toHaveClass(/shadow-1/, { timeout: 30_000 });
+    // A common chat puts the chat list in Chat mode, whose tile returns to the last ordinary chat.
+    await expect(tile).toHaveAttribute("href", "/chat/mock-chat-build-app");
+
+    // The main chat puts it in Concierge mode, whose tile opens the main chat.
+    await page.goto("/message");
+    await expect(tile).toHaveAttribute("href", "/message", { timeout: 30_000 });
   });
 });
 

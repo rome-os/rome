@@ -97,6 +97,30 @@ describe("send_message attachments", () => {
     );
   });
 
+  it("sends a chat upload from the profile assets directory", async () => {
+    rs.stubEnv("HOME", tempDir);
+    const assetsDir = join(tempDir, ".rome", "send-message-test", "assets");
+    await mkdir(assetsDir, { recursive: true });
+    const source = join(assetsDir, `${"a".repeat(32)}.png`);
+    await writeFile(source, "png");
+    const safeSource = await realpath(source);
+    const chats = host();
+
+    await executeSendMessage(
+      makeAdapter(),
+      {
+        channel: "discord",
+        threadId: "thread-1",
+        attachments: [{ type: "image", source }],
+      },
+      { chats },
+    );
+
+    expect(chats.send).toHaveBeenCalledWith(
+      expect.objectContaining({ attachments: [{ type: "image", source: safeSource }] }),
+    );
+  });
+
   it("rejects absolute paths outside allowed attachment roots", async () => {
     const source = join(outsideRoot, "secret.txt");
     await writeFile(source, "secret");

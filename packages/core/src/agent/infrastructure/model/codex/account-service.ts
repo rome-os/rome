@@ -110,6 +110,7 @@ export interface SharedCodexAccountServiceOptions {
   markAuthRevoked?: () => Promise<void>;
   now?: () => number;
   usageTimeoutMs?: number;
+  allowChatgptCredits?: () => Promise<boolean>;
   /** Where the gateway's model list comes from while Rome credits are the login. */
   readRomeCredits?: () => Promise<RomeCreditsView | null>;
 }
@@ -189,20 +190,24 @@ export class SharedCodexAccountService
   private lastLoginError: string | null = null;
   /** The usage refusal the adapter last saw, until a later usage read shows capacity. */
   private refusal: UsageRefusal | undefined;
-  /** The last report, so a limit still ahead survives a usage read that fails. */
+  /** The account report, including any allowed ChatGPT credit capacity. */
   private last: ModelAccountReport | undefined;
+  /** Keep subscription limits even when credits make the account available. */
+  private lastSubscription: ModelAccountReport | undefined;
   private readonly readRomeCredits: () => Promise<RomeCreditsView | null>;
   /** The gateway's list for the current login, or null while it has not said. */
   private modelsServed: readonly string[] | null = null;
   private modelsRead: { promise: Promise<void> } | null = null;
   private readonly now: () => number;
   private closed = false;
+  private readonly allowChatgptCredits: () => Promise<boolean>;
 
   constructor(
     manager: CodexAppServerManager | CodexAccountRpc,
     options: SharedCodexAccountServiceOptions = {},
   ) {
     this.manager = manager;
+    this.allowChatgptCredits = options.allowChatgptCredits ?? (async () => false);
     this.loginTimeoutMs = options.loginTimeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
     this.usageCachePaths = options.usageCachePaths ?? CODEX_USAGE_CACHE_PATHS;
     this.usageTimeoutMs = options.usageTimeoutMs ?? DEFAULT_USAGE_TIMEOUT_MS;
@@ -235,10 +240,32 @@ export class SharedCodexAccountService
     void this.readModelsServed();
     const readAt = this.now();
     const [status, usage] = await Promise.all([this.status(), this.usage()]);
-    if (usage && usageShowsCapacity(usage) && this.refusal) {
+    const useCredits =
+      status.authMode === "chatgpt" &&
+      usage?.creditsAvailable === true &&
+      (await this.allowChatgptCredits());
+    if (usage && (useCredits || usageShowsCapacity(usage)) && this.refusal) {
       if (usageReadClearsRefusal(this.refusal, readAt)) this.refusal = undefined;
     }
-    this.last = accountReport(status, usage, this.heldRefusal(), this.now(), this.last);
+    const refusal = this.heldRefusal();
+    const now = this.now();
+    const subscriptionUsage = usage?.fiveHour || usage?.sevenDay ? usage : null;
+    const subscription = accountReport(
+      status,
+      subscriptionUsage,
+      refusal,
+      now,
+      this.lastSubscription,
+    );
+    this.lastSubscription = subscription;
+    // Credits cover subscription windows; a refused turn still blocks requests.
+    this.last = useCredits
+      ? accountReport(status, { ...usage, fiveHour: undefined, sevenDay: undefined }, refusal, now)
+      : subscription;
+    if (this.last.state === "available" && subscription.state === "usage_limit_reached") {
+      this.last.requiresChatgptCredits = true;
+    }
+    if (usage) this.last.usage = usage;
     this.refusal = refusalAfterReport(this.refusal, this.last);
     return this.last;
   }
@@ -348,15 +375,41 @@ export class SharedCodexAccountService
           const response = await this.withUsageTimeout(
             this.manager.request<unknown>(Method.accountRateLimitsRead),
           );
-          return (
-            normalizeUsageStatus(rateLimitsPayload(response), "codex app-server", {
+          const payload = rateLimitsPayload(response) as Record<string, unknown> | null;
+          const credits = payload?.credits as Record<string, unknown> | undefined;
+          const reportedCredits: AIToolUsageStatus["credits"] =
+            credits &&
+            (typeof credits.hasCredits === "boolean" || typeof credits.unlimited === "boolean")
+              ? {
+                  hasCredits: credits.hasCredits === true,
+                  unlimited: credits.unlimited === true,
+                  ...(typeof credits.balance === "string" &&
+                  credits.balance.trim() !== "" &&
+                  Number.isFinite(Number(credits.balance))
+                    ? { balance: credits.balance.trim() }
+                    : {}),
+                }
+              : undefined;
+          const usage: AIToolUsageStatus | null =
+            normalizeUsageStatus(payload, "codex app-server", {
               utilizationUnit: "fraction",
-            }) ?? {
-              checkedAt: new Date().toISOString(),
-              source: "codex app-server",
-              error: "Codex rate limit response did not include usage windows",
-            }
-          );
+            }) ??
+            (reportedCredits
+              ? { checkedAt: new Date().toISOString(), source: "codex app-server" }
+              : null);
+          if (usage) {
+            if (reportedCredits) usage.credits = reportedCredits;
+            usage.creditsAvailable =
+              (credits?.hasCredits === true || credits?.unlimited === true) &&
+              payload?.spendControlReached !== true &&
+              !String(payload?.rateLimitReachedType ?? "").startsWith("workspace");
+            return usage;
+          }
+          return {
+            checkedAt: new Date().toISOString(),
+            source: "codex app-server",
+            error: "Codex rate limit response did not include usage windows",
+          };
         } catch (err) {
           return {
             checkedAt: new Date().toISOString(),
@@ -492,6 +545,7 @@ export class SharedCodexAccountService
     await this.manager.request(Method.accountLogout);
     this.refusal = undefined;
     this.last = undefined;
+    this.lastSubscription = undefined;
     this.emitAccountChanged();
   }
 
@@ -611,6 +665,7 @@ export class SharedCodexAccountService
       // limit were the old one's.
       this.refusal = undefined;
       this.last = undefined;
+      this.lastSubscription = undefined;
     } else {
       this.lastLoginError =
         typeof notification.error === "string" && notification.error.trim()

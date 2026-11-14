@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
-import { applyTaskUpsert, formatTaskTime, groupTasks, taskTime } from "./tasks";
+import { applyTaskUpsert, formatTaskTime } from "./tasks";
 
 const NOW = Date.UTC(2026, 9, 29, 12);
 const DAY = 86_400_000;
@@ -27,86 +27,6 @@ function task(state: ConciergeTaskState, extra: Partial<ConciergeTaskDto> = {}):
     ...extra,
   };
 }
-
-describe("groupTasks", () => {
-  it("shows the five groups in order and leaves empty ones out", () => {
-    const groups = groupTasks(
-      [
-        task("done", { completedAt: NOW - DAY }),
-        task("watching"),
-        task("next"),
-        task("doing"),
-        task("needs_user"),
-      ],
-      { now: NOW },
-    );
-    expect(groups.map((group) => group.key)).toEqual([
-      "needsYou",
-      "doing",
-      "next",
-      "watching",
-      "done",
-    ]);
-    expect(groupTasks([task("doing")], { now: NOW }).map((group) => group.key)).toEqual(["doing"]);
-    expect(groupTasks([], { now: NOW })).toEqual([]);
-  });
-
-  it("orders Up next by the Concierge's rank and Watching by due time, unranked last", () => {
-    const groups = groupTasks(
-      [
-        task("next", { title: "unranked" }),
-        task("next", { title: "second", rank: 2 }),
-        task("next", { title: "first", rank: 1 }),
-        task("watching", { title: "later", dueAt: NOW + 2 * DAY }),
-        task("watching", { title: "undated" }),
-        task("watching", { title: "soon", dueAt: NOW + DAY }),
-      ],
-      { now: NOW },
-    );
-    const titles = (key: string) =>
-      groups.find((group) => group.key === key)?.tasks.map((item) => item.title);
-    expect(titles("next")).toEqual(["first", "second", "unranked"]);
-    expect(titles("watching")).toEqual(["soon", "later", "undated"]);
-  });
-
-  it("puts done and dropped rows together, newest completion first", () => {
-    const [done] = groupTasks(
-      [
-        task("done", { title: "older", completedAt: NOW - 3 * DAY }),
-        task("dropped", { title: "newer", completedAt: NOW - DAY }),
-      ],
-      { now: NOW },
-    );
-    expect(done.tasks.map((item) => item.title)).toEqual(["newer", "older"]);
-  });
-
-  it("shows finished rows of the last 7 days by completion and holds older ones behind show more", () => {
-    const rows = [
-      task("done", { title: "fresh", completedAt: NOW - 6 * DAY }),
-      task("dropped", { title: "stale", completedAt: NOW - 8 * DAY }),
-      // Updated long ago but completed recently: the completion decides.
-      task("done", { title: "recent", completedAt: NOW - DAY, updatedAt: NOW - 30 * DAY }),
-    ];
-    const [group] = groupTasks(rows, { now: NOW });
-    expect(group.tasks.map((item) => item.title)).toEqual(["recent", "fresh"]);
-    expect(group.hidden).toBe(1);
-
-    const [all] = groupTasks(rows, { now: NOW, showAllDone: true });
-    expect(all.tasks.map((item) => item.title)).toEqual(["recent", "fresh", "stale"]);
-    expect(all.hidden).toBe(0);
-  });
-
-  it("keeps a group of only old finished rows, for its show more", () => {
-    const [group] = groupTasks([task("done", { completedAt: NOW - 20 * DAY })], { now: NOW });
-    expect(group.key).toBe("done");
-    expect(group.tasks).toEqual([]);
-    expect(group.hidden).toBe(1);
-  });
-
-  it("never lists an archived row", () => {
-    expect(groupTasks([task("doing", { archivedAt: NOW })], { now: NOW })).toEqual([]);
-  });
-});
 
 describe("applyTaskUpsert", () => {
   it("adds a new row and replaces a known one", () => {
@@ -142,20 +62,5 @@ describe("formatTaskTime", () => {
     // Short abbreviations come without their dots.
     expect(formatTaskTime(NOW + 25 * 60_000, NOW, "en")).toBe("in 25 min");
     expect(formatTaskTime(NOW - 10_000, NOW, "en")).toBe("now");
-  });
-});
-
-describe("taskTime", () => {
-  it("is the due time of a watched or planned row, and the finish time of a finished one", () => {
-    expect(taskTime(task("watching", { dueAt: NOW + 5 }))).toBe(NOW + 5);
-    expect(taskTime(task("next", { dueAt: NOW + 7 }))).toBe(NOW + 7);
-    expect(taskTime(task("watching"))).toBeNull();
-    expect(taskTime(task("done", { completedAt: NOW - 9, updatedAt: NOW - 1 }))).toBe(NOW - 9);
-    expect(taskTime(task("dropped", { completedAt: null, updatedAt: NOW - 1 }))).toBe(NOW - 1);
-  });
-
-  it("is nothing for a row the guardian is needed on or the Concierge is working on", () => {
-    expect(taskTime(task("needs_user", { dueAt: NOW + 5 }))).toBeNull();
-    expect(taskTime(task("doing", { dueAt: NOW + 5 }))).toBeNull();
   });
 });

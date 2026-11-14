@@ -29,7 +29,7 @@ export interface SendMessageAttachment {
   type: "image" | "video" | "audio" | "document";
   /**
    * Absolute local path to the attachment. Must resolve under a Rome project
-   * workspace or channel attachment directory.
+   * workspace, chat upload or channel attachment directory.
    */
   source: string;
   /** Optional caption for the attachment. */

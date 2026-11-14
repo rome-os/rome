@@ -39,8 +39,9 @@ One [task](#task)'s conversation inside a [Concierge chat](#concierge-chat), whi
 - Any other message is in no chat thread: an owner's message typed in the chat, the Concierge's answer to one, and every message of a thread from before that no task has, which every client shows as in none.
 - A task moved to another Concierge chat leaves its thread behind, and starts a new one there the same way.
 - The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one task's thread on its own.
-- In the chat's timeline, every Concierge message in a task's thread shows the task's title under it, which opens the thread view. The owner's own messages show none, and neither does the thread view. A label shows no count.
-- Only that label, or the quote in a reply that is in a task's thread, opens the thread view. The quote in any other reply goes to the original message and tints it. Reply on a message opens the reply bar alone. Reply inside an open thread view keeps it open. Closing the reply bar, or sending, closes an open view with it.
+- In the chat's timeline, a Concierge message in a task's thread can show the task's title under it, which opens the thread view: a plain message, a forwarded result and a task's question or approval card alike. A task card needs none, since it names its task. When messages of one thread follow each other with nothing between them, only the first and the last of that run show the label, so a run of one or two shows it on each. Another thread's message or a task card ends the run. The owner's messages neither end it nor join it. The label sits as close under a card as under a bubble and apart from the next message, and stays faint until it is pointed at or focused. A long title is cut short, and shows whole when pointed at. The owner's own messages show none, and neither does the thread view. A label shows no count.
+- Opening the thread view tints the whole message it opened from, every bubble of it. The view's header opens the task chat.
+- Only that label, or the quote in a reply that is in a task's thread, opens the thread view. The quote in any other reply goes to the original message and tints it. Reply on a message opens the reply bar alone, quoting it. Only a message with text takes a Reply: a task card and a question or approval card take none. While the thread view is open, its reply bar reads "Reply to <task title>" and what is sent goes to the task's thread, quoting no message, however the view was opened. A Reply inside the view keeps it so. Closing the reply bar, or sending, closes an open view with it.
 
 ## Place
 
@@ -83,7 +84,7 @@ An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome t
 
 A dashboard chat a person starts themselves, in a project. The dashboard calls it a chat.
 
-- A person **starts** one from the Projects section of the [chat list](#chat-list), from the search palette, or from an app or a project. It exists from its first message.
+- A person **starts** one from the New chat row or a project's plus in the [chat list](#chat-list), from the search palette, or from an app or a project. It exists from its first message.
 - It belongs to one project, or to one folder on a device, and the chat list groups it there.
 - Its owner can **rename**, **archive** and **delete** it.
 - A settled turn of it can be **forked** into a [fork chat](#fork-chat).
@@ -101,25 +102,16 @@ A chat forked from one turn of another chat, carrying that chat's history up to 
 
 A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) to show how the work it asked for stands: working, or failed. Work that finished shows none, since the reply says so. It takes the place of an acknowledgement from the Concierge.
 
-- Rome sets it, never the Concierge. A message has at most one, and a newer state replaces the older one.
-- A message gets one as soon as a Concierge turn takes it in: working, before the Concierge says or starts anything. Each message a turn takes gets its own.
-- The message's work is that turn and every task the Concierge starts for it or passes its words on to. The mark stays working while any of them works, and goes away once all are done. It turns failed only when one fails, and a failed mark stays, since a crash may leave no reply. A task that asks its owner a question is still working.
-- How the turn's end sets the reaction:
-  - It completes: done, which shows no mark once its tasks are done too.
-  - It fails with an error, or ends with no end of its own, as when the process dies: failed. When Rome starts again and continues that turn, the mark stays working until the continuation ends.
-  - Its owner stops it: stopped, which counts toward no reaction.
-  - A newer input supersedes it and the work carries into the next turn: still working, until that turn ends.
-- A task that ends keeps the message working until the Concierge says its result: until the turn that reports the task ends, a turn that says the result naming the task ends, or the Concierge marks the task done or drops it. Only then does it settle as the task ended. Until then the reply has not told the owner anything. A report turn that fails or is cut short keeps the mark working, since Rome hands the report over again, also after Rome restarts. The mark turns failed only once Rome gives up on the report.
-- How a task's end sets the reaction, the same way:
-  - It finishes, or the Concierge marks it done: done, which shows no mark.
-  - It fails with an error, or its turn ends with no end of its own, as when the process dies: failed.
-  - Its owner stops it, or the Concierge drops it: stopped. A stopped task counts toward no reaction, so a message whose only task was stopped has none, and the mark goes away. A task the Concierge drops after it failed shows no mark either.
-  - A newer input supersedes its turn and the work carries into the next turn: still working, until that turn ends.
-- A stopped task that is resumed or given more words is working again.
-- A message counts only the work not stopped: working while any of it works, then failed if any failed, else none. When all of it was stopped, it has none too.
-- The turn's part of the work is done as soon as the Concierge answers the message, though the turn runs on. A message with no task then shows no mark. The Concierge answers it when its answer names it, or when the message is the turn's only one and the answer names no task. A turn that holds several of its owner's messages and names none in an answer settles them only when it ends.
+- Rome derives it, never the Concierge, from two facts it keeps: which turn took the message and whether that turn answered it, and which tasks were made for the message (the ones it started, and the ones its words were passed on to). A message has at most one.
+- Working: the Concierge works for the message now. The turn that took it has not answered it, or a task made for it is active, its report included. A task that waits for its owner, for a check or for its next scheduled run, or has not started, keeps no mark, and shows it again when it runs. A message gets it as soon as a Concierge turn takes it in, before the Concierge says or starts anything.
+- Failed: the turn that took it failed before it answered, by an error or a crash. A task made for it that ended failed shows it too, and so does a task whose result Rome gave up telling the Concierge, since its owner was never told. It shows only once none of its work is still open.
+- Otherwise none: a task that ended done, stopped or for no response shows no mark, and neither does a turn its owner stopped or a newer input took over.
+- A turn answers a message when it ends, or as soon as the Concierge answers it: when its answer names the message, or when the message is the turn's only one and the answer names no task. A message a newer input handed on to the next turn is that turn's, and waits for it. A turn that runs again, as after a usage limit, opens every message it holds again.
+- A task's result keeps the message working until a report of it to the Concierge runs to its end, also across a restart. A report that fails or is cut short runs again, even when the Concierge already said the result: a second report rather than a lost one. One the owner stops is not run again, and the message shows its owner was never told. A restart ends every message's turn it cut off as failed, unless it continues that turn, so no mark stays working past the process that set it. A task chat turn a restart ended failed.
+- Stopping a task that failed takes its mark away.
 - It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
 - A common chat has none, and neither does a task chat.
+- The working mark says the Concierge has started on the message. Its **typing dots** say something else: the Concierge is writing a message now. The server tells each client, web and iOS, how the running turn shows them, with `message_writing` on the chat's session topic: `{ sessionId, turnId, mode, writing }`, sent when the turn starts, whenever `writing` changes, and with `writing` false when it ends. A client that subscribes gets the running turn's latest at once. On Claude the `mode` is `exact`: the dots show while `writing` is true, from the first word of a `say` or `chat_forward` call until the call lands. On Codex, and any provider that cannot say when it writes, the `mode` is `simulated` and `writing` stays false: each message of the turn that arrives while the chat is open waits behind the dots for a moment before it shows, by its length, half a second to one second, and several wait one after the other. Nothing is inferred from the turn's other work. A quiet turn, one that is housekeeping, shows none until it says something, so its first message never waits.
 
 ## Concierge chat
 
@@ -129,18 +121,19 @@ A dashboard chat where its owner talks with their Concierge: a [main chat](#main
 - The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
 - While the Concierge is on, the guardian and every visitor on the dashboard allow-list each have their own Concierge. App users have none.
 - A Concierge chat is private to its owner: to anyone else, the guardian included, it does not exist. So is a fork or a subagent session of it, or of a task chat it started, from the moment it is made.
-- Its follows and unfinished tasks go to its owner's main chat when it is archived or deleted, and everything that reported to it stays its owner's.
+- Its follows and unfinished tasks go to its owner's main chat when it is archived or deleted, and everything that reported to it stays its owner's. Deleting it can instead stop them, when its owner chooses so.
 - A visitor dropped from the dashboard allow-list keeps their Concierge chats and follows, but their Concierge tells them nothing until they are back on the list.
 - Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One owner follows one thing once, whatever chat asks for it. Two owners may follow the same thing, and each hears it.
 - Digest times, quiet hours and the time zone they are read in are each owner's own.
-- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's task panel lists only its own tasks: the main chat's lists the tasks whose chat is the main chat. A Concierge chat sends to and forwards from only its own tasks, and showing a card for another chat's task or pointing its row at a message never moves it. It can read another chat's task, and starts its own task for the same work.
+- A Concierge chat holds only its owner's messages and the Concierge's. What a routine, an app or another agent sends into one, a task chat's agent included, is no message there. It wakes the Concierge with a quiet turn whose input stays in the turn's trace. Its owner never reads the text it sent, and no status reaction marks it. When someone else made the Concierge speak like this, rather than its owner, each message it says gets one quiet label under it naming who, such as "Routine · Daily summary", "Agent · Flint", "App · Inbox" or "Automation". The Concierge's own wake-ups, a check it set coming due, what it follows and its digest, label nothing. The label looks like a task thread's label but opens nothing. A turn that says nothing shows nothing. A message in a task's thread shows only its thread label, or none. An automated message from before this rule, one sent on its owner's behalf included, draws no message either and labels its turn's replies the same way.
+- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's [task list](#task-list) lists only its own tasks: the main chat's lists the tasks whose chat is the main chat. A Concierge chat sends to and forwards from only its own tasks, and showing a card for another chat's task or pointing its row at a message never moves it. It can read another chat's task, and starts its own task for the same work.
 
 ## Main chat
 
 The one Concierge chat each owner always has.
 
 - The main chat exists while the Concierge is on, and it is never archived or deleted. The dashboard offers neither.
-- The dashboard's Chat entry and its home page open the main chat. When it cannot be loaded, the dashboard says so rather than opening a blank chat.
+- The dashboard's home page opens the main chat, and so does its Chat entry while the [chat list](#chat-list) is in Concierge mode. When the main chat cannot be loaded, the dashboard says so rather than opening a blank chat.
 - The dashboard opens it at `/message`, for the guardian and for each visitor alike. A topic chat is at `/chat/<id>`. The old `/chat/concierge` address redirects to `/message`.
 - Each Concierge chat gets the digest of its own follows. The main chat also gets one when nothing is new anywhere.
 - Alerts and tasks whose Concierge chat is archived or deleted come here.
@@ -152,36 +145,71 @@ A Concierge chat its owner starts for one topic, such as the calendar or a proje
 
 - A topic chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. It starts on the model the main chat uses.
 - One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. One the Concierge starts with a name keeps it, and the main chat's name never changes on its own.
-- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows and tasks to its owner's main chat, and the Concierge says so there.
+- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows to its owner's main chat, and its tasks report there while it is archived or gone. The Concierge says so there. When it has follows or open tasks, the delete dialog lists them and asks what happens to them: they move to the main chat, which is the default, or the follows end and the tasks stop with the chat. Stopped this way, nothing moves and the main chat gets no notice. Archiving always moves them.
 - An owner may have any number of topic chats.
 
 ## Task
 
-One piece of work the Concierge keeps on its owner's task list, with a title, a state and, while an agent works on it, a [task chat](#task-chat). It belongs to the Concierge chat it reports to.
+One piece of work the Concierge keeps on its owner's task list, with a title, a status and, while an agent works on it, a [task chat](#task-chat). It belongs to the Concierge chat it reports to.
 
-- Its states are planned (next), in progress (doing), waiting on something outside (watching), waiting on its owner (needs_user), done, and dropped, for work called off.
-- The Concierge **writes** a task: it creates it, moves it between states and marks it done or dropped. Starting a task chat for one makes it in progress. Nothing else sets a task's state.
+- Rome **derives** a task's status from facts it holds. The status is one of four, checked in this order:
+  - **Waiting for you**: its task chat has an unanswered question card or approval, opened less than a day ago.
+  - **Active**: a turn runs or is queued in its task chat, or its result waits for the Concierge to report it.
+  - **Later**: a check is scheduled for it and nothing runs, its schedule has a next run, or the Concierge wrote it as a row and has not started its task chat yet. A row without a check shows no time. Starting its chat takes it from there, and stopping it ends it.
+  - **Ended**, with a reason: done, failed, stopped, or no response, when a wait went unanswered for a day.
+- A stopped task is always ended·stopped, whoever stopped it: the Concierge, its owner, or archiving or deleting its task chat. New words sent to it take it up again, whether the owner types them in its chat or the Concierge passes them on or starts its row: it is active once more, as when its owner answers an expired card. A task stopped by archiving or deleting its chat stays stopped.
+- A stop, an archive or a delete turns down the task chat's pending approvals, so nothing approved later runs for a task that ended. Archiving a task that is still open stops it. An ended task leaves the task list a week after it ended.
+- Its owner **stops** a task from its card or its row in the [task list](#task-list). Rome stops it at once, without a turn of the Concierge, which hears of it quietly. A Stop in a task chat stops its task the same way, except a scheduled task's: there it ends only the run under way, turning down what that run asked for, and the schedule and its checks stay. Only the task list's Stop ends a schedule. However an approval in a task chat is decided (approved, rejected, or turned down by Rome), the Concierge hears the decision quietly, even when no turn of the task follows it. Stop in a Concierge chat ends only that chat's turn: the tasks it started keep running, and the header keeps showing them.
+- A message whose turn its owner stopped before an answer stays stopped: the next turn is told of it, and takes it up only when its owner asks again.
+- Every card and approval open in a task chat is one wait, which began at the oldest of them. A wait nobody answers within a day ends the task for no response, all of it at once, and it waits for its owner no more. A card said before that day ran out stays part of the ended wait. Only one said after it begins a new wait. Its question card stays answerable, marked expired, and answering it takes the task up again. A pending approval is turned down, and the task chat's turn finishes as on any refusal. The Concierge hears of it quietly, says nothing and asks nothing, and the next digest lists the task once. That line is the only time the Concierge mentions it. A task that ended for no response shows no ⚠️, even when its result was never told.
+- The Concierge **schedules a check** on a task with `defer`, for a time or for an event with a deadline. The task is later until the check is due. The check shows on the task's row in the [task list](#task-list). Its owner calls a check off by asking the Concierge, which leaves the task in place. Stopping or archiving the task cancels its checks, and a check of a stopped or archived task never wakes its chat. A task checked three times and still waiting comes up in the next digest, so the Concierge asks its owner rather than check again. So does a row the Concierge wrote a day ago or more with no task chat started and nothing scheduled, once: it stays later until then.
+- A task may **repeat on a schedule**: every day, or on some weekdays, at a time in its owner's zone. At each run Rome sends the task's brief into its own task chat, with no turn of the Concierge, and the result comes back as any task's does. Every run uses the same task chat. Between runs the task is later, and its row says when it repeats and when it runs next. Its owner skips a run by asking the Concierge, which skips that one run only. Stopping the task removes its schedule, and the Concierge can change or remove it. A run set to report only when it matters, that finishes with nothing to ask, goes into the next digest. Recurring work for an owner is a scheduled task, never an automation that sends into a Concierge chat. [ADR](../adrs/scheduled-tasks.md)
+- The status, the task list, the chat header and the status reactions all read the same derived result. Rome tells the task list again whenever a fact changes it, however that change was read. The state the Concierge used to write stays for apps from before, mapped from the status.
+- The Concierge **writes** a task: it creates it and names it. Starting a task chat for one makes it active.
 - Rome tells the Concierge what a task's chat does, and marks a task not synced when the Concierge never takes in what it was told.
 - A task has at most one [chat thread](#chat-thread), and its root is kept for good.
-- A task moves to its owner's main chat when its Concierge chat is archived or deleted. Its thread stays behind and is a task's no more, so its label goes.
-- A message a task works for shows a [status reaction](#status-reaction) until the Concierge says the task's result, marks it done, or drops it.
+- A task reports to its owner's main chat while its Concierge chat is archived or deleted. Nothing moves it: it reads as the main chat's, and as its own chat's again once that chat is unarchived. An open task's thread stays behind and is a task's no more, so its label goes and the task starts a new thread in the main chat. An ended task keeps its thread while its chat is archived. Once the chat is deleted, its messages are gone, so its next message in the main chat starts a new thread too.
+- A task links one task chat in its life. A task whose task chat could not be started leaves no chat behind, and stays on the list as failed.
+- A message a task works for shows a [status reaction](#status-reaction) while the task is open, and until the Concierge reports its result.
 
 ## Task chat
 
 A chat the Concierge starts to hand one piece of work to another agent. It belongs to the Concierge chat that started it, and its result comes back there.
 
 - A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
+- Archiving a task chat stops its task: its running work stops, and its row is stopped and archived with the chat, so the task leaves the task list and the Concierge stops tracking it. Unarchiving the chat lists the row again, still stopped. A row archived before its chat stays archived. Deleting the chat stops and archives the row for good.
 - A task chat carries one piece of work. It gets no alerts and no digest.
-- A task chat is in the [chat list](#chat-list), under its project with the common chats, with a mark saying the Concierge started it. It also opens from its row in the task list and from its task card, and search finds it.
+- A task chat is in the [chat list](#chat-list)'s Concierge mode, in its Tasks section, with a mark saying the Concierge started it. It also opens from the link on its row in the task list and from its task card, and search finds it.
+- A task shows in a Concierge chat as one of two cards. Its **task card** names it with its status, a Stop and an Open: the Concierge shows it when its owner asks to see or watch the task, as it starts or later. Its **question or approval** shows alone, with no status, Stop or Open: the Concierge shows it while the task waits on its owner, and shows the one Rome says the task waits on, the newest open. Settled, it folds to a small card of what it asked and how it ended, and opens to the original. The message holds which task chat the card is for and the question or approval the task waited on when the card was said. Rome reads how that ended each time it hands the message out, and tells the chats that show it as soon as it settles. A card shows a task's question or approval only in its owner's own Concierge chat. In any other chat, and when its question or approval cannot be found, it shows one quiet line. It ended answered (with a short answer), dismissed, approved, rejected, turned down when the wait ran out or the task was stopped, or waiting on a newer copy. An app's own card, such as a sign-in, opens the task chat to answer it. A question or approval in any chat, a common chat's or the main agent's included, folds the same way once settled. The Activity page shows approvals whole. An expired question folds to a small card of what it asked that opens to its form: it still takes an answer, and counts as waiting nowhere. A card from before shows the task card with the question or approval inside.
+
+## Task list
+
+The list in a [Concierge chat](#concierge-chat)'s side panel that answers "what is my agent doing for me in this chat?". The dashboard labels it Tasks. It lists the chat's tasks, its checks, the follows whose alerts come to it, and the routines that work for it: those that send into it, those made in it that send into no chat, and those that work so for one of its [task chats](#task-chat). Nothing else does. Its owner opens it from the agent's logo in the chat's header.
+
+- It is its owner's only, like the chat: the guardian and each visitor see only their own chat's list, and a Stop on another person's chat is refused as if the chat did not exist. A common chat has none for now.
+- It gathers what Rome already holds and decides nothing: a task shows its derived status, and a check, a schedule, a follow and a routine show as their own record says.
+- Its rows fall into groups, one group each: **Needs you** (a task waiting on its owner), **Active** (a task at work, a scheduled task's run included), **Later** (a task with a check, a scheduled task between runs, and a check with no task), **Running on its own** (follows and routines), and **Ended** (done, failed, stopped and no-response tasks). Ended starts folded and shows the newest twenty, then more on request. A scheduled task moves between the groups run by run.
+- Every row reads the same way: its title, then one line of its state and the time that goes with it, such as "Done · 2 hr ago" or "Daily at 3:47 PM · in 17 hr". A routine of a task chat ends its line with the task it came from, "From Rome releases", whether that task has ended or not. A check for a task, a schedule, a follow's digest times, a paused routine and a failed last run all show on that line, never as a row or a mark of their own.
+- A task with a task chat has a small link beside its title, the list's only way into that chat. Pressing a row does nothing.
+- A task's row offers its owner what they can do to it, on hover: **Respond** on a task that needs them, which goes to the message in the chat that shows its question or approval, and **Stop** on every task that has not ended. Stopping a scheduled task ends its schedule. Either shows its effect at once, and neither asks to confirm. Checks, follows, routines and ended tasks have no buttons: they are changed by asking the Concierge, on the Routines page or in settings.
+- A fired check and a deleted routine leave it, since neither has an outcome to show.
+- It has no New button: recurring work starts by asking the Concierge, which makes a scheduled task.
+- It changes as the work does, without being opened again.
 
 ## Chat list
 
 The dashboard's list of a person's chats, beside the rail. Every dashboard person gets the same list, with their own main chat in it.
 
-- It opens with the main chat, labelled "Main chat", and the topic chats under it, latest first: five, then a More row for the rest. The plus beside the main chat starts a topic chat.
-- Below a divider, the Projects section holds the common chats, fork chats and task chats, grouped by project or by device folder, with the default project first. The default project's row is always there, under every filter, even when it holds no chat. A plus on a project row starts a chat in that project, and the composer can still move it to another project before its first message. The plus shows on hover, and always on a touch screen.
+- It has two modes, Chat and Concierge, and a switch of two icons in its header changes between them. The title names the mode. Each mode lists one kind of chat, so no chat is in both.
+- Chat mode starts with a New chat row, which opens a blank chat. Under it, the Projects section holds the common chats and fork chats, grouped by project or by device folder, with the default project first. The default project's row is always there, under every filter, even when it holds no chat. A plus on a project row starts a chat in that project, and the composer can still move it to another project before its first message. The plus shows on hover, and always on a touch screen.
+- Concierge mode starts with a New topic row, which opens a blank topic chat. Under it come the main chat, labelled "Main chat", and the topic chats, latest first: five, then a More row for the rest. Below a divider, the Tasks section holds the task chats, latest first: five, then a More row. It is absent when there is no task chat.
+- A dot on the switch's segment for the mode that is not showing says something there needs a look. The Concierge's dot shows for unread messages in the main chat or a topic chat, and for a task chat that waits for its owner. The Chat dot shows while a common chat or a fork chat is replying.
+- Each tab keeps its own mode, and a new tab starts from the last mode the device showed. A device that has shown none starts on Chat when its owner has a common chat or a fork chat, else on Concierge. Opening a chat moves the list to its mode: the main chat, a topic chat and a task chat to Concierge, a common chat and a fork chat to Chat. A blank topic chat opens Concierge mode, and any other blank chat opens Chat mode. A switch the person makes stays until they open another chat, or come back to a chat from another page.
+- The new-chat shortcut, Ctrl or Cmd with Shift and O, opens a blank chat in Chat mode and a blank topic chat in Concierge mode. The rail's Chat entry opens the main chat in Concierge mode. In Chat mode it opens the common chat or fork chat last opened on the device, or a blank chat when there is none or it is gone.
+- Deleting the open common chat or fork chat opens a blank chat, so the list stays in Chat mode. Deleting any other open chat opens the main chat.
+- Without a Concierge the list has no switch and no mode. It is the Chat mode list, with the task chats under their project, and a New chat row.
 - Nothing in it is pinned, and it is not grouped by date.
-- Its status filter, active, archived or all, applies to every chat in it. Under archived the main chat is hidden, since it is never archived, and an archived topic chat stays under the main chat, not in Projects.
+- Its status filter, active, archived or all, applies to every chat in both modes. Under archived the main chat is hidden, since it is never archived, and an archived topic chat stays under the main chat, not in Projects.
 
 ## Reply rule
 
@@ -236,6 +264,19 @@ Something shown in a chat that people can look at or act on: a question with cho
 - An agent shows a widget by calling a tool.
 - A widget either asks something or only shows something. One that asks keeps the agent waiting until it is answered. One that only shows something leaves the agent to go on, and nobody answers it.
 - An app's widget belongs to the app whose action showed it, and is one of the kinds that app adds. An action cannot show another app's widget.
+- A widget is a message of its own, and is known by that message. A message that holds a widget holds nothing else (zhangfan, 2026-11-12).
+- A widget's owner is the app that showed it, or Rome for its own kinds, such as the question. A widget keeps no state of its own: what it shows comes from its owner, read again when it is drawn and after each event.
+- People do two things with a widget. An **edit**, such as picking an option or typing an answer, changes only what the widget shows on the screen in front of them. An **event**, such as pressing Send or a button that logs a glass of water, asks Rome to act, and carries the edits it needs. An edit never leaves the screen on its own.
+- Every event goes to the widget's owner, which alone says what it means: an app's widget calls its app, and Rome's question answers the agent waiting on it. A widget accepts only the events it names, and only from someone who may open its chat.
+- What the agent reads of an answer is written by Rome from the widget and the event. Anything the owner app adds reads as the app's, never as the words of the person who acted.
+
+## Client
+
+One of the apps a person uses to reach a [platform](#platform): the dashboard in a browser and the Rome app on a phone are two clients of the dashboard.
+
+- A client draws widgets and sends what people do with them. It decides nothing about what an event means: that is the widget's owner's (zhangfan, 2026-11-12).
+- Two clients of one platform show the same widget the same way and send the same events for it.
+- A client shows an event as sent once Rome takes it, and leaves the widget usable when Rome does not.
 
 ## Platform
 
@@ -299,8 +340,12 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 
 ## Decided against
 
+- **Event names every widget shares,** such as one name for "answer the agent" on any widget. Who owns a widget already says what its events mean, and a shared name made every client learn it.
+- **Each client deciding what a widget event means.** The rule lived once per client and drifted between the dashboard and the phone.
 - **A link to one message, apart from sharing turns.** It was a second way to share, with its own card, its own link per message and its own rules, beside the share mode every chat already has. Share on a message now opens that share mode with its turn picked.
-- **A New chat button, pinned chats and pinned projects at the top of the chat list.** They showed the same ideas twice beside the main chat, and a person had to choose between the Concierge and a new chat for every request. The main chat is where a person talks to Rome, and a common chat starts from Projects.
+- **A New chat button, pinned chats and pinned projects beside the main chat in one chat list.** They showed the same ideas twice beside the main chat, and a person had to choose between the Concierge and a new chat for every request. The chat list has two modes instead. People who long used common chats need an entry of their own, and one kind per mode means nobody chooses between the Concierge and a new chat inside one list: Concierge mode starts topic chats, and Chat mode starts common chats. Pinned chats and pinned projects stay out of both.
+- **A task panel and a checks strip above the message box, beside the routines.** The same check showed on a task's row and in the strip, and a scheduled task was both a task and a routine, so the owner read one piece of work in up to three places. One task list per chat lists each piece once.
+- **Cancel, skip, unfollow, pause and delete on the task list's rows.** Every row grew its own buttons, so the list read as a control panel rather than an answer to what runs. The Concierge chat, the Routines page and settings already change those, and the list keeps two buttons on a task's row: Respond and Stop.
 - **Task chats out of the chat list.** The guardian lost sight of work running on their behalf, and the task list and cards were the only way back to it.
 - **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.
 - **The agent as part of the connection.** Which agent speaks through an account is the guardian's decision about a chat identity, so it belongs to Chats. Kept on the connection, Connections would hold a fact only Chats uses.
@@ -327,6 +372,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
 - **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the list. Other Romes return to the list when that product is designed.
 - **Sending to an account.** A person's account is reached in a chat, and a group or a thread has no account to address. One destination, the place, serves a direct message, a group and a thread alike.
+- **An automation's text as a message in a Concierge chat.** It read as an odd bubble from the owner's own agent, and what it showed was an instruction, not news. The owner hears what the Concierge makes of it.
 - **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A delivery on the message keeps one record.
 - **Assistants' chats as a group in the dashboard's chat list.** Main answers assistants, so the guardian reads their chats now and then rather than watching them. A group beside the guardian's own chats kept them in view all the time.
 - **An account record with an id of its own that links and profiles point at.** It would make the account an entity with an identity Rome minted, which no platform has, and Rome never makes an account, so a link to one Rome has not heard from yet would have nothing to point at. The [account profile](#account-profile) keyed by the account gives what the platform says a home without giving the account a lifetime.

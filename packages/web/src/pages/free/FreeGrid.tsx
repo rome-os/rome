@@ -425,6 +425,7 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
     model,
     reasoningEffort,
     pinnedAgentMention,
+    forkable,
   } = useSessionIdentity(chatSessionId);
   const conciergeChats = useConciergeChats();
   const conciergeName = useConciergeName();
@@ -443,8 +444,9 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
   useDocumentTitle(chatName);
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
-  // desktop navbar: drop the session, refresh the sidebar list, land on the
-  // main chat.
+  // desktop navbar: drop the session, refresh the sidebar list, land on a new
+  // chat after an ordinary chat and on the main chat after any other. The main
+  // chat's page would switch the chat list to Concierge mode.
   const handleDeleteSession = useCallback(async () => {
     if (!chatSessionId) return;
     try {
@@ -453,8 +455,8 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
       // best-effort — the list refresh below reconciles either way
     }
     emitSessionsChanged();
-    navigate(MAIN_CHAT_PATH);
-  }, [chatSessionId, navigate]);
+    navigate(forkable ? "/chat" : MAIN_CHAT_PATH);
+  }, [chatSessionId, forkable, navigate]);
 
   return (
     <WorkspaceEventBusContext.Provider value={eventBus}>

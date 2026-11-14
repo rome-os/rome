@@ -1,13 +1,17 @@
 // What `ask_question` takes and how a question reaches the guardian.
 
+import { type Question, questionCardUi } from "@rome/api-types/question-card";
+
+export { type Question, questionCardUi };
+
 function nonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
-// `ask_question` is a host built-in: the question-card is rendered by rome-web
-// directly (see packages/web .../blocks/QuestionCard.tsx), not by an app. We
+// `ask_question` is a host built-in: the question card is described as data
+// (`questionCardUi`) and every reader draws it, not an app. We
 // still ride the existing pending-interaction render/resume path, which keys on
 // an `appId`; "core" is the sentinel for a host-owned card (the webchat drain
 // skips the app-installed check when `render.builtin` is set).
@@ -16,20 +20,6 @@ const ASK_QUESTION_COMPONENT_ID = "question-card";
 
 const ASK_QUESTION_PARK_DIRECTIVE =
   "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
-
-/** One question as the model asked it. Any other field it sent rides along to the card. */
-export interface Question {
-  id: string;
-  question: string;
-  type: "single" | "multi" | "text";
-  options?: string[];
-  defaults?: string[];
-  defaultText?: string;
-  optionDescriptions?: Record<string, string>;
-  freeText?: boolean;
-  optional?: boolean;
-  [field: string]: unknown;
-}
 
 /** What `ask_question` accepts, the same where it draws a card and where it
  * relays a plain message. Fails closed on a malformed questions array, so a
@@ -183,4 +173,83 @@ export function askQuestionToolOutput(
     },
     message: ASK_QUESTION_PARK_DIRECTIVE,
   };
+}
+
+/** One answer as the question card has always sent it. A multi answer joins
+ * its parts with ", " and keeps them in `values` when a part holds ", ". */
+export interface QuestionAnswer {
+  questionId: string;
+  value: string;
+  values?: string[];
+}
+
+/**
+ * The answers a described question card sent, as the question card has
+ * always sent them, or null when `output` is not from a described card.
+ * Blank answers are left out, so only optional questions can go unanswered.
+ * On a single-choice question the typed text wins over the pick.
+ */
+export function answersFromQuestionCard(
+  questions: readonly Question[],
+  output: unknown,
+): { answers: QuestionAnswer[] } | null {
+  const sent = (output as { answers?: unknown } | null)?.answers;
+  if (!Array.isArray(sent) || sent.some((a) => a && typeof a === "object" && "questionId" in a)) {
+    return null;
+  }
+  const answers = questions.flatMap((q, i): QuestionAnswer[] => {
+    const raw = (sent[i] ?? {}) as { values?: unknown; text?: unknown };
+    const picked = Array.isArray(raw.values)
+      ? raw.values.filter(
+          (v): v is string => typeof v === "string" && (q.options ?? []).includes(v),
+        )
+      : [];
+    const typed = typeof raw.text === "string" ? raw.text.trim() : "";
+    if (q.type === "multi") {
+      const parts = [...picked, ...(typed ? [typed] : [])];
+      if (parts.length === 0) return [];
+      const keep = parts.some((part) => part.includes(", ")) ? { values: parts } : {};
+      return [{ questionId: q.id, value: parts.join(", "), ...keep }];
+    }
+    const value = typed || (q.type === "single" ? (picked[0] ?? "") : "");
+    return value ? [{ questionId: q.id, value }] : [];
+  });
+  return { answers };
+}
+
+/**
+ * What a described question card would have sent for `answers` in the shape
+ * the question card has always sent, so a card answered by a reader that
+ * draws its own question card shows the same answer when drawn from its
+ * description. A value that is one of the options is a pick; the rest is
+ * typed text.
+ */
+export function questionCardFromAnswers(
+  questions: readonly Question[],
+  output: unknown,
+): { values: string[]; text: string }[] | null {
+  const sent = (output as { answers?: unknown } | null)?.answers;
+  if (!Array.isArray(sent)) return null;
+  const answers = sent.filter(
+    (a): a is QuestionAnswer =>
+      !!a &&
+      typeof a === "object" &&
+      typeof (a as QuestionAnswer).questionId === "string" &&
+      typeof (a as QuestionAnswer).value === "string",
+  );
+  if (answers.length !== sent.length) return null;
+  return questions.map((q) => {
+    const answer = answers.find((a) => a.questionId === q.id);
+    if (!answer) return { values: [], text: "" };
+    if (q.type === "text") return { values: [], text: answer.value };
+    const options = q.options ?? [];
+    const parts =
+      q.type === "multi"
+        ? (answer.values ?? answer.value.split(", ")).map((part) => part.trim())
+        : [answer.value];
+    return {
+      values: parts.filter((part) => options.includes(part)),
+      text: parts.filter((part) => part && !options.includes(part)).join(", "),
+    };
+  });
 }

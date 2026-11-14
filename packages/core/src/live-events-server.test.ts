@@ -196,6 +196,12 @@ describe("live events WebSocket", () => {
         });
         return track(() => {});
       },
+      // The guardian's main chat is the only Concierge chat there is.
+      hasChatTasks: async (chatId, owner) => chatId === "concierge" && owner === "guardian",
+      subscribeChatTasks: (chatId, _owner, emit) => {
+        emit("tasks_changed", { chatId });
+        return track(() => {});
+      },
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();
@@ -349,6 +355,20 @@ describe("live events WebSocket", () => {
     ).toMatchObject({ event: "concierge_activity", data: { chatId: "visitor-main" } });
   });
 
+  it("serves a Concierge chat's task list topic to its owner only", async () => {
+    const guardian = await connect();
+    await guardian.subscribe("chat.tasks:concierge");
+    expect(
+      await guardian.next((m) => m.type === "event" && m.topic === "chat.tasks:concierge"),
+    ).toMatchObject({ event: "tasks_changed", data: { chatId: "concierge" } });
+
+    const visitor = await connect(visitorHeaders());
+    visitor.send({ type: "subscribe", topic: "chat.tasks:concierge" });
+    expect(
+      await visitor.next((m) => m.type === "error" && m.topic === "chat.tasks:concierge"),
+    ).toMatchObject({ message: "Not found" });
+  });
+
   it("pushes each write to the Concierge's todo list on concierge.tasks", async () => {
     const client = await connect();
     await client.subscribe("concierge.tasks");
@@ -359,7 +379,17 @@ describe("live events WebSocket", () => {
       await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
     ).toMatchObject({
       event: "task_upsert",
-      data: { task: { id: row.id, title: "Fix flaky test", state: "doing", chat: null } },
+      // Rome derives the status: with no task chat started yet, the task is later.
+      data: {
+        task: {
+          id: row.id,
+          title: "Fix flaky test",
+          status: "later",
+          endReason: null,
+          state: "watching",
+          chat: null,
+        },
+      },
     });
   });
 

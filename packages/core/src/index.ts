@@ -1,4 +1,7 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { STICKY_HEADERS } from "./core/sticky-headers.js";
+import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
+import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
@@ -57,6 +60,7 @@ import {
 } from "./apps/actions/app-action-schema-cache.js";
 import {
   initTelemetry,
+  startEventLoopDelayMetric,
   getTracer,
   shutdown as shutdownTelemetry,
   withInboundSpans,
@@ -68,7 +72,11 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { Channel, ChatStopHandler } from "@rome-os/app-runtime";
+import type { Channel, ChannelsService, ChatStopHandler } from "@rome-os/app-runtime";
+import { conciergeChatGuard } from "./concierge/automated-input.js";
+import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
+import { actionExecutionContext } from "./apps/actions/context.js";
+import { isConciergeChat } from "./webchat/privacy.js";
 
 const log = createLogger("startup");
 
@@ -117,7 +125,12 @@ import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./webchat/dashboard-account.js";
+import {
+  refuseAnotherOwnersChat,
+  WEBCHAT_CHANNEL,
+  WEBCHAT_SURFACE,
+  webchatChannel,
+} from "./webchat/dashboard-account.js";
 import { ownPlatforms } from "./webchat/send.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
@@ -206,6 +219,7 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
+import { registerShowFileAction } from "./assets/show-file-action.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -215,9 +229,13 @@ import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
+import { TaskChecks } from "./concierge/task-checks.js";
+import { registerTaskRunAction, TaskSchedules } from "./concierge/task-schedule.js";
+import { turnDownApprovals } from "./concierge/approval-expiry.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
+import { taskChatInstructions } from "./concierge/conclusion.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -384,6 +402,7 @@ async function main() {
   ensureProfileExampleAppsSeeded();
 
   initTelemetry();
+  startEventLoopDelayMetric();
   const tracer = getTracer("rome");
 
   const db: DrizzleDb = getDb(config.database);
@@ -945,7 +964,10 @@ async function main() {
   // The "openai" provider runs over the codex app-server JSON-RPC surface
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
-  const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
+  const codexAccountService = new SharedCodexAccountService(codexAppServerManager, {
+    allowChatgptCredits: async () =>
+      (await settingsRepo.get("aiTools.codex.allowCredits")) === true,
+  });
   const claudeAccount = new ClaudeAccount({ settingsRepo });
   const modelAccounts = createModelAccounts({
     accounts: { openai: codexAccountService, anthropic: claudeAccount },
@@ -1164,7 +1186,24 @@ async function main() {
   // Whether the guardian is at a web dashboard, from the same socket; while
   // they are, the Concierge pushes nothing to the phone.
   const dashboardActivity = new DashboardActivity();
-  const concierge = new ConciergeService({
+  // Each task's repeating schedule. A run acts in its owner's zone, which
+  // following keeps; before following starts it is the guardian's.
+  const taskSchedules = new TaskSchedules({
+    routines: routinesRepo,
+    routineEngine,
+    timezoneOf: async (owner): Promise<string> => {
+      try {
+        return await concierge.following.timezone(owner);
+      } catch {
+        return resolveGuardianTimezone(settingsRepo);
+      }
+    },
+    // As the schedule trigger resolves a floating schedule's zone.
+    floatingZone: () => resolveGuardianTimezone(settingsRepo),
+    ownerOf: async (taskId) => (await conciergeTasksRepo.getWithChat(taskId))?.owner ?? null,
+  });
+  const conciergeTasksRepo = new ConciergeTasksRepository(db);
+  const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
     owners: createConciergeOwners({
@@ -1178,7 +1217,19 @@ async function main() {
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
-    tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
+    // Created before the routine engine runs any wake-up, which it reads.
+    checks: new TaskChecks({
+      routines: routinesRepo,
+      routineEngine,
+      schedules: taskSchedules,
+      // A schedule names only its task: the chat it reports to comes from the row.
+      placeOf: async (taskId) => {
+        const found = await conciergeTasksRepo.getWithChat(taskId);
+        return found ? { chatId: found.conciergeChat.id, owner: found.owner } : null;
+      },
+    }),
+    schedules: taskSchedules,
+    tasks: new ConciergeTasks(conciergeTasksRepo, config.conciergeTaskWaitExpiryMinutes * 60_000),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,
@@ -1214,6 +1265,7 @@ async function main() {
         subagentSessions(manager, parentLink, webchatRepo, inherited),
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      chatInstructions: taskChatInstructions({ webchatRepo }),
       sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
@@ -1224,9 +1276,26 @@ async function main() {
         webchatRepo,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
+        taskOwner: async (taskId) =>
+          (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
+      // A thread reads which chat it is in, whom it serves and the open
+      // workspace again only when they change.
+      stickyHeaders: STICKY_HEADERS,
+      // A renewal whose agent asks for it starts from a handoff (Concierge chats).
+      handoffs: createRenewalHandoffs({
+        timeoutMs: config.sessionHandoffTimeoutSeconds * 1_000,
+        contextLimitTokens: config.sessionHandoffContextTokens,
+        fallbackTimeoutMs: config.sessionHandoffFallbackTimeoutSeconds * 1_000,
+        modelResolver,
+        rows: async (chatId, turns) =>
+          (await webchatRepo.getMessagesPage(chatId, { limit: turns })).rows,
+        openTasks: (chatId) => conciergeOpenTasks(concierge, chatId),
+        ownerLabel: (chatId) => conciergeOwnerLabel(concierge, chatId),
+        tidying: (chatId, work) => concierge.activity?.tidying(chatId, work) ?? work(),
+      }),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -1316,6 +1385,8 @@ async function main() {
     },
   });
 
+  registerShowFileAction(actionRegistry);
+  registerTaskRunAction(actionRegistry, concierge);
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
@@ -1334,6 +1405,7 @@ async function main() {
   startConciergeEvents(concierge, turnListeners);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
+    timezoneMoved: (owner, timezone) => taskSchedules.rezone(owner, timezone),
     routines: routinesRepo,
     routineEngine,
     actions: actionRegistry,
@@ -1362,6 +1434,11 @@ async function main() {
     // An approved action, and the turn it resumes, act for whoever's turn asked.
     executionRequester(actionExecutionsRepo),
   );
+  // A task chat's approvals are turned down when its wait runs out, or when
+  // its task is stopped, archived or deleted.
+  concierge.attachApprovalExpiry((chatId, turnDown) =>
+    turnDownApprovals({ approvals: approvalsRepo, handler: approvalHandler }, chatId, turnDown),
+  );
 
   // Learn whether this boot's release version differs from the last completed
   // boot's — the dashboard reads the result via /api/build-info. The stored
@@ -1380,12 +1457,36 @@ async function main() {
   // What apps get of the chat settings, with the chat ids an app built for
   // SDK 0.7 reads.
   const appChatSettings = legacyChatIdSettings(chatSettings);
+  // Only the Concierge writes in a Concierge chat. An app's action sending
+  // there, as a task chat's agent or a routine may, wakes the Concierge with
+  // a quiet system turn instead (docs/architecture/concierge.md).
+  const intoConciergeChat = conciergeChatGuard({
+    isConciergeChat: async (chatId) => isConciergeChat(await webchatRepo.getSession(chatId)),
+    refuseAnotherOwnersChat: (chatId) => refuseAnotherOwnersChat(webchatRepo, chatId),
+    senderOf: async (agentName) =>
+      (agentName
+        ? await resolveAutomatedSender({ agentLoader, appCatalog, settingsRepo }, agentName)
+        : null) ?? { sourceType: null, name: null },
+    runSystemTurn: (chatId, prompt, options) => concierge.runSystemTurn(chatId, prompt, options),
+  });
+  // Built on the service, not spread from it, so the removed members still
+  // answer with their migration message.
+  const appChannelsService = Object.create(channelsService) as ChannelsService;
+  Object.defineProperty(appChannelsService, "send", {
+    value: async (...[target, chatId, message]: Parameters<ChannelsService["send"]>) =>
+      (await intoConciergeChat(
+        target,
+        chatId,
+        message,
+        actionExecutionContext.getStore()?.agentName,
+      )) ?? channelsService.send(target, chatId, message),
+  });
   const appActionDeps = {
     agentRunner,
     resolveOneOffDate: (trigger: Trigger) =>
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
-    channelsService: legacyChatIdChannelsService(channelsService),
+    channelsService: legacyChatIdChannelsService(appChannelsService),
     chatSettings: appChatSettings,
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
@@ -2004,7 +2105,12 @@ async function main() {
         connectionRegistry,
         emailConnectionId: () => emailConnection(connectionRegistry, channelOf)?.id,
       }),
-      ...chatWorkerCalls({ channelsService, chatSettings, agentNames: agentNameResolver }),
+      ...chatWorkerCalls({
+        channelsService,
+        chatSettings,
+        agentNames: agentNameResolver,
+        intoConciergeChat,
+      }),
       ...sessionWorkerCalls({
         backendTurnRunner,
         notify: notifyClient,
@@ -2398,8 +2504,7 @@ async function main() {
     actorOf: continuationActorOf,
     // A Concierge turn a limit stopped shows its messages failed; run again,
     // they work again until the continuation ends.
-    onContinue: (turn) =>
-      concierge.deps.tasks.repo.reopenTurnReactions(turn.sessionId, turn.turnId),
+    onContinue: (turn) => concierge.deps.tasks.repo.reopenTurn(turn.sessionId, turn.turnId),
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces

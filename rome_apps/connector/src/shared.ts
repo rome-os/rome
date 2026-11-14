@@ -215,19 +215,12 @@ export function unsupportedToolkitHint(toolkit: string): string {
   return `Rome can't connect "${toolkit}" — it isn't one of Rome's supported integrations. Pick a supported toolkit (e.g. gmail, slack, notion, linear, github) or ask the guardian to add it.`;
 }
 
-const INLINE_CONNECT_ROME_MANAGED = new Set(["github", "shopify"]);
-
-export function isInlineConnectRomeManagedToolkit(toolkit: string): boolean {
-  return INLINE_CONNECT_ROME_MANAGED.has(toolkit.toLowerCase());
-}
-
 /** Guidance shown when the agent tries to connect a Rome-managed toolkit, or
- *  acts on one that isn't connected yet. Native-card toolkits can connect in chat. */
+ *  acts on one that isn't connected yet. Rome connects these itself, through
+ *  its own `connect_account` tool. */
 export function romeManagedConnectHint(toolkit: string): string {
-  if (isInlineConnectRomeManagedToolkit(toolkit)) {
-    return `${toolkit} is managed by Rome. Call connector_connect(${JSON.stringify({ toolkit: toolkit.toLowerCase() })}) to show the connect card, then retry once connected. On surfaces without cards, ask the guardian to use Settings → Connections.`;
-  }
-  return `${toolkit} is managed by Rome — it can't be connected from here. Ask the guardian to connect ${toolkit} in Settings → Connections.`;
+  const kind = toolkit.toLowerCase();
+  return `${toolkit} is connected by Rome itself, not by this app. Call the connect_account tool with ${JSON.stringify({ kind })} to show the connect card, then retry once it is connected. Where no card shows, ask the guardian to connect ${toolkit} in Settings → Connections.`;
 }
 
 /** Guidance for an agent that reached `connector_tool_execute` (Composio-only)

@@ -49,7 +49,7 @@ struct MainShell: View {
     /// The Agent page, opened from a chat header's mascot.
     @State private var agentPage: AgentRoute?
     /// The Agent page's last tab, kept while the instance is open.
-    @State private var agentTab: AgentTab = .uses
+    @State private var agentTab: AgentTab = .tasks
     /// Pages pushed inside the Agent page: a task chat from its Tasks, an app
     /// or another task chat linked from there. Back returns to the Tasks.
     @State private var agentPath: [Route] = []
@@ -60,6 +60,14 @@ struct MainShell: View {
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
+    /// Goes up with each widget link followed: a later one wins.
+    @State private var linkSerial = 0
+    /// A short notice after a widget link, such as an app that is gone.
+    @State private var linkNotice: String?
+    /// "See usage" was pressed inside the Agent page: Settings opens as it closes.
+    @State private var openUsageAfterCover = false
+    /// This window's actions for the views far below (`ShellActions`).
+    @State private var actions = ShellActions()
     @State private var settingsPath: [SettingsRoute] = []
     /// A page of the instance, in a sheet over the main stack.
     @State private var page: URL?
@@ -82,6 +90,7 @@ struct MainShell: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let _ = PerfProbe.count("shellBody")
             let width = min(318, geometry.size.width * 0.81)
             // Pinned, the drawer takes this much of the width beside the page;
             // pushed aside (compact), none, and the slide moves the page instead.
@@ -125,7 +134,9 @@ struct MainShell: View {
                         destination(route)
                     }
                 }
-                .environment(\.chatLinkOpener, openChatLink)
+                .environment(\.chatLinkOpener, actions.linkOpener)
+                .environment(\.openUsage, actions.openUsage)
+                .environment(\.openTaskChat, actions.openTaskChat)
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
@@ -137,7 +148,13 @@ struct MainShell: View {
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
             }
         }
-        .fullScreenCover(item: $agentPage) { route in
+        .fullScreenCover(item: $agentPage, onDismiss: {
+            // Settings is a sheet of this view, so it waits for the cover to be gone.
+            guard openUsageAfterCover else { return }
+            openUsageAfterCover = false
+            settingsPath = []
+            showSettings = true
+        }) { route in
             // Its own stack: a task opens inside the page, and back returns
             // to the Tasks as they were.
             NavigationStack(path: $agentPath) {
@@ -145,9 +162,15 @@ struct MainShell: View {
                     // Into this chat's composer, unsent, as the page closes.
                     agentPage = nil
                     workspace.composerPrefills[route.composerKey] = prompt
-                }, onOpenTask: { task in
-                    guard let chat = task.chat else { return }
+                }, onOpenTask: { chat in
                     agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
+                }, onRespond: { messageId in
+                    // The page closes onto the chat it was opened from, at the card.
+                    agentPage = nil
+                    let chat = route.tasksChatId
+                    if workspace.isMainChat(chat) { show(.chat) } else if !chat.isEmpty { show(.topic(chat)) }
+                    let store = workspace.transcript(forChat: chat)
+                    Task { await store.revealCard(messageId) }
                 }, onClose: { agentPage = nil })
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in
@@ -155,7 +178,9 @@ struct MainShell: View {
                 }
             }
             .environment(model)
-            .environment(\.chatLinkOpener, openChatLink)
+            .environment(\.chatLinkOpener, actions.linkOpener)
+            // Settings is a sheet of this view: the cover closes first.
+            .environment(\.openUsage, actions.openUsageFromCover)
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
@@ -197,7 +222,22 @@ struct MainShell: View {
         // Which chat is in front, for pushes: none under a sheet or the drawer.
         .onChange(of: visibleChat, initial: true) { _, chat in model.show(chat, by: screenID) }
         .onChange(of: workspace.mainChatServerID) { model.rewatch() }
-        .onDisappear { model.hide(by: screenID) }
+        .onAppear {
+            installShellActions()
+            workspace.register(actions)
+        }
+        // What toggling the navigation does depends on the width.
+        .onChange(of: usesSidebar) { installShellActions() }
+        .onDisappear {
+            model.hide(by: screenID)
+            // The actions hold this view's state, which they must not
+            // outlive. The Agent page's cover takes the shell off screen too
+            // and uses them meanwhile; the workspace empties them when it
+            // stops, cover or not.
+            guard agentPage == nil else { return }
+            actions.reset()
+            workspace.unregister(actions)
+        }
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .onChange(of: drawerOpen) { _, open in
             if open {
@@ -218,6 +258,13 @@ struct MainShell: View {
         .onChange(of: model.sessionExpired) { _, expired in if expired { agentPage = nil } }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
         .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
+        // A tap on the widget: its app, Apps or Chat in front, nothing over it.
+        // Taken on appear too: a link routed while this shell was being
+        // built (a sign-in, a switch) waits for it.
+        .onChange(of: model.widgetRequest, initial: true) {
+            guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
+            Task { await follow(link) }
+        }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
             agentPage = nil
@@ -231,6 +278,7 @@ struct MainShell: View {
         // A window that turns wide pins the drawer; the one it pushed aside is closed.
         .onChange(of: usesSidebar) { drawerOpen = false }
         #if DEBUG
+        .onAppear { PerfProbe.start(model: model) }
         .onChange(of: model.debugCommand) { _, command in
             switch command {
             case .drawer(let open):
@@ -258,9 +306,64 @@ struct MainShell: View {
         #endif
     }
 
+    /// A tap on the widget: its app, Apps or Chat in front, nothing over it.
+    /// Everything presented closes first, the screens' own sheets and covers
+    /// included (a photo, a share sheet, a page from an app), and the link is
+    /// followed once they are gone, so the app never opens under one. A later
+    /// tap wins over one still on its way.
+    private func follow(_ link: WidgetLink) async {
+        linkSerial += 1
+        let mine = linkSerial
+        agentPage = nil
+        agentPath = []
+        agentLinkPage = nil
+        showSettings = false
+        page = nil
+        settingsPage = nil
+        closeDrawer()
+        Keyboard.dismiss()
+        await Presentations.dismissAll()
+        guard mine == linkSerial else { return }
+        switch link {
+        case .app(_, let appId):
+            show(.apps)
+            switch await WidgetApps.resolve(appId, in: workspace) {
+            case .found(let app):
+                guard mine == linkSerial else { return }
+                path = [.app(app)]
+            case .gone:
+                // Never a quiet nothing: the Apps grid, and why.
+                guard mine == linkSerial else { return }
+                path = []
+                say(String(localized: "App not found"))
+            }
+        case .apps:
+            show(.apps)
+            path = []
+        case .newApp:
+            show(.chat)
+            path = []
+            workspace.composerPrefills[conciergeChatID] = AppIdea.own.prompt
+        }
+    }
+
+    private func say(_ text: String) {
+        linkNotice = text
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if linkNotice == text { linkNotice = nil }
+        }
+    }
+
     /// Session expired, at the top of the page's column.
     @ViewBuilder
     private var banners: some View {
+        if let linkNotice {
+            TopBanner(kind: .error, text: linkNotice)
+                .readableColumn()
+                .padding(.top, 58)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
         if model.sessionExpired {
             TopBanner(kind: .error, text: String(localized: "Session expired"), actionTitle: String(localized: "Sign in again")) {
                 Task { await model.reauthenticate() }
@@ -280,6 +383,24 @@ struct MainShell: View {
         case .app(let app):
             AppWebScreen(workspace: workspace, app: app)
                 .id(app.id)
+        }
+    }
+
+    /// What the chat rows call back into the shell. The environment holds
+    /// these objects, never closures made in `body`: a shell update changes
+    /// none of them, so it draws no row and no message's text again.
+    private func installShellActions() {
+        actions.linkOpener.run = { openChatLink($0) }
+        actions.toggleNavigation.run = { _ in toggleNavigation() }
+        actions.openAgent.run = { _ in agentPage = AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID) }
+        actions.openTaskChat.run = { path.append(.taskChat(chatId: $0.chatId, title: $0.title)) }
+        actions.openUsage.run = { _ in
+            settingsPath = []
+            showSettings = true
+        }
+        actions.openUsageFromCover.run = { _ in
+            openUsageAfterCover = true
+            agentPage = nil
         }
     }
 
@@ -319,16 +440,19 @@ struct MainShell: View {
         // Chat stays alive under the other pages: rebuilt, its list would load
         // again from the top and scroll down while the drawer closes onto it.
         ZStack {
+            // References and a flag, no closures: a shell update that
+            // changes none of them leaves Chat's body alone. Not
+            // `.equatable()`: that keeps iOS 26 from fading the rows under
+            // Chat's header.
             ChatScreen(
                 workspace: workspace,
-                onMenu: { toggleNavigation() },
-                onAgent: { agentPage = AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID) },
-                onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) },
+                shell: actions,
                 // The same answer the server watch and push banners go by: a
                 // sheet, the drawer or a pushed page over Chat hides it.
                 visible: visibleChat == conciergeChatID
             )
             .opacity(section == .chat ? 1 : 0)
+            .environment(\.offScreen, section != .chat || covered)
             .allowsHitTesting(section == .chat)
             .accessibilityHidden(section != .chat)
             switch section {
@@ -362,6 +486,9 @@ struct MainShell: View {
         }
     }
 
+    /// A pushed page or the Agent page's cover hides the stack's root.
+    private var covered: Bool { !path.isEmpty || agentPage != nil }
+
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
             workspace: workspace,
@@ -372,7 +499,6 @@ struct MainShell: View {
                 // A blank chat has no tasks yet; its Tasks tab shows the empty state.
                 agentPage = AgentRoute(tasksChatId: id ?? "", composerKey: id ?? draftKey)
             },
-            onOpenChat: { id, title in path.append(.taskChat(chatId: id, title: title)) },
             onArchived: { show(.chat) },
             onCreated: { id in
                 if let key { startedTopics[id] = key }
@@ -381,6 +507,7 @@ struct MainShell: View {
                 withTransaction(instant) { section = .topic(id) }
             }
         )
+        .environment(\.offScreen, covered)
     }
 
     /// Swaps the stack's root with no motion of its own; the drawer's slide is
