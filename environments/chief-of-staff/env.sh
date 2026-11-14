@@ -41,7 +41,9 @@ USER_VOLUME="rome-env-${NAME}-user"
 BUILD_TREE="$RUN_DIR/agent-tree"
 # The agent under test. It lives on its own branch, not on this one. The default
 # is the head of the chief of staff agent's pull request.
-AGENT_REF="${COS_AGENT_REF:-origin/claude/project-thread-ys37d4}"
+# The refs merged into the build, in order, separated by spaces. Each is a
+# pull request as #<number>, a remote branch as origin/<branch>, or any commit.
+AGENT_REFS="${COS_AGENT_REF:-#2130 #2155}"
 # The one model every tier runs on, cheapest first to keep the bill down. A run
 # that needs a stronger model sets COS_MODEL, in the shell or the secrets file.
 DEFAULT_MODEL=claude-haiku-5-5
@@ -194,25 +196,48 @@ image_sha() {
 # its own branch, so this merges that ref into a throwaway checkout of this
 # branch and builds there — the agent's code never lands on this branch. Records
 # the commits that went in, for `cos-env version`.
+# The commit a ref names, fetched from origin first when it is a pull request
+# or a remote branch.
+resolve_ref() {
+  local ref="$1"
+  case "$ref" in
+    "#"*)
+      git -C "$REPO_ROOT" fetch --quiet origin "pull/${ref#\#}/head" &&
+        git -C "$REPO_ROOT" rev-parse FETCH_HEAD
+      ;;
+    origin/*)
+      git -C "$REPO_ROOT" fetch --quiet origin "${ref#origin/}" 2>/dev/null || true
+      git -C "$REPO_ROOT" rev-parse "$ref"
+      ;;
+    *) git -C "$REPO_ROOT" rev-parse "$ref" ;;
+  esac
+}
+
 build_rome_image() {
-  local main_sha env_sha agent_sha env_dirty=false merged
+  local main_sha env_sha env_dirty=false merged ref sha merged_refs="" done_refs="" refs
   git -C "$REPO_ROOT" fetch --quiet origin main
-  git -C "$REPO_ROOT" fetch --quiet origin "${AGENT_REF#origin/}" 2>/dev/null || true
   main_sha="$(git -C "$REPO_ROOT" merge-base HEAD origin/main)"
   env_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-  agent_sha="$(git -C "$REPO_ROOT" rev-parse "$AGENT_REF" 2>/dev/null)" ||
-    die "cannot resolve the agent ref \"$AGENT_REF\". Set COS_AGENT_REF to the agent's branch or commit."
   [ -z "$(git -C "$REPO_ROOT" status --porcelain -- environments/chief-of-staff)" ] || env_dirty=true
 
-  log "merging the agent ${agent_sha:0:9} into a throwaway checkout of ${env_sha:0:9} ..."
   git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
   rm -rf "$BUILD_TREE"
   git -C "$REPO_ROOT" worktree add --quiet --detach "$BUILD_TREE" "$env_sha"
-  if ! git -C "$BUILD_TREE" merge --no-edit --no-ff "$agent_sha" >/dev/null 2>&1; then
-    git -C "$BUILD_TREE" merge --abort 2>/dev/null || true
-    git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
-    die "the agent ref does not merge cleanly into this branch. Rebase the agent branch on main, or set COS_AGENT_REF to one that merges."
-  fi
+  read -r -a refs <<<"$AGENT_REFS"
+  for ref in "${refs[@]}"; do
+    sha="$(resolve_ref "$ref" 2>/dev/null)" || {
+      git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
+      die "cannot resolve \"$ref\". COS_AGENT_REF takes #<pull request>, origin/<branch> or a commit."
+    }
+    log "merging $ref (${sha:0:9}) into the build ..."
+    if ! git -C "$BUILD_TREE" merge --no-edit --no-ff "$sha" >/dev/null 2>&1; then
+      git -C "$BUILD_TREE" merge --abort 2>/dev/null || true
+      git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
+      die "$ref does not merge cleanly on top of ${done_refs:-this branch}. Rebase it on main, or change COS_AGENT_REF."
+    fi
+    done_refs+="${done_refs:+ + }$ref"
+    merged_refs+="${merged_refs:+,}{\"ref\":\"$ref\",\"commit\":\"$sha\"}"
+  done
   merged="$(git -C "$BUILD_TREE" rev-parse HEAD)"
 
   log "building the Rome image from the merged tree ${merged:0:9} ..."
@@ -228,9 +253,18 @@ build_rome_image() {
       .docker/rome-runtime-workspace >/dev/null
   )
   git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
-
-  printf '{"rome":{"commit":"%s","dirty":false},"agent":{"commit":"%s","dirty":false},"environment":{"commit":"%s","dirty":%s},"builtAt":"%s"}\n' \
-    "$main_sha" "$agent_sha" "$env_sha" "$env_dirty" "$(date -u +%FT%TZ)" >"$BUILD_FILE"
+  # agent.commit is the first ref, the agent's own; merged lists every ref in
+  # the build, and tree the commit the image was built from.
+  node -e '
+    const [main, env, envDirty, refs, tree] = process.argv.slice(1);
+    const merged = JSON.parse(`[${refs}]`);
+    process.stdout.write(JSON.stringify({
+      rome: { commit: main, dirty: false },
+      agent: { commit: merged[0]?.commit ?? null, dirty: false, merged },
+      environment: { commit: env, dirty: envDirty === "true" },
+      tree,
+      builtAt: new Date().toISOString(),
+    }) + "\n");' "$main_sha" "$env_sha" "$env_dirty" "$merged_refs" "$merged" >"$BUILD_FILE"
 }
 
 # A value already in the Rome env file, so the instance secrets survive a rewrite.
@@ -434,6 +468,23 @@ save_rome_logs() {
   started="$(docker inspect -f '{{.Created}}' "$ROME" 2>/dev/null)" || return 0
   mkdir -p "$RUN_DIR/logs"
   docker logs "$ROME" >"$RUN_DIR/logs/rome-${started%%.*}.log" 2>&1 || true
+  rome_memory >"$RUN_DIR/logs/rome-${started%%.*}.memory.json" 2>/dev/null || true
+}
+
+# The Rome container's memory as JSON: its limit, the most it has used, and how
+# many times the kernel killed a process in it for want of memory, all since the
+# container was made.
+rome_memory() {
+  local created
+  created="$(docker inspect -f '{{.Created}}' "$ROME")" || return 1
+  docker exec "$ROME" sh -c 'cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.peak; grep "^oom_kill " /sys/fs/cgroup/memory.events' |
+    node -e '
+      let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+        const [max, peak, kills] = s.trim().split("\n");
+        const limit = max === "max" ? null : Number(max);
+        const oomKills = Number(kills.split(" ")[1]);
+        console.log(JSON.stringify({ since: process.argv[1], limitBytes: limit, peakBytes: Number(peak), oomKills, hitLimit: oomKills > 0 }));
+      });' "$created"
 }
 
 remove_rome() {
@@ -571,6 +622,33 @@ cos_renew_session() {
   log "armed. The next message to the agent in #$chat renews its session once a minute has passed since its last turn. 'cos-env reset' restores the policy."
 }
 
+# The memory of the container before this one, as save_rome_logs kept it.
+previous_memory() {
+  local current file last=""
+  current="$(docker inspect -f '{{.Created}}' "$ROME" 2>/dev/null)"
+  # The glob sorts by name, and so by when each container was made.
+  for file in "$RUN_DIR"/logs/rome-*.memory.json; do
+    [ -e "$file" ] && [ "$file" != "$RUN_DIR/logs/rome-${current%%.*}.memory.json" ] && last="$file"
+  done
+  [ -z "$last" ] || cat "$last"
+}
+
+# Copies every Rome log since `since` into `dir`: each container's kept log and
+# memory, and the current container's log and memory so far.
+cos_logs() {
+  local dir="${1:?usage: cos-env logs <dir> [--since <time>]}" since="${2:-}" file name created
+  mkdir -p "$dir"
+  for file in "$RUN_DIR"/logs/rome-*; do
+    [ -e "$file" ] || continue
+    name="$(basename "$file")" created="${name#rome-}" created="${created%%.log}" created="${created%%.memory.json}"
+    [ -z "$since" ] || [[ ! "$created" < "${since%%.*}" ]] || continue
+    cp "$file" "$dir/"
+  done
+  created="$(docker inspect -f '{{.Created}}' "$ROME" 2>/dev/null)" || return 0
+  docker logs "$ROME" >"$dir/rome-${created%%.*}.log" 2>&1 || true
+  rome_memory >"$dir/rome-${created%%.*}.memory.json" 2>/dev/null || true
+}
+
 cos_version() {
   [ -f "$BUILD_FILE" ] || die "the environment is not up. Run environments/chief-of-staff/env.sh up first."
   local login model
@@ -580,12 +658,17 @@ cos_version() {
   # rome is the main commit the test Rome sits on, agent and environment the
   # refs merged on top of it, all recorded when the image was built.
   node -e '
-    const [build, verifier, login, model] = process.argv.slice(1);
+    const [build, verifier, login, model, memory, previous] = process.argv.slice(1);
     const b = JSON.parse(build);
     console.log(JSON.stringify({
       rome: b.rome,
       agent: b.agent,
       environment: b.environment,
+      tree: b.tree ?? null,
+      memory: {
+        current: memory ? JSON.parse(memory) : null,
+        previous: previous ? JSON.parse(previous) : null,
+      },
       verifier: JSON.parse(verifier),
       model: {
         login,
@@ -594,7 +677,8 @@ cos_version() {
       },
       builtAt: b.builtAt,
     }, null, 2));' \
-    "$(cat "$BUILD_FILE")" "$(tree_json environments/chief-of-staff/verifier)" "$login" "$model"
+    "$(cat "$BUILD_FILE")" "$(tree_json environments/chief-of-staff/verifier)" "$login" "$model" \
+    "$(rome_memory 2>/dev/null)" "$(previous_memory)"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

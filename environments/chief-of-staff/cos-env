@@ -15,6 +15,7 @@ usage() {
   cos-env read --dm <member> [--since <message id>]
   cos-env rename --as <member> <display name>
   cos-env rome stop|start|restart|renew-session --chat <name>
+  cos-env logs <dir> [--since <time>]
   cos-env reset
   cos-env version"
 }
@@ -30,7 +31,7 @@ while [ $# -gt 0 ]; do
     --chat) chat="${2:?--chat needs a chat name}" && shift 2 ;;
     --dm) dm="${2:?--dm needs a member}" && shift 2 ;;
     --thread) thread="${2:?--thread needs a thread id}" && shift 2 ;;
-    --since) since="${2:?--since needs a message id}" && shift 2 ;;
+    --since) since="${2:?--since needs a message id or, for logs, a time}" && shift 2 ;;
     --mention-agent) mention=1 && shift ;;
     --) shift && args+=("$@") && break ;;
     *) args+=("$1") && shift ;;
@@ -79,6 +80,10 @@ case "$command" in
     discord rename "$as" "${args[*]}"
     ;;
   rome) cos_rome "${args[0]:-}" ${chat:+--chat "$chat"} ;;
+  logs)
+    [ ${#args[@]} -eq 1 ] || usage
+    cos_logs "${args[0]}" "$since"
+    ;;
   reset) cmd_reset ;;
   version) cos_version ;;
   *) usage ;;

@@ -59,6 +59,8 @@ Run them from the repository root inside `nix develop`.
 | `environments/chief-of-staff/env.sh down` | Deletes the members' webhooks and removes the Rome container, its volumes and its image. The test chats' messages stay |
 | `environments/chief-of-staff/env.sh seed <dir>` | The same as `cos-env seed <dir>` |
 
+`up` builds Rome from this branch with the refs in `COS_AGENT_REF` merged on top, in order, separated by spaces: `#<pull request>`, `origin/<branch>`, or a commit. It defaults to `#2130 #2155`, the agent and the envoy change under test. The merge happens in a throwaway checkout, so none of it lands on this branch.
+
 ### cos-env
 
 The one command the verifier drives, and the only one it may call. Its contract stays stable across changes to the environment.
@@ -73,8 +75,9 @@ The one command the verifier drives, and the only one it may call. Its contract 
 | `cos-env rename --as <member> <display name>` | Sets the name the member's later messages carry. Messages already sent keep theirs, as on Discord |
 | `cos-env rome stop\|start\|restart` | Stops, starts or restarts the Rome container |
 | `cos-env rome renew-session --chat <name>` | Arms a session renewal on the chat: sets its reset policy so a reset is due, then restarts Rome. The next message to the agent in that chat opens the session cold and renewed. `cos-env reset` restores the chat's reset policy |
+| `cos-env logs <dir> [--since <time>]` | Copies Rome's logs into `<dir>`: the log of every container made since `<time>` (an ISO time, such as the run's start), and the current container's log so far, each with a `.memory.json` of its memory limit, peak and out-of-memory kills |
 | `cos-env reset` | The same as `env.sh reset` |
-| `cos-env version` | Prints as JSON the commit and dirty flag of the Rome under test (`rome`), of `rome_apps/chief-of-staff` (`agent`), of the verifier (`verifier`) and of the environment (`environment`), plus the model login and the instance's tier-to-model mapping. The verifier stamps every report with it |
+| `cos-env version` | Prints as JSON the commit and dirty flag of the Rome under test (`rome`), of the agent (`agent`, the first ref merged, with `agent.merged` listing every ref in the build and `tree` the commit built), of the verifier (`verifier`) and of the environment (`environment`), plus the model login, the instance's tier-to-model mapping, and `memory`: the current container's limit, peak and out-of-memory kills (`hitLimit`), and the same for the container before it (`previous`), so a run can tell whether the last one ran out of memory. The verifier stamps every report with it |
 
 Rome's log for each container, kept whole across restarts, is copied to `~/.rome-environments/chief-of-staff/run/logs/` whenever `up`, `reset` or `down` replaces the container. `docker logs rome-env-chief-of-staff-rome` shows the current one.
 
