@@ -317,6 +317,43 @@ describe("queryPersonalData", () => {
     ).toMatchObject({ value: 14000 });
   });
 
+  it("splits every day by the device's dates in another zone, so no hour is counted twice", () => {
+    // The Nov 10 hours (Shanghai) fall on Nov 9 in Los Angeles, inside the Nov 10 day bucket.
+    const answer = query({
+      type: "stepCount",
+      start: "2026-11-09",
+      end: "2026-11-11",
+      timeZone: "America/Los_Angeles",
+    });
+    expect(answer.results[0]).toMatchObject({ value: 14000, dayZones: [TZ] });
+  });
+
+  it("fills a device date with no day bucket from its hours, by the device's date", () => {
+    const nov12 = NOV_10 + 2 * DAY;
+    repo.ingest(
+      APPLE_HEALTH,
+      batch("hours-only", { upserts: [stepHour(nov12, 300), stepHour(nov12 + HOUR, 200)] }),
+      NOW,
+    );
+    const days = query({
+      type: "stepCount",
+      start: "2026-11-10",
+      end: "2026-11-12",
+      timeZone: "America/Los_Angeles",
+      interval: "day",
+    });
+    expect(
+      (days.results[0] as { buckets: { startISO: string; value: number }[] }).buckets.map((b) => [
+        b.startISO.slice(0, 10),
+        b.value,
+      ]),
+    ).toEqual([
+      ["2026-11-10", 8000],
+      ["2026-11-11", 6000],
+      ["2026-11-12", 500],
+    ]);
+  });
+
   it("says where hourly detail starts, and does not claim an hourly window before it", () => {
     const answer = query({
       type: "stepCount",

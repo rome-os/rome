@@ -210,13 +210,15 @@ export function readsDayBuckets(
 }
 
 /**
- * One reading per day, from what is stored for it, in this order: the
- * device's day bucket in the plan's zone, the day's hours added up, and the
- * device's day bucket in another zone, read as the day with the same date
- * here. A device keeps only day buckets for older history, and a guardian may
- * read it in another zone than the device's. `deviceOnly` says whether every
- * day came from the device, and `otherZones` names the zones of the days
- * taken from another zone.
+ * One reading per day. When the device's day buckets are in the plan's zone,
+ * each day is its day bucket, else its hours added up. When any of them is in
+ * another zone, as when the guardian reads in another zone than the device's,
+ * every day the device has a bucket for is that bucket, read as the day with
+ * the same date here, and hours fill only the dates with no bucket. Mixing
+ * hours split by this zone with buckets split by the device's would drop or
+ * count twice the hours where the two splits meet. A device keeps only day
+ * buckets for older history. `deviceOnly` says whether every day came from
+ * the device, and `otherZones` names the zones read as this one.
  */
 export function mergeDays(
   spec: TypeSpec,
@@ -225,23 +227,27 @@ export function mergeDays(
   hours: readonly StoredPoint[],
 ): { days: StoredPoint[]; deviceOnly: boolean; otherZones: string[] } {
   const inWindow = (at: number) => at >= plan.start && at < plan.end;
-  const sameZone = deviceDays.filter((day) => day.tz === plan.tz && inWindow(day.startAt));
-  const covered = new Set(sameZone.map((day) => day.startAt));
-  const fromHours = daysFromHours(spec, plan, hours).filter((day) => !covered.has(day.startAt));
-  for (const day of fromHours) covered.add(day.startAt);
-  const otherZone: StoredPoint[] = [];
+  const byDate = new Map<number, StoredPoint>();
   for (const day of deviceDays) {
-    if (day.tz === plan.tz) continue;
     const date = wallClock(day.startAt, day.tz);
     const startAt = fromWallClock(plan.tz, date.year, date.month, date.day);
-    if (!inWindow(startAt) || covered.has(startAt)) continue;
-    covered.add(startAt);
-    otherZone.push({ ...day, startAt, endAt: nextPeriod(startAt, plan.tz, "day") });
+    if (!inWindow(startAt) || byDate.has(startAt)) continue;
+    byDate.set(startAt, { ...day, startAt, endAt: nextPeriod(startAt, plan.tz, "day") });
   }
+  const otherZones = [
+    ...new Set([...byDate.values()].filter((day) => day.tz !== plan.tz).map((day) => day.tz)),
+  ];
+  // In another zone, hours are grouped by the device's dates too, so every
+  // date is split the one way the device's buckets split it.
+  const fromHours =
+    otherZones.length === 0
+      ? daysFromHours(spec, plan, hours)
+      : daysByDeviceDate(spec, plan, hours);
+  const filled = fromHours.filter((day) => !byDate.has(day.startAt));
   return {
-    days: [...sameZone, ...fromHours, ...otherZone].sort((a, b) => a.startAt - b.startAt),
-    deviceOnly: fromHours.length === 0,
-    otherZones: [...new Set(otherZone.map((day) => day.tz))],
+    days: [...byDate.values(), ...filled].sort((a, b) => a.startAt - b.startAt),
+    deviceOnly: filled.length === 0,
+    otherZones,
   };
 }
 
@@ -392,6 +398,24 @@ export function placedAt(spec: TypeSpec, point: Pick<StoredPoint, "startAt" | "e
   return spec.bucketBy === "end" ? point.endAt : point.startAt;
 }
 
+/** Adds hours up into days by the date they fall on in their own zone,
+ *  each read as the day with the same date in the plan's zone. */
+function daysByDeviceDate(
+  spec: TypeSpec,
+  plan: QueryPlan,
+  hours: readonly StoredPoint[],
+): StoredPoint[] {
+  const days = new Map<number, StoredPoint[]>();
+  for (const hour of hours) {
+    if (hour.value === null) continue;
+    const date = wallClock(hour.startAt, hour.tz);
+    const startAt = fromWallClock(plan.tz, date.year, date.month, date.day);
+    if (startAt < plan.start || startAt >= plan.end) continue;
+    days.set(startAt, [...(days.get(startAt) ?? []), hour]);
+  }
+  return [...days.entries()].map(([startAt, list]) => dayOf(spec, plan, startAt, list));
+}
+
 /** Adds the hours of each day up into one reading per day in the plan's zone,
  *  for a bucket type whose day buckets cannot be read. */
 export function daysFromHours(spec: TypeSpec, plan: QueryPlan, hours: readonly StoredPoint[]) {
@@ -404,24 +428,32 @@ export function daysFromHours(spec: TypeSpec, plan: QueryPlan, hours: readonly S
     const day = Math.max(periodStart(hour.startAt, plan.tz, "day"), plan.start);
     days.set(day, [...(days.get(day) ?? []), hour]);
   }
-  return [...days.entries()].map(([dayStart, list]): StoredPoint => {
-    const total = list.reduce((sum, p) => sum + (p.value ?? 0), 0);
-    const mins = list.map((p) => p.fields?.min ?? p.value ?? 0);
-    const maxes = list.map((p) => p.fields?.max ?? p.value ?? 0);
-    return {
-      id: 0,
-      type: spec.type,
-      shape: "bucket",
-      resolution: "day",
-      startAt: dayStart,
-      endAt: nextPeriod(periodStart(dayStart, plan.tz, "day"), plan.tz, "day"),
-      tz: plan.tz,
-      value: spec.rollup === "sum" ? total : total / list.length,
-      // A summed day's minimum is the day's total, not its smallest hour.
-      fields: spec.rollup === "sum" ? null : { min: Math.min(...mins), max: Math.max(...maxes) },
-      metadata: null,
-    };
-  });
+  return [...days.entries()].map(([dayStart, list]) => dayOf(spec, plan, dayStart, list));
+}
+
+/** One day's reading from its hours. */
+function dayOf(
+  spec: TypeSpec,
+  plan: QueryPlan,
+  dayStart: number,
+  list: readonly StoredPoint[],
+): StoredPoint {
+  const total = list.reduce((sum, p) => sum + (p.value ?? 0), 0);
+  const mins = list.map((p) => p.fields?.min ?? p.value ?? 0);
+  const maxes = list.map((p) => p.fields?.max ?? p.value ?? 0);
+  return {
+    id: 0,
+    type: spec.type,
+    shape: "bucket",
+    resolution: "day",
+    startAt: dayStart,
+    endAt: nextPeriod(periodStart(dayStart, plan.tz, "day"), plan.tz, "day"),
+    tz: plan.tz,
+    value: spec.rollup === "sum" ? total : total / list.length,
+    // A summed day's minimum is the day's total, not its smallest hour.
+    fields: spec.rollup === "sum" ? null : { min: Math.min(...mins), max: Math.max(...maxes) },
+    metadata: null,
+  };
 }
 
 function converter(spec: TypeSpec, unit: string | undefined): (value: number) => number {
