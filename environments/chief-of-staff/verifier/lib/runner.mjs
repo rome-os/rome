@@ -121,6 +121,7 @@ export async function verify({
   env,
   judge,
   judgeName,
+  notes = [],
   rules,
   phase,
   waits,
@@ -232,6 +233,7 @@ export async function verify({
     waits,
     notes: [
       "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. The real direct-message path is checked by hand in the live trial.",
+      ...notes,
     ],
     selection: rules ? { rules } : { phase: phase ?? 1 },
     liveness: { questionId: liveness.questionId, replyId: liveness.reply?.id ?? null },

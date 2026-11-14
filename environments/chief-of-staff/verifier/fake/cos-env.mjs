@@ -46,7 +46,10 @@ function agentTurn(message) {
   const out = respond({ agent, state, message });
   if (!out) return;
   if (out.held) {
-    state.held = [...(state.held ?? []), { inReplyTo: out.inReplyTo, text: out.text }];
+    state.held = [
+      ...(state.held ?? []),
+      { status: "pending", question: out.question, reply: out.text, reason: "held for approval" },
+    ];
     return;
   }
   const clock = state.clock;

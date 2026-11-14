@@ -23,6 +23,7 @@ node environments/chief-of-staff/verifier/verify.mjs --rules K1,A5
 | `--a1-wait <s>` | How long to wait for a reply to an A1 mention | 150 |
 | `--poll <s>` | How often to read the chat while waiting | 5 |
 | `--out <dir>` | Write the report here instead of the runs folder | |
+| `--note <text>` | A note for the report, such as the state of a pull request in the build. Repeatable | |
 
 It exits 0 when the agent fails nothing, 1 when it fails a rule or a leg, and 2 when it could not run or the agent did not answer the opening mention. A leg that waits on a design decision does not count as an agent failure.
 

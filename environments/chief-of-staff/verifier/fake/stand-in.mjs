@@ -101,7 +101,7 @@ export function respond({ agent, state, message }) {
   if (agent === "held" && /interviewing|budget/i.test(message.text) && message.chat === "general")
     return {
       held: true,
-      inReplyTo: message.id,
+      question: message.id,
       text: "I have nothing I can share about that here.",
     };
   const breaks = agent.startsWith("fail-") ? agent.slice("fail-".length) : null;

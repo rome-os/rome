@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // verify [--rules K1,A5] [--phase 1] [--dirty] [--cos-env "<command>"] [--judge "<command>"]
-//        [--out <dir>] [--reply-wait <s>] [--a1-wait <s>] [--poll <s>]
+//        [--out <dir>] [--reply-wait <s>] [--a1-wait <s>] [--poll <s>] [--note <text>]...
 // Scores the chief of staff agent against the rules from the chat alone. See README.md.
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,7 @@ const { values } = parseArgs({
     "reply-wait": { type: "string", default: "300" },
     "a1-wait": { type: "string", default: "150" },
     poll: { type: "string", default: "5" },
+    note: { type: "string", multiple: true, default: [] },
   },
 });
 
@@ -39,6 +40,7 @@ try {
     env: cosEnv({ command: words(values["cos-env"]), agentAuthor: values["agent-author"] }),
     judge: makeJudge(words(values.judge)),
     judgeName,
+    notes: values.note,
     rules: values.rules?.split(",").map((r) => r.trim().toUpperCase()),
     phase: values.phase ? Number(values.phase) : undefined,
     waits: {

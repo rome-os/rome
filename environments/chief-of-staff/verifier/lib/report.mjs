@@ -46,6 +46,7 @@ export function renderMarkdown(report) {
     "",
     part("Rome", underTest.rome),
     part("Agent (rome_apps/chief-of-staff)", underTest.agent),
+    ...(underTest.agent?.merged ?? []).map((m) => `  - built with ${m.ref} at \`${m.commit}\``),
     part("Environment", underTest.environment),
     part("Verifier", underTest.verifier),
     `- Model: ${typeof underTest.model === "object" && underTest.model !== null ? `\`${JSON.stringify(underTest.model)}\`` : (underTest.model ?? "unknown")}`,
