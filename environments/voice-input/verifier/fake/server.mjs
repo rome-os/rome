@@ -46,8 +46,8 @@ async function handle(req, res, statePath, script) {
       "text/html; charset=utf-8",
       `<main><h1>Settings</h1><p>Voice input: ${PLACE.provider}, ${PLACE.host}</p></main>`,
     );
-  if (req.method === "GET" && url.pathname === "/api/voice/transcription")
-    return send(200, "application/json", JSON.stringify(PLACE));
+  if (req.method === "GET" && url.pathname === "/api/voice-input")
+    return send(200, "application/json", JSON.stringify({ place: PLACE }));
   const post = url.pathname.match(/^\/api\/chats\/([^/]+)\/messages$/);
   if (req.method === "POST" && post) {
     const body = JSON.parse(await readBody(req));

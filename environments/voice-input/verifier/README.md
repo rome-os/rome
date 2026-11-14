@@ -103,7 +103,7 @@ The rules' contract leaves these open. The planner has the list.
 - **Rule 6's leading space**: one space goes before spoken text when the character before the cursor is neither a space nor a Chinese character, as the contract says. The case "text, cursor at the end" checks it.
 - **A picture** is attached through an `input[type=file]` inside the message form.
 - **A mention** is typed as `@`, which offers mentions as `option` elements, and Enter picks the first.
-- **The read API** that names the place is `GET /api/voice/transcription`, returning `{ provider, host }`, and the Settings page is `/settings`. Both paths sit in `scenarios/r10-voice-goes-where-named.mjs`.
+- **The Settings page** is `/settings`. The read API, `GET /api/voice-input` answering `{ place: { provider, host } | null }`, comes from the product builder. Both paths sit in `scenarios/r10-voice-goes-where-named.mjs`.
 - **Audio through Rome**: a request carrying audio from the browser to the guardian's own Rome is allowed, since the rules route speech to the transcriber through it.
 
 When a case cannot be set up, rule 6 reports that case as not checked and names what it needed.

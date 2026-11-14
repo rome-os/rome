@@ -5,10 +5,11 @@ import { scriptRuns } from "../lib/runs.mjs";
 import { check, required, ruleResult } from "../lib/scenario.mjs";
 
 /**
- * Where Rome names the place. The rules name a Settings page and a read API but not their
- * paths, so these are the verifier's working assumption until the contract states them.
+ * Where Rome names the place: the read API the product builder gave, which answers
+ * `{ place: { provider, host } | null }`, and the Settings page, whose path the verifier
+ * assumes until the contract states it.
  */
-export const PLACE_API = "/api/voice/transcription";
+export const PLACE_API = "/api/voice-input";
 export const SETTINGS_PATH = "/settings";
 
 export default {
