@@ -62,6 +62,8 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
     cloudSignOut: () => json(["cloud", "sign-out"]),
     /** Restarts Rome signed in to Rome Cloud with no provider settings. Prints `cloud status`. */
     cloudSignIn: () => json(["cloud", "sign-in"]),
+    /** `{ lines }`: Rome's log entries holding `match`. */
+    logs: (match) => json(["logs", "--match", match]),
     /** The transcriber's counters, such as `decoyConnections`: connections on the signed-out settings' key. */
     transcriberStatus: () => json(["transcriber", "status"]),
     /** Turns Rome Cloud's voice input gate `on` or `off` for the test account. */

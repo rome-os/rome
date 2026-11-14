@@ -219,6 +219,9 @@ switch (command) {
     else print({ signedIn: cloud.signedIn, ownCredential: cloud.ownCredential });
     break;
   }
+  case "logs":
+    print({ lines: [] });
+    break;
   case "audio-scan":
     print({ findings: readState(statePath).audioFiles });
     break;

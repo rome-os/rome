@@ -241,6 +241,15 @@ async function gateOn(ctx, message) {
   ];
 
   const usage = await waitForUsage(env, usageBefore);
+  // Rome logs its own count of the session; read it now, before a later restart loses it.
+  const romeLog = await env
+    .logs("voice input stopped")
+    .then((l) =>
+      (l?.lines ?? [])
+        .slice(-1)
+        .map((line) => `Rome logged: ${typeof line === "string" ? line : JSON.stringify(line)}`),
+    )
+    .catch(() => []);
   const seconds = usage?.seconds;
   const off = seconds === undefined ? null : Math.abs(seconds - message.seconds) / message.seconds;
   checks.push(
@@ -251,7 +260,7 @@ async function gateOn(ctx, message) {
         seconds === undefined
           ? `Rome Cloud shows no new usage within ${USAGE_WAIT_MS / 1000} s of listening stopping`
           : `Rome Cloud records ${seconds} s for a ${message.seconds} s recording (${Math.round(off * 100)}% off); listening lasted ${listened.toFixed(1)} s`,
-        [message.key],
+        [message.key, ...romeLog],
       ),
     ),
   );
