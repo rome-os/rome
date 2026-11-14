@@ -57,11 +57,18 @@ final class TranscriptStore {
     private(set) var stopped = false
     /// Bumps when a new message arrives, so the view can scroll or count it.
     private(set) var arrivals = 0
+    /// What was unread when the chat opened, as far as the loaded pages
+    /// show it. It stays while the chat is open, once read too. Nil when
+    /// nothing was unread, and until the read mark is known.
+    private(set) var unread: UnreadSummary? {
+        didSet { if unread?.firstId != oldValue?.firstId { rebuildRows() } }
+    }
     /// The first message that was unread when the chat opened: the rows put
-    /// "New messages" above it. It stays while the chat is open, once read
-    /// too. Nil when nothing was unread, until the read mark is known, and
-    /// while the unread run may reach into an older page not loaded yet.
-    private(set) var unreadFrom: String? { didSet { if unreadFrom != oldValue { rebuildRows() } } }
+    /// "New messages" above it. Nil also while the unread run may reach into
+    /// an older page not loaded yet.
+    var unreadFrom: String? { unread?.firstId }
+    /// Whether the "N new messages" pill shows; one per open.
+    let unreadPill = UnreadPill()
     /// A short line about an action that failed (Stop, an answer), shown for a few seconds.
     private(set) var notice: String?
     @ObservationIgnored private var noticeWork: Task<Void, Never>?
@@ -400,7 +407,7 @@ final class TranscriptStore {
         if var unread = openUnread, let openMark {
             unread.formUnion(UnreadAtOpen.unread(page.messages.filter { !openLive.contains($0.id) }, mark: openMark))
             openUnread = unread
-            unreadFrom = UnreadAtOpen.first(in: messages, unread: unread, hasOlder: hasOlder)
+            summarizeUnread()
         }
         // The list keeps the rows in view still while this is set; hold it
         // through the layout that places the page above them.
@@ -469,16 +476,48 @@ final class TranscriptStore {
         openFetched = false
         openLive = []
         openUnread = nil
-        unreadFrom = nil
+        unread = nil
+        unreadPill.reset()
     }
 
     /// Fixes what was unread at open, once the read mark and the rows held
     /// at open are both known.
     private func settleUnread() {
         guard openUnread == nil, openFetched, let openMark else { return }
-        let unread = UnreadAtOpen.unread(messages.filter { !openLive.contains($0.id) }, mark: openMark)
-        openUnread = unread
-        unreadFrom = UnreadAtOpen.first(in: messages, unread: unread, hasOlder: hasOlder)
+        openUnread = UnreadAtOpen.unread(messages.filter { !openLive.contains($0.id) }, mark: openMark)
+        summarizeUnread()
+    }
+
+    private func summarizeUnread() {
+        unread = openUnread.flatMap { UnreadAtOpen.summary(in: messages, unread: $0, hasOlder: hasOlder) }
+        // No line drawn yet, the run going on into an older page: the pill
+        // shows as for a line above the screen.
+        if let unread, unread.firstId == nil { unreadPill.dividerAbove(true) }
+    }
+
+    /// The pill was tapped: older pages come in until the line is drawn,
+    /// then the transcript brings it to the top. A run that cannot be
+    /// found says so briefly.
+    func revealUnread() async {
+        guard unread != nil else { return }
+        var stalled = 0
+        while unreadFrom == nil, hasOlder, stalled < 2 {
+            let before = messages.count
+            await loadOlder()
+            await placeOlderPage()
+            if messages.count == before {
+                stalled += 1
+                try? await Task.sleep(for: .milliseconds(150))
+            } else {
+                stalled = 0
+            }
+        }
+        guard unreadFrom != nil else {
+            say(String(localized: "Can't find where the new messages start"))
+            return
+        }
+        jumpTarget = TranscriptRow.unreadDivider.id
+        jumps += 1
     }
 
     /// New replies came in, or the list appeared: read, if the chat shows.
@@ -1444,14 +1483,79 @@ enum UnreadAtOpen {
         Set(messages.filter { $0.role == "assistant" && second($0.date) > mark }.map(\.id))
     }
 
-    /// The first of `unread` the chat draws, in the chat's order; nil when
-    /// none is drawn. A page holds whole turns, so while older pages remain
-    /// and the oldest loaded turn has an unread message, the run may start
-    /// on an older page: nil until it loads.
-    static func first(in messages: [ChatMessage], unread: Set<String>, hasOlder: Bool) -> String? {
+    /// The unread messages of `messages` the chat draws: how many, and the
+    /// first in the chat's order; nil when none is drawn. A page holds whole
+    /// turns, so while older pages remain and the oldest loaded turn has an
+    /// unread message, the run may start on an older page: no first until it
+    /// loads, and the count is a lower bound.
+    static func summary(in messages: [ChatMessage], unread: Set<String>, hasOlder: Bool) -> UnreadSummary? {
         guard !unread.isEmpty, let oldest = messages.first else { return nil }
+        let drawn = messages.filter { unread.contains($0.id) && TranscriptBuilder.isReply($0, parts: $0.parts) }
+        guard let first = drawn.first else { return nil }
         let oldestTurn = oldest.turnId ?? oldest.id
-        if hasOlder, messages.contains(where: { unread.contains($0.id) && ($0.turnId ?? $0.id) == oldestTurn }) { return nil }
-        return messages.first { unread.contains($0.id) && TranscriptBuilder.isReply($0, parts: $0.parts) }?.id
+        let more = hasOlder && messages.contains { unread.contains($0.id) && ($0.turnId ?? $0.id) == oldestTurn }
+        return UnreadSummary(firstId: more ? nil : first.id, count: drawn.count, more: more)
+    }
+}
+
+/// The unread messages of a chat at open, as far as its loaded pages show them.
+struct UnreadSummary: Equatable, Sendable {
+    /// The first one the chat draws; nil while the run may start on an older page.
+    var firstId: String?
+    /// How many the chat draws among the loaded messages.
+    var count: Int
+    /// More wait on an older page: the count reads "N+".
+    var more: Bool
+}
+
+/// When the "N new messages" pill shows. It appears once the unread line is
+/// above the visible transcript (under the header counts), or not loaded
+/// yet, and goes for good when tapped or when the line comes into view. A
+/// line that stays in view from the open, because the unread messages fit
+/// on screen, never shows it.
+@MainActor
+@Observable
+final class UnreadPill {
+    enum Phase: Equatable { case waiting, shown, done }
+
+    private(set) var phase: Phase = .waiting
+    /// How long a line in view must stay so before the pill gives up on it:
+    /// cards and pictures that load late can still push it up out of view.
+    @ObservationIgnored var settleDelay: Duration = .milliseconds(600)
+    @ObservationIgnored private var settle: Task<Void, Never>?
+
+    /// Where the line is against the visible transcript.
+    func dividerAbove(_ above: Bool) {
+        guard phase != .done else { return }
+        if above {
+            settle?.cancel()
+            settle = nil
+            if phase != .shown { phase = .shown }
+            return
+        }
+        if phase == .shown {
+            phase = .done
+            return
+        }
+        guard settle == nil else { return }
+        let delay = settleDelay
+        settle = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled, self.phase == .waiting else { return }
+            self.phase = .done
+        }
+    }
+
+    func tapped() {
+        settle?.cancel()
+        settle = nil
+        phase = .done
+    }
+
+    /// A new open of the chat.
+    func reset() {
+        settle?.cancel()
+        settle = nil
+        if phase != .waiting { phase = .waiting }
     }
 }

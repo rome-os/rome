@@ -61,7 +61,11 @@ struct SourceLabelLine: View {
 
 /// "New messages" between two hairlines, above the first message that was
 /// unread when the chat opened. Plain: not tappable.
+/// It tells the pill whether it is above the visible transcript; the pill
+/// decides the rest, so a scroll never draws the line again.
 struct UnreadDivider: View {
+    let pill: UnreadPill
+
     var body: some View {
         HStack(spacing: 12) {
             Rectangle().fill(Palette.hair).frame(height: 1)
@@ -74,6 +78,61 @@ struct UnreadDivider: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+        // Under the header is out of sight too: the space starts below it.
+        .onGeometryChange(for: Bool.self) { proxy in
+            proxy.frame(in: .named(transcriptScrollSpace)).maxY <= 0
+        } action: { above in
+            pill.dividerAbove(above)
+        }
+    }
+}
+
+/// "N new messages" at the top right of a Concierge chat's transcript, while
+/// the unread line is out of sight above: a tap takes the transcript up to
+/// it. It reads the unread state itself, so the transcript is not drawn
+/// again when the pill comes or goes.
+struct UnreadPillButton: View {
+    let store: TranscriptStore
+
+    var body: some View {
+        let shown = store.unreadPill.phase == .shown && store.thread == nil
+        Group {
+            if shown, let unread = store.unread {
+                Button {
+                    store.unreadPill.tapped()
+                    Task { await store.revealUnread() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up")
+                            .romeFont(12, .semibold)
+                        Group {
+                            if unread.more {
+                                Text("\(unread.count)+ new messages")
+                            } else {
+                                Text("\(unread.count) new messages")
+                            }
+                        }
+                        .romeFont(13, .semibold)
+                        .lineLimit(1)
+                    }
+                    .foregroundStyle(Palette.fg)
+                    .padding(.horizontal, 14)
+                    .frame(height: 36)
+                    .glassSurface(Capsule(), interactive: true, frost: Frost.composer)
+                    .overlay(Capsule().strokeBorder(Palette.hair, lineWidth: 0.5))
+                    .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+                    .frame(minHeight: 44)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressScaleStyle(scale: 0.95))
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.horizontal, Metrics.pagePadding)
+        .readableColumn()
+        .padding(.top, 4)
+        .animation(.easeOut(duration: 0.2), value: shown)
     }
 }
 

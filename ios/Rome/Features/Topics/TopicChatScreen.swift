@@ -154,6 +154,7 @@ struct TopicChatScreen: View {
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }
+            .overlay(alignment: .top) { UnreadPillButton(store: store) }
             .onAppear { markRead(store) }
             .onChange(of: store.arrivals) { markRead(store) }
             // Back from under a sheet: what arrived meanwhile is read now.

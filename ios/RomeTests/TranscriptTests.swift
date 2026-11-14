@@ -287,8 +287,9 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
             message("a2", [text("new")], at: 21),
         ]
         let unread = UnreadAtOpen.unread(messages, mark: mark(10))
-        #expect(UnreadAtOpen.first(in: messages, unread: unread, hasOlder: false) == "a2")
-        #expect(UnreadAtOpen.first(in: messages, unread: [], hasOlder: false) == nil)
+        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: false) == UnreadSummary(firstId: "a2", count: 1, more: false))
+        #expect(UnreadAtOpen.summary(in: messages, unread: [], hasOlder: false) == nil)
+        #expect(UnreadAtOpen.summary(in: messages, unread: ["blank"], hasOlder: false) == nil)
     }
 
     @Test func anUnreadRunThatMayStartOnAnOlderPageWaitsForIt() {
@@ -298,11 +299,11 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
             turn(message("r2", [text("new too")], at: 40), "t2"),
         ]
         let unread = UnreadAtOpen.unread(messages, mark: mark(10))
-        #expect(UnreadAtOpen.first(in: messages, unread: unread, hasOlder: true) == nil)
-        #expect(UnreadAtOpen.first(in: messages, unread: unread, hasOlder: false) == "r1")
+        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
+        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: false) == UnreadSummary(firstId: "r1", count: 2, more: false))
         // The oldest loaded turn has nothing unread: the run starts here.
         let read = [turn(message("old", [text("read")], at: 5), "t0")] + messages.dropFirst()
-        #expect(UnreadAtOpen.first(in: Array(read), unread: unread, hasOlder: true) == "r1")
+        #expect(UnreadAtOpen.summary(in: Array(read), unread: unread, hasOlder: true)?.firstId == "r1")
     }
 
     @Test func theLineSitsUnderItsTimeSeparatorAndEndsTheRunBeforeIt() {
@@ -326,5 +327,49 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
     @Test func noLineForAMessageTheChatDoesNotDraw() {
         let rows = TranscriptBuilder.rows(messages: [message("a1", [text("one")], at: 0)], pending: [], answers: [:], options: .init(unreadFrom: "gone"))
         #expect(!rows.contains(.unreadDivider))
+    }
+}
+
+/// When the "N new messages" pill shows.
+@MainActor
+@Suite struct UnreadPillTests {
+    @Test func aLineAboveTheScreenShowsItAndComingIntoViewEndsIt() {
+        let pill = UnreadPill()
+        pill.dividerAbove(true)
+        #expect(pill.phase == .shown)
+        pill.dividerAbove(false)
+        #expect(pill.phase == .done)
+        // Gone for good: the line scrolling out of sight again brings nothing.
+        pill.dividerAbove(true)
+        #expect(pill.phase == .done)
+    }
+
+    @Test func aLineThatStaysInViewNeverShowsIt() async {
+        let pill = UnreadPill()
+        pill.settleDelay = .milliseconds(20)
+        pill.dividerAbove(false)
+        #expect(pill.phase == .waiting)
+        for _ in 0..<50 where pill.phase == .waiting { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(pill.phase == .done)
+        pill.dividerAbove(true)
+        #expect(pill.phase == .done)
+    }
+
+    @Test func contentThatPushesTheLineUpBeforeItSettlesShowsIt() async {
+        let pill = UnreadPill()
+        pill.settleDelay = .milliseconds(50)
+        pill.dividerAbove(false)
+        pill.dividerAbove(true)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(pill.phase == .shown)
+    }
+
+    @Test func aTapEndsItAndANewOpenStartsOver() {
+        let pill = UnreadPill()
+        pill.dividerAbove(true)
+        pill.tapped()
+        #expect(pill.phase == .done)
+        pill.reset()
+        #expect(pill.phase == .waiting)
     }
 }

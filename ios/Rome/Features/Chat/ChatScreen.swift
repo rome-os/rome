@@ -164,6 +164,7 @@ struct ChatScreen: View {
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
+                .overlay(alignment: .top) { UnreadPillButton(store: store) }
                 .onAppear { store.arrived() }
                 .onChange(of: store.arrivals) { store.arrived() }
             }
@@ -360,7 +361,7 @@ struct ConciergeRow: View, Equatable {
         case .sessionRenewal(_, let reason, let sessionId):
             SessionRenewalLine(reason: reason)
         case .unreadDivider:
-            UnreadDivider()
+            UnreadDivider(pill: store.unreadPill)
         }
     }
 }
@@ -768,6 +769,9 @@ struct CenteredMessage: View {
     }
 }
 
+/// The coordinate space of the visible transcript, between the bars.
+let transcriptScrollSpace = "transcript"
+
 /// A transcript that follows its bottom while the guardian is there, loads
 /// older pages at the top, and offers a back-to-bottom button far up, with a
 /// dot when something arrives while they read above it.
@@ -935,11 +939,13 @@ struct TranscriptList<Row: View>: View {
             }
             .onChange(of: latestRequest) { catchUp(proxy) }
             // A quote led to its original: it comes into view, mid-screen.
+            // The unread line goes to the top, under the header.
             .onChange(of: store.jumps) {
-                guard let target = store.jumpTarget, let row = rows.first(where: { $0.ownMessageId == target }) else { return }
+                guard let target = store.jumpTarget, let row = rows.first(where: { $0.ownMessageId == target || $0.id == target }) else { return }
                 _ = scrollHandle.stop()
                 following = false
-                withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo(row.id, anchor: .center) }
+                let anchor: UnitPoint = row == .unreadDivider ? .top : .center
+                withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo(row.id, anchor: anchor) }
             }
             .onChange(of: store.pending.count) { old, new in
                 if new > old { scrollToBottom(proxy) }
@@ -991,7 +997,7 @@ struct TranscriptList<Row: View>: View {
         }
     }
 
-    private static var scrollSpace: String { "transcript" }
+    private static var scrollSpace: String { transcriptScrollSpace }
 
     private static var placesInGlide: Bool {
         if #available(iOS 18, *) { return true }

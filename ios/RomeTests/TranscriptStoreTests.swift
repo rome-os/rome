@@ -432,6 +432,29 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         store.stop()
     }
 
+    @Test func thePillPagesOlderMessagesInUntilTheLineIsDrawnThenGoesToIt() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<60).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 5)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        for _ in 0..<100 where store.unread == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        // The newest page is all unread, and older pages remain.
+        #expect(store.unread == UnreadSummary(firstId: nil, count: 40, more: true))
+        #expect(!store.rows.contains(.unreadDivider))
+        #expect(store.unreadPill.phase == .shown)
+
+        let jumps = store.jumps
+        await store.revealUnread()
+        #expect(store.unread == UnreadSummary(firstId: "m6", count: 54, more: false))
+        #expect(store.rows.contains(.unreadDivider))
+        #expect(store.jumps == jumps + 1)
+        #expect(store.jumpTarget == TranscriptRow.unreadDivider.id)
+    }
+
     @Test func aTaskChatHasNoUnreadLine() async {
         let backend = FakeBackend()
         backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
