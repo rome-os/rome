@@ -423,8 +423,6 @@ cmd_reset() {
   claim_ownership
   load_secrets
   write_discord_state
-  log "deleting the members' webhooks ..."
-  discord delete-webhooks
   clear_chats
   node -e '
     const fs = require("fs"); const f = process.argv[1];

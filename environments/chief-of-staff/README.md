@@ -43,7 +43,7 @@ Both bots join the test server. The agent's bot takes the permissions the Discor
 - `leads`: member1 and member2.
 - `dm-member1`, `dm-member2`, `dm-member3`: that one member. Each stands in for a direct message.
 
-`cos-env seed` makes each member's webhooks in the chats it is in and keeps their ids and tokens in the state folder, `~/.rome-environments/chief-of-staff/`, never in the repository. `reset` and `down` delete them.
+`cos-env seed` makes each member's webhooks in the chats it is in and keeps their ids and tokens in the state folder, `~/.rome-environments/chief-of-staff/`, never in the repository. `seed` reuses the webhooks an earlier seed made, since Discord rate-limits making them, and `down` deletes them.
 
 The three members are fixed identifiers (`member1`, `member2`, `member3`); their display names and the persons they map to come from the `team.json` that `cos-env seed` reads, so the roster can change without touching `team.env`.
 
@@ -55,7 +55,7 @@ Run them from the repository root inside `nix develop`.
 | --- | --- |
 | `environments/chief-of-staff/env.sh up` | Builds the Rome image from this checkout, connects the agent's bot, links the agent, and sets every test chat to hear bots |
 | `environments/chief-of-staff/env.sh up --no-build` | The same, reusing the last Rome image |
-| `environments/chief-of-staff/env.sh reset` | Wipes Rome's home, memory and chats, deletes the members' webhooks, clears the test chats' messages on Discord, then starts again. Run `cos-env seed` after it |
+| `environments/chief-of-staff/env.sh reset` | Wipes Rome's home, memory and chats, clears the test chats' messages on Discord, then starts again. Run `cos-env seed` after it |
 | `environments/chief-of-staff/env.sh down` | Deletes the members' webhooks and removes the Rome container, its volumes and its image. The test chats' messages stay |
 | `environments/chief-of-staff/env.sh seed <dir>` | The same as `cos-env seed <dir>` |
 

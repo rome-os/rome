@@ -52,6 +52,10 @@ async function discord(token, method, path, body) {
     });
     if (response.status === 429) {
       const wait = Number((await response.json()).retry_after ?? 1);
+      if (wait > 5)
+        process.stderr.write(
+          `cos-env: Discord rate-limits ${method} ${path.split("?")[0].replace(/^(\/webhooks\/\d+)\/[^/]+/, "$1/<token>")}, waiting ${Math.ceil(wait)}s\n`,
+        );
       await new Promise((resolve) => setTimeout(resolve, Math.ceil(wait * 1000)));
       continue;
     }
@@ -225,25 +229,31 @@ const commands = {
     process.stdout.write(`${JSON.stringify(found)}\n`);
   },
 
-  // Replaces the members' webhooks. The plan on stdin is {chat: [member, ...]};
-  // the webhooks go into the state file, which holds their tokens.
+  // Gives each member its webhook in each chat. The plan on stdin is
+  // {chat: [member, ...]}. A webhook an earlier seed made is kept, since Discord
+  // rate-limits making them, and one no member needs now is deleted. The
+  // webhooks go into the state file, which holds their tokens.
   async webhooks() {
     const s = state();
     const bot = token("COS_TOKEN");
     const plan = JSON.parse(readFileSync(0, "utf8"));
-    await deleteWebhooks(
-      bot,
-      s.driver.id,
-      Object.keys(plan).map((chat) => chatByName(s, chat)),
-    );
     s.webhooks = {};
     for (const [chat, members] of Object.entries(plan)) {
+      const chatId = chatByName(s, chat);
+      const ours = (await discord(bot, "GET", `/channels/${chatId}/webhooks`)).filter(
+        (hook) => hook.name?.startsWith(WEBHOOK_PREFIX) && hook.user?.id === s.driver.id,
+      );
       s.webhooks[chat] = {};
       for (const member of members) {
-        const hook = await discord(bot, "POST", `/channels/${chatByName(s, chat)}/webhooks`, {
-          name: `${WEBHOOK_PREFIX}${member.replace(":", "-")}`,
-        });
+        const name = `${WEBHOOK_PREFIX}${member.replace(":", "-")}`;
+        const hook =
+          ours.find((h) => h.name === name && h.token) ??
+          (await discord(bot, "POST", `/channels/${chatId}/webhooks`, { name }));
         s.webhooks[chat][member] = { id: hook.id, token: hook.token };
+      }
+      const kept = new Set(Object.values(s.webhooks[chat]).map((h) => h.id));
+      for (const hook of ours.filter((h) => !kept.has(h.id))) {
+        await discord(bot, "DELETE", `/webhooks/${hook.id}`);
       }
     }
     saveState(s);
