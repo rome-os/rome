@@ -17,6 +17,11 @@ import { profileMemoryDir } from "../../lib/memory-dir.js";
 import { type FileChange, MAX_CHANGE_CHARS } from "../../lib/changes.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
+  describeRemovedWorktrees,
+  profileLockfilePath,
+  removeStaleWorktrees,
+} from "../../lib/stale-worktrees.js";
+import {
   ensureUserSkillsCarrier,
   publishStagedSkills,
   removeStaleRunFolders,
@@ -34,6 +39,8 @@ export interface DreamDeps {
   carrierDir?: string;
   /** The profile's memory directory. Tests point it at a fixed path. */
   memoryDir?: string;
+  /** Core's app lockfile, which says what is installed from where. Tests point it at a temp file. */
+  lockfilePath?: string;
 }
 
 /** The installed skills a dream added or changed, as writes or as edits of their old text. */
@@ -109,6 +116,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
   const { agentRunner, appContext } = deps;
   const carrierDir = deps.carrierDir ?? userSkillsCarrierDir();
   const memoryDir = deps.memoryDir ?? profileMemoryDir();
+  const lockfilePath = deps.lockfilePath ?? profileLockfilePath();
   /** Whether anyone sent Rome a message in the last `windowHours`, read
    *  through Chats. */
   const chatInWindow = async (windowHours: number) => {
@@ -235,6 +243,18 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         const memoryStopped = await runAgent("dream", "Memory agent", memoryPrompt, memoryRecorder);
         if (memoryStopped) return memoryStopped;
 
+        // Worktrees the guardian's chats left behind go before the snapshot,
+        // so the apps diff neither copies them nor shows them as deleted. A
+        // failure here leaves them for the next dream.
+        let worktreesNote = "";
+        try {
+          const removed = await removeStaleWorktrees({ appsDir, lockfilePath });
+          worktreesNote = describeRemovedWorktrees(removed);
+          if (removed.length > 0) log.info("dream removed stale worktrees", { runId, removed });
+        } catch (err) {
+          log.warn("dream could not remove stale worktrees", { error: String(err), runId });
+        }
+
         // The practice agent's skills staging copy, and its baseline for the
         // apps diff: a copy of the apps outside staging, taken after the
         // carrier exists so a fresh carrier does not show as an app change.
@@ -295,7 +315,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           }
         }
         if (practiceStopped) return practiceStopped;
-        const agentSummary = [memoryRecorder.summary, practiceRecorder.summary]
+        const agentSummary = [memoryRecorder.summary, practiceRecorder.summary, worktreesNote]
           .filter(Boolean)
           .join("\n\n");
 
