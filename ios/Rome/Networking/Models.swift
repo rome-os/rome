@@ -254,6 +254,11 @@ struct ConciergeSessionInfo: Codable, Sendable {
     var unread: Int
 }
 
+/// `GET /chat/sessions/:id`, the one field read from it.
+struct SessionReadMark: Decodable, Sendable {
+    var lastSeenActivityAt: String?
+}
+
 /// `POST /chat/sessions/:id/turns`.
 struct CreatedTurn: Codable, Sendable {
     var turnId: String?

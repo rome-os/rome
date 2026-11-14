@@ -478,6 +478,13 @@ final class Workspace {
         if isMainChat(chat) { concierge.chatShown() } else { topicStores[chat]?.chatShown() }
     }
 
+    /// The app went to the background: each Concierge chat opens again when
+    /// it comes back in front, so what arrived meanwhile gets its unread line.
+    func leftForBackground() {
+        concierge.leftForBackground()
+        for store in topicStores.values { store.leftForBackground() }
+    }
+
     /// The id this person's main chat goes by, here and on the server.
     func isMainChat(_ id: String) -> Bool {
         id == conciergeChatID || id == mainChatServerID || id == concierge.sessionId
@@ -1318,6 +1325,7 @@ final class AppModel {
         // Drafts are written before the app may be killed.
         if let drafts = workspace?.drafts { Task { await drafts.flush() } }
         workspace?.transcripts.flush()
+        workspace?.leftForBackground()
         sayGoodbye()
     }
 

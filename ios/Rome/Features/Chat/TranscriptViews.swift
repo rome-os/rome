@@ -566,7 +566,7 @@ enum TranscriptSpacing {
         if case .notice = row { return 14 }
         // A faint line stands apart, like a time separator.
         switch (row, previous) {
-        case (.sessionRenewal, _), (_, .sessionRenewal): return 14
+        case (.sessionRenewal, _), (_, .sessionRenewal), (.unreadDivider, _), (_, .unreadDivider): return 14
         default: break
         }
         // Tight under its own message, and apart from the next one.

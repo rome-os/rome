@@ -255,6 +255,34 @@
         }
       }
     },
+    "%lld new messages" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new message"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new messages"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条新消息"
+          }
+        }
+      }
+    },
     "%lld records" : {
       "localizations" : {
         "en" : {
@@ -299,6 +327,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条未读"
+          }
+        }
+      }
+    },
+    "%lld+ new messages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld+ 条新消息"
           }
         }
       }
@@ -839,6 +877,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法检查更新"
+          }
+        }
+      }
+    },
+    "Can't find where the new messages start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到新消息的起点"
           }
         }
       }
@@ -2247,6 +2295,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新聊天"
+          }
+        }
+      }
+    },
+    "New messages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以下为新消息"
           }
         }
       }
