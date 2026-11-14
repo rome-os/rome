@@ -17,6 +17,8 @@ import { browserLanguage } from "../lib/script.mjs";
 
 /** How far Rome Cloud's seconds may be from the recording's length, as a fraction of it. */
 export const SECONDS_TOLERANCE = 0.1;
+/** How long Rome Cloud's usage must stay unchanged before a session starts; tests shorten it. */
+const usageQuietMs = () => Number(process.env.VERIFY_USAGE_QUIET_MS ?? 30000);
 /** Listening sessions whose seconds are checked; every one must be within the tolerance. */
 export const SECONDS_REPEATS = 5;
 /** How long Rome Cloud has to show the usage event after listening stops. */
@@ -252,7 +254,7 @@ async function gateOn(ctx, message) {
  */
 async function dictate(ctx, message) {
   const { env } = ctx;
-  const usageBefore = (await env.cloudUsage()).events.length;
+  const usageBefore = await settledUsage(env);
   const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
   let listened;
   let heard;
@@ -287,6 +289,26 @@ async function dictate(ctx, message) {
 }
 
 /** The first usage event after the `before` events already shown, or undefined after a wait. */
+/**
+ * The number of usage events once no new one has arrived for `usageQuietMs()`. A session's
+ * event can reach Rome Cloud well after the session, so an earlier rule's last event could
+ * otherwise be taken for this session's.
+ */
+async function settledUsage(env) {
+  const start = Date.now();
+  let count = (await env.cloudUsage()).events.length;
+  let since = Date.now();
+  while (Date.now() - since < usageQuietMs() && Date.now() - start < USAGE_WAIT_MS) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const now = (await env.cloudUsage()).events.length;
+    if (now !== count) {
+      count = now;
+      since = Date.now();
+    }
+  }
+  return count;
+}
+
 async function waitForUsage(env, before) {
   const start = Date.now();
   while (Date.now() - start < USAGE_WAIT_MS) {

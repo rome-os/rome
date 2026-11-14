@@ -13,6 +13,8 @@ import { loadScript } from "../lib/script.mjs";
 import { voiceEnv } from "../lib/voice-env.mjs";
 import { execFileSync } from "node:child_process";
 
+// The fake records usage at once, so rule 11 need not wait long for it to settle.
+process.env.VERIFY_USAGE_QUIET_MS ??= "1500";
 const fakeEnv = fileURLToPath(new URL("../fake/voice-env.mjs", import.meta.url));
 
 /** Every test folder, so their Chromes die even when a test times out or the run is killed. */
@@ -68,6 +70,7 @@ async function runAgainst(variant, options = {}) {
       script,
       waits: WAITS,
       allowDirty: true,
+      secondsRepeats: 2,
       outDir: join(dir, "run"),
       log: process.env.VERIFY_TEST_LOG ? (line) => console.error(`${variant}: ${line}`) : () => {},
       ...options,
