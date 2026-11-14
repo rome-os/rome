@@ -42,6 +42,7 @@ PG="rome-env-${NAME}-pg"
 PG_VOLUME="rome-env-${NAME}-pg"
 CLOUD="rome-env-${NAME}-cloud"
 ROUTER="rome-env-${NAME}-router"
+WALKER="rome-env-${NAME}-walk"
 RUNNER_IMAGE="rome-env-${NAME}-runner"
 ENV_FILE="$STATE_DIR/cloud.env"
 # The model login and the test OAuth apps, one KEY=value per line, mode 600.
@@ -238,7 +239,7 @@ EOF
 
 start_database() {
   if [ -z "$(docker ps -aq --filter "name=^${PG}$")" ]; then
-    docker run -d --name "$PG" --network "$NETWORK" --restart unless-stopped \
+    docker run -d --name "$PG" --network "$NETWORK" --restart unless-stopped --memory 1g \
       -e POSTGRES_USER=pantheon -e POSTGRES_PASSWORD=pantheon -e POSTGRES_DB=pantheon \
       -v "$PG_VOLUME:/var/lib/postgresql/data" postgres:16 >/dev/null
   fi
@@ -249,7 +250,7 @@ start_database() {
 start_cloud() {
   docker rm -f "$CLOUD" >/dev/null 2>&1 || true
   # Rome Cloud runs `docker` to create each Rome, so it gets the socket and its group.
-  docker run -d --name "$CLOUD" --network "$NETWORK" --restart unless-stopped \
+  docker run -d --name "$CLOUD" --network "$NETWORK" --restart unless-stopped --memory 4g \
     --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" \
     -e HOME=/tmp --env-file "$ENV_FILE" \
     -v /var/run/docker.sock:/var/run/docker.sock -v "$ROME_CLOUD_DIR:$ROME_CLOUD_DIR" \
@@ -265,7 +266,7 @@ start_cloud() {
 # Priority 1 lets every other stack's own Host rule win.
 start_router() {
   docker rm -f "$ROUTER" >/dev/null 2>&1 || true
-  docker run -d --name "$ROUTER" --network "$NETWORK" --restart unless-stopped \
+  docker run -d --name "$ROUTER" --network "$NETWORK" --restart unless-stopped --memory 256m \
     -e "ROME_DOMAIN=$DOMAIN" -v "$ENV_DIR/router.Caddyfile:/etc/caddy/Caddyfile:ro" \
     --label traefik.enable=true --label "traefik.docker.network=$NETWORK" \
     --label "traefik.http.routers.${ROUTER}.rule=HostRegexp(\`^[a-z0-9-]+\\.rome\\.localhost$\`)" \
@@ -366,7 +367,10 @@ cmd_walk() {
   log "walking from the landing page to a Rome's chat${cards:+ and its cards} ..."
   rm -rf "$STATE_DIR/walk"
   mkdir -p "$STATE_DIR/walk"
-  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  # The walk's Chrome lives in this container: --init reaps it, and the trap
+  # removes the container when the walk is stopped or fails.
+  trap 'docker rm -f "$WALKER" >/dev/null 2>&1 || true' EXIT INT TERM
+  docker run --rm --init --name "$WALKER" --memory 2g --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -e "CLOUD_ORIGIN=$CLOUD_ORIGIN" -e "ROME_DOMAIN=$DOMAIN" -e OUT=/out \
     -e "CARDS=$cards" -e "MODEL=${ONBOARDING_MODEL:-$DEFAULT_MODEL}" -e "TEST_APPS=$(test_apps)" \
     -v "$STATE_DIR/walk:/out" -v "$ENV_DIR:/walk:ro" -w /tmp \
