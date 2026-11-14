@@ -5429,6 +5429,13 @@ describe("Webchat API", () => {
       const prompt = ctl.sentTurns.at(-1)?.prompt ?? "";
       expect(prompt).toContain("latitude: 31.23");
       expect(prompt).toContain("around <city>");
+      // The chat keeps how the card ended, never where the guardian was.
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-loc",
+        output: { status: "shared", accuracyMeters: 25_000, fixedAt: "2026-11-14T08:00:00.000Z" },
+      });
+      expect(JSON.stringify(await userPartsIn(sessionId))).not.toContain("31.23");
     });
 
     it("expires an open share-location card when the guardian types a reply instead", async () => {

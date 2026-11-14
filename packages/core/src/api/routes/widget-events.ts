@@ -5,6 +5,11 @@ import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 import { DECLINED_LOCATION, sharedLocationAnswer } from "../../webchat/location-card.js";
+import {
+  DECLINE_LOCATION_EVENT,
+  LOCATION_CARD_ID,
+  SHARE_LOCATION_EVENT,
+} from "@rome/api-types/location-card";
 
 /** What core's own widget makes of one of its events: an answer for the agent
  *  waiting on it, a link for the client to open, or neither, which leaves the
@@ -76,13 +81,13 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
     dismiss: async (context) => ({ answer: { kind: context.kind, dismissed: true } }),
   },
   // Share carries the position the client read from the device; Not now declines.
-  "location-card": {
-    "share-location": async (context) => {
+  [LOCATION_CARD_ID]: {
+    [SHARE_LOCATION_EVENT]: async (context) => {
       const shared = sharedLocationAnswer(context);
       if (!shared) return Response.json({ error: "No location was sent." }, { status: 400 });
       return { answer: shared };
     },
-    decline: async () => ({ answer: DECLINED_LOCATION }),
+    [DECLINE_LOCATION_EVENT]: async () => ({ answer: DECLINED_LOCATION }),
   },
 };
 

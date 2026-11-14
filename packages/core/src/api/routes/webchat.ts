@@ -132,7 +132,11 @@ import {
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
-import { locationAnswerPrompt, locationCardUiFromProps } from "../../webchat/location-card.js";
+import {
+  locationAnswerPrompt,
+  locationCardUiFromProps,
+  storedLocationAnswer,
+} from "../../webchat/location-card.js";
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import { cameThroughWidgetEvent } from "./widget-events.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
@@ -4149,6 +4153,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // far to trust the position and that it is for this turn only.
     if (resolution && openSuspensions.get(resolution.toolUseId)?.location) {
       resolution.prompt = locationAnswerPrompt(resolution.output);
+      // The position reaches this turn only: the chat keeps how the card
+      // ended and how precise it was, never where the guardian was.
+      for (const part of body.parts as Array<Record<string, unknown>>) {
+        if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+          part.output = storedLocationAnswer(resolution.output);
+        }
+      }
     }
 
     let reply: Extract<ReplyResolution, { ok: true }> | undefined;

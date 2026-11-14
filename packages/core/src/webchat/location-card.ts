@@ -100,6 +100,14 @@ export function sharedLocationAnswer(context: Record<string, unknown>): Location
 /** The answer Not now makes. */
 export const DECLINED_LOCATION: LocationAnswer = { status: "declined", dismissed: true };
 
+/** What the chat keeps of an answer: how the card ended and how precise a
+ *  shared position was, without the position itself. */
+export function storedLocationAnswer(output: unknown): Record<string, unknown> {
+  const answer = output as Partial<Extract<LocationAnswer, { status: "shared" }>> | null;
+  if (answer?.status !== "shared") return { ...DECLINED_LOCATION };
+  return { status: "shared", accuracyMeters: answer.accuracyMeters, fixedAt: answer.fixedAt };
+}
+
 /** What the agent reads when the card is answered. */
 export function locationAnswerPrompt(output: unknown): string {
   const answer = output as Partial<Extract<LocationAnswer, { status: "shared" }>> | null;
