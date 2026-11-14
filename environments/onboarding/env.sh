@@ -4,6 +4,8 @@
 #
 #   environments/onboarding/env.sh up      # start, or bring up to date
 #   environments/onboarding/env.sh walk    # reset, then run the walk-through
+#   environments/onboarding/env.sh walk-cards  # the same, then the chat cards
+#   environments/onboarding/env.sh models  # run every Rome on the cheap model
 #   environments/onboarding/env.sh reset   # delete every account and Rome
 #   environments/onboarding/env.sh down    # remove everything up created
 #
@@ -42,6 +44,11 @@ CLOUD="rome-env-${NAME}-cloud"
 ROUTER="rome-env-${NAME}-router"
 RUNNER_IMAGE="rome-env-${NAME}-runner"
 ENV_FILE="$STATE_DIR/cloud.env"
+# The model login and the test OAuth apps, one KEY=value per line, mode 600.
+# Optional: without it each Rome has no model and Rome Cloud no OAuth apps.
+SECRETS_FILE="${ONBOARDING_SECRETS_FILE:-$HOME/.config/rome/onboarding.env}"
+SECRET_NAMES='ANTHROPIC_API_KEY|ONBOARDING_MODEL|(GITHUB|SLACK|SHOPIFY)_OAUTH_CLIENT_(ID|SECRET)'
+DEFAULT_MODEL=claude-haiku-5-5
 OWNER_FILE="$STATE_DIR/owner"
 
 log() { printf 'env/%s: %s\n' "$NAME" "$*" >&2; }
@@ -142,6 +149,53 @@ in_runner() {
     "$RUNNER_IMAGE" bash -c "$1"
 }
 
+# Reads the secrets file into the shell. A variable already set in the shell wins.
+load_secrets() {
+  [ -f "$SECRETS_FILE" ] || return 0
+  local key value
+  while IFS='=' read -r key value; do
+    [[ "$key" =~ ^($SECRET_NAMES)$ ]] || continue
+    [ -n "${!key:-}" ] || export "$key=$value"
+  done <"$SECRETS_FILE"
+}
+
+# The Rome .env lines Rome Cloud adds to each Rome it creates. Rome Cloud's
+# provisioning script sources that file, so a value must be a plain word.
+instance_env() {
+  local entries=FEATURE_GATE_ROME_CLOUD_AUTH=true
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    [[ "$ANTHROPIC_API_KEY" =~ ^[A-Za-z0-9_-]+$ ]] || die "ANTHROPIC_API_KEY is not a plain word"
+    entries+=",ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+  fi
+  printf '%s' "$entries"
+}
+
+# The kinds whose test OAuth app is set, comma-separated, such as github,slack.
+test_apps() {
+  local provider id kinds=()
+  for provider in GITHUB SLACK SHOPIFY; do
+    id="${provider}_OAUTH_CLIENT_ID"
+    [ -z "${!id:-}" ] || kinds+=("${provider,,}")
+  done
+  local IFS=,
+  printf '%s' "${kinds[*]}"
+}
+
+# Rome Cloud's settings for the test OAuth apps, for each provider whose id and
+# secret are both set.
+oauth_apps() {
+  local provider id secret
+  for provider in GITHUB SLACK SHOPIFY; do
+    id="${provider}_OAUTH_CLIENT_ID"
+    secret="${provider}_OAUTH_CLIENT_SECRET"
+    if [ -n "${!id:-}" ] && [ -n "${!secret:-}" ]; then
+      printf '%s=%s\n%s=%s\n' "$id" "${!id}" "$secret" "${!secret}"
+    elif [ -n "${!id:-}${!secret:-}" ]; then
+      die "only one of $id and $secret is set"
+    fi
+  done
+}
+
 # A value already in the env file, so secrets survive a rewrite.
 kept() { [ ! -f "$ENV_FILE" ] || sed -n "s/^$1=//p" "$ENV_FILE"; }
 
@@ -169,13 +223,14 @@ NEXT_TELEMETRY_DISABLED=1
 PROVIDER=docker
 DOCKER_NETWORK=${NETWORK}
 DOCKER_INSECURE_REGISTRY=${REGISTRY}:5000
-DOCKER_INSTANCE_ENV=FEATURE_GATE_ROME_CLOUD_AUTH=true
+DOCKER_INSTANCE_ENV=$(instance_env)
 ROME_DOCKER_IMAGE=${ROME_IMAGE_PULL}
 CLICKHOUSE_ENDPOINT=http://clickhouse.invalid:8123
 CLICKHOUSE_INSTANCE_USERNAME=none
 CLICKHOUSE_INSTANCE_PASSWORD=none
 RELAY_ORIGIN=https://relay.invalid
 RELAY_SIGNING_KEY=${relay_key}
+$(oauth_apps)
 EOF
   )
   mv "$ENV_FILE.new" "$ENV_FILE"
@@ -239,6 +294,22 @@ wait_for_cloud() {
   done
 }
 
+# Sends every model tier of every running Rome to one model, through the same
+# setting the dashboard's model picker writes. A Rome made later runs on its
+# default models until the next `models`.
+set_models() {
+  [ -n "${ANTHROPIC_API_KEY:-}" ] || return 0
+  local model="${ONBOARDING_MODEL:-$DEFAULT_MODEL}" id body
+  body="$(printf '{"tierModelMappings":{"anthropic":{"large":"%s","medium":"%s","small":"%s"}}}' "$model" "$model" "$model")"
+  for id in $(docker ps -q --filter "name=^rome-vm-" --filter "network=$NETWORK"); do
+    if docker exec "$id" docker exec rome-rome-1 curl -sS --fail -o /dev/null -X PUT \
+      -H 'Content-Type: application/json' -H 'Sec-Fetch-Site: same-origin' \
+      --data "$body" http://127.0.0.1:4141/api/settings 2>/dev/null; then
+      log "$(docker inspect -f '{{.Name}}' "$id" | sed 's|^/rome-vm-||') runs on $model"
+    fi
+  done
+}
+
 # Removes every Rome this environment's Rome Cloud created: the rome-vm-* containers
 # on its network, and their volumes. Rome Cloud must be stopped first, so that it
 # creates nothing while they go.
@@ -284,15 +355,22 @@ cmd_reset() {
   cmd_up --no-build
 }
 
+# Resets, then walks from the landing page to a Rome's chat. With `cards`, the
+# walk goes on to the chat cards in cards.mjs, which need the model login.
 cmd_walk() {
+  local cards="${1:-}"
+  if [ -n "$cards" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    die "walk-cards needs ANTHROPIC_API_KEY, in the shell or $SECRETS_FILE"
+  fi
   cmd_reset
-  log "walking from the landing page to a Rome's chat ..."
+  log "walking from the landing page to a Rome's chat${cards:+ and its cards} ..."
   rm -rf "$STATE_DIR/walk"
   mkdir -p "$STATE_DIR/walk"
   docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -e "CLOUD_ORIGIN=$CLOUD_ORIGIN" -e "ROME_DOMAIN=$DOMAIN" -e OUT=/out \
-    -v "$STATE_DIR/walk:/out" -v "$ENV_DIR/walk.mjs:/walk/walk.mjs:ro" -w /tmp \
-    "$PLAYWRIGHT_IMAGE" bash -c "npm install --silent --no-save playwright@1.62.1 >/dev/null 2>&1 && cp /walk/walk.mjs . && node walk.mjs"
+    -e "CARDS=$cards" -e "MODEL=${ONBOARDING_MODEL:-$DEFAULT_MODEL}" -e "TEST_APPS=$(test_apps)" \
+    -v "$STATE_DIR/walk:/out" -v "$ENV_DIR:/walk:ro" -w /tmp \
+    "$PLAYWRIGHT_IMAGE" bash -c "npm install --silent --no-save playwright@1.62.1 >/dev/null 2>&1 && cp /walk/*.mjs . && node walk.mjs"
   log "walk passed on Rome $(image_sha) and Rome Cloud $(git -C "$ROME_CLOUD_DIR" rev-parse --short HEAD). Screenshots: $STATE_DIR/walk"
 }
 
@@ -306,10 +384,13 @@ cmd_down() {
   log "removed. The Rome Cloud checkout stays in $ROME_CLOUD_DIR"
 }
 
+load_secrets
 case "${1:-}" in
   up) cmd_up "${2:-}" ;;
   walk) cmd_walk ;;
+  walk-cards) cmd_walk cards ;;
+  models) set_models ;;
   reset) cmd_reset ;;
   down) cmd_down ;;
-  *) die "usage: env.sh up [--no-build] | walk | reset | down" ;;
+  *) die "usage: env.sh up [--no-build] | walk | walk-cards | models | reset | down" ;;
 esac
