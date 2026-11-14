@@ -31,19 +31,20 @@ function shownName(sender: string | null | undefined): string | null {
   return sender?.replace(/[[\]]/g, "").trim() || null;
 }
 
+/** `text` with its markup escaped, so nothing a sender writes closes the
+ *  block it sits in. */
+function escapeMarkup(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 /** A message's text as one context line reads it. Its later lines are
- *  indented and its markup escaped, so nothing a sender writes reads as
- *  another message or closes the block it sits in. */
+ *  indented, so none of them reads as another message. */
 function shownText(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\r?\n/g, "\n  ");
+  return escapeMarkup(text).replace(/\r?\n/g, "\n  ");
 }
 
 function contextLine(message: ContextMessage): string {
-  const name = shownName(message.sender) ?? "Unknown sender";
+  const name = escapeMarkup((shownName(message.sender) ?? "Unknown sender").replace(/\s+/g, " "));
   const who = message.who?.trim();
   return replyContextLine({
     createdAt: message.createdAt,
