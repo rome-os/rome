@@ -41,6 +41,8 @@ export const voiceInputStopReasonSchema = z.enum([
   "provider-refused",
   /** The client broke the socket's message order. */
   "bad-request",
+  /** One dictation reached Rome's length limit; the text heard so far still arrives. */
+  "time-limit",
 ]);
 export type VoiceInputStopReason = z.infer<typeof voiceInputStopReasonSchema>;
 

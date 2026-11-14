@@ -1,6 +1,7 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
+import { isElectronShell } from "@/lib/electron-shell";
 import {
   type Dictation,
   type DictationDeps,
@@ -11,6 +12,8 @@ import {
 export type VoiceInputState = "idle" | "listening" | "finishing";
 
 interface Anchor {
+  /** The field as it was when listening started. */
+  original: string;
   before: string;
   after: string;
   start: number;
@@ -64,23 +67,28 @@ export function useVoiceInput({
       anchorRef.current = null;
       if (!anchor) return;
       const insertion = spokenInsertion(anchor.before, heard);
+      // Back to the field and selection as they were, so the spoken text
+      // replaces the selection the way typing would, and undo brings it back.
       flushSync(() => {
         setState("idle");
-        setValue(anchor.before + anchor.after);
+        setValue(anchor.original);
       });
-      if (!insertion) return;
       const el = textareaRef.current;
       if (el) {
         el.focus();
         el.setSelectionRange(anchor.start, anchor.end);
-        // The browser's own insertion is what typing does: it fires the input
-        // event and records one undo step.
-        if (
-          typeof document.execCommand === "function" &&
-          document.execCommand("insertText", false, insertion)
-        ) {
-          return;
-        }
+      }
+      if (!insertion) return;
+      // The browser's own insertion is what typing does: it fires the input
+      // event and records one undo step. It acts on the focused element, so
+      // it runs only when focus reached the field.
+      if (
+        el &&
+        document.activeElement === el &&
+        typeof document.execCommand === "function" &&
+        document.execCommand("insertText", false, insertion)
+      ) {
+        return;
       }
       setValue(anchor.before + insertion + anchor.after);
     },
@@ -94,6 +102,7 @@ export function useVoiceInput({
     const startAt = el ? el.selectionStart : current.length;
     const endAt = el ? el.selectionEnd : current.length;
     anchorRef.current = {
+      original: current,
       before: current.slice(0, startAt),
       after: current.slice(endAt),
       start: startAt,
@@ -126,8 +135,12 @@ export function useVoiceInput({
   }, []);
 
   return {
-    /** False hides the voice control: the instance has no transcription provider. */
-    available: Boolean(info.data?.place),
+    /**
+     * False hides the voice control: the instance has no transcription
+     * provider, or this is the desktop app, which cannot open the microphone
+     * yet.
+     */
+    available: Boolean(info.data?.place) && !isElectronShell(),
     state,
     /** Why listening last stopped on its own, or null. */
     notice,

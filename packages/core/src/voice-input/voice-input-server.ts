@@ -24,6 +24,9 @@ const log = createLogger("voice-input");
 // A 16 kHz mono frame of a few hundred milliseconds is about 10 KB.
 const MAX_FRAME_BYTES = 256 * 1024;
 
+// Bounds what one forgotten open microphone costs on the provider's bill.
+export const MAX_DICTATION_MS = 10 * 60 * 1000;
+
 const STOP_REASON: Record<TranscriptionFailure, VoiceInputStopReason> = {
   unavailable: "provider-unavailable",
   refused: "provider-refused",
@@ -71,9 +74,15 @@ export function attachVoiceInputServer(
 }
 
 /** Runs one dictation over `ws`. Exported for tests. */
-export function serve(ws: WebSocket, transcriber: Transcriber): void {
+export function serve(
+  ws: WebSocket,
+  transcriber: Transcriber,
+  maxDictationMs = MAX_DICTATION_MS,
+): void {
   let stream: TranscriptionStream | null = null;
   let closed = false;
+  let timedOut = false;
+  let limit: ReturnType<typeof setTimeout> | null = null;
   let frames = 0;
   let bytes = 0;
 
@@ -83,6 +92,7 @@ export function serve(ws: WebSocket, transcriber: Transcriber): void {
   const close = (last: VoiceInputServerMessage) => {
     if (closed) return;
     closed = true;
+    if (limit) clearTimeout(limit);
     reply(last);
     ws.close(1000);
     log.info("voice input stopped", { outcome: last.type, frames, bytes });
@@ -118,13 +128,18 @@ export function serve(ws: WebSocket, transcriber: Transcriber): void {
           onText: (settled, pending) => {
             if (!closed) reply({ type: "text", settled, pending });
           },
-          onEnd: () => close({ type: "ended" }),
+          onEnd: () =>
+            close(timedOut ? { type: "error", reason: "time-limit" } : { type: "ended" }),
           onFailure: (failure, detail) => {
             log.warn("voice input provider failed", { failure, detail });
             close({ type: "error", reason: STOP_REASON[failure] });
           },
         },
       );
+      limit = setTimeout(() => {
+        timedOut = true;
+        stream?.finish();
+      }, maxDictationMs);
       return;
     }
     if (!stream) return close({ type: "error", reason: "bad-request" });
@@ -132,6 +147,7 @@ export function serve(ws: WebSocket, transcriber: Transcriber): void {
   });
 
   ws.on("close", () => {
+    if (limit) clearTimeout(limit);
     if (!closed) {
       closed = true;
       log.info("voice input stopped", { outcome: "client-closed", frames, bytes });

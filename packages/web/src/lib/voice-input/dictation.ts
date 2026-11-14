@@ -15,6 +15,7 @@ export type DictationStopReason =
   | VoiceInputStopReason
   | "microphone-blocked"
   | "microphone-missing"
+  | "microphone-failed"
   | "connection-lost";
 
 export interface DictationHandlers {
@@ -154,9 +155,11 @@ export function startDictation(
     .catch((error: unknown) => {
       const name = error instanceof DOMException ? error.name : "";
       finish(
-        name === "NotFoundError" || name === "OverconstrainedError"
-          ? "microphone-missing"
-          : "microphone-blocked",
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "microphone-blocked"
+          : name === "NotFoundError" || name === "OverconstrainedError"
+            ? "microphone-missing"
+            : "microphone-failed",
       );
     });
 
@@ -165,7 +168,9 @@ export function startDictation(
       if (done || stopping) return;
       stopping = true;
       microphone?.close();
-      if (microphone && !socket) {
+      // Without a socket nothing was sent, so nothing more can come back. A
+      // microphone that opens later is closed by the `done` check.
+      if (!socket) {
         finish(null);
         return;
       }

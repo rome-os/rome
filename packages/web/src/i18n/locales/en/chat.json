@@ -709,7 +709,9 @@
       "bad-request": "Listening stopped after an error",
       "microphone-blocked": "Microphone blocked. Allow it in the browser's site settings",
       "microphone-missing": "No microphone found",
-      "connection-lost": "Connection to Rome lost. Listening stopped"
+      "connection-lost": "Connection to Rome lost. Listening stopped",
+      "microphone-failed": "Microphone could not start. Listening stopped",
+      "time-limit": "Listening stopped after 10 minutes"
     }
   }
 }

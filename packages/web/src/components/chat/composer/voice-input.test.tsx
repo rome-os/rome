@@ -12,11 +12,14 @@ import { ReplyDraftHarness } from "../reply/reply-draft-harness";
 // The browser's microphone, which jsdom does not have.
 const microphone = rs.hoisted(() => ({
   refuse: false,
+  /** While true, the permission prompt never answers. */
+  pending: false,
   closed: 0,
   onAudio: null as ((chunk: ArrayBuffer) => void) | null,
 }));
 rs.mock("@/lib/voice-input/microphone", () => ({
   openMicrophone: async (onAudio: (chunk: ArrayBuffer) => void) => {
+    if (microphone.pending) await new Promise(() => {});
     if (microphone.refuse) throw new DOMException("denied", "NotAllowedError");
     microphone.onAudio = onAudio;
     return {
@@ -66,15 +69,32 @@ class FakeSocket {
   }
 }
 
+/**
+ * jsdom has no `execCommand`. This one inserts into the focused field as
+ * Chrome's does: it replaces the selection and fires an input event.
+ */
+function insertTextAtSelection(command: string, _ui: boolean, text: string): boolean {
+  const el = document.activeElement;
+  if (command !== "insertText" || !(el instanceof HTMLTextAreaElement)) return false;
+  const next = el.value.slice(0, el.selectionStart) + text + el.value.slice(el.selectionEnd);
+  const caret = el.selectionStart + text.length;
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, next);
+  el.setSelectionRange(caret, caret);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+}
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
 beforeEach(() => {
   microphone.refuse = false;
+  microphone.pending = false;
   microphone.closed = 0;
   FakeSocket.last = null;
   rs.stubGlobal("WebSocket", FakeSocket);
+  document.execCommand = insertTextAtSelection as typeof document.execCommand;
 });
 
 afterEach(() => {
@@ -165,6 +185,54 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(field().readOnly).toBe(false);
     expect(screen.queryByRole("status")).toBeNull();
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("replaces selected text the way typing does", async () => {
+    const { field } = renderComposer(kind);
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "Hello old world" } });
+    box.setSelectionRange(6, 9);
+
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "new", pending: "" });
+    expect(field().value).toBe("Hello new world");
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    socket.say({ type: "ended" });
+
+    expect(field().value).toBe("Hello new world");
+  });
+
+  it("leaves the field and its selection as they were when nothing was heard", async () => {
+    microphone.refuse = true;
+    const { field } = renderComposer(kind);
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "Hello old world" } });
+    box.setSelectionRange(6, 9);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    expect(field().value).toBe("Hello old world");
+    expect([field().selectionStart, field().selectionEnd]).toEqual([6, 9]);
+  });
+
+  it("stops at once while the microphone prompt is still open", async () => {
+    microphone.pending = true;
+    const { field } = renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+
+    await waitFor(() => expect(field().readOnly).toBe(false));
+    expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(FakeSocket.last).toBeNull();
   });
 
   it("keeps the words heard and says why when the transcriber stops listening", async () => {

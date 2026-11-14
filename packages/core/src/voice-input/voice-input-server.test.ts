@@ -67,11 +67,11 @@ async function fakeSoniox(): Promise<FakeSoniox> {
 }
 
 /** Rome's dictation socket in front of the fake, and a client connected to it. */
-async function dictation(fake: FakeSoniox) {
+async function dictation(fake: FakeSoniox, maxDictationMs?: number) {
   const transcriber = createSonioxTranscriber({ apiKey: "key-1", url: fake.url });
   const http: Server = createServer();
   const wss = new WebSocketServer({ server: http });
-  wss.on("connection", (ws) => serve(ws, transcriber));
+  wss.on("connection", (ws) => serve(ws, transcriber, maxDictationMs));
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   servers.push({
     close: () => {
@@ -162,6 +162,23 @@ describe("voice input socket", () => {
     await closed;
 
     expect(messages).toEqual([{ type: "error", reason: "provider-unavailable" }]);
+  });
+
+  it("finishes a dictation that reaches the length limit and says why", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) =>
+      text === ""
+        ? [{ tokens: [{ text: "so far", is_final: true }] }, { tokens: [], finished: true }]
+        : [];
+    const { client, messages, closed } = await dictation(fake, 50);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "so far", pending: "" },
+      { type: "error", reason: "time-limit" },
+    ]);
   });
 
   it("refuses audio before start", async () => {
