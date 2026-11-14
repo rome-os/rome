@@ -4,7 +4,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { listSessions, type SessionScope, type SessionStatusFilter } from "@/lib/chat-api";
 import type { ChatSession } from "@/lib/chat-types";
 import { CHAT_SESSIONS_CHANGED_EVENT } from "@/lib/session-events";
@@ -29,11 +29,32 @@ export function findCachedChatSession(
   return undefined;
 }
 
-/** Whether this tab has loaded any chat list, so a chat's absence from them means something. */
-export function hasCachedChatSessions(queryClient: QueryClient): boolean {
-  return queryClient
-    .getQueriesData<ChatSession[]>({ queryKey: CHAT_SESSIONS_QUERY_KEY })
-    .some(([, list]) => list !== undefined);
+/**
+ * False when the lists this tab has loaded show the chat is gone: it is in none
+ * of them, and one of them is not the archived list, which does not hold a
+ * chat that is not archived. True when a list holds it, and when no list can
+ * say. Never fetches.
+ */
+function chatSessionMayExist(queryClient: QueryClient, id: string): boolean {
+  let proves = false;
+  for (const [key, list] of queryClient.getQueriesData<ChatSession[]>({
+    queryKey: CHAT_SESSIONS_QUERY_KEY,
+  })) {
+    if (!list) continue;
+    if (list.some((session) => session.id === id)) return true;
+    if (key[1] !== "archived") proves = true;
+  }
+  return !proves;
+}
+
+/** {@link chatSessionMayExist}, kept current as this tab's chat lists change. True for no id. */
+export function useChatSessionMayExist(id: string | null): boolean {
+  const queryClient = useQueryClient();
+  return useSyncExternalStore(
+    (onChange) => queryClient.getQueryCache().subscribe(onChange),
+    () => id === null || chatSessionMayExist(queryClient, id),
+    () => true,
+  );
 }
 
 const pendingInvalidations = new WeakMap<QueryClient, Promise<void>>();

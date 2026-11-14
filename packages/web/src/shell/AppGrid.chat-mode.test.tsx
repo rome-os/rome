@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LAST_CHAT_KEY, MODE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import i18n from "@/i18n";
@@ -28,9 +28,9 @@ afterEach(() => {
   seedChatListMode();
 });
 
-function chatTile(sessions?: Array<{ id: string }>) {
+function mountRail(sessions?: Array<{ id: string }>, key: readonly string[] = SESSIONS_KEY) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  if (sessions) queryClient.setQueryData(SESSIONS_KEY, sessions);
+  if (sessions) queryClient.setQueryData(key, sessions);
   render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/settings"]}>
@@ -38,7 +38,11 @@ function chatTile(sessions?: Array<{ id: string }>) {
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  return screen.getByRole("link", { name: "Chat" });
+  return { queryClient, tile: () => screen.getByRole("link", { name: "Chat" }) };
+}
+
+function chatTile(sessions?: Array<{ id: string }>) {
+  return mountRail(sessions).tile();
 }
 
 describe("the rail's Chat entry", () => {
@@ -69,5 +73,21 @@ describe("the rail's Chat entry", () => {
   it("keeps the last chat while the lists still hold it", () => {
     seedChatListMode({ mode: "chat", lastChat: "mine" });
     expect(chatTile([{ id: "mine" }]).getAttribute("href")).toBe("/chat/mine");
+  });
+
+  it("opens a blank chat when the remembered chat leaves the lists after the rail mounted", () => {
+    seedChatListMode({ mode: "chat", lastChat: "mine" });
+    const { queryClient, tile } = mountRail([{ id: "mine" }, { id: "other" }]);
+    expect(tile().getAttribute("href")).toBe("/chat/mine");
+
+    act(() => queryClient.setQueryData(SESSIONS_KEY, [{ id: "other" }]));
+
+    expect(tile().getAttribute("href")).toBe("/chat");
+  });
+
+  it("keeps the last chat when only the archived list is loaded, which does not hold an active chat", () => {
+    seedChatListMode({ mode: "chat", lastChat: "mine" });
+    const { tile } = mountRail([{ id: "old" }], ["chat-sessions", "archived", "mine"]);
+    expect(tile().getAttribute("href")).toBe("/chat/mine");
   });
 });
