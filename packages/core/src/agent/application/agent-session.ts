@@ -494,7 +494,10 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   const sentHeaders = new Map<string, SentHeaders>();
   const writtenHandoffs = new Map<string, string>();
   const onSessionClosed = (sess: AgentSessionImpl) => {
-    sessions.delete(keyOf(sess.key));
+    const k = keyOf(sess.key);
+    // A late close must not evict a newer live session under the same key.
+    if (sessions.get(k) !== sess) return;
+    sessions.delete(k);
     // A thread that read none, such as one just compacted, must send them all
     // on its reopen, so an earlier snapshot of the same session goes too.
     if (sess.readHeaders.size === 0) {
