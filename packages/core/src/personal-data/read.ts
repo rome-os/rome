@@ -16,6 +16,8 @@ import {
 import type { SourceSpec, TypeSpec } from "./domain/source.js";
 import { isoInZone } from "./domain/zoned-time.js";
 import type { PersonalDataRepository } from "./repository.js";
+import { type ConnectionPointer, connectionPointer } from "./connection-pointer.js";
+import type { DeviceConnection } from "../connections/device/repository.js";
 
 export interface Freshness {
   syncedThrough?: string;
@@ -37,6 +39,11 @@ export interface QueryAnswer {
   interval: string;
   results: (TypeResult | ListedRecords)[];
   freshness: Record<string, Freshness>;
+  /**
+   * When the store does not cover the window for some type: the device
+   * connection that can read the rest live, or that none can.
+   */
+  connection?: ConnectionPointer;
 }
 
 interface ListedRecords {
@@ -53,10 +60,14 @@ export function queryPersonalData(
   source: SourceSpec,
   input: QueryInput,
   defaults: { tz: string; now: number },
+  connectionOf: (id: string) => DeviceConnection | undefined = () => undefined,
 ): QueryAnswer | { error: string } {
   const plan = planQuery(source, input, defaults);
   if ("error" in plan) return plan;
   const freshness: Record<string, Freshness> = {};
+  // The origin of the first type the store does not cover, or null when that
+  // type has no origin at all.
+  let gapOrigin: string | null | undefined;
   const results = plan.types.map((spec) => {
     // Each type reads the origin that covers the window, so a second device
     // or a new origin after a sign-in takes over once it has caught up.
@@ -91,6 +102,9 @@ export function queryPersonalData(
           ? { missingFrom: new Date(Math.max(at, plan.start)).toISOString() }
           : {}),
     };
+    if (!freshness[spec.type].coversWindow && gapOrigin === undefined) {
+      gapOrigin = reading?.origin ?? null;
+    }
     return answered.result;
   });
   return {
@@ -100,6 +114,14 @@ export function queryPersonalData(
     interval: plan.interval,
     results,
     freshness,
+    ...(gapOrigin !== undefined
+      ? {
+          connection: connectionPointer(
+            repo.connectionIdOf(source.source, gapOrigin ?? undefined),
+            connectionOf,
+          ),
+        }
+      : {}),
   };
 }
 

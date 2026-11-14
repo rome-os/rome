@@ -61,7 +61,8 @@ export interface CatalogSource {
   lastResult?: string;
   lastErrorCode?: string;
   types: CatalogType[];
-  live?: { how: string; device: string; when: string };
+  /** The device connection that reads the same data live. */
+  connectionId?: string;
 }
 
 export interface IngestLogEntry {
@@ -287,13 +288,7 @@ export class PersonalDataRepository {
         if (row.lastSyncAt) entry.lastSyncAt = iso(row.lastSyncAt);
         if (row.lastResult) entry.lastResult = row.lastResult;
         if (row.lastErrorCode) entry.lastErrorCode = row.lastErrorCode;
-        if (spec.live) {
-          entry.live = {
-            how: spec.live.how,
-            device: row.originName ?? "the device",
-            when: spec.live.when,
-          };
-        }
+        if (row.connectionId) entry.connectionId = row.connectionId;
         return [entry];
       })
       .sort((a, b) => Number(b.state === "active") - Number(a.state === "active"));
@@ -426,6 +421,25 @@ export class PersonalDataRepository {
     }));
   }
 
+  /**
+   * The device connection an origin's sync names. Without an origin, the
+   * connection of the source's most recently synced origin that is not off.
+   */
+  connectionIdOf(source: string, origin?: string): string | null {
+    const row = this.db
+      .select({ connectionId: personalDataSources.connectionId })
+      .from(personalDataSources)
+      .where(
+        origin !== undefined
+          ? sourceRow(source, origin)
+          : and(eq(personalDataSources.source, source), ne(personalDataSources.state, "off")),
+      )
+      .orderBy(desc(personalDataSources.lastSyncAt))
+      .limit(1)
+      .get();
+    return row?.connectionId ?? null;
+  }
+
   /** Sets an origin's state. False when the origin never sent this source. */
   setState(source: string, origin: string, state: OriginState): boolean {
     const changed = this.db
@@ -525,6 +539,7 @@ function upsertSource(
     ...(envelope.origin.name !== undefined ? { originName: envelope.origin.name } : {}),
     ...(envelope.origin.platform !== undefined ? { platform: envelope.origin.platform } : {}),
     ...(envelope.origin.appVersion !== undefined ? { appVersion: envelope.origin.appVersion } : {}),
+    ...(envelope.connectionId !== undefined ? { connectionId: envelope.connectionId } : {}),
     // A batch means the device syncs, so an origin set off by a delete is back.
     state: "active",
     note: source.note,

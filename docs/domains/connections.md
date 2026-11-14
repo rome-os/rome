@@ -51,7 +51,17 @@ What a connection lets Rome hear from the external system without being asked: a
 - Whether an event matters is not the connection's to say. The follower decides, from the generic fields and the labels. The Concierge's triage answers important, digest or ignore.
 - Watching is something others use. It has no agent of its own. The Concierge's following is one user of it. A subscription at the external system, such as a repository's webhook, may serve several users at once, so one user stopping leaves the subscription in place.
 
-## Decided against
+## Device connection
+
+What one of the guardian's devices lets Agents reach on it live, over rome-node: one capability of one device, such as Apple Health on the guardian's iPhone. Each capability of each device is its own connection, so turning one off leaves the others working.
+
+- The device declares its capabilities: each one's title, command prefix, operations with read or write, and whether it is personal. Core stores what the device reports and names no capability itself, so a new capability needs no core change.
+- Its grant is the device's own permission, such as the iOS permission for Health, and the device's Live access switch for that capability. A capability that needs no permission says so.
+- A device connection is **working**, **off** (Live access is off) or **broken** (the device's permission is denied). Rome reads the state from the device's last report when asked, and stores none of its own.
+- Offline is not broken. Rome keeps when the device last reported and never claims it is online: whether it answers shows only when an Agent asks it.
+- A device connection holds only what live access needs. [Personal data](../personal-data.md) may name the device connection that reads the same data live, and never the reverse: a connection knows nothing of sync, and neither stores the other's state. Screens that show both read both.
+- The guardian connects a device connection on the device itself. A connect card in a chat leads there.
+
 
 - **The next connection of the same kind takes over the disconnected account's name, chats and history.** For an account that takes an agent, a new account is a new participant, and inheriting another account's history misattributes what was said.
 - **Deleting a disconnected account's record, with the chats it alone was in.** The rule until 2026-11-04. The agent link is the guardian's decision about the account and outlives Rome's access to it, and a chat's history belongs to the chat whatever reaches it, so a disconnect removes Rome's reach and nothing else.
@@ -64,4 +74,5 @@ What a connection lets Rome hear from the external system without being asked: a
 - **"Service" as the name for the kind of connection.** The code's word. It did not say what it was and read as a platform when it is not one, so a Telegram bot and a signed-in Telegram user as "two services" made no sense to the guardian.
 - **A translation layer between the old vocabulary and the new.** That layer is for a context one cannot change, and Rome is one codebase its owners can change. It would add a second vocabulary to keep in step with the first. The code is refactored instead, each change landing as add beside, switch callers, remove.
 - **The connection deciding whether an event concerns the guardian.** It dropped bulk mail, cc mail, bots and the guardian's own actions in code, which hid them from the one who decides, and every new service needed its own rules. Facts on the event let the follower decide.
+- **Sync state on a device connection.** The first sketch kept sync on and off, and its state, in the connection's record. Sync belongs to personal data, whose source row already records it, and two records of one switch drift apart.
 - **Each user of watching defining what can be watched.** The Concierge first listed GitHub event types and filtered mail itself. A second user would have repeated that, and the guardian would have met two names for one event and two answers to "can Rome watch this?".

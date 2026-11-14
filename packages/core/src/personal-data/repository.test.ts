@@ -138,8 +138,8 @@ describe("PersonalDataRepository", () => {
       origin: { id: ORIGIN, name: "iPhone", platform: "ios" },
       state: "active",
       lastResult: "ok",
-      live: { device: "iPhone" },
     });
+    expect(source.connectionId).toBeUndefined();
     expect(source.types.find((t) => t.type === "stepCount")).toEqual({
       type: "stepCount",
       shape: "bucket",
@@ -151,6 +151,18 @@ describe("PersonalDataRepository", () => {
       syncedThrough: new Date(NOV_10 + 9 * HOUR).toISOString(),
     });
     expect(source.types.find((t) => t.type === "sleep")?.pointCount).toBe(1);
+  });
+
+  it("keeps the connection a sync names until a sync names another or clears it", () => {
+    const connected = { ...batch("b-1"), connectionId: "dev-1:apple_health" };
+    ingest(connected);
+    expect(repo.catalog()[0].connectionId).toBe("dev-1:apple_health");
+    expect(repo.connectionIdOf("apple_health", ORIGIN)).toBe("dev-1:apple_health");
+    // An older build sends none: the connection stays.
+    ingest(batch("b-2"));
+    expect(repo.connectionIdOf("apple_health")).toBe("dev-1:apple_health");
+    ingest({ ...batch("b-3"), connectionId: null });
+    expect(repo.connectionIdOf("apple_health")).toBeNull();
   });
 
   it("never moves synced-through back, and ignores one ahead of Rome's clock", () => {

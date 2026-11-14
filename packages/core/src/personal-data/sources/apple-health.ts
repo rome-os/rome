@@ -100,8 +100,4 @@ export const APPLE_HEALTH: SourceSpec = {
     },
   ],
   metadataKeys: ["activity", "sourceApp"],
-  live: {
-    how: "rome-node device run <device> health.stats",
-    when: "only while the Rome app is open on the iPhone",
-  },
 };

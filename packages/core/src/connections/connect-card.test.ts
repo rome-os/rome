@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   connectAccountToolOutput,
   connectCardUiFromProps,
+  deviceConnectToolOutput,
+  deviceKinds,
   parseConnectAccountInput,
 } from "./connect-card.js";
+import type { DeviceConnection } from "./device/repository.js";
 
 describe("connect_account", () => {
   // Where Rome Cloud is set up, as on a provisioned instance.
@@ -40,5 +43,55 @@ describe("connect_account", () => {
   it("refuses a kind Rome does not connect itself", () => {
     expect(parseConnectAccountInput({ kind: "notion" })).toMatchObject({ ok: false });
     expect(parseConnectAccountInput({ kind: "github" })).toEqual({ ok: true, kind: "github" });
+  });
+});
+
+describe("connect_account for a device kind", () => {
+  const row = (deviceId: string, capability: string, title: string) =>
+    ({ device: { id: deviceId }, capability, title }) as DeviceConnection;
+
+  it("takes its device kinds from what devices reported, each once, never an OAuth kind's name", () => {
+    expect(
+      deviceKinds([
+        row("dev-1", "apple_health", "Apple Health"),
+        row("dev-2", "apple_health", "Apple Health"),
+        row("dev-1", "device", "Device"),
+        row("dev-1", "github", "Not GitHub"),
+      ]),
+    ).toEqual([
+      { kind: "apple_health", label: "Apple Health" },
+      { kind: "device", label: "Device" },
+    ]);
+  });
+
+  it("parses a reported device kind, and lists it among the kinds when refusing", () => {
+    const devices = [{ kind: "apple_health", label: "Apple Health" }];
+    expect(parseConnectAccountInput({ kind: "apple_health" }, devices)).toEqual({
+      ok: true,
+      kind: "apple_health",
+      device: devices[0],
+    });
+    const refused = parseConnectAccountInput({ kind: "location" }, devices);
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error).toContain('"apple_health"');
+  });
+
+  it("shows a card every reader can draw, whose events say the kind is a device's", () => {
+    const device = { kind: "apple_health", label: "Apple Health" };
+    expect(deviceConnectToolOutput(device, true)).toMatchObject({
+      pendingInteraction: true,
+      render: {
+        componentId: "connect-card",
+        props: { kind: "apple_health", label: "Apple Health", device: true },
+      },
+    });
+    const ui = connectCardUiFromProps({
+      kind: "apple_health",
+      label: "Apple Health",
+      device: true,
+    });
+    expect(ui && checkWidgetUi(ui)).toEqual([]);
+    expect(JSON.stringify(ui)).toContain('"context":{"kind":"apple_health","device":true}');
+    expect(deviceConnectToolOutput(device, false)).toContain("Rome app");
   });
 });

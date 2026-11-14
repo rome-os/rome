@@ -46,8 +46,6 @@ export interface SourceSpec {
   types: readonly TypeSpec[];
   /** The metadata keys a reading may carry. Others are dropped. */
   metadataKeys: readonly string[];
-  /** How an Agent reads the source live, when the device is reachable. */
-  live?: { how: string; when: string };
 }
 
 export function typeSpec(source: SourceSpec, type: string): TypeSpec | undefined {

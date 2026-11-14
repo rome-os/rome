@@ -4,6 +4,7 @@ import { currentChatOwner } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
+import { deviceConnectPath } from "../../connections/connect-card.js";
 
 /** What core's own widget makes of one of its events: an answer for the agent
  *  waiting on it, a link for the client to open, or neither, which leaves the
@@ -14,6 +15,8 @@ type CoreReply = { answer: unknown } | { open: string } | { ok: true } | Respons
 interface CoreIo {
   /** The connections, as `GET /api/connections` lists them to the caller. */
   connections(): Promise<ConnectionStatus[]>;
+  /** The device connections, as `GET /api/device-connections` lists them to the caller. */
+  deviceConnections(): Promise<DeviceConnectionStatus[]>;
   /** The origin the caller reached Rome at, for turning a path into a link. */
   origin: string;
 }
@@ -29,12 +32,31 @@ interface ConnectionStatus {
   connect: { url: string | null; available: boolean; unavailableReason: string | null } | null;
 }
 
+/** A device connection as `GET /api/device-connections` lists it, in the
+ *  fields the connect card reads. */
+interface DeviceConnectionStatus {
+  capability: string;
+  title: string;
+  state: "working" | "off" | "broken";
+}
+
+/** Whether a device connection of `kind` works, and its title. */
+async function deviceKindState(kind: string, io: CoreIo) {
+  const ofKind = (await io.deviceConnections()).filter((c) => c.capability === kind);
+  return {
+    working: ofKind.some((c) => c.state === "working"),
+    label: ofKind[0]?.title ?? kind,
+  };
+}
+
 /**
  * The widgets core owns, by kind, and how each handles its events. The question
  * card's Send answers the agent with what was picked and typed, and its Dismiss
  * declines. The connect card's Connect opens the connection kind's
  * authorization page, or answers at once when the connection is working; its
- * Check answers once the connection is working; its Dismiss declines. Core
+ * Check answers once the connection is working; its Dismiss declines. For a
+ * device kind, Connect opens the device's page, which the device's own app
+ * turns into its flow, and Check reads the device connections. Core
  * turns the answer into what the agent reads when the turn starts.
  */
 const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
@@ -45,6 +67,11 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
   "connect-card": {
     connect: async (context, io) => {
       const kind = String(context.kind ?? "");
+      if (context.device === true) {
+        const device = await deviceKindState(kind, io);
+        if (device.working) return { answer: { kind, status: "connected" } };
+        return { open: deviceConnectPath(kind) };
+      }
       const ofKind = (await io.connections()).filter((c) => c.connectionKind === kind);
       if (ofKind.some((c) => c.state === "working")) {
         return { answer: { kind, status: "connected" } };
@@ -61,6 +88,16 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
     },
     check: async (context, io) => {
       const kind = String(context.kind ?? "");
+      if (context.device === true) {
+        const device = await deviceKindState(kind, io);
+        if (device.working) return { answer: { kind, status: "connected" } };
+        return Response.json(
+          {
+            error: `${device.label} isn't connected yet. Connect it on your device, then try again.`,
+          },
+          { status: 409 },
+        );
+      }
       const connections = (await io.connections()).filter((c) => c.connectionKind === kind);
       if (connections.some((c) => c.state === "working")) {
         return { answer: { kind, status: "connected" } };
@@ -198,6 +235,16 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
           );
           const listed = (await res.json().catch(() => null)) as {
             connections?: ConnectionStatus[];
+          } | null;
+          return res.ok ? (listed?.connections ?? []) : [];
+        },
+        deviceConnections: async () => {
+          const res = await deps.forward(
+            new Request(new URL("/api/device-connections", c.req.url), { headers }),
+            c.env,
+          );
+          const listed = (await res.json().catch(() => null)) as {
+            connections?: DeviceConnectionStatus[];
           } | null;
           return res.ok ? (listed?.connections ?? []) : [];
         },

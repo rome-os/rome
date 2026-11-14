@@ -824,6 +824,7 @@ export async function buildTestDeps(
     routinesRepo,
     routineRunsRepo,
     personalData: new PersonalDataRepository(db, PERSONAL_DATA_SOURCES),
+    deviceConnections: new DeviceConnectionsRepository(db),
     routineEngine,
     eventCatalog: new EventCatalog(),
     appCatalog,
@@ -993,6 +994,7 @@ import {
   type TelemetryBridge,
 } from "@rome-os/app-runtime";
 import { testChannelSurface } from "./channel-surface.js";
+import { DeviceConnectionsRepository } from "../connections/device/repository.js";
 import { PersonalDataRepository } from "../personal-data/repository.js";
 import { PERSONAL_DATA_SOURCES } from "../personal-data/sources/index.js";
 export interface SpanHarness {

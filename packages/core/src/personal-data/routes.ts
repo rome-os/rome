@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { resolveGuardianSession } from "../access/guardian-session.js";
 import type { DrizzleDb } from "../db/index.js";
+import { readCappedBody } from "../lib/read-capped-body.js";
 import { createLogger } from "../logger.js";
 import { ingestEnvelopeSchema, MAX_BATCH_BYTES, MAX_ITEMS_PER_BATCH } from "./domain/ingest.js";
 import type { PersonalDataRepository } from "./repository.js";
@@ -50,7 +51,7 @@ export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
     }
     const declared = Number(c.req.header("content-length") ?? 0);
     if (declared > MAX_BATCH_BYTES) return c.json({ error: "too_large" }, 413);
-    const text = await readCapped(c.req.raw, MAX_BATCH_BYTES);
+    const text = await readCappedBody(c.req.raw, MAX_BATCH_BYTES);
     if (text === undefined) return c.json({ error: "too_large" }, 413);
     let body: unknown;
     try {
@@ -126,28 +127,6 @@ export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
   });
 
   return app;
-}
-
-/**
- * The request body as text, or undefined once it passes `max` bytes. Reads
- * the stream, so a chunked body with no Content-Length stops at the cap too.
- */
-async function readCapped(request: Request, max: number): Promise<string | undefined> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 /** Seconds until the origin may ingest again, or 0 when it may now. */

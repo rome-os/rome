@@ -960,6 +960,13 @@
       "when": 1794679279327,
       "tag": "0137_personal_data",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "6",
+      "when": 1794679409481,
+      "tag": "0138_device_connections",
+      "breakpoints": true
     }
   ]
 }

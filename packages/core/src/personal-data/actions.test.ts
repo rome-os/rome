@@ -4,6 +4,7 @@ import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import { registerPersonalDataActions } from "./actions.js";
 import { PersonalDataRepository } from "./repository.js";
+import { DeviceConnectionsRepository } from "../connections/device/repository.js";
 import { APPLE_HEALTH } from "./sources/apple-health.js";
 import { PERSONAL_DATA_SOURCES } from "./sources/index.js";
 import { batch, DAY, HOUR, NOV_10, stepDay, TZ } from "./__fixtures__/apple-health.js";
@@ -11,19 +12,28 @@ import { batch, DAY, HOUR, NOV_10, stepDay, TZ } from "./__fixtures__/apple-heal
 describe("personal-data actions", () => {
   let testDb: TestDb;
   let engine: ActionEngine;
+  let devices: DeviceConnectionsRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
     const repo = new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES);
     repo.ingest(
       APPLE_HEALTH,
-      batch("seed", { upserts: [stepDay(NOV_10, 8000), stepDay(NOV_10 + DAY, 6000)] }),
+      {
+        ...batch("seed", {
+          upserts: [stepDay(NOV_10, 8000), stepDay(NOV_10 + DAY, 6000)],
+          types: [{ type: "stepCount", syncedThrough: new Date(NOV_10 + 2 * DAY).toISOString() }],
+        }),
+        connectionId: "dev-1:apple_health",
+      },
       NOV_10 + 2 * DAY,
     );
+    devices = new DeviceConnectionsRepository(testDb.db);
     const registry = new ActionRegistryImpl();
     registerPersonalDataActions(registry, {
       personalData: repo,
       guardianTimeZone: async () => TZ,
+      connectionOf: (id) => devices.byId(id),
       now: () => NOV_10 + 2 * DAY + 9 * HOUR,
     });
     engine = new ActionEngine(registry, createActionEngineRepos(), {
@@ -66,6 +76,58 @@ describe("personal-data actions", () => {
       { audience: "private" },
     );
     expect(result).toMatchObject({ status: "ok", data: { results: [{ value: 14000 }] } });
+  });
+
+  it("points at the device connection where the store does not cover the window", async () => {
+    const today = { source: "apple_health", type: "stepCount", start: "2026-11-12" };
+    const before = await engine.run("core:personal_data_query", today, { audience: "private" });
+    expect(before).toMatchObject({
+      status: "ok",
+      data: { connection: { state: "not_connected" } },
+    });
+    devices.report(
+      {
+        version: 1,
+        device: { id: "dev-1", name: "iPhone", platform: "ios" },
+        connections: [
+          {
+            capability: "apple_health",
+            title: "Apple Health",
+            prefix: "health",
+            personal: true,
+            operations: [{ name: "health.stats", access: "read" }],
+            permission: "unknown",
+            live: true,
+          },
+        ],
+      },
+      NOV_10 + 2 * DAY + 8 * HOUR,
+    );
+    const after = await engine.run("core:personal_data_query", today, { audience: "private" });
+    expect(after).toMatchObject({
+      status: "ok",
+      data: {
+        freshness: { stepCount: { coversWindow: false, missingFrom: expect.any(String) } },
+        connection: {
+          id: "dev-1:apple_health",
+          title: "Apple Health",
+          device: { id: "dev-1", name: "iPhone" },
+          state: "working",
+          lastSeenAt: new Date(NOV_10 + 2 * DAY + 8 * HOUR).toISOString(),
+        },
+      },
+    });
+    // A window the store covers needs no pointer.
+    const covered = await engine.run(
+      "core:personal_data_query",
+      { source: "apple_health", type: "stepCount", start: "2026-11-10", end: "2026-11-11" },
+      { audience: "private" },
+    );
+    expect((covered as { data: Record<string, unknown> }).data.connection).toBeUndefined();
+    const catalog = await engine.run("core:personal_data_catalog", {}, { audience: "private" });
+    expect(catalog).toMatchObject({
+      data: { sources: [{ connection: { id: "dev-1:apple_health", state: "working" } }] },
+    });
   });
 
   it("returns a query it cannot answer as an error the Agent reads", async () => {

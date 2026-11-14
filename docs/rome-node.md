@@ -554,10 +554,15 @@ URL (WS only to loopback in a Debug build against a local Cloud). The backoff is
 does. The phone speaks text envelopes only and ignores binary frames, so its
 `system.info` has no `frameVersion` or `transferVersion`.
 
-The phone connects only after the user turns on **Settings → iPhone use → Can Rome
-use this iPhone**. The switch is off by default and kept across launches, so nothing
-connects until the user chooses it. Signed in with the switch on, the phone is a
-device. It is online only while the app is in front: iOS suspends a background app's sockets, and Health's data is
+The phone's capabilities, Apple Health and Device (`device.status`), are each a
+[device connection](domains/connections.md#device-connection) with its own
+**Live access** switch under **Settings → Connections → This iPhone**. The phone
+connects while any Live access is on, and there is no switch for the phone as a
+whole. A capability's actions follow its own Live access, and fail with `live_off`
+while it is off. The phone reports its connections to the Rome open on it with
+`PUT /api/device-connections`, at launch, on foreground, and when a switch or a
+permission changes, so Rome lists them and an agent learns where to read live.
+Signed in with a Live access on, the phone is a device. It is online only while the app is in front: iOS suspends a background app's sockets, and Health's data is
 unreadable while the phone is locked. When the app leaves the front, requests
 under way finish their replies, then the connection closes. Signing out
 disconnects. A device that is not connected answers `target_unavailable`.

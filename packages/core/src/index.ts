@@ -225,6 +225,8 @@ import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
 import { PersonalDataRepository } from "./personal-data/repository.js";
+import { DeviceConnectionsRepository } from "./connections/device/repository.js";
+import { deviceKinds } from "./connections/connect-card.js";
 import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
@@ -603,6 +605,7 @@ async function main() {
     chatAudience({ channel: "webchat", threadId: chatId }),
   );
   const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
+  const deviceConnectionsRepo = new DeviceConnectionsRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
   // Runs before the action engine, routine engine, and ingress below exist, so
   // every `running` row it ends belongs to the stopped process.
@@ -1312,6 +1315,7 @@ async function main() {
         sessionTools: (context) => buildConciergeTools(concierge, context),
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
+        deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
@@ -1423,6 +1427,7 @@ async function main() {
   registerPersonalDataActions(actionRegistry, {
     personalData: personalDataRepo,
     guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
+    connectionOf: (id) => deviceConnectionsRepo.byId(id),
   });
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {
@@ -2285,6 +2290,7 @@ async function main() {
     const apiDeps: ApiDeps = {
       agentNameEvents,
       personalData: personalDataRepo,
+      deviceConnections: deviceConnectionsRepo,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,

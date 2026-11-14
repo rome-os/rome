@@ -23,7 +23,7 @@ The ingest takes only `Content-Type: application/json`, and answers 415 otherwis
 | Route | Does |
 | --- | --- |
 | `POST /api/personal-data/ingest` | Applies one batch |
-| `GET /api/personal-data/sources` | The catalog, the same body as `core:personal_data_catalog` |
+| `GET /api/personal-data/sources` | The catalog, as `core:personal_data_catalog` lists it, with each source's `connectionId` in place of its live pointer |
 | `PUT /api/personal-data/sources/:source/origins/:origin/state` | Sets `active`, `paused` or `off`, so the agent knows why data stops |
 | `DELETE /api/personal-data/sources/:source/origins/:origin` | Deletes every reading and catalog row of the origin, sets it `off`, logs one `deleted` row, and answers `{ deletedPoints }` |
 | `GET /api/personal-data/sources/:source/ingests?limit=50` | The ingest log, newest first, at most 500 rows |
@@ -54,6 +54,7 @@ A state change or a delete for an origin Rome never heard from answers 404.
 - One batch takes at most 2,000 items and 1 MB, with or without a Content-Length, or it is refused with 413. An origin may send 60 batches a minute. Over that, it gets 429 with `Retry-After`.
 - One batch is one transaction, the catalog included.
 - A batch brings its origin back to `active`, and refreshes the origin's name and app version.
+- `connectionId` names the device connection that reads the same data live, such as `<deviceId>:apple_health`. `null` clears it, and an envelope without it leaves it as it is.
 - `syncedThrough` is how far the device reports a type complete, which is not the latest reading: a day with no steps still counts as synced. It only moves forward, and a value more than a day ahead of Rome's clock is ignored.
 - The metadata keys a source allows are kept, and others are dropped.
 
@@ -75,11 +76,17 @@ The ingest log keeps 90 days of rows with counts, ranges and codes, and never a 
 
 ## Agent access
 
-`core:personal_data_catalog` takes no input and lists each source and origin: its state, when it last synced, each type with its unit, range, count and `syncedThrough`, and how to read it live. `core:personal_data_query` aggregates or lists readings. Main reaches both through `actions: ["*"]`, and the Concierge lists both in `concierge.yaml`.
+`core:personal_data_catalog` takes no input and lists each source and origin: its state, when it last synced, each type with its unit, range, count and `syncedThrough`, and its [live pointer](#live). `core:personal_data_query` aggregates or lists readings. Main reaches both through `actions: ["*"]`, and the Concierge lists both in `concierge.yaml`.
 
 Both are personal-data actions. They run only in a private turn and are refused in a shared one with `personal_data_private_only` and a reason the agent passes on ([audience](domains/participation.md#audience)).
 
-The rule the agent follows is stored first, live second. It answers from stored data and says how fresh it is. It runs `rome-node device run <iphone> health.*` only when the stored data does not cover the question (`freshness.coversWindow` is false and the question needs the latest hours) and the phone is online.
+## Live
+
+The store points to where the rest can be read. It never says how to run the device. A source row names the [device connection](domains/connections.md#device-connection) that reads the same data live, when the device's sync names one in the envelope's `connectionId`. A source with no connection, such as an import, leaves it empty.
+
+When the stored data does not cover a query's window, the reply's `connection` names that device connection: its id, title, device id and name, state and `lastSeenAt`. With no connection, or one the device has stopped reporting, it says `not_connected` and points to `connect_account`. An empty store after a fresh connect reads the same way. The catalog gives each source the same pointer.
+
+The agent reads the device with `rome-node device run <device id> <action>`, with arguments from `rome-node device describe`. When the device does not answer, or the connection is `off`, it answers from stored data and says how fresh it is. Live answers are never written to the store.
 
 ## Query
 

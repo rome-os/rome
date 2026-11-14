@@ -49,6 +49,12 @@
     "remove": "移除",
     "cancel": "取消"
   },
+  "deviceConnect": {
+    "title": "连接 {{title}}",
+    "onDevice": "请在{{device}}上连接 {{title}}：打开那台设备上的 Rome App，在“设置 › 连接”里打开它。然后回到聊天，点“I've authorized”。",
+    "connected": "{{title}} 已在{{device}}上连接。回到聊天，点“I've authorized”。",
+    "yourDevice": "你的设备"
+  },
   "connections": {
     "loading": "正在加载连接",
     "errorTitle": "无法加载连接",

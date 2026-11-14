@@ -2,6 +2,8 @@ import type { RomeTool, WidgetDrawing } from "../agent/index.js";
 import {
   connectableKinds,
   connectAccountToolOutput,
+  type DeviceKind,
+  deviceConnectToolOutput,
   parseConnectAccountInput,
 } from "../connections/connect-card.js";
 
@@ -14,21 +16,24 @@ import {
 export function connectAccountTools(input: {
   widgets: WidgetDrawing;
   hasSpeaker: boolean;
+  /** The device kinds devices reported, read when the session's tools are built. */
+  devices?: readonly DeviceKind[];
 }): RomeTool[] {
   const widgetsShow = input.widgets === "card";
+  const devices = input.devices ?? [];
   return [
     {
       name: "connect_account",
       endsTurn: widgetsShow,
       description:
-        "Ask the guardian to connect an account of a kind Rome connects itself, such as GitHub, Slack or Shopify, through a card in the chat. Call it when a task needs one of these and it is not connected, or a call reports it is not connected. The card opens the provider's authorization page; whether the guardian connected it or dismissed the card comes back as the next turn. Where no card shows, ask the guardian to connect it in Settings › Connections.",
+        "Ask the guardian to connect an account of a kind Rome connects itself, such as GitHub, Slack or Shopify, or a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it when a task needs one of these and it is not connected, or a call reports it is not connected. The card opens the provider's authorization page, or the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. Where no card shows, ask the guardian to connect it in Settings › Connections.",
       inputSchema: {
         type: "object",
         required: ["kind"],
         properties: {
           kind: {
             type: "string",
-            enum: connectableKinds(),
+            enum: [...connectableKinds(), ...devices.map((d) => d.kind)],
             description: "The kind of connection to connect.",
           },
         },
@@ -40,9 +45,11 @@ export function connectAccountTools(input: {
             isError: true,
           };
         }
-        const parsed = parseConnectAccountInput(args);
+        const parsed = parseConnectAccountInput(args, devices);
         if (!parsed.ok) return { content: [{ type: "text", text: parsed.error }], isError: true };
-        const output = connectAccountToolOutput(parsed.kind, widgetsShow);
+        const output = parsed.device
+          ? deviceConnectToolOutput(parsed.device, widgetsShow)
+          : connectAccountToolOutput(parsed.kind, widgetsShow);
         return {
           content: [
             { type: "text", text: typeof output === "string" ? output : JSON.stringify(output) },

@@ -27,6 +27,7 @@ import {
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
 import { connectAccountTools } from "./connect-account-tool.js";
+import type { DeviceKind } from "../connections/connect-card.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 
 export interface RomeToolPortsDeps {
@@ -46,6 +47,8 @@ export interface RomeToolPortsDeps {
    * a task of its own chat's owner. When absent, no check names a task.
    */
   taskOwner?: (taskId: string) => Promise<string | null>;
+  /** The device kinds `connect_account` connects. When absent, none. */
+  deviceKinds?: () => readonly DeviceKind[];
 }
 
 export interface RomeToolPorts {
@@ -224,7 +227,11 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
         // to ask for a connection.
         ...(provided.some((tool) => tool.name === "connect_card")
           ? []
-          : connectAccountTools({ widgets: turn.widgets, hasSpeaker })),
+          : connectAccountTools({
+              widgets: turn.widgets,
+              hasSpeaker,
+              devices: deps.deviceKinds?.(),
+            })),
       ];
     },
   };

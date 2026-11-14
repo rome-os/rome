@@ -49,6 +49,9 @@ export const ingestEnvelopeSchema = z.object({
     platform: z.string().max(40).optional(),
     appVersion: z.string().max(40).optional(),
   }),
+  // The device connection that reads the same data live, such as
+  // `<deviceId>:apple_health`. Null clears it; absent leaves it as it is.
+  connectionId: z.string().min(1).max(200).nullable().optional(),
   batch: z.object({
     id: z.string().min(1).max(100),
     trigger: z.string().max(40).optional(),

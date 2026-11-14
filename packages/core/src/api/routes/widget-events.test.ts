@@ -47,6 +47,7 @@ function setup(
   caller: string | null = "guardian",
   appReply: unknown = { ok: true },
   connections: unknown[] = [],
+  deviceConnections: unknown[] = [],
 ) {
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
@@ -74,6 +75,9 @@ function setup(
     forward: async (request) => {
       if (request.method === "GET" && new URL(request.url).pathname === "/api/connections") {
         return Response.json({ connections });
+      }
+      if (request.method === "GET" && new URL(request.url).pathname === "/api/device-connections") {
+        return Response.json({ connections: deviceConnections });
       }
       forwarded.push({
         url: new URL(request.url).pathname,
@@ -610,6 +614,63 @@ describe("an event on the connect card core owns", () => {
     await fire("m", { name: "dismiss", context: { kind: "github" } });
     expect(forwarded[0]?.body).toMatchObject({
       parts: [{ output: { kind: "github", dismissed: true } }],
+    });
+  });
+});
+
+describe("an event on the connect card for a device kind", () => {
+  const context = { kind: "apple_health", device: true };
+  const deviceCard = {
+    type: "pending_interaction",
+    toolUseId: "k2",
+    appId: "core",
+    render: {
+      kind: "inline",
+      componentId: "connect-card",
+      ui: {
+        components: [
+          { id: "root", component: "Column", children: ["connect", "check", "dismiss"] },
+          button("connect", "connect", context),
+          button("check", "check", context),
+          button("dismiss", "dismiss", context),
+        ],
+      },
+    },
+  };
+  const health = (state: string) => [{ capability: "apple_health", title: "Apple Health", state }];
+  const card = (rows: unknown[]) =>
+    setup({ m: { chatId: "c1", content: [deviceCard] } }, "guardian", undefined, [], rows);
+
+  it("opens the device's page on Connect, on the caller's origin", async () => {
+    const { fire, forwarded } = card(health("off"));
+    const res = await fire("m", { name: "connect", context });
+    expect(await res.json()).toEqual({ open: "http://localhost/connections/device/apple_health" });
+    expect(forwarded).toEqual([]);
+  });
+
+  it("answers at once on Connect when a device's connection already works", async () => {
+    const { fire, forwarded } = card(health("working"));
+    await fire("m", { name: "connect", context });
+    expect(forwarded[0]?.body).toMatchObject({
+      parts: [{ toolUseId: "k2", output: { kind: "apple_health", status: "connected" } }],
+    });
+  });
+
+  it("answers the agent on Check only once the device reports it working", async () => {
+    const notYet = card(health("off"));
+    const refused = await notYet.fire("m", { name: "check", context });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({
+      error: "Apple Health isn't connected yet. Connect it on your device, then try again.",
+    });
+    expect(notYet.forwarded).toEqual([]);
+
+    const working = card(health("working"));
+    expect(await (await working.fire("m", { name: "check", context })).json()).toMatchObject({
+      answered: true,
+    });
+    expect(working.forwarded[0]?.body).toMatchObject({
+      parts: [{ output: { kind: "apple_health", status: "connected" } }],
     });
   });
 });

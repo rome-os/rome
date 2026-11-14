@@ -87,11 +87,13 @@ Personal data is data about the guardian that only they should see, which their 
 - An ingest is idempotent per batch and per item, so a device may resend a batch after a lost answer.
 - Rome keeps personal data until the guardian deletes it. Deleting an origin removes its readings and keeps the ingest log, which holds counts and never a value.
 - Facts an agent already wrote into memory or a chat are not personal data anymore, and nothing checks where they go next.
+- A source does not need a connection. A source a device also reads live names its [device connection](../domains/connections.md#device-connection). Personal data depends on connections, never the reverse.
 
 **Not to be confused with:**
 
 - **[Memory](#memory)** — memory is authored and loads into context. Personal data is measured, and an agent reads it on demand.
 - **[App data](apps.md#app-data)** — app data belongs to an app. No app owns personal data.
+- **[Device connection](../domains/connections.md#device-connection)** — a device connection reads the device live and stores nothing. Personal data is what a sync stored.
 
 ## Database
 

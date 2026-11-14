@@ -6,20 +6,23 @@ import type { ActionRegistry } from "../apps/actions/types.js";
 import { queryInputSchema } from "./domain/query.js";
 import { queryPersonalData } from "./read.js";
 import type { PersonalDataRepository } from "./repository.js";
+import { connectionPointer } from "./connection-pointer.js";
+import type { DeviceConnection } from "../connections/device/repository.js";
 import { sourceSpec, PERSONAL_DATA_SOURCES } from "./sources/index.js";
 
 export const PERSONAL_DATA_CATALOG_ACTION = "core:personal_data_catalog";
 export const PERSONAL_DATA_QUERY_ACTION = "core:personal_data_query";
 
-const STORED_FIRST =
-  "Read stored data first. Use the live device path only when the stored data does not cover what " +
-  "you need (freshness.coversWindow is false and the question needs the latest hours) and the device " +
-  "is online. Otherwise answer from stored data and say how fresh it is.";
+const CONNECTION =
+  "Where the stored data does not cover the window, the reply's connection names the device " +
+  "connection that reads the rest live, with its state, or not_connected.";
 
 export interface PersonalDataActionDeps {
   personalData: PersonalDataRepository;
   /** The guardian's time zone, the default zone of a query. */
   guardianTimeZone: () => Promise<string>;
+  /** The device connection with an id, as a source's sync names it. */
+  connectionOf?: (id: string) => DeviceConnection | undefined;
   now?: () => number;
 }
 
@@ -28,14 +31,16 @@ export function registerPersonalDataActions(
   deps: PersonalDataActionDeps,
 ): void {
   const now = deps.now ?? Date.now;
+  const connectionOf = deps.connectionOf ?? (() => undefined);
   actions.register({
     config: {
       name: PERSONAL_DATA_CATALOG_ACTION,
       type: "system",
       description:
         "List the guardian's personal data that their devices sync to Rome, such as Apple Health: " +
-        "each source, the device it comes from, when it last synced, and each type with its unit, " +
-        `range and how far it is synced. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ${STORED_FIRST} ` +
+        "each source, the device it comes from, when it last synced, each type with its unit, " +
+        "range and how far it is synced, and the device connection that reads the source live, " +
+        `with its state, or not_connected. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ` +
         "Runs only in a private chat with the guardian.",
       complexity: "simple",
       speed: "fast",
@@ -43,7 +48,15 @@ export function registerPersonalDataActions(
       sideEffects: "read-only",
     },
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    execute: async () => ({ status: "ok", data: { sources: deps.personalData.catalog() } }),
+    execute: async () => ({
+      status: "ok",
+      data: {
+        sources: deps.personalData.catalog().map(({ connectionId, ...entry }) => ({
+          ...entry,
+          connection: connectionPointer(connectionId, connectionOf),
+        })),
+      },
+    }),
   });
 
   const sourceNames = PERSONAL_DATA_SOURCES.map((source) => source.source);
@@ -56,7 +69,7 @@ export function registerPersonalDataActions(
         "heart rate or workouts, over a time window. The input and reply follow the iPhone's " +
         "health.stats: types, start, end, interval, aggregate, unit. A bucket with no value is left " +
         "out, never 0. Week, month and total averages are the mean of daily averages " +
-        `(aggregate avg_of_days). The reply's freshness says how far each type is synced. ${STORED_FIRST} ` +
+        `(aggregate avg_of_days). The reply's freshness says how far each type is synced. ${CONNECTION} ` +
         "Runs only in a private chat with the guardian.",
       complexity: "simple",
       speed: "fast",
@@ -134,10 +147,16 @@ export function registerPersonalDataActions(
           error: `Unknown source "${input.data.source}". Sources: ${sourceNames.join(", ")}.`,
         };
       }
-      const answer = queryPersonalData(deps.personalData, source, input.data, {
-        tz: await deps.guardianTimeZone(),
-        now: now(),
-      });
+      const answer = queryPersonalData(
+        deps.personalData,
+        source,
+        input.data,
+        {
+          tz: await deps.guardianTimeZone(),
+          now: now(),
+        },
+        connectionOf,
+      );
       if ("error" in answer) return { status: "error", error: answer.error };
       return { status: "ok", data: answer };
     },

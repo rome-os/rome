@@ -1524,6 +1524,10 @@ export const personalDataSources = sqliteTable(
     lastErrorCode: text("last_error_code"),
     // The source's short text for the Agent, written by core, never by the device.
     note: text("note"),
+    // The device connection that reads the same data live, such as
+    // `<deviceId>:apple_health`, as the device's sync names it. Null for a
+    // source no connection reads, such as an import.
+    connectionId: text("connection_id"),
   },
   (table) => [primaryKey({ columns: [table.source, table.origin] })],
 );
@@ -1559,4 +1563,34 @@ export const personalDataIngests = sqliteTable(
     uniqueIndex("uq_personal_data_ingests_batch").on(table.source, table.origin, table.batchId),
     index("idx_personal_data_ingests_received").on(table.source, table.receivedAt),
   ],
+);
+
+// Device connections: what each of the guardian's devices lets Agents reach
+// live over rome-node, one row per device and capability, as the device last
+// reported it. Holds nothing of personal data or sync. Concept:
+// docs/domains/connections.md#device-connection. All access goes through
+// packages/core/src/connections/device/repository.ts.
+export const deviceConnections = sqliteTable(
+  "device_connections",
+  {
+    // The rome-node device id.
+    deviceId: text("device_id").notNull(),
+    // The device's own id for the capability, such as `apple_health`.
+    capability: text("capability").notNull(),
+    deviceName: text("device_name"),
+    platform: text("platform"),
+    title: text("title").notNull(),
+    // The command prefix, without the dot, such as `health`.
+    prefix: text("prefix").notNull(),
+    personal: integer("personal", { mode: "boolean" }).notNull(),
+    operations: text("operations", { mode: "json" })
+      .$type<{ name: string; access: "read" | "write" }[]>()
+      .notNull(),
+    permission: text("permission").notNull(), // granted | denied | not_needed | unknown
+    // The device's Live access switch.
+    live: integer("live", { mode: "boolean" }).notNull(),
+    // When a report last listed the row.
+    lastSeenAt: integer("last_seen_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.deviceId, table.capability] })],
 );

@@ -6,6 +6,18 @@ import {
   type OAuthProvider,
 } from "./oauth/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "./oauth/rome-cloud-oauth.js";
+import type { DeviceConnection } from "./device/repository.js";
+
+/** A device connection kind the card connects: a capability a device reported. */
+export interface DeviceKind {
+  kind: string;
+  label: string;
+}
+
+/** The path of the page that connects a device kind; the phone's app opens its own flow there. */
+export function deviceConnectPath(kind: string): string {
+  return `/connections/device/${encodeURIComponent(kind)}`;
+}
 
 /**
  * The card that connects a connection kind Rome connects itself, such as
@@ -13,8 +25,8 @@ import { createRomeCloudOAuthStartUrl } from "./oauth/rome-cloud-oauth.js";
  * `api/routes/widget-events.ts`, which open the kind's authorization page and
  * answer the agent once the connection is working.
  */
-export function connectCardUi(kind: string, kindLabel: string): WidgetUi {
-  const context = { kind };
+export function connectCardUi(kind: string, kindLabel: string, device = false): WidgetUi {
+  const context: Record<string, string | boolean> = device ? { kind, device: true } : { kind };
   return {
     components: [
       { id: "root", component: "Column", children: ["title", "note", "actions"] },
@@ -22,7 +34,9 @@ export function connectCardUi(kind: string, kindLabel: string): WidgetUi {
       {
         id: "note",
         component: "Text",
-        text: `Press Connect and authorize ${kindLabel} in the page that opens, then come back and press I've authorized.`,
+        text: device
+          ? `Press Connect and turn on ${kindLabel} in the Rome app on your device, then come back and press I've authorized.`
+          : `Press Connect and authorize ${kindLabel} in the page that opens, then come back and press I've authorized.`,
         variant: "caption",
       },
       {
@@ -63,19 +77,64 @@ export function connectableKinds(): OAuthProvider[] {
   return getEnabledOAuthProviders();
 }
 
+/**
+ * The device kinds the card connects: each capability a device reported,
+ * once, under its title. A capability named as a kind Rome connects itself
+ * is left out, so a kind always means one thing.
+ */
+export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKind[] {
+  const kinds = new Map<string, string>();
+  for (const connection of connections) {
+    if (isOAuthProvider(connection.capability) || kinds.has(connection.capability)) continue;
+    kinds.set(connection.capability, connection.title);
+  }
+  return [...kinds].map(([kind, label]) => ({ kind, label }));
+}
+
 /** The connection kind `connect_account` was asked for, or why it can't connect it. */
 export function parseConnectAccountInput(
   input: unknown,
-): { ok: true; kind: OAuthProvider } | { ok: false; error: string } {
+  devices: readonly DeviceKind[] = [],
+):
+  | { ok: true; kind: OAuthProvider; device?: undefined }
+  | { ok: true; kind: string; device: DeviceKind }
+  | { ok: false; error: string } {
   const kind = (input as { kind?: unknown } | null)?.kind;
   const kinds = connectableKinds();
-  if (typeof kind !== "string" || !kinds.includes(kind as OAuthProvider)) {
-    return {
-      ok: false,
-      error: `kind must be one of ${kinds.map((k) => `"${k}"`).join(", ")}.`,
-    };
+  if (typeof kind === "string" && kinds.includes(kind as OAuthProvider)) {
+    return { ok: true, kind: kind as OAuthProvider };
   }
-  return { ok: true, kind: kind as OAuthProvider };
+  const device = devices.find((d) => d.kind === kind);
+  if (device) return { ok: true, kind: device.kind, device };
+  const all = [...kinds, ...devices.map((d) => d.kind)];
+  return { ok: false, error: `kind must be one of ${all.map((k) => `"${k}"`).join(", ")}.` };
+}
+
+/**
+ * What `connect_account` hands back for a device kind. The card's Connect
+ * opens the device's page, which the device's own app turns into its flow.
+ */
+export function deviceConnectToolOutput(device: DeviceKind, widgetsShow: boolean): unknown {
+  if (!widgetsShow) {
+    return (
+      "This conversation cannot show the connect card. Ask the guardian, in a message, " +
+      `to turn on ${device.label} in the Rome app on their device, then wait for their reply.`
+    );
+  }
+  return {
+    pendingInteraction: true,
+    appId: "core",
+    render: {
+      kind: "inline",
+      componentId: CONNECT_CARD_ID,
+      props: { kind: device.kind, label: device.label, device: true },
+      builtin: true,
+    },
+    message:
+      `The card to connect ${device.label} has been shown to the guardian. Whether they connected it ` +
+      "or dismissed the card arrives as the next turn's prompt — do not call any further tools " +
+      "or send another message until then.",
+  };
 }
 
 /**
@@ -115,7 +174,14 @@ export function connectAccountToolOutput(kind: OAuthProvider, widgetsShow: boole
 /** The connect card described as data, for the connection kind a stored
  *  card's props name, or null when they name none Rome connects. */
 export function connectCardUiFromProps(props: unknown): WidgetUi | null {
-  const kind = (props as { kind?: unknown } | null)?.kind;
+  const { kind, label, device } = (props ?? {}) as {
+    kind?: unknown;
+    label?: unknown;
+    device?: unknown;
+  };
+  if (device === true && typeof kind === "string" && typeof label === "string") {
+    return connectCardUi(kind, label, true);
+  }
   if (typeof kind !== "string" || !isOAuthProvider(kind)) return null;
   return connectCardUi(kind, OAUTH_PROVIDER_DESCRIPTORS[kind].label);
 }
