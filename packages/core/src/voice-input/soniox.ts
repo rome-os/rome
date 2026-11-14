@@ -22,6 +22,9 @@ interface SonioxResponse {
 // A temporary key's stream reached the time Rome Cloud gave it.
 const EXPIRED = "temp_api_key_session_expired";
 
+// How long the provider has to accept the connection.
+export const SONIOX_CONNECT_TIMEOUT_MS = 10_000;
+
 // Control tokens such as `<end>` and `<fin>` mark endpoints, not speech.
 const CONTROL_TOKEN = /^<[a-z]+>$/;
 
@@ -55,9 +58,15 @@ function openSonioxStream(
   let done = false;
   let finishing = false;
 
+  const connecting = setTimeout(
+    () => stop(() => listener.onFailure("unavailable", "connect timed out")),
+    SONIOX_CONNECT_TIMEOUT_MS,
+  );
+
   const stop = (outcome: () => void) => {
     if (done) return;
     done = true;
+    clearTimeout(connecting);
     outcome();
     ws.removeAllListeners();
     ws.on("error", () => {});
@@ -70,6 +79,7 @@ function openSonioxStream(
   };
 
   ws.on("open", () => {
+    clearTimeout(connecting);
     ws.send(
       JSON.stringify({
         model,
@@ -108,7 +118,8 @@ function openSonioxStream(
       if (token.is_final) settled += token.text;
       else pending += token.text;
     }
-    if (settled || pending || (response.tokens?.length ?? 0) > 0) listener.onText(settled, pending);
+    // Each response replaces the unsettled tail, so one with no tokens clears it.
+    if (response.tokens) listener.onText(settled, pending);
     if (response.finished) stop(() => listener.onEnd());
   });
 

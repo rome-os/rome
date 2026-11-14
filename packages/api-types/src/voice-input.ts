@@ -21,8 +21,13 @@ export const voiceInputInfoSchema = z.object({
       host: z.string(),
     })
     .nullable(),
-  /** Why `place` is null on Rome Cloud: it cannot be reached, or has no provider set up. */
-  placeUnknown: z.enum(["rome-cloud-unreachable", "rome-cloud-not-configured"]).optional(),
+  /**
+   * Why `place` is null on Rome Cloud: it cannot be reached, has no provider
+   * set up, or no longer accepts this instance, which must sign in again.
+   */
+  placeUnknown: z
+    .enum(["rome-cloud-unreachable", "rome-cloud-not-configured", "rome-cloud-signed-out"])
+    .optional(),
 });
 export type VoiceInputInfo = z.infer<typeof voiceInputInfoSchema>;
 
@@ -52,6 +57,8 @@ export const voiceInputStopReasonSchema = z.enum([
   "service-refused",
   /** Rome Cloud could not be reached for a transcription session. */
   "service-unavailable",
+  /** Rome Cloud no longer accepts this instance; it must sign in again. */
+  "service-signed-out",
   /** The client broke the socket's message order. */
   "bad-request",
   /** One dictation reached Rome's length limit; the text heard so far still arrives. */

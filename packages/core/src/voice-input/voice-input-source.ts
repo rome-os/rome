@@ -63,11 +63,19 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
     const outcome: RomeCloudSessionOutcome = await requestRomeCloudSession(caller, deps.fetch);
     if (outcome.kind !== "granted") return outcome;
     const { session } = outcome;
-    const transcriber = transcriberFor(session.provider, {
-      apiKey: session.token,
-      url: session.url,
-      model: session.model,
-    });
+    let transcriber: Transcriber | null;
+    try {
+      transcriber = transcriberFor(session.provider, {
+        apiKey: session.token,
+        url: session.url,
+        model: session.model,
+      });
+    } catch (err) {
+      return {
+        kind: "unavailable" as const,
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
     if (!transcriber) return { kind: "unknown-provider" as const, provider: session.provider };
     return { kind: "granted" as const, transcriber, sessionId: session.sessionId };
   };
@@ -117,13 +125,13 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
       // The gate lives in Rome Cloud: the instance's own provider is not gated.
       if (cloud && (cloud.available || !deps.own)) return cloud;
       if (deps.own) return { available: true, via: "instance", place: deps.own.place };
-      // Signed in, but Rome Cloud no longer takes this instance.
+      // Signed in, but Rome Cloud does not take this instance's credential.
       if (caller) {
         return {
           available: true,
           via: "rome-cloud",
           place: null,
-          placeUnknown: "rome-cloud-unreachable",
+          placeUnknown: "rome-cloud-signed-out",
         };
       }
       return { available: false, via: null, place: null };
@@ -133,6 +141,9 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
       const caller = deps.romeCloud();
       if (caller) {
         const outcome = await askRomeCloud(caller);
+        // The place named for Rome Cloud no longer says where this session's
+        // audio goes.
+        if (outcome.kind !== "granted") named = null;
         switch (outcome.kind) {
           case "granted":
             return {
@@ -159,7 +170,7 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
       }
       if (deps.own)
         return { ok: true, source: { transcriber: deps.own, romeCloudSessionId: null } };
-      return { ok: false, reason: "service-unavailable" };
+      return { ok: false, reason: caller ? "service-signed-out" : "service-unavailable" };
     },
   };
 }
