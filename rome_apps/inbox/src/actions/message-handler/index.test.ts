@@ -14,6 +14,7 @@ import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
   buildSenderInfo,
+  recipientLabel,
   createAction as createMessageHandlerAction,
   parseSentinelDecision,
   sendAnswer,
@@ -300,6 +301,24 @@ describe("buildMessageContext", () => {
     expect(result).not.toContain("project name: alpha");
     expect(result).not.toContain("## Project context");
     expect(result).not.toContain("Current selected project");
+  });
+});
+
+// Pins the inbox's label to the form core's `whoSaid`
+// (packages/core/src/chats/sender-labels.ts) gives a message the agent reads:
+// "<shown name> [<person>, <bond level in words>]", or "[not linked]".
+// Apps cannot import core, so the format is asserted literally.
+describe("recipientLabel", () => {
+  it("labels a linked sender with their person and bond level in words, as core does", () => {
+    expect(
+      recipientLabel({ shownName: "Ada", person: "Ada Lovelace", bondLevel: "inner-circle" }),
+    ).toBe("Ada [Ada Lovelace, inner circle]");
+  });
+
+  it("labels a sender with no linked person as not linked, as core does", () => {
+    expect(recipientLabel({ shownName: "Ada", person: null, bondLevel: "other" })).toBe(
+      "Ada [not linked]",
+    );
   });
 });
 
@@ -714,6 +733,39 @@ describe("message reply bond-level settings", () => {
         knownToProvider: true,
       },
     ]);
+  });
+
+  it("tells the envoy the reply goes to the sender, not the guardian", async () => {
+    const priya: PersonRecord = {
+      id: "priya",
+      displayName: "Priya Lindqvist-Mbeki",
+      bondLevel: "acquaintance",
+      channelMappings: [{ channel: "discord", channelUserId: "priya-dc" }],
+      profilePath: null,
+    };
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      settings: { replyToBondLevels: ["guardian", "acquaintance"] },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => priya) },
+      agentResponses: [
+        [{ type: "result", content: "You committed to the launch plan." }],
+        [{ type: "result", content: "APPROVE" }],
+      ],
+    });
+
+    await createAction(actionConfig, deps).execute({
+      channel: "discord",
+      channelUserId: "priya-dc",
+      threadId: "thread-1",
+      threadType: "group",
+      displayName: "Priya",
+      text: "What did I commit to?",
+      messageId: "msg-1",
+    });
+
+    const envoyPrompt = agentRunner.calls[1]?.prompt ?? "";
+    expect(envoyPrompt).toContain("from Priya [Priya Lindqvist-Mbeki, acquaintance]:");
+    expect(envoyPrompt).toContain("in the same group chat the message was sent in");
+    expect(envoyPrompt).toContain("The sender is not the guardian");
   });
 
   it("escalates malformed sentinel output instead of sending reasoning to other senders", async () => {

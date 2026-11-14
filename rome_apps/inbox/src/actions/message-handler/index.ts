@@ -227,21 +227,57 @@ export function parseSentinelDecision(raw: string): SentinelDecision {
   return { action: "replied", response };
 }
 
+/** Who the envoy is told a reply goes to: the answered message's sender. */
+export interface EnvoyRecipient {
+  /** The name the message showed, which the sender chose. */
+  shownName: string;
+  /** The person Rome links to the sender's account, or null when none. */
+  person: string | null;
+  bondLevel: string;
+  threadType?: string;
+}
+
+const BOND_LEVEL_WORDS: Record<string, string> = {
+  guardian: "guardian",
+  "inner-circle": "inner circle",
+  acquaintance: "acquaintance",
+  other: "other",
+};
+
+/** The sender as the replying agent reads them, `Ada [Ada Lovelace, inner circle]`,
+ *  the same form Rome labels each message the agent reads with (`whoSaid` in
+ *  packages/core/src/chats/sender-labels.ts, which apps cannot import). */
+export function recipientLabel(recipient: EnvoyRecipient): string {
+  const who = recipient.person
+    ? `${recipient.person}, ${BOND_LEVEL_WORDS[recipient.bondLevel] ?? recipient.bondLevel}`
+    : "not linked";
+  return `${recipient.shownName} [${who}]`;
+}
+
+function placeOf(threadType: string | undefined): string {
+  if (threadType === "private") return "direct message";
+  if (threadType === "group") return "group chat";
+  return "chat";
+}
+
 async function envoyCheck(
   runner: AgentRunnerInterface,
   outgoingText: string,
   originalMessage: string,
-  bondLevel: string,
+  recipient: EnvoyRecipient,
   replyingAgent: string,
   workingDir?: string,
 ): Promise<{ action: "approve" | "reject" | "require_approval"; reason?: string }> {
+  const place = placeOf(recipient.threadType);
   const prompt = [
     `Validate this outgoing message before it is sent.`,
     ``,
-    `Original user message: ${originalMessage}`,
-    `Bond level: ${bondLevel}`,
+    `Message being answered, from ${recipientLabel(recipient)}:`,
+    originalMessage,
+    ``,
+    `The reply goes to that sender, in the same ${place} the message was sent in.`,
+    `The sender is not the guardian: the guardian's replies skip this check.`,
     `Replying agent: ${replyingAgent}`,
-    `The reply goes to the chat the original message was sent in.`,
     ``,
     `Proposed reply:`,
     outgoingText,
@@ -473,7 +509,12 @@ async function handleTrustedMessage(
     deps.agentRunner,
     response,
     text,
-    bondLevel,
+    {
+      shownName: typeof args.displayName === "string" ? args.displayName : channelUserId,
+      person: typeof args.senderPerson === "string" ? args.senderPerson : null,
+      bondLevel,
+      threadType: typeof args.threadType === "string" ? args.threadType : undefined,
+    },
     targetAgent,
     workingDir,
   );
@@ -805,7 +846,9 @@ export function createMessageHandlerAction(
           strangerPersonId: deps.strangerPersonId,
         });
 
-        const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo };
+        const senderPerson =
+          person && person.id !== deps.strangerPersonId ? person.displayName : null;
+        const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo, senderPerson };
 
         const trustedLevels =
           (await settings.get<string[]>("trustedBondLevels")) ?? DEFAULT_TRUSTED_BOND_LEVELS;
