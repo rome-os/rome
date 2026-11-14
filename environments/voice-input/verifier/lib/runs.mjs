@@ -77,7 +77,8 @@ export async function useTranscriber(ctx) {
  * the provider and host Rome names, which on the Rome Cloud path come from Rome Cloud.
  */
 async function transcriberInUse(ctx) {
-  const environment = (await ctx.env.version())?.transcriber ?? null;
+  const version = await ctx.env.version();
+  const environment = version?.transcriberInUse ?? version?.transcriber ?? null;
   const opened = await openPage(ctx.env, { mic: setMessages(ctx.script, "B")[0].path });
   try {
     const url = new URL("/api/voice-input", opened.page.url()).toString();
