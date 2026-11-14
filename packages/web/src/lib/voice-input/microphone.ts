@@ -69,13 +69,33 @@ export interface Microphone {
 
 /**
  * Opens the microphone and calls `onAudio` with each chunk until `close()`.
- * Rejects with the browser's `DOMException` when the microphone is refused
- * (`NotAllowedError`) or missing (`NotFoundError`).
+ * Calls `onAsk` when the browser asks the guardian for the microphone, which
+ * it does while the permission is unset. Rejects with the browser's
+ * `DOMException` when the microphone is refused (`NotAllowedError`) or
+ * missing (`NotFoundError`).
  */
-export async function openMicrophone(onAudio: (chunk: ArrayBuffer) => void): Promise<Microphone> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-  });
+export async function openMicrophone(
+  onAudio: (chunk: ArrayBuffer) => void,
+  onAsk?: () => void,
+): Promise<Microphone> {
+  let answered = false;
+  // Chrome's permission prompt opens when the permission is unset.
+  navigator.permissions
+    ?.query({ name: "microphone" as PermissionName })
+    .then((status) => {
+      if (status.state === "prompt" && !answered) onAsk?.();
+    })
+    .catch(() => {
+      // A browser that cannot tell just shows no reason.
+    });
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    });
+  } finally {
+    answered = true;
+  }
   let context: AudioContext | null = null;
   try {
     context = new AudioContext();

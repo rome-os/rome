@@ -40,6 +40,8 @@ export interface DictationHandlers {
    * guardian stopped and the provider sent the rest of the text.
    */
   onDone(text: string, stop: DictationStop | null): void;
+  /** True while the browser asks the guardian for the microphone, false once answered. */
+  onAsking?(asking: boolean): void;
 }
 
 export interface Dictation {
@@ -56,7 +58,7 @@ export type DictationSocket = Pick<
 >;
 
 export interface DictationDeps {
-  openMicrophone(onAudio: (chunk: ArrayBuffer) => void): Promise<Microphone>;
+  openMicrophone(onAudio: (chunk: ArrayBuffer) => void, onAsk?: () => void): Promise<Microphone>;
   openSocket(): DictationSocket;
 }
 
@@ -139,13 +141,27 @@ export function startDictation(
     if (audioDone && socket?.readyState === WebSocket.OPEN) send({ type: "stop" });
   };
 
+  let asking = false;
+  const answered = () => {
+    if (!asking) return;
+    asking = false;
+    if (!done) handlers.onAsking?.(false);
+  };
   void deps
-    .openMicrophone((chunk) => {
-      if (done || audioDone) return;
-      if (socket?.readyState === WebSocket.OPEN) socket.send(chunk);
-      else queued.push(chunk);
-    })
+    .openMicrophone(
+      (chunk) => {
+        if (done || audioDone) return;
+        if (socket?.readyState === WebSocket.OPEN) socket.send(chunk);
+        else queued.push(chunk);
+      },
+      () => {
+        if (done) return;
+        asking = true;
+        handlers.onAsking?.(true);
+      },
+    )
     .then((opened) => {
+      answered();
       if (done) {
         opened.close();
         return;
@@ -189,6 +205,7 @@ export function startDictation(
       socket.onerror = () => finish("connection-lost");
     })
     .catch((error: unknown) => {
+      answered();
       const name = error instanceof DOMException ? error.name : "";
       finish(
         name === "NotAllowedError" || name === "SecurityError"

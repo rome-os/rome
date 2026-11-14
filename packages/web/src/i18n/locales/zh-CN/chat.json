@@ -704,6 +704,7 @@
     "start": "开始语音输入",
     "stop": "停止语音输入",
     "finishing": "正在完成语音输入",
+    "whyMicrophone": "Rome 使用麦克风将你的语音转成文字",
     "stopped": {
       "provider-unavailable": "转写服务不可用，已停止收听",
       "provider-refused": "转写服务拒绝了请求，已停止收听",

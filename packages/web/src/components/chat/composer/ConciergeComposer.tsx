@@ -419,7 +419,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             }}
           />
           <ReplyBar />
-          <VoiceInputNotice notice={voice.notice} />
+          <VoiceInputNotice notice={voice.notice} asking={voice.asking} />
           {draftSkill && (
             <div className="mb-2 flex min-w-0">
               <SkillCommandChip
