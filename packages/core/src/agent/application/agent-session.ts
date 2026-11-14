@@ -31,7 +31,7 @@ import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
 import { handoffSections, type RenewalHandoffs } from "../domain/session-handoff.js";
 import { writeRenewalHandoff } from "./session-handoff.js";
-import { type PromptFacts, type PromptMessage } from "../domain/prompt-facts.js";
+import type { PromptFacts } from "../domain/prompt-facts.js";
 import { type AgentLog } from "../domain/agent-log.js";
 import { type DeferTool } from "./ask-user-tools.js";
 import {
@@ -250,9 +250,14 @@ export interface SendTurnOptions {
   romeSessionId?: string;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
-  /** The message `replyTo` names, as Rome holds it where the turn's session
-   *  stands, or null when Rome holds none. Read only with `promptFacts`. */
-  quoted?: PromptMessage | null;
+  /** The id of the message `replyTo` names, as Rome holds it where the turn's
+   *  session stands, or null when Rome holds none. Read with `promptFacts`
+   *  when the turn runs. */
+  quotedId?: number | null;
+  /** The id of the message the turn answers, as Rome holds it where the turn's
+   *  session stands, or null when Rome holds none. Read with `promptFacts`
+   *  when the turn runs, so who said it is current then. */
+  currentId?: number | null;
   initiatedBy?: "user" | "system";
   /** Pushes the messages said in the turn at this level (RunParams.pushLevel). */
   pushLevel?: PushLevel;
@@ -2001,7 +2006,8 @@ interface TurnSink {
   sharedContext?: Record<string, unknown>;
   romeSessionId: string;
   replyTo?: MessageReplyReference;
-  quoted?: PromptMessage | null;
+  quotedId?: number | null;
+  currentId?: number | null;
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
   actor?: TurnActor;
@@ -3539,7 +3545,8 @@ class AgentSessionImpl implements AgentSession {
       sharedContext: options?.sharedContext,
       romeSessionId: options?.romeSessionId ?? this.sessionId,
       replyTo: options?.replyTo,
-      quoted: options?.quoted ?? null,
+      quotedId: options?.quotedId ?? null,
+      currentId: options?.currentId ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
       actor: options?.actor,
@@ -3730,16 +3737,20 @@ class AgentSessionImpl implements AgentSession {
       // The agent catches up on the messages said where its session stands
       // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
       // The prompt facts answer null where it catches up on nothing.
-      const unseen =
-        this.kind === "conversation" && sink.threadContext
-          ? (this.deps.promptFacts?.unseen(sink.romeSessionId) ?? null)
-          : null;
-      if (unseen) {
+      const promptFacts =
+        this.kind === "conversation" && sink.threadContext ? this.deps.promptFacts : undefined;
+      const unseen = promptFacts ? await promptFacts.unseen(sink.romeSessionId) : null;
+      if (promptFacts && unseen) {
         unseenMessageIds = unseen.map((message) => message.id);
+        const named = [sink.currentId, sink.quotedId].filter((id) => id != null);
+        const read = named.length > 0 ? await promptFacts.read(named) : [];
+        const byId = (id: number | null | undefined) =>
+          id == null ? null : (read.find((message) => message.id === id) ?? null);
         userPrompt = catchUpPrompt(userPrompt, {
           unseen,
-          quoted: sink.quoted,
+          quoted: byId(sink.quotedId),
           replyTo: sink.replyTo,
+          current: byId(sink.currentId),
         });
       }
       // Every turn, subagents included: the folder is where the work happens.

@@ -1258,6 +1258,8 @@ async function main() {
       // and nothing in a chat whose channel hands the agent every message.
       promptFacts: chatPromptFacts({
         facts: chatsWired.links,
+        messages: chatsWired.messages,
+        labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
       }),
