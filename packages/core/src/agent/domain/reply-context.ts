@@ -30,7 +30,13 @@ export function currentMessageSection(
     sender?.name ? ` from="${xmlAttr(sender.name)}"` : "",
     sender?.who ? ` who="${xmlAttr(sender.who)}"` : "",
   ].join("");
-  return [`<current_message${attrs}>`, prompt, "</current_message>"];
+  return [`<current_message${attrs}>`, sealed(prompt), "</current_message>"];
+}
+
+/** `prompt` with any `current_message` tag in it escaped, so the text a
+ *  sender writes cannot close its block and open one that names someone else. */
+function sealed(prompt: string): string {
+  return prompt.replace(/<(\/?\s*current_message)/gi, "&lt;$1");
 }
 
 /** Puts a replied-to line ahead of the prompt it answers. */
