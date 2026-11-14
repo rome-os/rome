@@ -143,7 +143,7 @@ enum NodeStatusLine {
 
 /// One connection's page, the same for every capability: its header; then
 /// one Connect button, or its Live access (and Sync, for one that syncs);
-/// where its data goes; and, for Health, what the Rome can do with it.
+/// where its data goes; and what the Rome can do with it.
 struct ConnectionScreen: View {
     let id: String
     let onActivity: () -> Void
@@ -167,10 +167,8 @@ struct ConnectionScreen: View {
                             PrimaryButton(title: "Connect", loading: connecting) { connect() }
                         }
                         DataFlowSection(capability: capability)
-                        if capability.syncSource == HealthSettings.sourceId {
-                            HealthChats()
-                                .id("end")
-                        }
+                        CapabilityExamples(capability: capability)
+                            .id("end")
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
@@ -373,18 +371,34 @@ struct PlainRow<Trailing: View>: View {
 /// goes, then the same authorization as Settings, or Not now.
 struct ConnectDeviceSheet: View {
     let request: DeviceConnectRequest
+    /// Snapshot runs only: drawn at its own height in a stand-in frame.
+    var standIn = false
     @Environment(AppModel.self) private var model
     @State private var connecting = false
+    /// The scrolling part's and the buttons' heights: the sheet is as tall as
+    /// both, so the whole "Where your data goes" card shows above Connect.
+    @State private var contentHeight: CGFloat = 0
+    @State private var buttonsHeight: CGFloat = 0
+
+    private static let padding: CGFloat = 20
+    private static let spacing: CGFloat = 20
+
+    private var height: CGFloat? {
+        guard contentHeight > 0, buttonsHeight > 0 else { return nil }
+        return contentHeight + Self.spacing + buttonsHeight + Self.padding * 2
+    }
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: Self.spacing) {
             if let capability = model.node.registry.capability(id: request.capability) {
+                // It scrolls when the text is larger than the screen allows.
                 ScrollView {
                     VStack(spacing: 20) {
                         ConnectionHeader(capability: capability)
                             .padding(.top, 12)
                         DataFlowSection(capability: capability)
                     }
+                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { contentHeight = $0 }
                 }
                 .scrollBounceBehavior(.basedOnSize)
                 VStack(spacing: 10) {
@@ -403,12 +417,63 @@ struct ConnectDeviceSheet: View {
                         .buttonStyle(PressScaleStyle())
                         .disabled(connecting)
                 }
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { buttonsHeight = $0 }
             }
         }
-        .padding(20)
+        .padding(Self.padding)
+        .frame(height: standIn ? height : nil)
+        .presentationDetents(height.map { [.height($0)] } ?? [.medium])
         // Mid-connect it stays until the card can check.
         .interactiveDismissDisabled(connecting)
-        .onDisappear { request.finish(false) }
+        .onDisappear { if !standIn { request.finish(false) } }
+    }
+}
+
+/// What the Rome can do with a connection, as the short chats its capability declares.
+struct CapabilityExamples: View {
+    let capability: any NodeCapability
+
+    var body: some View {
+        let examples = capability.examples
+        if !examples.isEmpty {
+            SettingsGroup(header: "What your Rome can do") {
+                ForEach(Array(examples.enumerated()), id: \.offset) { index, example in
+                    ExampleRow(example: example, last: index == examples.count - 1)
+                }
+            }
+        }
+    }
+}
+
+/// One example as a short chat: the request in the guardian's bubble and the
+/// Rome's answer in its own, both the real chat's.
+private struct ExampleRow: View {
+    let example: CapabilityExample
+    var last = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                Image(systemName: example.symbol)
+                    .romeFont(20)
+                    .foregroundStyle(Palette.sub)
+                    .frame(width: 30, alignment: .center)
+                    .accessibilityHidden(true)
+                Text(example.title).romeFont(16, .semibold).foregroundStyle(Palette.fg)
+                Spacer(minLength: 0)
+            }
+            VStack(spacing: 8) {
+                UserBubble(text: String(localized: example.request), pending: nil)
+                AgentBubble(text: String(localized: example.reply), forwardedFrom: nil, position: .single)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

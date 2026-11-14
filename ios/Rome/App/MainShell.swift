@@ -86,6 +86,7 @@ struct MainShell: View {
     @State private var photoViewerPreview = false
     @State private var pagePreview: URL?
     @State private var appPreview: InstalledApp?
+    @State private var connectPreview: String?
     #endif
 
     /// The drawer pinned beside the page rather than pushed aside.
@@ -207,7 +208,6 @@ struct MainShell: View {
         // A connect card's device connection: its authorization, then the card checks.
         .sheet(item: Binding(get: { model.connections.request }, set: { if $0 == nil { model.connections.request?.finish(false) } })) { request in
             ConnectDeviceSheet(request: request)
-                .presentationDetents([.medium])
                 .presentationBackground(Palette.sheet)
                 .presentationCornerRadius(22)
         }
@@ -226,6 +226,15 @@ struct MainShell: View {
             }
             if settingsPreview {
                 SheetStandIn { settingsSheet }
+            }
+            if let connectPreview {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    ConnectDeviceSheet(request: DeviceConnectRequest(capability: connectPreview) { _ in }, standIn: true)
+                        .background(Palette.sheet)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                }
+                .ignoresSafeArea(edges: .bottom)
             }
         }
         #endif
@@ -333,6 +342,8 @@ struct MainShell: View {
                 if SnapshotRunner.directory != nil { appPreview = app } else { openApp = app }
             case .photoViewer(let open):
                 photoViewerPreview = open
+            case .connectSheet(let id):
+                connectPreview = id
             case .composerPhotos, .appIdeas, nil: break
             }
         }

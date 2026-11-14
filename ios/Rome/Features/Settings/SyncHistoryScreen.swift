@@ -56,7 +56,7 @@ struct SyncHistoryFormatter {
         case .deleted:
             return SyncHistoryRow(id: entry.seq, symbol: "trash", title: triggerText(entry), detail: time, count: nil, failed: false)
         case .ok, .partial, .interrupted:
-            let detail = entry.history ? String(localized: "\(time) · last 6 months") : time
+            let detail = entry.history ? String(localized: "\(time) · the history you allow") : time
             let count = entry.itemCount == 0 ? String(localized: "Up to date") : String(localized: "\(entry.itemCount) readings")
             return SyncHistoryRow(id: entry.seq, symbol: symbol(entry), title: triggerText(entry), detail: detail, count: count, failed: false)
         }

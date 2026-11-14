@@ -18,6 +18,10 @@ final class FakeHealthSync: HealthSyncReading, @unchecked Sendable {
     private var deletions: [String: [(id: String, version: Int)]] = [:]
     private(set) var readCount = 0
     var failure: Error?
+    /// Health shows the app nothing older, as with "Past 30 days" in its sheet.
+    var grantedFrom: Date?
+
+    private func granted(_ record: HealthRecord) -> Bool { grantedFrom.map { record.start >= $0 } ?? true }
 
     func add(_ type: String, id: String, start: Date, end: Date? = nil, value: Double? = nil, stage: SleepStage? = nil, workout: WorkoutRecord? = nil) {
         lock.withLock {
@@ -54,7 +58,7 @@ final class FakeHealthSync: HealthSyncReading, @unchecked Sendable {
         let since = version(anchor)
         return lock.withLock {
             HealthChanges(
-                added: (stored[type.name] ?? []).filter { $0.version > since && $0.record.start >= from }.map(\.record),
+                added: (stored[type.name] ?? []).filter { $0.version > since && $0.record.start >= from && granted($0.record) }.map(\.record),
                 deleted: (deletions[type.name] ?? []).filter { $0.version > since }.map(\.id),
                 anchor: self.anchor(version)
             )
@@ -63,7 +67,7 @@ final class FakeHealthSync: HealthSyncReading, @unchecked Sendable {
 
     func buckets(_ type: HealthSyncType, _ resolution: BucketResolution, in window: DateInterval, calendar: Calendar) async throws -> [HealthBucketValue] {
         try read()
-        let records = lock.withLock { (stored[type.name] ?? []).map(\.record) }
+        let records = lock.withLock { (stored[type.name] ?? []).map(\.record).filter(granted) }
         var grouped: [Date: [Double]] = [:]
         for record in records where record.start >= window.start && record.start < window.end {
             guard let value = record.value, let slot = calendar.dateInterval(of: resolution == .hour ? .hour : .day, for: record.start)?.start else { continue }
@@ -83,13 +87,13 @@ final class FakeHealthSync: HealthSyncReading, @unchecked Sendable {
         try read()
         return lock.withLock {
             lookups.append(type.name)
-            return (stored[type.name] ?? []).contains { $0.record.start >= window.start && $0.record.start < window.end }
+            return (stored[type.name] ?? []).contains { $0.record.start >= window.start && $0.record.start < window.end && granted($0.record) }
         }
     }
 
     func records(_ type: HealthSyncType, in window: DateInterval) async throws -> [HealthRecord] {
         try read()
-        return lock.withLock { (stored[type.name] ?? []).map(\.record).filter { $0.start >= window.start && $0.start < window.end } }
+        return lock.withLock { (stored[type.name] ?? []).map(\.record).filter { $0.start >= window.start && $0.start < window.end && granted($0) } }
     }
 }
 
@@ -521,6 +525,24 @@ struct SyncRig {
         let progress = await rig.progress.load()
         #expect(progress.syncedThrough["bodyMass"] == marked, "refused readings move no mark")
         #expect(progress.unsupported.contains("bodyMass"), "left out until Sync now tries again")
+    }
+
+    @Test func aThirtyDayGrantSendsThoseDaysAndIsSyncedThroughNow() async throws {
+        let rig = SyncRig()
+        rig.health.grantedFrom = rig.date("2026-10-11T00:00:00Z")
+        rig.health.add("stepCount", id: "old", start: rig.date("2026-09-01T02:00:00Z"), value: 100)
+        rig.health.add("stepCount", id: "new", start: rig.date("2026-11-01T02:00:00Z"), value: 200)
+        rig.health.add("bodyMass", id: "w-old", start: rig.date("2026-08-01T02:00:00Z"), value: 70)
+        await rig.backfill()
+        #expect(await rig.log.entries.allSatisfy { $0.outcome == .ok }, "an empty month is no error")
+        let upserts = await rig.backend.upserts
+        #expect(upserts.contains { $0.key == "stepCount:day:2026-10-31T16:00:00Z" })
+        #expect(!upserts.contains { $0.key.hasPrefix("stepCount:day:2026-08") || $0.key.hasPrefix("stepCount:day:2026-09") })
+        #expect(!upserts.contains { $0.type == "bodyMass" }, "nothing Health keeps from the app")
+        let progress = await rig.progress.load()
+        for type in HealthSyncPlan.all {
+            #expect(progress.syncedThrough[type.name] == HealthFixtures.now, "through the backfill's start, as with the whole history")
+        }
     }
 
     @Test func aCGMsReadingsGoUpAsBucketsNotSamples() async throws {

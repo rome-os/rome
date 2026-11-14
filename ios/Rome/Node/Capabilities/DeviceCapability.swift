@@ -18,6 +18,20 @@ struct DeviceCapability: NodeCapability {
     var title: LocalizedStringResource { "Device" }
     let symbol = "battery.75percent"
     var summary: LocalizedStringResource { "Your Rome reads this phone's battery and network." }
+    var examples: [CapabilityExample] {
+        [
+            CapabilityExample(
+                symbol: "battery.25percent", title: "Charge before you leave",
+                request: "Remind me to charge before I leave.",
+                reply: "Your battery is at 18%. I'll remind you at 5:30, before your 6 pm train."
+            ),
+            CapabilityExample(
+                symbol: "thermometer.medium", title: "Check if it runs hot",
+                request: "Is my phone running hot?",
+                reply: "It's warm, not hot: it's charging on cellular, which heats it a little."
+            ),
+        ]
+    }
     let personal = false
     let needsPermission = false
     var syncSource: String? { nil }
