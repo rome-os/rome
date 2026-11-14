@@ -286,7 +286,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           // The line the run names by its platform id, which the turn answers,
           // and the one its reply quotes, as Chats holds them.
           const lines = this.runLineDeps
-            ? await runLines(this.runLineDeps.lines, this.runLineDeps.labels, romeSessionId, req)
+            ? await runLines(this.runLineDeps.lines, romeSessionId, req)
             : null;
           return { conversation, romeSessionId, romeSession, lines };
         })().catch((err: unknown) => {
@@ -307,7 +307,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           sharedContext: req.init?.sharedContext,
           romeSessionId,
           replyTo: req.replyTo,
-          ...(lines ? { quoted: lines.quoted, current: lines.current } : {}),
+          ...(lines ? { quotedId: lines.quoted, currentId: lines.prompt } : {}),
         }).turn;
         const turnLogFields = {
           ...baseLogFields,

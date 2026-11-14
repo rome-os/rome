@@ -9,6 +9,8 @@ import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
 import type { PromptFacts, UnseenMessage } from "../agent/index.js";
 import { SenderLabels } from "../chats/sender-labels.js";
+import type { SaidMessage } from "../chats/storage/message.js";
+import type { RunLineDeps } from "../connections/speaker-messages.js";
 import type { AgentDefinition } from "../agent/index.js";
 import { claudeStoppedTurnResult, readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
@@ -2357,6 +2359,7 @@ describe("AgentRunner", () => {
       appCatalog?: Pick<AppCatalog, "get">;
       resetPolicy?: ProviderSessionResetPolicy;
       turnLinks?: PromptFacts;
+      runLineDeps?: RunLineDeps;
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2378,7 +2381,7 @@ describe("AgentRunner", () => {
       new ChatsWebChatRepository(testDb.db),
       undefined,
       undefined,
-      undefined,
+      options.runLineDeps,
       resetPolicy ? async () => resetPolicy : undefined,
       sessionOpeningFor({ channelSurface: testChannelSurface }),
     );
@@ -6360,6 +6363,7 @@ describe("AgentRunner", () => {
       // already reaches the agent, as webchat's does.
       const promptFacts = chatPromptFacts({
         facts: { unseen: () => [ambient], seen: (ids) => void seen.push(ids) },
+        messages: { byIds: () => [] },
         labels: new SenderLabels({ byAccount: async () => null }),
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface: (channel) =>
@@ -6411,6 +6415,7 @@ describe("AgentRunner", () => {
         {
           id: 7,
           sender: "Bob",
+          who: null,
           text: "ambient update",
           at,
           fromRome: false,
@@ -6420,6 +6425,7 @@ describe("AgentRunner", () => {
         {
           id: 8,
           sender: "Dana",
+          who: null,
           text: "second update",
           at,
           fromRome: false,
@@ -6430,6 +6436,7 @@ describe("AgentRunner", () => {
       const seen: { ids: readonly number[]; sessionId: string; turnId: string }[] = [];
       const turnLinks: PromptFacts = {
         unseen: async (sessionId) => (sessionId === conversation.id ? unseen : []),
+        read: async () => [],
         seen: (ids, sessionId, turnId) => {
           seen.push({ ids, sessionId, turnId });
         },
@@ -6488,6 +6495,7 @@ describe("AgentRunner", () => {
       });
       const turnLinks: PromptFacts = {
         unseen: async () => unseen,
+        read: async () => [],
         seen: () => undefined,
       };
       const prompts: string[] = [];
@@ -6518,13 +6526,14 @@ describe("AgentRunner", () => {
 
     it("leaves the line an ordinary reply quotes out of the catch-up", async () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const target = { id: 1, sender: "Bob", text: "the question", at };
+      const target = { id: 1, sender: "Bob", who: null, text: "the question", at };
       const prompt = await linkedPrompt(
         [
           { ...target, fromRome: false, quoted: null, quotesOutside: false },
           {
             id: 2,
             sender: "Rome",
+            who: null,
             text: "the answer",
             at,
             fromRome: true,
@@ -6539,12 +6548,13 @@ describe("AgentRunner", () => {
 
     it("carries the line that started a thread before Rome's first line in it", async () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
-      const starter = { id: 1, sender: "Bob", text: "start here", at };
+      const starter = { id: 1, sender: "Bob", who: null, text: "start here", at };
       const prompt = await linkedPrompt(
         [
           {
             id: 2,
             sender: "Rome",
+            who: null,
             text: "on it",
             at,
             fromRome: true,
@@ -6563,6 +6573,7 @@ describe("AgentRunner", () => {
       const unseen: UnseenMessage[] = Array.from({ length: 21 }, (_, index) => ({
         id: index + 1,
         sender: "Participant",
+        who: null,
         text: `ambient ${index + 1}`,
         at,
         fromRome: false,
@@ -6587,6 +6598,7 @@ describe("AgentRunner", () => {
       });
       const turnLinks: PromptFacts = {
         unseen: async () => [],
+        read: async () => [],
         seen: () => undefined,
       };
       const providerPrompts: string[] = [];
@@ -6623,6 +6635,69 @@ describe("AgentRunner", () => {
       expect(providerPrompts[0]).toContain(
         "<reply_context>\nRome: Jack Ma profile\n</reply_context>",
       );
+    });
+    it("reads who said the turn's message when the turn runs, not when it was queued", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "discord",
+        threadId: "queued-who",
+        agentName: "main",
+      });
+      // What People answers for the sender. The guardian links the account
+      // while the turn waits behind another.
+      let who = "not linked";
+      const turnLinks: PromptFacts = {
+        unseen: async () => [],
+        read: async (ids) =>
+          ids.includes(42) ? [{ id: 42, sender: "Ana", who, text: "hi", at: new Date(0) }] : [],
+        seen: () => undefined,
+      };
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const prompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          prompts.push(input.prompt);
+          if (prompts.length === 1) await held;
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks,
+        keepAliveAcrossTurns: true,
+        runLineDeps: {
+          lines: {
+            recorded: async (_sessionId, platformId) =>
+              platformId === "p-42" ? ({ id: 42 } as SaidMessage) : null,
+            stands: () => false,
+          },
+          links: { prompt: () => {} },
+        },
+      });
+      const run = (prompt: string, platformMessageId?: string) =>
+        collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "discord:queued-who",
+            romeSessionId: conversation.id,
+            ...(platformMessageId ? { platformMessageId } : {}),
+            threadContext: { channel: "discord", threadId: "queued-who", threadType: "group" },
+          }),
+        );
+
+      const first = run("first");
+      await rs.waitFor(() => expect(prompts).toHaveLength(1));
+      const second = run("hi", "p-42");
+      who = "Ana Lopez, inner circle";
+      release();
+      await Promise.all([first, second]);
+
+      expect(prompts[1]).toContain('<current_message from="Ana" who="Ana Lopez, inner circle">');
     });
   });
 

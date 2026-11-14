@@ -298,7 +298,7 @@ export class AgentRunner {
     // The line the run names by its platform id, which the turn answers, and
     // the one its reply quotes, as Chats holds them.
     const lines = this.runLineDeps
-      ? await runLines(this.runLineDeps.lines, this.runLineDeps.labels, romeSessionId, params)
+      ? await runLines(this.runLineDeps.lines, romeSessionId, params)
       : null;
 
     // An action's turn waits behind the running one. Its id is allocated by
@@ -312,7 +312,7 @@ export class AgentRunner {
         sharedContext: params.sharedContext,
         romeSessionId,
         replyTo: params.replyTo,
-        ...(lines ? { quoted: lines.quoted, current: lines.current } : {}),
+        ...(lines ? { quotedId: lines.quoted, currentId: lines.prompt } : {}),
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
         ...(params.actor ? { actor: params.actor } : {}),

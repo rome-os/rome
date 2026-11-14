@@ -10,6 +10,7 @@ const CATCH_UP_LIMIT = 20;
 interface ContextMessage {
   id: string;
   sender: string | null;
+  who?: string | null;
   text: string;
   createdAt?: Date;
 }
@@ -18,15 +19,24 @@ function contextMessage(message: PromptMessage): ContextMessage {
   return {
     id: String(message.id),
     sender: message.sender,
+    who: message.who,
     text: message.text,
     createdAt: message.at,
   };
 }
 
+/** The name a message showed, without square brackets, which mark who Rome
+ *  knows the sender to be: a name a sender picks never reads as that. */
+function shownName(sender: string | null | undefined): string | null {
+  return sender?.replace(/[[\]]/g, "").trim() || null;
+}
+
 function contextLine(message: ContextMessage): string {
+  const name = shownName(message.sender) ?? "Unknown sender";
+  const who = message.who?.trim();
   return replyContextLine({
     createdAt: message.createdAt,
-    sender: message.sender?.trim() || "Unknown sender",
+    sender: who ? `${name} [${who}]` : name,
     text: message.text,
   });
 }
@@ -75,7 +85,9 @@ export function catchUpPrompt(
     (message) =>
       message.id !== repliedTo?.id && !(facts.current && message.id === String(facts.current.id)),
   );
-  const from = facts.current?.sender?.trim() || null;
+  const from = facts.current
+    ? { name: shownName(facts.current.sender), who: facts.current.who?.trim() || null }
+    : null;
 
   const sections: string[] = [];
   if (notifications.length > 0 || omitted > 0) {
@@ -87,7 +99,7 @@ export function catchUpPrompt(
     );
   }
   if (repliedTo) sections.push(...replyContextSection(contextLine(repliedTo)));
-  if (sections.length === 0 && !from) return prompt;
+  if (sections.length === 0 && !from?.name && !from?.who) return prompt;
   sections.push(...currentMessageSection(prompt, from));
   return sections.join("\n");
 }

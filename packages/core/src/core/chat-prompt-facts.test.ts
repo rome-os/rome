@@ -23,11 +23,14 @@ function facts() {
   const seen = rs.fn((_ids: readonly number[], _chatId: string, _turnId: string) => undefined);
   const promptFacts = chatPromptFacts({
     facts: { unseen: () => [AMBIENT], seen },
+    messages: { byIds: () => [] },
     labels: {
+      read: async () => [],
       readUnseen: async (lines) =>
         lines.map(({ senderName, account: _account, ...line }) => ({
           ...line,
-          sender: `${senderName} (labelled)`,
+          sender: senderName,
+          who: "labelled",
           quoted: null,
         })),
     },
@@ -47,11 +50,12 @@ describe("chatPromptFacts", () => {
     expect(await facts().promptFacts.unseen("chat-quiet")).toBeNull();
   });
 
-  it("answers the unseen messages in a chat whose channel does not, their senders labelled", async () => {
+  it("answers the unseen messages in a chat whose channel does not, with who said them", async () => {
     const { promptFacts } = facts();
     const read = {
       id: 7,
-      sender: "Bob (labelled)",
+      sender: "Bob",
+      who: "labelled",
       text: "ambient update",
       at: AMBIENT.at,
       fromRome: false,

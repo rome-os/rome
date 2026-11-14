@@ -20,10 +20,17 @@ export function replyContextSection(line: string): string[] {
 }
 
 /** The `<current_message>` block around the turn's prompt, one string per
- *  line, naming who said it when `from` is given. */
-export function currentMessageSection(prompt: string, from?: string | null): string[] {
-  const open = from ? `<current_message from="${xmlAttr(from)}">` : "<current_message>";
-  return [open, prompt, "</current_message>"];
+ *  line. `from` is the name the message showed and `who` who Rome knows the
+ *  sender to be, each an attribute when given. */
+export function currentMessageSection(
+  prompt: string,
+  sender?: { name?: string | null; who?: string | null } | null,
+): string[] {
+  const attrs = [
+    sender?.name ? ` from="${xmlAttr(sender.name)}"` : "",
+    sender?.who ? ` who="${xmlAttr(sender.who)}"` : "",
+  ].join("");
+  return [`<current_message${attrs}>`, prompt, "</current_message>"];
 }
 
 /** Puts a replied-to line ahead of the prompt it answers. */
