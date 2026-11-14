@@ -30,6 +30,11 @@ CURRENT_PROJECT_VERSION = 1
 // Rome Cloud signs the app in. Debug builds may point elsewhere from Local.xcconfig.
 ROME_CLOUD_ORIGIN = https:/$()/romeos.cc
 
+// Debug builds reach Rome's test hosts (*.romeos.dev) behind Cloudflare Access
+// with a service token, set in Local.xcconfig. Empty sends nothing.
+CF_ACCESS_CLIENT_ID =
+CF_ACCESS_CLIENT_SECRET =
+
 // Local signing for device builds: copy Local.xcconfig.example to Local.xcconfig.
 #include? "Local.xcconfig"
 

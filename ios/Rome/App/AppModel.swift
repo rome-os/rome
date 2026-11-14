@@ -1586,6 +1586,7 @@ final class AppModel {
         guard let url = URL(string: origin) else { return }
         phase = .connecting(host: url.host() ?? origin)
         var request = URLRequest(url: url.appending(path: "api/auth/login"))
+        DevAccess.stamp(&request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONEncoder().encode(["userId": user, "password": password])
