@@ -228,7 +228,7 @@ export function parseSentinelDecision(raw: string): SentinelDecision {
 }
 
 /** Who the envoy is told a reply goes to: the answered message's sender. */
-interface EnvoyRecipient {
+export interface EnvoyRecipient {
   /** The name the message showed, which the sender chose. */
   shownName: string;
   /** The person Rome links to the sender's account, or null when none. */
@@ -245,8 +245,9 @@ const BOND_LEVEL_WORDS: Record<string, string> = {
 };
 
 /** The sender as the replying agent reads them, `Ada [Ada Lovelace, inner circle]`,
- *  the same form Rome labels each message the agent reads with. */
-function recipientLabel(recipient: EnvoyRecipient): string {
+ *  the same form Rome labels each message the agent reads with (`whoSaid` in
+ *  packages/core/src/chats/sender-labels.ts, which apps cannot import). */
+export function recipientLabel(recipient: EnvoyRecipient): string {
   const who = recipient.person
     ? `${recipient.person}, ${BOND_LEVEL_WORDS[recipient.bondLevel] ?? recipient.bondLevel}`
     : "not linked";

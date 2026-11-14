@@ -14,6 +14,7 @@ import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
   buildSenderInfo,
+  recipientLabel,
   createAction as createMessageHandlerAction,
   parseSentinelDecision,
   sendAnswer,
@@ -295,6 +296,24 @@ describe("buildMessageContext", () => {
     expect(result).not.toContain("project name: alpha");
     expect(result).not.toContain("## Project context");
     expect(result).not.toContain("Current selected project");
+  });
+});
+
+// Pins the inbox's label to the form core's `whoSaid`
+// (packages/core/src/chats/sender-labels.ts) gives a message the agent reads:
+// "<shown name> [<person>, <bond level in words>]", or "[not linked]".
+// Apps cannot import core, so the format is asserted literally.
+describe("recipientLabel", () => {
+  it("labels a linked sender with their person and bond level in words, as core does", () => {
+    expect(
+      recipientLabel({ shownName: "Ada", person: "Ada Lovelace", bondLevel: "inner-circle" }),
+    ).toBe("Ada [Ada Lovelace, inner circle]");
+  });
+
+  it("labels a sender with no linked person as not linked, as core does", () => {
+    expect(recipientLabel({ shownName: "Ada", person: null, bondLevel: "other" })).toBe(
+      "Ada [not linked]",
+    );
   });
 });
 
