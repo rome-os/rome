@@ -2,14 +2,15 @@
 
 Rome Cloud is the operator-run service that complements Rome instances. Where each Rome instance serves a single [guardian](people.md#guardian), Rome Cloud is the shared piece of infrastructure that sits in front of all of them.
 
-It plays six roles:
+It plays seven roles:
 
 - **Tenant provisioner** — provisions a Rome instance per paying user, manages domains and certificates.
 - **Identity provider for instances** — authenticates a guardian against their Rome Cloud account when an instance signs in, and issues the durable instance credential ([Instance sign-in](#instance-sign-in)).
 - **Third-party OAuth broker** — runs the start/callback flow for providers like Google or GitHub, then hands the access token to the requesting Rome instance via a PKCE-bound handoff ([OAuth handoff](#oauth-handoff)).
 - **App store backend** — hosts the publicly available [app](apps.md#rome-apps) listings (see [App store](apps.md#app-store)).
 - **Rome credits provider** — serves Codex through an inference gateway that bills the instance's Rome credits while the guardian's ChatGPT login is disconnected and the account has credits to spend ([Rome credits](#rome-credits)).
-- **Usage collector** — receives the usage a signed-in instance reports about its own turns, action runs, and guardian sign-ins ([Usage reporting](#usage-reporting)).
+- **Voice input provider** — hands a signed-in instance a short-lived credential for a transcription provider, one per listening session ([Voice input](#voice-input)).
+- **Usage collector** — receives the usage a signed-in instance reports about its own turns, action runs, guardian sign-ins, and listening sessions ([Usage reporting](#usage-reporting)).
 
 **Contracts:**
 
@@ -82,9 +83,22 @@ Rome credits are an account-wide allowance that Rome Cloud serves through its in
 - An agent pinned to Codex by tier, such as the image generation agent, still needs the ChatGPT login, because the credits gateway rejects ChatGPT's hosted tools.
 - The gateway answers a used-up balance with `402 insufficient_credits`. The turn fails with `credits_used_up`. The instance does not check the balance before each turn, so a balance used up between reads fails turns this way until the next read ends Rome credits.
 
+## Voice input
+
+Rome Cloud provides the transcription service behind dictation in message fields. It holds the provider's credential, so a guardian on a signed-in instance sets nothing up.
+
+**Contracts:**
+
+- For each listening session the instance asks `POST /v1/transcription/sessions`, as the instance. Rome Cloud answers the provider, its address, the model, a credential that lives a few minutes, and a session id.
+- Settings and `GET /api/voice-input` name the provider and its host from `GET /v1/transcription/provider`, which mints no credential. When Rome Cloud cannot be reached or has no provider set up, they say so and name none.
+- The audio goes from the browser to the guardian's own Rome and from there to the provider. It never passes through Rome Cloud, and Rome keeps none of it.
+- A refusal carries a reason code, such as `voice_input_rate_limited`. The message field shows it and keeps the words heard so far.
+- Rome Cloud allows voice input per account. For an account it does not allow, both routes answer 403 `voice_input_not_allowed`, and the dashboard shows no voice control and no voice input row in Settings.
+- An instance that is not signed in, or whose credential Rome Cloud refuses, uses its own provider from `ROME_TRANSCRIPTION_*` when it has one. Without either the voice control is absent.
+
 ## Usage reporting
 
-A signed-in instance reports one usage event per [turn](sessions.md#turn), one per app or [routine](data.md#routines) action run, and one per guardian sign-in to Rome Cloud. A turn event carries its token counts, the model, who paid the provider, where the work came from, and what set it off. Rome Cloud joins turn events to the Rome credit charges its inference gateway recorded. The two sources stay separate ([decision](../adrs/instance-reported-usage-beside-credits-ledger.md)).
+A signed-in instance reports one usage event per [turn](sessions.md#turn), one per app or [routine](data.md#routines) action run, one per guardian sign-in, and one per listening session on a Rome Cloud transcription session to Rome Cloud. A turn event carries its token counts, the model, who paid the provider, where the work came from, and what set it off. Rome Cloud joins turn events to the Rome credit charges its inference gateway recorded. The two sources stay separate ([decision](../adrs/instance-reported-usage-beside-credits-ledger.md)).
 
 **Contracts:**
 
@@ -100,6 +114,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 
   A turn takes the trigger of its root session's chain. A routine run records what fired it. A run recorded before runs stored that takes its routine's current trigger. A retried fire has no run of its own, so it takes the trigger shared by the routines with its name, or `unknown` when they differ.
 - A login event records each time the guardian signs in to the instance. Its kind is the sign-in method: `password`, `onboard`, `oauth`, `rome_cloud`, or `rome_cloud_native` for the desktop and mobile apps. An OAuth redeem by a guardian who is already signed in connects a provider and is not a login.
+- A transcription event records one listening session that used a Rome Cloud transcription session. It carries Rome Cloud's session id, the provider, the model, the seconds of audio sent, and why listening stopped. A session on the instance's own provider is not reported.
 - A turn event carries the kind of [login](../domains/agents.md#model-provider-login) the turn ran on: `subscription`, `api_credential`, or `rome_credits`. It is left out when Rome cannot tell. Instances older than the field sent `funding` instead, which Rome Cloud still reads.
 - A Codex turn event carries Codex's own turn id. Codex sends the same id on every gateway request, which is the join key for credit charges.
 - Events carry no prompt, output, contact, or routine name. An app appears as its App Store listing id or `first-party:<app id>`. Any other app appears as `local`.

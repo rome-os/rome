@@ -7,6 +7,11 @@ import { attachLiveEventsServer, type LiveEventSources } from "./live-events-ser
 import { attachNodeConsoleServer } from "./desktops/node-console-server.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { attachTerminalServer } from "./terminal-server.js";
+import {
+  attachVoiceInputServer,
+  createVoiceInputSource,
+  type Transcriber,
+} from "./voice-input/index.js";
 import { guardianAuth } from "./db/schema.js";
 import { createTestDb, type TestDb } from "./test/db.js";
 import { createSession } from "./access/auth.js";
@@ -35,6 +40,13 @@ const noSources: LiveEventSources = {
   subscribeChatTasks: () => () => {},
 };
 
+const silentTranscriber: Transcriber = {
+  place: { provider: "Fake", host: "stt.example" },
+  model: "fake",
+  open: () => ({ sendAudio: () => {}, finish: () => {}, abort: () => {} }),
+};
+const silentSource = createVoiceInputSource({ own: silentTranscriber, romeCloud: () => null });
+
 function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
   const handlers = [
     attachDesktopProxy(server, db),
@@ -43,6 +55,7 @@ function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
     attachNodeConsoleServer(server, db, () =>
       createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),
     ),
+    attachVoiceInputServer(server, db, silentSource, null, new DashboardAccessState()),
   ];
   return { close: () => handlers.forEach((handler) => handler.close()) };
 }
@@ -88,6 +101,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     "/ws/terminal?preset=claude-login",
     "/ws/events",
     "/ws/node",
+    "/ws/voice-input",
   ])("owns socket errors before checking %s", async (path) => {
     const testDb = createTestDb();
     const server = createServer();
@@ -111,7 +125,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     }
   });
 
-  it("blocks anonymous and cross-origin requests before reaching websockify, the terminal, live events, or the node console", async () => {
+  it("blocks anonymous and cross-origin requests before reaching websockify, the terminal, live events, the node console, or voice input", async () => {
     const testDb = createTestDb();
     await testDb.db.insert(guardianAuth).values({
       id: "auth-1",
@@ -137,6 +151,7 @@ describe("guardian WebSocket upgrade handlers", () => {
       "/ws/terminal?preset=claude-login",
       "/ws/events",
       "/ws/node",
+      "/ws/voice-input",
     ];
 
     try {
@@ -154,6 +169,14 @@ describe("guardian WebSocket upgrade handlers", () => {
       ).toBe(101);
       expect(
         await upgrade(port, "/ws/node", { origin: `http://127.0.0.1:${port}` }, { direct: true }),
+      ).toBe(101);
+      expect(
+        await upgrade(
+          port,
+          "/ws/voice-input",
+          { origin: `http://127.0.0.1:${port}` },
+          { direct: true },
+        ),
       ).toBe(101);
 
       const cookie = `rome_session=${createSession("guardian-1")}`;
