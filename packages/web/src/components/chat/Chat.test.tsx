@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
+import { forwardRef, memo, useImperativeHandle, useRef, type ReactNode } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ChatSession } from "@/lib/chat-types";
@@ -52,6 +52,10 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+// Which composer took the caret: the thread it sends into, or "" for the chat's own.
+const conciergeFocus = rs.hoisted(() => rs.fn());
+const touch = rs.hoisted(() => ({ coarse: false }));
+rs.mock("@/hooks/use-coarse-pointer", () => ({ useCoarsePointer: () => touch.coarse }));
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
 const toast = rs.hoisted(() => ({
   loading: rs.fn(() => "finding"),
@@ -410,13 +414,15 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
     },
     ref,
   ) {
+    // The thread the composer's draft sends into: none for the chat's own.
+    const thread = useReplyDraft()?.thread;
+    const threadRef = useRef(thread);
+    threadRef.current = thread;
     useImperativeHandle(ref, () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
-      focus: () => {},
+      focus: () => conciergeFocus(threadRef.current ?? ""),
     }));
-    // The thread the composer's draft sends into: none for the chat's own.
-    const thread = useReplyDraft()?.thread;
     return (
       <div
         data-testid="chat-composer"
@@ -2910,7 +2916,10 @@ describe("Chat Concierge empty state", () => {
       return element;
     };
     const host = (target: HTMLElement | null) =>
-      ({ outlet: target, open: rs.fn(), close: rs.fn() }) satisfies ToolThreadHost;
+      ({ outlet: target, set: rs.fn(), reveal: rs.fn() }) satisfies ToolThreadHost;
+    // The last tab the chat offered the pane, or null while none shows.
+    const tabOf = (toolThread: ToolThreadHost) =>
+      rs.mocked(toolThread.set).mock.calls.at(-1)?.[1] ?? null;
     const concierge = (toolThread: ToolThreadHost | null) => (
       <ToolThreadContext.Provider value={toolThread}>
         <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
@@ -2930,12 +2939,15 @@ describe("Chat Concierge empty state", () => {
       renderChat(concierge(toolThread));
       await screen.findAllByTestId("user-row");
       expect(composers()).toHaveLength(1);
+      expect(tabOf(toolThread)).toBeNull();
 
       fireEvent.click(screen.getByTestId("open-thread"));
 
-      expect(toolThread.open).toHaveBeenCalledWith(expect.any(String), expect.any(Function));
+      expect(toolThread.reveal).toHaveBeenCalledTimes(1);
       const view = threadView(toolThread.outlet!)!;
-      expect(view.textContent).toContain("First");
+      expect(view).toBeTruthy();
+      // The pane's tab is named for the task.
+      expect(tabOf(toolThread)).toMatchObject({ title: "First", taskChatId: null });
       // The chat stays as it was, and its own composer sends to the chat.
       expect(screen.getByTestId("message-list")).toBeTruthy();
       expect(threadsOf()).toEqual(["", "u-1"]);
@@ -2959,7 +2971,7 @@ describe("Chat Concierge empty state", () => {
       expect(threadView(toolThread.outlet!)).toBeTruthy();
     });
 
-    it("shows another task's thread in the same tab", async () => {
+    it("shows another task's thread in the same tab, under its title", async () => {
       twoTurns();
       const toolThread = host(outlet());
       renderChat(concierge(toolThread));
@@ -2968,34 +2980,85 @@ describe("Chat Concierge empty state", () => {
 
       fireEvent.click(screen.getByTestId("open-other-thread"));
 
-      expect(toolThread.open).toHaveBeenCalledTimes(2);
+      expect(toolThread.reveal).toHaveBeenCalledTimes(2);
       expect(toolThread.outlet!.querySelectorAll("[data-chat-thread-view]")).toHaveLength(1);
-      expect(threadView(toolThread.outlet!)!.textContent).toContain("Second");
+      expect(tabOf(toolThread)).toMatchObject({ title: "Second" });
       expect(threadsOf()).toEqual(["", "u-2"]);
     });
 
-    it("closes when the pane's tab asks, and when its own close button does", async () => {
+    it("closes when the pane's tab asks, and removes the tab", async () => {
       twoTurns();
       const toolThread = host(outlet());
       renderChat(concierge(toolThread));
       await screen.findAllByTestId("user-row");
       fireEvent.click(screen.getByTestId("open-thread"));
-      const close = rs.mocked(toolThread.open).mock.calls[0]![1];
 
-      act(() => close());
+      act(() => tabOf(toolThread)!.onClose());
+
       expect(threadView(toolThread.outlet!)).toBeNull();
-      expect(toolThread.close).toHaveBeenLastCalledWith(
-        rs.mocked(toolThread.open).mock.calls[0]![0],
-      );
-
+      expect(tabOf(toolThread)).toBeNull();
+      // Opened again, it is selected again.
       fireEvent.click(screen.getByTestId("open-thread"));
-      fireEvent.click(
-        within(threadView(toolThread.outlet!) as HTMLElement).getByRole("button", {
-          name: "thread.close",
-        }),
+      expect(toolThread.reveal).toHaveBeenCalledTimes(2);
+      expect(tabOf(toolThread)).toMatchObject({ title: "First" });
+    });
+
+    it("closes on Esc inside it, and leaves it open on Esc in the chat's composer", async () => {
+      twoTurns();
+      const toolThread = host(outlet());
+      renderChat(concierge(toolThread));
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-thread"));
+
+      fireEvent.keyDown(screen.getByTestId("reply-jump"), { key: "Escape" });
+      expect(threadView(toolThread.outlet!)).toBeTruthy();
+      fireEvent.keyDown(
+        within(threadView(toolThread.outlet!) as HTMLElement).getByTestId("chat-composer"),
+        {
+          key: "Escape",
+        },
       );
       expect(threadView(toolThread.outlet!)).toBeNull();
-      expect(toolThread.close).toHaveBeenCalledTimes(2);
+    });
+
+    describe("the caret", () => {
+      beforeEach(() => {
+        conciergeFocus.mockClear();
+        touch.coarse = false;
+      });
+      afterEach(() => {
+        touch.coarse = false;
+      });
+
+      it("goes to the thread's composer on every open, and switching threads", async () => {
+        twoTurns();
+        const toolThread = host(outlet());
+        renderChat(concierge(toolThread));
+        await screen.findAllByTestId("user-row");
+        expect(conciergeFocus).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(conciergeFocus).toHaveBeenLastCalledWith("u-1"));
+        fireEvent.click(screen.getByTestId("open-other-thread"));
+        await waitFor(() => expect(conciergeFocus).toHaveBeenLastCalledWith("u-2"));
+        // The same thread again, from its label: the caret returns.
+        conciergeFocus.mockClear();
+        fireEvent.click(screen.getByTestId("open-other-thread"));
+        await waitFor(() => expect(conciergeFocus).toHaveBeenCalledWith("u-2"));
+      });
+
+      it("stays out of the composer on a touch device, which would raise its keyboard", async () => {
+        touch.coarse = true;
+        twoTurns();
+        const toolThread = host(outlet());
+        renderChat(concierge(toolThread));
+        await screen.findAllByTestId("user-row");
+
+        fireEvent.click(screen.getByTestId("open-thread"));
+
+        expect(await within(toolThread.outlet!).findByTestId("chat-composer")).toBeTruthy();
+        expect(conciergeFocus).not.toHaveBeenCalled();
+      });
     });
 
     it("leaves the thread open when Share opens share mode in the chat", async () => {
@@ -3022,9 +3085,7 @@ describe("Chat Concierge empty state", () => {
       await screen.findAllByTestId("user-row");
       fireEvent.click(screen.getByTestId("open-thread"));
       unmount();
-      expect(toolThread.close).toHaveBeenLastCalledWith(
-        rs.mocked(toolThread.open).mock.calls[0]![0],
-      );
+      expect(tabOf(toolThread)).toBeNull();
     });
 
     it("keeps no chat threads outside a tool pane", async () => {

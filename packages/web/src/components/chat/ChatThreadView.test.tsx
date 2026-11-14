@@ -1,7 +1,15 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { type ReactNode, StrictMode } from "react";
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { chatSessionTopicName } from "@rome/api-types/live-events";
@@ -13,7 +21,12 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
-import { ChatThreadView, taskChatOfThread } from "./ChatThreadView";
+import {
+  ChatThreadView,
+  chatThreadQueryKey,
+  taskChatOfThread,
+  useThreadTaskChat,
+} from "./ChatThreadView";
 import { ChatThreadsProvider } from "./reply/chat-threads";
 import { QuotedReply } from "./reply/QuotedReply";
 import { ReplyBar } from "./reply/ReplyBar";
@@ -310,7 +323,6 @@ describe("ChatThreadView", () => {
     <ChatThreadView
       sessionId="concierge"
       messageId="a1"
-      title="Move my 3pm"
       onClose={() => {}}
       renderMessages={paragraphs}
       {...props}
@@ -343,28 +355,12 @@ describe("ChatThreadView", () => {
     const panel = screen.getByRole("region", { name: "Chat thread" });
     expect(panel.className).not.toMatch(/absolute|inset-0|z-\d/);
     expect(panel.querySelector("[aria-hidden]")).toBeNull();
+    // No header of its own: the pane's tab names the thread and closes it.
+    expect(panel.querySelector("button")).toBeNull();
     expect(panel.querySelector("[class*=backdrop]")).toBeNull();
     // Blend modes in a message stay inside the list.
     const list = screen.getByText("Which day?").closest("div.isolate");
     expect(list).toBeTruthy();
-  });
-
-  it("names the task in its header, beside its actions and a close button", async () => {
-    const onClose = rs.fn();
-    render(host(view({ onClose, actions: <button type="button">Open task chat</button> })));
-    await screen.findByText("Which day?");
-
-    expect(screen.getByTitle("Move my 3pm").textContent).toBe("Move my 3pm");
-    expect(screen.getByRole("button", { name: "Open task chat" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close chat thread" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("falls back to its own name when no task title is known", async () => {
-    render(host(view({ title: "" })));
-    await screen.findByText("Which day?");
-    expect(screen.getAllByText("Chat thread").length).toBeGreaterThan(0);
-    expect(document.querySelector("[data-chat-thread-view] span[title]")).toBeNull();
   });
 
   it("draws the composer it is given below its messages", async () => {
@@ -574,5 +570,45 @@ describe("taskChatOfThread", () => {
       } as never,
     ];
     expect(taskChatOfThread(messages, "root")).toBe("named-chat");
+  });
+});
+
+describe("useThreadTaskChat", () => {
+  const card = (id: string, chatId: string) =>
+    ({
+      id,
+      sessionId: "concierge",
+      role: "assistant",
+      content: JSON.stringify([{ type: "task_chat", chatId, title: "A", show: "ask" }]),
+      createdAt: "2026-11-10T12:00:00Z",
+      chatThreadId: "root",
+    }) as never;
+  const open = { sessionId: "concierge", messageId: "a1", threadRoot: "root" };
+  const hook = (
+    thread: typeof open | null,
+    options: Parameters<typeof useThreadTaskChat>[1],
+    client = new QueryClient(),
+  ) =>
+    renderHook(() => useThreadTaskChat(thread, options), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+
+  it("is null with no thread open", () => {
+    expect(hook(null, { messages: [card("c", "task-chat")] }).result.current).toBeNull();
+  });
+
+  it("reads the task chat from the chat's loaded messages, and a live placement first", () => {
+    expect(hook(open, { messages: [card("c", "task-chat")] }).result.current).toBe("task-chat");
+    expect(
+      hook(open, { messages: [card("c", "task-chat")], liveTaskChat: "live-chat" }).result.current,
+    ).toBe("live-chat");
+  });
+
+  it("reads it from the thread the view loaded, shared through the cache", () => {
+    const client = new QueryClient();
+    client.setQueryData(chatThreadQueryKey("concierge", "a1"), [card("c", "from-view")]);
+    expect(hook(open, { messages: [] }, client).result.current).toBe("from-view");
   });
 });

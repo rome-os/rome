@@ -1,7 +1,4 @@
-import { MessageSquare, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
-import { IconButton } from "@/components/ui/icon-button";
 import { useQuery } from "@tanstack/react-query";
 import {
   type KeyboardEvent,
@@ -27,30 +24,24 @@ const anyEvent = z.unknown();
 
 /**
  * One chat thread of a Concierge chat on its own (docs/domains/chats.md#chat-thread),
- * the body of the tool pane's Chat thread tab: a header with the task's title
- * and `actions`, the thread's messages, drawn by `renderMessages`, at the
- * bottom of a list that scrolls when long, and the thread's `composer`. New
- * messages in the thread appear as they are said. The chat stays beside it.
+ * the body of the tool pane's Chat thread tab, which is named for the task and
+ * closes it: the thread's messages, drawn by `renderMessages`, at the bottom of
+ * a list that scrolls when long, and the thread's `composer`. New messages in
+ * the thread appear as they are said. The chat stays beside it.
  *
  * Esc inside it closes it, unless what has focus used the key first.
  */
 export function ChatThreadView({
   sessionId,
   messageId,
-  title,
   onClose,
-  actions,
   renderMessages,
   composer,
 }: {
   sessionId: string;
   /** Any message of the thread. */
   messageId: string;
-  /** The task's title; empty when none is known. */
-  title: string;
   onClose: () => void;
-  /** Header buttons before the close button. */
-  actions?: ReactNode;
   renderMessages: (messages: ChatMessage[]) => ReactNode;
   composer?: ReactNode;
 }) {
@@ -125,16 +116,6 @@ export function ChatThreadView({
       onKeyDown={onKeyDown}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border pl-4 pr-2">
-        <span
-          className="min-w-0 flex-1 truncate text-ui text-foreground"
-          title={title || undefined}
-        >
-          {title || t("thread.title")}
-        </span>
-        {actions}
-        <IconButton size="sm" label={t("thread.close")} icon={<X />} onClick={onClose} />
-      </div>
       <div
         ref={listRef}
         onScroll={onScroll}
@@ -185,52 +166,37 @@ export function taskChatOfThread(
 }
 
 /**
- * The thread view header's way into the open thread's task chat, when the
- * thread's messages name one: those the thread view loaded, and the chat's own.
+ * The task chat of the open thread, when the thread's messages name one:
+ * those the thread view loaded, and the chat's own. Null while none does, and
+ * with no thread open.
  */
-export function OpenThreadTaskChat({
-  sessionId,
-  messageId,
-  threadRoot,
-  messages,
-  liveTaskChat,
-  size,
-  className,
-}: {
-  sessionId: string;
-  /** The message the thread view opened on, which keys its read of the thread. */
-  messageId: string;
-  threadRoot: string;
-  /** The chat's loaded messages. */
-  messages: readonly ChatMessage[];
-  /** The thread's task chat a live placement told, if one did. */
-  liveTaskChat?: string | null;
-  size: "sm" | "md";
-  className?: string;
-}) {
-  const { t } = useTranslation("chat");
-  const navigate = useNavigate();
+export function useThreadTaskChat(
+  thread: { sessionId: string; messageId: string; threadRoot: string } | null,
+  {
+    messages,
+    liveTaskChat,
+  }: {
+    /** The chat's loaded messages. */
+    messages: readonly ChatMessage[];
+    /** The thread's task chat a live placement told, if one did. */
+    liveTaskChat?: string | null;
+  },
+): string | null {
   // The thread view's own read of the thread, shared through the cache.
-  const { data: thread } = useQuery({
-    queryKey: chatThreadQueryKey(sessionId, messageId),
-    queryFn: async () => (await listChatThreadMessages(sessionId, messageId)) ?? [],
+  const { data: loaded } = useQuery({
+    queryKey: chatThreadQueryKey(thread?.sessionId ?? "", thread?.messageId ?? ""),
+    queryFn: async () =>
+      thread ? ((await listChatThreadMessages(thread.sessionId, thread.messageId)) ?? []) : [],
     enabled: false,
   });
-  const chatId = useMemo(
+  const threadRoot = thread?.threadRoot;
+  return useMemo(
     () =>
-      liveTaskChat ??
-      taskChatOfThread(thread ?? [], threadRoot) ??
-      taskChatOfThread(messages, threadRoot),
-    [liveTaskChat, thread, messages, threadRoot],
-  );
-  if (!chatId) return null;
-  return (
-    <IconButton
-      size={size}
-      label={t("thread.openTaskChat")}
-      icon={<MessageSquare />}
-      onClick={() => navigate(`/chat/${chatId}`)}
-      className={className}
-    />
+      threadRoot === undefined
+        ? null
+        : (liveTaskChat ??
+          taskChatOfThread(loaded ?? [], threadRoot) ??
+          taskChatOfThread(messages, threadRoot)),
+    [liveTaskChat, loaded, messages, threadRoot],
   );
 }

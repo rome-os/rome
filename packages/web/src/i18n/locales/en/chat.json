@@ -650,7 +650,6 @@
   "thread": {
     "title": "Chat thread",
     "openTaskChat": "Open task chat",
-    "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
     "replyPlaceholder": "Reply"
   },

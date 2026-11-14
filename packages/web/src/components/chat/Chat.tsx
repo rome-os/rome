@@ -79,6 +79,7 @@ import {
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
 import { useToolThread } from "@/pages/free/tool-thread";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { useToolTrace } from "@/pages/free/tool-trace";
 import type {
   TraceSegment,
@@ -120,7 +121,7 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
-import { ChatThreadView, OpenThreadTaskChat } from "@/components/chat/ChatThreadView";
+import { ChatThreadView, useThreadTaskChat } from "@/components/chat/ChatThreadView";
 import {
   type LiveStatusReactions,
   LiveStatusReactionsProvider,
@@ -995,25 +996,27 @@ export function Chat({
   );
   // The chat thread open in the tool pane's Chat thread tab, which is view
   // state: nothing keeps it across a reload. The tab holds the thread while
-  // the pane is open; its X and Delete key, and the thread's own close button,
-  // end it through `closeThread`.
+  // the pane is open; its X and Delete key, and Esc inside the thread, end it
+  // through `closeThread`.
   const toolThread = useToolThread();
-  const openToolThread = toolThread?.open;
-  const closeToolThread = toolThread?.close;
+  const setToolThread = toolThread?.set;
+  const revealToolThread = toolThread?.reveal;
   const threadOwner = useId();
   const [thread, setThread] = useState<ReplyThread | null>(null);
-  const closeThread = useCallback(() => {
-    setThread(null);
-    closeToolThread?.(threadOwner);
-  }, [closeToolThread, threadOwner]);
+  // Counts the guardian's opens, which put the caret in the thread's composer
+  // once it is on screen. A touch device keeps its keyboard down.
+  const coarsePointer = useCoarsePointer();
+  const [threadOpens, setThreadOpens] = useState(0);
+  const closeThread = useCallback(() => setThread(null), []);
   const openThread = useCallback(
     (next: ReplyThread) => {
       setThread(next);
-      openToolThread?.(threadOwner, closeThread);
+      setThreadOpens((count) => count + 1);
+      revealToolThread?.();
     },
-    [openToolThread, threadOwner, closeThread],
+    [revealToolThread],
   );
-  useEffect(() => () => closeToolThread?.(threadOwner), [closeToolThread, threadOwner]);
+  useEffect(() => () => setToolThread?.(threadOwner, null), [setToolThread, threadOwner]);
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
     sessionId: mainSessionId ?? null,
@@ -1022,7 +1025,7 @@ export function Chat({
     focusComposer: () => composerRef.current?.focus(),
     // A Concierge chat beside a tool pane keeps chat threads: a thread label
     // opens the thread tab, and Reply opens the reply bar alone.
-    onOpenThread: concierge && openToolThread ? openThread : undefined,
+    onOpenThread: concierge && revealToolThread ? openThread : undefined,
   });
   // The thread tab's own draft: what it sends goes into its thread.
   const threadComposerRef = useRef<ChatComposerHandle>(null);
@@ -2620,8 +2623,30 @@ export function Chat({
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
   const chatThreads = useChatThreadsValue(displayMessages, rethreaded, liveThreadTitles);
-  // The open thread tab's thread, whose task chat its header opens.
   const threadRoot = thread ? (chatThreads.taskThreads.get(thread.thread) ?? thread.thread) : null;
+  const threadTaskChat = useThreadTaskChat(
+    thread && threadRoot && mainSessionId
+      ? { sessionId: mainSessionId, messageId: thread.thread, threadRoot }
+      : null,
+    {
+      messages: displayMessages,
+      liveTaskChat: threadRoot ? (liveThreadTaskChats.get(threadRoot) ?? null) : null,
+    },
+  );
+  // The pane names the tab for the task and opens its chat from its header.
+  const threadTitle = (threadRoot && chatThreads.titles.get(threadRoot)) || thread?.title || "";
+  const showThread = Boolean(thread && mainSessionId);
+  useEffect(() => {
+    setToolThread?.(
+      threadOwner,
+      showThread ? { title: threadTitle, taskChatId: threadTaskChat, onClose: closeThread } : null,
+    );
+  }, [setToolThread, threadOwner, showThread, threadTitle, threadTaskChat, closeThread]);
+  const threadOutlet = toolThread?.outlet ?? null;
+  useEffect(() => {
+    if (threadOpens === 0 || coarsePointer || !threadOutlet || !thread) return;
+    threadComposerRef.current?.focus();
+  }, [threadOpens, coarsePointer, threadOutlet, thread]);
 
   const conciergeHeader = concierge ? (
     <>
@@ -2958,28 +2983,14 @@ export function Chat({
                   onJump={jumpToMessage}
                 />
               )}
-              {thread && mainSessionId && toolThread?.outlet
+              {thread && mainSessionId && threadOutlet
                 ? createPortal(
                     <ReplyDraftProvider value={threadDraft}>
                       <ChatThreadView
                         key={thread.thread}
                         sessionId={mainSessionId}
                         messageId={thread.thread}
-                        title={(threadRoot && chatThreads.titles.get(threadRoot)) || thread.title}
                         onClose={closeThread}
-                        actions={
-                          threadRoot ? (
-                            <OpenThreadTaskChat
-                              sessionId={mainSessionId}
-                              messageId={thread.thread}
-                              threadRoot={threadRoot}
-                              messages={displayMessages}
-                              liveTaskChat={liveThreadTaskChats.get(threadRoot) ?? null}
-                              size="sm"
-                              className="text-muted-foreground hover:text-foreground"
-                            />
-                          ) : null
-                        }
                         renderMessages={(threadMessages) => (
                           // The thread tab offers Copy and Reply, not Share: a share
                           // is made from the chat's own timeline.
@@ -3021,7 +3032,7 @@ export function Chat({
                         }
                       />
                     </ReplyDraftProvider>,
-                    toolThread.outlet,
+                    threadOutlet,
                   )
                 : null}
             </div>

@@ -4,6 +4,7 @@ import {
   LayoutGrid,
   ListChecks,
   ListTree,
+  MessageSquare,
   MessagesSquare,
   PanelRightClose,
   Plus,
@@ -18,6 +19,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   DropdownMenu,
@@ -41,7 +43,7 @@ import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { TaskList } from "@/components/concierge/TaskList";
 import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
-import { ToolThreadContext, type ToolThreadHost } from "./tool-thread";
+import { ToolThreadContext, type ToolThreadHost, type ToolThreadTab } from "./tool-thread";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import {
   COMPACT_WIDTH,
@@ -167,6 +169,7 @@ export function ToolWorkspace({
 }: ToolWorkspaceProps) {
   const { t } = useTranslation("common");
   const { t: tActivity } = useTranslation("activity");
+  const { t: tChat } = useTranslation("chat");
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [ratio, setRatio] = useState(readRatio);
@@ -204,7 +207,8 @@ export function ToolWorkspace({
   // The Concierge chat whose task list the tab shows; null while it is not open.
   const [tasksChatId, setTasksChatId] = useState<string | null>(null);
   const tasksOpen = tasksChatId !== null;
-  const [threadOpen, setThreadOpen] = useState(false);
+  const [thread, setThread] = useState<Pick<ToolThreadTab, "title" | "taskChatId"> | null>(null);
+  const threadOpen = thread !== null;
   const [threadOutlet, setThreadOutlet] = useState<HTMLDivElement | null>(null);
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
@@ -299,26 +303,37 @@ export function ToolWorkspace({
     () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
     [tasksActive, open, compact, showTasks, hideTasks],
   );
-  const openThread = useCallback((owner: string, onClose: () => void) => {
-    const previousOwner = threadOwnerRef.current;
-    const previousClose = threadCloseRef.current;
-    threadOwnerRef.current = owner;
-    threadCloseRef.current = onClose;
-    if (previousOwner !== null && previousOwner !== owner) previousClose?.();
+  const revealThread = useCallback(() => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
-    setThreadOpen(true);
     setSelected("thread");
   }, []);
-  const closeThread = useCallback((owner: string) => {
-    if (threadOwnerRef.current !== owner) return;
-    threadOwnerRef.current = null;
-    threadCloseRef.current = null;
-    setThreadOpen(false);
-    setSelected((current) => (current === "thread" ? null : current));
-  }, []);
+  const setThreadTab = useCallback(
+    (owner: string, tab: ToolThreadTab | null) => {
+      if (tab === null) {
+        if (threadOwnerRef.current !== owner) return;
+        threadOwnerRef.current = null;
+        threadCloseRef.current = null;
+        setSelected((current) => (current === "thread" ? null : current));
+        setThread(null);
+        return;
+      }
+      const previousOwner = threadOwnerRef.current;
+      const previousClose = threadCloseRef.current;
+      threadOwnerRef.current = owner;
+      threadCloseRef.current = tab.onClose;
+      if (previousOwner !== null && previousOwner !== owner) previousClose?.();
+      setThread((prev) =>
+        prev && prev.title === tab.title && prev.taskChatId === tab.taskChatId
+          ? prev
+          : { title: tab.title, taskChatId: tab.taskChatId },
+      );
+      if (previousOwner === null) revealThread();
+    },
+    [revealThread],
+  );
   const threadHost = useMemo<ToolThreadHost>(
-    () => ({ outlet: threadOutlet, open: openThread, close: closeThread }),
-    [threadOutlet, openThread, closeThread],
+    () => ({ outlet: threadOutlet, set: setThreadTab, reveal: revealThread }),
+    [threadOutlet, setThreadTab, revealThread],
   );
   const activeWidget = builtinActive
     ? undefined
@@ -363,6 +378,7 @@ export function ToolWorkspace({
     ...(threadOpen ? [THREAD_TAB_ID] : []),
     ...sorted.map((widget) => widget.id),
   ];
+  const threadLabel = thread?.title || t("chat.threadTab");
   const builtinTabId = traceActive
     ? TRACE_TAB_ID
     : tasksActive
@@ -405,7 +421,7 @@ export function ToolWorkspace({
           {threadOpen && shownIds.has(THREAD_TAB_ID) && (
             <ToolTab
               id={THREAD_TAB_ID}
-              label={t("chat.threadTab")}
+              label={threadLabel}
               icon={<MessagesSquare className="size-3.5" />}
               active={threadActive}
               onClose={() => threadCloseRef.current?.()}
@@ -447,6 +463,18 @@ export function ToolWorkspace({
           </a>
         </Button>
       )}
+      {threadActive && thread?.taskChatId && (
+        // A real link, like an app's, so middle-click and copy-link work.
+        <Button asChild variant="ghost" size="icon-sm">
+          <Link
+            to={`/chat/${thread.taskChatId}`}
+            aria-label={tChat("thread.openTaskChat")}
+            title={tChat("thread.openTaskChat")}
+          >
+            <MessageSquare />
+          </Link>
+        </Button>
+      )}
       {hasTabs && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -481,7 +509,7 @@ export function ToolWorkspace({
             {threadOpen && (
               <DropdownMenuItem onSelect={() => pickTab(THREAD_TAB_ID)}>
                 <MessagesSquare className="size-3.5" />
-                {t("chat.threadTab")}
+                {threadLabel}
               </DropdownMenuItem>
             )}
             {sorted.map((widget) => (

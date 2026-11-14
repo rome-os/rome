@@ -4,6 +4,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
@@ -960,27 +961,38 @@ describe("ToolWorkspace Tasks tab", () => {
 function ThreadOwner({ id = "chat" }: { id?: string }) {
   const host = useToolThread();
   const [thread, setThread] = useState<string | null>(null);
-  const open = host?.open;
-  const close = host?.close;
-  const closeThread = useCallback(() => {
-    setThread(null);
-    close?.(id);
-  }, [close, id]);
-  useEffect(() => () => close?.(id), [close, id]);
+  const set = host?.set;
+  const closeThread = useCallback(() => setThread(null), []);
+  useEffect(() => {
+    set?.(
+      id,
+      thread
+        ? {
+            title: thread === "three" ? "" : `Thread ${thread}`,
+            taskChatId: thread === "one" ? "task-1" : null,
+            onClose: closeThread,
+          }
+        : null,
+    );
+  }, [set, id, thread, closeThread]);
+  useEffect(() => () => set?.(id, null), [set, id]);
   return (
     <>
-      {["one", "two"].map((name) => (
+      {["one", "two", "three"].map((name) => (
         <button
           key={name}
           type="button"
           onClick={() => {
             setThread(name);
-            open?.(id, closeThread);
+            host?.reveal();
           }}
         >
           Open thread {name} {id}
         </button>
       ))}
+      <button type="button" onClick={() => setThread(null)}>
+        Drop thread {id}
+      </button>
       {thread &&
         host?.outlet &&
         createPortal(<textarea aria-label={`Reply in ${thread}`} />, host.outlet)}
@@ -1003,30 +1015,32 @@ function ThreadHarness({
 }) {
   const [view, setView] = useState(initial);
   return (
-    <ToolWorkspace
-      placements={placements}
-      view={view}
-      selectTool={(id) => {
-        selectTool(id);
-        setView((v) => ({ ...v, activeId: id, collapsed: false }));
-      }}
-      setCollapsed={(collapsed) => {
-        setCollapsed(collapsed);
-        setView((v) => ({ ...v, collapsed }));
-      }}
-      addWidget={rs.fn()}
-      removeWidget={rs.fn()}
-      label={(widget) => widget.type}
-      icon={() => null}
-      content={(widget) => <ToolContent id={widget.id} />}
-      fullHref={() => null}
-    >
-      <input aria-label="Chat draft" />
-      <ThreadOwner />
-      {withSecondOwner && <ThreadOwner id="pinned" />}
-      {withTrace && <TraceOwner />}
-      <TasksOwner />
-    </ToolWorkspace>
+    <MemoryRouter>
+      <ToolWorkspace
+        placements={placements}
+        view={view}
+        selectTool={(id) => {
+          selectTool(id);
+          setView((v) => ({ ...v, activeId: id, collapsed: false }));
+        }}
+        setCollapsed={(collapsed) => {
+          setCollapsed(collapsed);
+          setView((v) => ({ ...v, collapsed }));
+        }}
+        addWidget={rs.fn()}
+        removeWidget={rs.fn()}
+        label={(widget) => widget.type}
+        icon={() => null}
+        content={(widget) => <ToolContent id={widget.id} />}
+        fullHref={() => null}
+      >
+        <input aria-label="Chat draft" />
+        <ThreadOwner />
+        {withSecondOwner && <ThreadOwner id="pinned" />}
+        {withTrace && <TraceOwner />}
+        <TasksOwner />
+      </ToolWorkspace>
+    </MemoryRouter>
   );
 }
 
@@ -1034,7 +1048,7 @@ describe("ToolWorkspace Chat thread tab", () => {
   const selected = (name: string) =>
     screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
 
-  it("adds an ephemeral tab and selects it, with the chat still on screen and usable", async () => {
+  it("adds an ephemeral tab named for the task and selects it, with the chat still on screen and usable", async () => {
     const user = userEvent.setup();
     const selectTool = rs.fn();
     const setCollapsed = rs.fn();
@@ -1043,8 +1057,8 @@ describe("ToolWorkspace Chat thread tab", () => {
 
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
 
-    expect(tabNames()).toEqual(["Chat thread", "desktop", "projects"]);
-    expect(selected("Chat thread")).toBe(true);
+    expect(tabNames()).toEqual(["Thread one", "desktop", "projects"]);
+    expect(selected("Thread one")).toBe(true);
     expect(selected("desktop")).toBe(false);
     expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
     // Side by side: the chat keeps its draft in view.
@@ -1065,15 +1079,54 @@ describe("ToolWorkspace Chat thread tab", () => {
     expect(JSON.stringify({ ...localStorage })).toBe(before);
   });
 
-  it("swaps the thread in the same tab", async () => {
+  it("swaps the thread in the same tab, and renames the tab", async () => {
     const user = userEvent.setup();
     render(<ThreadHarness />);
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
     await user.click(screen.getByRole("button", { name: "Open thread two chat" }));
 
-    expect(tabNames().filter((name) => name === "Chat thread")).toHaveLength(1);
+    expect(tabNames()).toEqual(["Thread two", "desktop", "projects"]);
     expect(screen.queryByRole("textbox", { name: "Reply in one" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Reply in two" })).toBeTruthy();
+  });
+
+  it("falls back to a general name while the task's title is unknown", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread three chat" }));
+    expect(tabNames()).toEqual(["Chat thread", "desktop", "projects"]);
+  });
+
+  it("names the tab in full in its tooltip and its close button", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.getByRole("tab", { name: "Thread one" }).getAttribute("title")).toBe(
+      "Thread one",
+    );
+    expect(screen.getByRole("button", { name: "Close Thread one" })).toBeTruthy();
+  });
+
+  it("opens the task chat from the pane's header, when the thread has one", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.getByRole("link", { name: "Open task chat" }).getAttribute("href")).toBe(
+      "/chat/task-1",
+    );
+
+    // No task chat known, or another tab selected: no link.
+    await user.click(screen.getByRole("tab", { name: "projects" }));
+    expect(screen.queryByRole("link", { name: "Open task chat" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Open thread two chat" }));
+    expect(screen.queryByRole("link", { name: "Open task chat" })).toBeNull();
+  });
+
+  it("has one close control: the tab's own, and nothing else in the pane", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.getAllByRole("button", { name: /^Close Thread one/ })).toHaveLength(1);
   });
 
   it("keeps its body, and the reply in it, mounted while an app tab is shown, and selects again on open", async () => {
@@ -1082,10 +1135,10 @@ describe("ToolWorkspace Chat thread tab", () => {
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
     await user.type(screen.getByRole("textbox", { name: "Reply in one" }), "half a reply");
     await user.click(screen.getByRole("tab", { name: "projects" }));
-    expect(selected("Chat thread")).toBe(false);
+    expect(selected("Thread one")).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
-    expect(selected("Chat thread")).toBe(true);
+    expect(selected("Thread one")).toBe(true);
     expect(
       (screen.getByRole("textbox", { name: "Reply in one" }) as HTMLTextAreaElement).value,
     ).toBe("half a reply");
@@ -1095,19 +1148,23 @@ describe("ToolWorkspace Chat thread tab", () => {
     const user = userEvent.setup();
     render(<ThreadHarness />);
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
-    await user.click(screen.getByRole("button", { name: "Close Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Close Thread one" }));
 
     expect(tabNames()).toEqual(["desktop", "projects"]);
     expect(screen.queryByRole("textbox", { name: "Reply in one" })).toBeNull();
     expect(selected("desktop")).toBe(true);
   });
 
-  it("is removed by the Delete key on its tab", async () => {
+  it("is removed by the Delete key on its tab, and by its owner", async () => {
     const user = userEvent.setup();
     render(<ThreadHarness />);
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
-    screen.getByRole("tab", { name: "Chat thread" }).focus();
+    screen.getByRole("tab", { name: "Thread one" }).focus();
     await user.keyboard("{Delete}");
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    await user.click(screen.getByRole("button", { name: "Drop thread chat" }));
     expect(tabNames()).toEqual(["desktop", "projects"]);
   });
 
@@ -1125,7 +1182,7 @@ describe("ToolWorkspace Chat thread tab", () => {
     expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
     expect(setCollapsed).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Close Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Close Thread one" }));
     expect(screen.queryByRole("tabpanel")).toBeNull();
     expect(screen.queryByRole("tab")).toBeNull();
     expect(setCollapsed).not.toHaveBeenCalled();
@@ -1138,8 +1195,8 @@ describe("ToolWorkspace Chat thread tab", () => {
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
     await user.click(screen.getByRole("button", { name: "Close Trace" }));
 
-    expect(tabNames()).toEqual(["Chat thread", "desktop", "projects"]);
-    expect(selected("Chat thread")).toBe(true);
+    expect(tabNames()).toEqual(["Thread one", "desktop", "projects"]);
+    expect(selected("Thread one")).toBe(true);
     expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
   });
 
@@ -1151,8 +1208,9 @@ describe("ToolWorkspace Chat thread tab", () => {
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
     expect(screen.queryByRole("textbox", { name: "Chat draft" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open task chat" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Close Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Close Thread one" }));
     expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
   });
 
@@ -1163,17 +1221,17 @@ describe("ToolWorkspace Chat thread tab", () => {
     await user.click(screen.getByRole("button", { name: "Open trace chat" }));
     await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
 
-    expect(tabNames()).toEqual(["Trace", "Tasks", "Chat thread", "desktop", "projects"]);
-    expect(selected("Chat thread")).toBe(true);
+    expect(tabNames()).toEqual(["Trace", "Tasks", "Thread one", "desktop", "projects"]);
+    expect(selected("Thread one")).toBe(true);
     expect(selected("Trace")).toBe(false);
     expect(selected("Tasks")).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "Show tasks" }));
     expect(selected("Tasks")).toBe(true);
-    expect(selected("Chat thread")).toBe(false);
+    expect(selected("Thread one")).toBe(false);
     // Closing one leaves the others.
     await user.click(screen.getByRole("button", { name: "Close Tasks" }));
-    expect(tabNames()).toEqual(["Trace", "Chat thread", "desktop", "projects"]);
+    expect(tabNames()).toEqual(["Trace", "Thread one", "desktop", "projects"]);
   });
 
   it("is lost to the last chat to open one, which is told to close its own", async () => {
@@ -1184,7 +1242,7 @@ describe("ToolWorkspace Chat thread tab", () => {
 
     await user.click(screen.getByRole("button", { name: "Open thread two pinned" }));
 
-    expect(tabNames().filter((name) => name === "Chat thread")).toHaveLength(1);
+    expect(tabNames().filter((name) => name?.startsWith("Thread"))).toEqual(["Thread two"]);
     expect(screen.queryByRole("textbox", { name: "Reply in one" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Reply in two" })).toBeTruthy();
   });
