@@ -1399,15 +1399,15 @@ async function main() {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  // The marks the stopped process left working settle before any turn runs.
+  // The messages the stopped process left open settle before any turn runs.
   const settledMarks = await settleMarksAfterRestart(
     concierge.deps.tasks.repo,
     webchatRepo,
     endedTurns,
   );
   if (settledMarks > 0) {
-    log.warn("Settled status reactions a stopped Rome process left working", {
-      reactions: settledMarks,
+    log.warn("Settled the messages a stopped Rome process left open", {
+      messages: settledMarks,
     });
   }
   startConciergeEvents(concierge, turnListeners);

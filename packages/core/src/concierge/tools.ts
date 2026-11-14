@@ -1,9 +1,10 @@
 // Concierge's session tools: `say` is its only way to speak, the `chat_*`
 // tools run its task chats and read its other Concierge chats, `topic_start`
-// starts a topic chat, and `connect_card` shows a card that connects a service.
+// starts a topic chat, `react` puts an emoji on a guardian message, and
+// `connect_card` shows a card that connects a service.
 
 import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
-import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
+import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { ChatThreadPlacement } from "../webchat/repository.js";
@@ -72,7 +73,7 @@ const TASK_PARAMETER = {
 const RELAYS_PARAMETER = {
   type: "string",
   description:
-    "The message_id of the guardian message whose words you send on to the task, from its <chat_thread> line. That message joins the task's chat thread and shows the task working. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on; without it nothing joins and nothing is marked.",
+    "The message_id of the guardian message whose words you send on to the task, from its <chat_thread> line. That message joins the task's chat thread. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on; without it nothing joins.",
 };
 
 /** The parameter that names the one guardian message an answer answers. */
@@ -397,38 +398,6 @@ export async function buildConciergeTools(
     throw new Error(NO_ROW_MESSAGE);
   };
 
-  // Rome's status reaction on the guardian message a task works for
-  // (docs/domains/chats.md#status-reaction). It only shows how the work
-  // stands, so failing to write it never fails the tool.
-  const writeReaction = async (label: string, write: () => Promise<void>) => {
-    try {
-      await write();
-    } catch (error) {
-      log.warn(`failed to ${label} a status reaction`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
-
-  // Sends `send` on to task `taskId` with guardian message `messageKey`
-  // marked as being worked on: marked first, so a task that ends at once
-  // still settles it, and taken back when the task never hears it.
-  const sendMarked = async (
-    taskId: string,
-    messageKey: string | undefined,
-    send: () => Promise<void>,
-  ) => {
-    if (!messageKey) return send();
-    const target = { chatId: currentTurn().chatId, messageKey };
-    await writeReaction("mark", () => tasks.repo.linkMessage(taskId, target));
-    try {
-      await send();
-    } catch (error) {
-      await writeReaction("take back", () => tasks.repo.unlinkMessage(taskId, target));
-      throw error;
-    }
-  };
-
   // What the Concierge writes on a row: what Rome cannot know. Rome derives
   // the status, and a field from before it is refused by name.
   const parseTaskWrite = async (
@@ -520,7 +489,7 @@ export async function buildConciergeTools(
 
   // The messages this turn answers: the ones it took, and the ones a turn a
   // newer input superseded handed on to it. An automated input counts: the
-  // reply to it is placed and its status reaction settled like any other's.
+  // reply to it is placed and the message settled like any other's.
   const turnPrompts = async () => {
     const { chatId } = currentTurn();
     const own = (await ownPrompts()).map((row) => row.id);
@@ -841,7 +810,7 @@ export async function buildConciergeTools(
     const answered = answers ?? (await certainlyAnswered(taskId));
     if (answered) {
       await tasks.repo.answerMessage(chatId, answered).catch((error: unknown) =>
-        log.warn("failed to settle an answered message's status reaction", {
+        log.warn("failed to settle an answered message", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -863,6 +832,36 @@ export async function buildConciergeTools(
     // is in the task's thread.
     const root = await rootOf(taskId);
     return root && (await threadOf(chatId, only)) === root ? only : undefined;
+  };
+
+  // The guardian message `react` puts its emoji on: the one named, in this
+  // turn or an earlier one, as with `chat_start`'s `answers`, else the turn's
+  // only one. A message of another chat, or one the Concierge said, is none.
+  const reactionTarget = async (messageId: string | undefined) => {
+    const { chatId } = currentTurn();
+    const refusal = (id: string) =>
+      new Error(
+        `No guardian message ${id} in this chat. Pass a message_id from a <chat_thread> line.`,
+      );
+    if (messageId !== undefined) {
+      if ((await webchatRepo.getReplyTarget(chatId, messageId))?.role !== "user") {
+        throw refusal(messageId);
+      }
+      return messageId;
+    }
+    const prompts = await turnPrompts();
+    if (prompts.length > 1) {
+      throw new Error(
+        "This turn carries several guardian messages. Pass message_id: the one you react to, from its <chat_thread> line.",
+      );
+    }
+    const only = prompts[0];
+    if (!only) {
+      throw new Error(
+        "This turn holds no guardian message. Pass message_id from a <chat_thread> line.",
+      );
+    }
+    return only;
   };
 
   // One message, so the lead-in and the report always arrive together. The
@@ -967,6 +966,44 @@ export async function buildConciergeTools(
             sent: "The guardian sees it. Call say again only for a new message.",
             messageId,
           };
+        }),
+    },
+    {
+      name: "react",
+      description:
+        "React to one guardian message with an emoji, or clear its reaction. A reaction never rings the phone and never answers the message. A message holds one reaction; a new one replaces it, and it stays until you change it.",
+      inputSchema: {
+        type: "object",
+        required: ["emoji"],
+        properties: {
+          emoji: {
+            type: ["string", "null"],
+            enum: [...CONCIERGE_REACTIONS, null],
+            description: "The reaction, or null to clear the message's reaction.",
+          },
+          message_id: {
+            type: "string",
+            description:
+              "The message_id of the guardian message, from its <chat_thread> line. Leave it out when this turn holds one guardian message: it reacts to that one. Required when the turn carries several.",
+          },
+        },
+      },
+      handler: (input) =>
+        runTool("react", input, async (args) => {
+          const { chatId } = currentTurn();
+          // Only a Concierge chat, the main chat or a topic chat, takes a reaction.
+          if (!(await service.conciergeChat(chatId))) {
+            throw new Error(`No Concierge chat ${chatId}`);
+          }
+          const { emoji } = args;
+          if (emoji !== null && !(CONCIERGE_REACTIONS as readonly unknown[]).includes(emoji)) {
+            throw new Error(`emoji must be one of ${CONCIERGE_REACTIONS.join(" ")}, or null`);
+          }
+          const messageId = await reactionTarget(optionalString(args, "message_id"));
+          if (!(await webchatRepo.setMessageReaction(chatId, messageId, emoji as string | null))) {
+            throw new Error(`No guardian message ${messageId} in this chat.`);
+          }
+          return emoji === null ? "Reaction cleared." : `Reacted ${emoji}.`;
         }),
     },
     {
@@ -1188,13 +1225,13 @@ export async function buildConciergeTools(
           answers: {
             type: "string",
             description:
-              "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on, or the task is for one from an earlier turn: the task's results join that message's chat thread and it shows the task working. Without it, with several, nothing is marked.",
+              "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on, or the task is for one from an earlier turn: the task's results join that message's chat thread. Without it, with several, none joins.",
           },
           schedule: SCHEDULE_PARAMETER,
           card: {
             type: "boolean",
             description:
-              "Also show the guardian a card that opens the task chat. The task runs either way. Only when the guardian asks to see or watch the task; otherwise leave it off, since its result, question or approval reaches them anyway.",
+              "Also show the guardian a card that opens the task chat. The task runs either way. For long work with many details, work that will likely need several rounds with the guardian, or when they ask to see or watch it. The card tells them you are on it, so do not also react 👀. Otherwise leave it off, since its result, question or approval reaches them anyway.",
           },
         },
       },
@@ -1299,9 +1336,7 @@ export async function buildConciergeTools(
                 schedule,
               );
             } else {
-              await sendMarked(started, start?.answered, () =>
-                sendInput(chatId, brief, skill?.name),
-              );
+              await sendInput(chatId, brief, skill?.name);
             }
             // A planned row that was stopped is taken up again by its start.
             if (taskId) await tasks.repo.resume(taskId);
@@ -1378,11 +1413,7 @@ export async function buildConciergeTools(
           const text = requireString(args, "text");
           // New work for a task the guardian or you stopped takes it up again.
           if (task) await tasks.repo.resume(task.id);
-          // The guardian message whose words go on: the one named, or the
-          // turn's only one.
-          const relayed = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
-          if (task) await sendMarked(task.id, relayed, () => sendInput(chatId, text));
-          else await sendInput(chatId, text);
+          await sendInput(chatId, text);
           await relayToTaskThread(chatId, answers);
           return "Sent; the task chat takes it as input.";
         }),

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { chatMessages, romeSessions } from "../schema.js";
+import { chatMessages, conciergeMessageTurns, romeSessions } from "../schema.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
@@ -572,7 +572,7 @@ describe("ConciergeTasksRepository", () => {
     await repo.reannounce(first.id);
     expect(seen.at(-1)).toBe("A:doing:refresh");
   });
-  describe("status reactions and chat threads", () => {
+  describe("message turns and chat threads", () => {
     const conciergeChat = (id: string, ownerKey: string | null = null) =>
       chats.createSession(
         id,
@@ -586,26 +586,37 @@ describe("ConciergeTasksRepository", () => {
         null,
         { ownerKey },
       );
-    it("keeps which turn took a message and whether it answered it, and which tasks were made for it", async () => {
-      const told: string[] = [];
-      repo.onMessageChange(({ messageKey }) => told.push(messageKey));
+    // Whether the turn that took message `key` of chat `chatId` answered it, or null when none took it.
+    const answered = async (chatId: string, key: string) => {
+      const [row] = await testDb.db
+        .select({ answeredAt: conciergeMessageTurns.answeredAt })
+        .from(conciergeMessageTurns)
+        .where(
+          and(eq(conciergeMessageTurns.chatId, chatId), eq(conciergeMessageTurns.messageKey, key)),
+        );
+      return row ? row.answeredAt !== null : null;
+    };
+
+    it("keeps which turn took a message and whether it answered it", async () => {
       await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
       await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
-      const [task] = await repo.upsertMany([{ title: "A" }]);
-      await repo.linkMessage(task!.id, { chatId: "concierge", messageKey: "g2" });
-      expect(await repo.messageMarks("concierge", ["g1", "g2", "g3"])).toEqual(
-        new Map([
-          ["g1", { answered: false, turnFailed: false, taskIds: [] }],
-          ["g2", { answered: false, turnFailed: false, taskIds: [task!.id] }],
-        ]),
-      );
+      expect(await answered("concierge", "g1")).toBe(false);
+      expect(await answered("concierge", "g3")).toBeNull();
       // Saying an answer answers that message; the end of every turn not running, the rest.
       await repo.answerMessage("concierge", "g1");
       await repo.takeMessage("t3", { chatId: "concierge", messageKey: "g3" });
       expect(await repo.answerTurns("concierge", ["t3"])).toBe(1);
-      expect((await repo.messageMarks("concierge", ["g2", "g3"])).get("g2")?.answered).toBe(true);
-      expect((await repo.messageMarks("concierge", ["g3"])).get("g3")?.answered).toBe(false);
-      expect(told).toEqual(["g1", "g2", "g2", "g1", "g3", "g2"]);
+      expect(await answered("concierge", "g1")).toBe(true);
+      expect(await answered("concierge", "g2")).toBe(true);
+      expect(await answered("concierge", "g3")).toBe(false);
+    });
+
+    it("tells a stopped turn's messages to the next turn, once", async () => {
+      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
+      await repo.answerTurns("concierge", ["t2"], new Date(), { stopped: true });
+      expect(await repo.takeStoppedRequests("concierge")).toEqual(["g1"]);
+      expect(await repo.takeStoppedRequests("concierge")).toEqual([]);
     });
 
     it("hands a message on to the turn that takes it over, and reopens it all when that turn runs again", async () => {
@@ -615,28 +626,26 @@ describe("ConciergeTasksRepository", () => {
       await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g1" });
       await repo.answerTurns("concierge", []);
       expect(await repo.reopenTurn("concierge", "t2")).toBe(2);
-      const marks = await repo.messageMarks("concierge", ["g1", "g2"]);
-      expect([marks.get("g1")?.answered, marks.get("g2")?.answered]).toEqual([false, false]);
+      expect([await answered("concierge", "g1"), await answered("concierge", "g2")]).toEqual([
+        false,
+        false,
+      ]);
     });
 
     it("answers every open message after a restart, except in a chat whose turn continues", async () => {
       await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
       await repo.takeMessage("t2", { chatId: "topic", messageKey: "g2" });
       expect(await repo.answerInterrupted(new Set(["topic"]))).toBe(1);
-      expect((await repo.messageMarks("concierge", ["g1"])).get("g1")?.answered).toBe(true);
-      expect((await repo.messageMarks("topic", ["g2"])).get("g2")?.answered).toBe(false);
+      expect(await answered("concierge", "g1")).toBe(true);
+      expect(await answered("topic", "g2")).toBe(false);
     });
 
-    it("forgets a deleted chat's marks, and no other chat's", async () => {
-      const [task] = await repo.upsertMany([{ title: "A" }]);
-      await repo.linkMessage(task!.id, { chatId: "topic", messageKey: "g1" });
-      await repo.linkMessage(task!.id, { chatId: "concierge", messageKey: "g2" });
-      await repo.takeMessage("t1", { chatId: "topic", messageKey: "g3" });
+    it("forgets a deleted chat's turns, and no other chat's", async () => {
+      await repo.takeMessage("t1", { chatId: "topic", messageKey: "g1" });
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
       await repo.forgetMessages("topic");
-      expect(await repo.messagesOfTask(task!.id)).toEqual([
-        { chatId: "concierge", messageKey: "g2" },
-      ]);
-      expect(await repo.messageMarks("topic", ["g3"])).toEqual(new Map());
+      expect(await answered("topic", "g1")).toBeNull();
+      expect(await answered("concierge", "g2")).toBe(false);
     });
 
     it("keeps a task's result unsaid from the end of its chat's work until it is reported", async () => {

@@ -22,11 +22,57 @@ struct WidgetUICardView: View {
     var press: (String, Rome.JSONValue) async throws -> WidgetEventReply = { _, _ in throw APIError.notFound }
     var waiting: Waiting? = nil
 
-    private var locked: Bool { waiting?.answered != nil || surface.sent }
+    /// Used where no list keeps the card's surface.
+    @StateObject private var own = WidgetSurface()
+    @Environment(\.widgetSurfaces) private var kept
 
-    @StateObject private var surface = WidgetSurface()
+    var body: some View {
+        WidgetCardBody(part: part, call: call, press: press, waiting: waiting, surface: kept?.surface(for: part.toolUseId) ?? own)
+    }
+}
+
+/// Cards whose surfaces outlive their views. A list that rebuilds a row
+/// scrolled away (a reused cell) would otherwise lose the guardian's unsent
+/// answers, and a sent card would unlock again.
+@MainActor
+final class WidgetSurfaces {
+    private var surfaces: [String: WidgetSurface] = [:]
+
+    /// A tool use id repeats across turns, so a card is known by its row too.
+    func surface(row: String, card: String) -> WidgetSurface {
+        let key = "\(row)/\(card)"
+        if let surface = surfaces[key] { return surface }
+        let surface = WidgetSurface()
+        surfaces[key] = surface
+        return surface
+    }
+
+    /// The surfaces of the cards in one row.
+    func row(_ id: String) -> Row { Row(surfaces: self, id: id) }
+
+    @MainActor
+    struct Row {
+        let surfaces: WidgetSurfaces
+        let id: String
+
+        func surface(for card: String) -> WidgetSurface { surfaces.surface(row: id, card: card) }
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var widgetSurfaces: WidgetSurfaces.Row? = nil
+}
+
+private struct WidgetCardBody: View {
+    let part: WidgetUIPart
+    let call: (String, String, Rome.JSONValue?) async throws -> ConnectReply
+    let press: (String, Rome.JSONValue) async throws -> WidgetEventReply
+    let waiting: WidgetUICardView.Waiting?
+    @ObservedObject var surface: WidgetSurface
     @Environment(\.openURL) private var openURL
     @Environment(\.connectDevice) private var connectDevice
+
+    private var locked: Bool { waiting?.answered != nil || surface.sent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -213,7 +259,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
                 guard reply.ok else { throw APIError.server(status: 500, message: nil) }
                 values.append((pointer, reply.body))
             }
-            guard read == reads else { return }
+            guard read == reads, !Task.isCancelled else { return }
             for (pointer, value) in values {
                 _ = send("updateDataModel", [
                     "surfaceId": .string(part.toolUseId), "path": .string(pointer), "value": value,
@@ -221,6 +267,8 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             }
             failed = false
         } catch {
+            // A card whose view went away mid-read keeps its last state.
+            if Task.isCancelled { return }
             if read == reads { failed = true }
         }
         loaded = true

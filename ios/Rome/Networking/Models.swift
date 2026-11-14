@@ -47,8 +47,9 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// Where a guardian message stands with the agent: `failed` and `unknown`
     /// mean it was not (or may not have been) handed over. Nil from older instances.
     var inputState: String? = nil
-    /// Rome's mark on a guardian message in a Chat: `working` or `failed`.
-    var statusReaction: String? = nil
+    /// The emoji the Concierge reacted to a guardian message of its chat with.
+    /// Nil when it has none, and from older instances.
+    var reaction: String? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -64,7 +65,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, statusReaction
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction
     }
 }
 
@@ -100,7 +101,7 @@ extension ChatMessage {
         // An unknown shape never costs the message itself.
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
-        statusReaction = (try? container.decodeIfPresent(String.self, forKey: .statusReaction)) ?? nil
+        reaction = (try? container.decodeIfPresent(String.self, forKey: .reaction)) ?? nil
     }
 
     /// Writes `chatThreadId` as null when the instance sent it as null, so a
@@ -118,7 +119,7 @@ extension ChatMessage {
         try container.encodeIfPresent(chatThreadTitle, forKey: .chatThreadTitle)
         try container.encodeIfPresent(sender, forKey: .sender)
         try container.encodeIfPresent(inputState, forKey: .inputState)
-        try container.encodeIfPresent(statusReaction, forKey: .statusReaction)
+        try container.encodeIfPresent(reaction, forKey: .reaction)
     }
 
     /// The chat thread it is in, by its first message: its own id when alone.

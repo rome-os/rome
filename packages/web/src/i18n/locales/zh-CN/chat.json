@@ -107,10 +107,7 @@
         "tidyingUp": "正在整理上下文"
       }
     },
-    "statusReaction": {
-      "working": "正在处理",
-      "failed": "未完成"
-    },
+    "reaction": "表情回应",
     "taskList": {
       "title": "任务",
       "close": "关闭任务",
@@ -181,8 +178,7 @@
     "action": "回复",
     "dismiss": "取消回复",
     "jump": "跳到原消息",
-    "openThread": "打开对话串",
-    "toThread": "回复：{{title}}"
+    "openThread": "打开对话串"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -651,19 +647,8 @@
   "thread": {
     "title": "对话串",
     "openTaskChat": "打开任务对话",
-    "close": "关闭对话串",
     "loadFailed": "无法加载这个对话串。",
     "replyPlaceholder": "回复"
-  },
-  "sessionRenewal": {
-    "notice": "已整理上下文 · {{reason}}",
-    "reasons": {
-      "context": "对话较长",
-      "setup": "设定已更新",
-      "idle": "闲置后",
-      "daily": "每日重置",
-      "working_dir": "工作目录不存在"
-    }
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
