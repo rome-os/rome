@@ -13,6 +13,7 @@ import {
   openPage,
   recordField,
   voiceForm,
+  waitForControlReturn,
   waitForSteadyField,
 } from "../lib/product.mjs";
 
@@ -123,14 +124,17 @@ async function runCase(ctx, message, testCase) {
     problems.push(
       `the sent messages differ: by voice ${describe(voice.sent)}, by typing ${describe(typed.sent)}`,
     );
+  if (undo.returnMs === null)
+    problems.push("the voice control did not offer to start again within 30 s of the stop action");
   if (undo.after !== undo.before)
     problems.push(`one undo left "${undo.after}" where the field was "${undo.before}"`);
+  const returned = `the control offered to start again ${voice.returnMs} ms after the stop action when speaking, ${undo.returnMs} ms before undo`;
   return check(
     testCase.name,
     problems.length === 0 ? "pass" : "fail",
     problems.length === 0
-      ? `spoke "${voice.spoken.trim()}"; same field and message as typing; one undo removed it`
-      : problems.join("; "),
+      ? `spoke "${voice.spoken.trim()}"; same field and message as typing; one undo removed it; ${returned}`
+      : `${problems.join("; ")}; ${returned}`,
     [voice.sent?.id, typed.sent?.id],
   );
 }
@@ -160,6 +164,7 @@ async function pass(ctx, message, testCase, mode, words) {
     const { control, form, field } = await voiceForm(page);
     await testCase.setup({ page, form, field });
     const before = await fieldText(field);
+    let returnMs;
     const cursor = await field.evaluate((el) => el.selectionStart ?? el.value.length);
     if (mode === "typing") {
       await field.focus();
@@ -169,18 +174,20 @@ async function pass(ctx, message, testCase, mode, words) {
       await control.click();
       await page.waitForTimeout(message.lastWordAt * 1000 + waits.afterSpeechMs);
       if (await isListening(control)) await control.click();
+      // The guardian edits once the control offers to start again; the field is theirs then.
+      returnMs = await waitForControlReturn(page, control);
       await waitForSteadyField(page, { quietMs: waits.steadyMs });
     }
     if (mode === "undo") {
       await field.focus();
       await page.keyboard.press("ControlOrMeta+z");
-      return { before, after: await fieldText(field) };
+      return { before, after: await fieldText(field), returnMs };
     }
     const after = await fieldText(field);
     const sentBefore = await env.allMessages();
     await field.press("Enter");
     const [sent = null] = newMessages(sentBefore, await waitForNewMessage(env, sentBefore, waits));
-    return { before, after, cursor, spoken: insertedAt(before, after, cursor), sent };
+    return { before, after, cursor, spoken: insertedAt(before, after, cursor), sent, returnMs };
   } finally {
     await opened.close();
   }

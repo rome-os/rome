@@ -150,6 +150,10 @@ switch (command) {
     }
     break;
   case "transcriber":
+    if (positionals[0] === "status") {
+      print({ decoyConnections: 0 });
+      break;
+    }
     updateState(statePath, (s) => {
       s.transcriber = {
         mode: positionals[0],
@@ -188,6 +192,15 @@ switch (command) {
     });
     break;
   case "cloud": {
+    if (positionals[0] === "sign-out" || positionals[0] === "sign-in") {
+      const signedIn = positionals[0] === "sign-in";
+      const { cloud } = updateState(statePath, (s) => {
+        s.cloud.signedIn = signedIn;
+        s.cloud.ownCredential = !signedIn;
+      });
+      print({ signedIn: cloud.signedIn, decoySettings: cloud.ownCredential });
+      break;
+    }
     if (positionals[0] === "session") {
       // fail-11g mints a credential for an account the gate refuses.
       const { cloud, variant } = updateState(statePath, (s) => {

@@ -10,6 +10,7 @@
 //   fail-10  the server sends the audio to a host Rome does not name
 //   fail-11  Rome Cloud records half the seconds listened
 //   fail-11g Rome Cloud mints a credential for an account the gate refuses
+//   fail-11s an instance not signed in offers voice input on its own provider settings
 import { createServer } from "node:http";
 import { basename } from "node:path";
 import { readState, updateState } from "./state.mjs";
@@ -26,6 +27,12 @@ export const VARIANTS = [
 ];
 
 const PLACE = { provider: "Soniox", host: "stt-rt.soniox.com" };
+
+/** Whether the instance offers voice input: signed in and allowed, or fail-11s on its own settings. */
+function voiceOffered(state) {
+  if (!state.cloud.signedIn) return state.variant === "fail-11s" && state.cloud.ownCredential;
+  return state.cloud.gate;
+}
 
 /** Starts the stand-in on a free port. Resolves to `{ url, close }`. */
 export async function startStandIn({ statePath, script }) {
@@ -50,7 +57,7 @@ async function handle(req, res, statePath, script) {
     res.end(body);
   };
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat"))
-    return send(200, "text/html; charset=utf-8", page(state.variant, state.cloud.gate));
+    return send(200, "text/html; charset=utf-8", page(state.variant, voiceOffered(state)));
   if (req.method === "GET" && url.pathname === "/settings")
     return send(
       200,
@@ -62,7 +69,7 @@ async function handle(req, res, statePath, script) {
       200,
       "application/json",
       JSON.stringify(
-        state.cloud.gate
+        voiceOffered(state)
           ? { available: true, via: "rome-cloud", place: PLACE }
           : { available: false, via: null, place: null },
       ),

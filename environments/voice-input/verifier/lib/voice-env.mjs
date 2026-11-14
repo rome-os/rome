@@ -58,6 +58,12 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
     cloudStatus: () => json(["cloud", "status"]),
     /** `{ events: [{ provider, model, seconds, at }] }`: Rome Cloud's voice usage for the instance, oldest first. */
     cloudUsage: () => json(["cloud", "usage"]),
+    /** Restarts Rome not signed in to Rome Cloud, with its own `ROME_TRANSCRIPTION_*`. Prints `cloud status`. */
+    cloudSignOut: () => json(["cloud", "sign-out"]),
+    /** Restarts Rome signed in to Rome Cloud with no provider settings. Prints `cloud status`. */
+    cloudSignIn: () => json(["cloud", "sign-in"]),
+    /** The transcriber's counters, such as `decoyConnections`: connections on the signed-out settings' key. */
+    transcriberStatus: () => json(["transcriber", "status"]),
     /** Turns Rome Cloud's voice input gate `on` or `off` for the test account. */
     gate: (state) => exec(command, ["gate", state]),
     /** `{ status, body }`: Rome Cloud's answer to `POST /v1/transcription/sessions` as the instance. */

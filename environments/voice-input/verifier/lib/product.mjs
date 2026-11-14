@@ -104,6 +104,24 @@ export async function pageNow(page) {
   return page.evaluate(() => performance.now());
 }
 
+/**
+ * After the stop action, waits until the voice control offers to start again, which is when the
+ * product has finished with the session and gives the field back. Resolves to the milliseconds
+ * that took, or null when it did not happen within `timeoutMs`.
+ */
+export async function waitForControlReturn(page, control, { timeoutMs = 30000 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const name = await control
+      .evaluate((el) => `${el.getAttribute("aria-label") ?? ""} ${el.textContent ?? ""}`)
+      .catch(() => "");
+    if (/Start voice input|开始语音输入/.test(name) && !(await isListening(control)))
+      return Date.now() - start;
+    await page.waitForTimeout(50);
+  }
+  return null;
+}
+
 /** Waits until the field's text has not changed for `quietMs`, or `timeoutMs` passed. */
 export async function waitForSteadyField(page, { quietMs, timeoutMs = 10000 }) {
   const start = Date.now();

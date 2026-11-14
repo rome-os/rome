@@ -1,6 +1,7 @@
 // Rule 11: Rome Cloud provides voice input to the accounts Ouou allows. With the gate off the
 // dashboard has no voice control and Rome Cloud refuses a session; with it on, voice input works
-// with no provider credential in the instance's config, and Rome Cloud records the seconds.
+// with nothing set up, and Rome Cloud records the seconds. Not signed in, there is no voice
+// input, even with the instance's own provider settings.
 import {
   fieldText,
   isListening,
@@ -35,16 +36,13 @@ export default {
       return notChecked(`the environment cannot report Rome Cloud: ${error.message}`);
     }
     if (!status.signedIn) return notChecked("the instance is not signed in to Rome Cloud");
-    if (status.ownCredential)
-      return notChecked(
-        "the instance has its own ROME_TRANSCRIPTION_API_KEY, so it cannot show that Rome Cloud provides the credential",
-      );
 
     const message = setMessages(ctx.script, "B")[0];
     const checks = await gateOff(env, message);
     await env.gate("on");
     await waitForAvailable(env, message, true);
     checks.push(...(await gateOn(ctx, message)));
+    checks.push(await signedOut(env, message));
     return ruleResult(checks);
   },
 };
@@ -113,6 +111,60 @@ async function gateOff(env, message) {
     ),
   );
   return checks;
+}
+
+/**
+ * An instance not signed in to Rome Cloud has no voice input, even with its own
+ * `ROME_TRANSCRIPTION_*` settings: the environment's sign-out restarts Rome that way.
+ */
+async function signedOut(env, message) {
+  const name = "not signed in, own provider settings: no voice control";
+  let status;
+  try {
+    status = await env.cloudSignOut();
+  } catch (error) {
+    return required(
+      check(name, "not_checked", `the environment cannot sign out: ${error.message}`),
+    );
+  }
+  try {
+    const ownSettings = status?.decoySettings ?? status?.ownCredential;
+    if (status?.signedIn || !ownSettings)
+      return required(
+        check(
+          name,
+          "not_checked",
+          `after sign-out the environment reports signedIn ${status?.signedIn} and own settings ${ownSettings}`,
+        ),
+      );
+    const available = await waitForAvailable(env, message, false);
+    const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
+    let shown;
+    try {
+      shown = await voiceForm(opened.page, { timeoutMs: 5000 }).then(
+        () => true,
+        () => false,
+      );
+    } finally {
+      await opened.close();
+    }
+    // Nothing may reach the transcriber on the instance's own settings.
+    const decoy = await env
+      .transcriberStatus()
+      .then((t) => t?.decoyConnections)
+      .catch(() => undefined);
+    const used = typeof decoy === "number" && decoy > 0;
+    return required(
+      check(
+        name,
+        shown || used ? "fail" : "pass",
+        `${shown ? "the dashboard shows a voice control" : "the dashboard shows no voice control"} with ROME_TRANSCRIPTION_* set; ${PLACE_API} says available ${available}; ${decoy === undefined ? "the transcriber does not count connections on those settings" : `${decoy} connections reached the transcriber on them`}`,
+      ),
+    );
+  } finally {
+    await env.cloudSignIn();
+    await waitForAvailable(env, message, true);
+  }
 }
 
 /** Waits until Rome's read API says voice input is `wanted`, and returns what it last said. */
