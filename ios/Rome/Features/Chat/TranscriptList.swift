@@ -414,6 +414,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
             dataSource.applySnapshotUsingReloadData(snapshot) { self.items = next }
             view.layoutIfNeeded()
             restoreToBottom()
+            warmRowsAbove()
         } else {
             UIView.performWithoutAnimation {
                 dataSource.apply(snapshot, animatingDifferences: false) { self.items = next }
@@ -428,6 +429,32 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         PerfProbe.sample(prepended ? "pageApplyMs" : "applyMs", (CACurrentMediaTime() - started) * 1000)
         if prepended { transcriptScrollLog.notice("older page in: \(next.count, privacy: .public) items, \(Int((CACurrentMediaTime() - started) * 1000), privacy: .public) ms") }
         readScroll()
+    }
+
+    /// Lays out the rows just above the screen once, off screen and one per
+    /// run-loop turn, after the chat opens. Their first build (a card's
+    /// views, its Markdown) then never lands in a single frame of the first
+    /// scroll up, where several came on screen at once.
+    private func warmRowsAbove() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard let self, let view = self.view else { return }
+            let top = view.indexPathsForVisibleItems.map(\.item).min() ?? self.items.count
+            let width = view.bounds.width
+            for index in stride(from: top - 1, through: max(0, top - 12), by: -1) {
+                guard let id = self.items[safe: index], let box = self.boxes[id] else { continue }
+                let host = UIHostingController(rootView: RowHost(box: box, cells: self.cells) { [weak self] row, previous in
+                    self.map { AnyView($0.row(row, previous)) } ?? AnyView(EmptyView())
+                })
+                let size = host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+                // Drawn once too: text and pictures are rasterized on first draw.
+                host.view.frame = CGRect(origin: .zero, size: CGSize(width: width, height: max(1, size.height)))
+                host.view.layoutIfNeeded()
+                _ = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in host.view.layer.render(in: context.cgContext) }
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
     }
 
     private var isUserScrolling: Bool {
