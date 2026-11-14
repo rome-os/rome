@@ -9,6 +9,7 @@
 #   voice-env transcriber stand-in [--text <text>] [--first-ms <n>] [--token-ms <n>]
 #   voice-env transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]
 #   voice-env transcriber status
+#   voice-env cloud status | usage | sign-in | sign-out
 #   voice-env network cut|restore
 #   voice-env chats
 #   voice-env messages --chat <id>
@@ -49,7 +50,7 @@ cmd_version() {
     script='{"provider":"stand-in","url":"'"$STAND_IN_URL"'","script":'"$script"'}'
   fi
   node -e '
-    const [build, verifier, transcriber, model] = process.argv.slice(1);
+    const [build, verifier, transcriber, model, dashboard, cloud, signIn] = process.argv.slice(1);
     const b = JSON.parse(build);
     console.log(JSON.stringify({
       product: b.product,
@@ -58,10 +59,13 @@ cmd_version() {
       merged: b.merged,
       transcriber: JSON.parse(transcriber),
       model: model || null,
-      dashboard: process.argv[5],
+      signIn,
+      cloud: cloud ? JSON.parse(cloud) : null,
+      dashboard,
       builtAt: b.builtAt,
     }, null, 2));' \
-    "$(cat "$BUILD_FILE")" "$(tree_json environments/voice-input/verifier)" "$script" "$model" "$DASHBOARD"
+    "$(cat "$BUILD_FILE")" "$(tree_json environments/voice-input/verifier)" "$script" "$model" "$DASHBOARD" \
+    "$(cat "$CLOUD_BUILD_FILE" 2>/dev/null || true)" "$(state signIn || echo cloud)"
 }
 
 cmd_browser() {
@@ -135,14 +139,75 @@ cmd_transcriber() {
   esac
 }
 
-# Rome reads the transcriber from its config at start, so switching rewrites
-# the env file and recreates the container on the same volumes.
+# Signed in to Rome Cloud, the provider is Rome Cloud's config, so switching
+# restarts Rome Cloud. Otherwise Rome reads it from its own config at start,
+# so switching rewrites Rome's env file and recreates the container on the
+# same volumes.
 switch_transcriber() {
   set_state "{\"transcriber\":\"$1\"}"
   load_secrets
-  write_rome_env
-  log "restarting Rome with the $1 transcriber ..."
-  start_rome
+  if [ "$(state signIn || echo cloud)" = cloud ]; then
+    write_cloud_env
+    log "restarting Rome Cloud with the $1 transcriber ..."
+    start_cloud
+  else
+    write_rome_env
+    log "restarting Rome with the $1 transcriber ..."
+    start_rome
+  fi
+}
+
+cmd_cloud() {
+  require_up
+  case "${1:-}" in
+    status)
+      # Signed in: Rome points at the environment's Rome Cloud, and its signer
+      # key is registered there on an active instance, as enrollment leaves it.
+      local instance_id signed_in=false own=false
+      instance_id="$(state cloud.instanceId || true)"
+      if [ -n "$instance_id" ] &&
+        [ "$(docker exec "$ROME" printenv PANTHEON_BASE_ORIGIN 2>/dev/null || true)" = "$CLOUD_ORIGIN" ] &&
+        docker inspect "$CLOUD_PG" >/dev/null 2>&1 &&
+        [ -n "$(cloud_sql -c "select 1 from account_instances where public_handle = '$instance_id'
+          and status = 'active' and public_jkt is not null" 2>/dev/null)" ]; then
+        signed_in=true
+      fi
+      [ -z "$(docker exec "$ROME" printenv ROME_TRANSCRIPTION_API_KEY 2>/dev/null || true)" ] || own=true
+      printf '{"signedIn":%s,"ownCredential":%s}\n' "$signed_in" "$own"
+      ;;
+    usage)
+      local instance_id
+      instance_id="$(state cloud.instanceId || true)"
+      [ -n "$instance_id" ] && docker inspect "$CLOUD_PG" >/dev/null 2>&1 || {
+        echo '{"events":[]}'
+        return
+      }
+      [ -n "$(cloud_sql -c "select 1 from information_schema.columns
+        where table_name = 'usage_events' and column_name = 'audio_ms'")" ] ||
+        die "this Rome Cloud ($(json ref <"$CLOUD_BUILD_FILE")) does not record voice usage. Set VOICE_CLOUD_REF to one that does."
+      cloud_sql -c "select coalesce(json_agg(json_build_object(
+          'provider', provider, 'model', model, 'seconds', audio_ms / 1000.0,
+          'at', occurred_at) order by occurred_at), '[]')
+        from usage_events where type = 'transcription' and instance_id = '$instance_id'" |
+        node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => console.log(JSON.stringify({ events: JSON.parse(s) }, null, 2)))'
+      ;;
+    sign-in | sign-out)
+      local next=cloud
+      [ "$1" = sign-out ] && next=own
+      set_state "{\"signIn\":\"$next\"}"
+      load_secrets
+      apply_stand_in_keys
+      if [ "$next" = cloud ] && { [ -z "$(state cloud.instanceToken || true)" ] || ! docker inspect "$CLOUD" >/dev/null 2>&1; }; then
+        log "starting Rome Cloud ..."
+        cmd_cloud_up
+      fi
+      write_rome_env
+      log "restarting Rome ..."
+      start_rome
+      "$0" cloud status
+      ;;
+    *) die "usage: voice-env cloud status | usage | sign-in | sign-out" ;;
+  esac
 }
 
 cmd_network() {
@@ -199,12 +264,14 @@ cmd_capture() {
       curl -fsS -X POST "$(proxy_url)/capture/stop" >"$tmp/browser.json"
       docker logs "$CAPTURE" >"$tmp/dump.txt" 2>/dev/null || true
       docker rm -f "$CAPTURE" >/dev/null 2>&1 || true
-      local rome_ips stand_in_ip stand_in_stats
+      local rome_ips stand_in_ip stand_in_stats cloud_ip
       rome_ips="$(docker inspect -f '{{range .NetworkSettings.Networks}}"{{.IPAddress}}",{{end}}' "$ROME")"
       stand_in_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$TRANSCRIBER")"
       stand_in_stats="$(curl -fsS "$(stand_in)/stats" || echo null)"
-      printf '{"startedAt":"%s","rome":[%s],"standInIp":"%s","names":{"%s":"transcriber (stand-in)"},"standIn":%s}' \
-        "$(json startedAt <"$ctx")" "${rome_ips%,}" "$stand_in_ip" "$stand_in_ip" "$stand_in_stats" >"$tmp/context.json"
+      cloud_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CLOUD" 2>/dev/null || true)"
+      printf '{"startedAt":"%s","rome":[%s],"standInIp":"%s","names":{"%s":"transcriber (stand-in)"%s},"standIn":%s}' \
+        "$(json startedAt <"$ctx")" "${rome_ips%,}" "$stand_in_ip" "$stand_in_ip" \
+        "${cloud_ip:+,\"$cloud_ip\":\"cloud (Rome Cloud)\"}" "$stand_in_stats" >"$tmp/context.json"
       node "$ENV_DIR/lib/capture.mjs" "$tmp/browser.json" "$tmp/dump.txt" "$tmp/context.json"
       rm -rf "$tmp" "$ctx"
       ;;
@@ -216,10 +283,11 @@ case "${1:-}" in
   version) cmd_version ;;
   browser) shift && cmd_browser "$@" ;;
   transcriber) shift && cmd_transcriber "$@" ;;
+  cloud) shift && cmd_cloud "$@" ;;
   network) shift && cmd_network "$@" ;;
   chats) cmd_chats ;;
   messages) shift && cmd_messages "$@" ;;
   audio-scan) cmd_audio_scan ;;
   capture) shift && cmd_capture "$@" ;;
-  *) die "usage: voice-env version | browser | transcriber | network | chats | messages | audio-scan | capture (see README.md)" ;;
+  *) die "usage: voice-env version | browser | transcriber | cloud | network | chats | messages | audio-scan | capture (see README.md)" ;;
 esac
