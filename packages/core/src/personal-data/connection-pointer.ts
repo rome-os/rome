@@ -59,8 +59,8 @@ export function connectionPointer(
 }
 
 /**
- * What the Agent does in the reply that found the gap, when the connection
- * cannot read it now. The query carries it so the step does not hang on prompt
+ * What the Agent does in the reply that found the gap: read it live when the
+ * connection works, otherwise what to turn on. The query carries it so the step does not hang on prompt
  * prose alone; the catalog lists the pointer without it.
  */
 export function withNextStep(pointer: ConnectionPointer): ConnectionPointer & { next?: string } {
@@ -89,5 +89,15 @@ export function withNextStep(pointer: ConnectionPointer): ConnectionPointer & { 
         "allow it in the device's settings.",
     };
   }
-  return pointer;
+  // Working: the device reads the gap now, and is often in front just after
+  // it connected, while a backfill is still landing. A check scheduled for
+  // later would answer long after the data arrived.
+  return {
+    ...pointer,
+    next:
+      `Read the rest from ${on} live now: rome-node device run ${pointer.device.id} <action>, ` +
+      `arguments from rome-node device describe ${pointer.device.id}. Do not schedule a later ` +
+      "check for this. If the device does not answer, answer from the stored data and say how " +
+      "fresh it is.",
+  };
 }
