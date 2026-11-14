@@ -871,6 +871,7 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
+            ConciergeChat(id: "topic-health", name: "睡眠和电量", main: false, unread: 0),
             ConciergeChat(id: "topic-routine", name: "每周读书提醒", main: false, unread: 0),
             ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
             ConciergeChat(id: "topic-errors", name: "出错的情况", main: false, unread: 0),
@@ -1138,6 +1139,41 @@ final class DemoBackend: RomeBackend {
             | Bose QC Ultra | 接近 Sony，人声压得更干净 | 最轻最松，适合长时间戴 | 一般 | 每天通勤、要戴一整天的人 |
             | AirPods Max | 比前两款弱一些 | 重，但做工最好 | 很好 | 已经在用 `iPhone` 和 Mac 的人 |
             """, at: at(12, 2), session: "topic-table"),
+        ]
+        // A device connection's card, as core draws it: answered once the
+        // phone connected Health, then a new one for Device.
+        func deviceCard(_ id: String, kind: String, label: String) -> JSONValue {
+            func c(_ id: String, _ type: String, _ fields: [String: JSONValue]) -> JSONValue {
+                var object = fields
+                object["id"] = .string(id)
+                object["component"] = .string(type)
+                return .object(object)
+            }
+            let context: JSONValue = .object(["kind": .string(kind)])
+            return .object([
+                "type": .string("pending_interaction"), "toolUseId": .string(id), "appId": .string("core"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("connect-card"), "builtin": .bool(true),
+                    "props": .object(["kind": .string(kind), "label": .string(label), "device": .bool(true)]),
+                    "ui": .object(["components": .array([
+                        c("root", "Column", ["children": .array([.string("title"), .string("note"), .string("actions")])]),
+                        c("title", "Text", ["text": .string("Connect \(label)"), "variant": .string("h4")]),
+                        c("note", "Text", ["text": .string("Connect it on this iPhone, then your Rome can read it."), "variant": .string("caption")]),
+                        c("actions", "Row", ["children": .array([.string("dismiss"), .string("connect")]), "justify": .string("end")]),
+                        c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("borderless"), "action": .object(["event": .object(["name": .string("dismiss"), "context": context])])]),
+                        c("dismiss-label", "Text", ["text": .string("Not now")]),
+                        c("connect", "Button", ["child": .string("connect-label"), "variant": .string("primary"), "action": .object(["event": .object(["name": .string("connect"), "context": context])])]),
+                        c("connect-label", "Text", ["text": .string("Connect")]),
+                    ])]),
+                ]),
+            ])
+        }
+        messages["topic-health"] = [
+            user("h1", "这周睡得怎么样？", at: at(9, 1), session: "topic-health"),
+            parts([deviceCard("dc-health", kind: "apple_health", label: "Apple Health")], at: at(9, 2), session: "topic-health"),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("dc-health"), "output": .object(["kind": .string("apple_health"), "status": .string("connected")])])], at: at(9, 3), session: "topic-health", role: "user"),
+            agent("这周平均每晚睡 6 小时 48 分，周三最少，只有 5 小时 10 分。", at: at(9, 4), session: "topic-health"),
+            user("h2", "手机还剩多少电？", at: at(9, 20), session: "topic-health"),
+            parts([deviceCard("dc-device", kind: "device", label: "Device")], at: at(9, 21), session: "topic-health"),
         ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),

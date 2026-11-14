@@ -10,7 +10,7 @@
 	<!-- Debug builds only. Same as Rome/Info.plist, plus plain HTTP to a Rome
 	     on this Mac or the LAN (ROME_LOCAL_*). Keep the two in step. -->
 	<key>NSHealthShareUsageDescription</key>
-	<string>When your Rome asks, Rome sends the Health data you allow to your Rome and its AI model. Rome never changes your Health data.</string>
+	<string>Rome sends the Health data you allow, such as your steps, sleep and heart rate, to your Rome and your AI model, whose terms apply, so your Agent can answer questions about your health.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>When you press Share on a card in a chat, Rome sends your current location to your Rome and its AI model, for that answer only.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
