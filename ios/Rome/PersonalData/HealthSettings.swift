@@ -348,11 +348,15 @@ final class HealthSettings {
         // first, and the engine is idle before the request goes.
         let before = lane.switches.value
         lane.switches.set(enabled: false)
+        // Off is saved before any wait: a lane rebuilt meanwhile (this Rome
+        // left and opened again) must not upload what is being deleted.
+        defaults.set(false, forKey: Defaults.enabled(id))
         await lane.engine.quiesce()
         do {
             _ = try await target.backend.deleteOrigin(source: Self.sourceId, origin: origin)
         } catch {
             lane.switches.set(enabled: before.enabled)
+            defaults.set(before.enabled, forKey: Defaults.enabled(id))
             return false
         }
         // This Rome's sync is off from here, whichever Rome is open by now:

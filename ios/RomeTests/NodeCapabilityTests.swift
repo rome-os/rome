@@ -105,7 +105,7 @@ extension DeviceStatus {
         #expect(list[0] == .init(
             capability: "apple_health", title: "Apple Health", prefix: "health", personal: true,
             operations: [.init(name: "health.stats", access: "read"), .init(name: "health.samples", access: "read")],
-            permission: "unknown", live: true
+            feeds: "apple_health", permission: "unknown", live: true
         ), "HealthKit hides read access: always unknown")
         #expect(list[1] == .init(
             capability: "device", title: "Device", prefix: "device", personal: false,
@@ -128,6 +128,7 @@ extension DeviceStatus {
         #expect(json["device"]?["platform"]?.string == "ios")
         #expect(json["connections"]?.array?.first?["permission"]?.string == "not_needed")
         #expect(json["connections"]?.array?.first?["operations"]?.array?.first?["access"]?.string == "read")
+        #expect(json["connections"]?.array?.first?["feeds"] == nil, "omitted for one that syncs nothing")
         #expect(DeviceConnections.connectionId(device: "DEV-1", capability: "apple_health") == "dev-1:apple_health")
         #expect(DeviceConnections.connectionId(device: nil, capability: "apple_health") == nil)
     }

@@ -1171,6 +1171,16 @@
         }
       }
     },
+    "Connecting syncs the last 6 months of the Health data you allow to your Rome, and keeps it up to date. iOS asks which data Rome may read." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接后，你允许的最近 6 个月健康数据会同步到你的 Rome，并保持更新。iOS 会询问 Rome 可以读取哪些数据。"
+          }
+        }
+      }
+    },
     "Connecting…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5587,16 +5597,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每日重置"
-          }
-        }
-      }
-    },
-    "iOS asks which data Rome may read. You can change it later in the Health app." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iOS 会询问 Rome 可以读取哪些数据，之后可在“健康”App 中更改。"
           }
         }
       }

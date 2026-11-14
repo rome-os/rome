@@ -713,6 +713,8 @@ final class AppModel {
     let health: HealthSettings
     /// This phone's device connections, reported to the open Rome.
     let connections: DeviceConnections
+    /// The workspace whose start has run on a good session: reports go only to it.
+    @ObservationIgnored private weak var reportsTo: Workspace?
     /// Settings opened at these pages, as a tapped "sign in again" notice asks.
     private(set) var settingsRequest = SettingsRequest(serial: 0, routes: [])
     /// Light, dark or automatic, for the whole app; kept across sign-out.
@@ -773,7 +775,9 @@ final class AppModel {
         }
         // Only to a Rome the guardian owns: a visitor's Rome cannot reach this phone.
         connections.send = { [weak self] report in
-            guard let self, self.phase == .ready, let workspace = self.workspace, !workspace.isVisitor else { return }
+            // Only once the workspace started on a good session: a cached
+            // launch shows ready before an expired session is renewed.
+            guard let self, self.phase == .ready, let workspace = self.workspace, workspace === self.reportsTo, !workspace.isVisitor else { return }
             let backend = workspace.backend
             try? await backend.reportDeviceConnections(report)
         }
@@ -888,6 +892,7 @@ final class AppModel {
             guard self.workspace === workspace else { return }
         }
         // On a good session, as the workspace's own start is: this Rome learns the phone's connections.
+        reportsTo = workspace
         connections.report()
         await workspace.start()
     }
@@ -1465,6 +1470,7 @@ final class AppModel {
             guard self.workspace === workspace else { return }
         }
         // On a good session, as the workspace's own start is: this Rome learns the phone's connections.
+        reportsTo = workspace
         connections.report()
         await workspace.start()
     }

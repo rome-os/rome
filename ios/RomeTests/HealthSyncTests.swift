@@ -791,6 +791,7 @@ struct SyncRig {
         await rig.backend.fail(.retryable("network"))
         #expect(await !settings.deleteUploaded())
         #expect(settings.isEnabled)
+        #expect(rig.make().isEnabled, "the saved switch is back on too")
     }
 
     @Test func signingOutForgetsEverythingButTheRomesCopy() async {
@@ -845,6 +846,24 @@ struct SyncRig {
         #expect(!settings.isEnabled)
         let sent = await rig.backend(Rig.home.id).envelopes.count
         await settings.syncNow().value
+        #expect(await rig.backend(Rig.home.id).envelopes.count == sent)
+    }
+
+    @Test func aRomeReopenedWhileItsDeleteIsHeldDoesNotSync() async throws {
+        let rig = Rig()
+        let settings = rig.make()
+        await settings.setEnabled(true).value
+        await rig.backend(Rig.home.id).holdDelete()
+        let delete = Task { await settings.deleteUploaded() }
+        for _ in 0..<500 where await !rig.backend(Rig.home.id).deleteHeld { try await Task.sleep(for: .milliseconds(10)) }
+        // Away and back while the delete waits: the rebuilt lane is off already.
+        settings.select(Rig.work)
+        settings.select(Rig.home)
+        #expect(!settings.isEnabled, "Off was saved before the delete waited")
+        let sent = await rig.backend(Rig.home.id).envelopes.count
+        await settings.syncNow().value
+        await rig.backend(Rig.home.id).releaseDelete()
+        #expect(await delete.value)
         #expect(await rig.backend(Rig.home.id).envelopes.count == sent)
     }
 

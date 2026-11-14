@@ -31,6 +31,9 @@ struct DeviceConnectionReport: Encodable, Sendable, Equatable {
         let prefix: String
         let personal: Bool
         let operations: [Operation]
+        /// The personal-data source it syncs into; absent for one that syncs
+        /// nothing. The Rome finds the connection by it before the first sync.
+        var feeds: String? = nil
         /// `granted`, `denied`, `not_needed` or `unknown`.
         let permission: String
         let live: Bool

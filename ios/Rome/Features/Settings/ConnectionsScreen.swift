@@ -271,13 +271,20 @@ struct ConnectButton: View {
     var body: some View {
         VStack(spacing: 10) {
             PrimaryButton(title: "Connect", loading: connecting, action: action)
-            Text("iOS asks which data Rome may read. You can change it later in the Health app.")
-                .romeFont(13)
-                .foregroundStyle(Palette.sub)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
+            HealthConnectNote()
         }
+    }
+}
+
+/// What connecting Health does beyond the iOS prompt: it uploads.
+struct HealthConnectNote: View {
+    var body: some View {
+        Text("Connecting syncs the last 6 months of the Health data you allow to your Rome, and keeps it up to date. iOS asks which data Rome may read.")
+            .romeFont(13)
+            .foregroundStyle(Palette.sub)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
     }
 }
 
@@ -344,6 +351,7 @@ struct ConnectDeviceSheet: View {
                     .padding(.top, 12)
                 Spacer(minLength: 0)
                 VStack(spacing: 10) {
+                    if capability.syncSource == HealthSettings.sourceId { HealthConnectNote() }
                     PrimaryButton(title: "Connect", loading: connecting) {
                         connecting = true
                         Task {

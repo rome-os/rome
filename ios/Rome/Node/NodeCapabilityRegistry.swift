@@ -61,6 +61,7 @@ struct NodeCapabilityRegistry: Sendable {
                 prefix: capability.prefix,
                 personal: capability.personal,
                 operations: capability.actions.map { .init(name: $0.name, access: $0.access.rawValue) },
+                feeds: capability.syncSource,
                 permission: await capability.permission().rawValue,
                 live: capability.live.isOn
             ))
