@@ -260,7 +260,10 @@ write_rome_env() {
 # ports: nothing outside reaches this Rome except through `docker exec`.
 start_rome() {
   docker rm -f "$ROME" >/dev/null 2>&1 || true
-  docker run -d --name "$ROME" --restart unless-stopped \
+  # The devbox runs many Romes at once. The cap keeps this one, and the Chrome
+  # the image runs inside it, from taking the box down; Chrome dies with the
+  # container on reset and down.
+  docker run -d --name "$ROME" --restart unless-stopped --memory 6g \
     --env-file "$ROME_ENV_FILE" \
     -v "$HOME_VOLUME:/home/rome" -v "$MEMORY_VOLUME:/app/memory" -v "$USER_VOLUME:/home/user" \
     --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor=unconfined \
