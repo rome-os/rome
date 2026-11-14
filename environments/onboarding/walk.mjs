@@ -75,9 +75,4 @@ await step("rome-chat", async () => {
   await page.getByText("Main chat").first().waitFor({ timeout: 60_000 });
 });
 
-if (process.env.CARDS) {
-  const { walkCards } = await import("./cards.mjs");
-  await walkCards({ page, step, out });
-}
-
 await browser.close();

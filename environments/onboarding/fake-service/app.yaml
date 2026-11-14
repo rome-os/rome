@@ -1,0 +1,19 @@
+formatVersion: 2
+id: fake-service
+name: Fake Service
+version: 0.1.0
+description: |
+  A stand-in third-party service, only in the onboarding environment. To
+  connect Fake Service, run the fake_service_connect action: it shows the
+  guardian a connect card and waits for their answer, which says whether Fake
+  Service is now connected.
+hideInLauncher: true
+appRoot: dist
+web:
+  manifest: web/manifest.json
+  displayName: Fake Service
+  navLabel: Fake Service
+api:
+  entry: api/index
+actions:
+  - actions/fake-service-connect

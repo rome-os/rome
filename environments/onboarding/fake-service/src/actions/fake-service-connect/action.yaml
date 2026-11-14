@@ -1,0 +1,11 @@
+name: fake_service_connect
+type: custom
+description: |
+  Connect Fake Service. Shows the guardian a card with Connect, which opens
+  Fake Service's sign-in page, and I've authorized. The agent waits for the
+  guardian's answer on the card: connected, or dismissed.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

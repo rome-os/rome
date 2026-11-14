@@ -8,6 +8,15 @@
 }
 
 :80 {
+	# The OAuth test server that Fake Service signs in through.
+	@oauth host {$OAUTH_HOST}.rome.localhost
+	handle @oauth {
+		reverse_proxy {$OAUTH}:8080 {
+			header_up Host {$OAUTH_HOST}.{$ROME_DOMAIN}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Port 443
+		}
+	}
 	@rome header_regexp rome Host ^([a-z0-9-]+)\.rome\.localhost(:[0-9]+)?$
 	handle @rome {
 		reverse_proxy rome-vm-{re.rome.1}:8080 {

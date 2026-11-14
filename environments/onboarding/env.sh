@@ -43,6 +43,11 @@ PG_VOLUME="rome-env-${NAME}-pg"
 CLOUD="rome-env-${NAME}-cloud"
 ROUTER="rome-env-${NAME}-router"
 WALKER="rome-env-${NAME}-walk"
+# The OAuth test server that the Fake Service app signs in through, reached by
+# the browser and by each Rome at https://<name>-oauth.<domain>.
+OAUTH="rome-env-${NAME}-oauth"
+OAUTH_HOST="${NAME}-oauth"
+OAUTH_IMAGE="ghcr.io/navikt/mock-oauth2-server:6.1.4"
 RUNNER_IMAGE="rome-env-${NAME}-runner"
 ENV_FILE="$STATE_DIR/cloud.env"
 # The model login and the test OAuth apps, one KEY=value per line, mode 600.
@@ -262,12 +267,19 @@ start_cloud() {
     "$RUNNER_IMAGE" node_modules/.bin/next dev --port 3100 --hostname 0.0.0.0 >/dev/null
 }
 
+start_oauth_server() {
+  docker rm -f "$OAUTH" >/dev/null 2>&1 || true
+  docker run -d --name "$OAUTH" --network "$NETWORK" --restart unless-stopped --memory 512m \
+    -e SERVER_PORT=8080 -e 'JSON_CONFIG={"interactiveLogin":true}' "$OAUTH_IMAGE" >/dev/null
+}
+
 # Routes <slug>.rome.localhost to the Rome container Rome Cloud named rome-vm-<slug>.
 # Priority 1 lets every other stack's own Host rule win.
 start_router() {
   docker rm -f "$ROUTER" >/dev/null 2>&1 || true
   docker run -d --name "$ROUTER" --network "$NETWORK" --restart unless-stopped --memory 256m \
-    -e "ROME_DOMAIN=$DOMAIN" -v "$ENV_DIR/router.Caddyfile:/etc/caddy/Caddyfile:ro" \
+    -e "ROME_DOMAIN=$DOMAIN" -e "OAUTH_HOST=$OAUTH_HOST" -e "OAUTH=$OAUTH" \
+    -v "$ENV_DIR/router.Caddyfile:/etc/caddy/Caddyfile:ro" \
     --label traefik.enable=true --label "traefik.docker.network=$NETWORK" \
     --label "traefik.http.routers.${ROUTER}.rule=HostRegexp(\`^[a-z0-9-]+\\.rome\\.localhost$\`)" \
     --label "traefik.http.routers.${ROUTER}.priority=1" \
@@ -311,6 +323,25 @@ set_models() {
   done
 }
 
+# Installs the Fake Service app (fake-service/) in every running Rome. Rome
+# builds it from source, so this takes about a minute per Rome.
+install_fake_service() {
+  local id slug
+  for id in $(docker ps -q --filter "name=^rome-vm-" --filter "network=$NETWORK"); do
+    slug="$(docker inspect -f '{{.Name}}' "$id" | sed 's|^/rome-vm-||')"
+    log "installing Fake Service in $slug ..."
+    tar -C "$ENV_DIR/fake-service" --exclude node_modules --exclude dist -cf - . |
+      docker exec -i "$id" sh -c 'rm -rf /tmp/fake-service && mkdir /tmp/fake-service && tar -C /tmp/fake-service -xf - &&
+        docker exec -u 0 rome-rome-1 rm -rf /tmp/fake-service &&
+        docker cp /tmp/fake-service rome-rome-1:/tmp/fake-service &&
+        docker exec -u 0 rome-rome-1 sh -c "chown -R rome:rome /tmp/fake-service && chmod -R a+rwX /tmp/fake-service"'
+    docker exec "$id" docker exec rome-rome-1 curl -sS --fail-with-body -o /dev/null -X POST \
+      -H 'Content-Type: application/json' -H 'Sec-Fetch-Site: same-origin' \
+      --data '{"source":{"mode":"source","path":"/tmp/fake-service"}}' http://127.0.0.1:4141/api/apps ||
+      die "installing Fake Service in $slug failed"
+  done
+}
+
 # Removes every Rome this environment's Rome Cloud created: the rome-vm-* containers
 # on its network, and their volumes. Rome Cloud must be stopped first, so that it
 # creates nothing while they go.
@@ -340,6 +371,7 @@ cmd_up() {
   start_database
   log "migrating the database ..."
   in_runner "cd packages/pantheon && node_modules/.bin/drizzle-kit migrate --config drizzle.config.ts >/dev/null"
+  start_oauth_server
   start_cloud
   start_router
   wait_for_cloud
@@ -356,25 +388,39 @@ cmd_reset() {
   cmd_up --no-build
 }
 
-# Resets, then walks from the landing page to a Rome's chat. With `cards`, the
-# walk goes on to the chat cards in cards.mjs, which need the model login.
+# Runs a walk-through script in the Playwright image. Its Chrome lives in the
+# container: --init reaps it, and the trap removes the container when the walk
+# is stopped or fails.
+run_walker() {
+  local script="$1"
+  shift
+  trap 'docker rm -f "$WALKER" >/dev/null 2>&1 || true' EXIT INT TERM
+  docker run --rm --init --name "$WALKER" --memory 2g --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -e "CLOUD_ORIGIN=$CLOUD_ORIGIN" -e "ROME_DOMAIN=$DOMAIN" -e OUT=/out "$@" \
+    -v "$STATE_DIR/walk:/out" -v "$ENV_DIR:/walk:ro" -w /tmp \
+    "$PLAYWRIGHT_IMAGE" bash -c "npm install --silent --no-save playwright@1.62.1 >/dev/null 2>&1 && cp /walk/*.mjs . && node $script"
+}
+
+# Resets, then walks from the landing page to a Rome's chat. With `cards`, it
+# then installs Fake Service in that Rome and walks the chat cards in
+# cards.mjs, which need the model login.
 cmd_walk() {
   local cards="${1:-}"
   if [ -n "$cards" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     die "walk-cards needs ANTHROPIC_API_KEY, in the shell or $SECRETS_FILE"
   fi
   cmd_reset
-  log "walking from the landing page to a Rome's chat${cards:+ and its cards} ..."
+  log "walking from the landing page to a Rome's chat ..."
   rm -rf "$STATE_DIR/walk"
   mkdir -p "$STATE_DIR/walk"
-  # The walk's Chrome lives in this container: --init reaps it, and the trap
-  # removes the container when the walk is stopped or fails.
-  trap 'docker rm -f "$WALKER" >/dev/null 2>&1 || true' EXIT INT TERM
-  docker run --rm --init --name "$WALKER" --memory 2g --user "$(id -u):$(id -g)" -e HOME=/tmp \
-    -e "CLOUD_ORIGIN=$CLOUD_ORIGIN" -e "ROME_DOMAIN=$DOMAIN" -e OUT=/out \
-    -e "CARDS=$cards" -e "MODEL=${ONBOARDING_MODEL:-$DEFAULT_MODEL}" -e "TEST_APPS=$(test_apps)" \
-    -v "$STATE_DIR/walk:/out" -v "$ENV_DIR:/walk:ro" -w /tmp \
-    "$PLAYWRIGHT_IMAGE" bash -c "npm install --silent --no-save playwright@1.62.1 >/dev/null 2>&1 && cp /walk/*.mjs . && node walk.mjs"
+  run_walker walk.mjs
+  if [ -n "$cards" ]; then
+    install_fake_service
+    log "walking the chat cards ..."
+    run_walker cards.mjs -e "ROME_ORIGIN=https://onboarding-walk.${DOMAIN}" \
+      -e "MODEL=${ONBOARDING_MODEL:-$DEFAULT_MODEL}" -e "TEST_APPS=$(test_apps)" \
+      -e "OAUTH_ORIGIN=https://${OAUTH_HOST}.${DOMAIN}"
+  fi
   log "walk passed on Rome $(image_sha) and Rome Cloud $(git -C "$ROME_CLOUD_DIR" rev-parse --short HEAD). Screenshots: $STATE_DIR/walk"
 }
 
@@ -382,7 +428,7 @@ cmd_down() {
   claim_ownership
   docker rm -f "$CLOUD" >/dev/null 2>&1 || true
   remove_romes
-  docker rm -f "$ROUTER" "$PG" >/dev/null 2>&1 || true
+  docker rm -f "$ROUTER" "$PG" "$OAUTH" >/dev/null 2>&1 || true
   docker volume rm "$PG_VOLUME" >/dev/null 2>&1 || true
   rm -f "$ENV_FILE" "$OWNER_FILE"
   log "removed. The Rome Cloud checkout stays in $ROME_CLOUD_DIR"
@@ -394,7 +440,8 @@ case "${1:-}" in
   walk) cmd_walk ;;
   walk-cards) cmd_walk cards ;;
   models) set_models ;;
+  fake-service) install_fake_service ;;
   reset) cmd_reset ;;
   down) cmd_down ;;
-  *) die "usage: env.sh up [--no-build] | walk | walk-cards | models | reset | down" ;;
+  *) die "usage: env.sh up [--no-build] | walk | walk-cards | models | fake-service | reset | down" ;;
 esac
