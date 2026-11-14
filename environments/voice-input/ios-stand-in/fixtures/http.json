@@ -1,0 +1,3346 @@
+{
+  "recordedFrom": "the voice-input environment's Rome",
+  "product": "ec6d5d38aea0934405003db6e0e53e552970f53f",
+  "cookieNames": [
+    "rome_session"
+  ],
+  "fields": {
+    "chat": "concierge",
+    "topic": "01a1db8f-b3fe-74dc-b914-f734f2651af7",
+    "task": "01a1db92-b40e-7218-98af-88fb6a66390e",
+    "thread": {
+      "sessionId": "concierge",
+      "root": "91f41e61-7c37-4924-92af-a5c02a84f971",
+      "chatThreadId": "91f41e61-7c37-4924-92af-a5c02a84f971"
+    }
+  },
+  "entries": [
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "success": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "kind": "guardian",
+        "userId": "guardian",
+        "displayName": "guardian",
+        "avatarUrl": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/build-info",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "version": null,
+        "sha": "876c67e346854a9c002e92b0a033bcae6dcb5ef8",
+        "builtAt": "2026-11-14T18:46:32Z",
+        "upgradedSinceLastBoot": false,
+        "previousVersion": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/upgrade/check",
+      "query": "",
+      "status": 503,
+      "contentType": "application/json",
+      "body": {
+        "error": "unversioned_build"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "artifactLegacyBindingsV1": {
+          "version": 1,
+          "agent": {
+            "concierge-triage": "core:concierge-triage",
+            "concierge": "core:concierge",
+            "envoy": "core:envoy",
+            "main": "core:main",
+            "assistant": "assistant:assistant",
+            "explore": "assistant:explore",
+            "coding": "coding:coding",
+            "dream": "dream:dream",
+            "dream-practice": "dream:dream-practice",
+            "skill-review": "dream:skill-review",
+            "sentinel": "inbox:sentinel",
+            "image_gen": "system:image_gen",
+            "image-gen": "system:image_gen"
+          },
+          "action": {
+            "briefing_add_scout": "briefing:briefing_add_scout",
+            "add-scout": "briefing:briefing_add_scout",
+            "briefing_run_scout": "briefing:briefing_run_scout",
+            "run-scout": "briefing:briefing_run_scout",
+            "briefing_run_brief": "briefing:briefing_run_brief",
+            "run-brief": "briefing:briefing_run_brief",
+            "briefing_sync_routines": "briefing:briefing_sync_routines",
+            "sync-routines": "briefing:briefing_sync_routines",
+            "chatgpt_chat": "browser-automation:chatgpt_chat",
+            "chat": "browser-automation:chatgpt_chat",
+            "chatgpt_image": "browser-automation:chatgpt_image",
+            "image": "browser-automation:chatgpt_image",
+            "coding_task": "coding:coding_task",
+            "coding-task": "coding:coding_task",
+            "connector_login": "connector:connector_login",
+            "connector-login": "connector:connector_login",
+            "connector_connect": "connector:connector_connect",
+            "connector-connect": "connector:connector_connect",
+            "connector_search": "connector:connector_search",
+            "connector-search": "connector:connector_search",
+            "connector_tool_schema": "connector:connector_tool_schema",
+            "connector-tool-schema": "connector:connector_tool_schema",
+            "connector_tool_execute": "connector:connector_tool_execute",
+            "connector-tool-execute": "connector:connector_tool_execute",
+            "connector_proxy": "connector:connector_proxy",
+            "connector-proxy": "connector:connector_proxy",
+            "connector_event_search": "connector:connector_event_search",
+            "connector-event-search": "connector:connector_event_search",
+            "connector_event_schema": "connector:connector_event_schema",
+            "connector-event-schema": "connector:connector_event_schema",
+            "connector_event_subscribe": "connector:connector_event_subscribe",
+            "connector-event-subscribe": "connector:connector_event_subscribe",
+            "connector_github_subscribe": "connector:connector_github_subscribe",
+            "connector-github-subscribe": "connector:connector_github_subscribe",
+            "connector_github_unsubscribe": "connector:connector_github_unsubscribe",
+            "connector-github-unsubscribe": "connector:connector_github_unsubscribe",
+            "connector_event_ensure": "connector:connector_event_ensure",
+            "connector-event-ensure": "connector:connector_event_ensure",
+            "connector_watch_sources": "connector:connector_watch_sources",
+            "connector-watch-sources": "connector:connector_watch_sources",
+            "connector_watch_ensure": "connector:connector_watch_ensure",
+            "connector-watch-ensure": "connector:connector_watch_ensure",
+            "connector_watch_normalize": "connector:connector_watch_normalize",
+            "connector-watch-normalize": "connector:connector_watch_normalize",
+            "connector_watch_release": "connector:connector_watch_release",
+            "connector-watch-release": "connector:connector_watch_release",
+            "dream": "dream:dream",
+            "skill_review": "dream:skill_review",
+            "skill-review": "dream:skill_review",
+            "get_webchat_conversations": "dream:get_webchat_conversations",
+            "get-webchat-conversations": "dream:get_webchat_conversations",
+            "get_account_chats": "dream:get_account_chats",
+            "get-account-chats": "dream:get_account_chats",
+            "get_action_logs": "dream:get_action_logs",
+            "get-action-logs": "dream:get_action_logs",
+            "search_chats": "dream:search_chats",
+            "search-chats": "dream:search_chats",
+            "list_memory_files": "dream:list_memory_files",
+            "list-memory-files": "dream:list_memory_files",
+            "read_memory_file": "dream:read_memory_file",
+            "read-memory-file": "dream:read_memory_file",
+            "write_memory_file": "dream:write_memory_file",
+            "write-memory-file": "dream:write_memory_file",
+            "edit_memory_file": "dream:edit_memory_file",
+            "edit-memory-file": "dream:edit_memory_file",
+            "message_handler": "inbox:message_handler",
+            "message-handler": "inbox:message_handler",
+            "app_management": "system:app_management",
+            "app-management": "system:app_management",
+            "app_store_search": "system:app_store_search",
+            "app-store-search": "system:app_store_search",
+            "create_routine": "system:create_routine",
+            "create-routine": "system:create_routine",
+            "delete_routine": "system:delete_routine",
+            "delete-routine": "system:delete_routine",
+            "conversation_settings_manage": "system:conversation_settings_manage",
+            "conversation-settings-manage": "system:conversation_settings_manage",
+            "email_inbound": "system:email_inbound",
+            "email-inbound": "system:email_inbound",
+            "execute_root_script": "system:execute_root_script",
+            "execute-root-script": "system:execute_root_script",
+            "fetch_channel_history": "system:fetch_channel_history",
+            "fetch-channel-history": "system:fetch_channel_history",
+            "generate_image": "system:generate_image",
+            "generate-image": "system:generate_image",
+            "get_guardian_cloud_profile": "system:get_guardian_cloud_profile",
+            "get-guardian-cloud-profile": "system:get_guardian_cloud_profile",
+            "manage_root_script": "system:manage_root_script",
+            "manage-root-script": "system:manage_root_script",
+            "publish_event": "system:publish_event",
+            "publish-event": "system:publish_event",
+            "search_event_catalog": "system:search_event_catalog",
+            "search-event-catalog": "system:search_event_catalog",
+            "search_routine": "system:search_routine",
+            "search-routine": "system:search_routine",
+            "request_approval_demo": "system:request_approval_demo",
+            "request-approval-demo": "system:request_approval_demo",
+            "resume_session": "system:resume_session",
+            "resume-session": "system:resume_session",
+            "send_message": "system:send_message",
+            "send-message": "system:send_message",
+            "send_feedback": "system:send_feedback",
+            "send-feedback": "system:send_feedback",
+            "send_notification": "system:send_notification",
+            "send-notification": "system:send_notification",
+            "send_user_message": "system:send_user_message",
+            "send-user-message": "system:send_user_message",
+            "show_app": "system:show_app",
+            "show-app": "system:show_app",
+            "summon": "system:summon",
+            "system_upgrade": "system:system_upgrade",
+            "system-upgrade": "system:system_upgrade"
+          },
+          "skill": {
+            "routine-from-chat": "assistant:routine-from-chat",
+            "browser-automation": "browser-automation:browser-automation",
+            "app_creation": "coding:app_creation",
+            "app_remix": "coding:app_remix",
+            "app_tagline_backfill": "coding:app_tagline_backfill",
+            "app_verification": "coding:app_verification",
+            "workflow_creation": "coding:workflow_creation",
+            "composio-cli": "connector:composio-cli",
+            "import-skill": "skills:import-skill",
+            "app-lifecycle": "system:app-lifecycle",
+            "custom-dependencies": "system:custom-dependencies",
+            "design-workflow": "workflow-studio:design-workflow"
+          }
+        },
+        "backfill.questionCardsDescribed": true,
+        "usageReporting.actionRunCursor": {
+          "finishedAt": "2026-11-14T19:36:30.000Z",
+          "id": "9362b63b-ee6e-4513-be99-0c59d5b851d0",
+          "credential": "d637c035ab7e422d321cfcd0aef0354022beb68bae008c960c577fb7fbb0a6d4"
+        },
+        "instanceKeyId": "-gTPAPeb4eKGEkhEsQ42Z9yYYB5ye5Mgkedwakt5DPs",
+        "relay": {
+          "drainUrl": "wss://relay.invalid/c/pDoqNV6uY7dUEyA_LrfRS0HmtKoRvVbuiO4piN0-YRk.GycYuO8D0CNX4ZkIVLmEGkHHZz58RriCxb2Mza0QiF5Bu6TaIMrwi8qhLFEVxbo12XXyHy8seOjOOsV_hDU_Ag",
+          "drainKey": "********",
+          "depositUrl": "https://relay.invalid/h/pDoqNV6uY7dUEyA_LrfRS0HmtKoRvVbuiO4piN0-YRk.GycYuO8D0CNX4ZkIVLmEGkHHZz58RriCxb2Mza0QiF5Bu6TaIMrwi8qhLFEVxbo12XXyHy8seOjOOsV_hDU_Ag"
+        },
+        "guardianName": "guardian",
+        "agentName": "Moth",
+        "agentPurpose": "A creature drawn to the essential. Moth circles and circles, spiraling inward toward the core of things. It is comfortable in darkness and ambiguity, navigating by faint signals others can't detect. Patient in its orbit, decisive when it finally lands.",
+        "computerUse.connections": [
+          {
+            "id": "9w9qsusf",
+            "name": null,
+            "cli": "opencli",
+            "status": "connected",
+            "version": "1.0.27",
+            "lastSeenAt": "2026-11-14T19:35:08.710Z"
+          }
+        ],
+        "guardianTimezone": "UTC",
+        "guardianLanguage": "en",
+        "tierModelMappings": {
+          "anthropic": {
+            "large": "claude-haiku-5-5",
+            "medium": "claude-haiku-5-5",
+            "small": "claude-haiku-5-5"
+          }
+        },
+        "aiTools.anthropicCompatibleCredentials": {
+          "provider": "custom",
+          "providerName": "Custom",
+          "hasApiKey": true,
+          "updatedAt": "2026-11-14T19:39:45.480Z"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/concierge/session",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "id": "concierge",
+        "unread": 0
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/concierge/chats",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "chats": [
+          {
+            "id": "concierge",
+            "name": "Main chat",
+            "main": true,
+            "unread": 0,
+            "activity": {
+              "kind": "idle"
+            }
+          },
+          {
+            "id": "01a1db8f-b3fe-74dc-b914-f734f2651af7",
+            "name": "",
+            "main": false,
+            "unread": 0,
+            "activity": {
+              "kind": "idle"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/concierge/connectors",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "connectors": [
+          {
+            "service": "github",
+            "label": "GitHub",
+            "icon": "brand:github",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "rome_oauth",
+              "url": "/api/oauth/github/start",
+              "available": true,
+              "unavailableReason": null
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "needs-auth",
+                "missingGrants": [],
+                "target": {
+                  "format": "A repository as owner/name",
+                  "example": "rome-os/rome"
+                },
+                "kinds": [
+                  {
+                    "kind": "review_requested",
+                    "label": "Review requests",
+                    "default": true
+                  },
+                  {
+                    "kind": "review_on_your_pr",
+                    "label": "Reviews of pull requests",
+                    "default": true
+                  },
+                  {
+                    "kind": "comment_or_mention",
+                    "label": "Comments on pull requests and issues",
+                    "default": true
+                  },
+                  {
+                    "kind": "your_ci_failed",
+                    "label": "Failed CI runs",
+                    "default": true
+                  },
+                  {
+                    "kind": "your_pr_closed",
+                    "label": "Pull requests merged or closed",
+                    "default": true
+                  },
+                  {
+                    "kind": "assigned_to_you",
+                    "label": "Assignments",
+                    "default": true
+                  },
+                  {
+                    "kind": "new_pr_or_issue",
+                    "label": "New pull requests and issues",
+                    "default": false
+                  }
+                ],
+                "options": [
+                  {
+                    "key": "scope",
+                    "label": "What to hear about",
+                    "type": "enum",
+                    "values": [
+                      {
+                        "value": "about_me",
+                        "label": "Only what concerns me"
+                      },
+                      {
+                        "value": "whole_repo",
+                        "label": "Also the whole repository"
+                      }
+                    ],
+                    "default": "about_me"
+                  },
+                  {
+                    "key": "ignorePeople",
+                    "label": "Ignore these people",
+                    "type": "list",
+                    "default": [],
+                    "itemHint": "GitHub logins"
+                  },
+                  {
+                    "key": "onlyPeople",
+                    "label": "Only these people",
+                    "type": "list",
+                    "default": [],
+                    "itemHint": "GitHub logins; empty means everyone"
+                  },
+                  {
+                    "key": "includeBots",
+                    "label": "Include bots",
+                    "type": "boolean",
+                    "default": false
+                  }
+                ],
+                "follows": []
+              }
+            }
+          },
+          {
+            "service": "gmail",
+            "label": "Gmail",
+            "icon": "glyph:gmail",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "gmail"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "needs-auth",
+                "missingGrants": [],
+                "target": null,
+                "kinds": [
+                  {
+                    "kind": "new_mail",
+                    "label": "New mail",
+                    "default": true
+                  }
+                ],
+                "options": [
+                  {
+                    "key": "recipients",
+                    "label": "Mail sent to",
+                    "type": "enum",
+                    "values": [
+                      {
+                        "value": "to_and_cc",
+                        "label": "Me, or with me in cc"
+                      },
+                      {
+                        "value": "to",
+                        "label": "Me directly"
+                      }
+                    ],
+                    "default": "to_and_cc"
+                  },
+                  {
+                    "key": "vipSenders",
+                    "label": "Always tell me about these senders",
+                    "type": "list",
+                    "default": [],
+                    "itemHint": "Addresses or domains"
+                  }
+                ],
+                "follows": []
+              }
+            }
+          },
+          {
+            "service": "outlook",
+            "label": "Outlook",
+            "icon": "glyph:outlook",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "outlook"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "needs-auth",
+                "missingGrants": [],
+                "target": null,
+                "kinds": [
+                  {
+                    "kind": "new_mail",
+                    "label": "New mail",
+                    "default": true
+                  }
+                ],
+                "options": [
+                  {
+                    "key": "recipients",
+                    "label": "Mail sent to",
+                    "type": "enum",
+                    "values": [
+                      {
+                        "value": "to_and_cc",
+                        "label": "Me, or with me in cc"
+                      },
+                      {
+                        "value": "to",
+                        "label": "Me directly"
+                      }
+                    ],
+                    "default": "to_and_cc"
+                  },
+                  {
+                    "key": "vipSenders",
+                    "label": "Always tell me about these senders",
+                    "type": "list",
+                    "default": [],
+                    "itemHint": "Addresses or domains"
+                  }
+                ],
+                "follows": []
+              }
+            }
+          },
+          {
+            "service": "googlecalendar",
+            "label": "Calendar",
+            "icon": "glyph:calendar",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "googlecalendar"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "needs-auth",
+                "missingGrants": [],
+                "target": null,
+                "kinds": [
+                  {
+                    "kind": "meeting_starting_soon",
+                    "label": "Meetings starting soon",
+                    "default": true
+                  },
+                  {
+                    "kind": "invitations_and_changes",
+                    "label": "Invitations and changes to my events",
+                    "default": true
+                  },
+                  {
+                    "kind": "rsvp_changes",
+                    "label": "Replies to invitations",
+                    "default": false
+                  }
+                ],
+                "options": [
+                  {
+                    "key": "events",
+                    "label": "Events to hear about",
+                    "type": "enum",
+                    "values": [
+                      {
+                        "value": "with_others",
+                        "label": "Only meetings with other people"
+                      },
+                      {
+                        "value": "all",
+                        "label": "Also my own events without guests"
+                      }
+                    ],
+                    "default": "with_others"
+                  }
+                ],
+                "follows": []
+              }
+            }
+          },
+          {
+            "service": "notion",
+            "label": "Notion",
+            "icon": "glyph:notion",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "notion"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "needs-auth",
+                "missingGrants": [],
+                "target": null,
+                "kinds": [
+                  {
+                    "kind": "comment_or_mention",
+                    "label": "Comments, mentions and replies on pages",
+                    "default": true
+                  },
+                  {
+                    "kind": "page_changed",
+                    "label": "Page changes",
+                    "default": true
+                  },
+                  {
+                    "kind": "new_page",
+                    "label": "New pages",
+                    "default": false
+                  }
+                ],
+                "options": [
+                  {
+                    "key": "pages",
+                    "label": "Pages to hear about",
+                    "type": "enum",
+                    "values": [
+                      {
+                        "value": "mine",
+                        "label": "Pages I created"
+                      },
+                      {
+                        "value": "all",
+                        "label": "Any page Rome can see"
+                      }
+                    ],
+                    "default": "mine"
+                  }
+                ],
+                "follows": []
+              }
+            }
+          },
+          {
+            "service": "linear",
+            "label": "Linear",
+            "icon": "glyph:linear",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "linear"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "needs-auth",
+                "missingGrants": [],
+                "target": null,
+                "kinds": [
+                  {
+                    "kind": "assigned_to_you",
+                    "label": "Issues assigned to me",
+                    "default": true
+                  },
+                  {
+                    "kind": "comment_or_mention",
+                    "label": "Comments on issues, and mentions",
+                    "default": true
+                  },
+                  {
+                    "kind": "status_changed",
+                    "label": "Issue status changes",
+                    "default": true
+                  },
+                  {
+                    "kind": "new_issue",
+                    "label": "New issues in my teams",
+                    "default": false
+                  }
+                ],
+                "options": [
+                  {
+                    "key": "teams",
+                    "label": "Teams to hear about",
+                    "type": "list",
+                    "default": [],
+                    "itemHint": "Team keys such as ENG; empty means every team"
+                  }
+                ],
+                "follows": []
+              }
+            }
+          },
+          {
+            "service": "stripe",
+            "label": "Stripe",
+            "icon": "glyph:stripe",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "stripe"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "needs-auth",
+                "missingGrants": [],
+                "target": null,
+                "kinds": [
+                  {
+                    "kind": "payment_failed",
+                    "label": "Failed payments",
+                    "default": true
+                  },
+                  {
+                    "kind": "dispute",
+                    "label": "Disputes",
+                    "default": true
+                  },
+                  {
+                    "kind": "refund",
+                    "label": "Refunds",
+                    "default": true
+                  },
+                  {
+                    "kind": "subscription_canceled",
+                    "label": "Canceled subscriptions",
+                    "default": true
+                  },
+                  {
+                    "kind": "payout_failed",
+                    "label": "Failed payouts",
+                    "default": true
+                  },
+                  {
+                    "kind": "payment_succeeded",
+                    "label": "Successful payments",
+                    "default": false
+                  }
+                ],
+                "options": [
+                  {
+                    "key": "includeTestMode",
+                    "label": "Include test-mode events",
+                    "type": "boolean",
+                    "default": false
+                  }
+                ],
+                "follows": []
+              }
+            }
+          },
+          {
+            "service": "agents",
+            "label": "Agents",
+            "icon": "brand:agents",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "cloud"
+                ]
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "discord",
+            "label": "Discord",
+            "icon": "brand:discord",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "bot"
+                ]
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "bot"
+                ]
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "email",
+            "label": "Email",
+            "icon": "brand:email",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "inbox"
+                ]
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "feishu",
+            "label": "Feishu",
+            "icon": "brand:feishu",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "app"
+                ]
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "app"
+                ]
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "linkedin",
+            "label": "LinkedIn",
+            "icon": "brand:linkedin",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "session"
+                ]
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "shopify",
+            "label": "Shopify",
+            "icon": "brand:shopify",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "rome_oauth",
+              "url": "https://admin.shopify.com/oauth/install?client_id=c7248430857716e104a01db512ed40ed",
+              "available": true,
+              "unavailableReason": null
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "slack",
+            "label": "Slack",
+            "icon": "brand:slack",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "rome_oauth",
+              "url": "/api/oauth/slack/start",
+              "available": true,
+              "unavailableReason": null
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "slack_bot",
+            "label": "Slack bot",
+            "icon": "brand:slack_bot",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "bot"
+                ]
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "telegram",
+            "label": "Telegram",
+            "icon": "brand:telegram",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "bot"
+                ]
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "telegram_user",
+            "label": "Telegram account",
+            "icon": "brand:telegram_user",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "session"
+                ]
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "wechat",
+            "label": "WeChat",
+            "icon": "brand:wechat",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "account"
+                ]
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "whatsapp",
+            "label": "WhatsApp",
+            "icon": "brand:whatsapp",
+            "origin": "connection",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "dashboard"
+            },
+            "capabilities": {
+              "chat": {
+                "state": "needs-auth",
+                "missingGrants": [
+                  "session"
+                ]
+              },
+              "act": {
+                "state": "unsupported"
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "googledrive",
+            "label": "Drive",
+            "icon": "glyph:drive",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "googledrive"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "googlesheets",
+            "label": "Sheets",
+            "icon": "glyph:sheets",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "googlesheets"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "googledocs",
+            "label": "Docs",
+            "icon": "glyph:docs",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "googledocs"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "googleslides",
+            "label": "Slides",
+            "icon": "glyph:slides",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "googleslides"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "googleads",
+            "label": "Google Ads",
+            "icon": "glyph:googleads",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "googleads"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "dropbox",
+            "label": "Dropbox",
+            "icon": "glyph:dropbox",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "dropbox"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "discord",
+            "label": "Discord",
+            "icon": "glyph:discord",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "discord"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "linkedin",
+            "label": "LinkedIn",
+            "icon": "glyph:linkedin",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "linkedin"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "metaads",
+            "label": "Meta Ads",
+            "icon": "glyph:metaads",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "metaads"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "supabase",
+            "label": "Supabase",
+            "icon": "glyph:supabase",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "supabase"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "neon",
+            "label": "Neon",
+            "icon": "glyph:neon",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "neon"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "hubspot",
+            "label": "HubSpot",
+            "icon": "glyph:hubspot",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "hubspot"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          },
+          {
+            "service": "otter_ai_mcp",
+            "label": "Otter.ai",
+            "icon": "glyph:otter",
+            "origin": "composio",
+            "connectionId": null,
+            "state": null,
+            "account": null,
+            "connect": {
+              "kind": "composio",
+              "method": "POST",
+              "path": "/api/apps/connector/connectors",
+              "body": {
+                "provider": "otter_ai_mcp"
+              },
+              "needsLogin": true,
+              "login": {
+                "method": "POST",
+                "path": "/api/apps/connector/login/start"
+              }
+            },
+            "capabilities": {
+              "chat": {
+                "state": "unsupported"
+              },
+              "act": {
+                "state": "needs-auth",
+                "missingGrants": []
+              },
+              "watch": {
+                "state": "unsupported"
+              }
+            }
+          }
+        ],
+        "rules": {
+          "digestTimes": [
+            "09:00",
+            "18:00"
+          ],
+          "quietHours": null
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": [
+        {
+          "id": "01a1db8f-b3fe-74dc-b914-f734f2651af7",
+          "name": "",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": "core:concierge",
+          "parentSessionId": null,
+          "triggerKind": null,
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-14T19:36:30.000Z",
+          "activityAt": "2026-11-14T19:36:30.000Z",
+          "lastSeenActivityAt": "2026-11-14T19:36:30.000Z",
+          "unread": false,
+          "messageCount": 0,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        },
+        {
+          "id": "concierge",
+          "name": "Main chat",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": "core:concierge",
+          "parentSessionId": null,
+          "triggerKind": null,
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-14T19:35:10.000Z",
+          "activityAt": "2026-11-14T19:35:10.000Z",
+          "lastSeenActivityAt": "2026-11-14T19:35:10.000Z",
+          "unread": false,
+          "messageCount": 0,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "apps": [
+          {
+            "id": "assistant",
+            "version": "0.1.6",
+            "description": "General assistance agents and routine-management guidance. Provides the routine-from-chat skill — reach for it first whenever the guardian wants something to happen automatically: it turns a plain-language \"do this automatically\" request into an event-triggered (\"text me when I get an email from my landlord\") or scheduled (\"remind me every Friday at 9am\") routine instead of hand-building a trigger.",
+            "displayName": "Assistant",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": false,
+            "href": null,
+            "fullHref": null,
+            "capabilities": [
+              "2 agents",
+              "0 actions",
+              "1 skill",
+              "0 hooks"
+            ],
+            "capabilityDetails": {
+              "agents": [
+                {
+                  "name": "assistant",
+                  "description": "General-purpose assistant for quick tasks."
+                },
+                {
+                  "name": "explore",
+                  "description": "Read-only exploration of files and memory."
+                }
+              ],
+              "actions": [],
+              "skills": [
+                {
+                  "name": "routine-from-chat",
+                  "description": "Turn a plain-language \"do this automatically\" request into a routine — either event-triggered (\"text me when I get an email from my landlord\") or scheduled (\"remind me every Friday at 9am\"). For third-party events (Gmail, GitHub, Slack…) it confirms with the guardian and then subscribes to the connector trigger so the event actually fires, even one that has never fired before. Ask for any missing detail, then confirm with a card when available or in plain chat otherwise. Reach for this first whenever the guardian wants something to happen automatically; do not explore the codebase or hand-build a trigger."
+                }
+              ],
+              "hooks": []
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": true,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": false,
+            "iconUrl": "/api/apps/assistant/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/assistant"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:34:53.848Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "briefing",
+            "version": "0.3.0",
+            "description": "Scheduled morning and evening briefings that fold in your calendar, recent messages, and the findings of recurring scouting tasks run by the assistant.",
+            "displayName": "Briefing",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/briefing",
+            "fullHref": "/full/apps/briefing",
+            "capabilities": [
+              "0 agents",
+              "4 actions",
+              "0 skills",
+              "0 hooks"
+            ],
+            "capabilityDetails": {
+              "agents": [],
+              "actions": [
+                {
+                  "name": "briefing_add_scout",
+                  "description": "Add a scouting task to the Briefing app. A scouting task is a detailed prompt that the assistant agent runs automatically on a repeating interval; its findings are folded into the next morning or evening brief. Use this when the guardian asks to \"scout\", \"keep an eye on\", \"monitor\", or \"track\" something on a schedule (e.g. \"every 6 hours, check Hacker News for posts about Rome and summarize them\"). Provide a short title, the full detailed prompt, and how often it should run in minutes."
+                },
+                {
+                  "name": "briefing_run_brief",
+                  "description": "Assemble and deliver a briefing for the guardian. Checks the calendar, recent messages on connected channels (WhatsApp, email), and all scouting-task findings gathered since the last brief, then has the assistant agent synthesize a concise brief and sends it to the configured channel. Use kind \"morning\" or \"evening\" for the scheduled briefs, or \"test\" for a manual test run. Normally invoked by a schedule."
+                },
+                {
+                  "name": "briefing_run_scout",
+                  "description": "Run a single Briefing scouting task now: hand its prompt to the assistant agent and store the findings so the next brief can fold them in. Normally invoked by the scout's schedule; can also be run on demand by scout id."
+                },
+                {
+                  "name": "briefing_sync_routines",
+                  "description": "Reconcile the Briefing app's scheduled routines (morning brief, evening brief, and one routine per scouting task) from the current settings and scouts in the database. Run after changing briefing settings or adding/editing/removing a scouting task. Internal maintenance action."
+                }
+              ],
+              "skills": [],
+              "hooks": []
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": false,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/briefing/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/briefing"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:34:57.009Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "browser-automation",
+            "version": "0.2.1",
+            "description": "Operate the agent's browser to visit and act on websites via predefined automation actions/scripts exposed by the `opencli` tool. You can get the supported commands by running shell command `opencli <site_name> --help`, where site_name can be amazon, google, instagram, linkedin, producthunt, substack, twitter, wikipedia, xiaohongshu, youtube or more. To know all available commands, run `opencli list`. Also drives ChatGPT through the logged-in browser session. `chatgpt_chat` sends a prompt and returns the markdown response, and `chatgpt_image` generates a ChatGPT image and saves it to disk. Both use OpenCLI's default browser unless `profile` names another.",
+            "displayName": "Browser Automation",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/browser-automation",
+            "fullHref": "/full/apps/browser-automation",
+            "capabilities": [
+              "0 agents",
+              "2 actions",
+              "1 skill",
+              "0 hooks"
+            ],
+            "capabilityDetails": {
+              "agents": [],
+              "actions": [
+                {
+                  "name": "chatgpt_chat",
+                  "description": "Send a prompt to ChatGPT in the signed-in browser and return the markdown response. Uses OpenCLI's default browser unless `profile` names another"
+                },
+                {
+                  "name": "chatgpt_image",
+                  "description": "Generate an image in ChatGPT Images in the signed-in browser and save it to disk. Uses OpenCLI's default browser unless `profile` names another"
+                }
+              ],
+              "skills": [
+                {
+                  "name": "browser-automation",
+                  "description": "Route browser tasks to specialized Rome apps or OpenCLI, and author browser automation actions with tested scripts and explicit navigation boundaries."
+                }
+              ],
+              "hooks": []
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": true,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/browser-automation/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/browser-automation"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:34:57.801Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "coding",
+            "version": "0.3.2",
+            "description": "The coding agent, the app_creation skill, and a frontend gallery of live UI mocks. Use app_creation when visuals are important, such as for apps, dashboards, games, and other Rome experiences that need a polished UI.",
+            "displayName": "Coding",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/coding",
+            "fullHref": "/full/apps/coding",
+            "capabilities": [
+              "1 agent",
+              "1 action",
+              "5 skills",
+              "1 hook"
+            ],
+            "capabilityDetails": {
+              "agents": [
+                {
+                  "name": "coding",
+                  "description": "Writes and modifies code."
+                }
+              ],
+              "actions": [
+                {
+                  "name": "coding_task",
+                  "description": "Run a coding task through the coding app boundary"
+                }
+              ],
+              "skills": [
+                {
+                  "name": "app_creation",
+                  "description": "Scaffold a brand-new Rome app from a bundled template into an independent, git-versioned source directory and install it from there. Use for genuinely **app-shaped** software — something with its own user-edited data model, several distinct operations, or a conversational/long-lived agent. FIRST apply the litmus in \"Is this an app, or a workflow?\" below: most \"build me something that does X\" requests are pipelines, not apps — if the work is inputs → a sequence → a result (a summary, digest, draft, triage, \"do X when Y\"), STOP and use `coding:workflow_creation` instead. Use `coding:app_remix` instead when the source is an installed App Store app. Do not improvise the create flow, do not let the daemon pick paths, do not scaffold files by hand. After install, use `system:summon` with `assistant:assistant` to run `coding:app_verification` against the installed app before claiming it works. Skip this skill for editing an existing installed app or read-only inspection."
+                },
+                {
+                  "name": "app_remix",
+                  "description": "Create a new Rome app from an App Store source, already installed or identified by a pinned Store version. Copy installed code locally or download and extract a Store bundle without installing the source. Never edit or overwrite an existing source app."
+                },
+                {
+                  "name": "app_tagline_backfill",
+                  "description": "Give apps built on this instance a share-card `tagline` when their `app.yaml` has none. Runs automatically once after Rome upgrades (AUTO mode, list supplied by the caller) or on request from the guardian (\"add taglines to my apps\", MANUAL mode, confirm before writing). Only touches editable `mode: \"source\"` apps — never App Store bundles or first-party apps."
+                },
+                {
+                  "name": "app_verification",
+                  "description": "Verify a newly created or newly installed Rome app after `coding:app_creation` or `coding:workflow_creation` finishes installing it. Use only as a second-pass verifier: receive the app id, source root, expected behavior, and local dashboard/API base URL from the creator, then visit the installed app, exercise its safe paths, and report pass/fail evidence. Do not use for scaffolding, implementation, or editing."
+                },
+                {
+                  "name": "workflow_creation",
+                  "description": "Build a new Rome **workflow app** — one action whose body is a single async function that implements its control flow in plain TypeScript (`await`, `if`, `for`, `Promise.all`) and calls existing actions (including `system:summon`). Use whenever the user describes a multi-step automation OR asks an LLM to produce something from inputs: \"read X then do Y\", \"pull from A, B, C and combine\", \"monitor … and notify me\", \"for each item, if … then …\", \"turn my X into Y\", \"write/draft/summarize me a … from …\". Generative work — writing, drafting, summarizing, judging — belongs HERE as a `system:summon` call, not a separate app with its own agent. A specialization of `coding:app_creation`; reuses its scaffold/build/pack/install mechanics and adds the workflow shell. Build a plain app (`coding:app_creation`) instead only when the thing needs a user-edited data model, multiple distinct operations, or a conversational agent."
+                }
+              ],
+              "hooks": [
+                {
+                  "name": "agent-turn-finished",
+                  "description": "Registered agent-turn-finished hook."
+                }
+              ]
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": true,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/coding/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/coding"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:34:58.411Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "connector",
+            "version": "0.7.0",
+            "description": "Connect and orchestrate third-party APIs (Gmail, Calendar, Slack, Supabase, Neon, and more) via Composio. Once a toolkit is connected, call its native provider REST/GraphQL API with the `connector_proxy` action: pass the toolkit slug, a relative `path` (e.g. `/gmail/v1/users/me/messages`), and the method — Connector prepends the toolkit's API host and injects the connection's credential, so you handle neither the host nor the token. `connector_proxy` requires being signed in (`connector_login`) and the toolkit connected (`connector_connect`) first, and fails closed (not-signed-in, not-connected, or a non-2xx provider response all return an action error). Connectable toolkits (slug): Gmail (`gmail`), Outlook (`outlook`), Calendar (`googlecalendar`), GitHub (`github`), Slack (`slack`), Notion (`notion`), Drive (`googledrive`), Sheets (`googlesheets`), Docs (`googledocs`), Slides (`googleslides`), Google Ads (`googleads`), Dropbox (`dropbox`), Linear (`linear`), Discord (`discord`), LinkedIn (`linkedin`), Meta Ads (`metaads`), Supabase (`supabase`), Neon (`neon`), HubSpot (`hubspot`), Stripe (`stripe`), Shopify (`shopify`), Otter.ai (`otter_ai_mcp`). This is the set of toolkits that are connectable — not which are currently connected. If you need one that isn't connected yet, ask the guardian to connect it. Connection status is not known here, so if a call comes back as not-connected, ask the guardian to connect it again. Rome fills in each toolkit's API host, so pass only `path` and omit `host` — except where there is no deterministic host: supply `host` for Supabase (the per-project `<project-ref>.supabase.co`), or to reach a provider's non-default host (Dropbox content `content.dropboxapi.com`, GitHub uploads `uploads.github.com`). Otter.ai has no REST API to proxy: find its tools with `connector_search` and run them with `connector_tool_execute`.\n\nFor GitHub, prefer the `gh` CLI and `git` directly in the shell (`gh api`, `gh pr`, `git clone/push`) — it's Rome-managed (no Composio). If a `gh`/`git` call reports it is not authenticated, call the `connect_account` tool with kind `github`. To react to GitHub events (push, PRs, issues), use `connector_github_subscribe` (NOT `connector_event_subscribe`, which is Composio-only) — it registers Rome's own webhook on the repo/org and returns the event-bus topic a routine binds to. To stop receiving them, use `connector_github_unsubscribe` with the same repo/org.\n\nSlack is also Rome-managed (no Composio): act on it with `connector_proxy` (toolkit `slack`) against the Slack Web API — e.g. POST `/api/chat.postMessage`, `/api/conversations.list`, `/api/search.messages`. Do NOT use `connector_login`/`connector_connect`/`connector_tool_execute` for Slack. If a Slack call comes back not-connected, call the `connect_account` tool with kind `slack`.\n\nShopify is also Rome-managed (no Composio): act on it with `connector_proxy` (toolkit `shopify`) against the store's GraphQL Admin API, POST `/admin/api/2026-10/graphql.json` with a `{ query, variables }` body. That endpoint is the only one allowed: a REST Admin API path or a method other than POST is refused. Omit `host`: Rome sends the call to the connected store's `<store>.myshopify.com`. Rome OS can read and update products and inventory and read orders; anything else returns an access error. Do NOT use `connector_login`/`connector_connect`/`connector_tool_execute` for Shopify. To connect it, call the `connect_account` tool with kind `shopify`: the card it shows opens Shopify, where the guardian picks the store and approves Rome OS. Never ask the guardian for the store's address. If a Shopify call comes back not-connected, do the same.\n",
+            "displayName": "Connector",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/connector",
+            "fullHref": "/full/apps/connector",
+            "capabilities": [
+              "0 agents",
+              "16 actions",
+              "1 skill",
+              "0 hooks"
+            ],
+            "capabilityDetails": {
+              "agents": [],
+              "actions": [
+                {
+                  "name": "connector_connect",
+                  "description": "Connect a third-party toolkit (e.g. github, gmail, slack, supabase, neon) so\nits tools become usable in workflows and agent steps. GitHub, Slack and Shopify\nare connected by Rome itself: for those, call the connect_account tool instead,\nnever this action.\nFor Composio toolkits, sign in with connector_login first, then re-run\nconnector_connect per toolkit. If already connected, this reports so. Otherwise\nit provisions the managed auth config and shows the authorization card for the\nguardian to complete in the browser. Pass the toolkit slug."
+                },
+                {
+                  "name": "connector_event_ensure",
+                  "description": "Make sure a provider event reaches Rome's event bus. Core calls it when an\nagent waits on an event this app declares under `eventSources` (a `defer`\nwith `event`), and with `dryRun` when `search_event_catalog` gets `match`.\nPass the bus `eventName` (e.g. `provider:event:github.workflow_run`) and the\nwait's equality `filter`; for GitHub the filter must name the repository\n(`repository.full_name`) or the organization (`organization.login`).\n`dryRun: true` only checks and returns `subscription: active | inactive`;\notherwise it subscribes when needed and returns `existing | created`. A\nGitHub subscription merges the event into Rome's existing webhook on that\nrepo or org. The Composio events (Gmail, Google Calendar, Linear, Outlook,\nNotion, Stripe) follow the connected account and need no filter: each arms\nits Composio trigger. Fails with a readable reason: GitHub not connected, no target\nin the filter, a repo or org name whose case differs from GitHub's (the\nerror gives the exact spelling), or GitHub refusing the webhook (admin\naccess needed)."
+                },
+                {
+                  "name": "connector_event_schema",
+                  "description": "Fetch one trigger's full config and payload JSON Schemas by slug, so you can\nsubscribe to it correctly and bind a routine to it. Returns the trigger's slug,\nname, description, `config` (the schema of the settings connector_event_subscribe\nneeds), `payload` (the schema of the event it delivers — use it to write routine\nfilters and map fields into the routine's action), `eventName` (the exact event a\nroutine's event-bus trigger binds to), and `requiresWebhookEndpointSetup` (true\nwhen the trigger won't deliver until a Composio webhook URL is registered with the\nprovider out-of-band, e.g. Slack, Notion). Find the slug with connector_event_search\nfirst. Pass the owning toolkit slug (e.g. 'gmail') and the trigger slug (e.g.\n'GMAIL_NEW_GMAIL_MESSAGE'). Requires being signed in to Composio (connector_login)."
+                },
+                {
+                  "name": "connector_event_search",
+                  "description": "Discover the event types (triggers) a connected toolkit can emit, so you can\nsubscribe to one and drive a routine off it. Returns each matching trigger's\nslug, human name, and description — never invent trigger slugs. Pass the\ntoolkit slug (e.g. 'gmail', 'github', 'slack') and an optional case-insensitive\nregex to filter by slug/name/description (omit to list every trigger the\ntoolkit offers). Requires being signed in to Composio (call connector_login\nonce if not). After finding a slug, call connector_event_schema to learn its\nconfig and payload, then connector_event_subscribe to arm it."
+                },
+                {
+                  "name": "connector_event_subscribe",
+                  "description": "Subscribe to a connector trigger so its events flow onto Rome's event bus,\narming the upstream Composio subscription. Returns the `eventName` a routine's\nevent-bus trigger binds to and the `triggerInstanceId` (for later teardown).\nThis is the step that makes a connector event actually fire — creating a routine\non the eventName alone does nothing until you subscribe here. Requires being\nsigned in (connector_login) and the toolkit connected (connector_connect). Look\nup the trigger's `config` schema with connector_event_schema first, then pass the\nowning toolkit slug, the trigger slug, and `config` matching that schema (pass {}\nwhen the trigger needs no config). Idempotent: re-subscribing the same trigger\nreturns the same instance. Fails closed: not signed in, unknown slug, or no\nconnected account for the toolkit all come back as an action error."
+                },
+                {
+                  "name": "connector_github_subscribe",
+                  "description": "Subscribe to GitHub repository or organization events so they flow onto Rome's\nevent bus — Rome's own GitHub webhook, no Composio. Registers a webhook on the\nrepo (`owner/name`) or org using the guardian's GitHub connection, pointing at\nthe relay deposit URL, and returns the `topics` a routine's event-bus\ntrigger binds to (one `provider:event:github.<event>` per requested event).\nPass exactly one of `repo` or `org`, plus the `events` to deliver (e.g.\n['push', 'pull_request', 'issues'], or ['*'] for all). This is the GitHub\nequivalent of connector_event_subscribe — use it instead of connector_event_subscribe\nfor GitHub. Requires GitHub connected in Settings → Connections and a relay\nmailbox. Fails closed: not connected, missing relay mailbox, or a GitHub API\nrefusal all come back as an action error."
+                },
+                {
+                  "name": "connector_github_unsubscribe",
+                  "description": "Remove Rome's GitHub webhook from a repository or organization — the teardown\nfor connector_github_subscribe. Pass exactly one of `repo` ('owner/name') or\n`org`; no hook id needed. Lists the target's webhooks and deletes only the\none(s) pointing at this instance's relay mailbox URL or legacy direct instance\nwebhook URL, so hooks the guardian added by hand are never touched.\nIdempotent: removing zero hooks (already gone) is success with `deleted: 0`.\nRequires GitHub connected in Settings → Connections. Fails closed: not\nconnected or a GitHub API error all come back as an action error."
+                },
+                {
+                  "name": "connector_login",
+                  "description": "Sign in to Composio so Rome can connect toolkits on the guardian's behalf.\nThis is the prerequisite for connector_connect: if connector_connect reports\nthat Composio is not signed in, call this once, then re-run connector_connect\nfor each toolkit. Also call it when another connector action reports that\nComposio rejected Rome's saved sign-in. Reports immediately when the saved\nsign-in is still valid. Otherwise, including when Composio rejects the saved\nsign-in, renders the inline sign-in card (the browser login happens in the\nowner's tab) and resumes once sign-in completes. Sign-in is account-wide, not\nper-toolkit — call it a single time even when several toolkits need connecting."
+                },
+                {
+                  "name": "connector_proxy",
+                  "description": "Proxy a raw HTTP request to a connected toolkit's native provider API and\nreturn the response. Connector holds the connection's credential and injects it\ninto the outbound call, so you write against the provider's own REST/GraphQL\nsurface (e.g. https://api.linear.app/graphql, https://slack.com/api/...) — the\nfull API, without ever handling the token.\n\nShaped like a common HTTP client: pass the owning toolkit slug, the relative\n`path` (beginning with `/`, e.g. `/graphql`, `/api/chat.postMessage`), the HTTP\nmethod, and optionally `body` (JSON), `query` (an object of query-string params,\n{ name: value }), and `headers` ({ name: value }). Rome prepends the toolkit's\nAPI host, so you supply only the path — omit `host` for the common single-host\ntoolkits (Rome fills in their default host). Supply `host` only for the hard\ncases: a toolkit with no fixed host (Supabase's `<project-ref>.supabase.co`), or\nto reach a non-default host (Dropbox content `content.dropboxapi.com`, GitHub\nuploads `uploads.github.com`). The resolved host must be the toolkit's own API\ndomain (the credential is never forwarded off-provider); any other host is\nrefused.\n\nPass any dynamic or step-sourced QUERY value via `query` rather than\nstring-building it into the path — interpolating an untrusted value into the\nquery string is query-param injection; `query` is escaped for you. (For a\ndynamic PATH segment, which `query` can't carry, encodeURIComponent it before\ninterpolating.) Requires being signed in (connector_login) and the toolkit\nconnected (connector_connect) first. On a 2xx response, returns { status, data,\nheaders } as `data`.\n\nFails closed: not signed in, toolkit not connected, or a non-2xx\nprovider response all come back as an action error, so a rejected call never\nreads as success."
+                },
+                {
+                  "name": "connector_search",
+                  "description": "Search Composio's tool catalog by capability (\"create a github issue\",\n\"send a slack message\", \"run a supabase query\", \"list neon branches\") and\nreturn the matching tools — slug, description, owning toolkit, and input\nschema. Use this to discover the exact slug a workflow or agent step should\nrun; never invent slugs. Optionally scope the search to one toolkit (e.g.\ngithub, supabase, neon) and cap the result count."
+                },
+                {
+                  "name": "connector_tool_execute",
+                  "description": "Execute one Composio tool against its connected service and return the result.\nComposio holds the connection's credential and proxies the upstream API call\n(e.g. send a Gmail message, create a GitHub issue). Requires being signed in\n(connector_login) and the toolkit connected (connector_connect) first. Look up\nthe tool's argument schema with connector_tool_schema before calling. Pass the\nowning toolkit slug, the tool slug, and `args` matching the tool's input\nschema. On success, returns the tool's raw payload as `data`. Fails closed:\nnot signed in, toolkit not connected, or a tool-level refusal (the upstream\noperation was rejected) all come back as an action error, so a rejected call\nnever reads as success."
+                },
+                {
+                  "name": "connector_tool_schema",
+                  "description": "Fetch one Composio tool's full input and output JSON Schemas by slug, so you\ncan write code that calls it correctly. Returns the tool's normalized name and\ndescription plus `input` (the arguments schema) and `output` (the return-value\nschema). Use connector_search first to find the slug, then this to learn its\nexact I/O before calling connector_tool_execute. Requires being signed in to\nComposio (call connector_login once if not). Pass the owning toolkit slug\n(e.g. 'gmail') and the tool slug (e.g. 'GMAIL_SEND_EMAIL'). Note: the\ngranularity of `output.data` is upstream-dependent — some toolkits model it\nfully, others leave it an opaque object, so confirm against a live response\nwhen it looks thin."
+                },
+                {
+                  "name": "connector_watch_ensure",
+                  "description": "Check, or create, the subscription that brings a watched source's events to\nRome's event bus, for the given kinds of a target. `dryRun: true` only\nchecks: it answers `active | inactive`, or fails with what stands in the way\n(GitHub needs admin rights on a repo to add its webhook; a Composio service\nsuch as Gmail, Google Calendar, Linear, Outlook, Notion or Stripe needs a\nconnected account and a relay mailbox). Otherwise it subscribes when needed\nand answers `existing | created`. A GitHub subscription merges into Rome's\none webhook per repo; a Composio one arms the service's triggers for the\nkinds on."
+                },
+                {
+                  "name": "connector_watch_normalize",
+                  "description": "Put one raw event from a watched source into the common shape a follower\nreads: its kind, who did it, a link, a short excerpt, and plain facts (from\na bot, by or about the guardian, sent to them or in cc, Gmail's tab, a\nmeeting's time and the guardian's reply to it, a failed payment's amount).\nWhen an event names only ids (an Outlook message, a Notion comment), it\nreads what it needs through the connected account, and fails when that\nread fails, so the routine running the follower retries it. It does not decide whether the\nevent matters; it drops only spam, trash and events of a kind the follow\nhas off. Changes nothing."
+                },
+                {
+                  "name": "connector_watch_release",
+                  "description": "Say that a follower no longer needs a source's subscription for a target.\nFor now it releases nothing: a repo's webhook and the Gmail trigger may serve\nother apps, and nothing yet counts who needs them (rome-os/rome#1658). It\nanswers `released: false`, so the follower keeps working the same once it\ndoes count."
+                },
+                {
+                  "name": "connector_watch_sources",
+                  "description": "What this app adds to Rome's list of services, for followers such as the\nConcierge. `services`: the Composio services, read from the same catalog\nand account list as Settings → Connections (state working, broken when its\naccess expired, or null; and, when not working, the call that starts\nconnecting it). `watch`: for each service this app can watch, its status\n(ready, not_connected, no_relay, error) with a reason saying what is\nmissing, the account events concern, the target format, the kinds of\nevent in guardian-readable words with the raw events behind each, the\noptions that tune them, and `undelivered`: the kinds whose subscription at\nthe source is missing, with what to do. Reads only; changes nothing."
+                }
+              ],
+              "skills": [
+                {
+                  "name": "composio-cli",
+                  "description": "Help users operate the published Composio CLI to find the right tool, connect accounts, inspect schemas, execute tools, subscribe to trigger events with `composio listen`, script workflows with `composio run`, and call authenticated app APIs with `composio proxy`. Use when the user asks how to do something with `composio`, wants to run a known tool slug, needs to discover a slug with `composio search`, fix a missing connection with `composio link`, inspect tool inputs with `--get-schema` or `--dry-run`, troubleshoot top-level CLI flows, or explicitly needs `composio dev` guidance."
+                }
+              ],
+              "hooks": []
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": true,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/connector/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/connector"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:34:59.509Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "dream",
+            "version": "0.3.0",
+            "description": "Periodic self-review agent that updates memory from recent chats, fixes the guardian's apps that broke, and turns repeated work into skills and tools",
+            "displayName": "Dream",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/dream",
+            "fullHref": "/full/apps/dream",
+            "capabilities": [
+              "3 agents",
+              "10 actions",
+              "0 skills",
+              "1 hook"
+            ],
+            "capabilityDetails": {
+              "agents": [
+                {
+                  "name": "dream",
+                  "description": "Reviews recent chats and keeps the guardian's persistent memory accurate and well organized"
+                },
+                {
+                  "name": "dream-practice",
+                  "description": "After a dream updates memory, fixes the guardian's broken apps and makes repeated work easier with skills and tools"
+                },
+                {
+                  "name": "skill-review",
+                  "description": "Reviews a conversation session and saves or updates a skill if the work was non-trivial"
+                }
+              ],
+              "actions": [
+                {
+                  "name": "dream",
+                  "description": "Runs the dream agent to review recent chats, update persistent memory, fix the guardian's apps that broke, and turn repeated work into skills and tools. The dream routine runs it every three days at 03:00 in the guardian's timezone over the past 74 hours. Skills the agent saves install when it completes. Without a runId it skips when nobody messaged Rome in a webchat or channel conversation during the window."
+                },
+                {
+                  "name": "edit_memory_file",
+                  "description": "Replace one exact, unique piece of text in a file in the guardian's memory directory. Refuses any path outside the memory directory, and text that is missing or appears more than once."
+                },
+                {
+                  "name": "get_account_chats",
+                  "description": "Fetch recent chats from every one of Rome's accounts on a chat app (Telegram, Discord and Feishu), formatted for analysis. Reads what Rome stored, not the platform. Returns a markdown summary grouped by account and chat, with each account's platform named. Keeps the newest 50 lines per chat and the most recently active chats that fit, quoting each line. The dashboard's own chats are left to get_webchat_conversations, and the guardian's own accounts (a linked WhatsApp, their signed-in Telegram) stay out."
+                },
+                {
+                  "name": "get_action_logs",
+                  "description": "Fetch recent action execution logs from the database, formatted for analysis. Returns a markdown summary of what actions ran, their status, and any errors."
+                },
+                {
+                  "name": "get_webchat_conversations",
+                  "description": "Fetch recent webchat conversations from the database, formatted for analysis. Returns a markdown summary grouped by session."
+                },
+                {
+                  "name": "list_memory_files",
+                  "description": "List the files in the guardian's memory directory, or in one folder of it, as absolute paths. Refuses any path outside it."
+                },
+                {
+                  "name": "read_memory_file",
+                  "description": "Read a file in the guardian's memory directory. Refuses any path outside it."
+                },
+                {
+                  "name": "search_chats",
+                  "description": "Search what the guardian asked for in the dashboard's chats over the past months, beyond the window a dream reviews. With a query, returns the chats whose guardian messages contain the most query words, quoting the matching requests. Without one, lists the opening request of every chat in the period, newest first. Each chat comes with the get_webchat_conversations arguments that open it in full. Chats on Rome's accounts, which other people write, are not searched."
+                },
+                {
+                  "name": "skill_review",
+                  "description": "Reviews the current session and saves or updates a skill if the work was non-trivial"
+                },
+                {
+                  "name": "write_memory_file",
+                  "description": "Write a whole file in the guardian's memory directory, creating it and its folders if needed. Refuses any path outside the memory directory. Use edit_memory_file to change part of a file."
+                }
+              ],
+              "skills": [],
+              "hooks": [
+                {
+                  "name": "app-started",
+                  "description": "Registered app-started hook."
+                }
+              ]
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": true,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/dream/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/dream"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:35:00.161Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "inbox",
+            "version": "0.2.13",
+            "description": "Incoming-message triage, routing, and channel hooks",
+            "displayName": "Inbox",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/inbox",
+            "fullHref": "/full/apps/inbox",
+            "capabilities": [
+              "1 agent",
+              "1 action",
+              "0 skills",
+              "1 hook"
+            ],
+            "capabilityDetails": {
+              "agents": [
+                {
+                  "name": "sentinel",
+                  "description": "Triages incoming messages from untrusted senders."
+                }
+              ],
+              "actions": [
+                {
+                  "name": "message_handler",
+                  "description": "Routes incoming channel messages to the appropriate agent"
+                }
+              ],
+              "skills": [],
+              "hooks": [
+                {
+                  "name": "channel-message",
+                  "description": "Registered channel-message hook."
+                }
+              ]
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": false,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/inbox/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/inbox"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:35:00.809Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "showcases",
+            "version": "0.1.0",
+            "description": "Import, view, export, and share static Rome agent trace showcases.",
+            "displayName": "Showcases",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/showcases",
+            "fullHref": "/full/apps/showcases",
+            "capabilities": [
+              "0 agents",
+              "0 actions",
+              "0 skills",
+              "0 hooks"
+            ],
+            "capabilityDetails": {
+              "agents": [],
+              "actions": [],
+              "skills": [],
+              "hooks": []
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": false,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/showcases/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/showcases"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:35:01.956Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "skills",
+            "version": "0.2.0",
+            "description": "Browse every skill installed on this Rome, start a chat that uses one (each skill is a slash command in webchat), and import or generate new skills with the import-skill skill.",
+            "displayName": "Skills",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/skills",
+            "fullHref": "/full/apps/skills",
+            "capabilities": [
+              "0 agents",
+              "0 actions",
+              "1 skill",
+              "0 hooks"
+            ],
+            "capabilityDetails": {
+              "agents": [],
+              "actions": [],
+              "skills": [
+                {
+                  "name": "import-skill",
+                  "description": "Import a Rome skill from a URL, a pasted SKILL.md, or a plain-language description — validate it against Rome's frontmatter parser, preview the final file, and install it into the user-skills carrier app after the guardian confirms."
+                }
+              ],
+              "hooks": []
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": false,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/skills/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/skills"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:35:01.981Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "system",
+            "version": "0.2.21",
+            "description": "Core system actions for scheduling, messaging, approvals, app store access, and subagent orchestration. In Rome context, 'store' / 'app store' usually means the Rome App Store. Reach here first for app_store_search (search/read Rome Store listings), app_management (install from the Rome Store with source.mode='appstore', install / uninstall / enable / disable a Rome app, or scaffold a new dev app — first-party apps ship with Rome, so only enable/disable applies to them), send_message (send a message through any registered channel adapter), send_user_message (start or continue a webchat conversation with a source badge when speaking for the guardian, otherwise as automation), and generate_image (generate an image from a text prompt via the connected image provider).",
+            "displayName": "System",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/system",
+            "fullHref": "/full/apps/system",
+            "capabilities": [
+              "1 agent",
+              "23 actions",
+              "2 skills",
+              "1 hook"
+            ],
+            "capabilityDetails": {
+              "agents": [
+                {
+                  "name": "image_gen",
+                  "description": "Forwards an image prompt verbatim to Codex's built-in image generation tool. Backs the generate_image action; requires a connected Codex (ChatGPT) account."
+                }
+              ],
+              "actions": [
+                {
+                  "name": "app_management",
+                  "description": "Manage Rome app lifecycle (install / uninstall / enable / disable), scaffold a new dev app, or create a remix by copying installed code or downloading a pinned Store bundle without installing the source. Use app_store_search for read-only Store discovery or listing details; install from the Rome App Store with source.mode='appstore' and a listingId from app_store_search. Omit version to install the latest live version, or pass a specific live version from listing detail. First-party apps ship with Rome — bundled at build time, installed at boot, not installable or uninstallable here; only enable/disable applies to them."
+                },
+                {
+                  "name": "app_store_search",
+                  "description": "Search or inspect the Rome App Store (also called \"store\", \"app store\", \"Rome store\", or marketplace). Use this read-only action when the guardian asks what is in the store, asks whether a Rome app exists, asks for Store app details, or wants to find a Store app before installing it with app_management install and source.mode='appstore'. This is for Rome's own App Store, not Apple App Store / Google Play unless the guardian explicitly says those."
+                },
+                {
+                  "name": "conversation_settings_manage",
+                  "description": "Manage Rome's provider-neutral behavior settings for a configurable conversation. Native threads have independent sessions but follow their parent settings; get returns the parent-derived effective values, while set/reset must target the parent reference returned by get or list."
+                },
+                {
+                  "name": "create_routine",
+                  "description": "Create a routine that runs an action when its trigger fires — a schedule (recurring or one-off), a watched event, or manual (no automatic trigger; run by hand from the Routines page's \"Run now\" button) — and bring it live immediately, with no confirmation card. For guardian-initiated \"do this automatically\" requests prefer the routine-from-chat skill (propose_routine), which shows the routine on a card (with activate set to true, it creates the routine immediately when the guardian asked for it explicitly); use create_routine for direct/programmatic creation"
+                },
+                {
+                  "name": "delete_routine",
+                  "description": "Permanently delete a routine by its id and tear down its live schedule. Refuses if the routine has in-flight runs (running or awaiting approval). Identify the routine first with search_routine, and confirm with the user when several could match"
+                },
+                {
+                  "name": "email_inbound",
+                  "description": "Internal transport entry point for inbound email. Called only by the connector when it transports an AgentMail relay deposit (x-rome-mail-source = agentmail) into core; verifies the per-inbox HMAC and hands the event to the EmailAdapter. Not agent-callable."
+                },
+                {
+                  "name": "execute_root_script",
+                  "description": "Submit an unrestricted root shell script on the Linux VM hosting Rome. Requires explicit owner enablement in Rome and host policy. Target must be hosting-vm. Returns bounded output if complete, or an accepted job ID if still running. Accepted host jobs survive Rome action or agent cancellation. Use system:manage_root_script to inspect or cancel a job. A new invocation creates a new job, so inspect an uncertain submission before repeating it. Scripts can change or destroy the entire host."
+                },
+                {
+                  "name": "fetch_channel_history",
+                  "description": "Fetch recent message history from a channel that keeps its messages, such as WhatsApp, LinkedIn or the dashboard chat. Pass threadId to fetch a specific thread, or omit it to fetch all accessible threads. Returns the newest messages as a markdown-formatted summary grouped by thread. To page back a few at a time, pass limit, then pass the returned nextCursor as cursor to read the messages before that page; paging needs threadId. Pass includeMessages=true to additionally receive a structured `messages` array with per-message attachment metadata (url, fileName, mimeType, localPath)."
+                },
+                {
+                  "name": "generate_image",
+                  "description": "Generate an image from a text prompt via the connected image generation provider (currently the Codex/ChatGPT account's built-in image generation). Optionally takes input images (local paths) to edit or combine as the prompt describes. Returns the saved image's absolute local path (valid as a send_message attachment source) and a dashboard asset URL. For several images, pass `prompts` (a list, up to 20) instead of `prompt`: they generate 5 at a time, each in its own session, and return one result per prompt in order, with per-prompt errors. Requires an image provider to be connected; returns a clear error naming what to connect when none is."
+                },
+                {
+                  "name": "get_guardian_cloud_profile",
+                  "description": "Read the guardian's full Rome Cloud profile: account email, Rome address, display name and sign-in links, their preview-survey answers (background, build goals, X and LinkedIn handles), and the Signup Research report on their public professional profile (identity verdict, headline, role, company, location, summary, cited facts, matched accounts, survey fit, limitations) when Rome Cloud matched it to them. Use it to tailor help to their work. It is personal context for the guardian's own agent: never repeat it to anyone else, and do not recite it back to the guardian unprompted. Returns an error when the instance is not connected to Rome Cloud."
+                },
+                {
+                  "name": "manage_root_script",
+                  "description": "Inspect the durable status and bounded output of a hosting-vm root script job, or request cancellation of its managed process group. Use the job ID returned by execute_root_script. Works after the originating Rome action exits or root execution is disabled. Cancellation is best effort because unrestricted root scripts can escape the process group. An unknown outcome requires inspection of host state before another submission."
+                },
+                {
+                  "name": "publish_event",
+                  "description": "Publish a domain event onto Rome's in-memory event bus. Any routine with a matching event-bus trigger (same eventName) fires with the supplied payload. Useful for testing event-bus routines and as a producer surface until app-native producers are wired."
+                },
+                {
+                  "name": "request_approval_demo",
+                  "description": "Test fixture for the approval flow. No side effects — renders a generic approval card with the supplied title/summary, and on approval returns a confirmation echo. Use this when the guardian asks you to demonstrate, test, or exercise the approval gate end-to-end."
+                },
+                {
+                  "name": "resume_session",
+                  "description": "Internal — continue an existing conversation. Fired by a defer one-off routine (a time or event wakeup); resumes the exact AgentSession captured by the routine and delivers the reply to its original channel thread. Not agent-callable."
+                },
+                {
+                  "name": "search_event_catalog",
+                  "description": "Search the event types an event-bus routine or an event `defer` can wait on. Pass keywords describing the event (\"gmail new email\", \"github workflow run\", \"pull request\") and a limit; returns the best-matching event types plus a total match count. Each result can carry a payloadSchema (JSON Schema for the payload; schemaOrigin \"observed\" means it was inferred from a recent emission and is a guide, not a contract) so you can write a filter against real fields. `subscribable` types come from an app that subscribes at the provider when you wait on them; their `keys` list the filter fields that pick where to subscribe, and a wait must filter on every field of one inner list (e.g. repository.full_name). Pass `match` (e.g. {\"repository.full_name\":\"acme/widgets\"}) to see whether each subscribable type is already `active` there. Types that are not subscribable appear only after they were first emitted, and payloadSchema is absent until a type was emitted with a non-empty payload."
+                },
+                {
+                  "name": "search_routine",
+                  "description": "Find existing routines matching a free-text description (name, action or args — not schedule), so a routine can be identified before editing or deleting it. Each result carries its schedule for the caller to filter by time"
+                },
+                {
+                  "name": "send_feedback",
+                  "description": "Report a Rome platform problem only the platform can fix: a system or first-party action failing or misbehaving, a wrong or stale skill or doc, a missing capability, or confusing UX. Do not use for bugs in the guardian's custom apps, task outcomes, or things you can fix yourself. Write generically: never include the guardian's personal data, message or file contents, credentials, or secrets. Give a short one-line summary and details of what happened, what was expected, and a minimal repro. Summary, a blank line, and details must fit within 4000 characters. File once per distinct issue and tell the guardian you filed it. Reports include instance diagnostics, as in the Feedback dialog. If the outcome is unknown, the report may have been filed: do not retry."
+                },
+                {
+                  "name": "send_message",
+                  "description": "Send a message through any registered Rome channel (telegram, whatsapp, discord, wechat, webchat, feishu, email, and agents). Name the account to send as by its id, the channel its messages arrive on. Use \"agents\" to message an agent on Rome Cloud, such as a dot: pass its id (a UUID, the threadId its messages arrive on) as the threadId, or, from the main agent, its name as `to`. Prefer this over any external Gmail tool when sending or replying to mail as Rome."
+                },
+                {
+                  "name": "send_notification",
+                  "description": "Send the user a push notification on their mobile device. USER-DIRECTED: call this ONLY when the user has explicitly asked or authorized you to notify them. Receiving, escalating, or handling a message or event does NOT authorize a notification. Optional `body` sets the notification text: a concise attention cue (what needs attention, what input or approval is needed, or what completed), summarized within 500 Unicode code points (roughly 500 characters) before you call — write the summary yourself, do not paste raw content; the broker silently truncates anything longer. The title is always \"Rome\"; omit `body` to send the generic default alert. The body may appear on the device lock screen, so it MUST NOT contain passwords, authentication codes, tokens, or other secrets — say that approval is required, never include the secret itself. A successful send means the push provider (APNs on iOS, FCM on Android) accepted the request, NOT that the user saw it: report the notification as sent, not as confirmed delivered. If the result is notification_outcome_unknown, delivery may already have happened — do NOT retry unless the user explicitly authorizes another attempt. Likewise, if the action is cancelled after it has been dispatched, the notification may still arrive; do not retry without explicit user authorization."
+                },
+                {
+                  "name": "send_user_message",
+                  "description": "Send an automated webchat message — a main-agent, Concierge, or app source with a guardian chain actor speaks for the guardian, with the source named below the bubble; other sends show the source on the left with an Automated label, and the receiving agent runs a turn and replies in that chat. By default this starts a new chat with the main agent, named after the message; pass sessionId to continue an existing webchat conversation instead (its locked agent replies), agentName to start the chat with a different agent, or sessionName/projectPath to shape the new chat. Fire-and-forget — it returns the sessionId/turnId immediately and the reply is delivered to the chat, not returned here. Use it as a routine's action for scheduled prompts (e.g. a morning briefing the guardian reads in webchat) or to open a conversation with another agent for the guardian. Never target the webchat session you are currently answering in."
+                },
+                {
+                  "name": "show_app",
+                  "description": "Place an available app's widget on the guardian's workspace (the freegrid) so they can glance at it beside the chat. appId may name an installed app or a host-owned app such as Sessions. Pass appId (and optionally a route + scalar params to address a screen). Fire-and-forget: it returns immediately and needs no input from the guardian — keep going. One tile per app; calling again retargets the same tile. Put structured data in the app's session storage, not in params."
+                },
+                {
+                  "name": "summon",
+                  "description": "Spawn a subagent in the calling session's project or a given project directory"
+                },
+                {
+                  "name": "system_upgrade",
+                  "description": "Nightly upgrade probe — asks Rome Cloud whether a release is pending and, if so, opens the consent countdown. Fired by the system_upgrade routine; not agent-callable."
+                }
+              ],
+              "skills": [
+                {
+                  "name": "app-lifecycle",
+                  "description": "Install, reinstall, uninstall, enable, or disable Rome apps, share an app with other people through its URL (private, public, or a Rome Cloud email list), and publish it to the Rome App Store. Includes deployment after app edits and the first-party build and restart procedure."
+                },
+                {
+                  "name": "custom-dependencies",
+                  "description": "Install software that Rome does not ship, such as a system package, CLI tool, language runtime, Python or global npm package, or an app dependency with native code, so it keeps working after Rome upgrades. Use when the guardian asks to install a tool or package in Rome, when `apt-get`, `sudo`, `pip`, or `npm install -g` fails, or when an app install fails with a native-build hint or `ERR_PNPM_IGNORED_BUILDS`."
+                }
+              ],
+              "hooks": [
+                {
+                  "name": "agent-turn-finished",
+                  "description": "Registered agent-turn-finished hook."
+                }
+              ]
+            },
+            "isEnabled": true,
+            "canToggle": false,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": true,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/system/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/system"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:35:02.732Z",
+            "suggestedChannelBindings": []
+          },
+          {
+            "id": "workflow-studio",
+            "version": "0.1.0",
+            "description": "Describe an automation in plain language; approve the short spec, and it's built into a runnable workflow in one conversation.",
+            "displayName": "Workflows",
+            "status": "active",
+            "phase": "installed",
+            "hasFrontend": true,
+            "href": "/apps/workflow-studio",
+            "fullHref": "/full/apps/workflow-studio",
+            "capabilities": [
+              "0 agents",
+              "0 actions",
+              "1 skill",
+              "0 hooks"
+            ],
+            "capabilityDetails": {
+              "agents": [],
+              "actions": [],
+              "skills": [
+                {
+                  "name": "design-workflow",
+                  "description": "Turn a guardian's plain-language automation into a runnable Rome workflow app, in one conversation. Use whenever the guardian wants to build, create, set up, or design an automation or workflow (\"every morning summarize my unread emails\", \"when I save a link, fetch and summarize it\", \"for each new ticket, look up the customer and draft a reply\"). You shape the idea into a short spec, get the guardian's approval, then build and install the workflow yourself — no separate planner or builder."
+                }
+              ],
+              "hooks": []
+            },
+            "isEnabled": true,
+            "canToggle": true,
+            "canUninstall": false,
+            "includeSource": false,
+            "hideInLauncher": true,
+            "canPublish": false,
+            "accessMode": "private",
+            "isPublic": false,
+            "cloudAllowedEmails": [],
+            "canManagePublicAccess": true,
+            "iconUrl": "/api/apps/workflow-studio/icon",
+            "source": {
+              "mode": "bundle",
+              "path": "/app/dist/first-party-artifacts/workflow-studio"
+            },
+            "projectPath": null,
+            "origin": "builtin",
+            "installedAt": "2026-11-14T19:35:02.768Z",
+            "suggestedChannelBindings": []
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/routines",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": [
+        {
+          "id": "6c4814c7-63d8-4a49-b9c9-af8d8b30bbed",
+          "name": "system_upgrade",
+          "key": null,
+          "managedBy": null,
+          "enabled": true,
+          "trigger": {
+            "type": "schedule",
+            "tzid": "UTC",
+            "tzMode": "floating",
+            "localTime": "03:00",
+            "rrule": "FREQ=DAILY"
+          },
+          "actionName": "system_upgrade",
+          "args": {},
+          "keepTriggerPayload": true,
+          "chatId": null,
+          "createdAt": "2026-11-14T19:35:03.000Z",
+          "lastFiredAt": null,
+          "nextRunAt": "2026-11-15T03:00:00.000Z",
+          "lastRun": null
+        },
+        {
+          "id": "36063e19-58ee-4b40-9b04-d33380af11e5",
+          "name": "dream",
+          "key": null,
+          "managedBy": "dream",
+          "enabled": true,
+          "trigger": {
+            "type": "schedule",
+            "tzid": "UTC",
+            "tzMode": "floating",
+            "localTime": "03:00",
+            "rrule": "FREQ=DAILY;INTERVAL=3"
+          },
+          "actionName": "dream",
+          "args": {},
+          "keepTriggerPayload": true,
+          "chatId": null,
+          "createdAt": "2026-11-14T19:35:03.000Z",
+          "lastFiredAt": null,
+          "nextRunAt": "2026-11-17T03:00:00.000Z",
+          "lastRun": null
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai-tools/status",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "claude": {
+          "loggedIn": true,
+          "authMethod": "stored-compatible",
+          "accountType": "Custom",
+          "quotaExhausted": false,
+          "anthropicCompatible": {
+            "provider": "custom",
+            "providerName": "Custom",
+            "hasApiKey": true,
+            "updatedAt": "2026-11-14T19:39:45.480Z"
+          }
+        },
+        "codex": {
+          "loggedIn": false,
+          "authMode": null,
+          "quotaExhausted": false,
+          "usage": {
+            "checkedAt": "2026-11-14T19:35:03.863Z",
+            "source": "codex app-server",
+            "error": "codex account authentication required to read rate limits"
+          },
+          "solAccess": false,
+          "lunaAccess": false
+        },
+        "codexLogin": {
+          "running": false,
+          "lastExit": null,
+          "lastError": null
+        },
+        "codexDeviceLogin": {
+          "running": false,
+          "userCode": null,
+          "verificationUrl": null,
+          "lastError": null
+        },
+        "anthropicCompatible": {
+          "provider": "custom",
+          "providerName": "Custom",
+          "hasApiKey": true,
+          "updatedAt": "2026-11-14T19:39:45.480Z"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/voice-input",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "available": true,
+        "place": {
+          "provider": "Soniox",
+          "host": "transcriber:8790"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/concierge/tasks",
+      "query": "doneDays=30",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "tasks": []
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/approvals",
+      "query": "status=pending",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/messages",
+      "query": "limit=20",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [],
+        "nextCursor": null,
+        "layout": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/messages",
+      "query": "limit=50",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [],
+        "nextCursor": null,
+        "layout": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/turns",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/shares",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/sessions/concierge/read",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "sessionId": "concierge",
+        "lastSeenActivityAt": "2026-11-14T19:35:10.000Z",
+        "unread": false
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/concierge/tasks",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "chatId": "concierge",
+        "groups": []
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/01a1db8f-b3fe-74dc-b914-f734f2651af7/messages",
+      "query": "limit=20",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [],
+        "nextCursor": null,
+        "layout": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/01a1db8f-b3fe-74dc-b914-f734f2651af7/messages",
+      "query": "limit=50",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [],
+        "nextCursor": null,
+        "layout": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/01a1db8f-b3fe-74dc-b914-f734f2651af7/turns",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/01a1db8f-b3fe-74dc-b914-f734f2651af7/shares",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/sessions/01a1db8f-b3fe-74dc-b914-f734f2651af7/read",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "sessionId": "01a1db8f-b3fe-74dc-b914-f734f2651af7",
+        "lastSeenActivityAt": "2026-11-14T19:36:30.000Z",
+        "unread": false
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/01a1db8f-b3fe-74dc-b914-f734f2651af7/tasks",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "chatId": "01a1db8f-b3fe-74dc-b914-f734f2651af7",
+        "groups": []
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/concierge/tasks",
+      "query": "doneDays=30",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "tasks": [
+          {
+            "id": "2cea228d-3626-43e8-9458-e1578eaf0132",
+            "title": "Stand-in task",
+            "state": "doing",
+            "status": "active",
+            "endReason": null,
+            "waitingSince": null,
+            "openWait": null,
+            "laterAt": null,
+            "summary": null,
+            "waitingOn": null,
+            "dueAt": null,
+            "rank": null,
+            "chat": {
+              "id": "01a1db92-b40e-7218-98af-88fb6a66390e",
+              "name": "Stand-in task"
+            },
+            "threadRoot": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "conciergeChat": {
+              "id": "concierge",
+              "name": "Main chat",
+              "main": true
+            },
+            "sourceMessageId": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "createdAt": 1794685187087,
+            "updatedAt": 1794685187087,
+            "completedAt": null,
+            "archivedAt": null,
+            "notSynced": false
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/concierge/chats",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "chats": [
+          {
+            "id": "concierge",
+            "name": "Main chat",
+            "main": true,
+            "unread": 0,
+            "activity": {
+              "kind": "tool",
+              "tool": "startingTask"
+            }
+          },
+          {
+            "id": "01a1db8f-b3fe-74dc-b914-f734f2651af7",
+            "name": "",
+            "main": false,
+            "unread": 0,
+            "activity": {
+              "kind": "idle"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": [
+        {
+          "id": "01a1db92-b40e-7218-98af-88fb6a66390e",
+          "name": "Stand-in task",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": null,
+          "parentSessionId": null,
+          "triggerKind": "concierge",
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-14T19:39:47.000Z",
+          "activityAt": "2026-11-14T19:39:47.000Z",
+          "lastSeenActivityAt": "2026-11-14T19:39:47.000Z",
+          "unread": false,
+          "messageCount": 3,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        },
+        {
+          "id": "concierge",
+          "name": "Main chat",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": "core:concierge",
+          "parentSessionId": null,
+          "triggerKind": null,
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-14T19:35:10.000Z",
+          "activityAt": "2026-11-14T19:39:46.000Z",
+          "lastSeenActivityAt": "2026-11-14T19:35:10.000Z",
+          "unread": true,
+          "messageCount": 3,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        },
+        {
+          "id": "01a1db8f-b3fe-74dc-b914-f734f2651af7",
+          "name": "",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": "core:concierge",
+          "parentSessionId": null,
+          "triggerKind": null,
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-14T19:36:30.000Z",
+          "activityAt": "2026-11-14T19:36:30.000Z",
+          "lastSeenActivityAt": "2026-11-14T19:36:30.000Z",
+          "unread": false,
+          "messageCount": 0,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/messages",
+      "query": "limit=20",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [
+          {
+            "id": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "sessionId": "concierge",
+            "turnId": "01a1db92-b34a-73e7-86ab-a13516a260a5",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "createdAt": "2026-11-14T19:39:46.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "7899c38b-daa6-40cf-9042-4a7729969a77",
+            "sessionId": "concierge",
+            "turnId": "01a1db92-b34a-73e7-86ab-a13516a260a5",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:46.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 1,
+              "totalDurationMs": 283,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 1
+              },
+              "model": "claude-haiku-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1db92-b472-7562-a6a3-b13c794f3b38",
+            "sessionId": "concierge",
+            "turnId": "01a1db92-b472-7562-a6a3-b13c794f3b38",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:47.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 21,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-haiku-5-5"
+            }
+          }
+        ],
+        "nextCursor": null,
+        "layout": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/messages",
+      "query": "limit=50",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [
+          {
+            "id": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "sessionId": "concierge",
+            "turnId": "01a1db92-b34a-73e7-86ab-a13516a260a5",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "createdAt": "2026-11-14T19:39:46.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "7899c38b-daa6-40cf-9042-4a7729969a77",
+            "sessionId": "concierge",
+            "turnId": "01a1db92-b34a-73e7-86ab-a13516a260a5",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:46.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 1,
+              "totalDurationMs": 283,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 1
+              },
+              "model": "claude-haiku-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1db92-b472-7562-a6a3-b13c794f3b38",
+            "sessionId": "concierge",
+            "turnId": "01a1db92-b472-7562-a6a3-b13c794f3b38",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:47.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 21,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-haiku-5-5"
+            }
+          }
+        ],
+        "nextCursor": null,
+        "layout": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/turns",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/shares",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/sessions/concierge/read",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "sessionId": "concierge",
+        "lastSeenActivityAt": "2026-11-14T19:39:46.000Z",
+        "unread": false
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/concierge/tasks",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "chatId": "concierge",
+        "groups": [
+          {
+            "key": "active",
+            "items": [
+              {
+                "kind": "task",
+                "task": {
+                  "id": "2cea228d-3626-43e8-9458-e1578eaf0132",
+                  "title": "Stand-in task",
+                  "state": "doing",
+                  "status": "active",
+                  "endReason": null,
+                  "waitingSince": null,
+                  "openWait": null,
+                  "laterAt": null,
+                  "summary": null,
+                  "waitingOn": null,
+                  "dueAt": null,
+                  "rank": null,
+                  "chat": {
+                    "id": "01a1db92-b40e-7218-98af-88fb6a66390e",
+                    "name": "Stand-in task"
+                  },
+                  "threadRoot": "91f41e61-7c37-4924-92af-a5c02a84f971",
+                  "conciergeChat": {
+                    "id": "concierge",
+                    "name": "Main chat",
+                    "main": true
+                  },
+                  "sourceMessageId": "91f41e61-7c37-4924-92af-a5c02a84f971",
+                  "createdAt": 1794685187087,
+                  "updatedAt": 1794685187087,
+                  "completedAt": null,
+                  "archivedAt": null,
+                  "notSynced": false
+                },
+                "schedule": null,
+                "check": null,
+                "cardMessageId": null
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/messages",
+      "query": "thread=91f41e61-7c37-4924-92af-a5c02a84f971",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [
+          {
+            "id": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "sessionId": "concierge",
+            "turnId": "01a1db92-b34a-73e7-86ab-a13516a260a5",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "createdAt": "2026-11-14T19:39:46.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/concierge/messages",
+      "query": "thread=91f41e61-7c37-4924-92af-a5c02a84f971",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [
+          {
+            "id": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "sessionId": "concierge",
+            "turnId": "01a1db92-b34a-73e7-86ab-a13516a260a5",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "createdAt": "2026-11-14T19:39:46.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/01a1db92-b40e-7218-98af-88fb6a66390e/messages",
+      "query": "limit=20",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [
+          {
+            "id": "fd5c4313-2fd4-4711-a7e4-28658dd8dc02",
+            "sessionId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "turnId": "01a1db92-b430-7308-ba2b-f0185eb19b2b",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"Reply with the word done. The stand-in instance records this task.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:47.000Z",
+            "sender": {
+              "kind": "automated",
+              "sourceType": "agent",
+              "name": "Moth",
+              "iconUrl": null,
+              "onBehalfOf": {
+                "kind": "guardian",
+                "name": "guardian",
+                "avatarUrl": null
+              }
+            }
+          },
+          {
+            "id": "71914e36-bd93-4b9c-a802-4feadb66d694",
+            "sessionId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "turnId": "01a1db92-b430-7308-ba2b-f0185eb19b2b",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:47.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 221,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-haiku-5-5"
+            }
+          },
+          {
+            "id": "be8ee580-4fde-4dff-8bbf-aabb08b83f42",
+            "sessionId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "turnId": "01a1db92-b430-7308-ba2b-f0185eb19b2b",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"Done.\",\"turnPhase\":\"final\",\"blockId\":\"msg_8328236f499842a69b78f3e4631643e9:0\",\"blockIx\":0}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:47.000Z"
+          }
+        ],
+        "nextCursor": null,
+        "layout": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/01a1db92-b40e-7218-98af-88fb6a66390e/messages",
+      "query": "limit=50",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "messages": [
+          {
+            "id": "fd5c4313-2fd4-4711-a7e4-28658dd8dc02",
+            "sessionId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "turnId": "01a1db92-b430-7308-ba2b-f0185eb19b2b",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"Reply with the word done. The stand-in instance records this task.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:47.000Z",
+            "sender": {
+              "kind": "automated",
+              "sourceType": "agent",
+              "name": "Moth",
+              "iconUrl": null,
+              "onBehalfOf": {
+                "kind": "guardian",
+                "name": "guardian",
+                "avatarUrl": null
+              }
+            }
+          },
+          {
+            "id": "71914e36-bd93-4b9c-a802-4feadb66d694",
+            "sessionId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "turnId": "01a1db92-b430-7308-ba2b-f0185eb19b2b",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:47.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 221,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-haiku-5-5"
+            }
+          },
+          {
+            "id": "be8ee580-4fde-4dff-8bbf-aabb08b83f42",
+            "sessionId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+            "turnId": "01a1db92-b430-7308-ba2b-f0185eb19b2b",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"Done.\",\"turnPhase\":\"final\",\"blockId\":\"msg_8328236f499842a69b78f3e4631643e9:0\",\"blockIx\":0}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-14T19:39:47.000Z"
+          }
+        ],
+        "nextCursor": null,
+        "layout": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/01a1db92-b40e-7218-98af-88fb6a66390e/turns",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions/01a1db92-b40e-7218-98af-88fb6a66390e/shares",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/sessions/01a1db92-b40e-7218-98af-88fb6a66390e/read",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "sessionId": "01a1db92-b40e-7218-98af-88fb6a66390e",
+        "lastSeenActivityAt": "2026-11-14T19:39:47.000Z",
+        "unread": false
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/01a1db92-b40e-7218-98af-88fb6a66390e/tasks",
+      "query": "",
+      "status": 404,
+      "contentType": "application/json",
+      "body": {
+        "error": "No such Concierge chat"
+      }
+    }
+  ]
+}

@@ -21,6 +21,7 @@
 #   voice-env messages --chat <id>
 #   voice-env audio-scan
 #   voice-env capture start|stop
+#   voice-env ios-record
 set -euo pipefail
 # shellcheck source=env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
@@ -169,6 +170,28 @@ cmd_desktop() {
     o.mic = process.argv[2]; o.proxy = "http://127.0.0.1:" + process.argv[3];
     o.desktop = JSON.parse(process.argv[4]);
     console.log(JSON.stringify(o, null, 2))' "$out" "$(realpath "$mic")" "$PROXY_PORT" "$(cat "$DESKTOP_BUILD_FILE")"
+}
+
+# Records the iOS stand-in instance's fixtures from this Rome. A task and its
+# chat exist only after a model calls chat_start, so for the recording only,
+# Rome's model is a scripted stand-in on the environment's network; its
+# provider setting comes out again afterwards. The tier mapping is the one
+# `env.sh up` sets, so it stays.
+cmd_ios_record() {
+  require_up
+  local model="rome-env-${NAME}-model" status=0
+  docker rm -f "$model" >/dev/null 2>&1 || true
+  docker run -d --name "$model" --memory 256m --network "$NETWORK" --network-alias model \
+    -v "$ENV_DIR/ios-stand-in:/stand-in:ro" node:24-bookworm-slim node /stand-in/stand-in-model.mjs --port 8793 >/dev/null
+  printf '{"provider":"custom","env":{"ANTHROPIC_BASE_URL":"http://model:8793","ANTHROPIC_AUTH_TOKEN":"stand-in"}}' |
+    api PUT /ai-tools/anthropic-compatible-credentials >/dev/null
+  state guardianPassword |
+    node "$ENV_DIR/ios-stand-in/record.mjs" --dashboard "$DASHBOARD" --user "$(state guardianUser)" \
+      --product "$(json product.commit <"$BUILD_FILE")" || status=$?
+  docker exec "$ROME" curl -sS --fail-with-body -X DELETE -H 'Sec-Fetch-Site: same-origin' \
+    "$API/ai-tools/anthropic-compatible-credentials" >/dev/null
+  docker rm -f "$model" >/dev/null 2>&1 || true
+  return "$status"
 }
 
 cmd_transcriber() {
@@ -403,6 +426,7 @@ case "${1:-}" in
   version) cmd_version ;;
   browser) shift && cmd_browser "$@" ;;
   desktop) shift && cmd_desktop "$@" ;;
+  ios-record) cmd_ios_record ;;
   transcriber) shift && cmd_transcriber "$@" ;;
   cloud) shift && cmd_cloud "$@" ;;
   gate) shift && cmd_gate "$@" ;;

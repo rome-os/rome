@@ -1,0 +1,223 @@
+{
+  "subscribed": [
+    "chat.status",
+    "concierge.activity",
+    "concierge.tasks",
+    "chat.session:concierge",
+    "chat.tasks:concierge",
+    "chat.watch:concierge"
+  ],
+  "send": {
+    "sessionId": "concierge",
+    "text": "The stand-in instance records this message.",
+    "turn": {
+      "inputId": "c22156fc-8285-4a5e-ab14-f377461f8aec",
+      "turnId": "01a1db92-b5b4-777b-94af-9bbc5cbb3160",
+      "disposition": "started",
+      "sessionId": "concierge",
+      "startedAt": "2026-11-14T19:39:47.509Z"
+    },
+    "messages": [
+      {
+        "id": "c22156fc-8285-4a5e-ab14-f377461f8aec",
+        "sessionId": "concierge",
+        "turnId": "01a1db92-b5b4-777b-94af-9bbc5cbb3160",
+        "inputState": "consumed",
+        "role": "user",
+        "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+        "chatThreadId": null,
+        "createdAt": "2026-11-14T19:39:47.000Z",
+        "sender": {
+          "kind": "guardian",
+          "name": "guardian",
+          "avatarUrl": null
+        }
+      }
+    ],
+    "frames": [
+      {
+        "type": "event",
+        "topic": "chat.status",
+        "event": "session_running",
+        "data": {
+          "sessionId": "concierge",
+          "running": true
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.session:concierge",
+        "event": "session_running",
+        "data": {
+          "sessionId": "concierge",
+          "running": true
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.session:concierge",
+        "event": "message_writing",
+        "data": {
+          "sessionId": "concierge",
+          "turnId": "01a1db92-b5b4-777b-94af-9bbc5cbb3160",
+          "mode": "exact",
+          "writing": false
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.session:concierge",
+        "event": "message_status_reaction",
+        "data": {
+          "sessionId": "concierge",
+          "messageId": "c22156fc-8285-4a5e-ab14-f377461f8aec",
+          "statusReaction": "working"
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.status",
+        "event": "inputs_settled",
+        "data": {
+          "sessionId": "concierge",
+          "inputIds": [
+            "c22156fc-8285-4a5e-ab14-f377461f8aec"
+          ]
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.session:concierge",
+        "event": "message_writing",
+        "data": {
+          "sessionId": "concierge",
+          "turnId": "01a1db92-b5b4-777b-94af-9bbc5cbb3160",
+          "mode": "exact",
+          "writing": false
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.status",
+        "event": "session_running",
+        "data": {
+          "sessionId": "concierge",
+          "running": false
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.session:concierge",
+        "event": "session_running",
+        "data": {
+          "sessionId": "concierge",
+          "running": false
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.session:concierge",
+        "event": "message_status_reaction",
+        "data": {
+          "sessionId": "concierge",
+          "messageId": "c22156fc-8285-4a5e-ab14-f377461f8aec",
+          "statusReaction": null
+        }
+      },
+      {
+        "type": "event",
+        "topic": "concierge.tasks",
+        "event": "task_upsert",
+        "data": {
+          "task": {
+            "id": "2cea228d-3626-43e8-9458-e1578eaf0132",
+            "title": "Stand-in task",
+            "state": "doing",
+            "status": "active",
+            "endReason": null,
+            "waitingSince": null,
+            "openWait": null,
+            "laterAt": null,
+            "summary": null,
+            "waitingOn": null,
+            "dueAt": null,
+            "rank": null,
+            "chat": {
+              "id": "01a1db92-b40e-7218-98af-88fb6a66390e",
+              "name": "Stand-in task"
+            },
+            "threadRoot": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "conciergeChat": {
+              "id": "concierge",
+              "name": "Main chat",
+              "main": true
+            },
+            "sourceMessageId": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "createdAt": 1794685187087,
+            "updatedAt": 1794685187545,
+            "completedAt": null,
+            "archivedAt": null,
+            "notSynced": false
+          }
+        }
+      },
+      {
+        "type": "event",
+        "topic": "concierge.tasks",
+        "event": "task_upsert",
+        "data": {
+          "task": {
+            "id": "2cea228d-3626-43e8-9458-e1578eaf0132",
+            "title": "Stand-in task",
+            "state": "doing",
+            "status": "active",
+            "endReason": null,
+            "waitingSince": null,
+            "openWait": null,
+            "laterAt": null,
+            "summary": "Done.",
+            "waitingOn": null,
+            "dueAt": null,
+            "rank": null,
+            "chat": {
+              "id": "01a1db92-b40e-7218-98af-88fb6a66390e",
+              "name": "Stand-in task"
+            },
+            "threadRoot": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "conciergeChat": {
+              "id": "concierge",
+              "name": "Main chat",
+              "main": true
+            },
+            "sourceMessageId": "91f41e61-7c37-4924-92af-a5c02a84f971",
+            "createdAt": 1794685187087,
+            "updatedAt": 1794685187551,
+            "completedAt": null,
+            "archivedAt": null,
+            "notSynced": false
+          }
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.tasks:concierge",
+        "event": "tasks_changed",
+        "data": {
+          "chatId": "concierge"
+        }
+      },
+      {
+        "type": "event",
+        "topic": "concierge.activity",
+        "event": "concierge_activity",
+        "data": {
+          "chatId": "concierge",
+          "activity": {
+            "kind": "working"
+          },
+          "at": 1794685188583
+        }
+      }
+    ]
+  }
+}

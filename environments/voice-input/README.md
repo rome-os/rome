@@ -68,6 +68,7 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 | `messages --chat <id>` | The chat's stored messages: role, sender, text, attachments, `inputState`, time |
 | `audio-scan` | Searches the instance for audio and lists each finding with its reason |
 | `capture start` / `capture stop` | Records the browser's and the server's outbound requests; `stop` prints the record and lists in `audio` each request that carried audio and where it went |
+| `ios-record` | Records the stand-in instance's fixtures from this Rome into `ios-stand-in/fixtures` (see "The stand-in instance"). Leaves a topic chat and a task in Rome. |
 
 ### The desktop app
 
@@ -76,6 +77,23 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 The microphone permission exists here only as granted. On macOS the system settings hold it, ahead of the app's own handler; Linux has no such setting, and Electron does not honor the debugging protocol's permission override (the page's permission query changes, the microphone still opens). Unset and refused are checked by hand on a Mac.
 
 The dashboard's language follows the guardian's saved language once one is saved, in the app as in Chrome; `--lang` sets the language the app reports, which decides only while none is saved.
+
+### The stand-in instance
+
+The iOS UI tests run on CI's macOS runner, which cannot reach this environment, so they talk to a stand-in instance: `ios-stand-in/server.mjs`, Node with no dependencies, which serves what this environment's Rome answered.
+
+```bash
+node environments/voice-input/ios-stand-in/server.mjs --port 4790 [--log <file>] [--transcript <text>] [--voice-error <reason> [--voice-error-after-ms <n>]]
+```
+
+The app signs in with `ROME_LOCAL_ORIGIN=http://127.0.0.1:4790`, `ROME_LOCAL_USER=guardian` and `ROME_LOCAL_PASSWORD=stand-in`. Every answer carries `x-rome-stand-in: 1`, `GET /api/build-info` adds `standIn`, and `GET /api/voice-input` names `stand-in instance` as the provider.
+
+- **Fixtures.** `voice-env ios-record` records them in `ios-stand-in/fixtures`; nobody edits them by hand. For the recording only, Rome's model is `stand-in-model.mjs`, which calls `chat_start` when a message holds `[stand-in: start a task]`, so the main Chat gets a task card and a thread. `http.json` lists the four message fields (`chat`, `topic`, `task`, `thread`) and every answer; a route asked twice answers as it did last. `events.json` holds the live events a typed send made.
+- **A typed send** answers as the recorded one did, adds the message to later history loads of that chat, and replays the recorded events on `/ws/events` with the new text.
+- **`/ws/voice-input`** speaks the product's protocol: `start` with `sampleRate` 16000 (any other is `bad-request`), binary PCM frames, `stop`. It sends `alive` every second, one settled word of the transcript per 300 ms of audio, the rest at `stop`, then `ended`; `no-speech` after 30 s of silence.
+- **Control.** `GET /__stand-in/health`, `GET /__stand-in/stats` (requests, routes asked that were not recorded, voice sessions), and `POST /__stand-in/voice {transcript?, error?: {reason, detail?, afterMs?} | null}`.
+
+A route the app asks that was not recorded answers 404 `unrecorded` and is logged; add it to `record.mjs` and record again.
 
 ### The route to real Soniox
 
