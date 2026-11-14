@@ -155,9 +155,8 @@ struct TopicChatScreen: View {
     private var content: some View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
-                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks)
+                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                     .equatable()
-                    .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }

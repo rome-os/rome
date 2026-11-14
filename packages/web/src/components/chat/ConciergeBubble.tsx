@@ -107,6 +107,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
       )}
     >
       <div
+        data-bubble-box
         className={cn(
           "group/bubble relative flex min-w-0 max-w-full",
           side === "end" && "justify-end",

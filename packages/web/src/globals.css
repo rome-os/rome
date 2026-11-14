@@ -979,14 +979,21 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
 [data-timeline-landed] {
   background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
-/* A Concierge bubble is as wide as its anchor, so the tint alone hides behind
-   it. The ring shows around the bubble. */
-[data-concierge-transcript] [data-timeline-anchor] {
-  transition:
-    background 300ms ease-out,
-    box-shadow 300ms ease-out;
-}
+/* A Concierge bubble's anchor is not as wide as the bubble: it takes up to 90%
+   of the column, where the bubble stops at its reading width, and a touch
+   device's details row sits in it. So the anchor draws nothing of its own, and
+   the tint alone would hide behind the bubble. The ring shows around the
+   bubble or card itself, the first thing in its box, so it is exactly as wide. */
 [data-concierge-transcript] [data-timeline-landed] {
+  background: none;
+}
+[data-concierge-transcript] [data-bubble-box] > :first-child {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 300ms;
+  transition-timing-function: ease-out;
+}
+[data-concierge-transcript] [data-timeline-landed] > [data-bubble-box] > :first-child {
+  border-radius: var(--rome-radius-16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
 /* A status reaction grows in from 0.6, as a tapback does, and fades out

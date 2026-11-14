@@ -158,9 +158,8 @@ struct ChatScreen: View {
                 .onTapGesture { composerFocused = false }
             } else {
                 TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks)
+                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                         .equatable()
-                        .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
@@ -267,9 +266,12 @@ struct ConciergeRow: View, Equatable {
     /// Drawn in an open thread view: no thread labels, no share mode, and a
     /// tap on a message never closes the view.
     var inThread = false
+    /// The row's message is the tinted one: its bubble or card draws the
+    /// tint behind its own shape, never behind the whole row.
+    var tinted = false
 
     nonisolated static func == (lhs: ConciergeRow, rhs: ConciergeRow) -> Bool {
-        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread
+        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread && lhs.tinted == rhs.tinted
     }
 
     @Environment(\.openTaskChat) private var openTaskChat
@@ -301,6 +303,11 @@ struct ConciergeRow: View, Equatable {
     }
 
     var body: some View {
+        content.environment(\.rowTinted, tinted)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         let actions = store.actions
         let _ = PerfProbe.count("rowBody")
         switch row {
