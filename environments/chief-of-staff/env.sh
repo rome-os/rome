@@ -173,8 +173,16 @@ api() {
 claim_ownership() {
   local owner
   owner="$(cat "$OWNER_FILE" 2>/dev/null || true)"
-  if [ -n "$owner" ] && [ "$owner" != "$REPO_ROOT" ] && [ "${ROME_ENV_TAKE_OVER:-0}" != 1 ]; then
-    die "the environment belongs to $owner. Run down there, or set ROME_ENV_TAKE_OVER=1 to take it over."
+  if [ -n "$owner" ] && [ "$owner" != "$REPO_ROOT" ]; then
+    [ "${ROME_ENV_TAKE_OVER:-0}" = 1 ] ||
+      die "the environment belongs to $owner. Run down there, or set ROME_ENV_TAKE_OVER=1 to take it over."
+    # Taking over in the middle of a verifier run in the owner's checkout would
+    # rebuild or wipe the Rome that run is talking to.
+    local pid
+    for pid in $(pgrep -f 'verifier/verify\.mjs' || true); do
+      [[ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" != "$owner"* ]] ||
+        die "a verifier run (process $pid) is going in $owner. Wait for it to finish before taking the environment over."
+    done
   fi
   printf '%s\n' "$REPO_ROOT" >"$OWNER_FILE"
 }
@@ -582,17 +590,28 @@ cmd_seed() {
 }
 
 # Entry points for cos-env, which sources this file.
+# Restarts or starts Rome and waits until its Discord client is ready, since
+# Discord does not replay a message sent while the client is down, so a
+# message posted before then never reaches Rome.
+bring_rome_back() {
+  local since
+  since="$(date -u +%FT%T.%NZ)"
+  docker "$1" "$ROME" >/dev/null
+  wait_for_rome
+  [ -n "$(state connection 2>/dev/null)" ] || return 0
+  local attempts=0
+  until docker logs --since "$since" "$ROME" 2>&1 | grep -q '"discord client ready"'; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 60 ] || die "Rome's Discord client never became ready. Inspect: docker logs $ROME"
+    sleep 1
+  done
+}
+
 cos_rome() {
   case "${1:-}" in
     stop) docker stop "$ROME" >/dev/null ;;
-    start)
-      docker start "$ROME" >/dev/null
-      wait_for_rome
-      ;;
-    restart)
-      docker restart "$ROME" >/dev/null
-      wait_for_rome
-      ;;
+    start) bring_rome_back start ;;
+    restart) bring_rome_back restart ;;
     renew-session)
       shift
       cos_renew_session "$@"
@@ -617,8 +636,7 @@ cos_renew_session() {
   load_secrets
   log "arming a session renewal on #$chat ..."
   set_chat "$chat" '{"session":{"reset":{"mode":"idle","idleMinutes":1}}}'
-  docker restart "$ROME" >/dev/null
-  wait_for_rome
+  bring_rome_back restart
   log "armed. The next message to the agent in #$chat renews its session once a minute has passed since its last turn. 'cos-env reset' restores the policy."
 }
 

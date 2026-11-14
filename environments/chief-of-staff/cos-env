@@ -69,7 +69,7 @@ case "$command" in
       check_member "$dm"
       chat="$COS_DM_CHAT_PREFIX${dm%%:*}"
     fi
-    [ -n "$chat" ] || usage
+    [ -n "$chat" ] || [ -n "$thread" ] || die "read needs --chat <name>, --dm <member> or --thread <id>"
     load_secrets
     discord read "$chat" "$thread" "$since"
     ;;
