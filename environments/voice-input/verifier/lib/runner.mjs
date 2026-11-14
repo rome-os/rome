@@ -113,6 +113,7 @@ export async function verify({
   const report = {
     rulesVersion: RULES_VERSION,
     place,
+    platform: platformOf(place, version),
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
     underTest: version,
@@ -145,4 +146,15 @@ async function scoreRule(rule, place, ctx) {
   }
   ctx.log(`rule ${rule}: ${result.status}`);
   return { rule, title: scenario?.title ?? "", phase: RULE_PHASES[rule], ...result };
+}
+
+/**
+ * Where the place ran. The desktop app runs on the devbox's own system, so a run there says the
+ * app's other systems, macOS among them, were not checked by machine.
+ */
+function platformOf(place, version) {
+  const host = `${process.platform} ${process.arch}`;
+  if (place !== "desktop") return `${host}, Chrome`;
+  const app = version.desktop ? ` (${JSON.stringify(version.desktop)})` : "";
+  return `${host}, the desktop app on Electron${app}; macOS not checked by machine`;
 }

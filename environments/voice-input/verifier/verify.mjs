@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// verify [--rules 2,3] [--phase 1] [--place chrome] [--transcriber real|stand-in|<provider>]
+// verify [--rules 2,3] [--phase 1] [--place chrome|desktop] [--transcriber real|stand-in|<provider>]
 //        [--dirty] [--voice-env "<command>"] [--reset "<command>"] [--script <dir>] [--out <dir>]
 // Scores voice input against rules V2. With a provider as --transcriber, compares that
 // provider on the script instead of scoring the product. See README.md.
@@ -77,6 +77,7 @@ try {
     env: voiceEnv({
       command: values["voice-env"].split(" ").filter(Boolean),
       resetCommand: values.reset ? values.reset.split(" ").filter(Boolean) : undefined,
+      place: values.place,
     }),
     script,
     rules,

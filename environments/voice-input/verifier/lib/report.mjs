@@ -38,6 +38,7 @@ export function renderMarkdown(report) {
       ? [part("Environment checkout, running its scripts", underTest.environmentCheckout)]
       : []),
     part("Verifier", underTest.verifier),
+    ...(report.platform ? [`- Platform: ${report.platform}`] : []),
     `- Transcriber mode asked for: ${report.transcriberMode}`,
     ...inUse(report.transcriberInUse, underTest.transcriber),
     `- Waits: listening ${report.waits.afterSpeechMs / 1000} s past the last word, ${report.waits.sendCheckMs / 1000} s for a message nobody sent, ${report.waits.sendMs / 1000} s for a sent message, field steady for ${report.waits.steadyMs / 1000} s`,

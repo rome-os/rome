@@ -40,6 +40,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 const PHASE_1 = ["2", "3", "5", "6", "10", "11"];
 const PHASE_2 = ["4", "7", "8", "9"];
+const PHASE_3 = ["1"];
 
 /**
  * A short copy of the script: per set, two English, one Mandarin and one mixed message, with
@@ -81,6 +82,7 @@ async function runAgainst(variant, options = {}) {
         command: ["node", fakeEnv],
         resetCommand: ["node", fakeEnv, "reset"],
         env,
+        place: options.place,
       }),
       script,
       waits: WAITS,
@@ -108,12 +110,8 @@ describe("verify against the stand-in product", { concurrency: 3, timeout: 60000
     it(`scores ${variant}`, async () => {
       const broken = variant === "good" ? [] : [variant.slice("fail-".length).replace(/\D+$/, "")];
       // A broken variant is scored on its own phase's rules; the good one on every rule.
-      const rules =
-        variant === "good"
-          ? [...PHASE_1, ...PHASE_2]
-          : PHASE_2.includes(broken[0])
-            ? PHASE_2
-            : PHASE_1;
+      const phase = [PHASE_1, PHASE_2, PHASE_3].find((p) => p.includes(broken[0]));
+      const rules = variant === "good" ? [...PHASE_1, ...PHASE_2, ...PHASE_3] : phase;
       const { report } = await runAgainst(variant, { rules });
       assert.deepEqual(
         statuses(report),
@@ -126,6 +124,13 @@ describe("verify against the stand-in product", { concurrency: 3, timeout: 60000
       );
     });
   }
+
+  it("scores the desktop app as a place of its own", async () => {
+    const { report } = await runAgainst("good", { place: "desktop", rules: PHASE_3 });
+    assert.equal(report.place, "desktop");
+    assert.match(report.platform, /desktop app.*macOS not checked by machine/);
+    assert.deepEqual(statuses(report), { 1: "pass" });
+  });
 
   it("leaves rules 2 and 3 not checked on the stand-in transcriber", async () => {
     const { report } = await runAgainst("good", { transcriber: "stand-in", rules: PHASE_1 });

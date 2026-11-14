@@ -12,7 +12,9 @@ const run = promisify(execFile);
  * the environment keeps that in `env.sh reset`, outside voice-env. Every method throws when
  * the command fails, with its stderr in the message.
  */
-export function voiceEnv({ command, resetCommand, env = process.env }) {
+export function voiceEnv({ command, resetCommand, env = process.env, place = "chrome" }) {
+  // The desktop app is started like Chrome, by its own command, and answers with a `cdp` too.
+  const launcher = place === "desktop" ? "desktop" : "browser";
   const exec = async ([bin, ...fixed], args) => {
     try {
       const { stdout } = await run(bin, [...fixed, ...args], { env, maxBuffer: 64 * 1024 * 1024 });
@@ -39,8 +41,8 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
      * Resolves to `{ cdp }`, whose first page is on the dashboard, signed in as the guardian.
      */
     browser: ({ mic, permission = "granted", language = "en" }) =>
-      json(["browser", "--mic", mic, "--permission", permission, "--lang", language]),
-    stopBrowser: () => exec(command, ["browser", "stop"]),
+      json([launcher, "--mic", mic, "--permission", permission, "--lang", language]),
+    stopBrowser: () => exec(command, [launcher, "stop"]),
     /**
      * Points Rome at the real transcriber, or at the stand-in. The stand-in returns `text`
      * as the transcript of whatever it hears, or the Soniox error `errorCode`.

@@ -15,6 +15,7 @@
 //   fail-7   a stop other than the guardian's loses the words and says nothing
 //   fail-8   with the microphone refused the control disappears, the first use gives no
 //            reason, and Enter sends nothing
+//   fail-1   the field shows listening, and idle again, 800 ms after the action
 //   fail-9   the microphone stays open after listening stops, and silence never stops it
 import { createServer } from "node:http";
 import { basename } from "node:path";
@@ -33,6 +34,7 @@ export const VARIANTS = [
   "fail-7",
   "fail-8",
   "fail-9",
+  "fail-1",
 ];
 
 /** The dashboard's chats; the page opens on the first. */
@@ -99,7 +101,8 @@ async function handle(req, res, statePath, script) {
     return;
   }
   const chatPath = url.pathname.match(/^\/chat\/([^/]+)$/);
-  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat" || chatPath))
+  const rootPaths = ["/", "/chat", "/message"];
+  if (req.method === "GET" && (rootPaths.includes(url.pathname) || chatPath))
     return send(
       200,
       "text/html; charset=utf-8",
@@ -358,6 +361,14 @@ field.addEventListener("keydown", (event) => {
 });
 
 function setListening(on) {
+  if (variant === "fail-1") {
+    setTimeout(() => showListening(on), 800);
+    return;
+  }
+  showListening(on);
+}
+
+function showListening(on) {
   button.setAttribute("aria-pressed", on ? "true" : "false");
   button.textContent = on ? words.stop : words.start;
 }

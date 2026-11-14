@@ -26,7 +26,7 @@ The verifier scores voice input against rule set V5 (`~/.rome-environments/voice
 | --- | --- | --- |
 | `--phase <n>` | Every rule of phase `n` and of the phases before it | 1 |
 | `--rules <list>` | Only these rules, comma separated. A rule with no scenario yet is reported as not checked | |
-| `--place <name>` | Where to score. Only `chrome` exists in phase 1 | `chrome` |
+| `--place <name>` | Where to score: `chrome`, the dashboard in Chrome, or `desktop`, the Rome desktop app, started by `voice-env desktop` with the same options as `browser`. The report names the platform that ran; on the devbox that is Linux, and macOS is not checked by machine | `chrome` |
 | `--transcriber <mode>` | `real` or `stand-in` scores the product with that transcriber behind Rome. On `stand-in`, rules 2 and 3 are not checked, because the stand-in's text and timing are scripted. A provider name runs the comparison below instead | `real` |
 | `--dirty` | Run even though the code under test has uncommitted changes. The report says so | off |
 | `--voice-env "<command>"` | The `voice-env` command | `environments/voice-input/voice-env` |
@@ -73,6 +73,7 @@ Each WAV is 48 kHz mono 16-bit PCM, with 1 s of silence before the speech and 6 
 
 | Rule | What the scenario does | Pass bar |
 | --- | --- | --- |
+| 1 You can speak wherever you can type | Opens each message field of the place, the Chat (`/message`) and a chat (`/chat`), and starts and stops listening 5 times in each, timing in the page's clock from the click to `aria-pressed` changing | Each field has a voice control, and every start and stop shows within 0.5 s |
 | 2 Text appears as you speak | Plays each of set B's 20 messages as the microphone in a new Chrome, starts listening, stops it `--after-speech` seconds past the last word, and records the field's text every 25 ms | At least 18 of 20 messages show text within 2 s of the first word and reach their final text within 2 s of the last word. Times count from the start click |
 | 3 The text is what you said | Compares each field's text with the written text, from rule 2's set B runs and the same runs of set A | In each set, English at most 8 wrong words in 100, and Mandarin and mixed together at most 8 wrong characters in 100. Each is pooled over its messages. Each set's numbers, Mandarin alone and mixed alone are reported too. Not checked on the stand-in transcriber |
 | 5 Only you send | In the same set B runs, reads every chat `--send-check` seconds after listening stops, then presses Enter in the field | No new message before Enter in any run. After Enter, one message with the field's text |
@@ -112,6 +113,7 @@ The environment's own README (`environments/voice-input/README.md`) is the contr
 - **`capture start`** runs once the first Chrome is up, and **`capture stop`** after set B's 20 messages. Rule 10 reads its `audio` list.
 - **`audio-scan`**: rule 10 fails on any finding.
 - **`browser --permission unset|granted|refused`** sets the microphone permission for rule 8, and **`--lang`** the dashboard's language.
+- **`desktop --mic <wav> --permission … --lang …`** and **`desktop stop`** start and stop the desktop app for `--place desktop`, the way `browser` does Chrome: it prints `cdp`, whose first page is the dashboard inside the app, signed in. `version` may add `desktop`, which the report prints with the platform.
 - **`network cut`** and **`network restore`** are rule 7's lost network. The verifier restores it in every case.
 - **`transcriber route cut|restore|status`** is rule 7's transcriber error on a real provider, and **`transcriber stand-in --error <code> --after-ms <n>`** on the stand-in.
 - **`cloud sign-out`**, **`cloud sign-in`**, **`gate on|off`**, **`cloud session`**, **`cloud minted`**, **`cloud status`** and **`cloud usage`** are what rule 11 uses. `cloud session` prints `{ status, body }` for `POST /v1/transcription/sessions` as the instance, and `cloud minted` prints `{ count }`. `cloud status` prints `{ signedIn, ownCredential }`: whether the instance is signed in to Rome Cloud, and whether its config holds `ROME_TRANSCRIPTION_API_KEY`. `cloud usage` prints `{ events: [{ eventId, sessionId, provider, model, seconds, at }] }`, Rome Cloud's voice usage for the instance, oldest first. **`logs --match`** gives Rome's `voice input stopped` entries, whose `sessionId` rule 11 matches. Where they are missing, rule 11 reports that part not checked.

@@ -169,6 +169,8 @@ switch (command) {
   case "reset":
     updateState(statePath, (s) => Object.assign(s, emptyState(s.variant)));
     break;
+  // The fake's desktop app is the same Chromium, as the desktop app is the same dashboard.
+  case "desktop":
   case "browser":
     if (positionals[0] === "stop") {
       stopBrowser();
