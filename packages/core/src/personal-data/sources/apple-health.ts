@@ -46,7 +46,8 @@ export const APPLE_HEALTH: SourceSpec = {
   source: "apple_health",
   title: "Apple Health",
   note:
-    "Pushed from the guardian's iPhone in the background, usually within an hour; sleep once a day. " +
+    "Pushed from the guardian's iPhone: within minutes while the Rome app is open, and in the " +
+    "background when iOS allows, often within an hour. " +
     "Hourly and daily buckets; workouts, sleep nights and body readings as records. " +
     "A day with no value had no data or the type is not allowed in iOS.",
   types: [

@@ -183,9 +183,10 @@ describe("personal-data actions", () => {
         sources: [{ source: "apple_health", types: [], connection: { id: "dev-1:apple_health" } }],
       },
     });
-    // A working connection is read live, with no step to take instead.
-    const working = (await query()) as { data: { connection: Record<string, unknown> } };
-    expect(working.data.connection.next).toBeUndefined();
+    // A working connection is read live now, never by a check scheduled for later.
+    const working = (await query()) as { data: { connection: { next?: string } } };
+    expect(working.data.connection.next).toContain("rome-node device run dev-1 <action>");
+    expect(working.data.connection.next).toContain("Do not schedule a later check");
     reportHealth("unknown", false);
     const off = (await query()) as { data: { connection: { next?: string } } };
     expect(off).toMatchObject({ data: { connection: { state: "off", kind: "apple_health" } } });
