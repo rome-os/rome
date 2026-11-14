@@ -363,14 +363,32 @@ final class Workspace {
     }
 
     /// Deletes a topic chat and drops it from the drawer. Returns whether the
-    /// server took it.
+    /// server took it. `stoppingWork` ends its follows and open tasks instead
+    /// of moving them to the main Chat.
     @discardableResult
-    func deleteTopic(_ chatId: String) async -> Bool {
-        guard (try? await backend.deleteChat(chatId)) != nil else { return false }
+    func deleteTopic(_ chatId: String, stoppingWork: Bool = false) async -> Bool {
+        guard (try? await backend.deleteChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
-        // Its open tasks now belong to the main Chat.
+        // Its open tasks now belong to the main Chat, or have stopped.
         tasks.resync()
         return true
+    }
+
+    /// The follows and open tasks that deleting topic chat `chatId` would
+    /// move, or nil when they cannot be read within `wait`: an older
+    /// instance, or a slow network. The delete then moves them, as before.
+    func topicWork(_ chatId: String, wait: Duration = .seconds(3)) async -> ConciergeChatWork? {
+        let backend = backend
+        return await withTaskGroup(of: ConciergeChatWork?.self) { group in
+            group.addTask { try? await backend.chatWork(chatId: chatId) }
+            group.addTask {
+                try? await Task.sleep(for: wait)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     private func dropTopic(_ chatId: String) {
@@ -491,6 +509,13 @@ final class Workspace {
     /// load again, visibly, or asks once whether its turn still runs.
     func chatShown(chat: String) {
         if isMainChat(chat) { concierge.chatShown() } else { topicStores[chat]?.chatShown() }
+    }
+
+    /// The app went to the background: each Concierge chat opens again when
+    /// it comes back in front, so what arrived meanwhile gets its unread line.
+    func leftForBackground() {
+        concierge.leftForBackground()
+        for store in topicStores.values { store.leftForBackground() }
     }
 
     /// The id this person's main chat goes by, here and on the server.
@@ -1416,6 +1441,7 @@ final class AppModel {
         // Drafts are written before the app may be killed.
         if let drafts = workspace?.drafts { Task { await drafts.flush() } }
         workspace?.transcripts.flush()
+        workspace?.leftForBackground()
         sayGoodbye()
     }
 
@@ -1685,6 +1711,7 @@ final class AppModel {
         guard let url = URL(string: origin) else { return }
         phase = .connecting(host: url.host() ?? origin)
         var request = URLRequest(url: url.appending(path: "api/auth/login"))
+        DevAccess.stamp(&request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONEncoder().encode(["userId": user, "password": password])

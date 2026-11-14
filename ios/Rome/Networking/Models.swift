@@ -254,6 +254,11 @@ struct ConciergeSessionInfo: Codable, Sendable {
     var unread: Int
 }
 
+/// `GET /chat/sessions/:id`, the one field read from it.
+struct SessionReadMark: Decodable, Sendable {
+    var lastSeenActivityAt: String?
+}
+
 /// `POST /chat/sessions/:id/turns`.
 struct CreatedTurn: Codable, Sendable {
     var turnId: String?
@@ -319,6 +324,41 @@ struct ConciergeChat: Codable, Identifiable, Hashable, Sendable {
         try container.encodeIfPresent(unread, forKey: .unread)
         try container.encodeIfPresent(activity?.json, forKey: .activity)
     }
+}
+
+/// What deleting a topic chat would move to the main chat, from
+/// `GET /concierge/chats/:chatId/follows-and-tasks`: its follows and its open
+/// tasks. A missing list reads as empty.
+struct ConciergeChatWork: Codable, Hashable, Sendable {
+    struct Follow: Codable, Hashable, Sendable {
+        var source: String
+        /// The source's name, as the connectors list shows it.
+        var label: String
+        var target: String
+    }
+
+    struct OpenTask: Codable, Hashable, Sendable {
+        var id: String
+        var title: String
+    }
+
+    var follows: [Follow]
+    var openTasks: [OpenTask]
+
+    private enum CodingKeys: String, CodingKey { case follows, openTasks }
+
+    init(follows: [Follow] = [], openTasks: [OpenTask] = []) {
+        self.follows = follows
+        self.openTasks = openTasks
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        follows = try container.decodeIfPresent([Follow].self, forKey: .follows) ?? []
+        openTasks = try container.decodeIfPresent([OpenTask].self, forKey: .openTasks) ?? []
+    }
+
+    var isEmpty: Bool { follows.isEmpty && openTasks.isEmpty }
 }
 
 /// What the Concierge is doing in one of its chats, as the server works it

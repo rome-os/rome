@@ -159,8 +159,8 @@ final class APIClient: Sendable {
     }
 
     @discardableResult
-    func delete(_ path: String) async throws -> Data {
-        try await send(request(path, method: "DELETE"))
+    func delete(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+        try await send(request(path, query: query, method: "DELETE"))
     }
 
     /// A request whose status the caller reads itself, for personal-data sync,
@@ -292,6 +292,7 @@ final class APIClient: Sendable {
             request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
         }
         request.setValue(Self.originString(origin), forHTTPHeaderField: "Origin")
+        DevAccess.stamp(&request)
     }
 
     /// The live-events upgrade header that marks the phone app's socket.

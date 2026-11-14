@@ -37,6 +37,10 @@
 	</array>
 	<key>RomeCloudOrigin</key>
 	<string>$(ROME_CLOUD_ORIGIN)</string>
+	<key>CFAccessClientId</key>
+	<string>$(CF_ACCESS_CLIENT_ID)</string>
+	<key>CFAccessClientSecret</key>
+	<string>$(CF_ACCESS_CLIENT_SECRET)</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

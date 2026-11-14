@@ -91,6 +91,7 @@ export class ConciergeTasks {
   /** The status each task was last told with, so a fact that changes none tells nothing. */
   private told = new Map<string, string>();
   private statusListeners = new Set<(taskId: string, status: TaskStatusView) => void>();
+  private endListeners = new Set<(row: ConciergeTaskRow) => void>();
   /** Per task, the keeping of when it ended that runs now (`keepEndedOf`). */
   private keeping = new Map<string, Promise<void>>();
   /** Task chats whose turn ended and whose outcome is not written yet. */
@@ -219,19 +220,28 @@ export class ConciergeTasks {
     rows: readonly ConciergeTaskRow[],
     read: Map<string, TaskStatusView>,
   ): Promise<void> {
-    const ended = rows.filter((row) => read.get(row.id)?.status === "ended");
-    const open = rows.filter((row) => read.get(row.id)?.status !== "ended");
-    await this.repo
+    const ended = rows.filter((row) => read.get(row.id)?.status === "ended" && !row.endedAt);
+    const reopened = rows.filter((row) => read.get(row.id)?.status !== "ended" && row.endedAt);
+    if (ended.length === 0 && reopened.length === 0) return;
+    const kept = await this.repo
       .keepEnded(
-        ended.filter((row) => !row.endedAt).map((row) => row.id),
-        open.filter((row) => row.endedAt).map((row) => row.id),
+        ended.map((row) => row.id),
+        reopened.map((row) => row.id),
         new Date(this.now()),
       )
-      .catch((error: unknown) =>
-        log.warn("failed to keep when tasks ended", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
+      .then(
+        () => true,
+        (error: unknown) => {
+          log.warn("failed to keep when tasks ended", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return false;
+        },
       );
+    if (!kept) return;
+    for (const row of [...ended, ...reopened]) {
+      for (const listener of this.endListeners) listener(row);
+    }
   }
 
   /**
@@ -279,6 +289,14 @@ export class ConciergeTasks {
   /** How long a wait on the owner keeps a task waiting for them, in milliseconds. */
   get waitExpiry(): number {
     return this.waitExpiryMs;
+  }
+
+  /** Calls `listener` with a task once it ended, or started again after it ended. Returns the unsubscribe. */
+  onEnded(listener: (row: ConciergeTaskRow) => void): () => void {
+    this.endListeners.add(listener);
+    return () => {
+      this.endListeners.delete(listener);
+    };
   }
 
   /** Calls `listener` with each task's status whenever it is read. Returns the unsubscribe. */

@@ -12,7 +12,7 @@ const placements = [
 
 rs.mock("@/pages/free/use-free-cells", () => ({ useFreeCells: () => ({ placements }) }));
 rs.mock("@/hooks/use-apps", () => ({
-  useApps: () => ({ apps: [{ id: "studio", displayName: "Studio", iconUrl: null }] }),
+  useAppsList: () => ({ apps: [{ id: "studio", displayName: "Studio", iconUrl: null }] }),
 }));
 rs.mock("@/lib/chat-api", () => ({
   ChatApiError: class extends Error {},

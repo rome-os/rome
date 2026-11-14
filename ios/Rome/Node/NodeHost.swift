@@ -29,6 +29,7 @@ enum NodeConfigError: Error {
 enum NodeGatewayConfig {
     static func fetch(cloud: URL, token: String, http: URLSession) async throws -> URL {
         var request = URLRequest(url: cloud.appending(path: "v1/gateway/config"))
+        DevAccess.stamp(&request)
         request.timeoutInterval = 10
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -462,6 +463,7 @@ final class WebSocketTransport: NSObject, NodeSocket, URLSessionWebSocketDelegat
     static func open(_ url: URL, authorization: String) async throws -> WebSocketTransport {
         let transport = WebSocketTransport()
         var request = URLRequest(url: url)
+        DevAccess.stamp(&request)
         request.timeoutInterval = 10
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .ephemeral, delegate: transport, delegateQueue: nil)

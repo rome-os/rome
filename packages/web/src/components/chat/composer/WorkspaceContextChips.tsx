@@ -13,7 +13,7 @@ import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useApps } from "@/hooks/use-apps";
+import { useAppsList } from "@/hooks/use-apps";
 import { appDisplayName } from "@/lib/app-display-name";
 import {
   useWorkspaceContextRegistry,
@@ -107,7 +107,7 @@ function appChip(
 export function WorkspaceContextChips() {
   const { t } = useTranslation("common");
   const registry = useWorkspaceContextRegistry();
-  const { apps } = useApps();
+  const { apps } = useAppsList();
   const [expanded, setExpanded] = useState(false);
 
   useSyncExternalStore(
