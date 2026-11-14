@@ -74,7 +74,7 @@ export function queryPersonalData(
   // The origin of the first type the store does not cover, or null when that
   // type has no origin at all.
   let gapOrigin: string | null | undefined;
-  // How much of the window the store lacks, for the widest gap of any type.
+  // How far behind the store is, for the most stale type the window lacks.
   let gapMs = 0;
   const results = plan.types.map((spec) => {
     // Each type reads the origin that covers the window, so a second device
@@ -112,8 +112,13 @@ export function queryPersonalData(
     };
     if (!freshness[spec.type].coversWindow) {
       if (gapOrigin === undefined) gapOrigin = reading?.origin ?? null;
-      const missingFrom = freshness[spec.type].missingFrom;
-      if (missingFrom) gapMs = Math.max(gapMs, windowEnd - Date.parse(missingFrom));
+      // How stale the store is, not how much of the window it lacks: a short
+      // window over a store days behind is still a wide gap. History that
+      // does not reach back, or no sync at all, has no bound.
+      gapMs = Math.max(
+        gapMs,
+        at === undefined || !reachesBack ? Number.POSITIVE_INFINITY : windowEnd - at,
+      );
     }
     return answered.result;
   });

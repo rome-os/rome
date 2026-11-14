@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/db.js";
 import type { QueryInput } from "./domain/query.js";
 import { type QueryAnswer, queryPersonalData } from "./read.js";
+import type { DeviceConnection } from "../connections/device/repository.js";
 import { PersonalDataRepository } from "./repository.js";
 import { APPLE_HEALTH } from "./sources/apple-health.js";
 import { PERSONAL_DATA_SOURCES } from "./sources/index.js";
@@ -298,6 +299,44 @@ describe("queryPersonalData", () => {
       query({ type: "heartRate", start: "2026-11-10", end: "2026-11-10", aggregate: "latest" })
         .results[0],
     ).toMatchObject({ aggregate: "latest", value: 100 });
+  });
+
+  it("reads a short window over a stale store live, and a fresh store from itself", () => {
+    const working = {
+      id: "dev-1:apple_health",
+      capability: "apple_health",
+      title: "Apple Health",
+      device: { id: "dev-1", name: "iPhone", platform: "ios" },
+      state: "working",
+      lastSeenAt: new Date(NOW).toISOString(),
+    } as unknown as DeviceConnection;
+    const connections = { byId: () => working, feeding: () => working };
+    const lastHalfHour = () => {
+      const answer = queryPersonalData(
+        repo,
+        APPLE_HEALTH,
+        {
+          source: "apple_health",
+          type: "stepCount",
+          start: "2026-11-15T09:30",
+          end: "2026-11-15T10:00",
+        },
+        { tz: TZ, now: NOW },
+        connections,
+      );
+      if ("error" in answer) throw new Error(answer.error);
+      return answer.connection?.next ?? "";
+    };
+    // Synced three days ago: the window is short, the store is not current.
+    expect(lastHalfHour()).toContain("rome-node device run dev-1");
+    repo.ingest(
+      APPLE_HEALTH,
+      batch("fresh", {
+        types: [{ type: "stepCount", syncedThrough: new Date(NOW - 20 * 60 * 1000).toISOString() }],
+      }),
+      NOW,
+    );
+    expect(lastHalfHour()).toContain("under an hour behind");
   });
 
   it("reads blood glucose as averaged buckets: hours recent, days older, and refuses a sample", () => {
