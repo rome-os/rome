@@ -103,6 +103,23 @@ final class FakeBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
+    /// What a topic chat's delete would move; nil, the read fails, as on an
+    /// older instance. `chatWorkDelay` holds the answer back.
+    var chatWorkAnswer: ConciergeChatWork?
+    var chatWorkDelay: Duration?
+
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws {
+        calls.append(stoppingWork ? "delete \(id) stopping work" : "delete \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        calls.append("work \(chatId)")
+        if let chatWorkDelay { try await Task.sleep(for: chatWorkDelay) }
+        guard let chatWorkAnswer else { throw APIError.notFound }
+        return chatWorkAnswer
+    }
+
     /// Share links: what each create asked for, the answer it gets, the
     /// chat's links, and the revokes, in order.
     var shareRequests: [(sessionId: String, turnIds: [String], agentName: String?)] = []

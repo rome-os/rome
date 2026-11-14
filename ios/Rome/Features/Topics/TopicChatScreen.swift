@@ -22,7 +22,8 @@ struct TopicChatScreen: View {
     @State private var startFailure: SendFailure = .unknown
     @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
-    @State private var confirmDelete = false
+    /// The delete alert, once the chat's follows and open tasks are read.
+    @State private var deleting: TopicDeletePrompt?
     @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -61,7 +62,7 @@ struct TopicChatScreen: View {
                     renaming = true
                 },
                 onArchive: chatId.map { id in { archive(id) } },
-                onDelete: { confirmDelete = true }
+                onDelete: { title in askToDelete(title) }
             )
             .accessibilityHidden(store?.thread != nil)
         }
@@ -85,9 +86,8 @@ struct TopicChatScreen: View {
                 Task { await workspace.renameTopic(chatId, to: name) }
             }
         }
-        .deleteChatAlert(isPresented: $confirmDelete) {
-            guard let chatId else { return }
-            Task { if await workspace.deleteTopic(chatId) { onArchived() } }
+        .deleteTopicChatAlert($deleting) { id, stoppingWork in
+            Task { if await workspace.deleteTopic(id, stoppingWork: stoppingWork) { onArchived() } }
         }
         .pageBackground()
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) }, prefill: Binding(
@@ -189,6 +189,15 @@ struct TopicChatScreen: View {
         }
     }
 
+    /// Reads what the delete would move, then asks.
+    private func askToDelete(_ name: String) {
+        guard let chatId else { return }
+        Task {
+            let work = await workspace.topicWork(chatId)
+            deleting = TopicDeletePrompt(id: chatId, name: name, work: work)
+        }
+    }
+
     private func archive(_ id: String) {
         Task {
             if await workspace.archiveTopic(id) { onArchived() }
@@ -272,7 +281,8 @@ private struct TopicChatHeader: View {
     /// Rename, with the chat's current title.
     let onRename: (String) -> Void
     let onArchive: (() -> Void)?
-    let onDelete: () -> Void
+    /// Delete, with the chat's current title.
+    let onDelete: (String) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -290,7 +300,7 @@ private struct TopicChatHeader: View {
             // A blank chat has nothing to rename, archive or delete yet.
             onRename: chatId == nil ? nil : { onRename(title) },
             onArchive: onArchive,
-            onDelete: chatId == nil ? nil : onDelete
+            onDelete: chatId == nil ? nil : { onDelete(title) }
         )
         .shareModeHeader(share)
     }

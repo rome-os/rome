@@ -348,14 +348,32 @@ final class Workspace {
     }
 
     /// Deletes a topic chat and drops it from the drawer. Returns whether the
-    /// server took it.
+    /// server took it. `stoppingWork` ends its follows and open tasks instead
+    /// of moving them to the main Chat.
     @discardableResult
-    func deleteTopic(_ chatId: String) async -> Bool {
-        guard (try? await backend.deleteChat(chatId)) != nil else { return false }
+    func deleteTopic(_ chatId: String, stoppingWork: Bool = false) async -> Bool {
+        guard (try? await backend.deleteChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
-        // Its open tasks now belong to the main Chat.
+        // Its open tasks now belong to the main Chat, or have stopped.
         tasks.resync()
         return true
+    }
+
+    /// The follows and open tasks that deleting topic chat `chatId` would
+    /// move, or nil when they cannot be read within `wait`: an older
+    /// instance, or a slow network. The delete then moves them, as before.
+    func topicWork(_ chatId: String, wait: Duration = .seconds(3)) async -> ConciergeChatWork? {
+        let backend = backend
+        return await withTaskGroup(of: ConciergeChatWork?.self) { group in
+            group.addTask { try? await backend.chatWork(chatId: chatId) }
+            group.addTask {
+                try? await Task.sleep(for: wait)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     private func dropTopic(_ chatId: String) {

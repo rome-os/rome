@@ -35,6 +35,11 @@ protocol RomeBackend: AnyObject, Sendable {
     func archiveChat(_ id: String) async throws
     /// Deletes a chat for good; a Concierge topic chat retires with it.
     func deleteChat(_ id: String) async throws
+    /// Deletes a topic chat for good. `stoppingWork` ends its follows and open
+    /// tasks instead of moving them to the main chat.
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws
+    /// The follows and open tasks that deleting topic chat `chatId` would move.
+    func chatWork(chatId: String) async throws -> ConciergeChatWork
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     /// The newest page, reaching down to `through` and two turns past it.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
@@ -161,6 +166,16 @@ final class LiveBackend: RomeBackend {
 
     func deleteChat(_ id: String) async throws {
         try await client.delete("/chat/sessions/\(escape(id))")
+    }
+
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws {
+        // Without the option, the server moves them, as it always has.
+        let query = stoppingWork ? [URLQueryItem(name: "followsAndTasks", value: "stop")] : []
+        try await client.delete("/chat/sessions/\(escape(id))", query: query)
+    }
+
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks")
     }
 
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
@@ -437,6 +452,9 @@ enum ToolCallExtractor {
 extension RomeBackend {
     /// Demo data and test doubles stop nothing.
     func stopTask(id: String) async throws { throw APIError.notFound }
+    /// Demo data and test doubles move a chat's work, as an older instance does.
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
+    func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
     /// Demo data and test doubles hold every message in the newest page.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
         try await messages(sessionId: sessionId, before: nil, limit: limit)
