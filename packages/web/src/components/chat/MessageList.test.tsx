@@ -29,6 +29,9 @@ import type { ChatMessage } from "@/lib/chat-types";
 import { EMPTY_LIVE_TEXT, staticLiveText } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
+import { questionCardRender } from "../../../mock/fixtures/question-card";
+import { MemoryRouter } from "react-router-dom";
+import "@/i18n";
 
 afterEach(() => cleanup());
 
@@ -60,11 +63,7 @@ function questionCardTurn(): ChatMessage {
         type: "pending_interaction",
         toolUseId: "t-1",
         appId: "system",
-        render: {
-          builtin: true,
-          componentId: "question-card",
-          props: { questions: [{ id: "q1", question: "Your name?", type: "text" }] },
-        },
+        render: questionCardRender([{ id: "q1", question: "Your name?", type: "text" }]),
       },
     ]),
     createdAt: "2026-06-13T00:00:00.000Z",
@@ -108,7 +107,10 @@ function renderList(streaming: boolean) {
 }
 
 describe("MessageList archived steps", () => {
-  it.each([true, false])("keeps replies and cards when assistant rows exist: %s", (hasReply) => {
+  it.each([
+    true,
+    false,
+  ])("keeps replies and cards when assistant rows exist: %s", async (hasReply) => {
     const trace: ChatMessage = {
       id: "archived-trace",
       sessionId: "s-1",
@@ -148,7 +150,7 @@ describe("MessageList archived steps", () => {
     if (hasReply) {
       expect(screen.getByText("My question")).toBeTruthy();
       expect(screen.getByText("The final answer")).toBeTruthy();
-      expect(screen.getByPlaceholderText("Type your answer…")).toBeTruthy();
+      expect(await screen.findByPlaceholderText("Type your answer…")).toBeTruthy();
     }
     expect(screen.queryByRole("button", { name: /step/i })).toBeNull();
   });
@@ -750,5 +752,113 @@ describe("MessageList model switch notice", () => {
     );
     const notes = screen.getAllByRole("note");
     expect(notes.map((note) => note.textContent)).toEqual(["Switched to GPT-6 Luna"]);
+  });
+});
+
+describe("a turn that failed, read back after a reload", () => {
+  const renderFailed = (
+    summary: Partial<NonNullable<ChatMessage["traceSummary"]>>,
+    before: ChatMessage[] = [],
+  ) => {
+    const messages: ChatMessage[] = [
+      ...before,
+      {
+        id: "trace-failed",
+        sessionId: "s-1",
+        turnId: "turn-failed",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-06-13T00:00:01.000Z",
+        traceSummary: {
+          distinctApps: [],
+          totalSteps: 0,
+          invocationCounts: {},
+          turnStatus: "error",
+          terminalError: "402 Payment Required: credit balance is 0",
+          ...summary,
+        },
+      },
+    ];
+    const rows = buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
+      runningTurnId: null,
+      isStreaming: false,
+    });
+    render(
+      <MemoryRouter>
+        <ThemeProvider>
+          <MessageList
+            rows={rows}
+            live={{
+              isStreaming: false,
+              runningTurnId: null,
+              snapshot: null,
+              textStore: EMPTY_LIVE_TEXT,
+              identity: IDENTITY,
+            }}
+            contentRef={() => {}}
+            onOpenLiveTrace={() => {}}
+            onOpenStoredTrace={() => {}}
+            actions={{
+              onApprovalResolved: () => {},
+              onSubmitAppComponent: () => {},
+              onDismissAppComponent: () => {},
+              interactionResults: new Map(),
+            }}
+          />
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+  };
+
+  it("shows the live banner's guidance, not the provider's raw text", () => {
+    renderFailed({ terminalErrorCode: "credits_used_up", terminalErrorProvider: "openai" });
+    expect(screen.getByText("Rome credits used up")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Connect an AI/ }).getAttribute("href")).toBe(
+      "/settings/ai-tools",
+    );
+    expect(screen.queryByText(/credit balance is 0/)).toBeNull();
+  });
+
+  it("puts the guidance in the row's body, below its one-line trace header", () => {
+    renderFailed({ terminalErrorCode: "credits_used_up" });
+    const header = screen.getByRole("button", { name: /Error/ }).closest(".h-5");
+    expect(header).not.toBeNull();
+    expect(header?.contains(screen.getByText("Rome credits used up"))).toBe(false);
+  });
+
+  it("shows the guidance once for a turn whose error is stored as its own message", () => {
+    renderFailed(
+      {
+        terminalError: "Claude is not signed in",
+        terminalErrorCode: "model_provider_unavailable",
+        terminalErrorProvider: "anthropic",
+        terminalErrorReason: "not_logged_in",
+      },
+      [
+        {
+          id: "a-failed",
+          sessionId: "s-1",
+          turnId: "turn-failed",
+          role: "assistant",
+          content: JSON.stringify([
+            {
+              type: "error",
+              error: "Claude is not signed in",
+              code: "model_provider_unavailable",
+              provider: "anthropic",
+              reason: "not_logged_in",
+            },
+          ]),
+          createdAt: "2026-06-13T00:00:00.000Z",
+        },
+      ],
+    );
+    expect(screen.getAllByText("Claude is not signed in")).toHaveLength(1);
+  });
+
+  it("keeps the raw text for an error with no guidance, or from an older server", () => {
+    renderFailed({});
+    expect(screen.getByText("Error: 402 Payment Required: credit balance is 0")).toBeTruthy();
+    expect(screen.queryByText("Rome credits used up")).toBeNull();
   });
 });

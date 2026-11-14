@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { routineRuns, routines } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
@@ -74,6 +74,33 @@ export async function routineCreator(
   return (await currentSessionActor()) ?? (await guardianActor(db)) ?? null;
 }
 
+/** The actions whose args name the chat they send into, and the arg that names it. */
+const CHAT_ARG_OF_ACTION: Record<string, string> = {
+  resume_session: "threadId",
+  send_message: "threadId",
+  send_user_message: "sessionId",
+};
+
+/**
+ * The chat a routine works for: the chat its args send into (`threadId` of
+ * `resume_session` and `send_message`, `sessionId` of `send_user_message`),
+ * else the chat it was made in: `madeIn`, or the webchat chat whose turn
+ * creates it. Null when neither names one. Migration 0134 fills older rows by
+ * their args alone, as nothing on them says where they were made.
+ */
+export function routineChatOf(
+  actionName: string,
+  args: Record<string, unknown>,
+  madeIn?: string,
+): string | null {
+  const arg = CHAT_ARG_OF_ACTION[actionName.replace(/^system:/, "")];
+  const value = arg ? args[arg] : undefined;
+  if (typeof value === "string" && value) return value;
+  if (madeIn) return madeIn;
+  const context = actionExecutionContext.getStore()?.channelContext;
+  return context?.channel === "webchat" && context.threadId ? context.threadId : null;
+}
+
 export class RoutinesRepository {
   constructor(private db: DrizzleDb) {}
 
@@ -116,6 +143,16 @@ export class RoutinesRepository {
       .where(eq(routines.name, name));
     const types = new Set(rows.map((row) => (row.trigger as Trigger).type));
     return types.size === 1 ? [...types][0] : null;
+  }
+
+  /** The routines that work for chat `chatId`, as stored rows. */
+  async findByChat(chatId: string) {
+    return this.db.select().from(routines).where(eq(routines.chatId, chatId));
+  }
+
+  /** The routines that work for some chat, as stored rows. */
+  async findWithChat() {
+    return this.db.select().from(routines).where(isNotNull(routines.chatId));
   }
 
   /** Look up a routine by its caller-assigned `key`. Used by create_routine to
@@ -195,6 +232,10 @@ export class RoutinesRepository {
     keepTriggerPayload?: boolean;
     /** Who its fires act for; absent, {@link routineCreator} decides. */
     createdBy?: SessionActor | RoutineOwner;
+    /** The chat it works for; absent, {@link routineChatOf} decides. Null for none. */
+    chatId?: string | null;
+    /** The chat it is made in, when no webchat turn makes it (a chat's card). */
+    madeIn?: string;
   }): Promise<string> {
     const id = uuid();
     const now = new Date();
@@ -210,6 +251,10 @@ export class RoutinesRepository {
       args: data.args as unknown,
       keepTriggerPayload: data.keepTriggerPayload ?? true,
       createdBy,
+      chatId:
+        data.chatId === undefined
+          ? routineChatOf(data.actionName, data.args, data.madeIn)
+          : data.chatId,
       createdAt: now,
       lastFiredAt: null,
       nextRunAt: data.nextRunAt ?? null,

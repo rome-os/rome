@@ -2,8 +2,13 @@
 // server is packages/core/src/concierge and the client is packages/web.
 
 import type { ConciergeActivity } from "./concierge-activity.js";
+import type { ConciergeTaskEndReason, ConciergeTaskStatus } from "./concierge-task-status.js";
+import type { TaskCardRender } from "./chat.js";
 
-/** What a task row is doing. The Concierge sets it; the system never derives it. */
+/**
+ * What a task row is doing, as apps from before derived status read it. Rome
+ * maps it from the task's status (`legacyTaskState`); read `status` instead.
+ */
 export const CONCIERGE_TASK_STATES = [
   "next",
   "doing",
@@ -15,19 +20,40 @@ export const CONCIERGE_TASK_STATES = [
 export type ConciergeTaskState = (typeof CONCIERGE_TASK_STATES)[number];
 
 /**
- * How the work a guardian message started stands, as its status reaction in a
- * Concierge chat shows it (docs/domains/chats.md#status-reaction): working,
- * or failed. Work that finished shows none, since the reply says so. Rome
- * sets it, never the Concierge.
+ * The reactions the Concierge may put on a guardian message of its chat with
+ * `react` (docs/domains/chats.md#reaction). Clients draw whatever string the
+ * server sends, so the set grows here only.
  */
-export const CONCIERGE_STATUS_REACTIONS = ["working", "failed"] as const;
-export type ConciergeStatusReaction = (typeof CONCIERGE_STATUS_REACTIONS)[number];
+export const CONCIERGE_REACTIONS = ["👀", "👍", "✅", "❤️", "🙏", "😂", "🎉", "🤔"] as const;
+export type ConciergeReaction = (typeof CONCIERGE_REACTIONS)[number];
 
-/** A message's status reaction changed (`message_status_reaction`). Null: it has none. */
-export interface MessageStatusReactionEvent {
+/** A message's reaction changed (`message_reaction`). Null: it has none. */
+export interface MessageReactionEvent {
   sessionId: string;
   messageId: string;
-  statusReaction: ConciergeStatusReaction | null;
+  reaction: string | null;
+}
+
+/**
+ * How a turn shows the typing dots (docs/domains/chats.md#status-reaction):
+ * `exact` where the provider says when it writes a message, so the dots show
+ * while `writing`; `simulated` where it cannot, so each message of the turn
+ * lands behind the dots for a moment, by its length, 0.5 to 1 s.
+ */
+export type MessageWritingMode = "exact" | "simulated";
+
+/**
+ * `message_writing` on a chat's session topic: how its running turn `turnId`
+ * shows the typing dots, sent when the turn starts, whenever `writing`
+ * changes, and once more with `writing` false when it ends. A subscriber gets
+ * the running turn's latest at once.
+ */
+export interface MessageWritingEvent {
+  sessionId: string;
+  turnId: string;
+  mode: MessageWritingMode;
+  /** Exact turns only: a message is being written now. Always false when simulated. */
+  writing: boolean;
 }
 
 /** The panel actions. Each one sends the Concierge a message, and never writes the row. */
@@ -64,6 +90,16 @@ export interface ConciergeChatStartRequest {
   name?: string;
 }
 
+/**
+ * `GET /api/concierge/chats/:chatId/follows-and-tasks`: what deleting the
+ * caller's topic chat moves to the main chat or, when they choose so, stops.
+ */
+export interface ConciergeChatWorkResponse {
+  /** `label` names the source as the connectors list does. */
+  follows: { source: string; label: string; target: string }[];
+  openTasks: { id: string; title: string }[];
+}
+
 /** How many days of finished rows `GET /concierge/tasks` returns by default. */
 export const CONCIERGE_DONE_DAYS = 7;
 
@@ -71,16 +107,53 @@ export const CONCIERGE_DONE_DAYS = 7;
 export const CONCIERGE_TASK_SUMMARY_MAX_LENGTH = 120;
 
 /** One row of the task panel. Times are epoch milliseconds. */
+/**
+ * The card or approval a task chat waits on its owner for: a card by its
+ * tool use id, with the message that holds it and how it renders, or a
+ * pending approval by its id. `since` is when the wait began: the oldest
+ * item still open in the chat, as all of them are one wait.
+ */
+export type ConciergeOpenWait =
+  | {
+      kind: "card";
+      id: string;
+      messageId: string;
+      render: TaskCardRender | null;
+      since: number;
+    }
+  | { kind: "approval"; id: string; since: number };
+
 export interface ConciergeTaskDto {
   id: string;
   title: string;
+  /** Mapped from `status` for apps from before it. */
   state: ConciergeTaskState;
+  /**
+   * How the task stands, derived by Rome (`taskStatus` in
+   * concierge-task-status.ts). Read it with `parseTaskStatus`. Absent from
+   * servers before it.
+   */
+  status?: ConciergeTaskStatus;
+  /** Why an ended task ended; null while it has not. */
+  endReason?: ConciergeTaskEndReason | null;
+  /** When the wait on its owner began, while one is open in its task chat, epoch milliseconds. */
+  waitingSince?: number | null;
+  /**
+   * What its task chat waits on its owner for now, or null: the newest open
+   * card or approval. Open after the wait expired too, since the card still
+   * takes an answer. Absent from servers before it.
+   */
+  openWait?: ConciergeOpenWait | null;
+  /** When the check scheduled for it is due, while one is pending, epoch milliseconds. */
+  laterAt?: number | null;
   summary: string | null;
   waitingOn: string | null;
   dueAt: number | null;
   rank: number | null;
   /** The linked task chat, with its current name, or null when the row has none. */
   chat: { id: string; name: string } | null;
+  /** The id of the first message of the task's chat thread in its Concierge chat, or null. */
+  threadRoot?: string | null;
   /** The Concierge chat the row came from; its results and the panel's buttons go there. */
   conciergeChat: ConciergeChatRef;
   /**
@@ -94,6 +167,33 @@ export interface ConciergeTaskDto {
   archivedAt: number | null;
   /** Set when the Concierge did not pick up the row's task chat events after a retry. */
   notSynced: boolean;
+}
+
+/**
+ * A wake-up pending in a chat: a check the agent scheduled with `defer`,
+ * which the chat shows until it fires and its owner can cancel there. Times
+ * are epoch milliseconds.
+ */
+export interface ChatPendingCheckDto {
+  id: string;
+  name: string;
+  /** When it wakes the chat: its time, or the deadline of the event it waits for; null for an event wait with no deadline. */
+  at: number | null;
+  /** What an event wait waits for; null for a timed check. */
+  waitingFor: string | null;
+  /** The task it is for, or null. */
+  taskId: string | null;
+  /** That task's title, or null. */
+  taskTitle?: string | null;
+  /** The next run of the task's repeating schedule: cancelling it skips that run only. */
+  recurring?: boolean;
+  /** When it was scheduled, epoch milliseconds. */
+  createdAt?: number;
+}
+
+/** `GET /chat/sessions/:id/checks`, the soonest first. */
+export interface ChatPendingChecksResponse {
+  checks: ChatPendingCheckDto[];
 }
 
 /** `GET /concierge/tasks`. */
@@ -246,9 +346,10 @@ export interface ConciergeConnectorDto {
 }
 
 /**
- * `GET /api/concierge/connectors`, and what the Concierge's following list
- * returns: one structure for every client and the agent. Which connectors are
- * listed is decided here, not by the client.
+ * `GET /api/concierge/connectors`: one structure for every client. The
+ * Concierge's following list answers the same entries, without what only a
+ * client draws with (`agentViewOf`). Which connectors are listed is decided
+ * here, not by the client.
  */
 export interface ConciergeConnectorsResponse {
   connectors: ConciergeConnectorDto[];

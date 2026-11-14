@@ -49,6 +49,8 @@ import { agentNameChangedSchema } from "@rome/api-types/live-events";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { isChatPath, MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { useConciergeChat } from "@/hooks/use-concierge";
+import { useChatListFollowsRoute, useChatListModeForShell } from "@/hooks/use-chat-list-mode";
+import { newChatTarget } from "@/lib/chat-list-mode";
 import { isElectronShell } from "@/lib/electron-shell";
 import { routeTitle } from "@/lib/page-title";
 import { isApplePlatform } from "@/lib/platform";
@@ -151,6 +153,11 @@ export function RomeShellLayout() {
   // main chat that failed to load shows a page of its own, which keeps the bar.
   const onMainChat = location.pathname === MAIN_CHAT_PATH;
   const mainChat = useConciergeChat(onMainChat);
+  // The chat list comes and goes, so the shell, which stays, is the one place
+  // that keeps the list's mode with the open chat. The new-chat shortcut and
+  // the rail read that mode.
+  useChatListFollowsRoute(mainChat.chatId);
+  const chatListMode = useChatListModeForShell(!mainChat.failed, "chat");
   const leadingSlot = useSlotOutlet(CONCIERGE_LEADING_SLOT);
   const [headerClaimed, setHeaderClaimed] = useState(false);
   useEffect(() => {
@@ -298,7 +305,8 @@ export function RomeShellLayout() {
       const modifier = isMac ? event.metaKey : event.ctrlKey;
       if (modifier && event.shiftKey && event.key.toLowerCase() === "o") {
         event.preventDefault();
-        navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat");
+        const { to, state } = newChatTarget(chatListMode, hideSidebar ? "?hideSidebar=1" : "");
+        navigate(to, { state });
       }
       if (
         modifier &&
@@ -316,7 +324,7 @@ export function RomeShellLayout() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [hideSidebar, navigate, toggleCollapsed]);
+  }, [chatListMode, hideSidebar, navigate, toggleCollapsed]);
 
   // On a phone a swipe right anywhere opens the sidebar and a swipe left closes
   // it. The menu button in the mobile header stays as the visible way in.

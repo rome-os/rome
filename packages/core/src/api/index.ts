@@ -1,3 +1,4 @@
+import { widgetEventRoutes } from "./routes/widget-events.js";
 import { devicesRoutes } from "./routes/devices.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
@@ -39,6 +40,7 @@ import { send } from "../chats/send.js";
 import { ownPlatforms } from "../webchat/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
+import { chatTaskListRoutes, ownsConciergeChat, subscribeChatTasks } from "./routes/task-list.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
 import { uptimeRoutes } from "./routes/uptime.js";
@@ -195,6 +197,7 @@ export function buildApp(
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
   api.route("/", conciergeRoutes(deps));
+  api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
@@ -237,6 +240,15 @@ export function buildApp(
 
   const { routes: webchatRoutesApp, runtime: webchatRuntime } = createWebchatRuntime(deps);
   api.route("/", webchatRoutesApp);
+  // A widget's event goes back through the API, so the turn or the app call
+  // it becomes passes every check a direct call would.
+  api.route(
+    "/",
+    widgetEventRoutes({
+      webchatRepo: deps.webchatRepo,
+      forward: (request, env) => app.fetch(request, env),
+    }),
+  );
   // The backend-turn orchestrator is the single holder of the webchat runtime
   // for all backend session tasks (defer + approvals). It's constructed before
   // buildApp runs, so the runtime is bound after the fact, like the rest of the
@@ -375,6 +387,10 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
           subscribeConciergeActivity: (owner, emit) =>
             deps.concierge?.activity?.subscribe(owner, emit) ?? (() => {}),
+          hasChatTasks: async (chatId, owner) =>
+            deps.concierge ? ownsConciergeChat(deps.concierge, chatId, owner) : false,
+          subscribeChatTasks: (chatId, owner, emit) =>
+            subscribeChatTasks(deps, chatId, owner, emit),
         },
         deps.phoneWatching,
         deps.dashboardActivity,

@@ -242,6 +242,82 @@ describe("defer", () => {
     expect(result.content[0].text).toContain("2026-06-25T12:05:00.000Z");
   });
 
+  it("waits for an event without a label or a deadline, for an agent whose policy asks for neither", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true, waitingFor: "ci.done" });
+    const served = tools({ defer: { schedule, finalText: "deliver" } })
+      .listTools("ask_user")
+      .find((tool) => tool.name === "defer");
+    const event = (served?.inputSchema as { properties: { event: Record<string, unknown> } })
+      .properties.event as { required: string[]; properties: Record<string, unknown> };
+    expect(event.required).toEqual(["eventName"]);
+    expect(event.properties).not.toHaveProperty("deadline");
+    const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
+      "ask_user",
+      "defer",
+      { name: "CI", note: "Read the run.", event: { eventName: "ci.done" } },
+    );
+    expect(result.isError).toBeFalsy();
+    expect(schedule).toHaveBeenCalledWith(TURN, {
+      kind: "event",
+      name: "CI",
+      note: "Read the run.",
+      event: { eventName: "ci.done" },
+    });
+  });
+
+  it("names no task for an agent whose policy checks none", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true });
+    const served = tools({ defer: { schedule, finalText: "deliver" } });
+    const schema = served.listTools("ask_user").find((tool) => tool.name === "defer")
+      ?.inputSchema as { properties: Record<string, unknown> };
+    expect(schema.properties).not.toHaveProperty("taskId");
+    const refused = await served.callTool("ask_user", "defer", {
+      name: "CI",
+      note: "Read the run.",
+      afterMinutes: 5,
+      taskId: "task-1",
+    });
+    expect(refused.isError).toBe(true);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it("tells an agent that checks tasks only what it can do when it wakes", () => {
+    const description = (taskChecks: boolean) =>
+      tools({ defer: { schedule: rs.fn(), finalText: "private", taskChecks } })
+        .listTools("ask_user")
+        .find((tool) => tool.name === "defer")?.description ?? "";
+    const checks = description(true);
+    expect(checks).not.toContain("search_event_catalog");
+    expect(checks).not.toContain("whole conversation still in context");
+    expect(checks).not.toContain("no limit on re-defers");
+    expect(checks).toContain("a newer session may be the one that wakes");
+    // A check still pending is checked again, so the task stays later until
+    // the digest asks after three.
+    expect(checks).toContain("`defer` again (minimum one minute) while it is still pending");
+    expect(checks).not.toContain("only when something changed");
+    const plain = description(false);
+    expect(plain).toContain("search_event_catalog");
+    expect(plain).toContain("no limit on re-defers");
+  });
+
+  it("asks for a label and a deadline on an event wait when the agent's policy does", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true });
+    const served = tools({ defer: { schedule, finalText: "private", taskChecks: true } });
+    const event = (
+      served.listTools("ask_user").find((tool) => tool.name === "defer")?.inputSchema as {
+        properties: { event: { required: string[] } };
+      }
+    ).properties.event;
+    expect(event.required).toEqual(["eventName", "waitingFor", "deadline"]);
+    const refused = await served.callTool("ask_user", "defer", {
+      name: "CI",
+      note: "Read the run.",
+      event: { eventName: "ci.done" },
+    });
+    expect(refused.isError).toBe(true);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
   // A private-text agent can confirm only with another message, which repeats
   // what it already told the guardian.
   it.each([

@@ -111,6 +111,7 @@
     "archived": "此轮对话的步骤已归档。",
     "loading": "正在加载追踪…",
     "retry": "重试",
+    "failed": "错误",
     "failedWithReason": "错误: {{reason}}",
     "stoppedByUser": "用户已停止",
     "thinking": "思考中…",

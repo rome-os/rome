@@ -15,10 +15,10 @@ import Testing
     /// A surface for `part` whose reads return `body`; `posts` records each press.
     private func surface(_ part: WidgetUIPart, body: Rome.JSONValue, posts: Box<[String]> = Box([])) async -> WidgetSurface {
         let surface = WidgetSurface()
-        surface.show(part) { method, path, _ in
-            if method == "POST" { posts.value.append(path) }
-            return ConnectReply(ok: true, body: body)
-        }
+        surface.show(part, call: { _, _, _ in ConnectReply(ok: true, body: body) }, press: { name, _ in
+            posts.value.append(name)
+            return WidgetEventReply()
+        })
         await surface.load()
         return surface
     }
@@ -78,7 +78,7 @@ import Testing
         #expect(items.map { $0.string(for: "text") } == ["spicy", "seafood"])
     }
 
-    @Test func aPressPostsToTheAppAndReadsAgain() async throws {
+    @Test func aPressGoesToCore() async throws {
         let part = try #require(card(#"""
         [{"id":"root","component":"Button","child":"l","action":{"event":{"name":"water","context":{"cups":1}}}},
          {"id":"l","component":"Text","text":"Water"}]
@@ -89,6 +89,27 @@ import Testing
         button.action(for: "action", userActivation: true)?()
         for _ in 0..<50 where posts.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(posts.value == ["water"])
+    }
+
+    /// A press core takes, then a read that fails: the card says its data failed.
+    @Test func aReadThatFailsAfterAPressIsShown() async throws {
+        let part = try #require(card(#"""
+        [{"id":"root","component":"Button","child":"l","action":{"event":{"name":"water"}}},
+         {"id":"l","component":"Text","text":"Water"}]
+        """#, bind: #"{"/today":"days/today"}"#))
+        let reads = Box(0)
+        let surface = WidgetSurface()
+        surface.show(part, call: { _, _, _ in
+            reads.value += 1
+            if reads.value > 1 { throw APIError.network }
+            return ConnectReply(ok: true, body: .object([:]))
+        }, press: { _, _ in WidgetEventReply() })
+        await surface.load()
+        #expect(!surface.failed)
+        try #require(surface.viewModel?.rootNode).action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where reads.value < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(surface.failed)
     }
 
     @Test func aCardReachesOnlyItsOwnApp() {
@@ -102,6 +123,165 @@ import Testing
         guard case .widgetUI(let card) = MessagePart.parse(JSONValue.array([DemoBackend.mealCard]).prettyText).first else { Issue.record("demo card did not parse"); return }
         #expect(card.components.count == 12)
         #expect(card.isDrawable)
+    }
+
+    // MARK: A card the agent waits on
+
+    private func questionCard() throws -> WidgetUIPart {
+        guard case .question(let part) = MessagePart.parse(JSONValue.array([DemoBackend.dinnerQuestion]).prettyText).first else {
+            throw CardError.notAQuestion
+        }
+        return try #require(part.ui)
+    }
+
+    private enum CardError: Error { case notAQuestion }
+
+    /// The question card on the engine; `answers` records what it sends.
+    private func waitingSurface(_ part: WidgetUIPart, answered: JSONValue? = nil, answers: Box<[JSONValue]> = Box([])) async -> WidgetSurface {
+        let surface = WidgetSurface()
+        surface.answered = answered != nil
+        surface.show(part, call: { _, _, _ in throw APIError.notFound }, press: { name, context in
+            answers.value.append(.object(["name": .string(name), "context": context]))
+            // Core answered the agent waiting on the card.
+            return WidgetEventReply(answered: true)
+        })
+        surface.showAnswered(answered)
+        await surface.load()
+        return surface
+    }
+
+    private func find(_ id: String, in node: Node?) -> Node? {
+        guard let node else { return nil }
+        if node.id == id { return node }
+        for kid in node.children(for: "children") + [node.child(for: "child")].compactMap({ $0 }) {
+            if let found = find(id, in: kid) { return found }
+        }
+        return nil
+    }
+
+    @Test func aQuestionCardDescribedAsDataIsDrawnFromItsDescription() throws {
+        let card = try questionCard()
+        #expect(card.waits)
+        #expect(card.isDrawable)
+        #expect(card.data["answers"]?.array?.count == 2)
+    }
+
+    @Test func sendWaitsForAnAnswerAndSpacesAreNone() async throws {
+        let surface = await waitingSurface(try questionCard())
+        let root = surface.viewModel?.rootNode
+        #expect(find("send", in: root)?.isValid == false)
+        surface.viewModel?.dataModel.set("/answers/0/text", value: .string("   "))
+        #expect(find("send", in: surface.viewModel?.rootNode)?.isValid == false)
+        surface.viewModel?.dataModel.set("/answers/0/text", value: .string("Soup"))
+        #expect(find("send", in: surface.viewModel?.rootNode)?.isValid == true)
+    }
+
+    @Test func romeStringsAreTranslatedByTheReader() async throws {
+        let surface = await waitingSurface(try questionCard())
+        #expect(find("send-label", in: surface.viewModel?.rootNode)?.string(for: "text") == String(localized: "Send"))
+    }
+
+    @Test func anInputEmptiesWhatItClears() async throws {
+        let surface = await waitingSurface(try questionCard())
+        #expect(surface.clears.targets["q0-pick"] == "/answers/0/text")
+        surface.viewModel?.dataModel.set("/answers/0/text", value: .string("Soup"))
+        surface.clears.clear("/answers/0/text", false)
+        #expect(surface.viewModel?.dataModel.get("/answers/0/text")?.stringValue == "")
+    }
+
+    @Test func sendAnswersTheInteractionWithTheCardsAnswers() async throws {
+        let answers = Box<[JSONValue]>([])
+        let surface = await waitingSurface(try questionCard(), answers: answers)
+        surface.viewModel?.dataModel.set("/answers/0/values", value: .array([.string("高蛋白")]))
+        find("send", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where answers.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(answers.value.first?["name"]?.string == "send")
+        #expect(answers.value.first?["context"]?["answers"]?.array?.first?["values"] == .array([.string("高蛋白")]))
+        // Core took it: the card is sent, and takes no second press.
+        #expect(surface.sent)
+    }
+
+    @Test func anAppsCardTheAgentWaitsOnIsDrawnHere() {
+        let parsed = MessagePart.parse(#"""
+        [{"type":"pending_interaction","toolUseId":"tu-c","appId":"connector","render":{"kind":"inline","ui":{"components":[{"id":"root","component":"Text","text":"Connect Gmail"}]},"bind":{"/s":"status"}}}]
+        """#)
+        guard case .widgetUI(let card) = parsed.first else { Issue.record("not drawn natively"); return }
+        #expect(card.waits && card.appId == "connector" && card.bind == ["/s": "status"])
+    }
+
+    @Test func aReplyThatDoesNotAnswerOpensItsLinkAndLeavesTheCardUsable() async throws {
+        let surface = WidgetSurface()
+        let opened = Box<[URL]>([])
+        let connect = try #require(WidgetUIPart(interaction: JSONValue.object([
+            "type": .string("pending_interaction"), "toolUseId": .string("tu-c"), "appId": .string("connector"),
+            "render": .object(["kind": .string("inline"), "ui": .object(["components": .array([
+                .object(["id": .string("root"), "component": .string("Button"), "child": .string("l"),
+                         "action": .object(["event": .object(["name": .string("connect")])])]),
+                .object(["id": .string("l"), "component": .string("Text"), "text": .string("Connect")]),
+            ])])]),
+        ])))
+        surface.show(connect, call: { _, _, _ in ConnectReply(ok: true, body: .object([:])) }, press: { _, _ in
+            WidgetEventReply(open: URL(string: "https://auth.example.com/go"))
+        }, open: { opened.value.append($0) })
+        await surface.load()
+        surface.viewModel?.rootNode?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where opened.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(opened.value == [URL(string: "https://auth.example.com/go")!])
+        #expect(!surface.sent)
+    }
+
+    @Test func aCardCoreDidNotTakeStaysUsable() async throws {
+        let surface = WidgetSurface()
+        let tries = Box(0)
+        surface.show(try questionCard(), call: { _, _, _ in throw APIError.notFound }, press: { _, _ in
+            tries.value += 1
+            throw APIError.network
+        })
+        await surface.load()
+        find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where !surface.sendFailed { try await Task.sleep(for: .milliseconds(10)) }
+        // It says the send failed, not that the card's data could not be read.
+        #expect(surface.sendFailed && !surface.failed && !surface.sent)
+        find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where tries.value < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(tries.value == 2)
+    }
+
+    /// A refusal that says why shows why.
+    @Test func aRefusalSaysWhy() async throws {
+        let surface = WidgetSurface()
+        surface.show(try questionCard(), call: { _, _, _ in throw APIError.notFound }, press: { _, _ in
+            throw APIError.server(status: 409, message: "Log in to Composio first")
+        })
+        await surface.load()
+        find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where !surface.sendFailed { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(surface.refusal == "Log in to Composio first")
+    }
+
+    @Test func anAnsweredCardShowsWhatWasSentAndTakesNoPress() async throws {
+        let sent: JSONValue = .array([.object(["values": .array([.string("清淡一点")]), "text": .string("")]), .object(["values": .array([]), "text": .string("")])])
+        let answers = Box<[JSONValue]>([])
+        let surface = await waitingSurface(try questionCard(), answered: .object(["answers": sent, "card": sent]), answers: answers)
+        #expect(surface.viewModel?.dataModel.get("/answers/0/values/0")?.stringValue == "清淡一点")
+        find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(answers.value.isEmpty)
+    }
+
+    @Test func aWidgetsIdIsTheIdOfTheMessageThatHoldsIt() {
+        let held = { (part: JSONValue, id: String) in
+            ChatMessage(id: id, sessionId: "topic-meals", role: "assistant", content: JSONValue.array([part]).prettyText, createdAt: RomeDate.string(.now))
+        }
+        let rows = TranscriptBuilder.rows(messages: [held(DemoBackend.mealCard, "m-meal"), held(DemoBackend.dinnerQuestion, "m-dinner")], pending: [], answers: [:], options: .init())
+        let ids = rows.compactMap { row -> String? in
+            switch row {
+            case .widgetUI(_, let part, _, _): part.widgetId
+            case .question(_, let part, _, _): part.ui?.widgetId
+            default: nil
+            }
+        }
+        #expect(ids == ["m-meal", "m-dinner"])
     }
 
     @Test func onlyHttpsImagesLoad() {
@@ -122,4 +302,25 @@ import Testing
 final class Box<T>: @unchecked Sendable {
     var value: T
     init(_ value: T) { self.value = value }
+}
+
+@MainActor @Suite struct WidgetHostStringTests {
+    /// A button's action is the app's data, sent as written, as the web sends it.
+    @Test func aButtonsActionIsSentAsWritten() {
+        let component: Rome.JSONValue = .object([
+            "id": .string("b"), "component": .string("Button"), "child": .string("l"),
+            "action": .object(["event": .object(["name": .string("tag"), "context": .object(["tag": .array([.object(["string": .string("send")])])])])]),
+        ])
+        let drawn = WidgetSurface.withHostStrings(component)
+        #expect(drawn["action"] == component["action"])
+    }
+
+    /// An answer the card sent, before core stored it as `card`, still shows
+    /// what was picked when the card is drawn again.
+    @Test func whatTheCardSentShowsBeforeCoreStoresIt() {
+        let sent: Rome.JSONValue = .object(["answers": .array([.object(["values": .array([.string("Plain")]), "text": .string("")])])])
+        #expect(WidgetSurface.sentCard(sent) == sent["answers"])
+        let stored: Rome.JSONValue = .object(["answers": .array([.object(["questionId": .string("tone"), "value": .string("Plain")])])])
+        #expect(WidgetSurface.sentCard(stored) == nil)
+    }
 }

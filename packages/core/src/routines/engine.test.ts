@@ -139,6 +139,31 @@ describe("RoutineEngine run records", () => {
     const firedBy = await Promise.all(recorded.map((run) => runs.findFiredBy(run.executionId)));
     expect(firedBy.sort()).toEqual(["run_now", "run_now_background", "schedule"]);
   });
+  it("tells its listeners once a run now settles, failed or not, with its run recorded", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    const actionEngine = {
+      run: async () => ({ status: "error", error: "boom" }),
+    } as unknown as ActionEngine;
+    const engine = new RoutineEngine(routines, runs, actionEngine, 0, systemClock);
+    const id = await routines.create({
+      name: "digest",
+      trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "09:00" },
+      actionName: "noop",
+      args: {},
+    });
+    const told: Array<{ id: string; runs: number }> = [];
+    engine.onChange((changed) => {
+      void runs
+        .findByRoutineId(changed)
+        .then((found) => told.push({ id: changed, runs: found.length }));
+    });
+
+    await engine.runNow(id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(told).toEqual([{ id, runs: 1 }]);
+  });
+
   it("keeps no trigger payload in the run or the action's record when the routine says so", async () => {
     const routines = new RoutinesRepository(testDb.db);
     const runs = new RoutineRunsRepository(testDb.db);

@@ -233,6 +233,44 @@ describe("backend turn delivery", () => {
     expect(await run()).not.toHaveProperty("pushLevel");
   });
 
+  it("keeps the input source and label the turn's resolving found, as a check that came due has", async () => {
+    const agentRunner = createMockAgentRunner([
+      [
+        { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+        { type: "result", content: "" },
+      ],
+    ]);
+    const webchat = {
+      name: "webchat",
+      send: { send: rs.fn(), direct: null, activity: null },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+      resolveTurn: async (params) => ({
+        ...params,
+        inputSource: { type: "check", name: "Tell the time" },
+        inputLabel: "Check · Tell the time",
+      }),
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        await task({ emit: async () => undefined });
+      },
+    });
+    await runner.runAndDeliver({
+      agentName: "core:concierge",
+      sessionId: "s",
+      channel: "webchat",
+      threadId: "concierge",
+      prompt: "⏰ Time's up: Tell the time",
+    });
+    expect(agentRunner.calls[0]).toMatchObject({
+      inputLabel: "Check · Tell the time",
+      inputSource: { type: "check", name: "Tell the time" },
+    });
+  });
+
   it("wakes a turn for the person of the action that asks, as a reminder's resume_session does", async () => {
     const visitor = { kind: "visitor", accountId: "acct-v", email: "v@example.com" } as const;
     const run = async (store?: { actor?: typeof visitor }) => {

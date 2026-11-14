@@ -192,7 +192,7 @@ import Testing
         await settle()
         let again = workspace.taskStore("task-1")
         #expect(again === first)
-        #expect(again.pending.contains { $0.text == "Did not go" && $0.state == .failed })
+        #expect(again.pending.contains { $0.text == "Did not go" && $0.state == .failed(.unreachable) })
         cleanUp()
     }
 

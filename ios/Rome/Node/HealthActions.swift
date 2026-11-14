@@ -311,20 +311,20 @@ struct HealthActions: Sendable {
                 workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
                 sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
                 A type the user has not allowed, or that has no data, has no value. \
-                Apple Health is off for Rome until the user turns it on in Settings → \(name) use → Apple Health on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+                Apple Health is off for Rome until the user turns it on in Settings → Apple Health in the Rome app on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
                 """,
             "health.samples": """
                 Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
                 limit 1-1000 (default 100), order desc (default) | asc by start, cursor (nextCursor of the previous reply), \
                 sources (array of app names or bundle ids), includeMetadata (bool, default false), activity (workouts only). \
-                A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn it on in Settings → \(name) use → Apple Health on the \(name). Example: {"type":"heartRate","start":"2026-11-08","limit":50}
+                A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn it on in Settings → Apple Health in the Rome app on the \(name). Example: {"type":"heartRate","start":"2026-11-08","limit":50}
                 """,
         ]
     }
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
         if Self.actions.contains(action), action != "system.info", !enabled.isOn {
-            return .failed(code: "health_off", message: "Apple Health is off for Rome on this \(device.name). The user must turn it on in Settings → \(device.name) use → Apple Health on the \(device.name).")
+            return .failed(code: "health_off", message: "Apple Health is off for Rome on this \(device.name). The user must turn it on in Settings → Apple Health in the Rome app on the \(device.name).")
         }
         do {
             switch action {

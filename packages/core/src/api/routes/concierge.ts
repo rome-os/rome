@@ -1,5 +1,6 @@
 import {
   type ConciergeChatsResponse,
+  type ConciergeChatWorkResponse,
   type ConciergeChatStartRequest,
   CONCIERGE_DONE_DAYS,
   type ConciergeConnectorsResponse,
@@ -18,7 +19,7 @@ export const CONCIERGE_UNREAD_CAP = 100;
 const MAX_DONE_DAYS = 3650;
 
 /** An SSE stream of what `subscribe` emits, with a heartbeat, until the client goes. */
-function streamEvents(
+export function streamEvents(
   c: Context,
   subscribe: (emit: (event: string, data: unknown) => void) => () => void,
 ): Response {
@@ -47,23 +48,27 @@ function streamEvents(
   });
 }
 
+/**
+ * Whose Concierge the caller reaches: the guardian's, or a dashboard
+ * visitor's own. Null for anyone else, app users included.
+ */
+export async function conciergeCallerOwner(
+  dashboardAccessState: Pick<ApiDeps["dashboardAccessState"], "isCloudEmailAllowed">,
+): Promise<string | null> {
+  const actor = await currentSessionActor();
+  if (actor?.kind === "guardian") return sessionOwnerKey(actor);
+  if (actor?.kind === "visitor" && dashboardAccessState.isCloudEmailAllowed(actor.email)) {
+    return sessionOwnerKey(actor);
+  }
+  return null;
+}
+
 export function conciergeRoutes(
   deps: Pick<ApiDeps, "concierge" | "dashboardAccessState" | "webchatRepo">,
 ): Hono {
   const app = new Hono();
 
-  /**
-   * Whose Concierge the caller reaches: the guardian's, or a dashboard
-   * visitor's own. Null for anyone else, app users included.
-   */
-  const callerOwner = async (): Promise<string | null> => {
-    const actor = await currentSessionActor();
-    if (actor?.kind === "guardian") return sessionOwnerKey(actor);
-    if (actor?.kind === "visitor" && deps.dashboardAccessState.isCloudEmailAllowed(actor.email)) {
-      return sessionOwnerKey(actor);
-    }
-    return null;
-  };
+  const callerOwner = () => conciergeCallerOwner(deps.dashboardAccessState);
 
   // The caller's main Concierge chat, created on first use, and how many
   // agent messages it got since it was last read. 404 without the Concierge service.
@@ -101,6 +106,26 @@ export function conciergeRoutes(
     return c.json({ chats } satisfies ConciergeChatsResponse);
   });
 
+  // What deleting one of the caller's topic chats moves to the main chat:
+  // its follows and open tasks. 404 for the main chat, another person's chat
+  // and without the Concierge service.
+  app.get("/concierge/chats/:chatId/follows-and-tasks", async (c) => {
+    const owner = await callerOwner();
+    if (!owner) return c.json({ error: "Not authenticated" }, 401);
+    const concierge = deps.concierge;
+    if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
+    const chatId = c.req.param("chatId");
+    const chat = await concierge.conciergeChat(chatId);
+    if (!chat || chat.main || (await concierge.ownerOfChat(chatId)) !== owner) {
+      return c.json({ error: "No such topic chat" }, 404);
+    }
+    const { follows, openTasks } = await concierge.followsAndTasksOf(chatId, owner);
+    return c.json({
+      follows,
+      openTasks: openTasks.map(({ id, title }) => ({ id, title })),
+    } satisfies ConciergeChatWorkResponse);
+  });
+
   // Starts a topic chat for the caller on their main chat's model. 404 without the Concierge service.
   app.post("/concierge/chats", async (c) => {
     const owner = await callerOwner();
@@ -134,6 +159,35 @@ export function conciergeRoutes(
       Number.isFinite(asked) && asked >= 0 ? Math.min(asked, MAX_DONE_DAYS) : CONCIERGE_DONE_DAYS;
     const tasks = await concierge.deps.tasks.listForPanel(owner, doneDays);
     return c.json({ tasks } satisfies ConciergeTasksResponse);
+  });
+
+  // Its owner stops one task, from its card or the task list: its task chat's
+  // work stops, its checks are cancelled, and the Concierge hears of it.
+  app.post("/concierge/tasks/:taskId/stop", async (c) => {
+    const owner = await callerOwner();
+    if (!owner) return c.json({ error: "Not authenticated" }, 401);
+    const concierge = deps.concierge;
+    if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
+    const taskId = c.req.param("taskId");
+    const found = await concierge.deps.tasks.repo.getWithChat(taskId);
+    if (!found || found.owner !== owner) return c.json({ error: "No such task" }, 404);
+    await concierge.stopTask(taskId, "guardian");
+    return c.json({ ok: true });
+  });
+
+  // Cancels a task's pending checks, as from its row in the task panel. The
+  // task stays, its status is read again without them, and the Concierge
+  // hears of it. A failure answers as one.
+  app.delete("/concierge/tasks/:taskId/checks", async (c) => {
+    const owner = await callerOwner();
+    if (!owner) return c.json({ error: "Not authenticated" }, 401);
+    const concierge = deps.concierge;
+    if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
+    const taskId = c.req.param("taskId");
+    const found = await concierge.deps.tasks.repo.getWithChat(taskId);
+    if (!found || found.owner !== owner) return c.json({ error: "No such task" }, 404);
+    await concierge.cancelChecksByOwner(taskId);
+    return c.json({ ok: true });
   });
 
   // The same `task_upsert` events as the `concierge.tasks` topic of the live

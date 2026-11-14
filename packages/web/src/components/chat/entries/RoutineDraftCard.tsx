@@ -78,9 +78,12 @@ function findCreatedRoutine(
 export function RoutineDraftCard({
   draft,
   routineKey,
+  chatId,
 }: {
   draft: RoutineDraftSpec;
   routineKey?: string;
+  /** The chat the card is in, where the routine is made. */
+  chatId?: string;
 }) {
   const { t } = useTranslation("chat");
   const { t: tRoutines } = useTranslation("routines");
@@ -124,6 +127,7 @@ export function RoutineDraftCard({
       actionName: draft.actionName,
       args: draft.args,
       ...(routineKey ? { key: routineKey } : {}),
+      ...(chatId ? { chatId } : {}),
     });
     if (result.ok) {
       // 409: the keyed routine already existed and was left as it is — it may

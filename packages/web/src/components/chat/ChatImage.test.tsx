@@ -285,4 +285,35 @@ describe("ChatImage", () => {
     // The open picture fills the window less the margin on both sides.
     expect(Math.round(Number.parseFloat(modal.style.width))).toBe(window.innerWidth - 2 * margin);
   });
+
+  it.each([
+    ["a title before it", "**Hanauma Bay**\n![Bay](https://example.com/bay.jpg)", "Hanauma Bay"],
+    ["a caption after it", "![Bay](https://example.com/bay.jpg)\nWaikiki", "Waikiki"],
+    [
+      "a linked picture",
+      "Waikiki\n[![Bay](https://example.com/bay.jpg)](https://example.org/x)",
+      "Waikiki",
+    ],
+  ])("puts a picture on its own line when text follows %s in the same paragraph", (_name, text, caption) => {
+    const { container } = render(<Message text={text} />);
+    const wrapper = container.querySelector<HTMLElement>('[data-streamdown="image-wrapper"]')!;
+    // The text and the picture share one paragraph, so only a block-level
+    // wrapper keeps the text above or below the picture, not beside it.
+    expect(wrapper.closest("p")?.textContent).toContain(caption);
+    expect(wrapper.textContent).not.toContain(caption);
+    const classes = wrapper.className.split(/\s+/);
+    expect(classes).toContain("block");
+    expect(classes).not.toContain("inline-block");
+    expect(classes).toContain("max-w-full");
+  });
+
+  it("keeps a failed picture's fallback on its own line", () => {
+    const { container } = render(
+      <Message text={"Waikiki\n![Gone](https://example.com/gone.png)"} />,
+    );
+    fireEvent.error(screen.getByRole("img", { name: "Gone" }));
+    const wrapper = container.querySelector('[data-streamdown="image-wrapper"]')!;
+    expect(wrapper.className.split(/\s+/)).toContain("block");
+    expect(wrapper.querySelector('[data-streamdown="image-fallback"]')).not.toBeNull();
+  });
 });

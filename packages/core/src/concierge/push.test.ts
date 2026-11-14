@@ -79,6 +79,29 @@ describe("pushBody", () => {
     expect(pushBody("`a < b && c`")).toBe("a < b && c");
   });
 
+  it("shows a pictures block as each picture's title and note, without addresses", () => {
+    expect(
+      pushBody(
+        "Here are two.\n\n```pictures grid\n![Hanauma Bay](https://example.com/a.jpg) Snorkeling\n![Waikiki](/projects/demo/b.png)\n```",
+      ),
+    ).toBe("Here are two. Hanauma Bay Snorkeling Waikiki");
+    expect(pushBody("```pictures list\n![Fuji](https://x.example/a_(1).jpg) Spring\n```")).toBe(
+      "Fuji Spring",
+    );
+  });
+
+  it("leaves another code block as it is", () => {
+    expect(pushBody("```ts\nconst a = ![x](https://example.com/a.jpg);\n```")).toBe(
+      "const a = ![x](https://example.com/a.jpg);",
+    );
+    expect(pushBody("```picturesque\n![x](https://example.com/a.jpg)\n```")).toBe(
+      "![x](https://example.com/a.jpg)",
+    );
+    expect(pushBody("```\n![x](https://example.com/a.jpg)\n```")).toBe(
+      "![x](https://example.com/a.jpg)",
+    );
+  });
+
   it("cuts a long message to about 100 characters, never inside an emoji", () => {
     // The cut lands right after the emoji, so it stays whole.
     expect(pushBody(`${"word ".repeat(19)}ab👩‍👩‍👧 and the rest of it`)).toBe(

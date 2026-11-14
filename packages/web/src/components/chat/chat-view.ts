@@ -1,3 +1,4 @@
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
 import { parseEntries, parseMessageEntries } from "@/components/chat/entries/parse-entries";
@@ -50,7 +51,7 @@ function isAutoDismissedCard(b: TranscriptPart): boolean {
   return (
     b.type === "pending_interaction" &&
     b.render.builtin === true &&
-    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId)
+    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId ?? "")
   );
 }
 
@@ -302,13 +303,9 @@ export type ChatRow =
   // The chat moved to another model: the turn after it ran on `model`, the
   // session's turn before it on another one.
   | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string })
-  // The chat's agent session was renewed before this turn, for `reason`.
-  | (RowBase & {
-      kind: "session_renewal";
-      reason: string;
-      renewedSessionId: string;
-      turnId: string;
-    });
+  // The turn after it ran on what a routine, an app or another agent sent
+  // into the chat, which shows as a faint line naming the source.
+  | (RowBase & { kind: "automated_input"; source: SystemInputSource; turnId: string });
 
 // The rows the last build made, by the message each starts from. A build hands
 // back the row object it made before when nothing the row shows has changed, so
@@ -317,8 +314,8 @@ export type ChatRow =
 const builtRows = new WeakMap<ChatMessage, ChatRow>();
 // A model-switch notice is keyed by the row it stands before.
 const builtSwitches = new WeakMap<ChatRow, ChatRow>();
-// A session-renewal notice is keyed by the row it stands before.
-const builtRenewals = new WeakMap<ChatRow, ChatRow>();
+// So is an automated input's line.
+const builtInputs = new WeakMap<ChatRow, ChatRow>();
 
 function sameIdentity(a: AgentIdentity, b: AgentIdentity): boolean {
   return a === b || (a.name === b.name && a.iconUrl === b.iconUrl);
@@ -330,8 +327,13 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
   if (a.kind === "model_switch") {
     return b.kind === "model_switch" && a.model === b.model && a.turnId === b.turnId;
   }
-  if (a.kind === "session_renewal") {
-    return b.kind === "session_renewal" && a.reason === b.reason && a.turnId === b.turnId;
+  if (a.kind === "automated_input") {
+    return (
+      b.kind === "automated_input" &&
+      a.turnId === b.turnId &&
+      a.source.type === b.source.type &&
+      a.source.name === b.source.name
+    );
   }
   if (a.kind === "trace") {
     return b.kind === "trace" && a.message === b.message && sameIdentity(a.identity, b.identity);
@@ -433,7 +435,7 @@ export function buildRows(
 
 /** The turn and session a row belongs to, or null for a row with no turn. */
 function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
-  if (row.kind === "model_switch" || row.kind === "session_renewal") return null;
+  if (row.kind === "model_switch" || row.kind === "automated_input") return null;
   const message = row.kind === "agent" ? row.messages[0] : row.message;
   return message?.turnId ? { turnId: message.turnId, sessionId: message.sessionId } : null;
 }
@@ -447,28 +449,24 @@ function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
 function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessage>): ChatRow[] {
   const lastModelBySession = new Map<string, string>();
   const seenTurns = new Set<string>();
-  // A renewed session's first turn says so once, even when it ran again.
-  const renewedSessions = new Set<string>();
   const out: ChatRow[] = [];
   for (const row of rows) {
     const turn = rowTurn(row);
     if (turn && !seenTurns.has(turn.turnId)) {
       seenTurns.add(turn.turnId);
-      const renewal = tracesByTurn.get(turn.turnId)?.traceSummary?.sessionRenewal;
-      if (renewal && !renewedSessions.has(renewal.sessionId)) {
-        renewedSessions.add(renewal.sessionId);
-        const notice: ChatRow = {
-          kind: "session_renewal",
-          key: `session-renewal:${renewal.sessionId}`,
-          reason: renewal.reason,
-          renewedSessionId: renewal.sessionId,
+      const source = tracesByTurn.get(turn.turnId)?.traceSummary?.automatedInput;
+      if (source) {
+        const line: ChatRow = {
+          kind: "automated_input",
+          key: `automated-input:${turn.turnId}`,
+          source,
           turnId: turn.turnId,
         };
-        const built = builtRenewals.get(row);
-        if (built && sameRow(built, notice)) out.push(built);
+        const built = builtInputs.get(row);
+        if (built && sameRow(built, line)) out.push(built);
         else {
-          builtRenewals.set(row, notice);
-          out.push(notice);
+          builtInputs.set(row, line);
+          out.push(line);
         }
       }
       const model = tracesByTurn.get(turn.turnId)?.traceSummary?.model;

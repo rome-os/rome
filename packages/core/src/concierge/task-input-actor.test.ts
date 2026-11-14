@@ -1,4 +1,4 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { expect, it, rs } from "@rstest/core";
 import { buildConciergeTools } from "./tools.js";
 import type { ConciergeService } from "./service.js";
 import type { SessionToolContext } from "../core/session-tools.js";
@@ -36,6 +36,7 @@ it("chat_send uses the host's turn-bound handoff, with no actor field in its mod
     received = await taskInputActor(claim, repo as never, async () => "source");
     return { ok: true };
   });
+  const resume = rs.fn(async () => {});
   const service = {
     ownerOfChat: async () => "guardian",
     promptsHandedOn: () => [],
@@ -46,6 +47,7 @@ it("chat_send uses the host's turn-bound handoff, with no actor field in its mod
       tasks: {
         repo: {
           findBySession: async () => ({ id: "task" }),
+          resume,
           getWithChat: async () => ({ conciergeChat: { id: "source" } }),
         },
       },
@@ -80,6 +82,7 @@ it("chat_send uses the host's turn-bound handoff, with no actor field in its mod
   expect(tool.inputSchema).not.toHaveProperty("properties.actor");
   const result = await tool.handler({ chatId: "target", text: "inspect public metadata" });
   expect(result.isError).toBeFalsy();
+  expect(resume).toHaveBeenCalledWith("task");
   expect(send).toHaveBeenCalledTimes(1);
   expect(received).toEqual(guardian);
 });

@@ -35,6 +35,8 @@ export interface ReplaceSessionOptions {
   reason?: string;
   /** The fingerprint of the setup the successor opens with. */
   setup?: string;
+  /** The handoff the retired session left for the successor ({@link Session.handoff}). */
+  handoff?: string;
 }
 
 /** What one turn ran on. */
@@ -46,6 +48,8 @@ export interface TurnRun {
   /** Where the turn left the provider's thread, so a fork can branch at it.
    *  Recorded only with a `modelThreadId`. */
   checkpoint?: { turnId: string; checkpointId: string };
+  /** How many tokens the context held at the turn's last model request, when the provider said. */
+  contextTokens?: number;
 }
 
 /** Where a completed turn left the provider's thread. Opaque to Sessions:
@@ -74,6 +78,10 @@ export interface SessionState {
   supersededBy: SessionId | null;
   /** Why the reset replaced it, or null. */
   supersededFor: string | null;
+  /** The handoff this session started from, or null. */
+  handoff: string | null;
+  /** The context's size at the last turn that reported one, in tokens, or null. */
+  contextTokens: number | null;
   createdAt: Date;
   lastActiveAt: Date;
 }
@@ -81,7 +89,14 @@ export interface SessionState {
 /** The facts a session can change after it is created. The repository writes
  *  only the ones that changed, so two instances of one session, each changing
  *  a different fact, never undo each other's write. */
-export type SessionChange = "turn" | "reasoningEffort" | "workingDir" | "lastActiveAt" | "status";
+export type SessionChange =
+  | "turn"
+  | "reasoningEffort"
+  | "workingDir"
+  | "lastActiveAt"
+  | "status"
+  | "contextTokens"
+  | "setup";
 
 /**
  * One agent's conversation from one reset to the next: the agent, what it last
@@ -115,6 +130,8 @@ export class Session {
       setup: options.setup ?? null,
       supersededBy: null,
       supersededFor: null,
+      handoff: null,
+      contextTokens: null,
       createdAt: now,
       lastActiveAt: now,
     });
@@ -177,6 +194,21 @@ export class Session {
   get supersededFor(): string | null {
     return this.state.supersededFor;
   }
+  /**
+   * The note the session it replaced wrote for it in a renewal: what was in
+   * progress, agreed and still open. Fixed for the session's life. Null when
+   * no renewal handoff was written. docs/concepts/sessions.md#handoff
+   */
+  get handoff(): string | null {
+    return this.state.handoff;
+  }
+  /**
+   * How many tokens the provider's context held at the last turn that said:
+   * its latest model request's input. Null until a turn reports one.
+   */
+  get contextTokens(): number | null {
+    return this.state.contextTokens;
+  }
   get createdAt(): Date {
     return this.state.createdAt;
   }
@@ -207,6 +239,10 @@ export class Session {
       this.state.reasoningEffort = run.reasoningEffort;
       this.changes.add("reasoningEffort");
     }
+    if (run.contextTokens !== undefined) {
+      this.state.contextTokens = run.contextTokens;
+      this.changes.add("contextTokens");
+    }
     if (run.checkpoint && run.modelThreadId) {
       this.checkpoints.set(run.checkpoint.turnId, {
         sessionId: this.state.id,
@@ -216,6 +252,18 @@ export class Session {
         checkpointId: run.checkpoint.checkpointId,
       });
     }
+  }
+
+  /**
+   * The session opens with setup `setup` from now on. Only for a session no
+   * turn has run on: its thread has read no setup yet, so it starts on this one.
+   */
+  adoptSetup(setup: string): void {
+    if (this.state.modelThreadId !== null) {
+      throw new Error(`Session "${this.state.id}" has a thread and keeps the setup it opened with`);
+    }
+    this.state.setup = setup;
+    this.changes.add("setup");
   }
 
   /** The provider's transcript now lives here. */
@@ -252,6 +300,7 @@ export class Session {
       workingDir: options.workingDir,
       setup: options.setup,
     });
+    successor.state.handoff = options.handoff ?? null;
     this.state.supersededBy = successor.id;
     this.state.supersededFor = options.reason ?? null;
     return successor;

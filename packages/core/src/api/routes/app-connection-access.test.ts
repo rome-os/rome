@@ -11,6 +11,7 @@ const sameOrigin = { "sec-fetch-site": "same-origin", "content-type": "applicati
 function makeApp(
   options: {
     appEnabled?: () => boolean;
+    connectionKind?: string;
     getGrant?: () => Promise<{
       state: "authorized";
       grantedAt: Date;
@@ -22,7 +23,8 @@ function makeApp(
   const access = new AppConnectionAccessRepository(db);
   const connection = {
     id: "connection-1",
-    connectionKind: "fake-docs",
+    connectionKind: options.connectionKind ?? "fake-docs",
+    label: "Fixture Bot",
   };
   const descriptor = {
     grant: "account",
@@ -77,7 +79,8 @@ function makeApp(
     },
     connectionRegistry: {
       all: () => [connection],
-      getDescriptor: (kind: string) => (kind === "fake-docs" ? descriptor : null),
+      getDescriptor: (kind: string) =>
+        kind === (options.connectionKind ?? "fake-docs") ? descriptor : null,
       grantOf:
         options.getGrant ??
         (async () => ({
@@ -348,6 +351,48 @@ describe("App connection access management", () => {
       expect(second).not.toHaveProperty("nextCursor");
     } finally {
       close();
+    }
+  });
+});
+
+describe("Document access discovery", () => {
+  it("shows guardian-only safe provider guidance without inspecting scopes or exposing grant material", async () => {
+    const h = makeApp({
+      connectionKind: "feishu",
+      getGrant: async () => ({
+        state: "authorized",
+        grantedAt: new Date(),
+        grantEpoch: "grant-fixture",
+        profile: { appId: "cli_fixture", domain: "lark" },
+        credential: { material: { appSecret: "SYNTHETIC_NOT_FOR_UI" } },
+      }),
+    });
+    try {
+      const path = "/app-connection-access/notes/documents?limit=1";
+      const response = await h.request(path);
+      expect(response.status).toBe(200);
+      const value = await response.json();
+      expect(value).toMatchObject({
+        connections: [
+          {
+            connectionId: "connection-1",
+            scopeStatus: "not_checked",
+            scope: "docx:document:readonly",
+            supported: false,
+            consoles: [{ brand: "lark", url: "https://open.larksuite.com/app/cli_fixture/auth" }],
+          },
+        ],
+      });
+      expect(JSON.stringify(value)).not.toContain("SYNTHETIC_NOT_FOR_UI");
+      expect(
+        (await h.request(path, undefined, { kind: "visitor", userId: "visitor" } as never)).status,
+      ).toBe(403);
+      expect((await h.request("/app-connection-access/missing/documents")).status).toBe(404);
+      expect((await h.request("/app-connection-access/notes/documents?limit=101")).status).toBe(
+        400,
+      );
+    } finally {
+      h.close();
     }
   });
 });

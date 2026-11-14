@@ -10,8 +10,19 @@ const MINUTE_MS = 60_000;
  * the agent's self-contained note-to-self, which the woken turn always
  * receives, since another session than the one that deferred may wake to it. */
 export type WakeUp =
-  | { kind: "time"; name: string; note: string; fireAtMs: number }
-  | { kind: "event"; name: string; note: string; event: DeferEvent };
+  | { kind: "time"; name: string; note: string; fireAtMs: number; taskId?: string }
+  | {
+      kind: "event";
+      name: string;
+      note: string;
+      /** The event to wait for. */
+      event: Omit<DeferEvent, "deadline" | "waitingFor">;
+      /** What the wait is for, and when it ends without the event (epoch
+       *  milliseconds), for an agent whose policy asks for them. */
+      waitingFor?: string;
+      deadlineMs?: number;
+      taskId?: string;
+    };
 
 export type ParsedDefer = { ok: true; wakeUp: WakeUp } | { ok: false; error: string };
 
@@ -42,7 +53,17 @@ const deferEventSchema = z.strictObject({
       }),
     )
     .optional(),
+  waitingFor: z
+    .string()
+    .transform((value) => value.trim())
+    .optional(),
+  deadline: z.string().optional(),
 });
+
+const WAITING_FOR_REQUIRED =
+  'defer.event.waitingFor is required — a few words saying what you wait for, e.g. "the CI run"';
+const DEADLINE_REQUIRED =
+  "defer.event.deadline is required — when to wake anyway if the event never comes";
 
 type DeferEvent = z.infer<typeof deferEventSchema>;
 
@@ -72,6 +93,11 @@ const deferInputSchema = z
     afterMinutes: z.number().int().min(1).optional(),
     at: z.string().optional(),
     event: deferEventSchema.optional(),
+    taskId: z
+      .string()
+      .transform((value) => value.trim())
+      .refine((value) => value.length > 0, { message: "defer.taskId must be non-empty" })
+      .optional(),
   })
   .refine(
     (value) => [value.afterMinutes, value.at, value.event].filter((v) => v != null).length === 1,
@@ -85,7 +111,15 @@ const deferInputSchema = z
  * instant, ceiled to the next whole minute (the schedule trigger is
  * minute-resolution) and in the future. An event wakeup resolves to the event
  * match. */
-export function parseDeferInput(input: unknown, now: number): ParsedDefer {
+export function parseDeferInput(
+  input: unknown,
+  now: number,
+  options: { taskChecks?: boolean } = {},
+): ParsedDefer {
+  // Only an agent whose policy checks tasks (the Concierge) links one.
+  if (!options.taskChecks && input && typeof input === "object" && "taskId" in input) {
+    return { ok: false, error: "defer.taskId is not available to this agent" };
+  }
   const parsed = deferInputSchema.safeParse(input);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -96,9 +130,33 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
     const error = issue.message.startsWith("defer") ? issue.message : `${where}: ${issue.message}`;
     return { ok: false, error };
   }
-  const { name, note, afterMinutes, at, event } = parsed.data;
+  const { name, note, afterMinutes, at, event, taskId } = parsed.data;
+  const task = taskId ? { taskId } : {};
 
-  if (event) return { ok: true, wakeUp: { kind: "event", name, note, event } };
+  if (event) {
+    const { deadline, waitingFor, ...match } = event;
+    // An agent whose policy asks for them (the Concierge) labels every wait
+    // and gives it a deadline; any other agent's wait takes neither.
+    if (!options.taskChecks) {
+      return { ok: true, wakeUp: { kind: "event", name, note, event: match, ...task } };
+    }
+    if (!waitingFor) return { ok: false, error: WAITING_FOR_REQUIRED };
+    if (deadline === undefined) return { ok: false, error: DEADLINE_REQUIRED };
+    const deadlineMs = Date.parse(deadline);
+    if (Number.isNaN(deadlineMs)) {
+      return {
+        ok: false,
+        error: `defer.event.deadline "${deadline}" is not a valid ISO 8601 instant`,
+      };
+    }
+    if (deadlineMs <= now) {
+      return { ok: false, error: "defer.event.deadline is in the past — pick a later time" };
+    }
+    return {
+      ok: true,
+      wakeUp: { kind: "event", name, note, event: match, waitingFor, deadlineMs, ...task },
+    };
+  }
 
   let rawMs: number;
   if (afterMinutes != null) {
@@ -119,5 +177,5 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
     return { ok: false, error: "defer fires in the past — pick a time at least a minute from now" };
   }
 
-  return { ok: true, wakeUp: { kind: "time", name, note, fireAtMs } };
+  return { ok: true, wakeUp: { kind: "time", name, note, fireAtMs, ...task } };
 }

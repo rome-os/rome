@@ -62,13 +62,13 @@ describe("SpeakerMessages", () => {
 
   it("find the messages a run names by platform id where its session stands", async () => {
     const asked = heard("rome_bot:7", "what now?");
-    heard("rome_bot:6", "earlier");
+    const earlier = heard("rome_bot:6", "earlier");
 
     expect(await lines.recorded("speaker-1", "7")).toMatchObject({ id: asked });
     expect(await lines.recorded("nobody", "7")).toBeNull();
     expect(
       await runLines(lines, "speaker-1", { platformMessageId: "7", replyTo: { messageId: "6" } }),
-    ).toMatchObject({ prompt: asked, quoted: { text: "earlier", senderName: "Wei" } });
+    ).toEqual({ prompt: asked, quoted: earlier });
     expect(await runLines(undefined, "speaker-1", { platformMessageId: "7" })).toEqual({
       prompt: null,
       quoted: null,

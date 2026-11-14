@@ -171,6 +171,82 @@ describe("ChatsWebChatRepository", () => {
     expect(older.nextCursor).toBeNull();
   });
 
+  it("reaches an old message in one page, with two older turns for context", async () => {
+    await repo.createSession("chat-1", "Plans");
+    for (let turn = 1; turn <= 8; turn++) {
+      await repo.addMessage(`in-${turn}`, "chat-1", "user", text(`Q${turn}`), `turn-${turn}`);
+      await repo.addMessage(`out-${turn}`, "chat-1", "assistant", text(`A${turn}`), `turn-${turn}`);
+    }
+    const turnsOf = (rows: { id: string }[]) =>
+      [...new Set(rows.map((line) => line.id.split("-")[1]))].map(Number);
+
+    const page = await repo.getMessagesPage("chat-1", { limit: 1, through: "out-5" });
+    expect(turnsOf(page.rows)).toEqual([3, 4, 5, 6, 7, 8]);
+    expect(page.nextCursor).not.toBeNull();
+
+    // From the oldest page held, it brings only what lies between.
+    const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
+    const between = await repo.getMessagesPage("chat-1", {
+      limit: 1,
+      before: newest.nextCursor,
+      through: "in-4",
+    });
+    expect(turnsOf(between.rows)).toEqual([2, 3, 4, 5, 6]);
+
+    // A message the chat does not hold pages as usual.
+    const plain = await repo.getMessagesPage("chat-1", { limit: 1, through: "elsewhere" });
+    expect(turnsOf(plain.rows)).toEqual([8]);
+  });
+
+  it("reads a chat's task chat parts from a time on", async () => {
+    const part = JSON.stringify([{ type: "task_chat", chatId: "task-1", title: "Flights" }]);
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date("2026-11-13T08:00:00Z"));
+      await repo.createSession("chat-1", "Plans");
+      rs.setSystemTime(new Date("2026-11-13T09:00:00Z"));
+      await repo.addMessage("card-old", "chat-1", "assistant", part, "turn-1");
+      rs.setSystemTime(new Date("2026-11-13T09:05:00Z"));
+      await repo.addMessage("card-new", "chat-1", "assistant", part, "turn-2");
+      await repo.addMessage("plain", "chat-1", "assistant", text("No card"), "turn-2");
+    } finally {
+      rs.useRealTimers();
+    }
+    const ids = async (since?: Date) =>
+      (await repo.taskChatPartMessages("chat-1", since)).map((line) => line.id);
+    expect(await ids()).toEqual(["card-old", "card-new"]);
+    expect(await ids(new Date("2026-11-13T09:04:59Z"))).toEqual(["card-new"]);
+  });
+
+  it("reads task chat parts in the transcript's order when two turns' cards share a second", async () => {
+    const part = JSON.stringify([{ type: "task_chat", chatId: "task-1", title: "Flights" }]);
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date("2026-11-13T08:00:00Z"));
+      await repo.createSession("chat-1", "Plans");
+      // "turn-z" starts first, "turn-a" later; both cards land in one second.
+      rs.setSystemTime(new Date("2026-11-13T09:00:00Z"));
+      await repo.addMessage("in-z", "chat-1", "user", text("Book it"), "turn-z");
+      rs.setSystemTime(new Date("2026-11-13T09:00:05Z"));
+      await repo.addMessage("in-a", "chat-1", "user", text("Something else"), "turn-a");
+      rs.setSystemTime(new Date("2026-11-13T09:00:10Z"));
+      await repo.addMessage("new-task", "chat-1", "assistant", part, "turn-a");
+      await repo.addMessage("ask", "chat-1", "assistant", part, "turn-z");
+    } finally {
+      rs.useRealTimers();
+    }
+    expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
+      "in-z",
+      "ask",
+      "in-a",
+      "new-task",
+    ]);
+    const ids = async (since?: Date) =>
+      (await repo.taskChatPartMessages("chat-1", since)).map((line) => line.id);
+    expect(await ids()).toEqual(["ask", "new-task"]);
+    expect(await ids(new Date("2026-11-13T09:00:09Z"))).toEqual(["ask", "new-task"]);
+  });
+
   // A subagent, fork or action run stands in no chat, so its prompts and
   // answers are its own.
   it("keeps the lines of a session in no chat as its own", async () => {

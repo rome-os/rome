@@ -1,3 +1,4 @@
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type {
   ForkRunParams as SdkForkRunParams,
   RunParams as SdkRunParams,
@@ -39,6 +40,9 @@ export interface RunParams extends SdkRunParams {
    *  `system_input` block. Only callers that ask for it; nothing more is
    *  sent to the model. */
   inputLabel?: string;
+  /** Who sent the input, when a routine, an app or another agent sent it
+   *  into the chat. Kept on the `system_input` block with the label. */
+  inputSource?: SystemInputSource;
 }
 
 export interface ForkRunParams extends SdkForkRunParams {

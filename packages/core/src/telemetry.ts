@@ -1,3 +1,4 @@
+import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 // OTLP/HTTP with protobuf body — more compact than JSON and universally
@@ -135,6 +136,32 @@ export function initTelemetry(): void {
   });
 
   sdk.start();
+}
+
+let eventLoopDelay: IntervalHistogram | undefined;
+
+/**
+ * Export the main process's worst event-loop delay in each metric export
+ * window as `rome.eventloop.delay.max`. A synchronous handler that holds the
+ * loop for seconds shows up here even when no span or log names it (#2144).
+ * One series, unlike the runtime-node instrumentation disabled above. Call
+ * once from main after `initTelemetry()`; a no-op when telemetry is off.
+ */
+export function startEventLoopDelayMetric(): void {
+  if (!sdk || eventLoopDelay) return;
+  const histogram = monitorEventLoopDelay();
+  histogram.enable();
+  eventLoopDelay = histogram;
+  apiMetrics
+    .getMeter(METER_NAME)
+    .createObservableGauge("rome.eventloop.delay.max", {
+      unit: "ms",
+      description: "Longest main-process event-loop delay since the previous export.",
+    })
+    .addCallback((result) => {
+      result.observe(histogram.max / 1e6);
+      histogram.reset();
+    });
 }
 
 export function getTracer(name: string): Tracer {
@@ -288,6 +315,7 @@ export function withInboundSpans<
 }
 
 export async function shutdown(): Promise<void> {
+  eventLoopDelay?.disable();
   if (sdk) {
     await sdk.shutdown();
   }

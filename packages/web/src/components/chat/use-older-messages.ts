@@ -50,6 +50,8 @@ interface UseOlderMessagesOptions {
   /** Whether the viewport follows the newest message. A pinned viewport needs no anchoring. */
   pinned: boolean;
   setMessages: Dispatch<SetStateAction<Map<string, ChatMessage[]>>>;
+  /** Called with the messages of each older page that loads, once it is merged in. */
+  onOlderPage?: (sessionId: string, messages: ChatMessage[]) => void;
 }
 
 export interface OlderMessages {
@@ -59,8 +61,12 @@ export interface OlderMessages {
   hasOlder: (sessionId: string) => boolean;
   /** Attach to an element placed at the top of the transcript. */
   sentinelRef: (node: HTMLElement | null) => void;
-  /** Loads the page of turns before the oldest loaded one, keeping the viewport on what it shows. */
-  loadOlder: (sessionId: string) => Promise<void>;
+  /**
+   * Loads the page of turns before the oldest loaded one, keeping the viewport
+   * on what it shows. With `through`, the page reaches that message however
+   * far back it is, in one read.
+   */
+  loadOlder: (sessionId: string, options?: { through?: string }) => Promise<void>;
 }
 
 /**
@@ -69,11 +75,12 @@ export interface OlderMessages {
  */
 export function useOlderMessages(
   sessionId: string | null,
-  { pageTurns, scroller, pinned, setMessages }: UseOlderMessagesOptions,
+  { pageTurns, scroller, pinned, setMessages, onOlderPage }: UseOlderMessagesOptions,
 ): OlderMessages {
   const [cursors, setCursors] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const cursorsRef = useRef(cursors);
-  const loadingRef = useRef(new Set<string>());
+  // Each session's page read in flight.
+  const loadingRef = useRef(new Map<string, Promise<void>>());
   const [loading, setLoading] = useState(false);
   const [retryBlocked, setRetryBlocked] = useState(false);
   const pinnedRef = useRef(pinned);
@@ -105,14 +112,15 @@ export function useOlderMessages(
 
   const hasOlder = useCallback((id: string) => !!cursors.get(id), [cursors]);
 
-  const loadOlder = useCallback(
-    async (id: string) => {
-      const cursor = cursorsRef.current.get(id);
-      if (!cursor || loadingRef.current.has(id)) return;
-      loadingRef.current.add(id);
+  const readPage = useCallback(
+    async (id: string, cursor: string, options: { through?: string }) => {
       setLoading(true);
       try {
-        const page = await listSessionMessagePage(id, { limit: pageTurns, before: cursor });
+        const page = await listSessionMessagePage(id, {
+          limit: pageTurns,
+          before: cursor,
+          ...(options.through ? { through: options.through } : {}),
+        });
         // A newer response may have restarted the history while this one flew.
         if (!page || cursorsRef.current.get(id) !== cursor) return;
         const el = scrollerRef.current;
@@ -126,6 +134,7 @@ export function useOlderMessages(
           return next;
         });
         setCursor(id, page.nextCursor);
+        onOlderPage?.(id, page.messages);
       } catch {
         setRetryBlocked(true);
       } finally {
@@ -133,7 +142,25 @@ export function useOlderMessages(
         setLoading(false);
       }
     },
-    [pageTurns, setCursor, setMessages],
+    [pageTurns, setCursor, setMessages, onOlderPage],
+  );
+
+  const loadOlder = useCallback(
+    async (id: string, options: { through?: string } = {}): Promise<void> => {
+      const inFlight = loadingRef.current.get(id);
+      if (inFlight) {
+        await inFlight;
+        // The page in flight may stop short of the message `through` names,
+        // so its own read follows.
+        if (!options.through || loadingRef.current.has(id)) return;
+      }
+      const cursor = cursorsRef.current.get(id);
+      if (!cursor) return;
+      const read = readPage(id, cursor, options);
+      loadingRef.current.set(id, read);
+      await read;
+    },
+    [readPage],
   );
 
   useEffect(() => {

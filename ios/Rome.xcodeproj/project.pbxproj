@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000071 /* RomeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* RomeWidget.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000611 /* A2UISwiftCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000601 /* A2UISwiftCore */; };
 		A10000000000000000000612 /* A2UISwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000602 /* A2UISwiftUI */; };
 		A10000000000000000000613 /* BasicCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000603 /* BasicCatalog */; };
@@ -20,13 +21,35 @@
 			remoteGlobalIDString = A10000000000000000000101;
 			remoteInfo = Rome;
 		};
+		A10000000000000000000302 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000103;
+			remoteInfo = RomeWidget;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000000000000000000061 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000000000000000000071 /* RomeWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A10000000000000000000011 /* Rome.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Rome.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000012 /* RomeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RomeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000013 /* Config */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Config; sourceTree = "<group>"; };
 		A10000000000000000000014 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
+		A10000000000000000000015 /* RomeWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RomeWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -36,6 +59,13 @@
 				Info.plist,
 			);
 			target = A10000000000000000000101 /* Rome */;
+		};
+		A10000000000000000000026 /* Exceptions for "RomeWidget" folder in "RomeWidget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A10000000000000000000103 /* RomeWidget */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -51,6 +81,19 @@
 		A10000000000000000000022 /* RomeTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = RomeTests;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000024 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000025 /* RomeWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A10000000000000000000026 /* Exceptions for "RomeWidget" folder in "RomeWidget" target */,
+			);
+			path = RomeWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -73,6 +116,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000033 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -81,6 +131,8 @@
 			children = (
 				A10000000000000000000014 /* Base.xcconfig */,
 				A10000000000000000000021 /* Rome */,
+				A10000000000000000000024 /* Shared */,
+				A10000000000000000000025 /* RomeWidget */,
 				A10000000000000000000022 /* RomeTests */,
 				A10000000000000000000003 /* Products */,
 			);
@@ -91,6 +143,7 @@
 			children = (
 				A10000000000000000000011 /* Rome.app */,
 				A10000000000000000000012 /* RomeTests.xctest */,
+				A10000000000000000000015 /* RomeWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -105,13 +158,16 @@
 				A10000000000000000000041 /* Sources */,
 				A10000000000000000000031 /* Frameworks */,
 				A10000000000000000000051 /* Resources */,
+				A10000000000000000000061 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A10000000000000000000202 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000021 /* Rome */,
+				A10000000000000000000024 /* Shared */,
 			);
 			name = Rome;
 			packageProductDependencies = (
@@ -146,6 +202,29 @@
 			productReference = A10000000000000000000012 /* RomeTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		A10000000000000000000103 /* RomeWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000403 /* Build configuration list for PBXNativeTarget "RomeWidget" */;
+			buildPhases = (
+				A10000000000000000000043 /* Sources */,
+				A10000000000000000000033 /* Frameworks */,
+				A10000000000000000000053 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000024 /* Shared */,
+				A10000000000000000000025 /* RomeWidget */,
+			);
+			name = RomeWidget;
+			packageProductDependencies = (
+			);
+			productName = RomeWidget;
+			productReference = A10000000000000000000015 /* RomeWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -162,6 +241,9 @@
 					A10000000000000000000102 = {
 						CreatedOnToolsVersion = 16.0;
 						TestTargetID = A10000000000000000000101;
+					};
+					A10000000000000000000103 = {
+						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
@@ -185,6 +267,7 @@
 			targets = (
 				A10000000000000000000101 /* Rome */,
 				A10000000000000000000102 /* RomeTests */,
+				A10000000000000000000103 /* RomeWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -198,6 +281,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A10000000000000000000052 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000053 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -221,6 +311,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000043 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -228,6 +325,12 @@
 			isa = PBXTargetDependency;
 			target = A10000000000000000000101 /* Rome */;
 			targetProxy = A10000000000000000000301 /* PBXContainerItemProxy */;
+		};
+		A10000000000000000000202 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = A10000000000000000000103 /* RomeWidget */;
+			targetProxy = A10000000000000000000302 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -364,6 +467,52 @@
 			};
 			name = Release;
 		};
+		A10000000000000000000531 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = Config/RomeWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RomeWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(ROME_DISPLAY_NAME)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(ROME_BUNDLE_IDENTIFIER).widget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A10000000000000000000532 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = Config/RomeWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RomeWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(ROME_DISPLAY_NAME)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(ROME_BUNDLE_IDENTIFIER).widget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -390,6 +539,15 @@
 			buildConfigurations = (
 				A10000000000000000000521 /* Debug */,
 				A10000000000000000000522 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000403 /* Build configuration list for PBXNativeTarget "RomeWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000531 /* Debug */,
+				A10000000000000000000532 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

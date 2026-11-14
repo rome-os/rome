@@ -4,11 +4,13 @@
 // thread no task has, from before, shows no label. The thread view's own
 // transcript has no provider, so it shows none.
 
+import { CornerDownRight } from "lucide-react";
 import { createContext, useContext, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage } from "@/lib/chat-types";
 import { useReplyDraft } from "./reply-draft";
-import { replyPreview } from "./reply-source";
 
 /** What the label under one message names: its task's thread, by the task's title. */
 export interface ThreadLabel {
@@ -22,6 +24,8 @@ export interface ChatThreads {
   labels: ReadonlyMap<string, ThreadLabel>;
   /** The task thread each message in one is in, by message id: the guardian's too. */
   taskThreads: ReadonlyMap<string, string>;
+  /** Each task thread's title, by the thread. */
+  titles: ReadonlyMap<string, string>;
 }
 
 const ChatThreadsContext = createContext<ChatThreads | null>(null);
@@ -67,20 +71,42 @@ export function taskThreads(
 }
 
 /**
- * The labels of a loaded timeline: one under every agent message in a task's
- * thread, named by the task's title, and none under the guardian's.
+ * The labels of a loaded timeline, named by the task's title. An agent
+ * message in a task's thread may carry one: a plain message, a forward and a
+ * question or approval card alike. A task card, the one shown when its task
+ * starts, needs none: it names its task itself. Of a run of such messages in
+ * one thread, with nothing else between them, only the first and the last
+ * show it, so a run of one or two shows it on each. Another thread's agent
+ * message or a task card ends the run; the owner's messages, like a turn's
+ * trace, neither end nor join it.
  */
 export function threadLabels(
   messages: readonly ThreadTimelineMessage[],
   liveTitles: ReadonlyMap<string, string | null> = new Map(),
 ): Map<string, ThreadLabel> {
   const { threads, titles } = taskThreads(messages, liveTitles);
-  const labels = new Map<string, ThreadLabel>();
+  // Each run of one thread's labelled messages, in order: a run ends where
+  // another agent message comes between.
+  const runs: { label: ThreadLabel; ids: string[] }[] = [];
+  let open = false;
   for (const message of messages) {
+    // A turn's trace and the owner's messages end nothing.
+    if (message.role !== "assistant") continue;
     const thread = threads.get(message.id);
     const title = thread ? titles.get(thread) : undefined;
-    if (message.role !== "assistant" || !thread || !title) continue;
-    labels.set(message.id, { thread, title });
+    if (!thread || !title || isTaskCard(message)) {
+      open = false;
+      continue;
+    }
+    const last = runs.at(-1);
+    if (open && last?.label.thread === thread) last.ids.push(message.id);
+    else runs.push({ label: { thread, title }, ids: [message.id] });
+    open = true;
+  }
+  const labels = new Map<string, ThreadLabel>();
+  for (const { label, ids } of runs) {
+    labels.set(ids[0]!, label);
+    labels.set(ids.at(-1)!, label);
   }
   return labels;
 }
@@ -106,10 +132,8 @@ export function useChatThreadsValue(
 ): ChatThreads {
   return useMemo(() => {
     const shown = placed(messages, rethreaded);
-    return {
-      labels: threadLabels(shown, liveTitles),
-      taskThreads: taskThreads(shown, liveTitles).threads,
-    };
+    const { threads, titles } = taskThreads(shown, liveTitles);
+    return { labels: threadLabels(shown, liveTitles), taskThreads: threads, titles };
   }, [messages, rethreaded, liveTitles]);
 }
 
@@ -146,41 +170,77 @@ export function placed(
   });
 }
 
-function wordsOf(message: Pick<ChatMessage, "id" | "content">): string {
-  return parseMessageEntries(message)
-    .flatMap((part) => (part.type === "text" && part.content.trim() ? [part.content] : []))
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+/** Whether the message shows a task's card: a task_chat part not shown as its question. */
+function isTaskCard(message: ThreadTimelineMessage): boolean {
+  if (message.content === undefined) return false;
+  return parseMessageEntries({ id: message.id, content: message.content }).some(
+    (part) => part.type === "task_chat" && part.show !== "ask",
+  );
 }
 
 /**
- * The subdued `↳ <task title>` label under an agent message in a task's chat
- * thread, which opens the thread. Renders nothing under the guardian's
- * messages and inside the thread view.
+ * The quiet look of a label under a message, as the iOS app draws it: about a
+ * spacing step from its bubble, a small turn-down arrow then the text, faint,
+ * cut short when long. It does not change on hover.
  */
-export function ThreadLabelLine({ message }: { message: ChatMessage }) {
+const LABEL_LINE =
+  "-mt-1 mb-1 flex max-w-full min-w-0 items-center gap-1 px-3 text-aux text-muted-foreground/75";
+
+/** The label's arrow: iOS's light 9pt `arrow.turn.down.right`, as a thin lucide icon. */
+function LabelArrow() {
+  return <CornerDownRight aria-hidden="true" strokeWidth={1.5} className="size-3 shrink-0" />;
+}
+
+/**
+ * The subdued `<arrow> <task title>` label under an agent message in a task's chat
+ * thread, which opens the thread. Renders nothing under the guardian's
+ * messages and inside the thread view. A message in no thread whose turn the
+ * Concierge took on its own, from a routine, an app, another agent or what
+ * it follows, shows `source` instead, in the same place and look, as plain
+ * text: at most one label per message, and a thread's wins.
+ */
+export function ThreadLabelLine({
+  message,
+  source,
+}: {
+  message: ChatMessage;
+  source?: SystemInputSource;
+}) {
   const threads = useChatThreads();
   const draft = useReplyDraft();
   const label = threads?.labels.get(message.id);
-  if (!label || !draft?.threads || draft.sessionId !== message.sessionId) return null;
+  if (!label || !draft?.threads || draft.sessionId !== message.sessionId) {
+    // A message in a task's thread shows its thread's label or none.
+    if (threads?.taskThreads.has(message.id)) return null;
+    return source ? <SourceLabel source={source} /> : null;
+  }
   const name = label.title;
   return (
     <button
       type="button"
       data-thread-label={label.thread}
       title={name}
-      onClick={() =>
-        draft.openThread({
-          messageId: message.id,
-          author: "agent",
-          preview: replyPreview(wordsOf(message)),
-        })
-      }
-      className="-mt-2 max-w-full truncate rounded-4 px-1 text-left text-aux text-muted-foreground/60 outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
+      onClick={() => draft.openThread({ thread: message.id, title: name })}
+      // About 4px (a spacing step) from its own bubble and 12px before the next
+      // message, so it reads as its bubble's. It keeps its look on hover; a
+      // keyboard focus shows a ring. A long title is cut at a fixed width,
+      // whole in the tooltip and the accessible name.
+      className={`${LABEL_LINE} cursor-pointer rounded-4 text-left outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50`}
     >
-      <span aria-hidden="true">↳ </span>
-      {name}
+      <LabelArrow />
+      <span className="max-w-56 truncate">{name}</span>
     </button>
+  );
+}
+
+/** Where a message's turn came from, such as "Routine · Daily summary": text with no arrow, not a control. */
+function SourceLabel({ source }: { source: SystemInputSource }) {
+  const { t } = useTranslation("chat");
+  const kind = t(`automatedInput.kinds.${source.type}`);
+  const name = source.name ? t("automatedInput.named", { kind, name: source.name }) : kind;
+  return (
+    <p data-source-label={source.type} title={name} className={LABEL_LINE}>
+      <span className="max-w-56 truncate">{name}</span>
+    </p>
   );
 }

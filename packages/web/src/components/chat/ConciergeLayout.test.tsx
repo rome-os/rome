@@ -110,7 +110,10 @@ const idle = {
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
-function renderTranscript(rows: ChatRow[], opts: { live?: LivePreview } = {}) {
+function renderTranscript(
+  rows: ChatRow[],
+  opts: { live?: LivePreview; unreadFrom?: string | null } = {},
+) {
   return render(
     <ThemeProvider>
       <ConciergeTranscript
@@ -119,6 +122,7 @@ function renderTranscript(rows: ChatRow[], opts: { live?: LivePreview } = {}) {
         actions={actions}
         contentRef={() => {}}
         feedback
+        unreadFrom={opts.unreadFrom}
       />
     </ThemeProvider>,
   );
@@ -130,6 +134,28 @@ function bubbleOf(content: string): HTMLElement {
   if (!bubble) throw new Error(`no bubble around ${content}`);
   return bubble;
 }
+
+describe("Concierge unread divider", () => {
+  const rows = [
+    agentRow(agent("old", 0, [text("Seen")], "turn-old")),
+    agentRow(agent("new", 1000, [text("Not seen")], "turn-new")),
+  ];
+
+  it("draws a labelled divider between the last read message and the first unread one", () => {
+    renderTranscript(rows, { unreadFrom: "new" });
+    const divider = screen.getByRole("separator", { name: "New messages" });
+    const seen = screen.getByText("Seen");
+    const unseen = screen.getByText("Not seen");
+    expect(seen.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(divider.compareDocumentPosition(unseen) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(divider.hasAttribute("data-concierge-unread-divider")).toBe(true);
+  });
+
+  it("draws none for a chat with nothing unread", () => {
+    renderTranscript(rows);
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+});
 
 describe("Concierge layout", () => {
   it("expands only the newest block for each task across messages and within one message", () => {
@@ -468,20 +494,10 @@ describe("Concierge layout", () => {
     });
 
     it("puts the typing bubble in the agent's group", () => {
-      // The turn has spoken, so it types only while it works on in a call.
-      const working = {
-        segments: [
-          {
-            kind: "block" as const,
-            id: "b0",
-            ordinal: 0,
-            block: { type: "tool_use" as const, id: "w1", tool: "WebSearch", input: {} },
-          },
-        ],
-        summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
-      };
+      // The server says the running turn writes a message.
+      const writing = { sessionId: "s", turnId: "turn-1", mode: "exact", writing: true } as const;
       const { container } = renderTranscript([agentRow(agent("a1", 0, [text("One sec.")]))], {
-        live: { ...idle, isStreaming: true, runningTurnId: "turn-1", snapshot: working },
+        live: { ...idle, isStreaming: true, runningTurnId: "turn-1", writing },
       });
 
       const groups = topLevel(container).filter((el) => el.tagName === "DIV");
@@ -571,18 +587,13 @@ describe("Concierge reply", () => {
     expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   });
 
-  it("gives a task chat card the same Reply, quoting it as one line", () => {
-    const draft = draftOf();
-    inChat(draft, [
+  it("offers a task card no Reply: only a message with text is replyable", () => {
+    inChat(draftOf(), [
       agentRow(agent("c1", 0, [{ type: "task_chat", chatId: "chat-7", title: "Trip" }])),
     ]);
 
     expect(screen.getByTestId("task-card")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-
-    expect(draft.set).toHaveBeenCalledWith(
-      expect.objectContaining({ messageId: "c1", preview: "[Task chat] Trip (chat chat-7)" }),
-    );
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   });
 
   it("makes each message the target of a jump from a quote of it", () => {

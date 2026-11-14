@@ -172,6 +172,26 @@ const namesIn = (region: HTMLElement) =>
     .queryAllByRole("button", { name: /^(Open|Connect) / })
     .map((card) => card.getAttribute("aria-label"));
 
+describe("App document access visibility", () => {
+  it("hides Feishu-only controls without a configured bot and shows them when one exists", () => {
+    const view = renderSection([
+      ...minimalConnections(),
+      connection({ connectionKind: "feishu", id: null }),
+    ]);
+    expect(screen.queryByRole("button", { name: "App document access" })).toBeNull();
+    view.rerender(
+      sectionWith(
+        [
+          ...minimalConnections(),
+          connection({ connectionKind: "feishu", grants: { app: "authorized" } }),
+        ],
+        async () => null,
+      ),
+    );
+    expect(screen.getByRole("button", { name: "App document access" })).toBeTruthy();
+  });
+});
+
 describe("ConnectionsSection — cards", () => {
   it("renders a card for every connection the registry reports", () => {
     renderSection([...minimalConnections(), oauth("github"), oauth("google")]);

@@ -1,5 +1,14 @@
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "../../db/schema.js";
+import type { DrizzleDb } from "../../db/index.js";
 import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ActiveSessionExistsError } from "../domain/session-repository.js";
@@ -339,5 +348,91 @@ describe("DrizzleSessionRepository", () => {
       repo.replace(current, Session.create("main", { continuityKey: "k2" })),
     ).rejects.toThrow(/does not succeed/);
     await repo.replace(current, successor);
+  });
+});
+
+describe("DrizzleSessionRepository under another connection's write lock", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "session-repo-lock-"));
+  });
+
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  /**
+   * Runs `act` against a repository on a file-backed WAL database, as the live
+   * one is, while another connection holds the write lock for a moment. The
+   * repository blocks this thread while it waits, so the other connection
+   * lives in its own process. It takes the write lock, then lets go.
+   */
+  async function whileLocked(
+    act: (repo: DrizzleSessionRepository) => Promise<void>,
+    prepare: (repo: DrizzleSessionRepository) => Promise<void> = async () => undefined,
+  ): Promise<void> {
+    const template = createTestDb();
+    const file = join(dir, "rome.db");
+    writeFileSync(
+      file,
+      (template.db as unknown as { $client: Database.Database }).$client.serialize(),
+    );
+    template.close();
+    const sqlite = new Database(file);
+    sqlite.pragma("journal_mode = WAL");
+    const repo = new DrizzleSessionRepository(drizzle(sqlite, { schema }) as unknown as DrizzleDb);
+    await prepare(repo);
+
+    const driver = createRequire(import.meta.url).resolve("better-sqlite3");
+    const holder = spawn(
+      process.execPath,
+      [
+        "-e",
+        `const db = require(process.argv[1])(process.argv[2]);
+         db.pragma("journal_mode = WAL");
+         db.exec("BEGIN IMMEDIATE");
+         console.log("locked");
+         setTimeout(() => { db.exec("COMMIT"); db.close(); }, 400);`,
+        driver,
+        file,
+      ],
+      { stdio: ["ignore", "pipe", "inherit"] },
+    );
+    const exited = new Promise<void>((resolve) => holder.on("exit", () => resolve()));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        holder.on("error", reject);
+        holder.stdout.once("data", () => resolve());
+      });
+      await act(repo);
+    } finally {
+      holder.kill();
+      await exited;
+      sqlite.close();
+    }
+  }
+
+  it("save() waits for the lock instead of failing with 'database is locked'", async () => {
+    const session = Session.create("main");
+    await whileLocked(
+      async (repo) => {
+        await expect(repo.save(session)).resolves.toBeUndefined();
+      },
+      async (repo) => {
+        await repo.add(session);
+        session.touch();
+      },
+    );
+  });
+
+  it("add() waits for the lock instead of failing with 'database is locked'", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
+    await whileLocked(async (repo) => {
+      await expect(repo.add(session)).resolves.toBeUndefined();
+      expect((await repo.session(session.id))?.snapshot().id).toBe(session.id);
+      // The active-session check still runs once the lock is won.
+      await expect(repo.add(Session.create("main", { continuityKey: "k" }))).rejects.toBeInstanceOf(
+        ActiveSessionExistsError,
+      );
+    });
   });
 });

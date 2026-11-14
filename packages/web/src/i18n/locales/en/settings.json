@@ -558,7 +558,6 @@
       "unlimited": "Unlimited",
       "empty": "No credits available",
       "balanceUnavailable": "Balance unavailable",
-
       "confirmTitle": "Enable credit usage?",
       "enable": "Enable",
       "manageCredits": "View ChatGPT usage",
@@ -951,5 +950,31 @@
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"
     }
+  },
+  "appDocuments": {
+    "title": "App document access",
+    "scope": "Allow an installed app to read one document through a connected Feishu/Lark bot. This does not grant the bot permissions in Feishu.",
+    "app": "Choose an app",
+    "bot": "Choose a bot connection",
+    "loadFailed": "Could not load document access.",
+    "saveFailed": "Could not save document access.",
+    "previous": "Previous connections",
+    "next": "More connections",
+    "unsupported": "This Core does not support document reading on this connection.",
+    "disconnected": "This connection needs to be fixed before granting access.",
+    "providerScope": "Required bot permission (not checked):",
+    "feishuConsole": "Feishu app permissions",
+    "larkConsole": "Lark app permissions",
+    "providerGuidance": "An app administrator must grant and publish the required permission in the provider console. Share the document with the bot as needed. This screen does not request or change provider permissions.",
+    "document": "Document ID (not a URL)",
+    "replaceWarning": "Allows only this document for 24 hours. Replaces this app’s existing document-read rule on the selected bot. Writes are not allowed.",
+    "allow": "Allow the selected app to read this document",
+    "allDocuments": "No document restriction",
+    "active": "Active",
+    "inactive": "Expired or connection authorization changed",
+    "revoke": "Revoke this app’s access",
+    "loading": "Loading access…",
+    "saved": "Access updated",
+    "refresh": "Refresh access"
   }
 }

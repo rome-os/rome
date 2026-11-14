@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { appDisplayName } from "@/lib/app-display-name";
-import { useApps } from "@/hooks/use-apps";
+import { useAppsList } from "@/hooks/use-apps";
 import { trackWidgetRender } from "@/lib/analytics";
 import { buildFullAppPath } from "./widget-links";
 import { useWorkspaceContextRegistry } from "./workspace-context";
@@ -68,7 +68,7 @@ export function AppWidget({
   const registry = useWorkspaceContextRegistry();
   // The frame's accessible name must match the tile header, which renders the
   // installed app's display name, or a generic label until the catalog loads.
-  const { apps } = useApps();
+  const { apps } = useAppsList();
   const { t } = useTranslation("common");
   const frameTitle = appDisplayName(appId, apps, t("nav.apps"));
 

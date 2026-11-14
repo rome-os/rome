@@ -232,6 +232,26 @@ describe("actionToolOutput", () => {
         expect(output).not.toHaveProperty("componentId");
       });
 
+      it("parks the agent on a described card that waits", () => {
+        const waiting: ActionResult = {
+          status: "show_widget",
+          widget: { ui, text: "Asking which meal to log.", waits: true },
+        };
+        const output = actionToolOutput(waiting, true, "meals") as Record<string, unknown>;
+        expect(output).toMatchObject({ showWidget: true, waits: true, appId: "meals", ui });
+        expect(output.message).toContain("do not call any further tools");
+      });
+
+      it("tells the model to wait for the reply where a card that waits cannot show", () => {
+        const waiting: ActionResult = {
+          status: "show_widget",
+          widget: { ui, text: "Asking which meal to log.", waits: true },
+        };
+        const output = actionToolOutput(waiting, false, "meals") as Record<string, unknown>;
+        expect(output).not.toHaveProperty("showWidget");
+        expect(output.message).toContain("wait for their reply");
+      });
+
       it("tells the model why a card that fails the check showed nowhere", () => {
         const bad = { components: [{ id: "top", component: "Text", text: "a" }] };
         const output = actionToolOutput(described(bad), true, "meals") as Record<string, unknown>;

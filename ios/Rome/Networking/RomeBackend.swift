@@ -35,7 +35,14 @@ protocol RomeBackend: AnyObject, Sendable {
     func archiveChat(_ id: String) async throws
     /// Deletes a chat for good; a Concierge topic chat retires with it.
     func deleteChat(_ id: String) async throws
+    /// Deletes a topic chat for good. `stoppingWork` ends its follows and open
+    /// tasks instead of moving them to the main chat.
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws
+    /// The follows and open tasks that deleting topic chat `chatId` would move.
+    func chatWork(chatId: String) async throws -> ConciergeChatWork
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
+    /// The newest page, reaching down to `through` and two turns past it.
+    func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
     /// A send from a chat thread: it lands in that thread.
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn
@@ -52,12 +59,27 @@ protocol RomeBackend: AnyObject, Sendable {
     func apiFile(path: String, query: String?) async throws -> Data
     /// The instance's origin, when there is a real one.
     var origin: URL? { get }
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws
+    /// An event a widget fired, sent to core by the widget's id. Core decides
+    /// what it means: its owner handles it, an app's widget by calling the app,
+    /// and the question card by answering the agent.
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply
     func markRead(sessionId: String) async
+    /// The chat's read mark, `lastSeenActivityAt`: an ISO time, or nil when
+    /// the chat has none or it cannot be read.
+    func readMark(sessionId: String) async -> String?
     func sessions() async throws -> [ChatSession]
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
     func interrupt(turnId: String) async throws
     func tasks() async throws -> [ConciergeTask]
+    /// Stops a task now, as its owner asked from its card.
+    func stopTask(id: String) async throws
+    /// `GET /chats/:chatId/tasks`: the Concierge chat's task list, by the
+    /// chat's server id.
+    func taskList(chatId: String) async throws -> TaskListResponse
+    /// The Ended group's next page alone, from `endedBefore` (its `nextCursor`).
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse
+    /// Stops a task from its chat's task list; a scheduled one loses its schedule.
+    func stopListedTask(chatId: String, taskId: String) async throws
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
@@ -87,7 +109,7 @@ protocol RomeBackend: AnyObject, Sendable {
     /// `/api/…` path on the instance. Any status answers; only a dropped
     /// connection or a lost session throws.
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply
-    /// A widget's call on its own app: `path` is relative to
+    /// A widget's read of its own app: `path` is relative to
     /// `/api/apps/<appId>/`. Any status answers; only a dropped connection or
     /// a lost session throws.
     func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply
@@ -146,14 +168,32 @@ final class LiveBackend: RomeBackend {
         try await client.delete("/chat/sessions/\(escape(id))")
     }
 
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws {
+        // Without the option, the server moves them, as it always has.
+        let query = stoppingWork ? [URLQueryItem(name: "followsAndTasks", value: "stop")] : []
+        try await client.delete("/chat/sessions/\(escape(id))", query: query)
+    }
+
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        // Optional, and bounded by the delete's wait: a 401 fails at once
+        // instead of waiting on a session renewal that a cancel cannot end.
+        try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks", reportsUnauthorized: false)
+    }
+
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
         let page: MessagePage = try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: [URLQueryItem(name: "thread", value: messageId)])
         return page.messages
     }
 
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]
         if let before { query.append(URLQueryItem(name: "before", value: before)) }
+        return try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: query)
+    }
+
+    func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
+        let query = [URLQueryItem(name: "limit", value: String(limit)), URLQueryItem(name: "through", value: through)]
         return try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: query)
     }
 
@@ -188,17 +228,21 @@ final class LiveBackend: RomeBackend {
         return try await client.getData(route, query: query, limit: APIClient.imageLimit)
     }
 
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
-        let part: JSONValue = .object([
-            "type": .string("interaction_result"),
-            "toolUseId": .string(toolUseId),
-            "output": output,
-        ])
-        try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: .object(["parts": .array([part])]))
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply {
+        let data = try await client.post(
+            "/chat/widgets/\(escape(widgetId))/events",
+            json: .object(["name": .string(name), "context": context])
+        )
+        return WidgetEventReply(json: (try? JSONDecoder().decode(JSONValue.self, from: data)) ?? .object([:]))
     }
 
     func markRead(sessionId: String) async {
         _ = try? await client.post("/chat/sessions/\(escape(sessionId))/read")
+    }
+
+    func readMark(sessionId: String) async -> String? {
+        let session: SessionReadMark? = try? await client.get("/chat/sessions/\(escape(sessionId))")
+        return session?.lastSeenActivityAt
     }
 
     func sessions() async throws -> [ChatSession] {
@@ -211,6 +255,22 @@ final class LiveBackend: RomeBackend {
 
     func interrupt(turnId: String) async throws {
         try await client.post("/chat/turns/\(escape(turnId))/interrupt")
+    }
+
+    func stopTask(id: String) async throws {
+        try await client.post("/concierge/tasks/\(escape(id))/stop")
+    }
+
+    func taskList(chatId: String) async throws -> TaskListResponse {
+        try await client.get("/chats/\(escape(chatId))/tasks")
+    }
+
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse {
+        try await client.get("/chats/\(escape(chatId))/tasks", query: [URLQueryItem(name: "endedBefore", value: endedBefore)])
+    }
+
+    func stopListedTask(chatId: String, taskId: String) async throws {
+        try await client.post("/chats/\(escape(chatId))/tasks/\(escape(taskId))/stop")
     }
 
     func tasks() async throws -> [ConciergeTask] {
@@ -392,6 +452,18 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
+    /// Demo data and test doubles stop nothing.
+    func stopTask(id: String) async throws { throw APIError.notFound }
+    /// Demo data and test doubles move a chat's work, as an older instance does.
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
+    func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
+    /// Demo data and test doubles hold every message in the newest page.
+    func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
+        try await messages(sessionId: sessionId, before: nil, limit: limit)
+    }
+    func taskList(chatId: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
+    func stopListedTask(chatId: String, taskId: String) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.
     func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
     /// Demo data and test doubles belong to no account.
@@ -408,6 +480,8 @@ extension RomeBackend {
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] { throw APIError.notFound }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
+    /// Demo data and test doubles have no read mark: no unread line.
+    func readMark(sessionId: String) async -> String? { nil }
     /// Stand-ins (demo, tests) are no guardian of a real instance.
     func isGuardian() async -> Bool { false }
     func setGuardianLanguage(_ code: String) async throws {}

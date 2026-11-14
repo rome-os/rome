@@ -2,7 +2,12 @@
 // the draft rules behind it. A session carries it where the place draws cards.
 
 import type { ActionResult, RoutineDraftSpec } from "@rome-os/app-runtime";
-import type { RomeTool, RomeToolResult, WidgetDrawing } from "../agent/index.js";
+import {
+  ROUTINE_PROPOSAL_TOOL,
+  type RomeTool,
+  type RomeToolResult,
+  type WidgetDrawing,
+} from "../agent/index.js";
 import { isValidTimeZone } from "../lib/timezone.js";
 
 /** What `propose_routine` checks before it creates a routine without the
@@ -307,7 +312,7 @@ export function proposeRoutineTools(input: {
   const { hasSpeaker, gate, runAction } = input;
   return [
     {
-      name: "propose_routine",
+      name: ROUTINE_PROPOSAL_TOOL,
       description:
         "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
       inputSchema: {

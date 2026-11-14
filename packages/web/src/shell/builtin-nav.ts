@@ -57,8 +57,9 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     aliases: ["browser"],
   },
   {
-    // Chat opens the signed-in person's main chat. A new chat starts from the
-    // chat list's Projects section or the Cmd+K palette.
+    // Chat opens the signed-in person's main chat. In the chat list's Chat mode
+    // the rail opens the last ordinary chat instead (AppGrid). A new chat
+    // starts from the list's New chat row or the Cmd+K palette.
     id: "chat",
     href: "/message",
     labelKey: "nav.chat",

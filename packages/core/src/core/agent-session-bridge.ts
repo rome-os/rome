@@ -307,7 +307,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           sharedContext: req.init?.sharedContext,
           romeSessionId,
           replyTo: req.replyTo,
-          ...(lines ? { quoted: lines.quoted } : {}),
+          ...(lines ? { quotedId: lines.quoted, currentId: lines.prompt } : {}),
         }).turn;
         const turnLogFields = {
           ...baseLogFields,

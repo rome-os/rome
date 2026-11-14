@@ -318,7 +318,8 @@ export class ApprovalHandler {
     }
   }
 
-  async onRejected(approvalId: string): Promise<void> {
+  /** `reason`: why Rome turned it down, when its owner did not, as when nobody answered in time. */
+  async onRejected(approvalId: string, reason?: string): Promise<void> {
     const approval = await this.approvalsRepo.findById(approvalId);
     if (!approval) return;
 
@@ -346,7 +347,9 @@ export class ApprovalHandler {
         const requester = await this.requesterOf(payload.rootExecutionId);
         const params = {
           agentName,
-          prompt: `The action "${payload.actionName}" you requested has been rejected by the guardian.`,
+          prompt: reason
+            ? `The action "${payload.actionName}" you requested was turned down: ${reason}.`
+            : `The action "${payload.actionName}" you requested has been rejected by the guardian.`,
           ...(requester ? { actor: requester } : {}),
           sessionId: payload.sessionId,
           channelThreadKey: payload.channelThreadKey,

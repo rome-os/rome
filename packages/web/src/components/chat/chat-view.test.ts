@@ -332,7 +332,7 @@ describe("buildRows model switch notice", () => {
   });
 });
 
-describe("buildRows session renewal notice", () => {
+describe("buildRows session renewal", () => {
   const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
   const turn = (turnId: string, renewal?: { reason: string; sessionId: string }) => [
     mk(MAIN, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
@@ -347,25 +347,44 @@ describe("buildRows session renewal notice", () => {
     mk(MAIN, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
   ];
 
-  it("puts one faint line, with its reason, before the first turn of a renewed session", () => {
+  it("draws nothing where the chat's session was replaced", () => {
     const renewal = { reason: "setup", sessionId: "runtime-2" };
+    const rows = buildRows([...turn("t1"), ...turn("t2", renewal)], idMap, MAIN_IDENTITY, {
+      runningTurnId: null,
+      isStreaming: false,
+    });
+
+    expect(rows.map((r) => r.kind)).toEqual(["user", "agent", "user", "agent"]);
+  });
+});
+
+describe("buildRows automated input line", () => {
+  it("puts a line naming the source before a system turn that ran on an automated input", () => {
+    const source = { type: "routine" as const, name: "Daily summary" };
     const rows = buildRows(
-      [...turn("t1"), ...turn("t2", renewal), ...turn("t3", renewal)],
-      idMap,
+      [
+        mk(MAIN, "trace", "t1", [], {
+          traceSummary: {
+            distinctApps: [],
+            totalSteps: 0,
+            invocationCounts: {},
+            automatedInput: source,
+          },
+        }),
+        mk(MAIN, "assistant", "t1", [{ type: "text", content: "Your summary" }]),
+      ],
+      new Map([[MAIN, MAIN_IDENTITY]]),
       MAIN_IDENTITY,
       { runningTurnId: null, isStreaming: false },
     );
 
-    expect(rows.map((r) => r.kind)).toEqual([
-      "user",
-      "agent",
-      "session_renewal",
-      "user",
-      "agent",
-      "user",
-      "agent",
-    ]);
-    expect(rows[2]).toMatchObject({ kind: "session_renewal", reason: "setup", turnId: "t2" });
+    expect(rows.map((r) => r.kind)).toEqual(["automated_input", "agent"]);
+    expect(rows[0]).toEqual({
+      kind: "automated_input",
+      key: "automated-input:t1",
+      source,
+      turnId: "t1",
+    });
   });
 });
 

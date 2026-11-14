@@ -1,15 +1,15 @@
 import { useEffect, type ReactNode } from "react";
-import { ReplyDraftProvider, useReplyDraftState, type ReplyTarget } from "./reply-draft";
+import { ReplyDraftProvider, type ReplyTarget, useReplyDraftState } from "./reply-draft";
 
 /** Test host that holds real reply state, as Chat does, optionally starting with a reply picked. */
 export function ReplyDraftHarness({
   initial,
-  threads = false,
+  thread,
   children,
 }: {
   initial?: ReplyTarget;
-  /** The chat keeps chat threads, and the reply is picked from its thread view, open on it. */
-  threads?: boolean;
+  /** The draft is a chat thread tab's: it sends into this thread. */
+  thread?: string;
   children: ReactNode;
 }) {
   const draft = useReplyDraftState({
@@ -18,11 +18,11 @@ export function ReplyDraftHarness({
     messageIds: new Set(),
     jump: () => {},
     focusComposer: () => {},
-    threads,
+    thread,
   });
-  const { set, openThread } = draft;
+  const { set } = draft;
   useEffect(() => {
-    if (initial) (threads ? openThread : set)(initial);
-  }, [initial, set, openThread, threads]);
+    if (initial) set(initial);
+  }, [initial, set]);
   return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
 }

@@ -12,7 +12,7 @@ import {
 const catalog = rs.hoisted(() => ({
   apps: null as { id: string; displayName: string }[] | null,
 }));
-rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: catalog.apps }) }));
+rs.mock("@/hooks/use-apps", () => ({ useAppsList: () => ({ apps: catalog.apps }) }));
 rs.mock("@/lib/analytics", () => ({ trackWidgetRender: rs.fn() }));
 
 beforeAll(async () => {

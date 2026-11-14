@@ -8,7 +8,7 @@ import {
 } from "../agent/index.js";
 import { createBackendTurnRunner, type MainBackendTurnRunner } from "./backend-turn.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
-import { guardianAuth, romeSessions, sessions } from "../db/schema.js";
+import { conciergeMessageTurns, guardianAuth, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -250,26 +250,32 @@ describe("usage-limit continuation", () => {
       expect(pushes).toEqual([{ body: "Done" }]);
     });
 
-    it("marks the stopped turn's messages working again as its continuation runs", async () => {
-      // The stop's end marked the guardian's message failed.
-      const tasks = new ConciergeTasksRepository(db.db);
+    it("opens the stopped turn's messages again as its continuation runs, the ones handed on to it too", async () => {
+      // The stop's end answered the guardian's message, and one a newer input handed on to it.
+      const repo_ = new ConciergeTasksRepository(db.db);
+      const open = async () =>
+        (await db.db.select().from(conciergeMessageTurns))
+          .filter((row) => row.answeredAt === null)
+          .map((row) => row.messageKey)
+          .sort();
       await stopped();
-      await tasks.markTurnWorking("chat-turn", { chatId: "chat", messageKey: "chat-input" });
-      await tasks.settleTurnReactions("chat", "failed", []);
+      await repo_.takeMessage("chat-turn", { chatId: "chat", messageKey: "chat-input" });
+      await repo_.takeMessage("chat-turn", { chatId: "chat", messageKey: "handed-on" });
+      await repo_.answerTurns("chat", []);
       claude.set(available);
       const { agent, runner } = backend();
       stop = startUsageLimitContinuation({
         accounts,
         repo,
         runner,
-        onContinue: (turn) => tasks.reopenTurnReactions(turn.sessionId, turn.turnId),
+        onContinue: (turn) => repo_.reopenTurn(turn.sessionId, turn.turnId),
       });
       await clearAndSweep();
       expect(agent.calls).toHaveLength(1);
-      expect((await tasks.reactionsOf("chat", ["chat-input"])).get("chat-input")).toBe("working");
-      // The continuation's end settles it, as any turn's end does.
-      await tasks.settleTurnReactions("chat", "done", []);
-      expect(await tasks.reactionsOf("chat", ["chat-input"])).toEqual(new Map());
+      expect(await open()).toEqual(["chat-input", "handed-on"]);
+      // The continuation's end answers them, as any turn's end does.
+      await repo_.answerTurns("chat", []);
+      expect(await open()).toEqual([]);
     });
 
     it("continues after the provider clears, in the same chat, runtime and agent", async () => {

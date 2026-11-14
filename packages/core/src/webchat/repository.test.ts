@@ -1763,7 +1763,7 @@ describe("WebChatRepository", () => {
 
     it("flags listSessions rows waiting on an open card or a pending approval", async () => {
       const card = JSON.stringify([
-        { type: "text", text: "Pick one" },
+        // A card the agent waits on is a message of its own.
         { type: "pending_interaction", toolUseId: "tu-1", appId: "rome", render: {} },
       ]);
       const answer = JSON.stringify([{ type: "interaction_result", toolUseId: "tu-1" }]);

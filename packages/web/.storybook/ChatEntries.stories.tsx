@@ -66,20 +66,34 @@ export const UnbrokenLabels: Story = {
 
 export const WrappedSubmission: Story = {
   ...NarrowQuestion,
-  args: { ...NarrowQuestion.args, onSubmitAppComponent: fn() },
-  play: async ({ canvas, args }) => {
-    const answer = "要，中文 + 英文，默认跟随 Rome 界面语言";
-    const option = canvas.getByRole("button", { name: answer });
-    option.focus();
-    await userEvent.keyboard(" ");
-    await expect(option).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(canvas.getByRole("button", { name: /^(Send|发送)$/ }));
-    await expect(args.onSubmitAppComponent).toHaveBeenCalledWith(
-      "storybook-chat-entries",
-      "dev-ask-cjk",
-      { answers: [{ questionId: "i18n", value: answer }] },
-      answer,
-    );
-    await expect(option).toBeDisabled();
+  play: async ({ canvas }) => {
+    // The card sends its events to core; here core takes them.
+    const sent: { url: string; body: unknown }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return Response.json({ answered: true });
+    }) as typeof fetch;
+    try {
+      const answer = "要，中文 + 英文，默认跟随 Rome 界面语言";
+      const option = await canvas.findByRole("button", { name: answer });
+      option.focus();
+      await userEvent.keyboard(" ");
+      await expect(option).toHaveAttribute("aria-pressed", "true");
+      await userEvent.click(canvas.getByRole("button", { name: /^(Send|发送)$/ }));
+      await expect(option).toBeDisabled();
+      await expect(sent[0]?.url).toBe("/api/chat/widgets/dev-ask-cjk/events");
+      await expect(sent[0]?.body).toMatchObject({
+        name: "send",
+        context: {
+          answers: [
+            { values: [answer], text: "" },
+            { values: [], text: "" },
+          ],
+        },
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   },
 };

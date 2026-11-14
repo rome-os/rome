@@ -14,7 +14,9 @@ export type ConciergeToolActivity =
   | "startingTopic"
   | "checkingFollows"
   | "searchingWeb"
-  | "readingPage";
+  | "readingPage"
+  /** Not a tool: a renewed session's handoff is being written before its first turn. */
+  | "tidyingUp";
 
 /**
  * What a Concierge chat is doing. New tools and kinds are only ever added,
@@ -58,6 +60,8 @@ export interface TaskChatActivityFacts {
 
 /** The facts one Concierge chat's activity follows from. */
 export interface ConciergeActivityFacts {
+  /** The chat's session is being renewed, and its handoff written, before its turn runs. */
+  tidying?: boolean;
   /** A card or an approval in the chat itself began waiting on the owner after they last spoke in it. */
   awaitingGuardian: boolean;
   /** The chat's own turn, and the tool it is in now (a call whose result has not come back). */
@@ -100,13 +104,14 @@ export function toolActivityOf(tool: string): ConciergeToolActivity | null {
 }
 
 /**
- * What a Concierge chat is doing, in order: the chat's own turn first (the
- * tool it is in, else plain work), then something that began waiting on the
+ * What a Concierge chat is doing, in order: tidying up its context while its
+ * session is renewed, then the chat's own turn (the tool it is in, else plain work), then something that began waiting on the
  * owner since they last spoke, then a task result about to be reported, then
  * the task chats it started that are running, else nothing. A wait the owner
  * had already seen when they last spoke shows in the Tasks list only.
  */
 export function conciergeActivity(facts: ConciergeActivityFacts): ConciergeActivity {
+  if (facts.tidying) return { kind: "tool", tool: "tidyingUp" };
   if (facts.turn.running) {
     const tool = facts.turn.tool ? toolActivityOf(facts.turn.tool) : null;
     return tool ? { kind: "tool", tool } : { kind: "working" };
@@ -128,7 +133,7 @@ export function sameActivity(a: ConciergeActivity, b: ConciergeActivity): boolea
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-const TOOLS = new Set<string>(Object.values(TOOL_ACTIVITY));
+const TOOLS = new Set<string>([...Object.values(TOOL_ACTIVITY), "tidyingUp"]);
 
 /**
  * Reads an activity off the wire, by the rule on {@link ConciergeActivity}:

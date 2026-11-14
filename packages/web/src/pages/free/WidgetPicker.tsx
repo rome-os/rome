@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/command";
 import { EmptyState, EmptyStateTitle } from "@/components/ui/empty-state";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useApps } from "@/hooks/use-apps";
+import { useAppsList } from "@/hooks/use-apps";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import type { WidgetPlacement, WidgetType } from "./use-free-cells";
 
@@ -25,7 +25,7 @@ export function WidgetPicker({ onSelect, children, placements }: WidgetPickerPro
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const { apps: allApps } = useApps();
+  const { apps: allApps } = useAppsList();
   const apps = useMemo(
     () =>
       (allApps ?? []).filter(

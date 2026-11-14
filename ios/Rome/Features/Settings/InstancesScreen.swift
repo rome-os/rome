@@ -16,7 +16,7 @@ struct InstancesScreen: View {
                             SkeletonRow(last: index == 2)
                         }
                     }
-                    .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                    .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .hairline(radius: Metrics.groupRadius)
                     .padding(.horizontal, 16)
                 } else {
@@ -25,7 +25,7 @@ struct InstancesScreen: View {
                             row(instance, last: index == model.instances.count - 1)
                         }
                     }
-                    .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                    .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .hairline(radius: Metrics.groupRadius)
                     .padding(.horizontal, 16)
@@ -48,7 +48,7 @@ struct InstancesScreen: View {
         }
         .softTopScrollEdge()
         .floatingTopBar { PageHeader(title: "Switch instance", inSheet: true) }
-        .background(Palette.bg.ignoresSafeArea())
+        .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .task { await model.refreshInstances() }
@@ -77,7 +77,7 @@ struct InstancesScreen: View {
                             .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(1)
-                        if instance.isVisitor { VisitorBadge().fixedSize() }
+                        if instance.isVisitor { VisitorBadge(fill: Palette.secondaryFill).fixedSize() }
                     }
                     Text(verbatim: instance.host)
                         .romeFont(13)
@@ -126,8 +126,8 @@ private struct SkeletonRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 4).fill(Palette.fill).frame(width: 96, height: 14)
-                RoundedRectangle(cornerRadius: 4).fill(Palette.fill).frame(width: 140, height: 11)
+                RoundedRectangle(cornerRadius: 4).fill(Palette.secondaryFill).frame(width: 96, height: 14)
+                RoundedRectangle(cornerRadius: 4).fill(Palette.secondaryFill).frame(width: 140, height: 11)
             }
             Spacer()
         }
@@ -310,13 +310,16 @@ struct SearchScreen: View {
 
 /// A Rome shared with this account: its owner put them on its allow-list.
 struct VisitorBadge: View {
+    /// `Palette.secondaryFill` on a second-level page's card.
+    var fill = Palette.fill
+
     var body: some View {
         Text("Visitor")
             .romeFont(11, .semibold)
             .foregroundStyle(Palette.sub)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Palette.fill, in: Capsule())
+            .background(fill, in: Capsule())
             .accessibilityLabel(Text("Visitor"))
     }
 }

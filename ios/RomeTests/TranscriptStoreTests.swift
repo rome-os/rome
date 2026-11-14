@@ -46,7 +46,13 @@ final class FakeBackend: RomeBackend {
         return page
     }
 
-    func activeTurns(sessionId: String) async throws -> [ActiveTurn] { turns }
+    /// Set, the active turns cannot be read.
+    var activeTurnsError: APIError?
+
+    func activeTurns(sessionId: String) async throws -> [ActiveTurn] {
+        if let activeTurnsError { throw activeTurnsError }
+        return turns
+    }
 
     func interrupt(turnId: String) async throws {
         interrupted.append(turnId)
@@ -97,6 +103,23 @@ final class FakeBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
+    /// What a topic chat's delete would move; nil, the read fails, as on an
+    /// older instance. `chatWorkDelay` holds the answer back.
+    var chatWorkAnswer: ConciergeChatWork?
+    var chatWorkDelay: Duration?
+
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws {
+        calls.append(stoppingWork ? "delete \(id) stopping work" : "delete \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        calls.append("work \(chatId)")
+        if let chatWorkDelay { try await Task.sleep(for: chatWorkDelay) }
+        guard let chatWorkAnswer else { throw APIError.notFound }
+        return chatWorkAnswer
+    }
+
     /// Share links: what each create asked for, the answer it gets, the
     /// chat's links, and the revokes, in order.
     var shareRequests: [(sessionId: String, turnIds: [String], agentName: String?)] = []
@@ -135,8 +158,46 @@ final class FakeBackend: RomeBackend {
     var sentFiles: [OutgoingFile] = []
 
     func asset(path: String) async throws -> Data { throw APIError.notFound }
-    func apiFile(path: String, query: String?) async throws -> Data { throw APIError.notFound }
+    /// Files under `/api`, by path; any other path is not found.
+    var apiFiles: [String: Data] = [:]
+    /// The `/api` files asked for, in order.
+    var apiFileRequests: [String] = []
+    /// Runs inside a file request, before it answers.
+    var duringApiFile: (() async -> Void)?
+    func apiFile(path: String, query: String?) async throws -> Data {
+        apiFileRequests.append(path)
+        await duringApiFile?()
+        guard let data = apiFiles[path] else { throw APIError.notFound }
+        return data
+    }
     var origin: URL? { nil }
+
+    /// The task list each read answers, by chat; a missing one fails.
+    var taskLists: [String: TaskListResponse] = [:]
+    var taskListReads = 0
+    /// What a Stop from the task list fails with; nil lets it through.
+    var stopListedError: APIError?
+    var stoppedFromList: [String] = []
+    /// Set, every task list read throws it (a cancellation, say).
+    var taskListError: Error?
+    func taskList(chatId: String) async throws -> TaskListResponse {
+        taskListReads += 1
+        if let taskListError { throw taskListError }
+        guard let list = taskLists[chatId] else { throw APIError.notFound }
+        return list
+    }
+    /// The Ended pages after the first, by cursor; a missing one fails.
+    var endedPages: [String: TaskListResponse] = [:]
+    var endedReads: [String] = []
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse {
+        endedReads.append(endedBefore)
+        guard let page = endedPages[endedBefore] else { throw APIError.notFound }
+        return page
+    }
+    func stopListedTask(chatId: String, taskId: String) async throws {
+        stoppedFromList.append(taskId)
+        if let stopListedError { throw stopListedError }
+    }
 
     /// Off, every send fails, as it always did here.
     var sendSucceeds = false
@@ -151,6 +212,7 @@ final class FakeBackend: RomeBackend {
     var threadError: APIError?
     /// Runs inside a thread read, before it answers.
     var duringThreadRead: (() async -> Void)?
+
 
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
         threadReads.append(messageId)
@@ -167,11 +229,19 @@ final class FakeBackend: RomeBackend {
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         sentFiles = files
+        sentInputIds.append(inputId)
         calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")
-        if sendSucceeds { return CreatedTurn(turnId: "turn", inputId: inputId, disposition: "started") }
-        throw APIError.network
+        if sendSucceeds { return CreatedTurn(turnId: sendTurnId, inputId: inputId, disposition: "started") }
+        throw sendError
     }
+    /// The input id of each send, in order.
+    var sentInputIds: [String] = []
+    /// What a send fails with when `sendSucceeds` is off.
+    var sendError: APIError = .network
+    /// The turn a successful send starts; nil is a send that started none.
+    var sendTurnId: String? = "turn"
     var answeredSessions: [String] = []
+    var answeredWidgets: [String] = []
     /// What an answer fails with; nil lets it through.
     var answerError: APIError? = .network
     var pending: [PendingApproval] = []
@@ -180,20 +250,45 @@ final class FakeBackend: RomeBackend {
 
     func pendingApprovals() async throws -> [PendingApproval] { pending }
 
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
-        answeredSessions.append(sessionId)
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply {
+        answeredWidgets.append(widgetId)
         if let answerError { throw answerError }
+        return WidgetEventReply(answered: true)
     }
     /// The chats marked read, in order.
     var reads: [String] = []
     func markRead(sessionId: String) async { reads.append(sessionId) }
-    func sessions() async throws -> [ChatSession] { [] }
+    /// The chat's read mark, as `GET /chat/sessions/:id` gives it, and how
+    /// many reads had gone out each time it was asked for.
+    var readMarkValue: String?
+    var readsBeforeMark: [Int] = []
+    func readMark(sessionId: String) async -> String? {
+        readsBeforeMark.append(reads.count)
+        return readMarkValue
+    }
+    /// The chats and tasks the lists hold.
+    var sessionRows: [ChatSession] = []
+    var taskRows: [ConciergeTask] = []
+    var stoppedTasks: [String] = []
+    func sessions() async throws -> [ChatSession] { sessionRows }
     func tasks() async throws -> [ConciergeTask] {
         taskFetches += 1
-        return []
+        return taskRows
+    }
+    /// What a stop on a task fails with; nil lets it through.
+    var stopError: APIError?
+    func stopTask(id: String) async throws {
+        if let stopError { throw stopError }
+        stoppedTasks.append(id)
     }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
-    func resolveApproval(id: String, approve: Bool) async throws { throw APIError.network }
+    /// What a decision on an approval fails with; nil lets it through.
+    var resolveError: APIError? = .network
+    var resolved: [String] = []
+    func resolveApproval(id: String, approve: Bool) async throws {
+        if let resolveError { throw resolveError }
+        resolved.append(id)
+    }
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }
     func aiTools() async throws -> AIToolsStatus { throw APIError.network }
     func setConciergeEnabled(_ enabled: Bool) async throws {}
@@ -303,6 +398,135 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         await store.loadOlder()
         await store.placeOlderPage()
         #expect(store.brief?.id == "m0")
+    }
+
+    /// The read mark at `seconds` past the base time of `chatMessage`.
+    private func readMark(at seconds: TimeInterval) -> String {
+        RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds))
+    }
+
+    @Test func theUnreadLineIsReadBeforeTheChatIsMarkedReadAndOutlivesIt() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<4).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 1)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        await store.reload()
+        for _ in 0..<100 where store.unreadFrom == nil || backend.reads.isEmpty {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.readsBeforeMark == [0])
+        #expect(backend.reads == ["task"])
+        #expect(store.unreadFrom == "m2")
+        let ids = store.rows.map(\.id)
+        #expect(ids.firstIndex(of: "unread-divider").map { ids[$0 + 1] } == "m2:0")
+
+        // Read now, and still marked while the chat stays open; closed, it goes.
+        store.markRead()
+        #expect(store.unreadFrom == "m2")
+        store.endOpen()
+        #expect(store.unreadFrom == nil)
+        #expect(!store.rows.contains(.unreadDivider))
+    }
+
+    @Test func aMessageThatArrivesLiveWhileTheChatOpensIsNeverUnread() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 1)
+        backend.duringNewestFetch = {
+            backend.bus.emit(LiveTopic.chat("task"), .messageInsert(chatMessage(5)))
+        }
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        store.start()
+        for _ in 0..<100 where backend.reads.isEmpty || !store.loaded {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.messages.map(\.id).contains("m5"))
+        #expect(store.unreadFrom == nil)
+        store.stop()
+    }
+
+    @Test func thePillPagesOlderMessagesInUntilTheLineIsDrawnThenGoesToIt() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<60).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 5)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        for _ in 0..<100 where store.unread == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        // The newest page is all unread, and older pages remain.
+        #expect(store.unread == UnreadSummary(firstId: nil, count: 40, more: true))
+        #expect(!store.rows.contains(.unreadDivider))
+        #expect(store.unreadPill.phase == .shown)
+
+        let jumps = store.jumps
+        await store.revealUnread()
+        #expect(store.unread == UnreadSummary(firstId: "m6", count: 54, more: false))
+        #expect(store.rows.contains(.unreadDivider))
+        #expect(store.jumps == jumps + 1)
+        #expect(store.jumpTarget == TranscriptRow.unreadDivider.id)
+    }
+
+    @Test func comingBackFromTheBackgroundOpensTheChatAgain() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 1)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        store.start()
+        for _ in 0..<100 where backend.reads.isEmpty || !store.loaded {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.unreadFrom == nil)
+
+        // A reply comes while the app is away; back in front, the read waits
+        // for the read mark, and the catch-up read brings the reply.
+        store.leftForBackground()
+        backend.stored.append(chatMessage(2))
+        store.chatShown()
+        store.markRead()
+        await store.reload()
+        for _ in 0..<100 where store.unreadFrom == nil || backend.reads.count < 2 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.readsBeforeMark == [0, 1])
+        #expect(store.unreadFrom == "m2")
+        store.stop()
+    }
+
+    @Test func thePillsSearchStopsWhenTheChatCloses() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<200).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 5)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        for _ in 0..<100 where store.unread == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.unread?.more == true)
+        backend.duringOlderFetch = { store.endOpen() }
+        await store.revealUnread()
+        // One page went in, the one already asked for; no more were fetched.
+        #expect(store.messages.count == 80)
+        #expect(store.notice == nil)
+    }
+
+    @Test func aTaskChatHasNoUnreadLine() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 0)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        #expect(backend.readsBeforeMark.isEmpty)
+        #expect(store.unreadFrom == nil)
     }
 
     @Test func stopEndsRunningWithoutALiveEvent() async throws {

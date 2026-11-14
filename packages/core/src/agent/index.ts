@@ -45,6 +45,13 @@ export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
 export { shapedResult, type AnswerShape, type ReadAnswerShape } from "./domain/answer-shape.js";
 export { catchUpPrompt } from "./domain/catch-up.js";
+export {
+  HANDOFF_RECENT_TOKENS,
+  recentWithin,
+  type HandoffContext,
+  type RecentMessage,
+  type RenewalHandoffs,
+} from "./domain/session-handoff.js";
 export { restoresSavedSelection, type SessionSettings } from "./domain/session-settings.js";
 export {
   evaluateProviderSessionReset,
@@ -52,6 +59,14 @@ export {
   type ProviderSessionResetDecision,
 } from "./domain/session-reset.js";
 export { projectPath, type AgentFolders } from "./domain/agent-folders.js";
+export {
+  answersFromQuestionCard,
+  askQuestionToolOutput,
+  parseAskQuestionInput,
+  type Question,
+  questionCardFromAnswers,
+  questionCardUi,
+} from "./domain/ask-question.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {
   currentMessageSection,
@@ -165,6 +180,7 @@ export type {
   ModelSession,
   ModelSessionEvent,
   ModelSessionParams,
+  ModelContextCompactedEvent,
   ModelTurnStartedEvent,
   ModelUserInput,
   ProviderId,
@@ -186,8 +202,12 @@ export {
   type Subagent,
   type Subagents,
 } from "./domain/subagent.js";
-export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
-export { forkSessionTools, type SessionTools } from "./domain/session-tools.js";
+export { NO_ROME_TOOLS, ROME_TOOL_GROUPS } from "./domain/rome-tools.js";
+export {
+  forkSessionTools,
+  ROUTINE_PROPOSAL_TOOL,
+  type SessionTools,
+} from "./domain/session-tools.js";
 export {
   createSessions,
   type AgentSession,

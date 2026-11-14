@@ -1,3 +1,4 @@
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 // How an action's work reaches an agent session: the approval handler runs
 // the rest of an approved action's turn in the session it came from. Apps says
 // what it needs; the app host's backend turn runner supplies it.
@@ -15,6 +16,8 @@ export interface BackendTurnOptions {
   quiet?: boolean;
   /** Keeps the turn's input in its saved trace under this label. */
   inputLabel?: string;
+  /** Who sent the input, kept with the label (RunParams.inputSource). */
+  inputSource?: SystemInputSource;
   /** Pushes the messages the agent says in the turn at this level
    *  (RunParams.pushLevel). Absent, the turn pushes nothing. */
   pushLevel?: NotifyLevel;

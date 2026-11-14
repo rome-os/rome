@@ -10,7 +10,6 @@ import {
 import {
   composioActionError,
   isRomeManagedToolkit,
-  isInlineConnectRomeManagedToolkit,
   isSupportedToolkit,
   loadConnectorClient,
   romeManagedConnectHint,
@@ -19,6 +18,7 @@ import {
 } from "../../shared.js";
 import { ensureComposioWebhookRegistered } from "../../api/composio-webhook.js";
 import { SettingsStore } from "../../api/settings-store.js";
+import { connectWidget } from "../../connect-widget.js";
 
 const log = createAppLogger("connector_connect");
 
@@ -34,33 +34,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
     config,
     schema: inputSchema,
     execute: async ({ toolkit }) => {
-      // Rome-brokered toolkits (e.g. GitHub) are connected via Rome's own
-      // integration (Rome Cloud OAuth), not Composio. Never start a Composio OAuth
-      // here — that would create a second, unmanaged connection, breaking the
-      // single-integration rule. GitHub has an inline connect surface, so render
-      // it: the card drives the same Rome Cloud OAuth the dashboard uses and resumes
-      // the agent once GitHub reports connected. The OAuth round-trip and the
-      // authoritative status check both reach core's /api/integrations directly —
-      // the connector server can't see Rome Cloud's connection state, so they must
-      // live in the browser component. A non-webchat surface that can't mount the
-      // card falls back to the guardian-facing `promptText`. Once
-      // connected, GitHub is driven through gh/git or connector_proxy — never
-      // connector_tool_execute, which is Composio-only.
+      // Rome-brokered toolkits (GitHub, Slack, Shopify) are connected by Rome
+      // itself, through core's own connect_account tool and card. Never start a
+      // Composio OAuth here: that would create a second, unmanaged connection.
       if (isRomeManagedToolkit(toolkit)) {
-        if (isInlineConnectRomeManagedToolkit(toolkit)) {
-          // The unified connect card selects the Rome-managed (Rome Cloud OAuth)
-          // adapter from the toolkit prop — same componentId the Composio branch
-          // renders below, so there's one card for both brokers. Shopify's card
-          // opens Shopify's install link, where Shopify asks which store.
-          return {
-            status: "pending_interaction",
-            interaction: {
-              appId: "connector",
-              promptText: `Connect ${toolkit}: click Connect on the card to start authorization. If no card is shown, connect ${toolkit} in Settings → Connections.`,
-              render: { kind: "inline", componentId: "connect-card", props: { toolkit } },
-            },
-          };
-        }
         return { status: "error", error: romeManagedConnectHint(toolkit) };
       }
       // Rome can only broker toolkits in its supported catalog — those are the
@@ -113,19 +90,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             error: `Toolkit "${toolkit}" has ${existing.ids.length} active managed connections — resolve the duplicate in Settings › Connections before reconnecting.`,
           };
         }
-        // Not connected: render the inline connect card. It drives the OAuth
-        // round-trip from the browser (provisioning the managed auth config and
-        // opening the authorize tab via the `connectors` endpoint), then resumes
-        // the agent once the toolkit reports ACTIVE. The round-trip is
-        // request-host-coupled, so it must originate in the component, not here.
-        return {
-          status: "pending_interaction",
-          interaction: {
-            appId: "connector",
-            promptText: `To connect ${toolkit}, open Settings › Connections and click Connect for "${toolkit}" to authorize.`,
-            render: { kind: "inline", componentId: "connect-card", props: { toolkit } },
-          },
-        };
+        // Not connected: show the connect card. Its presses go to this app's
+        // API through core, which starts the OAuth and checks the connection;
+        // the app's reply answers the agent once the toolkit is connected.
+        return { status: "show_widget", widget: connectWidget(toolkit) };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("connector add failed", { toolkit, error: message });

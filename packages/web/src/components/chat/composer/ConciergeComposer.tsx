@@ -249,8 +249,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         setPendingUploads([]);
         setFolder(null);
         setDraftSkill(null);
-        // A send closes the reply bar and, with it, the thread view; the
-        // message keeps the thread it was sent into.
         clearedAt = replyDraft?.clear();
       }
       try {
@@ -273,7 +271,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           setPendingUploads(uploads);
           setFolder(pickedFolder);
           setDraftSkill(skill);
-          if (replyTo) replyDraft?.restore(replyTo, clearedAt, chatThread);
+          if (replyTo) replyDraft?.restore(replyTo, clearedAt);
         }
       }
     }, [inputText, pendingUploads, folder, draftSkill, invokeOnSend, snapshotOf, replyDraft]);

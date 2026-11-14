@@ -5,6 +5,10 @@ import { MessageList, type BlockActions } from "@/components/chat/MessageList";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { PublicTaskChatContext } from "@/components/chat/entries/TaskChatCard";
 import { MessageActionsProvider } from "@/components/chat/message-actions";
+import {
+  READ_ONLY_WIDGET_HOST,
+  WidgetHostContext,
+} from "@/components/chat/entries/widget-ui/turn-fields";
 import type { ChatMessage } from "@/lib/chat-types";
 
 // The main agent's name on the public feed: the name the chat showed for it,
@@ -74,28 +78,30 @@ export function PublicChat({ messages, mainSessionId, agentName }: PublicChatPro
   return (
     <PublicTaskChatContext.Provider value>
       <MessageActionsProvider value={false}>
-        <TooltipProvider delayDuration={150}>
-          {/* Fills the column under the share page's header, and keeps the last
+        <WidgetHostContext.Provider value={READ_ONLY_WIDGET_HOST}>
+          <TooltipProvider delayDuration={150}>
+            {/* Fills the column under the share page's header, and keeps the last
             message clear of the screen's bottom edge. */}
-          <div className="@container/chat relative flex flex-1 pb-[calc(var(--rome-safe-area-bottom)+2.5rem)]">
-            <div className="relative flex min-w-0 flex-1 flex-col">
-              <MessageList
-                rows={rows}
-                live={{
-                  isStreaming: false,
-                  runningTurnId: null,
-                  snapshot: null,
-                  textStore: EMPTY_LIVE_TEXT,
-                  identity: mainIdentity,
-                }}
-                contentRef={NO_OP}
-                onOpenLiveTrace={NO_OP}
-                onOpenStoredTrace={NO_OP}
-                actions={actions}
-              />
+            <div className="@container/chat relative flex flex-1 pb-[calc(var(--rome-safe-area-bottom)+2.5rem)]">
+              <div className="relative flex min-w-0 flex-1 flex-col">
+                <MessageList
+                  rows={rows}
+                  live={{
+                    isStreaming: false,
+                    runningTurnId: null,
+                    snapshot: null,
+                    textStore: EMPTY_LIVE_TEXT,
+                    identity: mainIdentity,
+                  }}
+                  contentRef={NO_OP}
+                  onOpenLiveTrace={NO_OP}
+                  onOpenStoredTrace={NO_OP}
+                  actions={actions}
+                />
+              </div>
             </div>
-          </div>
-        </TooltipProvider>
+          </TooltipProvider>
+        </WidgetHostContext.Provider>
       </MessageActionsProvider>
     </PublicTaskChatContext.Provider>
   );

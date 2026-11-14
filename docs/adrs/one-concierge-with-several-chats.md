@@ -35,7 +35,7 @@ Future diffs must respect:
 
 - Triage runs once per batch for each owner, whatever number of chats that owner has.
 - A follow has one chat. Its alerts go there, or to the main chat when that chat is archived or gone.
-- Archiving or deleting a Concierge chat moves its follows and unfinished tasks to its owner's main chat and says so there. The main chat cannot be archived or deleted.
+- Archiving or deleting a Concierge chat moves its follows and unfinished tasks to its owner's main chat and says so there. Deleting a topic chat stops them instead when its owner chooses so. The main chat cannot be archived or deleted.
 - Follows, tasks and kept events record their owner, which never changes. No owner means the guardian.
 - A rule for "the Concierge chat" applies to every Concierge chat, unless it names the main chat.
 

@@ -249,7 +249,17 @@ function buildRawUsage(usage: BetaUsageShape): Record<string, unknown> | undefin
 function buildContextUsageFromSdk(
   contextUsage: SDKControlGetContextUsageResponse,
 ): AgentContextUsage | undefined {
-  const usedTokens = readPositiveNumber(contextUsage.totalTokens);
+  // Only the rows that occupy the window: the compaction reserve (`buffer`),
+  // the free space and deferred tool schemas are not context the model read.
+  const kinded = (contextUsage.categories ?? []).filter((row) => row.kind !== undefined);
+  const usedTokens =
+    kinded.length > 0
+      ? readPositiveNumber(
+          kinded
+            .filter((row) => row.kind === "used" && !row.isDeferred)
+            .reduce((sum, row) => sum + row.tokens, 0),
+        )
+      : readPositiveNumber(contextUsage.totalTokens);
   if (usedTokens === undefined) {
     return undefined;
   }
@@ -727,6 +737,11 @@ export class AnthropicProvider implements ModelProvider {
             isAssistantMessage(message) ||
             isUserMessage(message);
           if (sdkTurnOwner === "sdk" && turnFrame && !romeReplay) continue;
+          if (message.type === "system" && message.subtype === "compact_boundary") {
+            // The SDK compacted the thread: what it read before may be gone.
+            yield { type: "model_context_compacted" };
+            continue;
+          }
           if (isPartialAssistantMessage(message)) {
             // Deltas of in-flight blocks. Each complete block still arrives
             // on its own assistant message, so this is purely additive for

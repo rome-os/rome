@@ -5,9 +5,9 @@ import { useReplyDraft } from "./reply-draft";
 import { plainQuote } from "./reply-source";
 
 /**
- * The bar across the top of a composer showing the message the draft replies
- * to: a rounded gray left edge, a reply arrow, up to two lines of the quote, and × at the
- * end. Renders nothing without a reply.
+ * The bar across the top of a composer showing what the draft replies to: a
+ * rounded gray left edge, a reply arrow, up to two lines of the quote, and ×
+ * at the end. Renders nothing without a reply.
  */
 export function ReplyBar() {
   const { t } = useTranslation("chat");

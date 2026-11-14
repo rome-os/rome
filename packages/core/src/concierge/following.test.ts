@@ -17,7 +17,7 @@ import {
 import type { ConnectionView } from "../api/routes/connections.js";
 import { GUARDIAN_OWNER } from "../webchat/owner.js";
 import { mainChatIdOf } from "./main-chat.js";
-import type { ConciergeService } from "./service.js";
+import type { ConciergeService, DigestTaskNotes } from "./service.js";
 
 const repoTrigger = (type: string) => ({
   eventName: `provider:event:github.${type}`,
@@ -198,6 +198,8 @@ function setup(
   ]);
   /** Each visitor's Concierge chat and its owner; any other chat is the guardian's. */
   const chatOwners = new Map<string, string>();
+  /** The task notes each chat's digest would list, until a digest that lists them runs to its end. */
+  const taskNotes = new Map<string, DigestTaskNotes>();
   /** Visitors dropped from the dashboard allow-list. */
   const dropped = new Set<string>();
   /** The chat whose turn calls the follow actions. */
@@ -218,6 +220,7 @@ function setup(
   /** The chats whose turns fail to run to their end, or throw. */
   const failingChats = { ends: new Set<string>(), throws: new Set<string>() };
   const inputLabels: (string | undefined)[] = [];
+  const inputSources: unknown[] = [];
   const pushLevels: (string | undefined)[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
@@ -245,7 +248,9 @@ function setup(
   let following: ConciergeFollowing | null = null;
   let nextId = 0;
   const failedReads = new Set<string>();
+  const movedZones: Array<[string, string]> = [];
   const deps: ConciergeFollowingDeps = {
+    timezoneMoved: async (owner, timezone) => void movedZones.push([owner, timezone]),
     routines: {
       create: async (data) => {
         const id = `r${nextId++}`;
@@ -377,20 +382,31 @@ function setup(
     runSystemTurn: async (
       chatId: string,
       prompt: string,
-      turnOptions?: { inputLabel?: string; pushLevel?: string },
+      turnOptions?: { inputLabel?: string; pushLevel?: string; inputSource?: unknown },
     ) => {
       turnChats.push(chatId);
       turns.push(prompt);
       inputLabels.push(turnOptions?.inputLabel);
+      inputSources.push(turnOptions?.inputSource);
       pushLevels.push(turnOptions?.pushLevel);
       if (failingChats.throws.has(chatId)) throw new Error("the session crashed");
       return !turnFails.on && !failingChats.ends.has(chatId);
     },
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
+    listChats: async (owner = GUARDIAN_OWNER) =>
+      [...liveChats.values()].filter(
+        (chat) => (chatOwners.get(chat.id) ?? GUARDIAN_OWNER) === owner,
+      ),
+    digestTaskNotes: async (chatId: string) =>
+      taskNotes.get(chatId) ?? { text: "", passive: [], noResponse: [], unstarted: [] },
+    markTaskNotesListed: async (notes: DigestTaskNotes) => {
+      for (const [chatId, held] of taskNotes) if (held === notes) taskNotes.delete(chatId);
+    },
   } as unknown as ConciergeService;
   const stop = startConciergeFollowing(service, deps);
   const action = (name: string) => actions.find((a) => a.config.name === name)!;
   return {
+    movedZones,
     routines,
     creators,
     active,
@@ -401,6 +417,7 @@ function setup(
     turnFails,
     failingChats,
     inputLabels,
+    inputSources,
     pushLevels,
     triaged,
     prompts,
@@ -408,6 +425,7 @@ function setup(
     items,
     liveChats,
     chatOwners,
+    taskNotes,
     dropped,
     calling,
     turnChats,
@@ -1138,6 +1156,11 @@ describe("the follow pipeline", () => {
     await rs.advanceTimersByTimeAsync(5 * 60_000);
     await s.action("core:concierge_digest").execute({}, {} as never);
     expect(s.inputLabels).toEqual(["Following · important (1)", "Following · digest (2)"]);
+    // The replies are labelled with where the turn came from.
+    expect(s.inputSources).toEqual([
+      { type: "following", name: expect.any(String) },
+      { type: "digest", name: null },
+    ]);
     s.stop();
   });
 
@@ -1476,6 +1499,69 @@ describe("follows in several Concierge chats", () => {
       s.stop();
     });
 
+    /** A no-response note for task `id` in a chat's next digest. */
+    const noResponseNote = (id: string): DigestTaskNotes => ({
+      text: `<task_review>\n<ended_no_response task="${id}" title="Flights"/>\n</task_review>`,
+      passive: [],
+      noResponse: [id],
+      unstarted: [],
+    });
+
+    it("gives a chat with only task notes a digest turn that lists them", async () => {
+      const s = setup();
+      s.taskNotes.set("calendar", noResponseNote("t1"));
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 0 } });
+      // Something is owed in the calendar chat, so the main chat gets no empty digest.
+      expect(s.turnChats).toEqual(["calendar"]);
+      expect(turnIn(s, "calendar")).toContain('<ended_no_response task="t1"');
+      expect(s.taskNotes.size).toBe(0);
+      s.stop();
+    });
+
+    it("gives the main chat its task notes when only another chat has items", async () => {
+      rs.useFakeTimers();
+      const s = setup({ triage: { e1: "digest" } });
+      s.calling.chat = "calendar";
+      await s.following().follow({ source: "github", target: "acme/widgets" });
+      await fire(s, "e1", "acme/widgets");
+      await rs.advanceTimersByTimeAsync(5 * 60_000);
+      s.turnChats.length = 0;
+      s.turns.length = 0;
+      s.taskNotes.set("concierge", noResponseNote("t1"));
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 1 } });
+      expect([...s.turnChats].sort()).toEqual(["calendar", "concierge"]);
+      expect(turnIn(s, "concierge")).toContain('delivery="digest" count="0"');
+      expect(turnIn(s, "concierge")).toContain('<ended_no_response task="t1"');
+      s.stop();
+    });
+
+    it.each([
+      ["a turn that does not run to its end", "ends"],
+      ["a turn that throws", "throws"],
+    ] as const)("keeps a chat's task notes for the next digest after %s", async (_name, how) => {
+      const s = setup();
+      const note = noResponseNote("t1");
+      s.taskNotes.set("calendar", note);
+      s.failingChats[how].add("calendar");
+      await digest(s);
+      expect(s.taskNotes.get("calendar")).toBe(note);
+      s.failingChats[how].clear();
+      s.turnChats.length = 0;
+      await digest(s);
+      expect(s.turnChats).toContain("calendar");
+      expect(s.taskNotes.size).toBe(0);
+      s.stop();
+    });
+
+    it("sends exactly one empty digest, to the main chat, when nothing is owed and no chat has notes", async () => {
+      const s = setup();
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 0 } });
+      expect(s.turnChats).toEqual(["concierge"]);
+      expect(s.turns[0]).toContain('delivery="digest" count="0"');
+      expect(s.turns[0]).not.toContain("task_review");
+      s.stop();
+    });
+
     it("sends an archived chat's items to the main chat, in its one digest", async () => {
       const s = await withItemsInTwoChats();
       s.liveChats.delete("calendar");
@@ -1501,6 +1587,94 @@ describe("follows in several Concierge chats", () => {
     expect(await s.following().moveToMainChat("calendar")).toBe(1);
     expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "concierge", main: true });
     expect((await s.items.owedToDigest()).map((i) => i.chatId)).toEqual([null]);
+    s.stop();
+  });
+
+  it("lists a chat's follows for the Tasks panel from what is stored, asking no provider", async () => {
+    const s = setup();
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    await s.following().follow({ source: "github", target: "acme/gadgets" });
+    s.calling.chat = null;
+    await s.following().configure({
+      source: "github",
+      target: "acme/gadgets",
+      kinds: {
+        review_requested: false,
+        your_pr_closed: false,
+        your_ci_failed: false,
+        new_pr_or_issue: false,
+      },
+    });
+    const asked = () => s.calls.filter(([name]) => name === "connector_watch_sources").length;
+    const before = asked();
+    const rows = await s.following().followsIn!("calendar", GUARDIAN_OWNER);
+    expect(asked()).toBe(before);
+    expect(rows.map((r) => [r.label, r.target, r.state])).toEqual([
+      ["GitHub", "acme/widgets", "active"],
+      ["GitHub", "acme/gadgets", "off"],
+    ]);
+    s.stop();
+  });
+
+  it("says a follow is unavailable from sources read in the last 30 s, and never reads them for it", async () => {
+    const options: Parameters<typeof setup>[0] = {};
+    const s = setup(options);
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "gmail" });
+    s.calling.chat = null;
+    options.gmailStatus = "error";
+    // `list` reads the sources, as the connector list does: they are warm now.
+    await s.following().list();
+    const asked = () => s.calls.filter(([name]) => name === "connector_watch_sources").length;
+    const before = asked();
+    const stateIn = async () =>
+      (await s.following().followsIn!("calendar", GUARDIAN_OWNER)).map((r) => r.state);
+    expect(await stateIn()).toEqual(["unavailable"]);
+    // Past the TTL it reads what is stored, rather than wait for the sources.
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(Date.now() + 31_000);
+    expect(await stateIn()).toEqual(["active"]);
+    expect(asked()).toBe(before);
+    s.stop();
+  });
+
+  it("lists only one chat's follows of one owner, and ending them keeps another person's routines", async () => {
+    const s = setup();
+    const ann = "visitor:acct-ann";
+    const annMainChat = mainChatIdOf(ann);
+    s.liveChats.set(annMainChat, { id: annMainChat, name: "Concierge", main: true });
+    s.chatOwners.set(annMainChat, ann);
+    // The guardian follows two repositories from two chats; Ann follows one of them.
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    await s.following().follow({ source: "github", target: "acme/gadgets" });
+    s.calling.chat = annMainChat;
+    await s
+      .action("core:concierge_follow")
+      .execute({ source: "github", target: "acme/widgets" }, {} as never);
+    s.calling.chat = null;
+    expect(await s.following().followsOfChat("calendar", GUARDIAN_OWNER)).toEqual([
+      { source: "github", label: "GitHub", target: "acme/widgets" },
+    ]);
+    // Another owner's follow of the same target is not this chat's.
+    expect(await s.following().followsOfChat("calendar", ann)).toEqual([]);
+
+    expect(await s.following().unfollow("github", "acme/widgets", GUARDIAN_OWNER)).toEqual({
+      removed: true,
+    });
+    expect(await s.following().followsOfChat("calendar", GUARDIAN_OWNER)).toEqual([]);
+    // Ann still follows it, so its routines stay; the guardian's other follow is untouched.
+    expect(keys(s)).toContain(
+      "concierge-follow:github:acme/widgets:provider:event:github.pull_request",
+    );
+    expect(keys(s)).toContain(
+      "concierge-follow:github:acme/gadgets:provider:event:github.pull_request",
+    );
+    // Once Ann ends hers too, the routines go.
+    await s.following().unfollow("github", "acme/widgets", ann);
+    expect(keys(s).some((key) => key?.includes("acme/widgets"))).toBe(false);
     s.stop();
   });
 
@@ -1592,6 +1766,11 @@ describe("follows in several Concierge chats", () => {
       tzid: "Europe/Paris",
     });
     expect(triggerOf("concierge-digest:09:00")).toMatchObject({ tzMode: "floating" });
+    // Their scheduled tasks move with them; the guardian's float on their own.
+    expect(s.movedZones).toEqual([
+      [ANN, "Asia/Shanghai"],
+      [ANN, "Europe/Paris"],
+    ]);
     s.stop();
   });
 

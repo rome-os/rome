@@ -89,7 +89,9 @@ describe("buildThemeCss", () => {
 
   it("emits semantic values without palette references", () => {
     const css = buildThemeCss(getThemeDefinitions());
-    expect(css).not.toMatch(/var\(\s*--(?:neutral|red|amber|blue|green|orange)-\d+\b/);
+    expect(css).not.toMatch(
+      /var\(\s*--(?:neutral|red|amber|blue|green|orange|sky|teal|violet|pink)-\d+\b/,
+    );
   });
 
   it("resolves a palette reference inside color-mix", () => {
@@ -163,11 +165,11 @@ describe("buildThemeCss", () => {
 });
 
 describe("theme registry", () => {
-  it("ships Ember, Ash and Slate as built-in themes", () => {
+  it("ships Ember, Ash, Slate and the pastel themes as built-in themes", () => {
     const ids = getThemeDefinitions().map((theme) => theme.id);
-    expect(ids).toContain("ember");
-    expect(ids).toContain("ash");
-    expect(ids).toContain("slate");
+    for (const id of ["ember", "ash", "slate", "sky", "mint", "lavender", "blossom"]) {
+      expect(ids).toContain(id);
+    }
   });
 
   it("defaults to the first registered theme", () => {
@@ -189,6 +191,28 @@ describe("theme registry", () => {
     const [first, ...rest] = getThemeDefinitions();
     for (const theme of rest) {
       expect(Object.keys(theme.palette).sort()).toEqual(Object.keys(first.palette).sort());
+    }
+  });
+
+  it("points each pastel theme at its own accent ramp and leaves --orange-* to Ember", () => {
+    // A primitive name says what color it holds. The pastel accents live in
+    // hue-named ramps, so a pastel mapping that reads --orange-* would paint
+    // an orange accent, and a pastel palette that stores its accent under
+    // --orange-* would make the name lie.
+    const ramps = { sky: "sky", mint: "teal", lavender: "violet", blossom: "pink" };
+    const byId = new Map(getThemeDefinitions().map((theme) => [theme.id, theme]));
+    const ember = byId.get("ember");
+    for (const [id, ramp] of Object.entries(ramps)) {
+      const theme = byId.get(id);
+      expect(theme).toBeDefined();
+      for (const half of [theme?.light, theme?.dark]) {
+        const read = [...JSON.stringify(half).matchAll(/var\(--([a-z]+)-\d+\)/g)].map((m) => m[1]);
+        expect(read).toContain(ramp);
+        expect(read).not.toContain("orange");
+      }
+      for (const [name, value] of Object.entries(ember?.palette ?? {})) {
+        if (name.startsWith("orange-")) expect(theme?.palette[name]).toBe(value);
+      }
     }
   });
 

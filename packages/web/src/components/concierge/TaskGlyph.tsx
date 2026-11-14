@@ -1,28 +1,31 @@
 import { Circle, CircleAlert, CircleCheck, CircleDot, CircleX, Clock } from "lucide-react";
-import type { ConciergeTaskState } from "@rome/api-types/concierge";
+import type { ConciergeTaskStatusResult } from "@rome/api-types/concierge-task-status";
 import { cn } from "@/lib/utils";
 
-const GLYPHS = {
-  needs_user: CircleAlert,
-  doing: CircleDot,
-  next: Circle,
-  watching: Clock,
-  done: CircleCheck,
-  dropped: CircleX,
-} satisfies Record<ConciergeTaskState, typeof Circle>;
-
 /**
- * The mark at a task row's leading edge, one shape per state. Only the one
- * that needs the guardian takes the warning colour. The group heading already
- * names the state, so the mark is not read out.
+ * The mark at a task row's leading edge, one shape per status, and per reason
+ * once it ended. Only the one that needs the guardian takes the warning
+ * colour. The group heading and the row's line already say it, so the mark
+ * is not read out.
  */
-export function TaskGlyph({ state }: { state: ConciergeTaskState }) {
-  const Glyph = GLYPHS[state];
+export function TaskGlyph({ status }: { status: ConciergeTaskStatusResult }) {
+  const Glyph =
+    status.status === "needs_you"
+      ? CircleAlert
+      : status.status === "active"
+        ? CircleDot
+        : status.status === "later"
+          ? Clock
+          : status.endReason === "done"
+            ? CircleCheck
+            : status.endReason === "no_response"
+              ? Circle
+              : CircleX;
   return (
     <Glyph
       className={cn(
         "size-4 shrink-0",
-        state === "needs_user" ? "text-warning" : "text-subtle-foreground",
+        status.status === "needs_you" ? "text-warning" : "text-subtle-foreground",
       )}
       aria-hidden
     />

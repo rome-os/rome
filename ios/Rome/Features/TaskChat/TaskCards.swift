@@ -192,13 +192,19 @@ struct ApprovalCardView: View {
     let resolvedAt: Date?
     /// A visitor sees the card but cannot answer it.
     var canResolve = true
+    /// Drawn whole and read only, as a folded card opens: what it asked, no controls.
+    var settled = false
+    /// How it ended, in the line above a settled card's title.
+    var settledLabel: String? = nil
     let onResolve: (Bool) -> Void
 
     private var title: String { part.title.flatMap { $0.isEmpty ? nil : $0 } ?? displayActionName(part.actionName) }
 
     var body: some View {
         Group {
-            switch status {
+            switch settled ? .pending : status {
+            case _ where settled:
+                settledCard
             case nil:
                 HStack(spacing: 10) {
                     Spinner(size: 16, color: Palette.sub)
@@ -226,6 +232,43 @@ struct ApprovalCardView: View {
         }
     }
 
+    /// An approval that no longer waits, opened read only: as an answered
+    /// question card draws itself, the outcome, what it asked, then its
+    /// details as a plain list.
+    private var settledCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(verbatim: settledLabel ?? String(localized: "Approval"))
+                .romeFont(CardScale.label)
+                .foregroundStyle(Palette.sub)
+            Text(title)
+                .romeFont(CardScale.title, .semibold)
+                .foregroundStyle(Palette.sub)
+                .lineSpacing(3)
+            let rows: [(label: String?, value: String)] =
+                ((part.summary ?? "").isEmpty ? [] : [(nil, part.summary ?? "")])
+                + part.fields.map { (Optional($0.label), $0.value) }
+            if !rows.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                        if index > 0 { OptionDivider() }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            if let label = row.label {
+                                Text(label).romeFont(CardScale.caption).foregroundStyle(Palette.sub).frame(width: 44, alignment: .leading)
+                            }
+                            Text(row.value).romeFont(CardScale.body).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(minHeight: CardScale.optionMinHeight, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .fillsBubbleWidth()
+        .cardPadding()
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
+        .hairline(radius: Metrics.bigCardRadius)
+        .transition(.opacity)
+    }
+
     private var pendingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
@@ -235,7 +278,7 @@ struct ApprovalCardView: View {
                     .frame(width: CardScale.iconBox, height: CardScale.iconBox)
                     .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Needs approval")
+                    (settled ? Text("Approval") : Text("Needs approval"))
                         .romeFont(CardScale.label)
                         .foregroundStyle(Palette.sub)
                     Text(title)
@@ -285,7 +328,9 @@ struct ApprovalCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            if canResolve {
+            if settled {
+                EmptyView()
+            } else if canResolve {
                 // Sized to their words at the card's foot: Approve the one
                 // accent button, Reject a quiet one beside it.
                 HStack(spacing: 6) {
@@ -331,6 +376,7 @@ struct ApprovalCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
@@ -367,7 +413,7 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 AlertGlyph(size: 15)
-                Text("Approved, but “\(title)” did not finish").romeFont(14, .medium)
+                Text("Approved, but “\(title)” didn't finish").romeFont(14, .medium)
             }
             .foregroundStyle(Palette.destructive)
             .padding(.horizontal, 12)
@@ -375,234 +421,35 @@ struct ApprovalCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .fillsBubbleWidth()
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
     }
 }
 
-/// The agent asked something. Options answer in one tap; "Or type your own…" takes text.
+/// The agent asked something: the card core described from its questions,
+/// drawn as the dashboard draws it. A question stored before cards were
+/// described shows its questions as a line.
 struct QuestionCardView: View {
     let part: MessagePart.QuestionPart
     let answered: JSONValue?
-    let sending: Bool
-    /// The `answers` to send, shaped as the web's QuestionCard sends them.
-    let onAnswer: ([JSONValue]) -> Void
-
-    /// Chosen options per question, in the order they were picked.
-    @State private var choices: [String: [String]]
-    @State private var typed: [String: String]
-    @FocusState private var focusedQuestion: String?
-
-    init(part: MessagePart.QuestionPart, answered: JSONValue?, sending: Bool, onAnswer: @escaping ([JSONValue]) -> Void) {
-        self.part = part
-        self.answered = answered
-        self.sending = sending
-        self.onAnswer = onAnswer
-        // Defaults are chosen before the guardian touches anything, and stay editable.
-        let initial = QuestionAnswers.initial(part.questions)
-        _choices = State(initialValue: initial.choices)
-        _typed = State(initialValue: initial.typed)
-    }
-
-    private func answer(for question: MessagePart.QuestionPart.Question) -> JSONValue? {
-        (answered?["answers"]?.array ?? []).first { $0["questionId"]?.string == question.id }
-    }
+    /// Sends an event the card fired to core, which decides what it means.
+    let press: (String, JSONValue) async throws -> WidgetEventReply
 
     var body: some View {
-        if answered != nil {
-            answeredCard
+        if let card = part.ui {
+            WidgetUICardView(part: card, call: { _, _, _ in throw APIError.notFound }, press: press, waiting: .init(answered: answered))
         } else {
-            pendingCard
-        }
-    }
-
-    private var single: Bool { part.questions.count == 1 && !(part.questions.first?.multi ?? true) }
-
-    private var pendingCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Waiting for your answer")
-                .romeFont(CardScale.label)
+            Text(verbatim: part.questions.map(\.text).joined(separator: "\n"))
+                .romeFont(CardScale.body)
                 .foregroundStyle(Palette.sub)
-            ForEach(part.questions, id: \.id) { question in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(question.text)
-                        .romeFont(CardScale.title, .semibold)
-                        .tracking(-0.4)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                    // A plain list: options, then the row to type in, between thin rules.
-                    VStack(spacing: 0) {
-                        ForEach(question.options, id: \.self) { option in
-                            optionButton(question, option)
-                            OptionDivider()
-                        }
-                        HStack(spacing: 12) {
-                            Image(systemName: "pencil")
-                                .romeFont(13)
-                                .foregroundStyle(Palette.sub)
-                                .frame(width: 18)
-                                .accessibilityHidden(true)
-                            TextField(question.options.isEmpty ? "Type your answer…" : "Or type your own…", text: binding(question.id), axis: .vertical)
-                                .romeFont(CardScale.body)
-                                .lineLimit(1...4)
-                                .focused($focusedQuestion, equals: question.id)
-                                .padding(.vertical, 10)
-                            if single, let answers = QuestionAnswers.inlineSend(question, choices: choices, typed: typed) {
-                                Button {
-                                    focusedQuestion = nil
-                                    onAnswer(answers)
-                                } label: {
-                                    Image(systemName: "arrow.up")
-                                        .romeFont(14, .bold)
-                                        .foregroundStyle(.white)
-                                        .frame(width: 30, height: 30)
-                                        .background(Palette.primary, in: Circle())
-                                }
-                                .buttonStyle(PressScaleStyle(scale: 0.9))
-                                .transition(.scale.combined(with: .opacity))
-                            }
-                        }
-                        .frame(minHeight: CardScale.optionMinHeight)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: typed[question.id]?.isEmpty ?? true)
-                    }
-                }
-            }
-            if !single {
-                PrimaryButton(title: "Submit", loading: sending, disabled: !complete, inCard: true) { submit() }
-            }
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .cardPadding()
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
-        .hairline(radius: Metrics.bigCardRadius)
-        .padding(.top, 4)
-        .disabled(sending)
-        .opacity(sending ? 0.7 : 1)
-    }
-
-    private func optionButton(_ question: MessagePart.QuestionPart.Question, _ option: String) -> some View {
-        let selected = choices[question.id]?.contains(option) ?? false
-        let description = question.optionDescriptions[option]
-        return Button {
-            if question.multi {
-                var list = choices[question.id] ?? []
-                if let index = list.firstIndex(of: option) { list.remove(at: index) } else { list.append(option) }
-                choices[question.id] = list
-            } else {
-                choices[question.id] = [option]
-                // Choosing replaces what was typed: the choice is the answer.
-                typed[question.id] = nil
-                if single { submit(choices: [question.id: [option]], typed: [:]) }
-            }
-        } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    if selected {
-                        Circle().fill(Palette.primary)
-                        Image(systemName: "checkmark").romeFont(9, .heavy).foregroundStyle(.white)
-                    } else {
-                        Circle().strokeBorder(Palette.sub, lineWidth: 1.5)
-                    }
-                }
-                .frame(width: 18, height: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(option)
-                        .romeFont(CardScale.body)
-                        .foregroundStyle(Palette.fg)
-                        .multilineTextAlignment(.leading)
-                    if let description {
-                        // Shown only: an answer carries the label.
-                        Text(description)
-                            .romeFont(CardScale.caption)
-                            .foregroundStyle(Palette.sub)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, description == nil ? 0 : CardScale.fieldRowPadding)
-            .frame(minHeight: CardScale.optionMinHeight)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressScaleStyle(scale: 0.98))
-        .sensoryFeedback(.selection, trigger: selected)
-    }
-
-    /// Optional questions never block Submit; a required one with a default is answered.
-    private var complete: Bool {
-        QuestionAnswers.complete(part.questions, choices: choices, typed: typed)
-    }
-
-    private func binding(_ id: String) -> Binding<String> {
-        Binding(get: { typed[id] ?? "" }, set: { typed[id] = $0 })
-    }
-
-    private func submit(choices: [String: [String]]? = nil, typed: [String: String]? = nil) {
-        let choices = choices ?? self.choices, typed = typed ?? self.typed
-        // Every required question answered; a card of only optional ones may go blank.
-        guard QuestionAnswers.complete(part.questions, choices: choices, typed: typed) else { return }
-        let answers = QuestionAnswers.answers(part.questions, choices: choices, typed: typed)
-        focusedQuestion = nil
-        onAnswer(answers)
-    }
-
-    private var answeredCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Answered")
-                .romeFont(CardScale.label)
-                .foregroundStyle(Palette.sub)
-            ForEach(part.questions, id: \.id) { question in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(question.text)
-                        .romeFont(CardScale.title, .semibold)
-                        .foregroundStyle(Palette.sub)
-                        .lineSpacing(3)
-                    let stored = QuestionAnswers.picked(answer(for: question), question: question)
-                    let picked = stored.options
-                    let extra = stored.extra
-                    VStack(spacing: 0) {
-                        ForEach(Array(question.options.enumerated()), id: \.element) { index, option in
-                            if index > 0 { OptionDivider() }
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    if picked.contains(option) {
-                                        Circle().fill(Palette.primary)
-                                        Image(systemName: "checkmark").romeFont(9, .heavy).foregroundStyle(.white)
-                                    }
-                                }
-                                .frame(width: 18, height: 18)
-                                Text(option)
-                                    .romeFont(CardScale.body)
-                                    .foregroundStyle(picked.contains(option) ? Palette.fg : Palette.sub)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: CardScale.optionMinHeight, alignment: .leading)
-                        }
-                        if !extra.isEmpty {
-                            if !question.options.isEmpty { OptionDivider() }
-                            HStack(spacing: 12) {
-                                Image(systemName: "pencil")
-                                    .romeFont(13)
-                                    .foregroundStyle(Palette.sub)
-                                    .frame(width: 18)
-                                Text(extra.joined(separator: QuestionAnswers.separator))
-                                    .romeFont(CardScale.body)
-                            }
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, minHeight: CardScale.optionMinHeight, alignment: .leading)
-                        }
-                    }
-                }
-            }
-        }
-        .cardPadding()
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
-        .hairline(radius: Metrics.bigCardRadius)
-        .transition(.opacity)
     }
 }
 
-/// The thin rule between a question's rows, from the option text's edge.
+/// A thin rule between the rows of a card's plain list.
 struct OptionDivider: View {
     var body: some View {
         Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 30)
@@ -656,22 +503,5 @@ struct WebOnlyCard: View {
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
         .hairline(radius: Metrics.groupRadius)
-    }
-}
-
-struct ErrorLine: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-            AlertGlyph(size: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-            Text(text)
-                .romeFont(15)
-                .lineSpacing(5)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(2)
-        .accessibilityElement(children: .combine)
     }
 }

@@ -56,6 +56,48 @@ describe("EventBusTriggerProvider", () => {
     provider = new EventBusTriggerProvider(bus, repo);
   });
 
+  it("ends a once wait at its deadline when no event came, and never fires it twice", async () => {
+    const fired: Record<string, unknown>[] = [];
+    const routine = buildRoutine({
+      trigger: { type: "event-bus", eventName: "ci.done", once: true },
+      args: { deadline: new Date(Date.now() + 60).toISOString(), waitingFor: "the CI run" },
+    });
+    await provider.activate(routine, async (payload) => void fired.push(payload));
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    await flush();
+    expect(fired).toEqual([
+      expect.objectContaining({ deadlinePassed: true, waitingFor: "the CI run" }),
+    ]);
+    expect(repo.updates).toEqual([{ id: routine.id, data: { enabled: false } }]);
+    publish(bus, { name: "ci.done" });
+    await flush();
+    expect(fired).toHaveLength(1);
+  });
+
+  it("ends a once wait whose deadline passed while Rome was down when it activates", async () => {
+    const fired: Record<string, unknown>[] = [];
+    const routine = buildRoutine({
+      trigger: { type: "event-bus", eventName: "ci.done", once: true },
+      args: { deadline: "2001-01-01T00:00:00Z" },
+    });
+    await provider.activate(routine, async (payload) => void fired.push(payload));
+    await flush();
+    expect(fired).toEqual([expect.objectContaining({ deadlinePassed: true })]);
+  });
+
+  it("drops a wait's deadline once its event came", async () => {
+    const fired: Record<string, unknown>[] = [];
+    const routine = buildRoutine({
+      trigger: { type: "event-bus", eventName: "ci.done", once: true },
+      args: { deadline: new Date(Date.now() + 60).toISOString() },
+    });
+    await provider.activate(routine, async (payload) => void fired.push(payload));
+    publish(bus, { name: "ci.done", payload: { ok: 1 } });
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    await flush();
+    expect(fired).toEqual([{ ok: 1 }]);
+  });
+
   it("fires a routine when a matching event is published, with the payload", async () => {
     const fired: Record<string, unknown>[] = [];
     await provider.activate(

@@ -34,13 +34,12 @@ private func rows(_ items: [[String: Any]]) -> [TranscriptRow] {
         ])
         #expect(parsed == [
             .webOnly(.aiTools, toolUseId: "a"), .webOnly(.connectService, toolUseId: "b"), .webOnly(.connectorSignIn, toolUseId: "c"),
-            .webOnly(.app("habits"), toolUseId: "d"), .webOnly(.turnSummary), .webOnly(.modelSwitch(model: "GPT-5")),
+            .webOnly(.app("habits"), toolUseId: "d"), .webOnly(.turnSummary), .notice("Switched to GPT-5"),
         ])
         #expect(MessagePart.WebOnlyKind.aiTools.title() == "Connect Claude or ChatGPT")
         #expect(MessagePart.WebOnlyKind.connectService.title() == "A card to connect a service")
         #expect(MessagePart.WebOnlyKind.app("habits").title(appName: "Habits") == "A card from Habits")
         #expect(MessagePart.WebOnlyKind.app("habits").title() == "An app card")
-        #expect(MessagePart.WebOnlyKind.modelSwitch(model: "GPT-5").title() == "Switched to GPT-5")
     }
 
     /// An answered interactive card says it is done; an open one still asks to be opened.
@@ -48,11 +47,12 @@ private func rows(_ items: [[String: Any]]) -> [TranscriptRow] {
         let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "tu-1", "appId": "connector", "render": ["componentId": "connect-card"]]
         let content = String(data: try! JSONSerialization.data(withJSONObject: [card]), encoding: .utf8)!
         let message = ChatMessage(id: "m", sessionId: "s", role: "assistant", content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000)))
+        // Answers are keyed by the message that holds the card.
         func row(_ answers: [String: JSONValue]) -> TranscriptRow? {
             TranscriptBuilder.rows(messages: [message], pending: [], answers: answers, options: .init()).last
         }
         #expect(row([:]) == .webOnly(id: "m:0", kind: .connectService, done: false))
-        #expect(row(["tu-1": .object(["connected": .bool(true)])]) == .webOnly(id: "m:0", kind: .connectService, done: true))
+        #expect(row(["m": .object(["connected": .bool(true)])]) == .webOnly(id: "m:0", kind: .connectService, done: true))
         #expect(row(["other": .object([:])]) == .webOnly(id: "m:0", kind: .connectService, done: false))
     }
 

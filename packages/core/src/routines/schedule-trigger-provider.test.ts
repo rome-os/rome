@@ -81,6 +81,32 @@ describe("ScheduleTriggerProvider", () => {
     expect(after!.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
   });
 
+  it("wakes a defer whose time passed while Rome was down, and leaves another missed one-off alone", async () => {
+    const past = {
+      type: "schedule" as const,
+      tzid: "UTC",
+      tzMode: "fixed" as const,
+      localTime: "09:00",
+      date: "2001-01-01",
+    };
+    const make = (actionName: string) =>
+      repo.create({ name: actionName, trigger: past, actionName, args: {}, enabled: true });
+    const deferId = await make("resume_session");
+    const otherId = await make("noop");
+    const fired: string[] = [];
+    for (const id of [deferId, otherId]) {
+      const row = await repo.findById(id);
+      await provider.activate(
+        buildRoutine({ id, trigger: row!.trigger as Trigger, actionName: row!.actionName }),
+        async () => void fired.push(id),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fired).toEqual([deferId]);
+    expect((await repo.findById(deferId))?.enabled).toBe(false);
+    expect((await repo.findById(otherId))?.enabled).toBe(true);
+  });
+
   it("refuses a schedule with neither date nor rrule", async () => {
     const routine = buildRoutine({
       trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "12:00" },

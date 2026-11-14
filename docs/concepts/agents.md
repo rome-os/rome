@@ -49,6 +49,8 @@ A core or app agent may declare how a chat treats its turns in an optional `poli
 | `autoTitle` | Whether the chat's first message names the chat. | `true` |
 | `loadMemory` | Whether a core agent's system prompt carries the memory index, project summaries, and runtime paths. | `true` for `main` only |
 | `freshSessionOnSetupChange` | Whether a session opened by continuity key is replaced by a fresh one when the agent's [setup](sessions.md#setup) changed since it opened. | `false` |
+| `handoffOnRenewal` | Whether a renewed session starts from a [handoff](sessions.md#handoff). | `false` |
+| `delegatesWork` | Whether the agent hands its work to other chats rather than doing it. Its system prompt then leaves out the command line tools and the runtime context beyond where memory and the docs are, and its sessions carry no `propose_routine`. | `false` |
 
 ## Builtin tools
 
@@ -64,7 +66,8 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 - Codex has one shell for reading files, searching, and running commands. Any of `Read`, `Glob`, `Grep`, or `Bash` gives the agent that shell, and the shell can write files. An agent that must not run commands on Codex declares none of the four.
 - Codex offers its patch tool on every thread. An agent with no `Write`, `Edit`, or shell name runs in Codex's read-only sandbox, which rejects every patch.
 - Some Codex models carry collaboration tools that spawn Codex agents, and no setting removes them. A spawned Codex agent gets the same builtin tools as the agent that spawned it.
-- Codex's plan tool stays on for every agent, because Rome renders plan updates from it. `WebFetch` and `TodoWrite` grant nothing on Codex.
+- Codex's plan tool stays on for every agent, because Rome renders plan updates from it. `TodoWrite` grants nothing on Codex.
+- ChatGPT's apps open web pages and reach the accounts linked in ChatGPT, so only `WebFetch` grants them. An agent that declares `WebSearch` alone gets Codex's search and none of the apps.
 - Codex's bundled skills are off, so an agent sees only Rome's [skills](skills.md). The exception is `imagegen`, Codex's guide to its image tool, which an agent that declares `ImageGeneration` gets too.
 
 | Declared on Codex | Codex capability |
@@ -73,6 +76,7 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 | `Read` | Viewing a local image |
 | `Write`, `Edit`, `Read`, `Glob`, `Grep`, or `Bash` | Patches that write files |
 | `WebSearch` | Web search |
+| `WebFetch` | ChatGPT's apps, which open web pages and reach the accounts linked in ChatGPT |
 | `Task` | Codex's multi-agent tools, on models without collaboration tools |
 | `ImageGeneration` | Image generation, and Codex's `imagegen` skill |
 

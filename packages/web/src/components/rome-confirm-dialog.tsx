@@ -8,6 +8,9 @@ import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
 interface RomeConfirmDialogProps {
   cancelLabel?: string;
+  // Content between the description and the buttons, such as a choice the
+  // confirmed action takes.
+  children?: ReactNode;
   // Disables the confirm button, e.g. while the confirmed action is in flight
   // and a second activation would resubmit it.
   confirmDisabled?: boolean;
@@ -25,6 +28,7 @@ interface RomeConfirmDialogProps {
 
 export function RomeConfirmDialog({
   cancelLabel,
+  children,
   confirmDisabled = false,
   confirmLabel,
   description,
@@ -61,6 +65,8 @@ export function RomeConfirmDialog({
           <DialogDescription className="sr-only">{title}</DialogDescription>
         )}
       </div>
+
+      {children ? <div className="mt-4">{children}</div> : null}
 
       <div className="mt-6 flex justify-end gap-2">
         <Button ref={cancelButtonRef} variant="outline" onClick={onCancel}>

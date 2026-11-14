@@ -46,7 +46,12 @@ import Testing
     /// the text in the composer for the chat.
     @Test func theChatReopensTheThreadWhileItIsThere() async {
         let backend = FakeBackend()
-        backend.stored = [message("a1")]
+        // A task's thread: its messages carry the task's title.
+        var anchor = message("a1")
+        anchor.chatThreadId = "a1"
+        anchor.chatThreadTitle = "Book flights"
+        anchor.knowsThreads = true
+        backend.stored = [anchor]
         let chat = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
         await chat.reload()
         chat.reopenThread(ThreadTarget(messageId: "gone", instanceKnowsThreads: true))

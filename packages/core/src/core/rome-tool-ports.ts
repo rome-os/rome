@@ -24,6 +24,7 @@ import {
   type RoutineActivationGate,
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
+import { connectAccountTools } from "./connect-account-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 import { withTaskInputActor } from "../webchat/task-input-actor.js";
 import { sameActor } from "../agent/index.js";
@@ -38,6 +39,11 @@ export interface RomeToolPortsDeps {
   webchatRepo?: Pick<WebChatRepository, "getSession">;
   /** The tools Rome adds for an agent. When absent, a session carries none. */
   sessionTools?: SessionToolsProvider;
+  /**
+   * Whose task `taskId` is, or null when there is none, so a check names only
+   * a task of its own chat's owner. When absent, no check names a task.
+   */
+  taskOwner?: (taskId: string) => Promise<string | null>;
 }
 
 export interface RomeToolPorts {
@@ -119,13 +125,21 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   const defer: Pick<DeferTool, "schedule"> = {
     schedule: (turn, wakeUp) =>
       turn.inTurn(() =>
-        asTurnActor(turn, async () =>
-          runDefer(wakeUp, {
+        asTurnActor(turn, async () => {
+          const ownerKey = await dashboardChatOwner(deps.webchatRepo, turn.threadContext());
+          // A check names only a task of the owner whose chat schedules it.
+          if (wakeUp.taskId) {
+            const owner = (await deps.taskOwner?.(wakeUp.taskId)) ?? null;
+            if (owner === null || owner !== (ownerKey ?? "guardian")) {
+              throw new Error(`No task ${wakeUp.taskId}. Use task_list to find it.`);
+            }
+          }
+          return runDefer(wakeUp, {
             context: {
               agentName: turn.agentName,
               sessionId: turn.sessionId,
               channelContext: turn.threadContext(),
-              ownerKey: await dashboardChatOwner(deps.webchatRepo, turn.threadContext()),
+              ownerKey,
               turnId: turn.turnId(),
               scheduledAt: new Date(),
             },
@@ -147,8 +161,8 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
                     actionEngine.run(name, args, agentRunContext(turn)),
                   )
               : undefined,
-          }),
-        ),
+          });
+        }),
       ),
   };
 
@@ -232,6 +246,12 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           runAction: (name: string, input: unknown): Promise<ActionResult> =>
             actions.run(turn, name, input),
         }),
+        // A session whose own tools already show a connect card (the
+        // Concierge's `connect_card`) keeps that one, so the agent has one way
+        // to ask for a connection.
+        ...(provided.some((tool) => tool.name === "connect_card")
+          ? []
+          : connectAccountTools({ widgets: turn.widgets, hasSpeaker })),
       ];
     },
   };

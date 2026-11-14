@@ -2,3 +2,9 @@
 // with Rome's own team (Amantru, Inc), like Release, so both receive pushes
 // sent with that team's APNs key.
 DEVELOPMENT_TEAM = 4YWXB26F39
+
+// Debug builds against Rome's test hosts (*.romeos.dev), which sit behind
+// Cloudflare Access: point sign-in there and set the Access service token.
+// ROME_CLOUD_ORIGIN = https:/$()/onboarding-pantheon.romeos.dev
+// CF_ACCESS_CLIENT_ID = <client id>
+// CF_ACCESS_CLIENT_SECRET = <client secret>

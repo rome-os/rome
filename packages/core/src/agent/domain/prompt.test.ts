@@ -6,6 +6,7 @@ import {
   buildThreadContextBlock,
   buildWorkspaceContextSection,
   WORKSPACE_CONTEXT_BLOCK_CHAR_LIMIT,
+  withoutRepeatedHeaders,
 } from "./prompt.js";
 
 describe("buildWorkspaceContextSection", () => {
@@ -283,5 +284,42 @@ describe("buildContinuationBlock", () => {
     const block = buildContinuationBlock({ canReadHistory: false });
     expect(block.startsWith("<continuation>\n")).toBe(true);
     expect(block).not.toContain("fetch_channel_history");
+  });
+});
+
+describe("withoutRepeatedHeaders", () => {
+  const names = ["concierge_chat", "concierge_owner", "workspace_context"];
+  const chat = '<concierge_chat id="c1" name="Main" main="true"/>';
+  const owner = '<concierge_owner role="guardian"/>';
+  const workspace = "<workspace_context>\nfile: a.ts\n</workspace_context>";
+
+  it("keeps every header on a thread's first input", () => {
+    const prompt = `${chat}\n${owner}\n\n${workspace}\n\nHello`;
+    const { prompt: kept, headers } = withoutRepeatedHeaders(prompt, names, new Map());
+    expect(kept).toBe(`${chat}\n${owner}\n${workspace}\n\nHello`);
+    expect([...headers.keys()]).toEqual(names);
+  });
+
+  it("leaves out the headers that did not change, and keeps the one that did", () => {
+    const first = withoutRepeatedHeaders(`${chat}\n${owner}\n\nHello`, names, new Map());
+    const renamed = chat.replace("Main", "Home");
+    const second = withoutRepeatedHeaders(`${renamed}\n${owner}\n\nAgain`, names, first.headers);
+    expect(second.prompt).toBe(`${renamed}\n\nAgain`);
+    const third = withoutRepeatedHeaders(
+      `${renamed}\n${owner}\n\nOnce more`,
+      names,
+      second.headers,
+    );
+    expect(third.prompt).toBe("Once more");
+  });
+
+  it("reads only the run of headers at the very start", () => {
+    const prompt = `Hello ${chat}`;
+    expect(withoutRepeatedHeaders(prompt, names, new Map([["concierge_chat", chat]])).prompt).toBe(
+      prompt,
+    );
+    expect(withoutRepeatedHeaders("<concierge_chatter/>\nHi", names, new Map()).prompt).toBe(
+      "<concierge_chatter/>\nHi",
+    );
   });
 });

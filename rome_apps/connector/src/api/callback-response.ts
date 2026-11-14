@@ -6,8 +6,8 @@ import type { ConnectOrigin } from "./csrf.js";
  *
  * - `dashboard` — redirect to Settings › Connections with the result in the
  *   query string; Settings surfaces the "<app> connected" notice.
- * - `webchat` — an inline card in the chat transcript started the flow and is
- *   already polling for the connection, so the tab has no dashboard to return
+ * - `webchat` — a card in the chat started the flow and checks the connection
+ *   when the guardian is back in the chat, so the tab has no dashboard to return
  *   to. Land it on a terminal confirmation that nudges the guardian back to
  *   their chat (and self-closes), instead of pulling them into settings.
  */
