@@ -266,7 +266,7 @@ start_cloud() {
 start_router() {
   docker rm -f "$ROUTER" >/dev/null 2>&1 || true
   docker run -d --name "$ROUTER" --network "$NETWORK" --restart unless-stopped \
-    -v "$ENV_DIR/router.Caddyfile:/etc/caddy/Caddyfile:ro" \
+    -e "ROME_DOMAIN=$DOMAIN" -v "$ENV_DIR/router.Caddyfile:/etc/caddy/Caddyfile:ro" \
     --label traefik.enable=true --label "traefik.docker.network=$NETWORK" \
     --label "traefik.http.routers.${ROUTER}.rule=HostRegexp(\`^[a-z0-9-]+\\.rome\\.localhost$\`)" \
     --label "traefik.http.routers.${ROUTER}.priority=1" \

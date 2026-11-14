@@ -1,4 +1,7 @@
 # Sends <slug>.rome.localhost to the Rome container that Rome Cloud named rome-vm-<slug>.
+# The tunnel rewrote the Host, so the Rome gets its public address back, which
+# it uses in links it hands out, such as a connect card's authorization page.
+# The Rome's own proxy overwrites X-Forwarded-Host, so it has to be the Host.
 {
 	admin off
 	auto_https off
@@ -7,7 +10,9 @@
 :80 {
 	@rome header_regexp rome Host ^([a-z0-9-]+)\.rome\.localhost(:[0-9]+)?$
 	handle @rome {
-		reverse_proxy rome-vm-{re.rome.1}:8080
+		reverse_proxy rome-vm-{re.rome.1}:8080 {
+			header_up Host {re.rome.1}.{$ROME_DOMAIN}
+		}
 	}
 	respond "No Rome at this address" 404
 }

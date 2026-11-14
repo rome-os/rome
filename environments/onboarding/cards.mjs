@@ -57,6 +57,16 @@ export async function walkCards({ page, step, out }) {
     return res.json();
   }
 
+  // The Concierge has a connect card of its own, so the walk asks in Chat,
+  // where the agent connects through `connect_account`.
+  await step("chat-mode", async () => {
+    const modes = page.getByLabel("Chat list mode");
+    const chat = { name: "Chat", exact: true };
+    await modes.getByRole("radio", chat).or(modes.getByRole("button", chat)).or(modes.getByRole("tab", chat)).first().click();
+    await page.getByText("New chat", { exact: true }).click();
+    await page.waitForURL((url) => !/main/i.test(url.pathname), { timeout: 30_000 }).catch(() => {});
+  });
+
   await step("card-shown", async () => {
     await askToConnect("github");
   });
@@ -87,7 +97,9 @@ export async function walkCards({ page, step, out }) {
 async function agentResumed(page, chatId) {
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
-    const res = await page.request.get(`/api/chat/sessions/${encodeURIComponent(chatId)}/messages`);
+    const res = await page.request.get(
+      new URL(`/api/chat/sessions/${encodeURIComponent(chatId)}/messages`, page.url()).href,
+    );
     if (res.ok()) {
       const messages = listOf(await res.json());
       const answeredAt = messages.findIndex((m) => partsOf(m).some((p) => p?.type === "interaction_result"));
@@ -95,7 +107,7 @@ async function agentResumed(page, chatId) {
         answeredAt >= 0 &&
         messages
           .slice(answeredAt + 1)
-          .some((m) => m.role === "assistant" && partsOf(m).some((p) => p?.type === "text" && p.text?.trim()))
+          .some((m) => m.role === "assistant" && partsOf(m).some((p) => p?.type === "text" && (p.content ?? p.text)?.trim()))
       ) {
         return;
       }
