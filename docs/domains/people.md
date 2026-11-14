@@ -79,6 +79,7 @@ The one question Participation asks People about a sender. The answer is a perso
 
 - A stranger and a dismissed account both answer nobody. The difference matters only to the guardian, in which accounts are shown for them to decide about.
 - Participation asks it about the sender of every message a wake hands an agent, each time a turn runs.
+- An agent that meets someone it does not recognize reads who they are by name, with the guardian's notes on them. Sentinel, which answers senders Rome does not trust, reads the sender's own notes on each message instead, and no one else's.
 
 ## Decided against
 
