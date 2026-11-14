@@ -367,7 +367,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     sessions: cachedSessions,
     isError: sessionsFailed,
     refetch: refetchSessions,
-  } = useChatSessions("all", undefined, { enabled: open });
+  } = useChatSessions("all", undefined, { enabled: open, refetchOnShow: true });
   const sessions = cachedSessions ?? null;
   const loadError = sessionsFailed && !cachedSessions;
   const [contentMatches, setContentMatches] = useState<ChatSearchMessageMatch[]>([]);

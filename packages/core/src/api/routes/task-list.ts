@@ -80,8 +80,11 @@ export function subscribeChatTasks(
 ): () => void {
   const list = chatTaskListOf(deps);
   if (!list) return () => {};
-  return list.watch(chatId, owner, () =>
-    emit(TASK_LIST_CHANGED_EVENT, { chatId } satisfies TaskListChangedEvent),
+  return list.watch(chatId, owner, ({ follows }) =>
+    emit(TASK_LIST_CHANGED_EVENT, {
+      chatId,
+      ...(follows ? { follows: true } : {}),
+    } satisfies TaskListChangedEvent),
   );
 }
 

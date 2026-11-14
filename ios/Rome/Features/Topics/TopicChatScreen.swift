@@ -112,7 +112,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                Composer(text: $draft, placeholder: store?.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
+                TopicComposer(workspace: workspace, chatId: chatId, replying: store?.composerThread != nil, draft: $draft, focused: $composerFocused, attachments: attachments) { send() }
             }
             .shareModeComposer(store?.share)
             .animation(.easeOut(duration: 0.2), value: showsStarters)
@@ -229,6 +229,25 @@ struct TopicChatScreen: View {
                 attachments.restore(images)
             }
         }
+    }
+}
+
+/// A topic chat's composer, named after the chat. It reads the chat's name
+/// itself, so a rename never redraws the transcript.
+private struct TopicComposer: View {
+    let workspace: Workspace
+    let chatId: String?
+    let replying: Bool
+    @Binding var draft: String
+    @Binding var focused: Bool
+    let attachments: ComposerAttachments
+    let onSend: () -> Void
+
+    var body: some View {
+        let chat = chatId.flatMap(workspace.topics.chat)
+        // Only "Message in <name>" is fitted; a reply keeps "Reply".
+        let name = replying ? nil : TopicChatsStore.composerName(chat)
+        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, onSend: onSend)
     }
 }
 

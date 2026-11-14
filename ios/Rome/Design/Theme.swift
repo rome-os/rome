@@ -15,6 +15,14 @@ enum Palette {
     static let pressed = dynamic(0xF1ECE5, 0x221E1C)
     static let drawer = dynamic(0xECE7DF, 0x050404)
     static let drawerField = dynamic(0xE3DCD1, 0x1E1A17)
+    /// A second-level page (Settings, an app, Apple Health): a sheet over
+    /// Chat or Apps. Gray in light, so white cards stand out; a step above
+    /// the black first level in dark, so its top edge reads.
+    static let secondaryPage = dynamic(0xEBE8E2, 0x1C1916)
+    /// A card on a second-level page: a step above `secondaryPage`.
+    static let secondaryCard = dynamic(0xFFFFFF, 0x2A2623)
+    /// An icon tile or a track inside a `secondaryCard`.
+    static let secondaryFill = dynamic(0xEFE9E1, 0x3A3430)
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
@@ -210,6 +218,13 @@ private struct PageBackground: ViewModifier {
 extension View {
     /// The page background of a page that can sit beside the drawer.
     func pageBackground() -> some View { modifier(PageBackground()) }
+
+    /// The background of a second-level page, which covers Chat or Apps from
+    /// the bottom (DESIGN.md 12). Its header's fade takes the same color.
+    func secondaryPageBackground() -> some View {
+        background(Palette.secondaryPage.ignoresSafeArea())
+            .environment(\.pageBackground, Palette.secondaryPage)
+    }
 
     /// The design's "soft" elevation: a hairline ring plus a faint two-layer drop shadow.
     func softElevation(radius: CGFloat) -> some View {

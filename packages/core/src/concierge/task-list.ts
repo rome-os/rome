@@ -257,17 +257,25 @@ export class ChatTaskList {
   /**
    * Calls `changed` whenever something chat `chatId`'s list holds may have
    * changed: one of its owner's tasks, a routine of the chat or of one of
-   * its task chats, one that is a check or a schedule, or a follow. A burst calls it once. Returns the
-   * unsubscribe.
+   * its task chats, one that is a check or a schedule, or a follow. A burst
+   * calls it once, saying whether a follow was among what changed. Returns
+   * the unsubscribe.
    */
-  watch(chatId: string, owner: ConciergeOwner, changed: () => void): () => void {
+  watch(
+    chatId: string,
+    owner: ConciergeOwner,
+    changed: (what: { follows: boolean }) => void,
+  ): () => void {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    let follows = false;
     const tell = () => {
       if (closed || timer) return;
       timer = setTimeout(() => {
         timer = null;
-        if (!closed) changed();
+        const what = { follows };
+        follows = false;
+        if (!closed) changed(what);
       }, CHANGE_SETTLE_MS);
     };
     const stops = [
@@ -293,7 +301,10 @@ export class ChatTaskList {
           })
           .catch(() => tell());
       }),
-      this.deps.following?.()?.onChange?.(tell) ?? (() => {}),
+      this.deps.following?.()?.onChange?.(() => {
+        follows = true;
+        tell();
+      }) ?? (() => {}),
       // A new card may be the one a waiting task's Respond goes to now.
       this.deps.onTaskCardMessage?.((cardChat) => {
         if (cardChat === chatId) tell();
