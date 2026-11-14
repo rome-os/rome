@@ -7,6 +7,7 @@ import {
   Cloud,
   FolderOpen,
   Laptop,
+  MessageCircle,
   Pencil,
   Plus,
   Trash2,
@@ -20,10 +21,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
+import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -34,6 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { deleteSession, renameSession, type SessionScope } from "@/lib/chat-api";
@@ -43,19 +47,35 @@ import { deviceFolderName, pathSegments } from "@/lib/device-folder";
 import {
   activeSessionFromPath,
   chatKind,
+  isProjectChat,
   MAIN_CHAT_PATH,
   sessionActivityTime,
 } from "@/lib/chat-session";
+import {
+  type ChatListMode,
+  initialChatListMode,
+  newChatShortcutForPlatform,
+  readChatListMode,
+  writeChatListMode,
+} from "@/lib/chat-list-mode";
+import { useStoredChatListMode } from "@/hooks/use-chat-list-mode";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
-import { useConciergeChatId, useConciergeName, useRefreshTopicChats } from "@/hooks/use-concierge";
+import {
+  CONCIERGE_CHATS_QUERY_KEY,
+  useConciergeChatId,
+  useConciergeChats,
+  useConciergeName,
+  useRefreshTopicChats,
+} from "@/hooks/use-concierge";
 import { useDesktop } from "@/hooks/use-desktop";
-import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { chatSessionTopic, chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { ConciergeChats } from "./ConciergeEntry";
 import { isElectronShell } from "@/lib/electron-shell";
 import { STANDALONE_DISPLAY_QUERY } from "@/lib/media-query";
 import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
+import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -296,6 +316,108 @@ function ChatRowLink({
   );
 }
 
+/** How many task chats show before the More row. */
+const TASK_CHATS_VISIBLE = 5;
+
+const MORE_ROW_CLASS =
+  "rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
+
+/** A dot on a segment's corner that says the other mode needs a look. */
+function ModeDot({ label, className }: { label: string; className: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      className={`absolute right-0.5 top-0.5 size-1.5 rounded-full ${className}`}
+    />
+  );
+}
+
+/**
+ * Switches the list between ordinary chats and the Concierge's. A dot on the
+ * segment of the mode that is not showing says something there wants a look:
+ * unread Concierge messages, or an ordinary chat replying.
+ */
+function ChatModeSwitch({
+  mode,
+  onChange,
+  conciergeUnread,
+  chatReplying,
+}: {
+  mode: ChatListMode;
+  onChange: (mode: ChatListMode) => void;
+  conciergeUnread: boolean;
+  chatReplying: boolean;
+}) {
+  const { t } = useTranslation("common");
+  const chatName = t("recentChats.modeChat");
+  const conciergeName = t("recentChats.modeConcierge");
+  return (
+    <SegmentedControl<ChatListMode>
+      size="sm"
+      aria-label={t("recentChats.modeSwitch")}
+      value={mode}
+      onValueChange={onChange}
+      className="ml-1 shrink-0"
+      options={[
+        {
+          value: "chat",
+          title: chatName,
+          icon: <MessageCircle aria-hidden />,
+          label: (
+            <>
+              <span className="sr-only">{chatName}</span>
+              {mode === "concierge" && chatReplying ? (
+                <ModeDot label={t("recentChats.modeChatReplying")} className="bg-primary" />
+              ) : null}
+            </>
+          ),
+        },
+        {
+          value: "concierge",
+          title: conciergeName,
+          icon: <RomeLogo aria-hidden />,
+          label: (
+            <>
+              <span className="sr-only">{conciergeName}</span>
+              {mode === "chat" && conciergeUnread ? (
+                <ModeDot label={t("recentChats.modeConciergeUnread")} className="bg-destructive" />
+              ) : null}
+            </>
+          ),
+        },
+      ]}
+    />
+  );
+}
+
+/** The list's top row: opens a blank chat, an ordinary one or a topic chat. */
+function NewChatRow({
+  kind,
+  label,
+  shortcut,
+}: {
+  kind: "chat" | "topic";
+  label: string;
+  /** Shown beside the label where a keyboard has it. */
+  shortcut: string | null;
+}) {
+  return (
+    <Link
+      to="/chat"
+      state={kind === "topic" ? { conciergeTopic: true } : undefined}
+      data-new-chat-row={kind}
+      className={`${LINK_CLASS} ${IDLE_CLASS} mb-1`}
+    >
+      <Plus className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
+      <span className="flex-1 truncate">{label}</span>
+      {shortcut ? (
+        <kbd className="shrink-0 font-sans text-aux text-subtle-foreground">{shortcut}</kbd>
+      ) : null}
+    </Link>
+  );
+}
+
 export interface RecentChatsProps {
   /** Extra buttons after the list's own, such as the shell's collapse control. */
   headerControls?: ReactNode;
@@ -363,6 +485,10 @@ export function RecentChats({
   );
   const conciergeChatId = useConciergeChatId();
   const conciergeName = useConciergeName();
+  const conciergeChats = useConciergeChats();
+  // Without a Concierge there is nothing to switch to: the list is the
+  // ordinary chats alone.
+  const hasConcierge = conciergeChatId !== null;
   // Refetches the chat list and the Concierge's list together.
   const refreshTopicChats = useRefreshTopicChats();
   // The Concierge section draws its topic chats from these: an archived one
@@ -372,6 +498,19 @@ export function RecentChats({
     [cachedSessions, conciergeChatId],
   );
   const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
+  const storedMode = useStoredChatListMode();
+  const hasOrdinaryChat = (cachedSessions ?? []).some((s) =>
+    isProjectChat(chatKind(s, conciergeChatId)),
+  );
+  // A device with no stored mode starts where its chats are, once the list
+  // has said.
+  const mode: ChatListMode = !hasConcierge
+    ? "chat"
+    : (storedMode ?? (cachedSessions ? initialChatListMode(hasOrdinaryChat) : "chat"));
+  useEffect(() => {
+    if (!hasConcierge || !cachedSessions || readChatListMode() !== null) return;
+    writeChatListMode(initialChatListMode(hasOrdinaryChat));
+  }, [hasConcierge, cachedSessions, hasOrdinaryChat]);
   // The router renders a navigation as a transition, so the location stays
   // on the old chat until the new one has rendered, which takes a moment
   // when the old one is long. The row a click opens is marked at once, as an
@@ -379,6 +518,30 @@ export function RecentChats({
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
   useEffect(() => setOpeningSessionId(null), [routeSessionId]);
   const activeSessionId = openingSessionId ?? routeSessionId;
+  // The Concierge entry recounts unread on a new main chat message while it
+  // shows. In Chat mode it does not, and the switch's dot needs the same count
+  // from the Concierge's chats alone.
+  const queryClient = useQueryClient();
+  const recountConciergeChats = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
+  }, [queryClient]);
+  useLiveEvents(
+    chatSessionTopic(conciergeChatId ?? ""),
+    { message_insert: { schema: z.unknown(), fn: recountConciergeChats } },
+    { enabled: hasConcierge && mode === "chat", onReconnect: recountConciergeChats },
+  );
+  // The chat on screen reads what arrives, so its unread count is stale. A task
+  // chat is Concierge's too, and one that waits for the guardian needs a look.
+  const conciergeUnread =
+    conciergeChats.some((chat) => chat.unread > 0 && chat.id !== activeSessionId) ||
+    sessions.some(
+      (s) =>
+        chatKind(s, conciergeChatId) === "task" &&
+        chatRowStatus(s, s.id === activeSessionId) === "waiting",
+    );
+  const chatReplying = sessions.some(
+    (s) => s.running && isProjectChat(chatKind(s, conciergeChatId)),
+  );
   const markOpening = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
@@ -482,6 +645,22 @@ export function RecentChats({
     [sessions],
   );
 
+  // Task chats list under Tasks in Concierge mode and nowhere in Chat mode.
+  // With no Concierge they stay under their project, as before.
+  const projectSessions = useMemo(
+    () =>
+      hasConcierge
+        ? sortedSessions.filter((s) => chatKind(s, conciergeChatId) !== "task")
+        : sortedSessions,
+    [hasConcierge, sortedSessions, conciergeChatId],
+  );
+  const taskSessions = useMemo(
+    () =>
+      hasConcierge ? sortedSessions.filter((s) => chatKind(s, conciergeChatId) === "task") : [],
+    [hasConcierge, sortedSessions, conciergeChatId],
+  );
+  const [tasksExpanded, setTasksExpanded] = useState(false);
+
   const projectGroups = useMemo<SessionGroup[]>(() => {
     const buckets = new Map<
       string,
@@ -492,7 +671,7 @@ export function RecentChats({
         deviceFolder?: SessionGroup["deviceFolder"];
       }
     >();
-    for (const session of sortedSessions) {
+    for (const session of projectSessions) {
       const folder = session.deviceFolder;
       if (folder) {
         const rawKey = deviceFolderKey(folder);
@@ -544,7 +723,7 @@ export function RecentChats({
               Number(a.projectPath === DEFAULT_PROJECT_NAME) || b.latest - a.latest,
         )
     );
-  }, [sortedSessions]);
+  }, [projectSessions]);
 
   const toggleGroup = useCallback((key: string) => {
     setCollapsedGroups((prev) => {
@@ -597,6 +776,10 @@ export function RecentChats({
 
   const handleDelete = useCallback(
     async (id: string) => {
+      // An ordinary chat's row stays in Chat mode: the main chat's page would
+      // switch the list to Concierge.
+      const deleted = sessions.find((s) => s.id === id);
+      const ordinary = deleted ? isProjectChat(chatKind(deleted, conciergeChatId)) : false;
       try {
         await deleteSession(id);
       } catch {
@@ -605,10 +788,10 @@ export function RecentChats({
       updateSessions((prev) => prev.filter((s) => s.id !== id));
       emitSessionsChanged();
       if (activeSessionId === id) {
-        navigate(MAIN_CHAT_PATH);
+        navigate(ordinary ? "/chat" : MAIN_CHAT_PATH);
       }
     },
-    [activeSessionId, navigate, updateSessions],
+    [activeSessionId, conciergeChatId, navigate, sessions, updateSessions],
   );
 
   const startRename = useCallback((session: ChatSession) => {
@@ -948,6 +1131,39 @@ export function RecentChats({
     );
   };
 
+  const renderTasks = () => {
+    if (taskSessions.length === 0) return null;
+    // The open task chat stays in view, even when it is past the first few.
+    const activeIndex = taskSessions.findIndex((s) => s.id === activeSessionId);
+    const showAll = tasksExpanded || activeIndex >= TASK_CHATS_VISIBLE;
+    const visible = showAll ? taskSessions : taskSessions.slice(0, TASK_CHATS_VISIBLE);
+    const hidden = taskSessions.length - visible.length;
+    const running = taskSessions.filter((s) => s.running).length;
+    return (
+      <section aria-labelledby="recent-chats-tasks-heading" data-tasks-section>
+        <hr className="mx-2 my-4 border-0 border-t border-border" aria-hidden />
+        <h2
+          id="recent-chats-tasks-heading"
+          className="flex h-8 min-h-[var(--control-min-h)] items-center justify-between px-2 text-aux text-subtle-foreground"
+        >
+          <span>{t("recentChats.sectionTasks")}</span>
+          {running > 0 ? <span>{t("recentChats.tasksRunning", { count: running })}</span> : null}
+        </h2>
+        {visible.map((session) => renderChatRow(session))}
+        {hidden > 0 ? (
+          <button
+            type="button"
+            onClick={() => setTasksExpanded(true)}
+            data-tasks-more
+            className={`ml-2 ${MORE_ROW_CLASS}`}
+          >
+            {t("recentChats.moreTasks", { count: hidden })}
+          </button>
+        ) : null}
+      </section>
+    );
+  };
+
   return (
     // skipDelayDuration 0 makes every row wait out the delay on its own:
     // Radix's default grace window would otherwise pop each name instantly
@@ -959,7 +1175,17 @@ export function RecentChats({
         >
           <div className="flex min-w-0 items-center gap-1">
             {headerLeading}
-            <span className="text-section text-foreground">{t("recentChats.title")}</span>
+            <span className="truncate text-section text-foreground">
+              {t(mode === "concierge" ? "recentChats.modeConcierge" : "recentChats.title")}
+            </span>
+            {hasConcierge ? (
+              <ChatModeSwitch
+                mode={mode}
+                onChange={writeChatListMode}
+                conciergeUnread={conciergeUnread}
+                chatReplying={chatReplying}
+              />
+            ) : null}
           </div>
           <div className="flex items-center gap-1">
             <DropdownMenu>
@@ -1022,54 +1248,60 @@ export function RecentChats({
           className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 scrollbar-idle-hidden"
           onClickCapture={markOpening}
         >
-          {conciergeChatId ? (
-            <ConciergeChats
-              mainChatId={conciergeChatId}
-              activeSessionId={activeSessionId}
-              statusFilter={statusFilter}
-              topicSessions={conciergeTopicSessions}
-            />
-          ) : null}
-          <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
-            {conciergeChatId ? (
-              <hr className="mx-2 my-4 border-0 border-t border-border" aria-hidden />
-            ) : null}
-            <h2
-              id="recent-chats-projects-heading"
-              className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
-            >
-              {t("recentChats.sectionProjects")}
-            </h2>
-            {phase === "loading" ? (
-              <div className="space-y-1 px-2 py-2" aria-hidden>
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-4/5" />
-                <Skeleton className="h-8 w-3/5" />
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {projectGroups.map(renderProjectGroup)}
-                {/* Only with nothing to show: a refetch that fails while the
+          <NewChatRow
+            kind={mode === "concierge" ? "topic" : "chat"}
+            label={t(mode === "concierge" ? "recentChats.newTopic" : "recentChats.newChat")}
+            shortcut={wideWindow && !coarsePointer ? newChatShortcutForPlatform() : null}
+          />
+          {mode === "concierge" && conciergeChatId ? (
+            <>
+              <ConciergeChats
+                mainChatId={conciergeChatId}
+                activeSessionId={activeSessionId}
+                statusFilter={statusFilter}
+                topicSessions={conciergeTopicSessions}
+              />
+              {renderTasks()}
+            </>
+          ) : (
+            <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
+              <h2
+                id="recent-chats-projects-heading"
+                className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
+              >
+                {t("recentChats.sectionProjects")}
+              </h2>
+              {phase === "loading" ? (
+                <div className="space-y-1 px-2 py-2" aria-hidden>
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-4/5" />
+                  <Skeleton className="h-8 w-3/5" />
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {projectGroups.map(renderProjectGroup)}
+                  {/* Only with nothing to show: a refetch that fails while the
                     list already has rows keeps the rows rather than blanking them. */}
-                {phase === "error" && sessions.length === 0 ? (
-                  <div className="px-3 py-8 text-center" role="alert">
-                    <p className="text-aux text-subtle-foreground">
-                      {t("recentChats.searchLoadError")}
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="mt-3"
-                      onClick={() => void refetch()}
-                    >
-                      {t("recentChats.searchRetry")}
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </section>
+                  {phase === "error" && sessions.length === 0 ? (
+                    <div className="px-3 py-8 text-center" role="alert">
+                      <p className="text-aux text-subtle-foreground">
+                        {t("recentChats.searchLoadError")}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        onClick={() => void refetch()}
+                      >
+                        {t("recentChats.searchRetry")}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </section>
+          )}
         </div>
         <RomeConfirmDialog
           open={pendingDeleteId !== null}

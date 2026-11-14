@@ -61,7 +61,7 @@ struct InteractionRow: View {
             .bubbleWidth()
         case .question(_, let part, _, let answered?):
             SettledCard(title: SettledOutcome.title(part), outcome: SettledOutcome.answer(answered)) {
-                QuestionCardView(part: part, answered: answered) { _, _ in }
+                QuestionCardView(part: part, answered: answered) { _, _ in WidgetEventReply() }
             }
         case .question(_, let part, _, let answered):
             QuestionCardView(part: part, answered: answered) { name, context in
@@ -74,12 +74,12 @@ struct InteractionRow: View {
             }
             .task(id: id) { await store.checkConnected(part, rowId: id) }
             .bubbleWidth()
-        case .widgetUI(_, let part, _):
+        case .widgetUI(_, let part, _, let answered):
             WidgetUICardView(part: part, call: { method, path, body in
                 try await store.appCall(appId: part.appId, method: method, path: path, body: body)
             }, press: { name, context in
                 try await store.answerWidget(widgetId: part.widgetId, name: name, context: context)
-            })
+            }, waiting: part.waits ? .init(answered: answered) : nil)
             .bubbleWidth()
         case .webOnly(_, let kind, let done):
             WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)

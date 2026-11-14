@@ -428,8 +428,16 @@ export async function updateSessionProject(
   return jsonOrThrow<ChatSession>(res);
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`/api/chat/sessions/${sessionId}`, {
+/**
+ * Deletes a chat. For a topic chat, `followsAndTasks: "stop"` ends its follows
+ * and stops its open tasks; without it they move to the main chat.
+ */
+export async function deleteSession(
+  sessionId: string,
+  options: { followsAndTasks?: "stop" } = {},
+): Promise<void> {
+  const query = options.followsAndTasks ? `?followsAndTasks=${options.followsAndTasks}` : "";
+  await fetch(`/api/chat/sessions/${sessionId}${query}`, {
     method: "DELETE",
     credentials: "include",
   });
@@ -493,10 +501,16 @@ export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | 
 export const widgetEventPath = (widgetId: string) =>
   `/api/chat/widgets/${encodeURIComponent(widgetId)}/events`;
 
-/** What core said to an event: whether it took it, and its status when not. */
+/** What core said to an event: whether it took it, its status when not,
+ *  whether the event answered the agent waiting on the widget, and a link the
+ *  reply asks the client to open. */
 export interface WidgetEventOutcome {
   ok: boolean;
   status: number;
+  answered?: boolean;
+  open?: string;
+  /** Why core or the widget's owner refused the event, to show the guardian. */
+  error?: string;
 }
 
 /** Sends an event a widget fired to core, which decides what it means. `turn`
@@ -511,7 +525,25 @@ export async function postWidgetEvent(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...body, turn: { inputId: randomUUID(), ...body.turn } }),
   });
-  return { ok: res.ok, status: res.status };
+  const reply = (await res.json().catch(() => null)) as {
+    answered?: unknown;
+    open?: unknown;
+    error?: unknown;
+  } | null;
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      ...(typeof reply?.error === "string" ? { error: reply.error } : {}),
+    };
+  }
+  return {
+    ok: true,
+    status: res.status,
+    answered: reply?.answered === true,
+    // Core vets the link it sends; the client opens it as given.
+    ...(typeof reply?.open === "string" ? { open: reply.open } : {}),
+  };
 }
 
 export async function postSessionTurnJson(

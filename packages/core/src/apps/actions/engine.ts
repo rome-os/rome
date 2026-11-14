@@ -139,6 +139,11 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "system:send_user_message",
   "system:create_routine",
   "system:send_feedback",
+  // Forwards to the main-owned event bus. A worker only proxied the same
+  // publish back to main, after a multi-second fork, while the caller (often
+  // an app API handler) waited (#2144). Routines it fires run as their own
+  // roots, outside this action's context.
+  "system:publish_event",
   "core:set_agent_name",
   "core:show_file",
   "core:app_connection_read",

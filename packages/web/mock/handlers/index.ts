@@ -21,6 +21,7 @@ import { http, HttpResponse } from "msw";
 import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
+  type ConciergeChatWorkResponse,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
@@ -913,6 +914,9 @@ const session = (
 const chatSessions: ChatSession[] = [
   // The guardian's main chat, which Chat and `/` open at /message.
   session(CONCIERGE_CHAT_ID, "Main chat", "default", CONCIERGE_AGENT_ID),
+  // Topic chats, which the Concierge section lists under the main chat.
+  session("mock-topic-travel", "Travel planning", "default", CONCIERGE_AGENT_ID),
+  session("mock-topic-news", "Weekly news digest", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {
@@ -928,6 +932,12 @@ const chatSessions: ChatSession[] = [
     reasoningEffort: "xhigh",
   },
   { ...session("mock-chat-lisbon", "Lisbon flights"), triggerKind: "concierge" },
+  // A task chat that is still working, for the chat list's Tasks section.
+  {
+    ...session("mock-task-running", "Compare standing desks"),
+    triggerKind: "concierge",
+    running: true,
+  },
   { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
   {
@@ -946,6 +956,9 @@ const chatSessions: ChatSession[] = [
     },
   },
 ];
+
+/** Unread agent messages per topic chat, so the chat list's Concierge dot shows. */
+const topicChatUnread: Record<string, number> = { "mock-topic-travel": 2 };
 
 const messageText = (message: ChatMessage): string =>
   (JSON.parse(message.content) as TranscriptPart[])
@@ -1316,7 +1329,7 @@ export const handlers = [
           id: s.id,
           name: s.name,
           main: s.id === CONCIERGE_CHAT_ID,
-          unread: 0,
+          unread: topicChatUnread[s.id] ?? 0,
           activity: { kind: "idle" as const },
         })),
     } satisfies ConciergeChatsResponse),
@@ -1333,6 +1346,10 @@ export const handlers = [
       },
     );
   }),
+  // Mock mode runs no turns and follows nothing, so a topic chat has nothing to move or stop.
+  http.get("/api/concierge/chats/:chatId/follows-and-tasks", () =>
+    HttpResponse.json({ follows: [], openTasks: [] } satisfies ConciergeChatWorkResponse),
+  ),
   http.get("/api/concierge/tasks", () =>
     HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
   ),

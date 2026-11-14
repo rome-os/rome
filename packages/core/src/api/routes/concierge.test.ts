@@ -502,6 +502,65 @@ describe("/concierge/chats", () => {
   });
 });
 
+describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
+  let testDb: TestDb;
+  const asked: [string, string][] = [];
+  const chats = new Map([
+    ["concierge", { id: "concierge", name: "Concierge", main: true }],
+    ["topic-1", { id: "topic-1", name: "Calendar", main: false }],
+    ["ann-topic", { id: "ann-topic", name: "Trips", main: false }],
+  ]);
+  const owners = new Map([
+    ["concierge", "guardian"],
+    ["topic-1", "guardian"],
+    ["ann-topic", "visitor:acct-ann"],
+  ]);
+  const app = () =>
+    mount(
+      testDb,
+      {
+        conciergeChat: async (id: string) => chats.get(id) ?? null,
+        ownerOfChat: async (id: string) => owners.get(id) ?? null,
+        followsAndTasksOf: async (id: string, owner: string) => {
+          asked.push([id, owner]);
+          return {
+            follows: [{ source: "github", label: "GitHub", target: "acme/widgets" }],
+            openTasks: [{ id: "t-1", title: "Fix login", sessionId: "task-1" }],
+          };
+        },
+      } as unknown as ConciergeService,
+      new ChatsWebChatRepository(testDb.db),
+    );
+  beforeEach(() => {
+    testDb = createTestDb();
+    asked.length = 0;
+  });
+  afterEach(() => testDb.close());
+
+  it("answers the caller's own topic chat's follows and open tasks, without the task chat", async () => {
+    const res = await app().request("/concierge/chats/topic-1/follows-and-tasks", guardian);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      follows: [{ source: "github", label: "GitHub", target: "acme/widgets" }],
+      openTasks: [{ id: "t-1", title: "Fix login" }],
+    });
+    expect(asked).toEqual([["topic-1", "guardian"]]);
+  });
+
+  it("answers 404 for the main chat, another person's topic chat and a chat that is not there", async () => {
+    const get = (id: string, who: object = guardian) =>
+      app().request(`/concierge/chats/${id}/follows-and-tasks`, who);
+    expect((await get("concierge")).status).toBe(404);
+    // Ann's chat is not the guardian's, and the guardian's is not Ann's.
+    expect((await get("ann-topic")).status).toBe(404);
+    expect((await get("topic-1", ann)).status).toBe(404);
+    expect((await get("nope")).status).toBe(404);
+    expect(asked).toEqual([]);
+    expect((await get("ann-topic", ann)).status).toBe(200);
+    expect((await get("topic-1", { headers: {} })).status).toBe(401);
+  });
+});
+
 describe("without the Concierge service", () => {
   let testDb: TestDb;
   beforeEach(() => {

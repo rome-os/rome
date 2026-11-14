@@ -153,15 +153,15 @@ final class ThreadStore {
 
     func info(for row: TranscriptRow) -> RowInfo { rowInfo[row.id] ?? RowInfo() }
 
-    /// Answers come from the chat and from the thread's own older messages,
-    /// so a card answered before the chat's pages shows done.
-    func rebuildRows(chatAnswers: [String: JSONValue]? = nil) {
+    /// Answers are read over the thread's own older messages and the chat's
+    /// together, in order, so a card on one and its answer on the other
+    /// still meet.
+    func rebuildRows(chatMessages: [ChatMessage]? = nil) {
         guard !rowsHeld else { return }
-        var all = TranscriptBuilder.answers(in: older)
-        all.merge(chatAnswers ?? chat?.answers ?? [:]) { _, chat in chat }
+        let answers = TranscriptBuilder.answers(in: Self.ordered(older + (chatMessages ?? chat?.messages ?? [])))
         let held = messages
         let resends = pendingResends
-        let built = TranscriptBuilder.rows(messages: held, pending: resends, answers: all, options: .init())
+        let built = TranscriptBuilder.rows(messages: held, pending: resends, answers: answers, options: .init())
         if built != rows { rows = built }
         let infos = RowInfo.build(rows: built, messages: held, pending: resends, kind: chat?.kind ?? .concierge)
         if infos != rowInfo { rowInfo = infos }

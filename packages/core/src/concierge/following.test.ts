@@ -1590,6 +1590,45 @@ describe("follows in several Concierge chats", () => {
     s.stop();
   });
 
+  it("lists only one chat's follows of one owner, and ending them keeps another person's routines", async () => {
+    const s = setup();
+    const ann = "visitor:acct-ann";
+    const annMainChat = mainChatIdOf(ann);
+    s.liveChats.set(annMainChat, { id: annMainChat, name: "Concierge", main: true });
+    s.chatOwners.set(annMainChat, ann);
+    // The guardian follows two repositories from two chats; Ann follows one of them.
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    await s.following().follow({ source: "github", target: "acme/gadgets" });
+    s.calling.chat = annMainChat;
+    await s
+      .action("core:concierge_follow")
+      .execute({ source: "github", target: "acme/widgets" }, {} as never);
+    s.calling.chat = null;
+    expect(await s.following().followsOfChat("calendar", GUARDIAN_OWNER)).toEqual([
+      { source: "github", label: "GitHub", target: "acme/widgets" },
+    ]);
+    // Another owner's follow of the same target is not this chat's.
+    expect(await s.following().followsOfChat("calendar", ann)).toEqual([]);
+
+    expect(await s.following().unfollow("github", "acme/widgets", GUARDIAN_OWNER)).toEqual({
+      removed: true,
+    });
+    expect(await s.following().followsOfChat("calendar", GUARDIAN_OWNER)).toEqual([]);
+    // Ann still follows it, so its routines stay; the guardian's other follow is untouched.
+    expect(keys(s)).toContain(
+      "concierge-follow:github:acme/widgets:provider:event:github.pull_request",
+    );
+    expect(keys(s)).toContain(
+      "concierge-follow:github:acme/gadgets:provider:event:github.pull_request",
+    );
+    // Once Ann ends hers too, the routines go.
+    await s.following().unfollow("github", "acme/widgets", ann);
+    expect(keys(s).some((key) => key?.includes("acme/widgets"))).toBe(false);
+    s.stop();
+  });
+
   const ANN = "visitor:acct-ann";
   const annMain = mainChatIdOf(ANN);
   /** Ann, a dashboard visitor, with her own main Concierge chat. */

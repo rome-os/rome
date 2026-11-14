@@ -1,5 +1,6 @@
 import {
   type ConciergeChatsResponse,
+  type ConciergeChatWorkResponse,
   type ConciergeChatStartRequest,
   CONCIERGE_DONE_DAYS,
   type ConciergeConnectorsResponse,
@@ -103,6 +104,26 @@ export function conciergeRoutes(
       }),
     );
     return c.json({ chats } satisfies ConciergeChatsResponse);
+  });
+
+  // What deleting one of the caller's topic chats moves to the main chat:
+  // its follows and open tasks. 404 for the main chat, another person's chat
+  // and without the Concierge service.
+  app.get("/concierge/chats/:chatId/follows-and-tasks", async (c) => {
+    const owner = await callerOwner();
+    if (!owner) return c.json({ error: "Not authenticated" }, 401);
+    const concierge = deps.concierge;
+    if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
+    const chatId = c.req.param("chatId");
+    const chat = await concierge.conciergeChat(chatId);
+    if (!chat || chat.main || (await concierge.ownerOfChat(chatId)) !== owner) {
+      return c.json({ error: "No such topic chat" }, 404);
+    }
+    const { follows, openTasks } = await concierge.followsAndTasksOf(chatId, owner);
+    return c.json({
+      follows,
+      openTasks: openTasks.map(({ id, title }) => ({ id, title })),
+    } satisfies ConciergeChatWorkResponse);
   });
 
   // Starts a topic chat for the caller on their main chat's model. 404 without the Concierge service.

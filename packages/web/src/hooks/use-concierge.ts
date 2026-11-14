@@ -1,4 +1,8 @@
-import type { ConciergeChatDto, ConciergeChatsResponse } from "@rome/api-types/concierge";
+import type {
+  ConciergeChatDto,
+  ConciergeChatsResponse,
+  ConciergeChatWorkResponse,
+} from "@rome/api-types/concierge";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { invalidateChatSessions } from "@/hooks/use-chat-sessions";
@@ -159,6 +163,26 @@ export function refreshTopicChats(queryClient: QueryClient): Promise<void> {
 export function useRefreshTopicChats(): () => void {
   const queryClient = useQueryClient();
   return useCallback(() => void refreshTopicChats(queryClient), [queryClient]);
+}
+
+/**
+ * The follows and open tasks deleting topic chat `chatId` would move or stop.
+ * Read afresh each time `enabled` turns on; it errors when the server cannot
+ * answer, and the caller then keeps the default, which moves them.
+ */
+export function useConciergeChatWork(chatId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["concierge-chat-work", chatId],
+    queryFn: ({ signal }) =>
+      fetchJson<ConciergeChatWorkResponse>(
+        `/api/concierge/chats/${encodeURIComponent(chatId)}/follows-and-tasks`,
+        { signal, fallback: "" },
+      ),
+    enabled,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
 }
 
 /** Starts an untitled topic chat, which its first message names, and answers it. */

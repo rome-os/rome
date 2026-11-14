@@ -428,6 +428,9 @@
     "playVideo": "播放",
     "closeImagePreview": "关闭",
     "downloadImage": "下载",
+    "previousImage": "上一张",
+    "nextImage": "下一张",
+    "imageCounter": "{{current}} / {{total}}",
     "filePill": "#文件 {{index}}",
     "uploadProgressFor": "{{name}} 的上传进度",
     "cancelUpload": "取消",
@@ -450,6 +453,7 @@
   "appComponent": {
     "dismiss": "跳过",
     "widgetUnavailable": "无法读取这张卡片的数据。{{text}}",
+    "widgetOpenLink": "打开页面继续",
     "widgetUndrawable": "无法显示这张卡片。{{text}}"
   },
   "aiToolsCard": {

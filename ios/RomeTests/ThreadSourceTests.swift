@@ -157,6 +157,53 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         store.closeThread()
     }
 
+    /// A card only in the thread's older read, answered in a message only the
+    /// chat's pages hold, shows done.
+    @Test func aCardAndItsAnswerFromDifferentReadsMeet() async {
+        let backend = FakeBackend()
+        let question: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "render": ["componentId": "question-card", "builtin": true, "props": ["questions": [["id": "s", "question": "Which?", "type": "single", "options": ["A", "B"]]]]]]
+        let content = String(data: try! JSONSerialization.data(withJSONObject: [question]), encoding: .utf8)!
+        let card = ChatMessage(id: "q", sessionId: "concierge", role: "assistant", content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000)), chatThreadId: "q", knowsThreads: true)
+        let answerContent = String(data: try! JSONSerialization.data(withJSONObject: [["type": "interaction_result", "toolUseId": "item_0", "output": ["answers": [["questionId": "s", "value": "A"]]]]]), encoding: .utf8)!
+        let answer = ChatMessage(id: "ans", sessionId: "concierge", role: "user", content: answerContent, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_010)), chatThreadId: "q", knowsThreads: true)
+        let store = await chat(backend, [answer, message("later", at: 100, thread: "later")])
+        backend.threads["q"] = [card]
+        store.reopenThread(ThreadTarget(messageId: "q", instanceKnowsThreads: true))
+        await settle { store.thread != nil }
+        let rows = store.thread?.rows ?? []
+        guard case .question(_, _, _, let answered) = rows.first(where: { if case .question = $0 { return true } else { return false } }) else {
+            Issue.record("no question row"); return
+        }
+        #expect(answered != nil)
+        store.closeThread()
+    }
+
+    /// An earlier card that reused the tool-use id, answered on the chat's
+    /// pages, does not answer the thread's newer card: answers follow date order.
+    @Test func anEarlierAnswerDoesNotAnswerALaterCardWithTheSameId() async {
+        let backend = FakeBackend()
+        let question: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "render": ["componentId": "question-card", "builtin": true, "props": ["questions": [["id": "s", "question": "Which?", "type": "single", "options": ["A", "B"]]]]]]
+        let content = String(data: try! JSONSerialization.data(withJSONObject: [question]), encoding: .utf8)!
+        func at(_ seconds: TimeInterval) -> String { RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)) }
+        let earlier = ChatMessage(id: "q0", sessionId: "concierge", role: "assistant", content: content, createdAt: at(0), chatThreadId: "q", knowsThreads: true)
+        let answerContent = String(data: try! JSONSerialization.data(withJSONObject: [["type": "interaction_result", "toolUseId": "item_0", "output": ["answers": [["questionId": "s", "value": "A"]]]]]), encoding: .utf8)!
+        let answer = ChatMessage(id: "ans", sessionId: "concierge", role: "user", content: answerContent, createdAt: at(1), chatThreadId: "q", knowsThreads: true)
+        let later = ChatMessage(id: "q", sessionId: "concierge", role: "assistant", content: content, createdAt: at(10), chatThreadId: "q", knowsThreads: true)
+        // The thread's read holds both cards; only the chat's pages hold the answer.
+        let store = await chat(backend, [answer, message("later", at: 100, thread: "later")])
+        backend.threads["q"] = [earlier, later]
+        store.reopenThread(ThreadTarget(messageId: "q", instanceKnowsThreads: true))
+        await settle { store.thread != nil }
+        let rows = store.thread?.rows ?? []
+        let answered = rows.compactMap { row -> JSONValue?? in
+            if case .question(let id, _, _, let answered) = row, id.hasPrefix("q:") { return answered } else { return nil }
+        }
+        // The later card stays open.
+        #expect(answered.count == 1)
+        #expect(answered.first == .some(nil))
+        store.closeThread()
+    }
+
     // MARK: Thread support is the instance's
 
     /// A live insert leaves `chatThreadId` out: the instance still has

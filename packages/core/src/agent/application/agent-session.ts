@@ -2050,7 +2050,13 @@ function toolResultSuspendsTurn(output: unknown): boolean {
       return false;
     }
   }
-  return isRecord(value) && (value.pendingInteraction === true || value.pendingApproval === true);
+  return (
+    isRecord(value) &&
+    (value.pendingInteraction === true ||
+      value.pendingApproval === true ||
+      // A card described as data that the agent waits on.
+      (value.showWidget === true && value.waits === true))
+  );
 }
 
 /**

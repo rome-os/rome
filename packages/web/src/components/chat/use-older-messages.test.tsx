@@ -52,6 +52,12 @@ class FakeResizeObserver {
 }
 
 /** A scroller whose height follows its row count, since jsdom lays nothing out. */
+interface Seen {
+  scrollTop: () => number;
+  isAtBottom: () => boolean;
+  loadOlder?: (sessionId: string, options?: { through?: string }) => Promise<void>;
+}
+
 function Harness({
   initial,
   initialStuck,
@@ -59,7 +65,7 @@ function Harness({
 }: {
   initial: ChatMessage[];
   initialStuck: boolean;
-  seen: { scrollTop: () => number; isAtBottom: () => boolean };
+  seen: Seen;
 }) {
   const [messages, setMessages] = useState(new Map([["s1", initial]]));
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
@@ -74,6 +80,7 @@ function Harness({
   useEffect(() => setCursor("s1", "cursor-1"), [setCursor]);
   const rows = messages.get("s1") ?? [];
   seen.isAtBottom = () => stick.isAtBottom;
+  seen.loadOlder = older.loadOlder;
   return (
     <div
       data-testid="scroller"
@@ -111,7 +118,7 @@ function Harness({
 }
 
 function renderHarness(initial: ChatMessage[], initialStuck = false) {
-  const seen = { scrollTop: () => 0, isAtBottom: () => initialStuck };
+  const seen: Seen = { scrollTop: () => 0, isAtBottom: () => initialStuck };
   render(<Harness initial={initial} initialStuck={initialStuck} seen={seen} />);
   return seen;
 }
@@ -260,6 +267,33 @@ describe("useOlderMessages", () => {
     await act(async () => finish({ messages: [message("m1", 1)], nextCursor: null }));
 
     expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads through a message once the page in flight is in", async () => {
+    let finish!: (page: { messages: ChatMessage[]; nextCursor: string }) => void;
+    rs.mocked(listSessionMessagePage)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ messages: [message("m1", 1)], nextCursor: null });
+    const seen = renderHarness([message("m3", 3)]);
+
+    let through!: Promise<void>;
+    await act(async () => {
+      void seen.loadOlder?.("s1");
+      through = seen.loadOlder!("s1", { through: "m1" });
+    });
+    await act(async () => finish({ messages: [message("m2", 2)], nextCursor: "cursor-2" }));
+    await act(async () => through);
+
+    expect(rs.mocked(listSessionMessagePage).mock.calls[1]).toEqual([
+      "s1",
+      { limit: 7, before: "cursor-2", through: "m1" },
+    ]);
+    expect(shownIds()).toEqual(["m1", "m2", "m3"]);
   });
 });
 

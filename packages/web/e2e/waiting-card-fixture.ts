@@ -221,6 +221,8 @@ export async function openWaitingCard(
             inputId: body.inputId,
             sessionId,
             startedAt: new Date().toISOString(),
+            // Core says an event that answered the agent did.
+            ...(answered ? { answered: true } : {}),
           });
         }
         if (path.startsWith("/api/") && !["GET", "HEAD"].includes(method))
