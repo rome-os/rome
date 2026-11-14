@@ -257,6 +257,15 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(0.6))
             await capture("13c-connection-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(DeviceCapability.id)]) }
             model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Device connected: its Live access on, with a read it answered.
+            model.node.showDemo(live: [DeviceCapability.id: true], recent: [NodeAuditEntry(
+                seq: 9, time: .now.addingTimeInterval(-600), from: "rome", action: "device.status", args: "{}",
+                outcome: .ok, errorCode: nil, count: nil, windowStart: nil, windowEnd: nil, durationMs: 40
+            )])
+            await capture("13e-connection-device-on", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(DeviceCapability.id)]) }
+            model.debugCommand = .settings(nil)
+            model.node.showDemo(live: [:], recent: [])
             model.health.showDemo(HealthDemo.history(now: .now))
             // A second command in the same pass would hide this one from the shell.
             try? await Task.sleep(for: .seconds(0.6))
@@ -270,6 +279,8 @@ enum SnapshotRunner {
             TranscriptStore.previewPhases = ["notion": .connecting, "linear": .failed(String(localized: "Sign-in timed out"))]
             await capture("43-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail")) }
             TranscriptStore.previewPhases = [:]
+            // A device connection's card: connected, then one still to connect.
+            await capture("43b-device-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-health")) }
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // A task's chat thread: its labels, and a reply's quote.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }

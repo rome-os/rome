@@ -20,7 +20,7 @@ struct HealthCapability: NodeCapability {
     let name = "Apple Health"
     var title: LocalizedStringResource { "Apple Health" }
     let symbol = "heart"
-    var summary: LocalizedStringResource { "Your Rome can read the Health data you allow, to answer questions about your activity, sleep and heart." }
+    var summary: LocalizedStringResource { "Your Rome reads the Health data you allow." }
     let personal = true
     let needsPermission = true
     var syncSource: String? { HealthSettings.sourceId }

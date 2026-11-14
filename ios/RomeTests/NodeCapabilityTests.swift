@@ -171,7 +171,7 @@ extension DeviceStatus {
 
     @Test func theStatusLineSaysWhetherRomeCanReachThePhone() {
         #expect(NodeStatusLine.words(.online) == "Online")
-        #expect(NodeStatusLine.words(.off) == "Offline · available while Rome is open")
+        #expect(NodeStatusLine.words(.off) == "Offline")
         #expect(NodeStatusLine.words(.stopped(.superseded)) == "Replaced")
     }
 }

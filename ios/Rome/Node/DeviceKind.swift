@@ -34,4 +34,12 @@ enum DeviceKind: Sendable, Equatable {
         case .iPad: return "This iPad"
         }
     }
+
+    /// The data-flow row, read out as one line.
+    var dataFlowLabel: LocalizedStringKey {
+        switch self {
+        case .iPhone: return "This iPhone, then your Rome, then your AI model"
+        case .iPad: return "This iPad, then your Rome, then your AI model"
+        }
+    }
 }

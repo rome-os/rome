@@ -17,7 +17,7 @@ struct DeviceCapability: NodeCapability {
     let name = "Device"
     var title: LocalizedStringResource { "Device" }
     let symbol = "battery.75percent"
-    var summary: LocalizedStringResource { "Your Rome can read this phone's battery, network and temperature." }
+    var summary: LocalizedStringResource { "Your Rome reads this phone's battery and network." }
     let personal = false
     let needsPermission = false
     var syncSource: String? { nil }

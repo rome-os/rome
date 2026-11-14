@@ -136,13 +136,14 @@ enum NodeStatusLine {
         case .connecting: return String(localized: "Connecting…")
         case .stopped(.superseded): return String(localized: "Replaced")
         case .stopped(.revoked): return String(localized: "Revoked")
-        case .off: return String(localized: "Offline · available while Rome is open")
+        case .off: return String(localized: "Offline")
         }
     }
 }
 
-/// One connection's page: what it lets the Rome do, its authorization or
-/// its Live access with the recent live reads, and for Health its Sync.
+/// One connection's page, the same for every capability: its header; then
+/// one Connect button, or its Live access (and Sync, for one that syncs);
+/// where its data goes; and, for Health, what the Rome can do with it.
 struct ConnectionScreen: View {
     let id: String
     let onActivity: () -> Void
@@ -157,16 +158,15 @@ struct ConnectionScreen: View {
                 if let capability = node.registry.capability(id: id) {
                     VStack(alignment: .leading, spacing: 26) {
                         ConnectionHeader(capability: capability)
-                        if model.connections.isConnected(capability) || !capability.needsPermission {
-                            // Health's Sync first: it runs in the background, and its
-                            // status is what the guardian comes to check.
+                        if model.connections.isConnected(capability) {
+                            LiveAccessSection(capability: capability, onActivity: onActivity)
                             if capability.syncSource == HealthSettings.sourceId {
                                 HealthSyncSection(onHistory: onHistory)
                             }
-                            liveSection(capability, node: node)
                         } else {
-                            ConnectButton(connecting: connecting) { connect() }
+                            PrimaryButton(title: "Connect", loading: connecting) { connect() }
                         }
+                        DataFlowSection(capability: capability)
                         if capability.syncSource == HealthSettings.sourceId {
                             HealthChats()
                                 .id("end")
@@ -199,36 +199,49 @@ struct ConnectionScreen: View {
             connecting = false
         }
     }
+}
 
-    /// Live access, how rome-node stands, and the last few live reads.
-    @ViewBuilder
-    private func liveSection(_ capability: any NodeCapability, node: NodeHost) -> some View {
+/// Live access: its switch and the reads it answered, then whether the Rome
+/// can reach the phone now.
+private struct LiveAccessSection: View {
+    let capability: any NodeCapability
+    let onActivity: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let node = model.node
         let on = node.liveSwitches[capability.id] ?? false
+        let reads = node.recent.filter { capability.handles($0.action) }.count
         VStack(alignment: .leading, spacing: 8) {
-            SettingsGroup {
-                PlainRow(title: "Live access") {
+            SettingsGroup(header: "Live access") {
+                PlainRow(title: "Live access", last: false) {
                     Toggle("Live access", isOn: Binding(get: { on }, set: { value in node.setLive(capability.id, on: value) }))
                         .labelsHidden()
                         .tint(Palette.primary)
                 }
                 .accessibilityElement(children: .combine)
+                Button(action: onActivity) {
+                    PlainRow(title: "Recent reads") {
+                        HStack(spacing: 6) {
+                            Text(verbatim: "\(reads)").romeFont(17, monospacedDigits: true).foregroundStyle(Palette.sub)
+                            Image(systemName: "chevron.right")
+                                .romeFont(13, .semibold)
+                                .foregroundStyle(Palette.sub)
+                        }
+                    }
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Recent reads")
+                .accessibilityValue(Text(verbatim: "\(reads)"))
+                .accessibilityAddTraits(.isButton)
             }
-            if on {
-                NodeStatusRow(status: node.status)
-            } else {
-                Text("Your Rome can read it only while this is on and Rome is open.")
-                    .romeFont(13)
-                    .foregroundStyle(Palette.sub)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
-            }
-            RecentReads(capability: capability, onAll: onActivity)
-                .padding(.top, 10)
+            if on { NodeStatusRow(status: node.status) }
         }
     }
 }
 
-/// A connection page's top: its mark, its name and what it lets the Rome do.
+/// A connection page's top: its mark, its name and what it is for.
 private struct ConnectionHeader: View {
     let capability: any NodeCapability
 
@@ -263,66 +276,80 @@ private struct ConnectionHeader: View {
     }
 }
 
-/// The authorization's one button, for a connection that needs iOS's permission.
-struct ConnectButton: View {
-    let connecting: Bool
-    let action: () -> Void
-
-    var body: some View {
-        VStack(spacing: 10) {
-            PrimaryButton(title: "Connect", loading: connecting, action: action)
-            HealthConnectNote()
-        }
-    }
-}
-
-/// What connecting Health does beyond the iOS prompt: it uploads.
-struct HealthConnectNote: View {
-    var body: some View {
-        Text("Connecting syncs the last 6 months of the Health data you allow to your Rome, and keeps it up to date. iOS asks which data Rome may read.")
-            .romeFont(13)
-            .foregroundStyle(Palette.sub)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
-    }
-}
-
-/// The newest live reads of one capability, and the way to all of them.
-private struct RecentReads: View {
+/// Where a connection's data goes: this phone, the Rome, the AI model, and
+/// one line on what the Rome does with it.
+struct DataFlowSection: View {
     let capability: any NodeCapability
-    let onAll: () -> Void
     @Environment(AppModel.self) private var model
 
-    static let shown = 3
-
     var body: some View {
-        let entries = model.node.recent.filter { capability.handles($0.action) }
-        let formatter = NodeActivityFormatter(registry: model.node.registry)
-        // None yet: no card at all.
-        if !entries.isEmpty {
-            SettingsGroup(header: "Recent live reads") {
-                ForEach(entries.prefix(Self.shown)) { entry in
-                    // Today's rows keep the time alone; older ones say the day.
-                    let day = Calendar.current.isDateInToday(entry.time) ? nil : formatter.dayText(entry.time)
-                    NodeActivityRowView(row: formatter.row(entry), day: day, last: false)
+        let device = model.node.device
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsGroup(header: "Where your data goes") {
+                HStack(alignment: .top, spacing: 4) {
+                    FlowNode(symbol: device.symbol, label: device.thisDevice)
+                    FlowArrow()
+                    FlowNode(symbol: "server.rack", label: "Your Rome")
+                    FlowArrow()
+                    FlowNode(symbol: "sparkle", label: "Your AI model")
                 }
-                Button(action: onAll) {
-                    PlainRow(title: "All live reads") {
-                        Image(systemName: "chevron.right")
-                            .romeFont(13, .semibold)
-                            .foregroundStyle(Palette.sub)
-                    }
-                }
-                .buttonStyle(RowPressStyle())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 16)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(device.dataFlowLabel)
             }
+            Group {
+                if capability.syncSource == HealthSettings.sourceId {
+                    Text("Sent to your Rome and your AI model, whose terms apply · Never sold or used for ads · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)")
+                } else {
+                    Text("Read only when you ask · [Privacy Policy](https://romeos.cc/privacy)")
+                }
+            }
+            .romeFont(13)
+            .foregroundStyle(Palette.sub)
+            .tint(Palette.primaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
         }
     }
 }
 
-/// A card's row with no icon: a title and its control.
+private struct FlowNode: View {
+    let symbol: String
+    let label: LocalizedStringKey
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .romeFont(26)
+                .foregroundStyle(Palette.fg)
+                .frame(height: 32)
+            Text(label)
+                .romeFont(12)
+                .foregroundStyle(Palette.sub)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+}
+
+private struct FlowArrow: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .romeFont(12, .semibold)
+            .foregroundStyle(Palette.sub.opacity(0.45))
+            .frame(height: 32)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A card's row with no icon: a title and its control, with a hairline
+/// under it unless it is the card's last.
 struct PlainRow<Trailing: View>: View {
     let title: LocalizedStringKey
+    var last = true
     @ViewBuilder let trailing: () -> Trailing
 
     var body: some View {
@@ -333,12 +360,15 @@ struct PlainRow<Trailing: View>: View {
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 52)
+        .overlay(alignment: .bottom) {
+            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 16) }
+        }
         .contentShape(Rectangle())
     }
 }
 
-/// A card asked to connect: what the connection lets the Rome do, then the
-/// same authorization as Settings, or Not now.
+/// A card asked to connect: the connection's header and where its data
+/// goes, then the same authorization as Settings, or Not now.
 struct ConnectDeviceSheet: View {
     let request: DeviceConnectRequest
     @Environment(AppModel.self) private var model
@@ -347,11 +377,15 @@ struct ConnectDeviceSheet: View {
     var body: some View {
         VStack(spacing: 20) {
             if let capability = model.node.registry.capability(id: request.capability) {
-                ConnectionHeader(capability: capability)
-                    .padding(.top, 12)
-                Spacer(minLength: 0)
+                ScrollView {
+                    VStack(spacing: 20) {
+                        ConnectionHeader(capability: capability)
+                            .padding(.top, 12)
+                        DataFlowSection(capability: capability)
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
                 VStack(spacing: 10) {
-                    if capability.syncSource == HealthSettings.sourceId { HealthConnectNote() }
                     PrimaryButton(title: "Connect", loading: connecting) {
                         connecting = true
                         Task {

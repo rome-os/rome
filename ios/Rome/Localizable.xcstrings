@@ -531,16 +531,6 @@
         }
       }
     },
-    "All live reads" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部实时读取"
-          }
-        }
-      }
-    },
     "Almost done…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1167,16 +1157,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已连接"
-          }
-        }
-      }
-    },
-    "Connecting syncs the last 6 months of the Health data you allow to your Rome, and keeps it up to date. iOS asks which data Rome may read." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "连接后，你允许的最近 6 个月健康数据会同步到你的 Rome，并保持更新。iOS 会询问 Rome 可以读取哪些数据。"
           }
         }
       }
@@ -2549,16 +2529,6 @@
         }
       }
     },
-    "Newest data %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最新数据：%@"
-          }
-        }
-      }
-    },
     "No AI tool is available" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2919,12 +2889,12 @@
         }
       }
     },
-    "Offline · available while Rome is open" : {
+    "Offline" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "离线 · Rome 打开时可用"
+            "value" : "离线"
           }
         }
       }
@@ -3269,12 +3239,12 @@
         }
       }
     },
-    "Read only · Never sold or used for ads or training · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)" : {
+    "Read only when you ask · [Privacy Policy](https://romeos.cc/privacy)" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只读 · 不出售，不用于广告或训练 · 随时可删除 · [隐私政策](https://romeos.cc/privacy)"
+            "value" : "仅在你提问时读取 · [隐私政策](https://romeos.cc/privacy)"
           }
         }
       }
@@ -3319,12 +3289,12 @@
         }
       }
     },
-    "Recent live reads" : {
+    "Recent reads" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最近的实时读取"
+            "value" : "最近读取"
           }
         }
       }
@@ -3843,6 +3813,16 @@
         }
       }
     },
+    "Sent to your Rome and your AI model, whose terms apply · Never sold or used for ads · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送到你的 Rome 和你的 AI 模型，适用其条款 · 绝不出售，也不用于广告 · 随时可删除 · [隐私政策](https://romeos.cc/privacy)"
+          }
+        }
+      }
+    },
     "Sent. Thank you." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4353,6 +4333,16 @@
         }
       }
     },
+    "Sync" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步"
+          }
+        }
+      }
+    },
     "Sync history" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4673,12 +4663,32 @@
         }
       }
     },
+    "This iPad, then your Rome, then your AI model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPad，然后是你的 Rome，再到你的 AI 模型"
+          }
+        }
+      }
+    },
     "This iPhone" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "这台 iPhone"
+          }
+        }
+      }
+    },
+    "This iPhone, then your Rome, then your AI model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone，然后是你的 Rome，再到你的 AI 模型"
           }
         }
       }
@@ -5321,6 +5331,16 @@
         }
       }
     },
+    "Where your data goes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "数据去向"
+          }
+        }
+      }
+    },
     "Why have I felt so tired lately?" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5401,6 +5421,16 @@
         }
       }
     },
+    "Your AI model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 AI 模型"
+          }
+        }
+      }
+    },
     "Your Agents can no longer read it. Things they already wrote in chats or memory stay. Sync turns off." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5411,32 +5441,12 @@
         }
       }
     },
-    "Your Rome can read it only while this is on and Rome is open." : {
+    "Your Rome" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只有在此开关打开且 Rome 处于打开状态时，你的 Rome 才能读取。"
-          }
-        }
-      }
-    },
-    "Your Rome can read the Health data you allow, to answer questions about your activity, sleep and heart." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的 Rome 可以读取你允许的健康数据，回答关于活动、睡眠和心脏的问题。"
-          }
-        }
-      }
-    },
-    "Your Rome can read this phone's battery, network and temperature." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的 Rome 可以读取这台手机的电量、网络和温度。"
+            "value" : "你的 Rome"
           }
         }
       }
@@ -5497,6 +5507,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 已停止"
+          }
+        }
+      }
+    },
+    "Your Rome reads the Health data you allow." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 读取你允许的健康数据。"
+          }
+        }
+      }
+    },
+    "Your Rome reads this phone's battery and network." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 读取这台手机的电量和网络。"
           }
         }
       }

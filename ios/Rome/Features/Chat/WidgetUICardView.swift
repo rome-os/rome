@@ -88,7 +88,7 @@ private struct WidgetCardBody: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let answered = waiting?.answered {
-                Text(answered["dismissed"]?.bool == true ? "Dismissed" : "Answered")
+                Text(answered["dismissed"]?.bool == true ? "Dismissed" : answered["status"]?.string == "connected" ? "Connected" : "Answered")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
             } else if surface.sent {

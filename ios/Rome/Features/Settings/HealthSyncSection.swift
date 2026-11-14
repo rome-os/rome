@@ -43,10 +43,10 @@ struct HealthStatusLine: Equatable {
     }
 }
 
-/// Apple Health's Sync, on its connection page: the open Rome's switch,
-/// how it stands, how new its data is, what Rome promises about the data,
-/// and its history. A visitor's Rome has none: Health syncs only to a Rome
-/// the guardian owns.
+/// Apple Health's Sync, on its connection page: the open Rome's switch and
+/// its history in one group, then one line on how it stands, and a second
+/// only when the data has gone stale. A visitor's Rome has none: Health
+/// syncs only to a Rome the guardian owns.
 struct HealthSyncSection: View {
     let onHistory: () -> Void
     @Environment(AppModel.self) private var model
@@ -54,36 +54,16 @@ struct HealthSyncSection: View {
     var body: some View {
         let health = model.health
         if health.instance?.isVisitor != true {
-            let rome = health.instance?.name
-            let line = HealthStatusLine(health.status, rome: rome, device: model.node.device)
+            let line = HealthStatusLine(health.status, device: model.node.device)
             VStack(alignment: .leading, spacing: 8) {
-                SettingsGroup {
-                    PlainRow(title: "Sync with Rome") {
+                SettingsGroup(header: "Sync") {
+                    PlainRow(title: "Sync with Rome", last: false) {
                         Toggle("Sync with Rome", isOn: Binding(get: { health.isEnabled }, set: { on in health.setEnabled(on) }))
                             .labelsHidden()
                             .tint(Palette.primary)
                             .disabled(!health.canSync)
                     }
                     .accessibilityElement(children: .combine)
-                }
-                if let text = line.text {
-                    HealthStatusRow(line: line, text: text, running: health.activity.running)
-                }
-                if health.isEnabled, let fresh = HealthFreshnessLine(health.freshness()) {
-                    Text(verbatim: fresh.text)
-                        .romeFont(13)
-                        .foregroundStyle(fresh.warning ? Palette.destructive : Palette.sub)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
-                }
-                // What Rome promises about Health, in one line, with the policy behind it.
-                Text("Read only · Never sold or used for ads or training · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)")
-                    .romeFont(13)
-                    .foregroundStyle(Palette.sub)
-                    .tint(Palette.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
-                SettingsGroup {
                     Button(action: onHistory) {
                         PlainRow(title: "Sync history") {
                             Image(systemName: "chevron.right")
@@ -93,26 +73,17 @@ struct HealthSyncSection: View {
                     }
                     .buttonStyle(RowPressStyle())
                 }
-                .padding(.top, 10)
+                if let text = line.text {
+                    HealthStatusRow(line: line, text: text, running: health.activity.running)
+                }
+                if health.isEnabled, health.freshness().stale {
+                    Text("No new Health data for 3 days. Health access may be off: Health app → your picture → Apps → Rome.")
+                        .romeFont(13)
+                        .foregroundStyle(Palette.destructive)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
+                }
             }
-        }
-    }
-}
-
-/// How new the synced data is, or that Health access may be off.
-struct HealthFreshnessLine: Equatable {
-    let text: String
-    let warning: Bool
-
-    init?(_ freshness: HealthFreshness, now: Date = Date(), locale: Locale = .current) {
-        if freshness.stale {
-            text = String(localized: "No new Health data for 3 days. Health access may be off: Health app → your picture → Apps → Rome.")
-            warning = true
-        } else if let newest = freshness.newest {
-            text = String(localized: "Newest data \(HealthStatusLine.ago(newest, now: now, locale: locale))")
-            warning = false
-        } else {
-            return nil
         }
     }
 }
