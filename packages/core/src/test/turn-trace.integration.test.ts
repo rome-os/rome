@@ -26,7 +26,7 @@ async function drainOneTurn(
   const session = await rig.manager.open(
     { agentName: "test-main", channelThreadKey },
     {
-      ...sessionOpeningFor({ channelSurface: testChannelSurface })(channelThreadKey),
+      ...(await sessionOpeningFor({ channelSurface: testChannelSurface })(channelThreadKey)),
       workingDir: "/tmp",
     },
   );
