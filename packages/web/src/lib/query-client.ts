@@ -1,4 +1,24 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, type QueryKey } from "@tanstack/react-query";
+
+/**
+ * Edits every cached query under `queryKey` with `update`, so that no read
+ * already on its way overwrites the edit: each is cancelled first and, once
+ * edited, read again, now after the change it would have missed.
+ */
+export async function patchQueries<T>(
+  client: QueryClient,
+  queryKey: QueryKey,
+  update: (data: T | undefined) => T | undefined,
+): Promise<void> {
+  const inFlight = client
+    .getQueryCache()
+    .findAll({ queryKey })
+    .filter((query) => query.state.fetchStatus === "fetching")
+    .map((query) => query.queryKey);
+  await client.cancelQueries({ queryKey });
+  client.setQueriesData<T>({ queryKey }, update);
+  for (const key of inFlight) void client.invalidateQueries({ queryKey: key, exact: true });
+}
 
 /**
  * For a query that live events keep current: an event or a reconnect

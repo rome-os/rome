@@ -5,7 +5,8 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { listSessions } from "@/lib/chat-api";
 import { emitSessionsChanged } from "@/lib/session-events";
-import { useChatSession, useChatSessions } from "./use-chat-sessions";
+import { markConciergeChatReadInCache } from "./use-concierge";
+import { markChatSessionReadInCache, useChatSession, useChatSessions } from "./use-chat-sessions";
 
 rs.mock("@/lib/chat-api", () => ({ listSessions: rs.fn() }));
 
@@ -82,6 +83,49 @@ describe("useChatSessions", () => {
     await waitFor(() =>
       expect(card.result.current.session).toMatchObject({ awaitingGuardian: false }),
     );
+  });
+
+  it("keeps a read mark that a list read already on its way would undo, and reads it again", async () => {
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void;
+      return { promise: new Promise<T>((r) => (resolve = r)), resolve: (v: T) => resolve(v) };
+    };
+    const wrapper = wrapperFor(client);
+    // The chat list, read once; its next read is on its way, from before the read mark.
+    rs.mocked(listSessions).mockResolvedValueOnce([{ id: "c", unread: true } as never]);
+    const sidebar = renderHook(() => useChatSessions("active", "all"), { wrapper });
+    await waitFor(() => expect(sidebar.result.current.sessions).toHaveLength(1));
+    const lateList = deferred<never[]>();
+    rs.mocked(listSessions).mockReturnValueOnce(lateList.promise);
+    rs.mocked(listSessions).mockResolvedValue([{ id: "c", unread: false } as never]);
+    void sidebar.result.current.refetch();
+    // The Concierge's list, the same.
+    const lateChats = deferred<unknown>();
+    client.setQueryData(["concierge-chats"], { chats: [{ id: "c", unread: 2 }] });
+    let chatsReads = 0;
+    void client.fetchQuery({
+      queryKey: ["concierge-chats"],
+      queryFn: () => {
+        chatsReads += 1;
+        return lateChats.promise;
+      },
+    });
+
+    await act(async () => {
+      await markChatSessionReadInCache(client, "c");
+      await markConciergeChatReadInCache(client, "c");
+    });
+    // The late answers, from before the mark, land now.
+    lateList.resolve([{ id: "c", unread: true } as never]);
+    lateChats.resolve({ chats: [{ id: "c", unread: 2 }] });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sidebar.result.current.sessions?.[0]).toMatchObject({ unread: false });
+    expect(
+      client.getQueryData<{ chats: { unread: number }[] }>(["concierge-chats"])?.chats[0]?.unread,
+    ).toBe(0);
+    // The cancelled list read was read again, after the mark.
+    await waitFor(() => expect(listSessions).toHaveBeenCalledTimes(3));
+    expect(chatsReads).toBe(1);
   });
 
   it("refetches once when many consumers share one sessions-changed event", async () => {

@@ -12,7 +12,7 @@ import {
   type SessionStatusFilter,
 } from "@/lib/chat-api";
 import type { ChatSession } from "@/lib/chat-types";
-import { LIVE_QUERY_OPTIONS } from "@/lib/query-client";
+import { LIVE_QUERY_OPTIONS, patchQueries } from "@/lib/query-client";
 import { CHAT_SESSIONS_CHANGED_EVENT } from "@/lib/session-events";
 
 /** Prefix shared by every filter's list, so one invalidation reaches them all. */
@@ -74,8 +74,8 @@ export function useChatSessionMayExist(id: string | null): boolean {
  * Marks chat `id` read in every cached chat list, the only field a read mark
  * changes, so no list is fetched again for it.
  */
-export function markChatSessionReadInCache(queryClient: QueryClient, id: string): void {
-  queryClient.setQueriesData<ChatSession[]>({ queryKey: CHAT_SESSIONS_QUERY_KEY }, (list) =>
+export function markChatSessionReadInCache(queryClient: QueryClient, id: string): Promise<void> {
+  return patchQueries<ChatSession[]>(queryClient, CHAT_SESSIONS_QUERY_KEY, (list) =>
     list?.some((session) => session.id === id && session.unread)
       ? list.map((session) => (session.id === id ? { ...session, unread: false } : session))
       : list,

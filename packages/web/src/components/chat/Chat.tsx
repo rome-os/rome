@@ -1204,8 +1204,8 @@ export function Chat({
         await apiMarkSessionRead(id);
         // A read changes only this chat's unread mark: clear it in the cached
         // lists rather than refetch every list that holds it.
-        markChatSessionReadInCache(queryClient, id);
-        markConciergeChatReadInCache(queryClient, id);
+        void markChatSessionReadInCache(queryClient, id);
+        void markConciergeChatReadInCache(queryClient, id);
       } catch {
         // Best effort. The next successful active-session load can retry.
       }

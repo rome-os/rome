@@ -223,17 +223,28 @@ function LiveTaskChatCard({
   // The row from the lists already loaded, such as the sidebar's: no list of its own.
   const { session, invalidate } = useChatSession(chatId);
   const [liveRunning, setLiveRunning] = useState<boolean | null>(null);
-  useLiveEvents(chatStatusTopic, {
-    session_running: {
-      schema: sessionRunningSchema,
-      fn: ({ sessionId, running }) => {
-        if (sessionId !== chatId) return;
-        setLiveRunning(running);
-        // A stop changes awaitingGuardian and lastTurnFailed, which the list carries.
-        if (!running) void invalidate();
+  useLiveEvents(
+    chatStatusTopic,
+    {
+      session_running: {
+        schema: sessionRunningSchema,
+        fn: ({ sessionId, running }) => {
+          if (sessionId !== chatId) return;
+          setLiveRunning(running);
+          // A stop changes awaitingGuardian and lastTurnFailed, which the list carries.
+          if (!running) void invalidate();
+        },
       },
     },
-  });
+    {
+      // Events missed while disconnected are gone: read the row again. Cards
+      // share one read, as one invalidation reaches every list.
+      onReconnect: () => {
+        setLiveRunning(null);
+        void invalidate();
+      },
+    },
+  );
   const running = liveRunning ?? session?.running ?? false;
   // Only what the task chat itself says live: working, or needing its owner.
   // Every other state is the Tasks panel's to show.

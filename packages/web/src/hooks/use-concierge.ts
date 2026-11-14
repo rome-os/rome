@@ -7,7 +7,7 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useCallback } from "react";
 import { invalidateChatSessions } from "@/hooks/use-chat-sessions";
 import { fetchJson } from "@/lib/fetch-json";
-import { LIVE_QUERY_OPTIONS } from "@/lib/query-client";
+import { LIVE_QUERY_OPTIONS, patchQueries } from "@/lib/query-client";
 import { useSettings } from "@/hooks/use-settings";
 import { mainAgentDisplayName } from "@/lib/agent-name";
 
@@ -153,11 +153,14 @@ export function useConciergeChats(): ConciergeChatDto[] {
  * badge and the Concierge's chat list. A read mark changes nothing else, so
  * nothing is fetched again for it.
  */
-export function markConciergeChatReadInCache(queryClient: QueryClient, id: string): void {
-  queryClient.setQueryData<ConciergeSession>(CONCIERGE_SESSION_QUERY_KEY, (session) =>
+export async function markConciergeChatReadInCache(
+  queryClient: QueryClient,
+  id: string,
+): Promise<void> {
+  await patchQueries<ConciergeSession>(queryClient, CONCIERGE_SESSION_QUERY_KEY, (session) =>
     session?.id === id && session.unread !== 0 ? { ...session, unread: 0 } : session,
   );
-  queryClient.setQueryData<ConciergeChatsResponse>(CONCIERGE_CHATS_QUERY_KEY, (data) =>
+  await patchQueries<ConciergeChatsResponse>(queryClient, CONCIERGE_CHATS_QUERY_KEY, (data) =>
     data?.chats.some((chat) => chat.id === id && chat.unread !== 0)
       ? {
           ...data,
