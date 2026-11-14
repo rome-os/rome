@@ -49,20 +49,21 @@ describe("voice input source", () => {
     });
   });
 
-  it("prefers Rome Cloud when signed in, and names the place it granted", async () => {
+  it("prefers Rome Cloud when signed in, and names the place its last session used", async () => {
     const cloud = answering(granted);
     const source = createVoiceInputSource({ own, romeCloud: signedIn, fetch: cloud.fetch });
+    // Naming the place never asks Rome Cloud for a session.
+    expect(await source.info()).toEqual({ available: true, via: "rome-cloud", place: null });
+    expect(cloud.calls()).toBe(0);
+
+    const opened = await source.open();
+    expect(opened.ok && opened.source.romeCloudSessionId).toBe("session-1");
     expect(await source.info()).toEqual({
       available: true,
       via: "rome-cloud",
       place: { provider: "Soniox", host: "stt-rt.soniox.com" },
     });
-    const opened = await source.open();
-    expect(opened.ok && opened.source.romeCloudSessionId).toBe("session-1");
-    // Settings asked once; each listening session asks again.
-    expect(cloud.calls()).toBe(2);
-    await source.info();
-    expect(cloud.calls()).toBe(2);
+    expect(cloud.calls()).toBe(1);
   });
 
   it("falls back to the instance's own provider when Rome Cloud no longer takes the instance", async () => {

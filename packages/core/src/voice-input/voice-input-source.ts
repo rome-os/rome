@@ -50,8 +50,9 @@ export interface VoiceInputSourceDeps {
 }
 
 export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSource {
-  // The place Rome Cloud last named, so Settings can show it without asking
-  // for a session each time it opens.
+  // The place Rome Cloud named for the last listening session. Settings shows
+  // it; asking for a session only to name the place would waste a credential
+  // and count against the account's session limit.
   let lastCloudPlace: TranscriptionPlace | null = null;
 
   const askRomeCloud = async (caller: RomeCloudCaller) => {
@@ -73,16 +74,7 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
 
     async info() {
       const caller = deps.romeCloud();
-      if (caller) {
-        if (!lastCloudPlace) {
-          // Naming the place takes one session; its credential is never used.
-          const outcome = await askRomeCloud(caller);
-          if (outcome.kind === "signed-out" && deps.own) {
-            return { available: true, via: "instance", place: deps.own.place };
-          }
-        }
-        return { available: true, via: "rome-cloud", place: lastCloudPlace };
-      }
+      if (caller) return { available: true, via: "rome-cloud", place: lastCloudPlace };
       if (deps.own) return { available: true, via: "instance", place: deps.own.place };
       return { available: false, via: null, place: null };
     },

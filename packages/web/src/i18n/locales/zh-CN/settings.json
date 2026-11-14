@@ -916,7 +916,7 @@
       "place": "口述的消息经由 Rome 发送到 {{provider}}（{{host}}）转为文字。Rome 不保存任何音频。",
       "off": "语音输入由 Rome Cloud 提供。此 Rome 未登录 Rome Cloud，因此消息输入框没有语音输入按钮。",
       "placeViaRomeCloud": "口述的消息经由 Rome 发送到 {{provider}}（{{host}}）转为文字，该服务由 Rome Cloud 提供。Rome 不保存任何音频。",
-      "romeCloud": "口述的消息由 Rome Cloud 提供的服务转为文字。Rome 不保存任何音频。"
+      "romeCloud": "口述的消息经由 Rome 发送到 Rome Cloud 提供的转写服务转为文字。第一次口述后，这里会显示该服务的名称。Rome 不保存任何音频。"
     }
   },
   "easterEgg": {

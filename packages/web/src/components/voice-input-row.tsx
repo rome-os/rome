@@ -6,7 +6,9 @@ import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
 /** Names where the dashboard's dictated speech becomes text. */
 export function VoiceInputRow() {
   const { t } = useTranslation("settings");
-  const query = useVoiceInputInfo();
+  // Rome learns Rome Cloud's place from a listening session, so read it again
+  // each time Settings opens.
+  const query = useVoiceInputInfo({ refetchOnMount: "always" });
   const info = query.data;
   return (
     <FormRow>
