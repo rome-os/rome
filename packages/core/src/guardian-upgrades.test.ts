@@ -43,6 +43,7 @@ const noSources: LiveEventSources = {
 const silentTranscriber: Transcriber = {
   place: { provider: "Fake", host: "stt.example" },
   model: "fake",
+  providerId: "fake",
   open: () => ({ sendAudio: () => {}, finish: () => {}, abort: () => {} }),
 };
 const silentSource = createVoiceInputSource({ own: silentTranscriber, romeCloud: () => null });

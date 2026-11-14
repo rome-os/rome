@@ -146,7 +146,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     const { transcriber } = listening.source;
     options.usage.recordTranscription({
       sessionId,
-      provider: transcriber.place.provider.toLowerCase(),
+      provider: transcriber.providerId,
       model: transcriber.model,
       // PCM s16le mono: two bytes a sample.
       seconds: Math.round((bytes / 2 / listening.sampleRate) * 10) / 10,
