@@ -8,7 +8,9 @@
 //   PUT  /script   {"mode":"text","text":"...","firstMs":400,"tokenMs":150}
 //                  {"mode":"error","errorCode":503,"errorType":"...","afterMs":0}
 //   GET  /stats    the sessions so far: their start request (key removed),
-//                  how they authenticated, audio bytes received, how they ended
+//                  how they authenticated, audio bytes received, how they ended;
+//                  and decoyConnections, each connection that presented the
+//                  decoy key (STAND_IN_DECOY_KEY)
 //   PUT  /keys     {"mintedOnly":true} accepts only temporary keys it minted;
 //                  {"sessionCapSeconds":5} ends every temporary key's session
 //                  that long after it starts, sooner than its own cap (null: off)
@@ -33,6 +35,11 @@ import { WebSocketServer } from "ws";
 
 const KEY = process.env.STAND_IN_API_KEY ?? "stand-in-key";
 let mintedOnly = process.env.STAND_IN_MINTED_ONLY === "1";
+// The decoy key an instance that is not signed in has in its removed
+// ROME_TRANSCRIPTION_* settings. Refused, and counted, so a check can show
+// that no connection ever presented it.
+const DECOY = process.env.STAND_IN_DECOY_KEY ?? null;
+let decoyConnections = [];
 let sessionCapSeconds = null;
 // Temporary key -> {expiresAt (ms), clientReferenceId, singleUse, used, maxSessionSeconds}
 const minted = new Map();
@@ -64,10 +71,11 @@ const control = createServer(async (req, res) => {
   const path = new URL(req.url, "http://x").pathname;
   if (req.method === "GET" && path === "/script") return json(res, 200, script);
   if (req.method === "GET" && path === "/stats")
-    return json(res, 200, { mintedOnly, sessionCapSeconds, mints, sessions });
+    return json(res, 200, { mintedOnly, sessionCapSeconds, decoyConnections, mints, sessions });
   if (req.method === "POST" && path === "/reset") {
     sessions = [];
     mints = [];
+    decoyConnections = [];
     minted.clear();
     script = { ...DEFAULT_SCRIPT };
     return json(res, 200, { ok: true });
@@ -204,6 +212,14 @@ wss.on("connection", (ws, req) => {
   const plan = { ...script };
   const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
   const protocolKey = (req.headers["sec-websocket-protocol"] ?? "").split(",").map((s) => s.trim());
+  // A decoy in the headers is recorded on connecting, before any start request.
+  const noteDecoy = (offered) => {
+    const decoy = DECOY && !session.decoyOffered && offered.find(([, k]) => k === DECOY);
+    if (!decoy) return;
+    session.decoyOffered = true;
+    decoyConnections.push({ at: new Date().toISOString(), way: decoy[0], client: session.client });
+  };
+  noteDecoy([["bearer", bearer], ...protocolKey.map((p) => ["protocol", p])]);
   let firstAudioAt = 0;
   const timers = [];
   let released = 0;
@@ -294,6 +310,7 @@ wss.on("connection", (ws, req) => {
         ["api_key", api_key],
         ...protocolKey.map((p) => ["protocol", p]),
       ].filter(([, k]) => k);
+      noteDecoy(offered);
       const accepted = offered.find(([, k]) => keyKind(k));
       session.auth = offered.filter(([, k]) => keyKind(k)).map(([way]) => way);
       if (!accepted) return fail(401, "unauthenticated", "Incorrect API key provided.");

@@ -155,22 +155,14 @@ cmd_transcriber() {
   esac
 }
 
-# Signed in to Rome Cloud, the provider is Rome Cloud's config, so switching
-# restarts Rome Cloud. Otherwise Rome reads it from its own config at start,
-# so switching rewrites Rome's env file and recreates the container on the
-# same volumes.
+# The provider is Rome Cloud's config, read at start, so switching restarts
+# Rome Cloud. Rome itself is untouched.
 switch_transcriber() {
   set_state "{\"transcriber\":\"$1\"}"
   load_secrets
-  if [ "$(state signIn || echo cloud)" = cloud ]; then
-    write_cloud_env
-    log "restarting Rome Cloud with the $1 transcriber ..."
-    start_cloud
-  else
-    write_rome_env
-    log "restarting Rome with the $1 transcriber ..."
-    start_rome
-  fi
+  write_cloud_env
+  log "restarting Rome Cloud with the $1 transcriber ..."
+  start_cloud
 }
 
 cmd_cloud() {
@@ -179,7 +171,7 @@ cmd_cloud() {
     status)
       # Signed in: Rome points at the environment's Rome Cloud, and its signer
       # key is registered there on an active instance, as enrollment leaves it.
-      local instance_id signed_in=false own=false
+      local instance_id signed_in=false decoy=false
       instance_id="$(state cloud.instanceId || true)"
       if [ -n "$instance_id" ] &&
         [ "$(docker exec "$ROME" printenv PANTHEON_BASE_ORIGIN 2>/dev/null || true)" = "$CLOUD_ORIGIN" ] &&
@@ -188,8 +180,9 @@ cmd_cloud() {
           and status = 'active' and public_jkt is not null" 2>/dev/null)" ]; then
         signed_in=true
       fi
-      [ -z "$(docker exec "$ROME" printenv ROME_TRANSCRIPTION_API_KEY 2>/dev/null || true)" ] || own=true
-      printf '{"signedIn":%s,"ownCredential":%s}\n' "$signed_in" "$own"
+      # The removed ROME_TRANSCRIPTION_* settings, set only on sign-out with a decoy key.
+      [ -z "$(docker exec "$ROME" printenv ROME_TRANSCRIPTION_API_KEY 2>/dev/null || true)" ] || decoy=true
+      printf '{"signedIn":%s,"decoySettings":%s}\n' "$signed_in" "$decoy"
       ;;
     usage)
       local instance_id
@@ -218,7 +211,6 @@ cmd_cloud() {
       [ "$1" = sign-out ] && next=own
       set_state "{\"signIn\":\"$next\"}"
       load_secrets
-      apply_stand_in_keys
       if [ "$next" = cloud ] && { [ -z "$(state cloud.instanceToken || true)" ] || ! docker inspect "$CLOUD" >/dev/null 2>&1; }; then
         log "starting Rome Cloud ..."
         cmd_cloud_up

@@ -1,6 +1,6 @@
 # Voice input environment
 
-Everything the voice input verifier needs to score the product without a person: a Rome instance it can start and reset, signed in to a Rome Cloud of its own, a Chrome whose microphone is a recording, and a transcriber it controls. The rules it serves are in `~/.rome-environments/voice-input/rules-V4.md`. The verifier lives in `verifier/` and drives the environment only through `voice-env`.
+Everything the voice input verifier needs to score the product without a person: a Rome instance it can start and reset, signed in to a Rome Cloud of its own, a Chrome whose microphone is a recording, and a transcriber it controls. The rules it serves are in `~/.rome-environments/voice-input/rules-V5.md`. The verifier lives in `verifier/` and drives the environment only through `voice-env`.
 
 The `try/` folder is separate: a page for hearing the transcription providers side by side. See [try/README.md](try/README.md).
 
@@ -33,7 +33,7 @@ State, including the guardian's password and session cookie, is in `~/.rome-envi
 
 `~/.config/rome/voice.env`, mode 600, `KEY=value` lines. Each is optional:
 
-- `SONIOX_API_KEY`: needed only for `voice-env transcriber real`. Signed in to Rome Cloud, Rome Cloud holds it; otherwise Rome does.
+- `SONIOX_API_KEY`: needed only for `voice-env transcriber real`. Only the local Rome Cloud holds it; it never goes into Rome's config.
 - `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`: a model login, so the agent answers sent messages. Every model tier then runs on `claude-haiku-5-5` (`VOICE_MODEL` overrides). Without one, a sent message is stored with the guardian as sender, and the agent's answer is an error.
 
 ## voice-env
@@ -47,16 +47,16 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 | `browser stop` | Stops Chrome and the proxy |
 | `transcriber stand-in [--text <t>] [--first-ms <n>] [--token-ms <n>]` | The stand-in answers each session with that text, the first token `first-ms` after the first audio and one token every `token-ms` after that |
 | `transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]` | The stand-in answers each session with a Soniox error message `after-ms` after the first audio, then closes |
-| `transcriber real` | Real Soniox with `SONIOX_API_KEY`. Signed in to Rome Cloud, this restarts Rome Cloud with that key and Soniox's addresses; otherwise it restarts Rome on the same data with the key in its own config. |
+| `transcriber real` | Real Soniox: restarts Rome Cloud with `SONIOX_API_KEY` and Soniox's addresses. Rome is untouched. |
 | `transcriber session-cap <seconds>` / `session-cap off` | Every session on a temporary key ends that many seconds after it starts with Soniox's `temp_api_key_session_expired`, sooner than the key's own `max_session_duration_seconds`, so the time-limit stop can be tried without waiting 30 minutes. `off` leaves only the key's own cap. Stand-in only; a restart of the stand-in turns it off. |
 | `transcriber status` | The mode, the stand-in's script, and each session it has served: the start request (key removed), how the key was sent, audio bytes received, how it ended |
-| `cloud status` | `{"signedIn", "ownCredential"}`. `signedIn`: Rome points at the environment's Rome Cloud, and its signer key is registered there on an active instance. `ownCredential`: Rome's config holds `ROME_TRANSCRIPTION_API_KEY`. |
+| `cloud status` | `{"signedIn", "decoySettings"}`. `signedIn`: Rome points at the environment's Rome Cloud, and its signer key is registered there on an active instance. `decoySettings`: Rome's config holds the removed `ROME_TRANSCRIPTION_*` settings with the decoy key, which only `cloud sign-out` writes. |
 | `cloud usage` | `{"events": [{"provider", "model", "seconds", "at"}]}`: the voice usage events Rome Cloud stored for this instance, oldest first. `seconds` is the audio's length. |
 | `cloud session` | `{"status", "body"}`: Rome Cloud's answer to `POST /v1/transcription/sessions`, asked as Rome asks it (from Rome's container, with a token from Rome's signer). A minted key in the body is replaced by `(removed)`. |
 | `cloud provider` | `{"status", "body"}`: Rome Cloud's answer to `GET /v1/transcription/provider`, asked the same way |
 | `cloud minted` | `{"count"}`: the temporary keys the stand-in has minted since it started or was reset |
 | `gate on` / `gate off` | Forces Rome Cloud's `voice_input` gate for every account (`FEATURE_GATE_VOICE_INPUT`) and restarts Rome Cloud. `on` after `up` and `reset`. |
-| `cloud sign-in` / `cloud sign-out` | Restarts Rome signed in to Rome Cloud with no provider credential (the default after `up` and `reset`), or not signed in with its own credential for the transcriber. Prints `cloud status`. |
+| `cloud sign-in` / `cloud sign-out` | Restarts Rome on the same data, signed in to Rome Cloud (the default after `up` and `reset`) or not signed in (see below). Prints `cloud status`. |
 | `network cut` / `network restore` | Drops every open connection of the browser and refuses new ones, or lets them through again |
 | `chats` | The dashboard's chats, from `GET /api/chat/sessions` |
 | `messages --chat <id>` | The chat's stored messages: role, sender, text, attachments, `inputState`, time |
@@ -67,7 +67,13 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 
 It speaks Soniox's real-time protocol: the start request with `model` and `audio_format`, binary audio frames, an empty text frame to finish, `keepalive` and `finalize` control messages, token responses with `is_final`, the `finished` response, and error responses with `error_code` and `error_type`. It accepts the key as `Authorization: Bearer`, in the start request's `api_key`, or as a WebSocket protocol, and refuses any other key with Soniox's 401.
 
-Like Soniox, it mints temporary keys at `POST /v1/auth/temporary-api-key` (Bearer the long-lived key `stand-in-key`; `usage_type`, `expires_in_seconds`, `client_reference_id`, `single_use`, `max_session_duration_seconds`; answers `api_key` and `expires_at`). A single-use key opens one session, and a second session on it gets 401. A session on a key with `max_session_duration_seconds` ends with error `temp_api_key_session_expired` when that time is up. The stand-in sends it with code 408. The error type is the one Rome Cloud's provider documents and the product handles; the code is the environment's guess. Rome Cloud holds `stand-in-key` and mints one per listening session. While Rome is signed in to Rome Cloud, the stand-in accepts only the temporary keys it minted and still valid, so a session that reaches it proves the key came through Rome Cloud. Signed out, Rome holds `stand-in-key` itself and the stand-in accepts it. `transcriber status` lists each mint (its `client_reference_id`) and each session's `keyKind` (`temporary` or `long-lived`).
+Like Soniox, it mints temporary keys at `POST /v1/auth/temporary-api-key` (Bearer the long-lived key `stand-in-key`; `usage_type`, `expires_in_seconds`, `client_reference_id`, `single_use`, `max_session_duration_seconds`; answers `api_key` and `expires_at`). A single-use key opens one session, and a second session on it gets 401. A session on a key with `max_session_duration_seconds` ends with error `temp_api_key_session_expired` when that time is up. The stand-in sends it with code 408. The error type is the one Rome Cloud's provider documents and the product handles; the code is the environment's guess. Only the local Rome Cloud holds `stand-in-key`, and it mints one temporary key per listening session. The stand-in accepts only the temporary keys it minted and still valid, never `stand-in-key` itself, so a session that reaches it proves the key came through Rome Cloud. `transcriber status` lists each mint (its `client_reference_id`) and each session's `keyKind`. It also lists `decoyConnections`: every connection that presented the decoy key from the section below, which should always be empty.
+
+### An instance that is not signed in
+
+`voice-env cloud sign-out` restarts Rome on the same data with `PANTHEON_BASE_ORIGIN` empty, so Rome is not signed in to Rome Cloud and has no voice input. `voice-env cloud sign-in` signs it back in.
+
+Signed out, Rome's config also gets `ROME_TRANSCRIPTION_PROVIDER`, `ROME_TRANSCRIPTION_URL` (the stand-in) and `ROME_TRANSCRIPTION_API_KEY`. The product removed those settings in rules V5. They are set only so rule 11 can show the product ignores them: the dashboard shows no voice control, and no connection reaches the stand-in. The key is the decoy `decoy-not-a-credential`, never a real credential, and the stand-in refuses it and records any connection that presents it in `decoyConnections`.
 
 Tokens come the way Soniox sends them: English as words with their leading space, Chinese as single characters. The two newest tokens stay non-final until the next ones arrive. On the empty frame every remaining token goes out final, then `finished`. The stand-in does not listen to the audio; it counts the bytes and drops them.
 
@@ -103,7 +109,7 @@ Searches `/home/rome` (the profile folder, which holds the database `rome.db` an
 - A dev instance on the devbox stands in for the guardian's Rome, and a Rome Cloud dev server (`next dev`, compiled on first request; `up` warms the routes Rome calls) on the same network stands in for Rome Cloud, at `http://cloud:3100` instead of `https://romeos.cc`.
 - Rome is signed in to Rome Cloud without the browser consent a guardian goes through: the environment writes an account and an instance token straight into Rome Cloud's database, the way Rome Cloud's admin dev tokens are made, and gives Rome the token in `ROME_INSTANCE_TOKEN`, the way a provisioned instance gets it. Rome then registers its signer key with it as in production.
 - Rome has no slug, so Rome Cloud sign-in for the guardian stays off and the guardian signs in with a local password the environment created. In production most guardians sign in through Rome Cloud.
-- Signed out (`cloud sign-out`), Rome Cloud is switched off for Rome (`PANTHEON_BASE_ORIGIN` empty) and Rome uses its own `ROME_TRANSCRIPTION_*` config.
+- Signed out (`cloud sign-out`), Rome Cloud is switched off for Rome (`PANTHEON_BASE_ORIGIN` empty), and its config holds the decoy `ROME_TRANSCRIPTION_*` settings described above.
 - The dashboard is reached over plain HTTP on `127.0.0.1`, which Chrome treats as a secure context, instead of HTTPS on the guardian's own address.
 - Chrome is headless Chromium from Nix, with a fresh profile per launch. The microphone permission is written into that profile before launch, as if the guardian had answered Chrome's prompt on an earlier visit. With `unset`, the headless browser has no one to answer the prompt, so a request for the microphone fails with `NotAllowedError` once the prompt would show.
 - Chrome's own background traffic to Google (updates, sync and similar) is switched off where flags allow, so it stays out of captures. Some still shows, such as `mtalk.google.com`.

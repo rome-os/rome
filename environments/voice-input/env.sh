@@ -56,7 +56,11 @@ DASHBOARD="http://127.0.0.1:$DASHBOARD_PORT"
 
 # The stand-in, as Rome sees it on the environment's network.
 STAND_IN_URL="ws://transcriber:8790/transcribe-websocket"
+# The stand-in's long-lived key. Only the local Rome Cloud holds it.
 STAND_IN_KEY="stand-in-key"
+# What an instance that is not signed in gets in the removed ROME_TRANSCRIPTION_*
+# settings: a decoy the stand-in refuses and reports, never a credential.
+DECOY_KEY="decoy-not-a-credential"
 SONIOX_URL="wss://stt-rt.soniox.com/transcribe-websocket"
 GUARDIAN_USER=guardian
 
@@ -215,7 +219,7 @@ start_transcriber() {
   docker run -d --name "$TRANSCRIBER" --restart unless-stopped --memory 2g \
     --network "$NETWORK" --network-alias transcriber \
     -p "127.0.0.1:$TRANSCRIBER_CONTROL_PORT:8791" \
-    -e "STAND_IN_API_KEY=$STAND_IN_KEY" \
+    -e "STAND_IN_API_KEY=$STAND_IN_KEY" -e STAND_IN_MINTED_ONLY=1 -e "STAND_IN_DECOY_KEY=$DECOY_KEY" \
     -v "$ENV_DIR/lib:/stand-in:ro" -v "$(ws_dir):/node_modules/ws:ro" \
     node:24-bookworm-slim node /stand-in/stand-in.mjs >/dev/null
   local attempts=0
@@ -229,26 +233,18 @@ start_transcriber() {
 # A value already in the Rome env file, so the instance secrets survive a rewrite.
 kept() { [ ! -f "$ROME_ENV_FILE" ] || sed -n "s/^$1=//p" "$ROME_ENV_FILE"; }
 
-# Rome's env file. Signed in to Rome Cloud (the default), Rome holds no
-# provider credential: it gets one from Rome Cloud per listening session.
-# Otherwise it uses its own: the stand-in's key, or Soniox's from the secrets
-# file when the state says real.
+# Rome's env file. Rome holds no provider credential either way: signed in to
+# Rome Cloud (the default), it gets a short-lived one per listening session;
+# not signed in, it has no voice input.
 write_rome_env() {
-  local jwt key mode url api_key sign_in token
+  local jwt key sign_in token
   jwt="$(kept ROME_JWT_SECRET)"
   key="$(kept ROME_OAUTH_TOKEN_ENCRYPTION_KEY)"
   [ -n "$jwt" ] || jwt="$(openssl rand -hex 32)"
   [ -n "$key" ] || key="$(openssl rand -hex 32)"
-  mode="$(state transcriber || true)"
   sign_in="$(state signIn || echo cloud)"
   token="$(state cloud.instanceToken || true)"
   [ "$sign_in" != cloud ] || [ -n "$token" ] || die "Rome Cloud has no instance for Rome yet. Run env.sh up."
-  if [ "$mode" = real ]; then
-    [ -n "${SONIOX_API_KEY:-}" ] || die "transcriber real needs SONIOX_API_KEY in $SECRETS_FILE"
-    url="$SONIOX_URL" api_key="$SONIOX_API_KEY"
-  else
-    url="$STAND_IN_URL" api_key="$STAND_IN_KEY"
-  fi
   {
     echo "NODE_ENV=production"
     echo "WEB_HOST=0.0.0.0"
@@ -260,10 +256,13 @@ write_rome_env() {
       echo "PANTHEON_BASE_ORIGIN=$CLOUD_ORIGIN"
       echo "ROME_INSTANCE_TOKEN=$token"
     else
+      # Not signed in. The product removed these settings (rules V5); they are
+      # here only so a check can show the product ignores them. The key is a
+      # decoy, never a real credential.
       echo "PANTHEON_BASE_ORIGIN="
       echo "ROME_TRANSCRIPTION_PROVIDER=soniox"
-      echo "ROME_TRANSCRIPTION_URL=$url"
-      echo "ROME_TRANSCRIPTION_API_KEY=$api_key"
+      echo "ROME_TRANSCRIPTION_URL=$STAND_IN_URL"
+      echo "ROME_TRANSCRIPTION_API_KEY=$DECOY_KEY"
     fi
     [ -z "${ANTHROPIC_API_KEY:-}" ] || echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
     [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || echo "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
@@ -362,7 +361,6 @@ cmd_up() {
   ensure_network
   log "starting the stand-in transcriber ..."
   start_transcriber
-  apply_stand_in_keys
   if [ "$(state signIn)" = cloud ]; then
     log "starting Rome Cloud ..."
     cmd_cloud_up
