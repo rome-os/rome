@@ -284,20 +284,20 @@ struct DataFlowSection: View {
 
     var body: some View {
         let device = model.node.device
-        VStack(alignment: .leading, spacing: 8) {
-            SettingsGroup(header: "Where your data goes") {
-                HStack(alignment: .top, spacing: 4) {
-                    FlowNode(symbol: device.symbol, label: device.thisDevice)
-                    FlowArrow()
-                    FlowNode(symbol: "server.rack", label: "Your Rome")
-                    FlowArrow()
-                    FlowNode(symbol: "sparkle", label: "Your AI model")
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 16)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(device.dataFlowLabel)
+        SettingsGroup(header: "Where your data goes") {
+            HStack(alignment: .top, spacing: 4) {
+                FlowNode(symbol: device.symbol, label: device.thisDevice)
+                FlowArrow()
+                FlowNode(symbol: "server.rack", label: "Your Rome")
+                FlowArrow()
+                FlowNode(symbol: "sparkle", label: "Your AI model")
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 16)
+            .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(device.dataFlowLabel)
+            // What the Rome does with it, in the same card under the flow.
             Group {
                 if capability.syncSource == HealthSettings.sourceId {
                     Text("Sent to your Rome and your AI model, whose terms apply · Never sold or used for ads · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)")
@@ -305,11 +305,13 @@ struct DataFlowSection: View {
                     Text("Read only when you ask · [Privacy Policy](https://romeos.cc/privacy)")
                 }
             }
-            .romeFont(13)
+            .romeFont(15)
             .foregroundStyle(Palette.sub)
             .tint(Palette.primaryText)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
     }
 }

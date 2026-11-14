@@ -523,6 +523,20 @@ struct SyncRig {
         #expect(progress.unsupported.contains("bodyMass"), "left out until Sync now tries again")
     }
 
+    @Test func aCGMsReadingsGoUpAsBucketsNotSamples() async throws {
+        let rig = SyncRig()
+        // A day of 5-minute glucose readings: 288 samples.
+        let start = rig.date("2026-11-08T00:00:00Z")
+        for index in 0..<288 {
+            rig.health.add("bloodGlucose", id: "g\(index)", start: start.addingTimeInterval(Double(index) * 300), value: 90 + Double(index % 20))
+        }
+        await rig.backfill()
+        let glucose = await rig.backend.upserts.filter { $0.type == "bloodGlucose" }
+        #expect(!glucose.isEmpty)
+        #expect(glucose.allSatisfy { $0.shape == .bucket }, "never sample by sample")
+        #expect(glucose.count < 288 / 4, "hours and a day, far fewer than the readings")
+    }
+
     @Test func anotherRomeStartsTheHistoryOver() async throws {
         let rig = SyncRig()
         rig.health.add("stepCount", id: "s1", start: rig.date("2026-10-01T02:00:00Z"), value: 100)
