@@ -53,3 +53,22 @@ jobs:
             -skipPackagePluginValidation \
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO
+      # Temporary, for #2168: print the stack of a test-host crash, which the
+      # log does not show.
+      - name: Crash reports
+        if: failure()
+        run: |
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/Rome*.ips 2>/dev/null | head -3); do
+            echo "== $f"
+            python3 -c '
+          import json, sys
+          text = open(sys.argv[1]).read().split("\n", 1)
+          body = json.loads(text[1])
+          print(body.get("exception"))
+          images = body["usedImages"]
+          for i, thread in enumerate(body["threads"]):
+              if not thread.get("triggered"): continue
+              for frame in thread["frames"][:40]:
+                  print(images[frame["imageIndex"]].get("name", "?"), frame.get("symbol", "?"), frame.get("sourceFile", ""), frame.get("sourceLine", ""))
+          ' "$f"
+          done
