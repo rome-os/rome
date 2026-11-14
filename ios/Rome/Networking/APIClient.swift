@@ -159,8 +159,8 @@ final class APIClient: Sendable {
     }
 
     @discardableResult
-    func delete(_ path: String) async throws -> Data {
-        try await send(request(path, method: "DELETE"))
+    func delete(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+        try await send(request(path, query: query, method: "DELETE"))
     }
 
     /// A request to an `/api/…` path on this instance that answers any status
