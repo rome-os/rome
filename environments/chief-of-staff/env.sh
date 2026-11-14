@@ -300,8 +300,31 @@ write_rome_env() {
 
 # The same container settings as a hosted Rome's docker-compose.yml, less the
 # ports: nothing outside reaches this Rome except through `docker exec`.
+# Runs watch-rome.sh beside the container as a systemd user service, so it
+# outlives the command that started it, after stopping any earlier one.
+WATCH_UNIT="rome-env-$NAME-watch"
+SYSTEMD_BIN=/run/current-system/sw/bin
+
+start_watch() {
+  stop_watch
+  mkdir -p "$RUN_DIR/incidents"
+  if [ -x "$SYSTEMD_BIN/systemd-run" ]; then
+    "$SYSTEMD_BIN/systemd-run" --user --quiet --collect --unit="$WATCH_UNIT" --setenv=PATH="$PATH" \
+      "$ENV_DIR/watch-rome.sh" "$ROME" "$RUN_DIR/incidents" ||
+      log "could not start the health watch; health failures will not be captured"
+  else
+    log "no systemd-run here; health failures will not be captured"
+  fi
+}
+
+stop_watch() {
+  [ -x "$SYSTEMD_BIN/systemctl" ] || return 0
+  "$SYSTEMD_BIN/systemctl" --user stop "$WATCH_UNIT" 2>/dev/null || true
+}
+
 start_rome() {
   save_rome_logs
+  stop_watch
   docker rm -f "$ROME" >/dev/null 2>&1 || true
   # The devbox runs many Romes at once. The cap keeps this one, and the Chrome
   # the image runs inside it, from taking the box down; Chrome dies with the
@@ -314,6 +337,7 @@ start_rome() {
     -v "$HOME_VOLUME:/home/rome" -v "$MEMORY_VOLUME:/app/memory" -v "$USER_VOLUME:/home/user" \
     --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor=unconfined \
     "$IMAGE" >/dev/null
+  start_watch
   wait_for_rome
 }
 
@@ -497,6 +521,7 @@ rome_memory() {
 
 remove_rome() {
   save_rome_logs
+  stop_watch
   docker rm -f "$ROME" >/dev/null 2>&1 || true
   docker volume rm "$HOME_VOLUME" "$MEMORY_VOLUME" "$USER_VOLUME" >/dev/null 2>&1 || true
 }
@@ -616,7 +641,11 @@ cos_rome() {
       shift
       cos_renew_session "$@"
       ;;
-    *) die "usage: cos-env rome stop|start|restart|renew-session --chat <name>" ;;
+    held)
+      shift
+      cos_held "$@"
+      ;;
+    *) die "usage: cos-env rome stop|start|restart|renew-session --chat <name>|held [--since <time>]" ;;
   esac
 }
 
@@ -662,9 +691,60 @@ cos_logs() {
     [ -z "$since" ] || [[ ! "$created" < "${since%%.*}" ]] || continue
     cp "$file" "$dir/"
   done
+  for file in "$RUN_DIR"/incidents/*; do
+    [ -d "$file" ] || continue
+    name="$(basename "$file")"
+    [ -z "$since" ] || [[ ! "$name" < "${since%%.*}" ]] || continue
+    mkdir -p "$dir/incidents" && cp -r "$file" "$dir/incidents/"
+  done
   created="$(docker inspect -f '{{.Created}}' "$ROME" 2>/dev/null)" || return 0
   docker logs "$ROME" >"$dir/rome-${created%%.*}.log" 2>&1 || true
   rome_memory >"$dir/rome-${created%%.*}.memory.json" 2>/dev/null || true
+}
+
+# Prints as JSON the agent's replies envoy held for the guardian's approval or
+# rejected since `--since` (an ISO time), oldest first, with envoy's reason,
+# read from Rome's own record of approvals. The approvals API asks for the
+# guardian's sign-in, which nothing outside Rome holds, so this reads Rome's
+# database inside the container.
+cos_held() {
+  local since=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --since) since="${2:?--since needs a time}" && shift 2 ;;
+      *) die "usage: cos-env rome held [--since <time>]" ;;
+    esac
+  done
+  docker exec -i "$ROME" node - "$since" <<'JS'
+const Database = require("/app/node_modules/better-sqlite3");
+const db = new Database("/home/rome/.rome/default/rome.db", { readonly: true });
+const since = process.argv[2] ? Math.floor(Date.parse(process.argv[2]) / 1000) : 0;
+if (Number.isNaN(since)) throw new Error(`not a time: ${process.argv[2]}`);
+const rows = db
+  .prepare(
+    `select id, status, created_at, resolved_at, description, payload from approvals
+     where type = 'outgoing_message' and status != 'auto_approved' and created_at >= ?
+     order by created_at`,
+  )
+  .all(since);
+const held = rows.map((r) => {
+  const p = JSON.parse(r.payload);
+  return {
+    id: r.id,
+    // pending: held for the guardian; rejected: envoy refused it, or the
+    // guardian did; approved: the guardian let it through later.
+    status: r.status,
+    time: new Date(r.created_at * 1000).toISOString(),
+    resolvedAt: r.resolved_at ? new Date(r.resolved_at * 1000).toISOString() : null,
+    question: p.messageId ?? null,
+    chatId: p.threadId ?? null,
+    senderId: p.channelUserId ?? null,
+    reply: p.response ?? null,
+    reason: r.description,
+  };
+});
+console.log(JSON.stringify(held, null, 2));
+JS
 }
 
 cos_version() {

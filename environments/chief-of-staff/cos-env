@@ -15,6 +15,7 @@ usage() {
   cos-env read --dm <member> [--since <message id>]
   cos-env rename --as <member> <display name>
   cos-env rome stop|start|restart|renew-session --chat <name>
+  cos-env rome held [--since <time>]
   cos-env logs <dir> [--since <time>]
   cos-env reset
   cos-env version"
@@ -79,7 +80,7 @@ case "$command" in
     load_secrets
     discord rename "$as" "${args[*]}"
     ;;
-  rome) cos_rome "${args[0]:-}" ${chat:+--chat "$chat"} ;;
+  rome) cos_rome "${args[0]:-}" ${chat:+--chat "$chat"} ${since:+--since "$since"} ;;
   logs)
     [ ${#args[@]} -eq 1 ] || usage
     cos_logs "${args[0]}" "$since"
