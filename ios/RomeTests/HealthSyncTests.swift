@@ -867,6 +867,24 @@ struct SyncRig {
         #expect(await rig.backend(Rig.home.id).envelopes.count == sent)
     }
 
+    @Test func syncCannotComeBackOnWhileADeleteIsUnderWay() async throws {
+        let rig = Rig()
+        let settings = rig.make()
+        await settings.setEnabled(true).value
+        await rig.backend.holdDelete()
+        let delete = Task { await settings.deleteUploaded() }
+        for _ in 0..<500 where await !rig.backend.deleteHeld { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(!settings.isEnabled, "shown off at once")
+        #expect(!settings.canSync)
+        let sent = await rig.backend.envelopes.count
+        await settings.setEnabled(true).value
+        #expect(!settings.isEnabled, "on is refused until the delete ends")
+        await rig.backend.releaseDelete()
+        #expect(await delete.value)
+        #expect(await rig.backend.envelopes.count == sent, "nothing reached the Rome after the delete")
+        #expect(settings.canSync, "and it can be turned on again afterwards")
+    }
+
     @Test func offThenOnDuringASyncSendsNoStaleOff() async throws {
         let rig = Rig()
         let settings = rig.make()

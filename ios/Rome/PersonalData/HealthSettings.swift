@@ -134,8 +134,13 @@ final class HealthSettings {
     /// old enough to say Health access may be off.
     func freshness(now: Date = Date()) -> HealthFreshness { HealthFreshness(history: history, enabled: isEnabled, now: now) }
 
-    /// The switch can be turned on: a Rome the guardian owns is open.
-    var canSync: Bool { instance.map { !$0.isVisitor } ?? false }
+    /// Romes whose Delete uploaded data is under way: their Sync stays off
+    /// until it ends.
+    private(set) var deleting: Set<String> = []
+
+    /// The switch can be turned on: a Rome the guardian owns is open, and
+    /// no Delete is under way for it.
+    var canSync: Bool { instance.map { !$0.isVisitor && !deleting.contains($0.id) } ?? false }
 
     var status: HealthSyncStatus {
         HealthSyncStatus.make(
@@ -303,6 +308,8 @@ final class HealthSettings {
     @discardableResult
     func setEnabled(_ on: Bool) -> Task<Void, Never> {
         guard let lane, let id = instance?.id else { return Task {} }
+        // On during a Delete would upload from the old anchors after it.
+        if on, deleting.contains(id) { return Task {} }
         isEnabled = on
         defaults.set(on, forKey: Defaults.enabled(id))
         lane.switches.set(enabled: on)
@@ -348,15 +355,24 @@ final class HealthSettings {
         // first, and the engine is idle before the request goes.
         let before = lane.switches.value
         lane.switches.set(enabled: false)
-        // Off is saved before any wait: a lane rebuilt meanwhile (this Rome
-        // left and opened again) must not upload what is being deleted.
+        // Off is saved and shown before any wait: a lane rebuilt meanwhile
+        // (this Rome left and opened again) must not upload what is being
+        // deleted, and the switch cannot be turned on until it ends.
         defaults.set(false, forKey: Defaults.enabled(id))
+        deleting.insert(id)
+        isEnabled = false
+        observers.stop()
+        defer { deleting.remove(id) }
         await lane.engine.quiesce()
         do {
             _ = try await target.backend.deleteOrigin(source: Self.sourceId, origin: origin)
         } catch {
             lane.switches.set(enabled: before.enabled)
             defaults.set(before.enabled, forKey: Defaults.enabled(id))
+            if self.lane === lane, before.enabled {
+                isEnabled = true
+                startObservers()
+            }
             return false
         }
         // This Rome's sync is off from here, whichever Rome is open by now:
