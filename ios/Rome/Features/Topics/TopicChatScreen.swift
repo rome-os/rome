@@ -24,6 +24,8 @@ struct TopicChatScreen: View {
     @State private var renaming = false
     /// The delete alert, once the chat's follows and open tasks are read.
     @State private var deleting: TopicDeletePrompt?
+    /// Set while that read runs, so a second tap on Delete starts no other.
+    @State private var readingWork = false
     @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -191,9 +193,11 @@ struct TopicChatScreen: View {
 
     /// Reads what the delete would move, then asks.
     private func askToDelete(_ name: String) {
-        guard let chatId else { return }
+        guard let chatId, !readingWork else { return }
+        readingWork = true
         Task {
             let work = await workspace.topicWork(chatId)
+            readingWork = false
             deleting = TopicDeletePrompt(id: chatId, name: name, work: work)
         }
     }

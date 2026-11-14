@@ -175,7 +175,9 @@ final class LiveBackend: RomeBackend {
     }
 
     func chatWork(chatId: String) async throws -> ConciergeChatWork {
-        try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks")
+        // Optional, and bounded by the delete's wait: a 401 fails at once
+        // instead of waiting on a session renewal that a cancel cannot end.
+        try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks", reportsUnauthorized: false)
     }
 
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
