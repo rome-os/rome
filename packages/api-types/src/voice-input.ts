@@ -62,8 +62,13 @@ export const voiceInputStopReasonSchema = z.enum([
   "bad-request",
   /** One dictation reached Rome's length limit; the text heard so far still arrives. */
   "time-limit",
+  /** Nothing was heard for `VOICE_INPUT_QUIET_LIMIT_MS`; the text heard so far still arrives. */
+  "no-speech",
 ]);
 export type VoiceInputStopReason = z.infer<typeof voiceInputStopReasonSchema>;
+
+/** How long a dictation listens with nothing heard before it stops. */
+export const VOICE_INPUT_QUIET_LIMIT_MS = 30_000;
 
 /** How often Rome says it is still there, so a client notices a dead connection. */
 export const VOICE_INPUT_ALIVE_INTERVAL_MS = 1_000;

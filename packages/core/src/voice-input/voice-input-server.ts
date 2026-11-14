@@ -8,6 +8,7 @@ import type { Duplex } from "node:stream";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
 import {
   VOICE_INPUT_ALIVE_INTERVAL_MS,
+  VOICE_INPUT_QUIET_LIMIT_MS,
   VOICE_INPUT_SOCKET_PATH,
   type VoiceInputServerMessage,
   type VoiceInputStopReason,
@@ -97,6 +98,7 @@ export interface ServeOptions {
   maxDictationMs?: number;
   finishTimeoutMs?: number;
   openTimeoutMs?: number;
+  quietLimitMs?: number;
 }
 
 /** Runs one dictation over `ws`. Exported for tests. */
@@ -104,6 +106,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   const maxDictationMs = options.maxDictationMs ?? MAX_DICTATION_MS;
   const finishTimeoutMs = options.finishTimeoutMs ?? FINISH_TIMEOUT_MS;
   const openTimeoutMs = options.openTimeoutMs ?? OPEN_TIMEOUT_MS;
+  const quietLimitMs = options.quietLimitMs ?? VOICE_INPUT_QUIET_LIMIT_MS;
   let stream: TranscriptionStream | null = null;
   let listening: { source: ListeningSource; sampleRate: number; startedAt: number } | null = null;
   // Between `start` and the transcriber opening: audio waits here, in order.
@@ -111,8 +114,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   const early: Uint8Array[] = [];
   let stopAsked = false;
   let closed = false;
-  let timedOut = false;
+  // Why Rome itself stopped listening, sent once the rest of the text is in.
+  let stoppedFor: VoiceInputStopReason | null = null;
   let limit: ReturnType<typeof setTimeout> | null = null;
+  let quiet: ReturnType<typeof setTimeout> | null = null;
   let finishing: ReturnType<typeof setTimeout> | null = null;
   let opening: ReturnType<typeof setTimeout> | null = null;
   let alive: ReturnType<typeof setInterval> | null = null;
@@ -132,6 +137,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   };
   const settle = (outcome: string) => {
     if (limit) clearTimeout(limit);
+    if (quiet) clearTimeout(quiet);
     if (finishing) clearTimeout(finishing);
     if (opening) clearTimeout(opening);
     if (alive) clearInterval(alive);
@@ -208,9 +214,12 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       { sampleRate },
       {
         onText: (settled, pending) => {
-          if (!closed) reply({ type: "text", settled, pending });
+          if (closed) return;
+          if (settled || pending !== lastPending) listenForSpeech();
+          lastPending = pending;
+          reply({ type: "text", settled, pending });
         },
-        onEnd: () => close(timedOut ? { type: "error", reason: "time-limit" } : { type: "ended" }),
+        onEnd: () => close(stoppedFor ? { type: "error", reason: stoppedFor } : { type: "ended" }),
         onFailure: (failure, detail) => {
           log.warn("voice input provider failed", { failure, detail });
           close({ type: "error", reason: STOP_REASON[failure] });
@@ -219,10 +228,20 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     );
     for (const chunk of early.splice(0)) stream.sendAudio(chunk);
     if (stopAsked) return finish();
-    limit = setTimeout(() => {
-      timedOut = true;
-      finish();
-    }, maxDictationMs);
+    limit = setTimeout(() => stopFor("time-limit"), maxDictationMs);
+    listenForSpeech();
+  }
+
+  // Restarts the wait for speech; it runs out after `quietLimitMs` of nothing heard.
+  let lastPending = "";
+  function listenForSpeech() {
+    if (quiet) clearTimeout(quiet);
+    quiet = setTimeout(() => stopFor("no-speech"), quietLimitMs);
+  }
+
+  function stopFor(reason: VoiceInputStopReason) {
+    stoppedFor = reason;
+    finish();
   }
 
   ws.on("message", (data: RawData, isBinary) => {
@@ -279,11 +298,12 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (!stream || finishAsked) return;
     finishAsked = true;
     if (limit) clearTimeout(limit);
+    if (quiet) clearTimeout(quiet);
     stream.finish();
     // Gives up on a provider that never sends the rest.
     finishing = setTimeout(() => {
       stream?.abort();
-      close({ type: "error", reason: timedOut ? "time-limit" : "provider-unavailable" });
+      close({ type: "error", reason: stoppedFor ?? "provider-unavailable" });
     }, finishTimeoutMs);
   }
 

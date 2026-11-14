@@ -417,6 +417,20 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
   });
 
+  it.each([
+    ["no-speech", "Listening stopped after 30 seconds without speech"],
+    ["time-limit", "Listening stopped after 10 minutes"],
+  ])("keeps the words heard when Rome stops listening for %s", async (reason, notice) => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    socket.say({ type: "error", reason });
+
+    expect(field().value).toBe("hello");
+    expect(screen.getByRole("status").textContent).toBe(notice);
+    expect(microphone.closed).toBe(1);
+  });
+
   it("says why when Rome Cloud refuses voice input", async () => {
     const { field } = renderComposer(kind);
     const socket = await startListening();
