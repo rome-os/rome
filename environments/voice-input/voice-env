@@ -10,6 +10,7 @@
 #   voice-env transcriber stand-in --error <code> [--after-ms <n>] [--type <error_type>]
 #   voice-env transcriber status
 #   voice-env transcriber session-cap <seconds>|off
+#   voice-env transcriber route cut|restore|status
 #   voice-env cloud status | usage | session | provider | minted | sign-in | sign-out
 #   voice-env gate on|off
 #   voice-env logs [--since <time>] [--match <text>]
@@ -29,6 +30,7 @@ require_up() {
 
 proxy_url() { printf 'http://127.0.0.1:%s/__voice-env' "$PROXY_PORT"; }
 stand_in() { printf 'http://127.0.0.1:%s' "$TRANSCRIBER_CONTROL_PORT"; }
+provider_route() { printf 'http://127.0.0.1:%s' "$PROVIDER_ROUTE_CONTROL_PORT"; }
 
 # A Chromium that runs here: VOICE_CHROME, the devShell's, or Nix's.
 chrome_path() {
@@ -152,7 +154,14 @@ cmd_transcriber() {
       curl -fsS -X PUT --data-binary "{\"sessionCapSeconds\":$cap}" "$(stand_in)/keys"
       echo
       ;;
-    *) die "usage: voice-env transcriber real | stand-in [...] | status | session-cap <seconds>|off" ;;
+    route)
+      case "${1:-}" in
+        cut | restore) curl -fsS -X POST "$(provider_route)/$1" ;;
+        status) curl -fsS "$(provider_route)/stats" ;;
+        *) die "usage: voice-env transcriber route cut|restore|status" ;;
+      esac
+      ;;
+    *) die "usage: voice-env transcriber real | stand-in [...] | status | session-cap <seconds>|off | route cut|restore|status" ;;
   esac
 }
 

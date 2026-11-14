@@ -31,6 +31,7 @@ TOOLS_IMAGE="rome-env-${NAME}-tools:latest"
 NETWORK="rome-env-${NAME}"
 ROME="rome-env-${NAME}-rome"
 TRANSCRIBER="rome-env-${NAME}-transcriber"
+PROVIDER_ROUTE="rome-env-${NAME}-provider-route"
 CAPTURE="rome-env-${NAME}-capture"
 HOME_VOLUME="rome-env-${NAME}-home"
 MEMORY_VOLUME="rome-env-${NAME}-memory"
@@ -52,6 +53,7 @@ DASHBOARD_PORT="${VOICE_DASHBOARD_PORT:-4780}"
 TRANSCRIBER_CONTROL_PORT="${VOICE_TRANSCRIBER_CONTROL_PORT:-4781}"
 PROXY_PORT="${VOICE_PROXY_PORT:-4783}"
 CDP_PORT="${VOICE_CDP_PORT:-4784}"
+PROVIDER_ROUTE_CONTROL_PORT="${VOICE_PROVIDER_ROUTE_CONTROL_PORT:-4785}"
 DASHBOARD="http://127.0.0.1:$DASHBOARD_PORT"
 
 # The stand-in, as Rome sees it on the environment's network.
@@ -230,6 +232,29 @@ start_transcriber() {
   done
 }
 
+# Rome reaches real Soniox through this route, which answers on the
+# environment's network to Soniox's own host name and passes the bytes through,
+# so a check can cut the route in the middle of a message.
+start_provider_route() {
+  local host upstream
+  host="${SONIOX_URL#wss://}" && host="${host%%/*}"
+  upstream="$(node -e 'require("dns").promises.resolve4(process.argv[1]).then((a) => console.log(a.join(",")), () => {})' "$host")"
+  [ -n "$upstream" ] || die "cannot resolve $host from the devbox, so Rome has no route to real Soniox."
+  docker rm -f "$PROVIDER_ROUTE" >/dev/null 2>&1 || true
+  docker run -d --name "$PROVIDER_ROUTE" --restart unless-stopped --memory 256m \
+    --network "$NETWORK" --network-alias "$host" \
+    -p "127.0.0.1:$PROVIDER_ROUTE_CONTROL_PORT:8792" \
+    -e "ROUTE_UPSTREAM=$upstream" \
+    -v "$ENV_DIR/lib:/route:ro" \
+    node:24-bookworm-slim node /route/provider-route.mjs >/dev/null
+  local attempts=0
+  until curl -fsS -o /dev/null "http://127.0.0.1:$PROVIDER_ROUTE_CONTROL_PORT/stats" 2>/dev/null; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 30 ] || die "the route to Soniox never answered. Inspect: docker logs $PROVIDER_ROUTE"
+    sleep 0.5
+  done
+}
+
 # A value already in the Rome env file, so the instance secrets survive a rewrite.
 kept() { [ ! -f "$ROME_ENV_FILE" ] || sed -n "s/^$1=//p" "$ROME_ENV_FILE"; }
 
@@ -361,6 +386,7 @@ cmd_up() {
   ensure_network
   log "starting the stand-in transcriber ..."
   start_transcriber
+  start_provider_route
   if [ "$(state signIn)" = cloud ]; then
     log "starting Rome Cloud ..."
     cmd_cloud_up
@@ -418,7 +444,7 @@ cmd_reset() {
 cmd_down() {
   claim_ownership
   stop_browser
-  docker rm -f "$CAPTURE" "$TRANSCRIBER" >/dev/null 2>&1 || true
+  docker rm -f "$CAPTURE" "$TRANSCRIBER" "$PROVIDER_ROUTE" >/dev/null 2>&1 || true
   remove_rome
   remove_cloud_data
   docker network rm "$NETWORK" >/dev/null 2>&1 || true

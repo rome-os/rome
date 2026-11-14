@@ -25,6 +25,7 @@ environments/voice-input/env.sh down              # remove everything up created
 | `rome-env-voice-input-cloud` | Rome Cloud's `packages/pantheon` dev server, with its transcription provider set to the stand-in | Rome: `http://cloud:3100` |
 | `rome-env-voice-input-cloud-pg` | Rome Cloud's Postgres | |
 | `rome-env-voice-input-transcriber` | The stand-in transcriber | Rome: `ws://transcriber:8790/transcribe-websocket`; control: `http://127.0.0.1:4781` |
+| `rome-env-voice-input-provider-route` | The route from Rome to real Soniox, which `transcriber route cut` breaks | Rome: `stt-rt.soniox.com:443`, passed through to Soniox; control: `http://127.0.0.1:4785` |
 | `rome-env-voice-input-capture` | tcpdump in Rome's network namespace, only while a capture runs | |
 
 State, including the guardian's password and session cookie, is in `~/.rome-environments/voice-input/run/` (mode 600). One checkout owns the environment at a time; `ROME_ENV_TAKE_OVER=1` moves it.
@@ -50,6 +51,7 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 | `transcriber real` | Real Soniox: restarts Rome Cloud with `SONIOX_API_KEY` and Soniox's addresses. Rome is untouched. |
 | `transcriber session-cap <seconds>` / `session-cap off` | Every session on a temporary key ends that many seconds after it starts with Soniox's `temp_api_key_session_expired`, sooner than the key's own `max_session_duration_seconds`, so the time-limit stop can be tried without waiting 30 minutes. `off` leaves only the key's own cap. Stand-in only; a restart of the stand-in turns it off. |
 | `transcriber status` | The mode, the stand-in's script, and each session it has served: the start request (key removed), how the key was sent, audio bytes received, how it ended |
+| `transcriber route cut` / `route restore` / `route status` | `cut` resets every open connection from Rome to real Soniox and refuses new ones until `restore`, as a route that drops in the middle of a message. It needs `transcriber real`; on the stand-in, use `--error`. `status` prints `{cut, open, connections: [{opened, closed, closedBy, bytesUp, bytesDown}]}`, where `closedBy` is `rome`, `provider` or `cut`. |
 | `cloud status` | `{"signedIn", "decoySettings"}`. `signedIn`: Rome points at the environment's Rome Cloud, and its signer key is registered there on an active instance. `decoySettings`: Rome's config holds the removed `ROME_TRANSCRIPTION_*` settings with the decoy key, which only `cloud sign-out` writes. |
 | `cloud usage` | `{"events": [{"eventId", "sessionId", "provider", "model", "seconds", "at"}]}`: the voice usage events Rome Cloud stored for this instance, oldest first. `eventId` is the id Rome sent with the event. `sessionId` is the listening session's id, the `sessionId` that `cloud session` returns, or null when Rome Cloud recorded none. `seconds` is the audio's length. |
 | `cloud session` | `{"status", "body"}`: Rome Cloud's answer to `POST /v1/transcription/sessions`, asked as Rome asks it (from Rome's container, with a token from Rome's signer). A minted key in the body is replaced by `(removed)`. |
@@ -63,6 +65,10 @@ Every command prints JSON on stdout. Errors go to stderr with a non-zero exit.
 | `messages --chat <id>` | The chat's stored messages: role, sender, text, attachments, `inputState`, time |
 | `audio-scan` | Searches the instance for audio and lists each finding with its reason |
 | `capture start` / `capture stop` | Records the browser's and the server's outbound requests; `stop` prints the record and lists in `audio` each request that carried audio and where it went |
+
+### The route to real Soniox
+
+On the environment's network, Soniox's streaming host `stt-rt.soniox.com` answers at the route container, so Rome dials it by the same name and port as in production. The route passes every byte through to Soniox's addresses, resolved on the devbox when the environment starts, and reads none of them: TLS runs between Rome and Soniox, and Rome checks Soniox's own certificate. Rome's DNS answer for the host is the route's address, so the capture names that connection `stt-rt.soniox.com`. Only Rome's connections to the streaming host go through the route; Rome Cloud mints keys at `api.soniox.com` directly.
 
 ### The stand-in transcriber
 
