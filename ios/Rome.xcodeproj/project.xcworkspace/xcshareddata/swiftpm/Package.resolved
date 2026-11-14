@@ -1,5 +1,5 @@
 {
-  "originHash" : "79a9fc50a0fa02aa1ab056eb3e89b14c4970dd58bb077a044cf97a11cf4836c4",
+  "originHash" : "c1f346ad425ed2a72af713908dc9d91357c36f49dac08e516307447ba7223361",
   "pins" : [
     {
       "identity" : "a2ui",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "ae2b6baaeca1dd02ebb21f7543aab5d823737cc4",
         "version" : "0.10.0+swift"
+      }
+    },
+    {
+      "identity" : "chatlayout",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ekazaev/ChatLayout",
+      "state" : {
+        "revision" : "dd4cb5c8f91623331ba023d0ab64d844f8436204",
+        "version" : "2.5.2"
       }
     },
     {

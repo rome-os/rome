@@ -85,7 +85,6 @@ private func row(_ index: Double, chat: String = "concierge", id: String? = nil)
         #expect(store.messages.map(\.id) == ["m2"] + (5..<45).map { "m\($0)" })
         #expect(store.hasOlder)
         await store.loadOlder()
-        await store.placeOlderPage()
         #expect(store.messages.map(\.id) == (0..<45).map { "m\($0)" })
         #expect(!store.hasOlder)
 

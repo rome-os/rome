@@ -342,7 +342,7 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         return backend
     }
 
-    @Test func olderPageWaitsUntilPlaced() async {
+    @Test func anOlderPageGoesInAtOnce() async {
         let backend = backendWithLongChat()
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
@@ -350,11 +350,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.hasOlder)
 
         await store.loadOlder()
-        #expect(store.olderPage != nil)
-        #expect(store.messages.count == 40)
-
-        await store.placeOlderPage()
-        #expect(store.olderPage == nil)
         #expect(store.messages.count == 50)
         #expect(!store.hasOlder)
     }
@@ -364,7 +359,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
         await store.loadOlder()
-        await store.placeOlderPage()
 
         backend.stored.append(chatMessage(50))
         await store.reload()
@@ -379,7 +373,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.brief == nil)
 
         await store.loadOlder()
-        await store.placeOlderPage()
         #expect(store.brief?.id == "m0")
     }
 
@@ -587,7 +580,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         }
         await store.loadOlder()
 
-        #expect(store.olderPage == nil)
         #expect(store.messages.allSatisfy { Int($0.id.dropFirst())! >= 100 })
         #expect(store.hasOlder)
     }

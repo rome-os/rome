@@ -11,6 +11,7 @@
 		A10000000000000000000611 /* A2UISwiftCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000601 /* A2UISwiftCore */; };
 		A10000000000000000000612 /* A2UISwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000602 /* A2UISwiftUI */; };
 		A10000000000000000000613 /* BasicCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000603 /* BasicCatalog */; };
+		A10000000000000000000621 /* ChatLayout in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000622 /* ChatLayout */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,6 +107,7 @@
 				A10000000000000000000611 /* A2UISwiftCore in Frameworks */,
 				A10000000000000000000612 /* A2UISwiftUI in Frameworks */,
 				A10000000000000000000613 /* BasicCatalog in Frameworks */,
+				A10000000000000000000621 /* ChatLayout in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -174,6 +176,7 @@
 				A10000000000000000000601 /* A2UISwiftCore */,
 				A10000000000000000000602 /* A2UISwiftUI */,
 				A10000000000000000000603 /* BasicCatalog */,
+				A10000000000000000000622 /* ChatLayout */,
 			);
 			productName = Rome;
 			productReference = A10000000000000000000011 /* Rome.app */;
@@ -259,6 +262,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A10000000000000000000600 /* XCRemoteSwiftPackageReference "a2ui" */,
+				A10000000000000000000620 /* XCRemoteSwiftPackageReference "ChatLayout" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000003 /* Products */;
@@ -563,6 +567,14 @@
 				minimumVersion = 0.10.0;
 			};
 		};
+		A10000000000000000000620 /* XCRemoteSwiftPackageReference "ChatLayout" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ekazaev/ChatLayout";
+			requirement = {
+				kind = exactVersion;
+				version = 2.5.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -580,6 +592,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000600 /* XCRemoteSwiftPackageReference "a2ui" */;
 			productName = BasicCatalog;
+		};
+		A10000000000000000000622 /* ChatLayout */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000620 /* XCRemoteSwiftPackageReference "ChatLayout" */;
+			productName = ChatLayout;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

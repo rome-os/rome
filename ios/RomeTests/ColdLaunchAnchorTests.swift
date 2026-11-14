@@ -343,23 +343,39 @@ private struct AppearHost: View {
             store.stop()
         }
         try await Task.sleep(for: .milliseconds(800))
-        // On the bottom with older pages behind: nothing fetched yet.
-        let held = store.messages.count
-        #expect(store.hasOlder && held == TranscriptStore.pageSize)
+        #expect(store.hasOlder)
 
-        // Up to the top of what is held.
+        // Up to the top of what is held. The next older page waits in its
+        // fetch until the row in view is noted, then goes in above it.
+        let anchor = Anchor()
+        backend.duringOlderFetch = {
+            try? await Task.sleep(for: .milliseconds(300))
+            await MainActor.run {
+                anchor.id = seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key
+                anchor.y = anchor.id.flatMap { seen.frames[$0]?.minY }
+            }
+        }
         let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        let held = store.messages.count
+        // As a drag would: the list stops keeping the newest row in view.
+        scroll.delegate?.scrollViewWillBeginDragging?(scroll)
         scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
-        try await Task.sleep(for: .milliseconds(100))
-        let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
-        let before = try #require(seen.frames[anchorId]).minY
+        scroll.delegate?.scrollViewDidEndDragging?(scroll, willDecelerate: false)
 
         for _ in 0..<200 where store.messages.count == held { try await Task.sleep(for: .milliseconds(10)) }
         #expect(store.messages.count > held, "no older page came")
         try await Task.sleep(for: .milliseconds(600))
+        let anchorId = try #require(anchor.id)
+        let before = try #require(anchor.y)
         let after = try #require(seen.frames[anchorId]).minY
         #expect(abs(after - before) < 1, "\(anchorId) moved from \(before) to \(after)")
     }
+}
+
+@MainActor
+private final class Anchor {
+    var id: String?
+    var y: CGFloat?
 }
 
 /// A newest page that fits on one screen, with older pages behind it: no
@@ -396,15 +412,6 @@ private struct AppearHost: View {
         }
         for _ in 0..<200 where store.messages.count == TranscriptStore.pageSize { try await Task.sleep(for: .milliseconds(10)) }
         #expect(store.messages.count > TranscriptStore.pageSize, "no older page loaded under a short screen")
-    }
-
-    @Test func onlyAShortScreenWithOlderPagesAsks() {
-        typealias List = TranscriptList<EmptyView>
-        #expect(List.needsOlderToFill(hasOlder: true, rowsHeight: 300, visibleHeight: 640))
-        #expect(!List.needsOlderToFill(hasOlder: false, rowsHeight: 300, visibleHeight: 640))
-        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 2000, visibleHeight: 640))
-        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 300, visibleHeight: 0))
-        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 0, visibleHeight: 640))
     }
 }
 
