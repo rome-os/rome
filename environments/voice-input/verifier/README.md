@@ -26,7 +26,7 @@ The verifier scores voice input against rule set V5 (`~/.rome-environments/voice
 | --- | --- | --- |
 | `--phase <n>` | Every rule of phase `n` and of the phases before it | 1 |
 | `--rules <list>` | Only these rules, comma separated. A rule with no scenario yet is reported as not checked | |
-| `--place <name>` | Where to score: `chrome`, the dashboard in Chrome, or `desktop`, the Rome desktop app, started by `voice-env desktop` with the same options as `browser`. The report names the platform that ran; on the devbox that is Linux, and macOS is not checked by machine | `chrome` |
+| `--place <name>` | Where to score: `chrome`, the dashboard in Chrome, or `desktop`, the Rome desktop app, started by `voice-env desktop` with the same options as `browser`. The report names the platform that ran; on the devbox that is Linux, and macOS is not checked by machine. `phone` is the iOS app's audio path (leg A): the verifier signs in through the environment's browser and plays each recording to `/ws/voice-input` as the app does (16 kHz mono PCM in 100 ms frames after `start`, then `stop`), scoring rules 2, 3, 4, 10 and 11. Every other rule says the app's UI tests (leg B) or Ouou's hand checks (leg C) score it | `chrome` |
 | `--transcriber <mode>` | `real` or `stand-in` scores the product with that transcriber behind Rome. On `stand-in`, rules 2 and 3 are not checked, because the stand-in's text and timing are scripted. A provider name runs the comparison below instead | `real` |
 | `--dirty` | Run even though the code under test has uncommitted changes. The report says so | off |
 | `--voice-env "<command>"` | The `voice-env` command | `environments/voice-input/voice-env` |

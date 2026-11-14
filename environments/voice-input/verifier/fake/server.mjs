@@ -18,6 +18,7 @@
 //   fail-1   the field shows listening, and idle again, 800 ms after the action
 //   fail-9   the microphone stays open after listening stops, and silence never stops it
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import { basename } from "node:path";
 import { readState, updateState } from "./state.mjs";
 
@@ -36,6 +37,11 @@ export const VARIANTS = [
   "fail-9",
   "fail-1",
 ];
+
+// Rome's own WebSocket server, for the voice input socket the iOS app speaks.
+const { WebSocketServer } = createRequire(
+  new URL("../../../../packages/core/package.json", import.meta.url),
+)("ws");
 
 /** The dashboard's chats; the page opens on the first. */
 const CHATS = ["c1", "c2"];
@@ -77,6 +83,11 @@ function voiceOffered(state) {
 /** Starts the stand-in on a free port. Resolves to `{ url, close }`. */
 export async function startStandIn({ statePath, script }) {
   const server = createServer((req, res) => handle(req, res, statePath, script));
+  const sockets = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (req, socket, head) => {
+    if (new URL(req.url, "http://stand-in").pathname !== "/ws/voice-input") return socket.destroy();
+    sockets.handleUpgrade(req, socket, head, (ws) => voiceSocket(ws, statePath, script));
+  });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
   return {
@@ -247,6 +258,79 @@ function listen(req, res, statePath, script) {
     clearInterval(watch);
     timers.forEach((t) => t && clearTimeout(t));
   });
+}
+
+/**
+ * The voice input socket the iOS app speaks: `start`, PCM frames, `stop`; answers `text`
+ * (`settled` appended, `pending` replaced), `alive` every second, then `ended` and a usage
+ * event for the seconds of audio it got. Words follow the recording's times from `start`, and
+ * the variants break it as they break the dashboard.
+ */
+function voiceSocket(ws, statePath, script) {
+  const state = readState(statePath);
+  const out = (event) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(event));
+  if (!voiceOffered(state)) {
+    out({ type: "error", reason: "service-refused" });
+    return ws.close();
+  }
+  updateState(statePath, (s) => {
+    if (!s.capturing) return;
+    const host = s.variant === "fail-10" ? "api.elsewhere.example" : PLACE.host;
+    s.captured.push({ side: "server", to: host, host });
+  });
+  const message = [...script.messages, ...(script.longs ?? [])].find(
+    (m) => basename(m.path) === basename(state.mic ?? ""),
+  );
+  const text = !message
+    ? ""
+    : state.transcriber.mode === "real"
+      ? message.text
+      : state.transcriber.text;
+  const pieces = split(state.variant === "fail-3" ? garble(text) : text) ?? [];
+  let sent = 0;
+  let bytes = 0;
+  const timers = [setInterval(() => out({ type: "alive" }), 1000)];
+  const settle = (upTo) => {
+    if (upTo <= sent) return;
+    out({ type: "text", settled: pieces.slice(sent, upTo).join(""), pending: "" });
+    sent = upTo;
+  };
+  ws.on("message", (data, isBinary) => {
+    if (isBinary) {
+      bytes += data.length;
+      return;
+    }
+    const m = JSON.parse(String(data));
+    if (m.type === "start" && message) {
+      const first = message.firstWordAt + 0.3;
+      const last = message.lastWordAt + 0.4;
+      pieces.forEach((_, i) => {
+        const at = pieces.length === 1 ? last : first + ((last - first) * i) / (pieces.length - 1);
+        if (state.variant === "fail-2") return;
+        if (state.variant === "fail-4" && (at > 90 || i > (pieces.length * 2) / 3)) return;
+        timers.push(setTimeout(() => settle(i + 1), at * 1000));
+      });
+    } else if (m.type === "stop") {
+      if (state.variant === "fail-2") settle(pieces.length);
+      const seconds = bytes / 32000;
+      updateState(statePath, (s) => {
+        const sessionId = crypto.randomUUID();
+        s.cloud.usage.push({
+          eventId: sessionId,
+          sessionId,
+          provider: "soniox",
+          model: "stt-rt-v6",
+          seconds: s.variant === "fail-11" ? seconds / 2 : seconds,
+          at: new Date().toISOString(),
+        });
+        s.logs ??= [];
+        s.logs.push({ message: "voice input stopped", data: { sessionId, outcome: "ended" } });
+      });
+      out({ type: "ended" });
+      ws.close();
+    }
+  });
+  ws.on("close", () => timers.forEach((t) => clearTimeout(t)));
 }
 
 /** Words with their following space for spaced text, else single characters. */

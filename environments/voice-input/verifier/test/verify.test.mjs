@@ -54,6 +54,9 @@ function shortScript(dir) {
     .map((m) => ({ ...m, firstWordAt: 0.2, lastWordAt: 0.6 }));
   // The long messages keep their text and sentences, spoken over 3 s instead of 3 minutes.
   const short = (m) => m && { ...m, firstWordAt: 0.2, lastWordAt: 3, seconds: 4 };
+  // The stand-in product hears nothing, but the iOS audio path reads each recording to play it.
+  for (const m of [...messages, real.long, real.longs.find((l) => l.set === "B")])
+    if (m) writeFileSync(join(dir, m.wav), silentWav(1));
   writeFileSync(
     join(dir, "manifest.json"),
     JSON.stringify({
@@ -64,6 +67,25 @@ function shortScript(dir) {
     }),
   );
   return loadScript(dir);
+}
+
+/** `seconds` of 16 kHz mono 16-bit silence as a WAV file. */
+function silentWav(seconds) {
+  const bytes = 16000 * 2 * seconds;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + bytes, 4);
+  header.write("WAVEfmt ", 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(16000, 24);
+  header.writeUInt32LE(32000, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(bytes, 40);
+  return Buffer.concat([header, Buffer.alloc(bytes)]);
 }
 
 const WAITS = { afterSpeechMs: 2200, sendCheckMs: 300, sendMs: 3000, steadyMs: 300 };
@@ -116,6 +138,38 @@ describe("verify against the stand-in product", { concurrency: 3, timeout: 60000
       assert.deepEqual(
         statuses(report),
         Object.fromEntries(rules.map((r) => [r, broken.includes(r) ? "fail" : "pass"])),
+        JSON.stringify(
+          report.results.map((r) => [r.rule, r.reason]),
+          null,
+          1,
+        ),
+      );
+    });
+  }
+
+  // Leg A scores rules 2, 3, 4, 10 and 11 over the iOS app's audio path; each variant that
+  // breaks one of them through the socket must fail it there too.
+  const LEG_A = ["2", "3", "4", "10", "11"];
+  for (const variant of [
+    "good",
+    "fail-2",
+    "fail-3",
+    "fail-4",
+    "fail-10",
+    "fail-11",
+    "fail-11g",
+    "fail-11s",
+  ]) {
+    it(`scores ${variant} on the iOS audio path`, async () => {
+      const broken = variant === "good" ? [] : [variant.slice("fail-".length).replace(/\D+$/, "")];
+      const rules = variant === "good" ? LEG_A : broken;
+      const { report } = await runAgainst(variant, { place: "phone", rules: [...rules, "1"] });
+      assert.deepEqual(
+        statuses(report),
+        Object.fromEntries([
+          ...rules.map((r) => [r, broken.includes(r) ? "fail" : "pass"]),
+          ["1", "not_checked"],
+        ]),
         JSON.stringify(
           report.results.map((r) => [r.rule, r.reason]),
           null,
