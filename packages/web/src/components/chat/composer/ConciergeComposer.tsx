@@ -615,6 +615,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     value={inputText}
                     onChange={(event) => {
                       if (uploadInFlightRef.current) return;
+                      voice.noticeEdited();
                       setInputText(event.target.value);
                       reevaluateSlashContext(event.target.value, event.target.selectionEnd);
                     }}

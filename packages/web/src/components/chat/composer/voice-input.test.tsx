@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { VoiceInputInfo } from "@rome/api-types/voice-input";
@@ -463,6 +464,21 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
       ),
     );
     expect(FakeSocket.last).toBeNull();
+  });
+
+  it("lets the first typed character through while it clears a notice", async () => {
+    microphone.refuse = true;
+    const { field, onSend } = renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    await screen.findByRole("status");
+
+    const user = userEvent.setup();
+    await user.type(field(), "A");
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.type(field(), "bc{Enter}");
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "Abc" });
   });
 });
 
