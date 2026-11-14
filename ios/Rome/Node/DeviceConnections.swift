@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 // This phone's device connections, one per capability ("Apple Health ·
 // iPhone"), as the open Rome is told of them. Connections know nothing of
@@ -57,6 +58,20 @@ enum DeviceConnectLink {
         guard !id.isEmpty, !id.contains("/") else { return nil }
         return id
     }
+}
+
+/// A card's way into the app's own authorization: for a device connection's
+/// link, whether it was connected; nil for any other link, which opens as a page.
+@MainActor
+final class DeviceConnectAction {
+    let run: @MainActor (URL) async -> Bool?
+
+    init(_ run: @escaping @MainActor (URL) async -> Bool?) { self.run = run }
+}
+
+extension EnvironmentValues {
+    /// Set by the shell; a card drawn anywhere else opens every link as a page.
+    @Entry var connectDevice: DeviceConnectAction? = nil
 }
 
 /// A card asked to connect a capability: the app shows its authorization,

@@ -145,6 +145,7 @@ struct MainShell: View {
                 }
                 .environment(\.chatLinkOpener, actions.linkOpener)
                 .environment(\.openUsage, actions.openUsage)
+                .environment(\.connectDevice, model.deviceConnectAction)
                 .environment(\.openTaskChat, actions.openTaskChat)
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
@@ -191,6 +192,7 @@ struct MainShell: View {
             .environment(\.chatLinkOpener, actions.linkOpener)
             // Settings is a sheet of this view: the cover closes first.
             .environment(\.openUsage, actions.openUsageFromCover)
+            .environment(\.connectDevice, model.deviceConnectAction)
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))

@@ -26,7 +26,7 @@ struct WidgetUICardView: View {
 
     @StateObject private var surface = WidgetSurface()
     @Environment(\.openURL) private var openURL
-    @Environment(AppModel.self) private var model
+    @Environment(\.connectDevice) private var connectDevice
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -75,11 +75,8 @@ struct WidgetUICardView: View {
         .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
         .task(id: part) {
             surface.answered = waiting?.answered != nil
-            surface.show(part, call: call, press: press, open: { openURL($0) }, connectDevice: { [model] url in
-                // A device connection's link is this app's own authorization, not a page.
-                // A visitor's Rome cannot reach this phone: the link stays a page.
-                guard model.workspace?.isVisitor != true, let id = DeviceConnectLink.capability(in: url, origin: model.webURL) else { return nil }
-                return await model.connections.ask(id)
+            surface.show(part, call: call, press: press, open: { openURL($0) }, connectDevice: { [connectDevice] url in
+                await connectDevice?.run(url)
             })
             surface.showAnswered(waiting?.answered)
             await surface.load()

@@ -713,6 +713,13 @@ final class AppModel {
     let health: HealthSettings
     /// This phone's device connections, reported to the open Rome.
     let connections: DeviceConnections
+    /// A connect card's link into the authorization, for the shell to hand its cards.
+    @ObservationIgnored private(set) lazy var deviceConnectAction = DeviceConnectAction { @MainActor [weak self] url in
+        // A device connection's link is this app's own authorization, not a page.
+        // A visitor's Rome cannot reach this phone: the link stays a page.
+        guard let self, self.workspace?.isVisitor != true, let id = DeviceConnectLink.capability(in: url, origin: self.webURL) else { return nil }
+        return await self.connections.ask(id)
+    }
     /// The workspace whose start has run on a good session: reports go only to it.
     @ObservationIgnored private weak var reportsTo: Workspace?
     /// Settings opened at these pages, as a tapped "sign in again" notice asks.
