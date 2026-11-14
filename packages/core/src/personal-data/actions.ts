@@ -14,7 +14,8 @@ export const PERSONAL_DATA_QUERY_ACTION = "core:personal_data_query";
 
 const CONNECTION =
   "Where the stored data does not cover the window, the reply's connection names the device " +
-  "connection that reads the rest live, with its state, or not_connected.";
+  "connection that reads the rest live, with its state, or not_connected, and, when it cannot " +
+  "read it now, a next step to take in the same reply.";
 
 export interface PersonalDataActionDeps {
   personalData: PersonalDataRepository;

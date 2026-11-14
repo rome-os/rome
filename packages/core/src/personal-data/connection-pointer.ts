@@ -19,6 +19,8 @@ export const NO_CONNECTIONS: ConnectionLookup = {
 export type ConnectionPointer =
   | {
       id: string;
+      /** The connection's capability, the kind `connect_account` takes for it. */
+      kind: string;
       title: string;
       device: { id: string; name: string | null };
       /** `working`, `off` (Live access is off) or `broken` (permission denied). */
@@ -48,9 +50,44 @@ export function connectionPointer(
   if (!connection) return NOT_CONNECTED;
   return {
     id: connection.id,
+    kind: connection.capability,
     title: connection.title,
     device: { id: connection.device.id, name: connection.device.name },
     state: connection.state,
     lastSeenAt: connection.lastSeenAt,
   };
+}
+
+/**
+ * What the Agent does in the reply that found the gap, when the connection
+ * cannot read it now. The query carries it so the step does not hang on prompt
+ * prose alone; the catalog lists the pointer without it.
+ */
+export function withNextStep(pointer: ConnectionPointer): ConnectionPointer & { next?: string } {
+  const fresh = "In this same reply, answer from the stored data and say how fresh it is";
+  if (pointer.state === "not_connected") {
+    return {
+      ...pointer,
+      next: `${fresh}, then ask the guardian to connect it in the Rome app on their device.`,
+    };
+  }
+  const on = pointer.device.name ? `${pointer.title} on ${pointer.device.name}` : pointer.title;
+  if (pointer.state === "off") {
+    return {
+      ...pointer,
+      next:
+        `Live access to ${on} is off. ${fresh}, then offer to turn it on: show the card with ` +
+        `connect_account and kind "${pointer.kind}" when connect_account lists it, otherwise ` +
+        "ask the guardian to turn on Live access in the Rome app on their device.",
+    };
+  }
+  if (pointer.state === "broken") {
+    return {
+      ...pointer,
+      next:
+        `The device's permission for ${on} is denied. ${fresh}, then ask the guardian to ` +
+        "allow it in the device's settings.",
+    };
+  }
+  return pointer;
 }

@@ -83,7 +83,7 @@ describe("personal-data actions", () => {
     const before = await engine.run("core:personal_data_query", today, { audience: "private" });
     expect(before).toMatchObject({
       status: "ok",
-      data: { connection: { state: "not_connected" } },
+      data: { connection: { state: "not_connected", next: expect.stringContaining("Rome app") } },
     });
     devices.report(
       {
@@ -183,10 +183,26 @@ describe("personal-data actions", () => {
         sources: [{ source: "apple_health", types: [], connection: { id: "dev-1:apple_health" } }],
       },
     });
+    // A working connection is read live, with no step to take instead.
+    const working = (await query()) as { data: { connection: Record<string, unknown> } };
+    expect(working.data.connection.next).toBeUndefined();
     reportHealth("unknown", false);
-    expect(await query()).toMatchObject({ data: { connection: { state: "off" } } });
+    const off = (await query()) as { data: { connection: { next?: string } } };
+    expect(off).toMatchObject({ data: { connection: { state: "off", kind: "apple_health" } } });
+    expect(off.data.connection.next).toContain('connect_account and kind "apple_health"');
     reportHealth("denied", true);
-    expect(await query()).toMatchObject({ data: { connection: { state: "broken" } } });
+    const broken = (await query()) as { data: { connection: { next?: string } } };
+    expect(broken).toMatchObject({ data: { connection: { state: "broken" } } });
+    expect(broken.data.connection.next).toContain("device's settings");
+    // The catalog lists the pointer, and leaves the step to the query that found the gap.
+    const catalog = (await engine.run(
+      "core:personal_data_catalog",
+      {},
+      { audience: "private" },
+    )) as {
+      data: { sources: { connection: Record<string, unknown> }[] };
+    };
+    expect(catalog.data.sources[0].connection.next).toBeUndefined();
   });
 
   it("returns a query it cannot answer as an error the Agent reads", async () => {

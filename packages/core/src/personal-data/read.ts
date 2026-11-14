@@ -20,6 +20,7 @@ import {
   type ConnectionLookup,
   type ConnectionPointer,
   connectionPointer,
+  withNextStep,
   NO_CONNECTIONS,
 } from "./connection-pointer.js";
 
@@ -45,9 +46,10 @@ export interface QueryAnswer {
   freshness: Record<string, Freshness>;
   /**
    * When the store does not cover the window for some type: the device
-   * connection that can read the rest live, or that none can.
+   * connection that can read the rest live, or that none can, and, when it
+   * cannot now, the step the Agent takes in the same reply.
    */
-  connection?: ConnectionPointer;
+  connection?: ConnectionPointer & { next?: string };
 }
 
 interface ListedRecords {
@@ -120,10 +122,12 @@ export function queryPersonalData(
     freshness,
     ...(gapOrigin !== undefined
       ? {
-          connection: connectionPointer(
-            source.source,
-            repo.connectionIdOf(source.source, gapOrigin ?? undefined),
-            connections,
+          connection: withNextStep(
+            connectionPointer(
+              source.source,
+              repo.connectionIdOf(source.source, gapOrigin ?? undefined),
+              connections,
+            ),
           ),
         }
       : {}),
