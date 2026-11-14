@@ -96,8 +96,8 @@ export function simulatedTypingMs(message: ChatMessage): number {
 
 /**
  * Whether the Concierge chat shows its typing dots: the Concierge is writing
- * a message (docs/domains/chats.md#status-reaction). The owner's message it
- * took shows 👀 for having started; the dots say a message is coming. The
+ * a message (docs/domains/chats.md#reaction). A reaction on the owner's
+ * message says the Concierge heard it; the dots say a message is coming. The
  * server says how the running turn shows them (`live.writing`):
  * - `exact`, where the provider says when it writes a message: while it does.
  * - `simulated`, where it cannot: while a message that just landed is held

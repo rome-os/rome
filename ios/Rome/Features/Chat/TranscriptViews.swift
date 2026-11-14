@@ -94,8 +94,8 @@ struct UserBubble: View {
     /// Removes a send that cannot go through; nil leaves it out.
     var onDelete: (() -> Void)? = nil
     var menu = BubbleMenu()
-    /// Rome's mark on the message: being worked on, or failed.
-    var mark: StatusMark? = nil
+    /// The Concierge's reaction on the message, drawn as the server sends it.
+    var mark: String? = nil
     /// What the message replies to, quoted at the top of the bubble.
     var quote: MessagePart.ReplyQuote? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
@@ -142,7 +142,7 @@ struct UserBubble: View {
                             .bubbleMenu(text: text, menu: bubbleMenu)
                     }
                 }
-                // The mark sits on the top leading corner of the bubble, or of the
+                // The reaction sits on the top leading corner of the bubble, or of the
                 // photos, over the corner and clear of the first line's start.
                 .overlay(alignment: .topLeading) {
                     if let mark {

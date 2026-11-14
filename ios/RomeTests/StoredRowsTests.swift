@@ -151,11 +151,11 @@ private func message(
         #expect(info("u2:1").quoteLeads)
         #expect(info("u3:1").quote?.messageId == "gone")
         #expect(!info("u3:1").quoteLeads)
-        // Rome's mark follows the event.
+        // The reaction follows the event.
         #expect(info("u1:0").mark == nil)
-        let mark = LiveEvent.statusReaction(sessionId: "concierge", messageId: "u1", reaction: "working")
+        let mark = LiveEvent.reaction(sessionId: "concierge", messageId: "u1", reaction: "👀")
         backend.bus.emit(LiveTopic.chat("concierge"), mark)
-        #expect(info("u1:0").mark == .working)
+        #expect(info("u1:0").mark == "👀")
         store.stop()
     }
 

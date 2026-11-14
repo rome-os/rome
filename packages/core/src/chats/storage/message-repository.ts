@@ -331,6 +331,22 @@ export class MessageRepository {
   }
 
   /**
+   * React to the message keyed `key` in `chat` with `reaction`, or with null
+   * clear its reaction. One message holds one reaction, so a new one replaces
+   * it. Answers whether Rome holds the message.
+   */
+  setReaction(chat: ChatRef, key: string, reaction: string | null): boolean {
+    return (
+      this.db
+        .update(chatMessages)
+        .set({ reaction })
+        .where(and(sql`${chatMessages.chatId} = ${chatIdOf(chat)}`, eq(chatMessages.key, key)))
+        .returning({ id: chatMessages.id })
+        .all().length > 0
+    );
+  }
+
+  /**
    * Make the message keyed `key` in `chat` the root of its own chat thread,
    * for good, when it is in none. Answers whether it was in none.
    */

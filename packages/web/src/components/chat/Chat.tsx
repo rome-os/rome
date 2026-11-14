@@ -123,10 +123,10 @@ import {
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ChatThreadView, useThreadTaskChat } from "@/components/chat/ChatThreadView";
 import {
-  type LiveStatusReactions,
-  LiveStatusReactionsProvider,
-  messageStatusReactionSchema,
-} from "@/components/chat/status-reaction";
+  type LiveReactions,
+  LiveReactionsProvider,
+  messageReactionSchema,
+} from "@/components/chat/reaction";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
 import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-unread";
@@ -306,8 +306,8 @@ interface ChatSessionEventsProps {
   /** The Concierge placed a message of the chat in a chat thread. */
   onMessageChatThread?: (event: z.infer<typeof messageChatThreadSchema>) => void;
   onChatThreadRetired?: (event: z.infer<typeof chatThreadRetiredSchema>) => void;
-  /** Rome changed the status reaction on a guardian message of a Concierge chat. */
-  onMessageStatusReaction?: (event: z.infer<typeof messageStatusReactionSchema>) => void;
+  /** The Concierge changed the reaction on a guardian message of its chat. */
+  onMessageReaction?: (event: z.infer<typeof messageReactionSchema>) => void;
   /** A question or approval a task card shows settled. */
   onChatCardSettled?: (event: z.infer<typeof chatCardSettledSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
@@ -322,7 +322,7 @@ function ChatSessionEvents({
   onMessageInsert,
   onMessageChatThread,
   onChatThreadRetired,
-  onMessageStatusReaction,
+  onMessageReaction,
   onChatCardSettled,
   onSessionName,
   onSessionRunning,
@@ -352,10 +352,10 @@ function ChatSessionEvents({
           if (event.sessionId === sessionId) onChatThreadRetired?.(event);
         },
       },
-      message_status_reaction: {
-        schema: messageStatusReactionSchema,
+      message_reaction: {
+        schema: messageReactionSchema,
         fn: (event) => {
-          if (event.sessionId === sessionId) onMessageStatusReaction?.(event);
+          if (event.sessionId === sessionId) onMessageReaction?.(event);
         },
       },
       chat_card_settled: {
@@ -624,12 +624,12 @@ export function Chat({
     },
     [],
   );
-  // Status reactions live events changed since the messages loaded. A
+  // Reactions live events changed since the messages loaded. A
   // reconnect reloads the messages, which then say how each stands.
-  const [liveReactions, setLiveReactions] = useState<LiveStatusReactions>(new Map());
-  const handleMessageStatusReaction = useCallback(
-    ({ messageId, statusReaction }: z.infer<typeof messageStatusReactionSchema>) =>
-      setLiveReactions((prev) => new Map(prev).set(messageId, statusReaction)),
+  const [liveReactions, setLiveReactions] = useState<LiveReactions>(new Map());
+  const handleMessageReaction = useCallback(
+    ({ messageId, reaction }: z.infer<typeof messageReactionSchema>) =>
+      setLiveReactions((prev) => new Map(prev).set(messageId, reaction)),
     [],
   );
   // How each chat's running turn shows the typing dots, its latest word.
@@ -2672,7 +2672,7 @@ export function Chat({
             onMessageInsert={handleMessageInsert}
             onMessageChatThread={handleMessageChatThread}
             onChatThreadRetired={handleChatThreadRetired}
-            onMessageStatusReaction={handleMessageStatusReaction}
+            onMessageReaction={handleMessageReaction}
             onChatCardSettled={handleChatCardSettled}
             onSessionName={handleSessionName}
             onSessionRunning={handleSessionRunning}
@@ -3085,9 +3085,9 @@ export function Chat({
   return (
     <ReplyDraftProvider value={replyDraft}>
       <MessageSharingContext.Provider value={shareMessageTurn}>
-        <LiveStatusReactionsProvider value={liveReactions}>
+        <LiveReactionsProvider value={liveReactions}>
           <LiveTaskCardsProvider value={liveCards}>{page}</LiveTaskCardsProvider>
-        </LiveStatusReactionsProvider>
+        </LiveReactionsProvider>
       </MessageSharingContext.Provider>
     </ReplyDraftProvider>
   );

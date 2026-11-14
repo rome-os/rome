@@ -119,13 +119,13 @@ interface ChatRows {
   turns: TurnRow[];
   speaking: { turn_id: string }[];
   models: { model: string }[];
-  linked: { message_key: string }[];
+  reacted: { message_key: string }[];
   taskChats: { session_id: string }[];
   chatId: string;
 }
 
 function readChat(chatId: string): ChatRows {
-  const [messages, turns, speaking, models, linked, taskChats] = stack.query([
+  const [messages, turns, speaking, models, reacted, taskChats] = stack.query([
     {
       sql: `SELECT m.key, m.sender_agent, m.text, m.parts, m.said_at, m.chat_thread_id
             FROM chat_messages m JOIN chats c ON c.id = m.chat_id
@@ -147,7 +147,11 @@ function readChat(chatId: string): ChatRows {
             FROM sessions WHERE chat_id = ?`,
       params: [chatId],
     },
-    { sql: "SELECT message_key FROM concierge_message_tasks WHERE chat_id = ?", params: [chatId] },
+    {
+      sql: `SELECT m.key AS message_key FROM chat_messages m JOIN chats c ON c.id = m.chat_id
+            WHERE c.platform = 'webchat' AND c.key = ? AND m.reaction IS NOT NULL`,
+      params: [chatId],
+    },
     {
       sql: "SELECT session_id FROM concierge_tasks WHERE chat_id = ? AND session_id IS NOT NULL",
       params: [chatId],
@@ -158,7 +162,7 @@ function readChat(chatId: string): ChatRows {
     turns: turns as unknown as TurnRow[],
     speaking: speaking as unknown as { turn_id: string }[],
     models: models as unknown as { model: string }[],
-    linked: linked as unknown as { message_key: string }[],
+    reacted: reacted as unknown as { message_key: string }[],
     taskChats: taskChats as unknown as { session_id: string }[],
     chatId,
   };
@@ -245,9 +249,9 @@ function checksFor(
     for (const r of missing) notes.push(`no result matched ${r}`);
   }
 
-  const linked = new Set(rows.linked.map((l) => l.message_key));
+  const reacted = new Set(rows.reacted.map((r) => r.message_key));
   for (const owner of rows.messages.filter(isOwnerMessage)) {
-    const heard = linked.has(owner.key) || concierge.some((m) => m.said_at >= owner.said_at);
+    const heard = reacted.has(owner.key) || concierge.some((m) => m.said_at >= owner.said_at);
     if (!heard) {
       checks.nothingDropped = false;
       notes.push(`owner message unanswered: ${owner.text.slice(0, 60)}`);

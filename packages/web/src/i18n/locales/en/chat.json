@@ -107,10 +107,7 @@
         "tidyingUp": "Tidying up context"
       }
     },
-    "statusReaction": {
-      "working": "Working on it",
-      "failed": "Did not finish"
-    },
+    "reaction": "Reaction",
     "taskList": {
       "title": "Tasks",
       "close": "Close tasks",

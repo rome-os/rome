@@ -456,10 +456,10 @@ const transcripts: Record<string, ChatMessage[]> = {
       createdAt: "2026-08-07T13:02:01.000Z",
     },
     // The owner's latest message, which the Concierge is still working on: it
-    // carries the working status reaction, as a live turn sets it.
+    // carries the 👀 reaction, as a live turn sets it with `react`.
     {
       ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T13:05:00.000Z", "Book the 9:40 one", [])[0]!,
-      statusReaction: "working",
+      reaction: "👀",
     },
   ],
   // The task chat the conclusion above came from: the full answer, then its conclusion.

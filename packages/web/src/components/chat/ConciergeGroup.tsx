@@ -5,7 +5,7 @@ import Markdown from "@/components/chat/ChatMarkdown";
 import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleContent";
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
-import { StatusReactionBadge, useStatusReaction } from "@/components/chat/status-reaction";
+import { ReactionBadge, useReaction } from "@/components/chat/reaction";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
@@ -18,8 +18,8 @@ import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
-// Room every guardian bubble keeps above it for its status reaction, whose
-// badge stands 14px above the bubble's top-left corner (status-reaction.tsx).
+// Room every guardian bubble keeps above it for its reaction, whose badge
+// stands 14px above the bubble's top-left corner (reaction.tsx).
 // With the group's 8px gap it leaves 10px clear of the message above, its
 // shadow included. It is there whether or not a mark shows, so nothing moves
 // when one comes or goes.
@@ -30,7 +30,7 @@ const GUARDIAN_BUBBLE_GAP = "mt-4";
 const GuardianBubble = memo(
   function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
-    const reaction = useStatusReaction(msg);
+    const reaction = useReaction(msg);
     // The bubble is a direct child of the group, so its width cap is a share
     // of the column, as the agent's is.
     return (
@@ -59,7 +59,7 @@ const GuardianBubble = memo(
           msg={msg}
           text={text}
           own
-          badge={<StatusReactionBadge reaction={reaction} />}
+          badge={<ReactionBadge reaction={reaction} />}
         />
       </ConciergeBubble>
     );
@@ -68,7 +68,7 @@ const GuardianBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.inputState === next.msg.inputState &&
-    prev.msg.statusReaction === next.msg.statusReaction &&
+    prev.msg.reaction === next.msg.reaction &&
     prev.arrival === next.arrival,
 );
 

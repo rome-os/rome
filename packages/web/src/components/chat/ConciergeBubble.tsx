@@ -49,7 +49,7 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  * message every bubble of a message belongs to, so landing on the message
  * tints all of them. `arrival` marks a bubble
  * that enters while the chat is open. `className` adds to the outer box, as
- * the room a guardian bubble keeps above it for its status reaction.
+ * the room a guardian bubble keeps above it for its reaction.
  */
 export const ConciergeBubble = memo(function ConciergeBubble({
   side,

@@ -48,6 +48,24 @@ describe("the Concierge agent", () => {
     expect(prompt).not.toContain("Do what it asks as the guardian's standing request");
   });
 
+  it("handles each guardian message in one way: a reply, a 👀 with a task, a card, or only a reaction", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(prompt).toContain("# Handling a guardian message");
+    expect(prompt).toContain("Handle each guardian message in exactly one of these ways:");
+    expect(prompt).toContain("Start a task with `card: true`, with no text and no reaction");
+    expect(prompt).toContain("never 👀 together with a card");
+    expect(prompt).toContain("A turn that only reacts is silent.");
+    expect(prompt).toContain("👍 for a plain yes or an instruction you only need to note");
+    // The memory-note example is gone: the Concierge may say what it noted.
+    expect(prompt).not.toContain("such as noting something in memory");
+    // A result clears the 👀, and a stop clears it too; Rome no longer marks a message itself.
+    expect(prompt).toContain("`react` with `emoji: null` and that message's id");
+    expect(prompt).toContain("clear the 👀 on the message the task was for, and react 👍");
+    expect(prompt).not.toContain("Rome marks the message");
+    expect(prompt).not.toContain("confirm in one bubble");
+    expect(prompt).not.toContain("Set `card: true` only when the guardian asks");
+  });
+
   it("makes recurring work a scheduled task, never a routine posting into this chat", () => {
     const prompt = concierge.systemPromptPrefix;
     expect(prompt).toContain("is a scheduled task: `chat_start` with a `schedule`");
@@ -248,12 +266,15 @@ describe("the Concierge agent", () => {
     expect(concierge.systemPromptPrefix).not.toContain("Each message can ring their phone");
   });
 
-  it("shows a task card only when the guardian asks for one", () => {
+  it("shows a task card for long, detailed or multi-round work, or when the guardian asks, with no 👀", () => {
     const rule =
       concierge.systemPromptPrefix
         .split("\n")
-        .find((line) => line.startsWith("- Start a task whenever the work needs one")) ?? "";
-    expect(rule).toContain("Set `card: true` only when the guardian asks to see or watch the task");
+        .find((line) => line.startsWith("- Start a task with `card: true`")) ?? "";
+    expect(rule).toContain("with no text and no reaction");
+    expect(rule).toContain("long work with many details");
+    expect(rule).toContain("several rounds");
+    expect(rule).toContain("whenever they ask to see or watch it");
     expect(rule).not.toContain("complex or long-running");
   });
 

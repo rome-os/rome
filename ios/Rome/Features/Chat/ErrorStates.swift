@@ -339,30 +339,16 @@ struct NoticeLine: View {
     }
 }
 
-/// Rome's mark on a guardian message: it is being worked on, or it failed.
-enum StatusMark: String, Hashable, Sendable {
-    case working, failed
-
-    var emoji: String { self == .working ? "👀" : "⚠️" }
-
-    var label: String {
-        switch self {
-        case .working: return String(localized: "Working on it")
-        case .failed: return String(localized: "Didn't finish")
-        }
-    }
-}
-
-/// The mark's round badge, a nod to a tapback on a bubble's corner: the emoji
-/// on a quiet surface, and one small dot trailing off down and out, as a
+/// The reaction's round badge, a nod to a tapback on a bubble's corner: the
+/// emoji the Concierge reacted with, whatever string the server sends, on a quiet surface, and one small dot trailing off down and out, as a
 /// thought bubble does. It is drawn about its own center, so the bubble's
 /// overlay sets where that center sits.
 struct StatusMarkBadge: View {
     static let size: CGFloat = 30
-    let mark: StatusMark
+    let mark: String
 
     var body: some View {
-        Text(mark.emoji)
+        Text(mark)
             .romeFont(16)
             .frame(width: Self.size, height: Self.size)
             .background(Palette.markFill, in: Circle())
@@ -376,7 +362,7 @@ struct StatusMarkBadge: View {
                     .offset(x: -Self.size * 0.48, y: Self.size * 0.48)
             }
             .accessibilityElement()
-            .accessibilityLabel(mark.label)
+            .accessibilityLabel(mark)
     }
 }
 
