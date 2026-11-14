@@ -73,6 +73,7 @@ export async function verify({
   outDir,
   log,
   environmentDir,
+  secondsRepeats,
 }) {
   const startedAt = new Date();
   // The environment's own `version` names the commit its containers were built from; its
@@ -90,7 +91,7 @@ export async function verify({
   const dir = outDir ?? join(runsDir ?? DEFAULT_RUNS_DIR, `${stamp}-${productCommit}`);
 
   const wanted = selectRules({ rules, phase });
-  const ctx = { env, script, transcriber, waits, memo: {}, log };
+  const ctx = { env, script, transcriber, waits, secondsRepeats, memo: {}, log };
   if (PLACES.includes(place)) await env.reset();
   const results = [];
   try {

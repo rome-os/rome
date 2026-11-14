@@ -17,6 +17,8 @@ import { browserLanguage } from "../lib/script.mjs";
 
 /** How far Rome Cloud's seconds may be from the recording's length, as a fraction of it. */
 export const SECONDS_TOLERANCE = 0.1;
+/** Listening sessions whose seconds are checked; every one must be within the tolerance. */
+export const SECONDS_REPEATS = 5;
 /** How long Rome Cloud has to show the usage event after listening stops. */
 const USAGE_WAIT_MS = 60000;
 /** Rome caches what Rome Cloud says about voice input for 60 s, so a gate change shows within this. */
@@ -197,22 +199,67 @@ async function gateOn(ctx, message) {
     await env.transcriber({ mode: "stand-in", text: message.text });
   else await useTranscriber(ctx);
 
+  const repeats = ctx.secondsRepeats ?? SECONDS_REPEATS;
+  const checks = [];
+  // The first session follows the gate switch straight away; the rest follow one another.
+  for (let i = 1; i <= repeats; i++) {
+    const session = await dictate(ctx, message);
+    if (!session.shown)
+      return [
+        ...checks,
+        required(
+          check("gate on: voice control shown", "fail", "the message field shows no voice control"),
+        ),
+      ];
+    if (i === 1)
+      checks.push(
+        required(
+          check(
+            "gate on: text appears with no credential in the instance",
+            session.heard.trim() ? "pass" : "fail",
+            session.heard.trim()
+              ? `the field shows "${session.heard}" for ${message.key}`
+              : `the field stayed empty for ${message.key}`,
+            [message.key],
+          ),
+        ),
+      );
+    const { seconds, listened, romeLog } = session;
+    const off =
+      seconds === undefined ? null : Math.abs(seconds - message.seconds) / message.seconds;
+    const within = off !== null && off <= SECONDS_TOLERANCE;
+    checks.push(
+      required(
+        check(
+          `gate on: Rome Cloud records the seconds, session ${i} of ${repeats}${i === 1 ? ", straight after the gate switch" : ""}`,
+          within ? "pass" : "fail",
+          seconds === undefined
+            ? `Rome Cloud shows no new usage within ${USAGE_WAIT_MS / 1000} s of listening stopping`
+            : `Rome Cloud records ${seconds} s for a ${message.seconds} s recording (${Math.round(off * 100)}% off); listening lasted ${listened.toFixed(1)} s`,
+          [message.key, ...romeLog],
+        ),
+      ),
+    );
+    // An intermittent pass is a fail, so the first miss settles it.
+    if (!within) break;
+  }
+  return checks;
+}
+
+/**
+ * One listening session over the whole recording: what the field shows, how long listening
+ * lasted, the seconds Rome Cloud records, and Rome's own log entry for the session.
+ */
+async function dictate(ctx, message) {
+  const { env } = ctx;
   const usageBefore = (await env.cloudUsage()).events.length;
-  const opened = await openPage(env, {
-    mic: message.path,
-    language: browserLanguage(message),
-  });
+  const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
   let listened;
   let heard;
   try {
     const { page } = opened;
     const form = await voiceForm(page).catch(() => null);
-    if (!form)
-      return [
-        required(
-          check("gate on: voice control shown", "fail", "the message field shows no voice control"),
-        ),
-      ];
+    if (!form) return { shown: false };
     await recordField(form.field, form.control);
     const startedAt = await pageNow(page);
     await form.control.click();
@@ -226,20 +273,6 @@ async function gateOn(ctx, message) {
   } finally {
     await opened.close();
   }
-
-  const checks = [
-    required(
-      check(
-        "gate on: text appears with no credential in the instance",
-        heard.trim() ? "pass" : "fail",
-        heard.trim()
-          ? `the field shows "${heard}" for ${message.key}`
-          : `the field stayed empty for ${message.key}`,
-        [message.key],
-      ),
-    ),
-  ];
-
   const usage = await waitForUsage(env, usageBefore);
   // Rome logs its own count of the session; read it now, before a later restart loses it.
   const romeLog = await env
@@ -250,21 +283,7 @@ async function gateOn(ctx, message) {
         .map((line) => `Rome logged: ${typeof line === "string" ? line : JSON.stringify(line)}`),
     )
     .catch(() => []);
-  const seconds = usage?.seconds;
-  const off = seconds === undefined ? null : Math.abs(seconds - message.seconds) / message.seconds;
-  checks.push(
-    required(
-      check(
-        "gate on: Rome Cloud records the seconds",
-        off !== null && off <= SECONDS_TOLERANCE ? "pass" : "fail",
-        seconds === undefined
-          ? `Rome Cloud shows no new usage within ${USAGE_WAIT_MS / 1000} s of listening stopping`
-          : `Rome Cloud records ${seconds} s for a ${message.seconds} s recording (${Math.round(off * 100)}% off); listening lasted ${listened.toFixed(1)} s`,
-        [message.key, ...romeLog],
-      ),
-    ),
-  );
-  return checks;
+  return { shown: true, heard, listened, seconds: usage?.seconds, romeLog };
 }
 
 /** The first usage event after the `before` events already shown, or undefined after a wait. */

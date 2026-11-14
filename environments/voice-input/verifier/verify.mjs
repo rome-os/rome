@@ -31,6 +31,7 @@ const { values } = parseArgs({
     "send-wait": { type: "string", default: "10" },
     steady: { type: "string", default: "1.5" },
     languages: { type: "string" },
+    "seconds-repeats": { type: "string" },
     secrets: { type: "string", default: join(homedir(), ".config/rome/voice.env") },
   },
 });
@@ -79,6 +80,7 @@ try {
     }),
     script,
     rules,
+    secondsRepeats: values["seconds-repeats"] ? Number(values["seconds-repeats"]) : undefined,
     environmentDir: dirname(values["voice-env"].split(" ").filter(Boolean)[0]),
     phase: values.phase ? Number(values.phase) : undefined,
     place: values.place,
