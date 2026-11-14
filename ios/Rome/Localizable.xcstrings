@@ -141,16 +141,6 @@
         }
       }
     },
-    "%@ · the history you allow" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ · 你允许的历史数据"
-          }
-        }
-      }
-    },
     "%@ · to %@" : {
       "localizations" : {
         "zh-Hans" : {
