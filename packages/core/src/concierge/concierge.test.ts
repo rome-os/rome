@@ -5578,6 +5578,27 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBeNull();
   });
 
+  it("clears the working mark once a task made for the message waits for its next scheduled run", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId, taskId } = await started(s);
+    s.chats.activeTurns = () => ["task-turn-1"];
+    await s.tasks.chatChanged(chatId);
+    expect(await reactionOf(s, "g1")).toBe("working");
+    const seen = watch(s);
+    // The Concierge made it a scheduled task: its next run is tomorrow, so it reads Later.
+    s.deps.checks = {
+      cancelFor: async () => 0,
+      laterOf: async (ids: readonly string[]) =>
+        new Map(ids.filter((id) => id === taskId).map((id) => [id, Date.now() + 86_400_000])),
+    } as never;
+    s.chats.activeTurns = () => [];
+    await finishTask(s, chatId);
+    expect((await s.tasks.listForChatPanel("guardian", CONCIERGE_CHAT))[0]?.status).toBe("later");
+    expect(await reactionOf(s, "g1")).toBeNull();
+    expect(seen.at(-1)).toEqual(["g1", null]);
+  });
+
   it("marks a message passed on to a task, and shows each message made for the task its latest outcome", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");

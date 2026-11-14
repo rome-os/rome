@@ -1,8 +1,9 @@
 // A Concierge chat's task list, the Tasks panel: everything that runs for the
 // chat, gathered from the reads that already decide it. Tasks bring their
 // derived status, checks and schedules come from the routines the Concierge
-// made, follows from the owner's following, and routines that send into the
-// chat from their `chat_id`. Nothing here decides a status.
+// made, follows from the owner's following, and routines from their
+// `chat_id`: those of the chat and those of its task chats. Nothing here
+// decides a status.
 // docs/domains/chats.md#task-list
 
 import {
@@ -57,11 +58,17 @@ export interface ChatTaskListDeps {
       onChange(
         listener: (task: { owner: string; conciergeChat: { id: string } }) => void,
       ): () => void;
+      /** Which of `chatIds` are the chat's task chats, each with its task, ended or not. */
+      taskChatsAmong(
+        chatIds: readonly string[],
+        conciergeChatId: string,
+        owner: ConciergeOwner,
+      ): Promise<Array<{ chatId: string; task: { id: string; title: string } }>>;
     };
   };
   checks?: Pick<TaskChecks, "inChatForApi">;
   following?: () => Pick<ConciergeFollowing, "followsIn" | "onChange"> | null;
-  routines: Pick<RoutinesRepository, "findByChat" | "listRoutines" | "findById">;
+  routines: Pick<RoutinesRepository, "findWithChat" | "listRoutines" | "findById">;
   routineRuns: Pick<RoutineRunsRepository, "findLatestByRoutineIds">;
   routineEngine: Pick<RoutineEngine, "onChange">;
   /**
@@ -117,7 +124,7 @@ export class ChatTaskList {
       this.deps.tasks.listForChatPanel(owner, chatId),
       this.deps.checks?.inChatForApi(chatId) ?? Promise.resolve([]),
       this.followsIn(chatId, owner),
-      this.routinesIn(chatId),
+      this.routinesIn(chatId, owner),
     ]);
     const [schedules, cards] = await Promise.all([
       this.schedulesOf(mine.map((task) => task.id)),
@@ -202,10 +209,32 @@ export class ChatTaskList {
     return out;
   }
 
-  private async routinesIn(chatId: string): Promise<TaskListRoutineItem[]> {
-    const routines = (await this.deps.routines.findByChat(chatId))
-      .map(toRoutine)
-      .filter((routine) => !NOT_A_CHAT_ROUTINE.has(routine.actionName) && !spent(routine));
+  /**
+   * The routines of chat `chatId` and of its task chats. Only the chats
+   * other routines work for are looked up as task chats, never the owner's
+   * whole task history. A task chat's routine names its task, whoever it
+   * works for.
+   */
+  private async routinesIn(chatId: string, owner: ConciergeOwner): Promise<TaskListRoutineItem[]> {
+    const shown = (await this.deps.routines.findWithChat())
+      .map((row) => ({ row, routine: toRoutine(row) }))
+      .filter(({ routine }) => !NOT_A_CHAT_ROUTINE.has(routine.actionName) && !spent(routine));
+    const elsewhere = shown.flatMap(({ row }) =>
+      row.chatId && row.chatId !== chatId ? [row.chatId] : [],
+    );
+    const taskChats = new Map(
+      (await this.deps.tasks.repo.taskChatsAmong(elsewhere, chatId, owner)).map(
+        (taskChat) => [taskChat.chatId, taskChat.task] as const,
+      ),
+    );
+    const fromTask = new Map<string, { id: string; title: string }>();
+    const routines = shown.flatMap(({ row, routine }) => {
+      if (row.chatId === chatId) return [routine];
+      const task = taskChats.get(row.chatId ?? "");
+      if (!task) return [];
+      fromTask.set(routine.id, task);
+      return [routine];
+    });
     const latest = await this.deps.routineRuns.findLatestByRoutineIds(
       routines.map((routine) => routine.id),
     );
@@ -220,14 +249,15 @@ export class ChatTaskList {
         nextRunAt: routine.enabled ? (routine.nextRunAt?.getTime() ?? null) : null,
         lastRun: run ? { status: run.status, firedAt: run.firedAt.getTime() } : null,
         createdAt: routine.createdAt.getTime(),
+        ...(fromTask.has(routine.id) ? { fromTask: fromTask.get(routine.id) } : {}),
       };
     });
   }
 
   /**
    * Calls `changed` whenever something chat `chatId`'s list holds may have
-   * changed: one of its owner's tasks, a routine of the chat or one that is
-   * a check or a schedule, or a follow. A burst calls it once. Returns the
+   * changed: one of its owner's tasks, a routine of the chat or of one of
+   * its task chats, one that is a check or a schedule, or a follow. A burst calls it once. Returns the
    * unsubscribe.
    */
   watch(chatId: string, owner: ConciergeOwner, changed: () => void): () => void {
@@ -247,9 +277,19 @@ export class ChatTaskList {
       this.deps.routineEngine.onChange((routineId) => {
         void this.deps.routines
           .findById(routineId)
-          .then((row) => {
+          .then(async (row) => {
             // A deleted routine may have been this chat's: tell it.
-            if (!row || this.concerns(toRoutine(row), row.chatId, chatId)) tell();
+            if (!row) return tell();
+            const routine = toRoutine(row);
+            if (this.concerns(routine, row.chatId, chatId)) return tell();
+            if (row.chatId && !NOT_A_CHAT_ROUTINE.has(routine.actionName)) {
+              const taskChats = await this.deps.tasks.repo.taskChatsAmong(
+                [row.chatId],
+                chatId,
+                owner,
+              );
+              if (taskChats.length > 0) tell();
+            }
           })
           .catch(() => tell());
       }),

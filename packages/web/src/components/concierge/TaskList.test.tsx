@@ -90,6 +90,16 @@ beforeEach(() => {
         nextRunAt: null,
         lastRun: { status: "error", firedAt: NOW },
       },
+      {
+        kind: "routine",
+        id: "r2",
+        name: "Summarize Rome releases",
+        trigger: { type: "schedule", localTime: "10:00", rrule: "FREQ=DAILY", date: null },
+        enabled: true,
+        nextRunAt: NOW + HOUR,
+        lastRun: null,
+        fromTask: { id: "t-releases", title: "Rome releases" },
+      },
     ],
   };
   rs.stubGlobal(
@@ -166,6 +176,12 @@ describe("TaskList", () => {
     expect(within(rowOf("Morning brief")).getByText(/^Daily at .* · in 1 hr$/)).toBeTruthy();
     expect(within(rowOf("Morning brief")).queryByLabelText("Repeats")).toBeNull();
     expect(within(rowOf("Daily summary")).getByText(/Paused · Last run failed/)).toBeTruthy();
+    // A routine made in one of the chat's task chats names its task.
+    expect(
+      within(rowOf("Summarize Rome releases")).getByText(
+        /^Daily at .* · in 1 hr · From Rome releases$/,
+      ),
+    ).toBeTruthy();
     // Respond and Stop where a card waits; Stop on any task not ended; nothing else.
     const names = (title: string) =>
       within(rowOf(title))
