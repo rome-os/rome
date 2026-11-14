@@ -21,6 +21,25 @@ struct HealthCapability: NodeCapability {
     var title: LocalizedStringResource { "Apple Health" }
     let symbol = "heart"
     var summary: LocalizedStringResource { "Your Rome reads the Health data you allow." }
+    var examples: [CapabilityExample] {
+        [
+            CapabilityExample(
+                symbol: "figure.run", title: "Plan fat-loss workouts",
+                request: "Plan my workouts so I lose 3 kg by March.",
+                reply: "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan."
+            ),
+            CapabilityExample(
+                symbol: "bed.double", title: "Understand your sleep",
+                request: "Why have I felt so tired lately?",
+                reply: "Your deep sleep dropped over the last two weeks, and your HRV fell with it."
+            ),
+            CapabilityExample(
+                symbol: "waveform.path.ecg", title: "Notice heart trends",
+                request: "Has my resting heart rate changed this month?",
+                reply: "It's 4 bpm higher than last month, mostly on days you slept under 6 hours."
+            ),
+        ]
+    }
     let personal = true
     let needsPermission = true
     var syncSource: String? { HealthSettings.sourceId }

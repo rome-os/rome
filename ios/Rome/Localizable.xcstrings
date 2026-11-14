@@ -141,12 +141,12 @@
         }
       }
     },
-    "%@ · last 6 months" : {
+    "%@ · the history you allow" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ · 最近 6 个月"
+            "value" : "%@ · 你允许的历史数据"
           }
         }
       }
@@ -981,6 +981,16 @@
         }
       }
     },
+    "Charge before you leave" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出门前提醒充电"
+          }
+        }
+      }
+    },
     "Chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1017,6 +1027,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "找不到该聊天"
+          }
+        }
+      }
+    },
+    "Check if it runs hot" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看看手机是否过热"
           }
         }
       }
@@ -2129,12 +2149,32 @@
         }
       }
     },
+    "Is my phone running hot?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的手机是不是太热了？"
+          }
+        }
+      }
+    },
     "It's 4 bpm higher than last month, mostly on days you slept under 6 hours." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "比上个月高了 4 次/分钟，主要出现在睡眠不足 6 小时的日子。"
+          }
+        }
+      }
+    },
+    "It's warm, not hot: it's charging on cellular, which heats it a little." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有点温，不算烫：它在充电，又在用蜂窝网络，所以会热一些。"
           }
         }
       }
@@ -3375,6 +3415,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新加载"
+          }
+        }
+      }
+    },
+    "Remind me to charge before I leave." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出门前提醒我充电。"
           }
         }
       }
@@ -5477,6 +5527,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Agent 将无法再读取这些数据。它们已写入聊天或记忆中的内容会保留。同步将关闭。"
+          }
+        }
+      }
+    },
+    "Your battery is at 18%. I'll remind you at 5:30, before your 6 pm train." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电量还剩 18%。我会在 5:30 提醒你，赶在 6 点的火车之前。"
           }
         }
       }

@@ -88,29 +88,6 @@ struct HealthSyncSection: View {
     }
 }
 
-/// What the Rome can do with Health, as three short chats.
-struct HealthChats: View {
-    var body: some View {
-        SettingsGroup(header: "What your Rome can do") {
-            CapabilityRow(
-                symbol: "figure.run", title: "Plan fat-loss workouts",
-                request: String(localized: "Plan my workouts so I lose 3 kg by March."),
-                reply: String(localized: "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan.")
-            )
-            CapabilityRow(
-                symbol: "bed.double", title: "Understand your sleep",
-                request: String(localized: "Why have I felt so tired lately?"),
-                reply: String(localized: "Your deep sleep dropped over the last two weeks, and your HRV fell with it.")
-            )
-            CapabilityRow(
-                symbol: "waveform.path.ecg", title: "Notice heart trends",
-                request: String(localized: "Has my resting heart rate changed this month?"),
-                reply: String(localized: "It's 4 bpm higher than last month, mostly on days you slept under 6 hours."), last: true
-            )
-        }
-    }
-}
-
 /// The sync's status under the switch, with Sign in or Retry when it needs one.
 struct HealthStatusRow: View {
     let line: HealthStatusLine
@@ -145,41 +122,6 @@ struct HealthStatusRow: View {
             .romeFont(13, .semibold)
             .foregroundStyle(Palette.primaryText)
             .buttonStyle(PressScaleStyle())
-    }
-}
-
-/// One thing the Rome can do with Health, as a short chat: the request in the
-/// guardian's bubble and the Rome's answer in its own, both the real chat's.
-private struct CapabilityRow: View {
-    let symbol: String
-    let title: LocalizedStringKey
-    let request: String
-    let reply: String
-    var last = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                Image(systemName: symbol)
-                    .romeFont(20)
-                    .foregroundStyle(Palette.sub)
-                    .frame(width: 30, alignment: .center)
-                    .accessibilityHidden(true)
-                Text(title).romeFont(16, .semibold).foregroundStyle(Palette.fg)
-                Spacer(minLength: 0)
-            }
-            VStack(spacing: 8) {
-                UserBubble(text: request, pending: nil)
-                AgentBubble(text: reply, forwardedFrom: nil, position: .single)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) {
-            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
-        }
-        .accessibilityElement(children: .combine)
     }
 }
 

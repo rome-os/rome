@@ -117,6 +117,13 @@ extension DeviceStatus {
         #expect(registry.capability(id: "device")?.syncSource == nil)
     }
 
+    @Test func everyConnectionPageHasWhatYourRomeCanDo() {
+        let registry = NodeCapabilityRegistry.testing(HealthFixtures.actions(FakeHealth()))
+        for capability in registry.capabilities {
+            #expect(capability.examples.count >= 2, "\(capability.id) declares its examples")
+        }
+    }
+
     @Test func theReportHasTheShapeTheRomeTakes() throws {
         let report = DeviceConnectionReport(
             device: .init(id: "dev-1", name: "iPhone", platform: "ios"),

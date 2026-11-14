@@ -50,6 +50,15 @@ struct NodeActionSpec: Sendable, Equatable {
     var access: NodeAccess = .read
 }
 
+/// One short chat on a connection's page: something the Rome can do with it.
+struct CapabilityExample: Sendable {
+    /// An SF Symbol.
+    let symbol: String
+    let title: LocalizedStringResource
+    let request: LocalizedStringResource
+    let reply: LocalizedStringResource
+}
+
 protocol NodeCapability: Sendable {
     /// The connection's id, the same on every phone: `apple_health`, `device`.
     var id: String { get }
@@ -63,6 +72,8 @@ protocol NodeCapability: Sendable {
     /// What the connection lets the Rome do, in one line, for its page and
     /// the authorization step.
     var summary: LocalizedStringResource { get }
+    /// "What your Rome can do" on its page: two or three short chats.
+    var examples: [CapabilityExample] { get }
     /// Reads the guardian's personal data: refused in a shared chat by the
     /// `rome-node` CLI.
     var personal: Bool { get }

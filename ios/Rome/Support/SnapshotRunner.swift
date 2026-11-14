@@ -24,6 +24,8 @@ enum DebugCommand: Equatable {
     case page(URL?)
     /// An app in its sheet; nil closes it.
     case app(InstalledApp?)
+    /// A card's connect sheet for a capability, in a stand-in frame; nil closes it.
+    case connectSheet(String?)
 }
 
 /// Health sync's demo: a few syncs of today and yesterday.
@@ -264,6 +266,8 @@ enum SnapshotRunner {
                 outcome: .ok, errorCode: nil, count: nil, windowStart: nil, windowEnd: nil, durationMs: 40
             )])
             await capture("13e-connection-device-on", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(DeviceCapability.id)]) }
+            await capture("13f-connection-device-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
+            model.debugHealthScroll = nil
             model.debugCommand = .settings(nil)
             model.node.showDemo(live: [:], recent: [])
             model.health.showDemo(HealthDemo.history(now: .now))
@@ -281,6 +285,10 @@ enum SnapshotRunner {
             TranscriptStore.previewPhases = [:]
             // A device connection's card: connected, then one still to connect.
             await capture("43b-device-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-health")) }
+            // The sheet a card opens, for one not yet connected.
+            await capture("43c-connect-sheet-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet(health) }
+            await capture("43d-connect-sheet-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet("device") }
+            model.debugCommand = .connectSheet(nil)
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // A task's chat thread: its labels, and a reply's quote.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
