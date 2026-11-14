@@ -10,6 +10,18 @@ import { TASK_CHAT_TRIGGER_KIND } from "../webchat/privacy.js";
 /** The longest conclusion the Concierge forwards, in characters. */
 export const CONCLUSION_MAX_CHARS = 600;
 
+/** How a task chat's answer tells the Concierge the guardian wants its work to recur. */
+export const RECURRING_PREFIX = "Recurring:";
+
+/** The answer's recurring line, without its prefix, or null for none. */
+export function recurringOf(answer: string): string | null {
+  const line = withoutConclusion(answer)
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith(RECURRING_PREFIX));
+  return line ? line.slice(RECURRING_PREFIX.length).trim() || null : null;
+}
+
 /** The conclusion of an answer that has nothing new for the guardian. */
 export const NOTHING_TO_REPORT = "Nothing to report.";
 
@@ -46,6 +58,12 @@ export function conclusionOf(answer: string): Conclusion {
   if (!text) return { kind: "missing" };
   const length = lengthOf(text);
   return length > CONCLUSION_MAX_CHARS ? { kind: "too_long", length } : { kind: "found", text };
+}
+
+/** Whether `answer`'s conclusion is the fixed line that says it has no news. */
+export function hasNothingToReport(answer: string): boolean {
+  const conclusion = conclusionOf(answer);
+  return conclusion.kind === "found" && conclusion.text === NOTHING_TO_REPORT;
 }
 
 /**
@@ -96,7 +114,7 @@ export const CONCLUSION_INSTRUCTION = [
   "",
   "Your answer here is how your result reaches the guardian: the Concierge forwards it. Never send a message into the guardian's Concierge chat yourself, with `system:send_message` or any other tool, and never set up a routine that does.",
   "",
-  'When the guardian asks for recurring work for themselves ("every day at 10:00", "each Monday"), set up no routine or schedule yourself: the Concierge makes it a scheduled task of this chat. Do the work now if they asked for it now, and say in your conclusion that they want it to recur and when, such as "They want this every day at 10:00, so it should be a scheduled task." Checks you defer while you work on the task are yours to keep.',
+  `When the guardian asks for recurring work for themselves ("every day at 10:00", "each Monday"), set up no routine or schedule yourself: the Concierge makes it a scheduled task of this chat. Do the work now if they asked for it now, and put one line before the conclusion, starting with "${RECURRING_PREFIX}" and saying when, such as "${RECURRING_PREFIX} every day at 10:00". Keep it out of the conclusion, which the guardian reads. Checks you defer while you work on the task are yours to keep.`,
 ].join("\n");
 
 /**

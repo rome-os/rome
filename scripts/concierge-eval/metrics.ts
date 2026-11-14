@@ -128,6 +128,16 @@ export function isAck(text: string): boolean {
   return ACK.test(text);
 }
 
+/**
+ * The expected results no message carries. Only real content counts: a
+ * message that acknowledges or announces the work never carries its result,
+ * whatever it names.
+ */
+export function resultsMissing(texts: string[], expected: RegExp[]): RegExp[] {
+  const results = texts.filter((t) => !isAck(t));
+  return expected.filter((r) => !results.some((t) => r.test(t)));
+}
+
 export interface MetricsInput {
   messages: MessageRow[];
   turns: TurnRow[];

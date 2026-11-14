@@ -29,8 +29,8 @@ export interface Scenario {
     endReason: "done" | "no_response";
     /** Needs the wait expiry shortened (CONCIERGE_TASK_WAIT_EXPIRY_MINUTES). */
     waitsForExpiry?: boolean;
-    /** A file under the default project that must exist, or must not, when the round ends. */
-    file?: { name: string; exists: boolean };
+    /** Files under the default project that must exist, or must not, when the round ends. */
+    files?: { name: string; exists: boolean }[];
     /**
      * The work recurs: one of the chat's tasks has a Concierge schedule, and
      * no task chat set up a routine of its own (a check it defers is fine).
@@ -76,7 +76,7 @@ export const SCENARIOS: Scenario[] = [
     expect: {
       decision: true,
       endReason: "done",
-      file: { name: "eval-approve.txt", exists: true },
+      files: [{ name: "eval-approve.txt", exists: true }],
     },
   },
   {
@@ -92,7 +92,7 @@ export const SCENARIOS: Scenario[] = [
     expect: {
       decision: true,
       endReason: "done",
-      file: { name: "eval-reject.txt", exists: false },
+      files: [{ name: "eval-reject.txt", exists: false }],
     },
   },
   {
@@ -114,7 +114,10 @@ export const SCENARIOS: Scenario[] = [
     cards: "first",
     approvals: "approve",
     expect: {
-      results: [/milvus|qdrant|weaviate|chroma|pgvector|lancedb|faiss/i],
+      // A comparison names at least two of them in one message.
+      results: [
+        /(milvus|qdrant|weaviate|chroma|pgvector|lancedb|faiss)[\s\S]*(?!\1)(milvus|qdrant|weaviate|chroma|pgvector|lancedb|faiss)/i,
+      ],
       endReason: "done",
     },
   },
@@ -140,7 +143,14 @@ export const SCENARIOS: Scenario[] = [
     ],
     cards: "first",
     approvals: "approve",
-    expect: { results: [/rain/i, /snow/i, /\d/], endReason: "done" },
+    expect: {
+      results: [/rain/i, /snow/i, /\d/],
+      endReason: "done",
+      files: [
+        { name: "eval-rain.txt", exists: true },
+        { name: "eval-snow.txt", exists: true },
+      ],
+    },
   },
   {
     id: "follow-ups",

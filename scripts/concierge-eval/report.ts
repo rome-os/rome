@@ -42,9 +42,17 @@ export interface RoundResult {
 interface Metric {
   name: string;
   value: (s: ScenarioResult) => number;
-  /** How a label's scenarios add up: summed, or averaged. */
-  total: "sum" | "mean";
+  /**
+   * How a label's scenarios add up: summed, or as a rate of summed parts,
+   * so a scenario with more messages or turns weighs more.
+   */
+  total: "sum" | { per: (s: ScenarioResult) => number; of: (s: ScenarioResult) => number };
 }
+
+const perTurn = (total: (s: ScenarioResult) => number) => ({
+  per: total,
+  of: (s: ScenarioResult) => s.metrics.turns,
+});
 
 const passed = (c: Checks) =>
   [c.decisionAsked, c.resultReached, c.scheduled, c.nothingDropped].filter((v) => v !== undefined);
@@ -52,7 +60,11 @@ const passed = (c: Checks) =>
 export const METRICS: Metric[] = [
   { name: "Owner msgs", value: (s) => s.metrics.ownerMessages, total: "sum" },
   { name: "Concierge msgs", value: (s) => s.metrics.conciergeMessages, total: "sum" },
-  { name: "Per owner msg", value: (s) => s.metrics.perOwnerMessage, total: "mean" },
+  {
+    name: "Per owner msg",
+    value: (s) => s.metrics.perOwnerMessage,
+    total: { per: (s) => s.metrics.conciergeMessages, of: (s) => s.metrics.ownerMessages },
+  },
   { name: "Task cards", value: (s) => s.metrics.byKind.task_card, total: "sum" },
   {
     name: "Ask cards",
@@ -66,9 +78,21 @@ export const METRICS: Metric[] = [
   { name: "Bursts", value: (s) => s.metrics.bursts, total: "sum" },
   { name: "Turns", value: (s) => s.metrics.turns, total: "sum" },
   { name: "Silent turns", value: (s) => s.metrics.silentTurns, total: "sum" },
-  { name: "Prompt tok/turn", value: (s) => s.metrics.inputTokens.mean, total: "mean" },
-  { name: "Cached tok/turn", value: (s) => s.metrics.cacheReadTokens.mean, total: "mean" },
-  { name: "Out tok/turn", value: (s) => s.metrics.outputTokens.mean, total: "mean" },
+  {
+    name: "Prompt tok/turn",
+    value: (s) => s.metrics.inputTokens.mean,
+    total: perTurn((s) => s.metrics.inputTokens.total),
+  },
+  {
+    name: "Cached tok/turn",
+    value: (s) => s.metrics.cacheReadTokens.mean,
+    total: perTurn((s) => s.metrics.cacheReadTokens.total),
+  },
+  {
+    name: "Out tok/turn",
+    value: (s) => s.metrics.outputTokens.mean,
+    total: perTurn((s) => s.metrics.outputTokens.total),
+  },
   {
     name: "Checks passed",
     value: (s) => passed(s.checks).filter(Boolean).length,
@@ -77,10 +101,11 @@ export const METRICS: Metric[] = [
   { name: "Checks", value: (s) => passed(s.checks).length, total: "sum" },
 ];
 
-function totalOf(metric: Metric, scenarios: ScenarioResult[]): number {
-  const values = scenarios.map(metric.value);
-  const sum = values.reduce((a, b) => a + b, 0);
-  return metric.total === "sum" ? sum : values.length ? round2(sum / values.length) : 0;
+export function totalOf(metric: Metric, scenarios: ScenarioResult[]): number {
+  const sum = (f: (s: ScenarioResult) => number) => scenarios.reduce((n, s) => n + f(s), 0);
+  if (metric.total === "sum") return sum(metric.value);
+  const of = sum(metric.total.of);
+  return of ? round2(sum(metric.total.per) / of) : 0;
 }
 
 function table(head: string[], rows: (string | number)[][]): string {

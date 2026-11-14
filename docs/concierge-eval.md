@@ -12,7 +12,7 @@
    pnpm concierge:eval --snapshot
    ```
 
-   The command stops the `rome` container, copies its state, and starts it again. The copy holds `rome.db` with its WAL, Concierge memory, the project files, and the provider's thread state that the database points at. Sign-in files and logs stay out, so a restore never rolls back a refreshed sign-in. Snapshots live in `~/.rome-worktrees/<slug>/concierge-eval/<name>`, `frozen` by default.
+   The command stops the `rome` container, copies its state, and starts it again. The copy holds `rome.db` with its WAL, Concierge memory, the project files, and the provider's thread state that the database points at. Sign-in files and logs stay out, so a restore never rolls back a refreshed sign-in. Snapshots live in `~/.rome-worktrees/<slug>/concierge-eval/<name>`, `frozen` by default. The eval works on this checkout's stack, named by its slug from `scripts/worktree-slug.sh`. For another stack, pass `--container` and `--base-url`. A snapshot name is letters, digits, `.`, `_` and `-`, starts with a letter or digit, and holds no `..`.
 
 ## Run
 
@@ -62,7 +62,7 @@ Every metric comes from the stack's database, read inside the container. The scr
 | Bursts | Runs of two or more Concierge messages, each within a minute of the one before, with no owner message or card answer between. |
 | Turns, Silent turns | Concierge turns in the chat, and those that sent no message. |
 | Prompt, Cached and Out tok/turn | The mean prompt size (input, cache read and cache write together), cache-read and output tokens of the chat's Concierge turns. The prompt sum fits Anthropic, which reports the cache apart from the input, so compare labels on one provider. |
-| Checks | The decision was asked: every task that asked the owner something had its card shown. The result reached the owner: each expected result matched a Concierge message. Scheduled: recurring work became a Concierge scheduled task of the chat, and no task chat set up a routine of its own, apart from the checks it defers. Nothing was dropped: every owner message was answered or handed to a task, every task ended as the scenario expects, and its file was or was not written. |
+| Checks | The decision was asked: every task that asked the owner something had its card shown. The result reached the owner: each expected result matched a Concierge message that is not an acknowledgement or an announcement, and a comparison names at least two of the things it compares. Scheduled: recurring work became a Concierge scheduled task of the chat, and no task chat set up a routine of its own, apart from the checks it defers. Nothing was dropped: every owner message was answered or handed to a task, every task ended as the scenario expects, and each file it names was or was not written. |
 
 Echo and Ack are heuristics. Read the flagged messages in `round-N.md` before trusting a change in either.
 

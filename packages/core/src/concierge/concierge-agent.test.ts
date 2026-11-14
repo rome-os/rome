@@ -274,10 +274,9 @@ describe("the Concierge agent", () => {
       concierge.systemPromptPrefix
         .split("\n")
         .find((line) => line.startsWith("- Recurring work for the guardian")) ?? "";
-    expect(rule).toContain(
-      "make that task a scheduled task yourself with `task_upsert` (`schedule`)",
-    );
-    expect(rule).toContain("never ask a task chat to set it up");
+    expect(rule).toContain("`recurring:` line");
+    expect(rule).toContain("make it a scheduled task yourself with `task_upsert` (`schedule`)");
+    expect(rule).toContain("Never ask a task chat to set it up");
   });
 
   it("mentions a task that ended for no response once, in the digest", () => {

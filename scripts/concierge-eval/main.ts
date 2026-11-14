@@ -8,7 +8,14 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { Api, DEV_JWT_SECRET } from "./api.js";
 import { drive } from "./drive.js";
-import { type MessageRow, type TurnRow, chatMetrics, isOwnerMessage, kindOf } from "./metrics.js";
+import {
+  type MessageRow,
+  type TurnRow,
+  chatMetrics,
+  isOwnerMessage,
+  kindOf,
+  resultsMissing,
+} from "./metrics.js";
 import {
   type Checks,
   type RoundResult,
@@ -18,21 +25,24 @@ import {
   roundMarkdown,
 } from "./report.js";
 import { SCENARIOS, SCENARIOS_VERSION, type Scenario } from "./scenarios.js";
-import { Stack } from "./stack.js";
+import { Stack, checkSnapshotName } from "./stack.js";
 
 const USAGE = `pnpm concierge:eval --snapshot [--name <snapshot>]
 pnpm concierge:eval --label <name> [--rounds N] [--compare <label>] [--only id,id] [--name <snapshot>]
 pnpm concierge:eval --report <label> [--compare <label>]
 
 Options:
-  --container <name>   backend container (default rome-rome-1)
-  --base-url <url>     dashboard origin (default $ROME_URL or http://rome.rome.localhost:3000)
+  --container <name>   backend container (default <slug>-rome-1, the slug from scripts/worktree-slug.sh)
+  --base-url <url>     dashboard origin (default $ROME_URL or http://<slug>.rome.localhost:3000)
   --user <id>          guardian user id (default dev)
   --out <dir>          results folder (default .concierge-eval)
   --settle <s>         quiet seconds that end a step (default 45)
   --timeout <min>      longest a scenario may take (default 25)
   --serial             run a round's scenarios one at a time
   --no-restore         keep the stack as it is (debugging only: rounds are not comparable)`;
+
+/** This checkout's stack, as `pnpm dev:all` names it (scripts/worktree-slug.sh). */
+const SLUG = execFileSync("scripts/worktree-slug.sh", { encoding: "utf8" }).trim();
 
 const { values: args } = parseArgs({
   options: {
@@ -43,10 +53,10 @@ const { values: args } = parseArgs({
     compare: { type: "string" },
     report: { type: "string" },
     only: { type: "string" },
-    container: { type: "string", default: "rome-rome-1" },
+    container: { type: "string", default: `${SLUG}-rome-1` },
     "base-url": {
       type: "string",
-      default: process.env.ROME_URL ?? "http://rome.rome.localhost:3000",
+      default: process.env.ROME_URL ?? `http://${SLUG}.rome.localhost:3000`,
     },
     user: { type: "string", default: "dev" },
     out: { type: "string", default: ".concierge-eval" },
@@ -63,8 +73,10 @@ const PROMPT_SOURCES = [
   "packages/core/agents/concierge.yaml",
   "packages/core/src/concierge/conclusion.ts",
   "packages/core/src/concierge/task-events.ts",
+  "packages/core/src/concierge/events.ts",
+  "packages/core/src/concierge/tools.ts",
   "packages/core/src/agent/domain/system-prompt.ts",
-  "packages/core/src/agent/infrastructure/ask-user-tools.ts",
+  "packages/core/src/agent/application/ask-user-tools.ts",
 ];
 
 function promptHash(): string {
@@ -74,9 +86,12 @@ function promptHash(): string {
     [
       "exec",
       args.container,
-      "sh",
+      "bash",
+      "-o",
+      "pipefail",
       "-c",
-      `cd /workspace && cat ${PROMPT_SOURCES.join(" ")} 2>/dev/null | sha256sum | cut -c1-64`,
+      // A missing file fails the hash, rather than hashing what is left.
+      `cd /workspace && cat ${PROMPT_SOURCES.join(" ")} | sha256sum | cut -c1-64`,
     ],
     { encoding: "utf8" },
   ).trim();
@@ -223,7 +238,7 @@ function checksFor(
     const texts = concierge
       .filter((m) => ["say", "forward"].includes(kindOf(m)))
       .map((m) => m.text);
-    const missing = scenario.expect.results.filter((r) => !texts.some((t) => r.test(t)));
+    const missing = resultsMissing(texts, scenario.expect.results);
     checks.resultReached = missing.length === 0;
     for (const r of missing) notes.push(`no result matched ${r}`);
   }
@@ -257,10 +272,11 @@ function checksFor(
     if (scheduled === 0) notes.push("no task of this chat has a schedule");
     for (const r of taskChatRoutines) notes.push(`a task chat set up routine ${r}`);
   }
-  const file = scenario.expect.file;
-  if (file && fileExists(file.name) !== file.exists) {
-    checks.nothingDropped = false;
-    notes.push(`${file.name} ${file.exists ? "missing" : "written"}`);
+  for (const file of scenario.expect.files ?? []) {
+    if (fileExists(file.name) !== file.exists) {
+      checks.nothingDropped = false;
+      notes.push(`${file.name} ${file.exists ? "missing" : "written"}`);
+    }
   }
   if (timedOut) {
     checks.nothingDropped = false;
@@ -373,7 +389,7 @@ function rejudge(round: RoundResult): RoundResult {
     const texts = result.metrics.messages
       .filter((m) => m.kind === "say" || m.kind === "forward")
       .map((m) => m.text);
-    const missing = expected.filter((r) => !texts.some((t) => r.test(t)));
+    const missing = resultsMissing(texts, expected);
     result.checks.resultReached = missing.length === 0;
     result.checks.notes = [
       ...result.checks.notes.filter((n) => !n.startsWith("no result matched")),
@@ -414,6 +430,8 @@ function writeSummary(label: string): void {
 
 async function main(): Promise<void> {
   if (args.help) return void console.log(USAGE);
+  // Before anything stops or restores.
+  checkSnapshotName(args.name);
   if (args.snapshot) {
     console.log(`snapshot ${args.name}: stopping ${args.container} to copy its state`);
     console.log(await stack.snapshot(args.name));

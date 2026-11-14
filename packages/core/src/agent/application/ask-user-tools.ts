@@ -43,7 +43,8 @@ const DEFER_WAKE =
 // once a task was checked three times.
 const DEFER_WAKE_TASK_CHECK =
   "When you wake, the note may be all you have of this turn, since a newer session may be the one that wakes: " +
-  "re-check, then finish or `defer` again (minimum one minute) only when something changed. ";
+  "re-check, then finish when it is done, or `defer` again (minimum one minute) while it is still pending. " +
+  "After three checks of one task, the digest asks the guardian whether to keep waiting. ";
 
 const DEFER_END_OF_TURN =
   "After calling defer, write one short line confirming you'll keep watch, then end your turn.";

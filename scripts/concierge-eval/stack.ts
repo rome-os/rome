@@ -79,6 +79,19 @@ const queries = JSON.parse(require("fs").readFileSync(0, "utf8"));
 process.stdout.write(JSON.stringify(queries.map((q) => db.prepare(q.sql).all(...(q.params ?? [])))));
 `;
 
+/**
+ * Throws unless `name` names a folder right inside the snapshots folder. The
+ * restore deletes and replaces live state from it, so `.`, `..` or a path
+ * would aim it at the profile itself.
+ */
+export function checkSnapshotName(name: string): void {
+  if (!/^[A-Za-z0-9][\w.-]*$/.test(name) || name.includes("..")) {
+    throw new Error(
+      `bad snapshot name: ${JSON.stringify(name)}. Use letters, digits, ".", "_" and "-", starting with a letter or digit.`,
+    );
+  }
+}
+
 export interface Query {
   sql: string;
   params?: (string | number | null)[];
@@ -126,7 +139,7 @@ export class Stack {
    * the script runs.
    */
   private async withBackendStopped(script: string, name: string): Promise<string> {
-    if (!/^[\w.-]+$/.test(name)) throw new Error(`bad snapshot name: ${name}`);
+    checkSnapshotName(name);
     const image = this.inspect("{{.Config.Image}}");
     const owner = this.inspect("{{.Config.User}}");
     run("docker", ["stop", "--time", "30", this.options.container]);

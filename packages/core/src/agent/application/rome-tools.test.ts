@@ -291,6 +291,10 @@ describe("defer", () => {
     expect(checks).not.toContain("whole conversation still in context");
     expect(checks).not.toContain("no limit on re-defers");
     expect(checks).toContain("a newer session may be the one that wakes");
+    // A check still pending is checked again, so the task stays later until
+    // the digest asks after three.
+    expect(checks).toContain("`defer` again (minimum one minute) while it is still pending");
+    expect(checks).not.toContain("only when something changed");
     const plain = description(false);
     expect(plain).toContain("search_event_catalog");
     expect(plain).toContain("no limit on re-defers");

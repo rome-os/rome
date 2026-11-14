@@ -62,6 +62,7 @@ import {
   CONCLUSION_MAX_CHARS,
   CONCLUSION_OPEN,
   NOTHING_TO_REPORT,
+  RECURRING_PREFIX,
 } from "./conclusion.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
@@ -2968,6 +2969,9 @@ describe("Concierge events", () => {
       "我订好了明天的机票。",
     );
     expect(resultSummary("Done. Next step.")).toBe("Done.");
+    expect(resultSummary(concluded(NOTHING_TO_REPORT, "Wrote notes.md. It has two lines."))).toBe(
+      "Wrote notes.md.",
+    );
     const long = resultSummary(`${"word ".repeat(60)}end.`);
     expect(long?.length).toBe(CONCIERGE_TASK_SUMMARY_MAX_LENGTH);
     expect(long?.endsWith("…")).toBe(true);
@@ -3028,6 +3032,40 @@ describe("Concierge events", () => {
     await s.tasks.statusOf(again ? [again] : []);
     await s.settle();
     expect((await s.taskRepo.get(taskId))?.summary).toBe("Eric replied");
+  });
+
+  it("tells the Concierge nothing of a result whose conclusion has nothing to report", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      text: concluded(NOTHING_TO_REPORT, "Saved Tea as your afternoon drink."),
+    });
+    await rs.advanceTimersByTimeAsync(120_000);
+    expect(s.backendTurns).toEqual([]);
+    // The row's line comes from the reply, not the no-news line.
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Saved Tea as your afternoon drink.");
+  });
+
+  it("tells the Concierge of a wish for the work to recur, even with nothing else to report", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    const answer = concluded(
+      NOTHING_TO_REPORT,
+      `Today's quote is above.\n${RECURRING_PREFIX} every day at 10:00`,
+    );
+    s.messages
+      .get(chatId)
+      ?.push({ role: "assistant", content: JSON.stringify([{ type: "text", content: answer }]) });
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId, text: answer });
+    await rs.advanceTimersByTimeAsync(2_100);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain("recurring: every day at 10:00");
+    expect(s.backendTurns[0].prompt).toContain(`conclusion: ${NOTHING_TO_REPORT}`);
   });
 
   it("tells the Concierge of a result it asked for two seconds after the turn ends, as one batch", async () => {
@@ -6097,6 +6135,19 @@ describe("Concierge status reactions", () => {
       await finishTask(s, chatId, "completed", { reported: false });
       expect(await reactionOf(s, "g1")).toBe("working");
       await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("clears at once when the result has nothing to report, since no report comes", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await s.finish({
+        turnId: "task-turn-1",
+        agentName: "core:main",
+        chatId,
+        text: concluded(NOTHING_TO_REPORT),
+      });
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
