@@ -728,23 +728,6 @@ struct SyncRig {
         #expect(await rig.backend.states == ["off"])
     }
 
-    @Test func theOldSwitchIsResetWithANote() {
-        let rig = Rig()
-        rig.defaults.set(true, forKey: "nodeHealthEnabled")
-        let settings = rig.make()
-        #expect(!settings.isEnabled, "the old consent did not cover uploading history")
-        #expect(settings.showsMigrationNote)
-        #expect(rig.defaults.object(forKey: "nodeHealthEnabled") == nil)
-        #expect(rig.make().showsMigrationNote, "until sync is turned on")
-        settings.setEnabled(true)
-        #expect(!settings.showsMigrationNote)
-        #expect(!rig.make().showsMigrationNote)
-    }
-
-    @Test func aNewInstallShowsNoNote() {
-        #expect(!Rig().make().showsMigrationNote)
-    }
-
     @Test func onAgainGoesOnFromTheAnchorsWithNoNewHistory() async {
         let rig = Rig()
         let settings = rig.make()

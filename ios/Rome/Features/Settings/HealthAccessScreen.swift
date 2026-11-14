@@ -120,68 +120,58 @@ struct HealthAccessScreen: View {
         .padding(.bottom, 4)
     }
 
-    /// The switch, the status line under it, Sync history, and what syncs.
+    /// The switch, the status line under it, and Sync history. A visitor's
+    /// Rome has none: Health syncs only to a Rome the guardian owns.
+    @ViewBuilder
     private func toggleCard(_ health: HealthSettings) -> some View {
-        let rome = health.instance.flatMap { $0.isVisitor ? nil : $0.name }
-        let line = HealthStatusLine(health.status, rome: rome, device: model.node.device)
-        return VStack(alignment: .leading, spacing: 8) {
-            SettingsGroup {
-                PlainRow(title: "Sync with Rome") {
-                    Toggle("Sync with Rome", isOn: Binding(get: { health.isEnabled }, set: { on in health.setEnabled(on) }))
-                        .labelsHidden()
-                        .tint(Palette.primary)
-                        .disabled(!health.canSync)
-                }
-                .accessibilityElement(children: .combine)
-            }
-            if health.instance?.isVisitor == true {
-                NoteLine(text: String(localized: "Health syncs only to a Rome you own."))
-            } else if health.showsMigrationNote {
-                NoteLine(text: String(localized: "Health now syncs to your Rome. Turn on Sync to keep using it."))
-            } else if let text = line.text {
-                HealthStatusRow(line: line, text: text, running: health.activity.running)
-            }
-            if health.isEnabled, health.backgroundRefreshOff {
-                NoteLine(text: String(localized: "Turn on Background App Refresh so Health stays up to date"))
-            }
-            SettingsGroup {
-                Button(action: onHistory) {
-                    PlainRow(title: "Sync history") {
-                        Image(systemName: "chevron.right")
-                            .romeFont(13, .semibold)
-                            .foregroundStyle(Palette.sub)
+        if health.instance?.isVisitor != true {
+            let rome = health.instance?.name
+            let line = HealthStatusLine(health.status, rome: rome, device: model.node.device)
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsGroup {
+                    PlainRow(title: "Sync with Rome") {
+                        Toggle("Sync with Rome", isOn: Binding(get: { health.isEnabled }, set: { on in health.setEnabled(on) }))
+                            .labelsHidden()
+                            .tint(Palette.primary)
+                            .disabled(!health.canSync)
                     }
+                    .accessibilityElement(children: .combine)
                 }
-                .buttonStyle(RowPressStyle())
+                if let text = line.text {
+                    HealthStatusRow(line: line, text: text, running: health.activity.running)
+                }
+                SettingsGroup {
+                    Button(action: onHistory) {
+                        PlainRow(title: "Sync history") {
+                            Image(systemName: "chevron.right")
+                                .romeFont(13, .semibold)
+                                .foregroundStyle(Palette.sub)
+                        }
+                    }
+                    .buttonStyle(RowPressStyle())
+                }
+                .padding(.top, 10)
             }
-            .padding(.top, 10)
-            NoteLine(text: String(localized: "Agents read this only in private chats."))
         }
     }
 
     private var capabilities: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SettingsGroup(header: "What your Rome can do") {
-                CapabilityRow(
-                    symbol: "figure.run", title: "Plan fat-loss workouts",
-                    request: String(localized: "Plan my workouts so I lose 3 kg by March."),
-                    reply: String(localized: "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan.")
-                )
-                CapabilityRow(
-                    symbol: "bed.double", title: "Understand your sleep",
-                    request: String(localized: "Why have I felt so tired lately?"),
-                    reply: String(localized: "Your deep sleep dropped over the last two weeks, and your HRV fell with it.")
-                )
-                CapabilityRow(
-                    symbol: "waveform.path.ecg", title: "Notice heart trends",
-                    request: String(localized: "Has my resting heart rate changed this month?"),
-                    reply: String(localized: "It's 4 bpm higher than last month, mostly on days you slept under 6 hours."), last: true
-                )
-            }
-            Text("For everyday wellness, not medical advice.")
-                .romeFont(13)
-                .foregroundStyle(Palette.sub)
-                .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
+        SettingsGroup(header: "What your Rome can do") {
+            CapabilityRow(
+                symbol: "figure.run", title: "Plan fat-loss workouts",
+                request: String(localized: "Plan my workouts so I lose 3 kg by March."),
+                reply: String(localized: "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan.")
+            )
+            CapabilityRow(
+                symbol: "bed.double", title: "Understand your sleep",
+                request: String(localized: "Why have I felt so tired lately?"),
+                reply: String(localized: "Your deep sleep dropped over the last two weeks, and your HRV fell with it.")
+            )
+            CapabilityRow(
+                symbol: "waveform.path.ecg", title: "Notice heart trends",
+                request: String(localized: "Has my resting heart rate changed this month?"),
+                reply: String(localized: "It's 4 bpm higher than last month, mostly on days you slept under 6 hours."), last: true
+            )
         }
     }
 
@@ -262,18 +252,6 @@ private struct PlainRow<Trailing: View>: View {
     }
 }
 
-/// One quiet line under a card, in line with its row text.
-struct NoteLine: View {
-    let text: String
-
-    var body: some View {
-        Text(verbatim: text)
-            .romeFont(13)
-            .foregroundStyle(Palette.sub)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
-    }
-}
 
 /// One thing the Rome can do with Health, as a short chat: the request in the
 /// guardian's bubble and the Rome's answer in its own, both the real chat's.

@@ -246,15 +246,6 @@ struct SettingsScreen: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                if model.update.cannotCheck {
-                    // Quiet: the app works as usual when the check cannot decide.
-                    Text("Can't check for updates")
-                        .romeFont(13)
-                        .foregroundStyle(Palette.sub)
-                        // In line with the card's row text, as all text around a card.
-                        .padding(.horizontal, 16 + SettingsGroup<EmptyView>.textInset)
-                        .padding(.top, -18)
-                }
                 SettingsGroup {
                     Button { confirmSignOut = true } label: {
                         Text("Sign out")

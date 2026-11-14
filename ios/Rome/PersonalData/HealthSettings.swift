@@ -88,14 +88,9 @@ final class HealthLane: Sendable {
 final class HealthSettings {
     enum Defaults {
         static func enabled(_ instance: String) -> String { "personalData.health.enabled.\(instance)" }
-        /// Set once when the old "Allow Rome to read Health" was on, so the
-        /// page says sync is new; gone once sync is turned on.
-        static let migrationNote = "personalData.health.migrationNote"
         static let lastSignInNotice = "personalData.health.lastSignInNotice"
         /// Every key of this account starts so.
         static let prefix = "personalData.health."
-        /// The switch before sync, under iPhone use: read once, then removed.
-        static let oldSwitch = "nodeHealthEnabled"
     }
 
     nonisolated static let originKey = "personalData.originId"
@@ -104,13 +99,9 @@ final class HealthSettings {
     /// The Rome open now; nil before one opens or after sign-out.
     private(set) var instance: HealthInstance?
     private(set) var isEnabled = false
-    /// "Health now syncs to your Rome. Turn on Sync to keep using it."
-    private(set) var showsMigrationNote: Bool
     private(set) var activity = SyncActivity()
     /// The open Rome's syncs, newest first, at most 30 days.
     private(set) var history: [SyncLogEntry] = []
-    /// Background App Refresh is off for the app.
-    private(set) var backgroundRefreshOff = false
 
     /// The switch can be turned on: a Rome the guardian owns is open.
     var canSync: Bool { instance.map { !$0.isVisitor } ?? false }
@@ -173,13 +164,6 @@ final class HealthSettings {
         self.protectedData = protectedData ?? { await MainActor.run { UIApplication.shared.isProtectedDataAvailable } }
         self.now = now
         self.pause = pause
-        // The old switch covered "read when your Rome asks", not "upload
-        // history": sync starts off for everyone, with one line saying so.
-        if defaults.object(forKey: Defaults.oldSwitch) as? Bool == true {
-            defaults.set(true, forKey: Defaults.migrationNote)
-        }
-        defaults.removeObject(forKey: Defaults.oldSwitch)
-        showsMigrationNote = defaults.bool(forKey: Defaults.migrationNote)
         open(instance)
     }
 
@@ -211,7 +195,6 @@ final class HealthSettings {
             return
         }
         isEnabled = defaults.bool(forKey: Defaults.enabled(instance.id))
-        if isEnabled { showsMigrationNote = false }
         flag.set(isEnabled)
         lane = makeLane(instance.id, enabled: isEnabled)
         if isEnabled { startObservers() } else { observers.stop() }
@@ -251,7 +234,6 @@ final class HealthSettings {
 
     /// The app came to the front: a catch-up, at most every 15 minutes.
     func foreground() {
-        backgroundRefreshOff = UIApplication.shared.backgroundRefreshStatus == .denied
         guard isEnabled, let engine = lane?.engine else { return }
         run { await engine.sync(.foreground) }
     }
@@ -294,10 +276,6 @@ final class HealthSettings {
         defaults.set(on, forKey: Defaults.enabled(id))
         flag.set(on)
         lane.switches.set(enabled: on)
-        if on {
-            showsMigrationNote = false
-            defaults.removeObject(forKey: Defaults.migrationNote)
-        }
         let engine = lane.engine
         let reader = reader
         if on {
@@ -362,7 +340,6 @@ final class HealthSettings {
         lane = nil
         instance = nil
         isEnabled = false
-        showsMigrationNote = false
         flag.set(false)
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Defaults.prefix) { defaults.removeObject(forKey: key) }
         originStore.remove()
@@ -454,7 +431,6 @@ final class HealthSettings {
         if instance == nil { instance = HealthInstance(id: "demo", name: "My Rome", isVisitor: false) }
         isEnabled = enabled
         flag.set(enabled)
-        showsMigrationNote = false
         history = entries
         self.activity = activity
     }

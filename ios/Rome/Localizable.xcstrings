@@ -473,16 +473,6 @@
         }
       }
     },
-    "Agents read this only in private chats." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Agent 只会在私人聊天中读取。"
-          }
-        }
-      }
-    },
     "All AI tools are at their limits" : {
       "localizations" : {
         "zh-Hans" : {
@@ -889,16 +879,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "允许 Rome 使用这台 iPhone"
-          }
-        }
-      }
-    },
-    "Can't check for updates" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法检查更新"
           }
         }
       }
@@ -1813,16 +1793,6 @@
         }
       }
     },
-    "For everyday wellness, not medical advice." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅用于日常健康管理，不构成医疗建议。"
-          }
-        }
-      }
-    },
     "Get notified when Rome has something for you" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1883,16 +1853,6 @@
         }
       }
     },
-    "Health now syncs to your Rome. Turn on Sync to keep using it." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "健康数据现在会同步到你的 Rome。打开同步即可继续使用。"
-          }
-        }
-      }
-    },
     "Health request" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1909,16 +1869,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "健康数据已停止同步到你的 Rome。打开 Rome 重新登录。"
-          }
-        }
-      }
-    },
-    "Health syncs only to a Rome you own." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "健康数据只会同步到你拥有的 Rome。"
           }
         }
       }
@@ -4791,16 +4741,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开"
-          }
-        }
-      }
-    },
-    "Turn on Background App Refresh so Health stays up to date" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开“后台 App 刷新”，让健康数据保持最新"
           }
         }
       }

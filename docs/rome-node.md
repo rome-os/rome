@@ -632,8 +632,7 @@ can delete what was sent. Results can stay in the Rome's chats and memory. A lin
 under the switch says how the sync stands, with Sync now at its end, and **Sync
 history** lists the syncs of the last 30 days by day, with Delete uploaded data. A build before sync
 had its own "Allow Rome to read Health" switch under iPhone use. That consent did
-not cover uploading history, so sync starts off, and the page says once that
-Health now syncs.
+not cover uploading history, so sync starts off.
 
 **Settings → iPhone use** holds the switch "Can Rome use this iPhone", a line
 with the device's name and whether Rome can reach it now, and **What Rome can
