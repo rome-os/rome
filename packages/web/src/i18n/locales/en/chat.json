@@ -447,6 +447,14 @@
     "dismiss": "Dismiss",
     "send": "Send"
   },
+  "locationCard": {
+    "shared": "Location shared · ±{{accuracy}}",
+    "notShared": "Not shared",
+    "locating": "Finding your location…",
+    "denied": "Location access is off for this site. Turn it on in the browser, or press Not now.",
+    "unavailable": "Couldn't find your location. Try again, or press Not now.",
+    "unsupported": "This browser can't share a location. Press Not now and name the place in a message."
+  },
   "appComponent": {
     "dismiss": "Dismiss",
     "widgetUnavailable": "Could not read this card's data. {{text}}",

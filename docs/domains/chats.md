@@ -271,6 +271,18 @@ Something shown in a chat that people can look at or act on: a question with cho
 - Every event goes to the widget's owner, which alone says what it means: an app's widget calls its app, and Rome's question answers the agent waiting on it. A widget accepts only the events it names, and only from someone who may open its chat.
 - What the agent reads of an answer is written by Rome from the widget and the event. Anything the owner app adds reads as the app's, never as the words of the person who acted.
 
+## Location share
+
+Rome's own widget that asks the guardian for where they are right now, once, for one answer: "what is near me", "will it rain here".
+
+- An agent asks only when the answer needs the guardian's current position. A message that names a place, or a city the agent already knows, needs none.
+- It is asked only where the guardian alone reads the chat. Anywhere else the agent says it cannot ask here, and why.
+- The guardian **shares** or **declines**. Shared, the agent gets the position and how precise it is, never an address. Declined, the agent does not ask again for that answer: it answers without, or asks for a place in a message.
+- A message the guardian sends instead closes it, as declined. Whichever of the guardian's clients answers first answers it, and it then takes no other answer.
+- The client the guardian is looking at reads the position from its device when they press Share, and asks for permission then. It is the one event a client fills in itself.
+- The position reaches that answer only. Rome keeps it nowhere else, and a location share is not a connection.
+- A coarse position, from a desktop's network or a VPN, reads as an area: the agent says "around" the city.
+
 ## Client
 
 One of the apps a person uses to reach a [platform](#platform): the dashboard in a browser and the Rome app on a phone are two clients of the dashboard.

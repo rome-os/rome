@@ -55,6 +55,24 @@
         }
       }
     },
+    "NSLocationWhenInUseUsageDescription" : {
+      "comment" : "Asked the first time the guardian presses Share on a share-location card",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When you press Share on a card in a chat, Rome sends your current location to your Rome and its AI model, for that answer only."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当你在聊天里的卡片上点按“共享”时，Rome 会把你当前的位置发送给你的 Rome 及其 AI 模型，只用于这一次回答。"
+          }
+        }
+      }
+    },
     "NSPhotoLibraryAddUsageDescription" : {
       "comment" : "Asked before saving a photo from the viewer",
       "extractionState" : "manual",

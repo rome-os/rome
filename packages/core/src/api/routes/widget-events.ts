@@ -4,6 +4,7 @@ import { currentChatOwner } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
+import { DECLINED_LOCATION, sharedLocationAnswer } from "../../webchat/location-card.js";
 
 /** What core's own widget makes of one of its events: an answer for the agent
  *  waiting on it, a link for the client to open, or neither, which leaves the
@@ -74,6 +75,15 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
     },
     dismiss: async (context) => ({ answer: { kind: context.kind, dismissed: true } }),
   },
+  // Share carries the position the client read from the device; Not now declines.
+  "location-card": {
+    "share-location": async (context) => {
+      const shared = sharedLocationAnswer(context);
+      if (!shared) return Response.json({ error: "No location was sent." }, { status: 400 });
+      return { answer: shared };
+    },
+    decline: async () => ({ answer: DECLINED_LOCATION }),
+  },
 };
 
 /** Set on the env of a turn the widget route starts, which a client cannot
@@ -134,6 +144,8 @@ export interface WidgetEventDeps {
 export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
   const app = new Hono();
   const callerOwner = deps.callerOwner ?? currentChatOwner;
+  /** The cards whose answer is on its way to their chat. */
+  const answering = new Set<string>();
 
   app.post("/chat/widgets/:id/events", async (c) => {
     const widgetId = c.req.param("id");
@@ -280,15 +292,26 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     output: unknown,
     turnFields: unknown,
   ) {
+    // Two clients can press the same card at once: the first answer wins,
+    // and the other is refused until the chat has stored the first.
+    if (answering.has(widgetId)) {
+      return Response.json({ error: "This card was already answered" }, { status: 400 });
+    }
+    answering.add(widgetId);
     const turn = isObject(turnFields) ? turnFields : {};
-    const res = await to(`/api/chat/sessions/${encodeURIComponent(widget.chatId)}/turns`, {
-      ...turn,
-      // The message names the card pressed: a later card in the chat can
-      // reuse its tool-use id.
-      parts: [
-        { type: "interaction_result", toolUseId: widget.toolUseId, messageId: widgetId, output },
-      ],
-    });
+    let res: Response;
+    try {
+      res = await to(`/api/chat/sessions/${encodeURIComponent(widget.chatId)}/turns`, {
+        ...turn,
+        // The message names the card pressed: a later card in the chat can
+        // reuse its tool-use id.
+        parts: [
+          { type: "interaction_result", toolUseId: widget.toolUseId, messageId: widgetId, output },
+        ],
+      });
+    } finally {
+      answering.delete(widgetId);
+    }
     if (!res.ok) return res;
     const turnReply = await res.json().catch(() => ({}));
     return Response.json(

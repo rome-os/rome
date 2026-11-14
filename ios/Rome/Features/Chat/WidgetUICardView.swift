@@ -86,8 +86,16 @@ private struct WidgetCardBody: View {
                     .foregroundStyle(Palette.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let answered = waiting?.answered {
+            if let answered = waiting?.answered, LocationCard.isLocationCard(part) {
+                Text(verbatim: LocationCard.outcome(answered))
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
+            } else if let answered = waiting?.answered {
                 Text(answered["dismissed"]?.bool == true ? "Dismissed" : "Answered")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
+            } else if surface.locating {
+                Text("Finding your location…")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
             } else if surface.sent {
@@ -147,6 +155,10 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var clears = WidgetClears()
     /// Set once core takes an event on a card the agent waits on.
     @Published private(set) var sent = false
+    /// The share-location card is reading the phone's position.
+    @Published private(set) var locating = false
+    /// Where Share on the share-location card reads the position.
+    var locator: DeviceLocating = CoreLocationLocator.shared
     /// Whether the card the agent waits on is answered, as stored.
     var answered = false
 
@@ -280,6 +292,27 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         guard let send, !busy, !(waits && (answered || sent)) else { return }
         busy = true
         defer { busy = false }
+        var body = body
+        // Share on the share-location card carries the phone's position, read
+        // on the press so iOS asks for permission then.
+        if name == LocationCard.shareEvent {
+            locating = true
+            let read = await locator.currentPosition()
+            locating = false
+            switch read {
+            case .success(let position):
+                if case .object(var fields) = body, case .object(let fix) = position.json {
+                    fields.merge(fix) { _, new in new }
+                    body = .object(fields)
+                } else {
+                    body = position.json
+                }
+            case .failure(let failure):
+                sendFailed = true
+                refusal = LocationCard.failureText(failure)
+                return
+            }
+        }
         do {
             let reply = try await send(name, body)
             // A link the reply names opens; a card core says is answered is

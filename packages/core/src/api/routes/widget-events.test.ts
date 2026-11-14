@@ -613,3 +613,119 @@ describe("an event on the connect card core owns", () => {
     });
   });
 });
+
+describe("an event on the share-location card core owns", () => {
+  const locationCard = {
+    type: "pending_interaction",
+    toolUseId: "l1",
+    appId: "core",
+    render: {
+      kind: "inline",
+      componentId: "location-card",
+      builtin: true,
+      ui: {
+        components: [
+          { id: "root", component: "Column", children: ["decline", "share"] },
+          button("decline", "decline"),
+          button("share", "share-location"),
+        ],
+      },
+    },
+  };
+  const position = {
+    latitude: 31.23,
+    longitude: 121.47,
+    accuracy: 18.4,
+    timestamp: 1_800_000_000_000,
+  };
+
+  it("answers the agent with the position the client read on Share", async () => {
+    const { fire, forwarded } = setup({ m: { chatId: "c1", content: [locationCard] } });
+    const res = await fire("m", { name: "share-location", context: position });
+    expect(await res.json()).toMatchObject({ answered: true });
+    expect(forwarded[0]?.body).toMatchObject({
+      parts: [
+        {
+          toolUseId: "l1",
+          messageId: "m",
+          output: {
+            status: "shared",
+            latitude: 31.23,
+            longitude: 121.47,
+            accuracyMeters: 18,
+            fixedAt: new Date(1_800_000_000_000).toISOString(),
+          },
+        },
+      ],
+    });
+  });
+
+  it("refuses a Share that carries no position, and leaves the card waiting", async () => {
+    const { fire, forwarded } = setup({ m: { chatId: "c1", content: [locationCard] } });
+    const res = await fire("m", {
+      name: "share-location",
+      context: { latitude: 91, longitude: 0 },
+    });
+    expect(res.status).toBe(400);
+    expect(forwarded).toEqual([]);
+  });
+
+  it("answers that the guardian declined on Not now", async () => {
+    const { fire, forwarded } = setup({ m: { chatId: "c1", content: [locationCard] } });
+    await fire("m", { name: "decline" });
+    expect(forwarded[0]?.body).toMatchObject({
+      parts: [{ output: { status: "declined", dismissed: true } }],
+    });
+  });
+
+  it("takes no answer once the card was answered or skipped by a message", async () => {
+    const { fire, forwarded } = setup({
+      m: { chatId: "c1", content: [locationCard] },
+      n: {
+        chatId: "c1",
+        content: [{ type: "interaction_result", toolUseId: "l1", output: { dismissed: true } }],
+      },
+    });
+    const res = await fire("m", { name: "share-location", context: position });
+    expect(res.status).toBe(400);
+    expect(forwarded).toEqual([]);
+  });
+
+  it("lets the first of two clients answer, and refuses the other", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const turns: unknown[] = [];
+    const app = widgetEventRoutes({
+      webchatRepo: {
+        widgetMessage: async () => ({ chatId: "c1", content: JSON.stringify([locationCard]) }),
+        getMessages: (async () => [
+          { id: "m", role: "assistant", content: JSON.stringify([locationCard]) },
+        ]) as never,
+        getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
+      },
+      callerOwner: async () => "guardian",
+      forward: async (request) => {
+        turns.push(await request.json());
+        await held;
+        return Response.json({ ok: true });
+      },
+    });
+    const fire = (body: unknown) =>
+      app.request("/chat/widgets/m/events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const first = fire({ name: "share-location", context: position });
+    // The second press lands while the first answer is on its way to the chat.
+    while (turns.length === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+    const second = await fire({ name: "decline" });
+    release();
+    expect((await first).status).toBe(200);
+    expect(second.status).toBe(400);
+    expect(await second.json()).toEqual({ error: "This card was already answered" });
+    expect(turns).toHaveLength(1);
+  });
+});

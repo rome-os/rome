@@ -229,6 +229,7 @@ import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
 import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOfChat } from "./webchat/owner.js";
+import { chatReadByGuardianAlone } from "./webchat/location-card.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
 import { TaskChecks } from "./concierge/task-checks.js";
@@ -1282,6 +1283,18 @@ async function main() {
         sessionTools: (context) => buildConciergeTools(concierge, context),
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
+        // Read on each call, so a chat that opens to visitors after the turn
+        // started is no longer private. Only dashboard chats draw cards.
+        privateTurn: async (turn) => {
+          const actor = turn.actor();
+          if (actor && actor.kind !== "guardian") return false;
+          const thread = turn.threadContext();
+          if (thread?.channel !== "webchat" || !thread.threadId) return false;
+          return chatReadByGuardianAlone(
+            await webchatRepo.getSession(thread.threadId),
+            dashboardAccessState.hasCloudEmailAccess(),
+          );
+        },
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),

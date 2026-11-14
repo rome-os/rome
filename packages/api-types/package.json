@@ -40,7 +40,8 @@
     "./wechat-app": "./src/wechat-app.ts",
     "./live-events": "./src/live-events.ts",
     "./app-connection-access": "./src/app-connection-access.ts",
-    "./question-card": "./src/question-card.ts"
+    "./question-card": "./src/question-card.ts",
+    "./location-card": "./src/location-card.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -604,6 +604,32 @@ final class DemoBackend: RomeBackend {
     /// is shown as (`questionCardFromAnswers`).
     static let questionCards: JSONValue = try! JSONDecoder().decode(JSONValue.self, from: Data(#"{"q-hk":{"components":[{"id":"q0-text","component":"Text","text":"你是想查海口明天的天气，还是了解海口这座城市？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"查明天的天气","value":"查明天的天气"},{"label":"了解这座城市","value":"了解这座城市"}],"value":{"path":"/answers/0/values"},"clears":{"path":"/answers/0/text"}},{"id":"q0-own","component":"TextField","label":"你是想查海口明天的天气，还是了解海口这座城市？","value":{"path":"/answers/0/text"},"variant":"shortText","placeholder":{"string":"typeOwn"},"clears":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick","q0-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"or","args":{"values":[{"call":"required","args":{"value":{"path":"/answers/0/values"}}},{"call":"required","args":{"value":{"path":"/answers/0/text"}}}]}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-mail":{"components":[{"id":"q0-text","component":"Text","text":"摘要里要包括哪些？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"multipleSelection","options":[{"label":"需要我回复的","value":"需要我回复的","description":"别人在等你答复的邮件"},{"label":"账单和收据","value":"账单和收据"},{"label":"新闻简报","value":"新闻简报","description":"订阅的周报和新闻"}],"value":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick"]},{"id":"q1-text","component":"Text","text":"几点发给你？","variant":"h5"},{"id":"q1-title","component":"Row","children":["q1-text"]},{"id":"q1-own","component":"TextField","label":"几点发给你？","value":{"path":"/answers/1/text"},"variant":"longText","placeholder":{"string":"typeAnswer"}},{"id":"q1","component":"Column","children":["q1-title","q1-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"required","args":{"value":{"path":"/answers/0/values"}}},"message":""},{"condition":{"call":"required","args":{"value":{"path":"/answers/1/text"}}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","q1","actions"]}],"data":{"answers":[{"values":["需要我回复的"],"text":""},{"values":[],"text":"每天早上 8 点"}]}},"q-1":{"components":[{"id":"q0-text","component":"Text","text":"调研范围只看国内产品，还是包括海外？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"只看国内","value":"只看国内"},{"label":"包括海外","value":"包括海外"}],"value":{"path":"/answers/0/values"},"clears":{"path":"/answers/0/text"}},{"id":"q0-own","component":"TextField","label":"调研范围只看国内产品，还是包括海外？","value":{"path":"/answers/0/text"},"variant":"shortText","placeholder":{"string":"typeOwn"},"clears":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick","q0-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"or","args":{"values":[{"call":"required","args":{"value":{"path":"/answers/0/values"}}},{"call":"required","args":{"value":{"path":"/answers/0/text"}}}]}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-login":{"components":[{"id":"q0-text","component":"Text","text":"深色模式下按钮用珊瑚色，还是用中性色？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"珊瑚色","value":"珊瑚色"},{"label":"中性色","value":"中性色"}],"value":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"required","args":{"value":{"path":"/answers/0/values"}}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-login-card":[{"values":["珊瑚色"],"text":""}]}"#.utf8))
 
+    /// A share-location card as core stores it (`locationCardUi`).
+    static func locationCard(_ toolUseId: String, reason: String) -> JSONValue {
+        func c(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
+            .object(props.merging(["id": .string(id), "component": .string(kind)]) { a, _ in a })
+        }
+        let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
+        let event = { (name: String) in JSONValue.object(["event": .object(["name": .string(name)])]) }
+        return .object([
+            "type": .string("pending_interaction"), "toolUseId": .string(toolUseId), "appId": .string("core"),
+            "render": .object([
+                "kind": .string("inline"), "componentId": .string("location-card"), "builtin": .bool(true),
+                "props": .object(["reason": .string(reason)]),
+                "ui": .object(["components": .array([
+                    c("root", "Column", ["children": ids(["title", "reason", "actions"])]),
+                    c("title", "Text", ["text": .string("Share your location?"), "variant": .string("h5")]),
+                    c("reason", "Text", ["text": .string(reason)]),
+                    c("actions", "Row", ["children": ids(["decline", "share"]), "justify": .string("end")]),
+                    c("decline", "Button", ["child": .string("decline-label"), "variant": .string("borderless"), "action": event("decline")]),
+                    c("decline-label", "Text", ["text": .string("Not now")]),
+                    c("share", "Button", ["child": .string("share-label"), "variant": .string("primary"), "action": event("share-location")]),
+                    c("share-label", "Text", ["text": .string("Share")]),
+                ])]),
+            ]),
+        ])
+    }
+
     static let mealCard: JSONValue = {
         func c(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
             .object(props.merging(["id": .string(id), "component": .string(kind)]) { a, _ in a })
@@ -841,6 +867,7 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),
             ConciergeChat(id: "topic-home", name: "家里装修：厨房翻新、浴室防水和客厅灯具的预算与师傅安排", main: false, unread: 0),
             ConciergeChat(id: "topic-meals", name: "今天吃了什么", main: false, unread: 0),
+            ConciergeChat(id: "topic-location", name: "附近的咖啡馆", main: false, unread: 0),
             ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
@@ -934,6 +961,26 @@ final class DemoBackend: RomeBackend {
             parts([Self.mealCard], at: at(12, 41), session: "topic-meals"),
             agent("到现在 1,240 千卡，离目标还差 760。晚饭可以吃点蛋白质多的。", at: at(12, 41).addingTimeInterval(2), session: "topic-meals"),
             parts([Self.dinnerQuestion], at: at(12, 41).addingTimeInterval(3), session: "topic-meals"),
+        ]
+
+        // Share-location cards in each state: shared, not shared, and open.
+        let location = "topic-location"
+        messages[location] = [
+            user("l1", "明天这里会下雨吗？", at: at(9, 10), session: location),
+            parts([Self.locationCard("loc-rain", reason: "查你所在地明天的天气")], at: at(9, 10).addingTimeInterval(2), session: location),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("loc-rain"), "output": .object([
+                "status": .string("shared"), "latitude": .number(31.2), "longitude": .number(121.4),
+                "accuracyMeters": .number(18), "fixedAt": .string("2026-11-14T01:10:00.000Z"),
+            ])])], at: at(9, 11), session: location, role: "user"),
+            agent("明天下午有小雨，出门记得带伞。", at: at(9, 11).addingTimeInterval(3), session: location),
+            user("l2", "离机场多远？", at: at(9, 30), session: location),
+            parts([Self.locationCard("loc-airport", reason: "算你到机场的距离")], at: at(9, 30).addingTimeInterval(2), session: location),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("loc-airport"), "output": .object([
+                "status": .string("declined"), "dismissed": .bool(true),
+            ])])], at: at(9, 31), session: location, role: "user"),
+            agent("好的。你从哪里出发？告诉我地点就能算。", at: at(9, 31).addingTimeInterval(3), session: location),
+            user("l3", "附近有什么好的咖啡馆？", at: at(10, 5), session: location),
+            parts([Self.locationCard("loc-coffee", reason: "找你附近的咖啡馆")], at: at(10, 5).addingTimeInterval(2), session: location),
         ]
 
         // Concierge, as on the design's Chat board.
