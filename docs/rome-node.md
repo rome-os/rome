@@ -616,7 +616,7 @@ for anything else. The phone answers at most 4 requests at once. Another request
 gets `busy` before it is recorded or Health is read, and `system.info` is always
 answered.
 
-**Settings → Apple Health** is a row that shows On, Off, Paused or Needs
+**Settings → Apple Health** is a row that shows On, Off or Needs
 sign-in and opens the Apple Health page. Its switch, **Sync with Rome**, belongs to
 the Rome open now, is off by default on each Rome, and decides both ways Health
 reaches that Rome: the background sync, and the
@@ -629,8 +629,8 @@ provider. Four short promises follow. Health is kept up to date on the Rome, rea
 only and never changed. Rome never sells it, uses it for ads, or uses it to train
 AI models, and the user's AI provider's terms apply to what it receives. The user
 can delete what was sent. Results can stay in the Rome's chats and memory. A line
-under the switch says how the sync stands, and **Sync history** lists the syncs of
-the last 30 days with Sync now, Pause and Delete uploaded data. A build before sync
+under the switch says how the sync stands, with Sync now at its end, and **Sync
+history** lists the syncs of the last 30 days by day, with Delete uploaded data. A build before sync
 had its own "Allow Rome to read Health" switch under iPhone use. That consent did
 not cover uploading history, so sync starts off, and the page says once that
 Health now syncs.

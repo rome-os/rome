@@ -7,36 +7,36 @@ struct HealthRowState: Equatable {
     var value: String {
         switch status {
         case .off: return String(localized: "Off")
-        case .paused: return String(localized: "Paused")
         case .needsSignIn: return String(localized: "Needs sign-in")
         default: return String(localized: "On")
         }
     }
 }
 
-/// The line under Sync with Rome, and the button it offers.
+/// The line under Sync with Rome, and the text button at its end: Sync
+/// now while all is well, Retry or Sign in when a sync failed.
 struct HealthStatusLine: Equatable {
-    enum Action: Equatable { case signIn, retry }
+    enum Action: Equatable { case syncNow, signIn, retry }
 
     let text: String?
     let action: Action?
     let failed: Bool
 
-    init(_ status: HealthSyncStatus, device: DeviceKind = .iPhone, now: Date = Date(), locale: Locale = .current) {
+    /// `rome`: the open Rome's name, which the line says it syncs to.
+    init(_ status: HealthSyncStatus, rome: String? = nil, device: DeviceKind = .iPhone, now: Date = Date(), locale: Locale = .current) {
+        func to(_ text: String) -> String { rome.map { String(localized: "\(text) · to \($0)") } ?? text }
         switch status {
         case .off:
             text = nil; action = nil; failed = false
-        case .paused:
-            text = String(localized: "Paused"); action = nil; failed = false
         case .waiting:
-            text = String(localized: "Not synced yet"); action = nil; failed = false
+            text = to(String(localized: "Not synced yet")); action = .syncNow; failed = false
         case .syncing:
             text = String(localized: "Syncing…"); action = nil; failed = false
         case .syncingHistory(let month):
-            let name = month.formatted(Date.FormatStyle(locale: locale).month(.abbreviated).year())
+            let name = month.formatted(Date.FormatStyle(locale: locale).month(.abbreviated))
             text = String(localized: "Syncing history · \(name)"); action = nil; failed = false
         case .synced(let date):
-            text = String(localized: "Synced \(Self.ago(date, now: now, locale: locale))"); action = nil; failed = false
+            text = to(String(localized: "Synced \(Self.ago(date, now: now, locale: locale))")); action = .syncNow; failed = false
         case .locked:
             text = String(localized: "Can't sync while \(device.name) is locked"); action = nil; failed = false
         case .needsSignIn:
@@ -129,54 +129,42 @@ struct HealthAccessScreen: View {
         .padding(.bottom, 4)
     }
 
+    /// The switch, the status line under it, Sync history, and what syncs.
     private func toggleCard(_ health: HealthSettings) -> some View {
-        let line = HealthStatusLine(health.status, device: model.node.device)
+        let rome = health.instance.flatMap { $0.isVisitor ? nil : $0.name }
+        let line = HealthStatusLine(health.status, rome: rome, device: model.node.device)
         return VStack(alignment: .leading, spacing: 8) {
             SettingsGroup {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Sync with Rome").romeFont(17).foregroundStyle(Palette.fg)
-                        // Each Rome has its own switch: this one is for the Rome open now.
-                        if let instance = health.instance {
-                            Text(verbatim: instance.isVisitor ? String(localized: "Only to a Rome you own") : instance.name)
-                                .romeFont(13)
-                                .foregroundStyle(Palette.sub)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer(minLength: 8)
+                PlainRow(title: "Sync with Rome") {
                     Toggle("Sync with Rome", isOn: Binding(get: { health.isEnabled }, set: { on in health.setEnabled(on) }))
                         .labelsHidden()
                         .tint(Palette.primary)
                         .disabled(!health.canSync)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .frame(minHeight: 52)
-                .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
                 .accessibilityElement(children: .combine)
-                Button(action: onHistory) {
-                    HStack(spacing: 12) {
-                        Text("Sync history").romeFont(17).foregroundStyle(Palette.fg)
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.right")
-                            .romeFont(13, .semibold)
-                            .foregroundStyle(Palette.sub)
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 52)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(RowPressStyle())
             }
-            if health.showsMigrationNote {
+            if health.instance?.isVisitor == true {
+                NoteLine(text: String(localized: "Health syncs only to a Rome you own."))
+            } else if health.showsMigrationNote {
                 NoteLine(text: String(localized: "Health now syncs to your Rome. Turn on Sync to keep using it."))
             } else if let text = line.text {
-                HealthStatusRow(line: line, text: text)
+                HealthStatusRow(line: line, text: text, running: health.activity.running)
             }
             if health.isEnabled, health.backgroundRefreshOff {
                 NoteLine(text: String(localized: "Turn on Background App Refresh so Health stays up to date"))
             }
+            SettingsGroup {
+                Button(action: onHistory) {
+                    PlainRow(title: "Sync history") {
+                        Image(systemName: "chevron.right")
+                            .romeFont(13, .semibold)
+                            .foregroundStyle(Palette.sub)
+                    }
+                }
+                .buttonStyle(RowPressStyle())
+            }
+            .padding(.top, 10)
+            NoteLine(text: String(localized: "Steps, sleep, heart rate, workouts and the other Health data you allow. Agents read it only in your private chats."))
         }
     }
 
@@ -232,30 +220,52 @@ struct HealthAccessScreen: View {
 struct HealthStatusRow: View {
     let line: HealthStatusLine
     let text: String
+    var running = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(verbatim: text)
                 .romeFont(13)
                 .foregroundStyle(line.failed ? Palette.destructive : Palette.sub)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             switch line.action {
+            case .syncNow?:
+                action("Sync now") { model.health.syncNow() }
+                    .disabled(running)
             case .signIn?:
-                Button("Sign in") { Task { await model.reauthenticate() } }
-                    .romeFont(13, .semibold)
-                    .foregroundStyle(Palette.primaryText)
-                    .buttonStyle(PressScaleStyle())
+                action("Sign in") { Task { await model.reauthenticate() } }
             case .retry?:
-                Button("Retry") { model.health.syncNow() }
-                    .romeFont(13, .semibold)
-                    .foregroundStyle(Palette.primaryText)
-                    .buttonStyle(PressScaleStyle())
+                action("Retry") { model.health.syncNow() }
             case nil:
                 EmptyView()
             }
         }
+    }
+
+    private func action(_ title: LocalizedStringKey, perform: @escaping () -> Void) -> some View {
+        Button(title, action: perform)
+            .romeFont(13, .semibold)
+            .foregroundStyle(Palette.primaryText)
+            .buttonStyle(PressScaleStyle())
+    }
+}
+
+/// A card's only row: a title and its control, no icon.
+private struct PlainRow<Trailing: View>: View {
+    let title: LocalizedStringKey
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title).romeFont(17).foregroundStyle(Palette.fg)
+            Spacer(minLength: 8)
+            trailing()
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
     }
 }
 

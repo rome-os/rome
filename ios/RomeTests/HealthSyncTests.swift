@@ -166,12 +166,12 @@ final class Clock: @unchecked Sendable {
 
 final class Flags: @unchecked Sendable {
     private let lock = NSLock()
-    private var state = (enabled: true, paused: false, unlocked: true, instance: "inst-1")
+    private var state = (enabled: true, unlocked: true, instance: "inst-1")
 
-    var switches: SyncSwitches { lock.withLock { SyncSwitches(enabled: state.enabled, paused: state.paused) } }
+    var switches: SyncSwitches { lock.withLock { SyncSwitches(enabled: state.enabled) } }
     var unlocked: Bool { lock.withLock { state.unlocked } }
     var instance: String { lock.withLock { state.instance } }
-    func set(paused: Bool) { lock.withLock { state.paused = paused } }
+    func set(enabled: Bool) { lock.withLock { state.enabled = enabled } }
     func set(unlocked: Bool) { lock.withLock { state.unlocked = unlocked } }
     func set(instance: String) { lock.withLock { state.instance = instance } }
 }
@@ -421,9 +421,9 @@ struct SyncRig {
         #expect(await rig.lastEntry()?.outcome == .skipped)
     }
 
-    @Test func pausedReadsAndSendsNothing() async {
+    @Test func offReadsAndSendsNothing() async {
         let rig = SyncRig()
-        rig.flags.set(paused: true)
+        rig.flags.set(enabled: false)
         await rig.engine.sync(.manual)
         #expect(rig.health.readCount == 0)
         #expect(await rig.log.entries.isEmpty)
@@ -559,22 +559,22 @@ struct SyncRig {
         #expect(await log.entries.last?.outcome == .ok, "the launch wake did not use up the foreground throttle")
     }
 
-    @Test func pausingStopsABackfillUnderWayAndKeepsNothingOfIt() async throws {
+    @Test func turningOffStopsABackfillUnderWayAndKeepsNothingOfIt() async throws {
         let rig = SyncRig()
         rig.addThreeWeeks()
         await rig.backend.hold()
         let run = Task { await rig.engine.sync(.backfill) }
         await rig.waitUntilHeld()
         let cursor = try #require(await rig.progress.load().backfill?.cursor)
-        rig.flags.set(paused: true)
+        rig.flags.set(enabled: false)
         await rig.backend.release()
         await run.value
         #expect(await rig.backend.envelopes.count == 1, "the batch already sent, and nothing after it")
         #expect(await rig.lastEntry()?.outcome == .interrupted)
-        #expect(await rig.progress.load().backfill?.cursor == cursor, "the week is read again after Resume")
+        #expect(await rig.progress.load().backfill?.cursor == cursor, "the week is read again once it is back on")
         let reads = rig.health.readCount
         await rig.engine.sync(.manual)
-        #expect(rig.health.readCount == reads, "paused reads nothing")
+        #expect(rig.health.readCount == reads, "off reads nothing")
     }
 
     @Test func aDeleteWaitsForTheSyncUnderWayAndNoLateBatchBringsAnythingBack() async throws {
@@ -753,14 +753,15 @@ struct SyncRig {
         #expect(!Rig().make().showsMigrationNote)
     }
 
-    @Test func pauseAndResumeTellTheRome() async {
+    @Test func onAgainGoesOnFromTheAnchorsWithNoNewHistory() async {
         let rig = Rig()
         let settings = rig.make()
         await settings.setEnabled(true).value
-        await settings.setPaused(true).value
-        #expect(settings.status == .paused)
-        await settings.setPaused(false).value
-        #expect(await rig.backend.states == ["paused", "active"])
+        #expect(await rig.log.entries.contains { $0.history }, "the first time, the history")
+        await settings.setEnabled(false).value
+        await settings.setEnabled(true).value
+        #expect(await rig.log.entries.last?.history == false, "on again: a catch-up from the anchors")
+        #expect(await rig.backend.states == ["off"], "off tells the Rome; on again, the next batch says it")
     }
 
     @Test func deletingUploadedDataTurnsSyncOffAndLogsIt() async {
@@ -853,22 +854,20 @@ struct SyncRig {
             SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: .observer, outcome: outcome, errorCode: code)
         }
         let idle = SyncActivity()
-        #expect(HealthSyncStatus.make(enabled: false, paused: false, activity: idle, newest: nil, lastGood: nil) == .off)
-        #expect(HealthSyncStatus.make(enabled: true, paused: true, activity: idle, newest: nil, lastGood: nil) == .paused)
-        #expect(HealthSyncStatus.make(enabled: true, paused: false, activity: idle, newest: nil, lastGood: nil) == .waiting)
-        #expect(HealthSyncStatus.make(enabled: true, paused: false, activity: SyncActivity(running: true, historyMonth: HealthFixtures.now), newest: nil, lastGood: nil) == .syncingHistory(HealthFixtures.now))
-        #expect(HealthSyncStatus.make(enabled: true, paused: false, activity: idle, newest: entry(.error, "signed_out"), lastGood: nil) == .needsSignIn)
-        #expect(HealthSyncStatus.make(enabled: true, paused: false, activity: idle, newest: entry(.error, "needs_update"), lastGood: nil) == .needsUpdate)
-        #expect(HealthSyncStatus.make(enabled: true, paused: false, activity: idle, newest: entry(.skipped, "locked"), lastGood: nil) == .locked)
-        #expect(HealthSyncStatus.make(enabled: true, paused: false, activity: idle, newest: entry(.error, "network"), lastGood: nil) == .failed)
-        #expect(HealthSyncStatus.make(enabled: true, paused: false, activity: idle, newest: entry(.ok), lastGood: entry(.ok)) == .synced(HealthFixtures.now))
+        #expect(HealthSyncStatus.make(enabled: false, activity: idle, newest: nil, lastGood: nil) == .off)
+        #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: nil, lastGood: nil) == .waiting)
+        #expect(HealthSyncStatus.make(enabled: true, activity: SyncActivity(running: true, historyMonth: HealthFixtures.now), newest: nil, lastGood: nil) == .syncingHistory(HealthFixtures.now))
+        #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.error, "signed_out"), lastGood: nil) == .needsSignIn)
+        #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.error, "needs_update"), lastGood: nil) == .needsUpdate)
+        #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.skipped, "locked"), lastGood: nil) == .locked)
+        #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.error, "network"), lastGood: nil) == .failed)
+        #expect(HealthSyncStatus.make(enabled: true, activity: idle, newest: entry(.ok), lastGood: entry(.ok)) == .synced(HealthFixtures.now))
     }
 
     @Test func theSettingsRowSaysWhenSyncNeedsASignIn() {
         #expect(HealthRowState(status: .needsSignIn).value == "Needs sign-in")
         #expect(HealthRowState(status: .off).value == "Off")
         #expect(HealthRowState(status: .synced(.now)).value == "On")
-        #expect(HealthRowState(status: .paused).value == "Paused")
     }
 
     @Test func theStatusLineOffersSignInOrRetry() {
@@ -878,7 +877,10 @@ struct SyncRig {
         #expect(HealthStatusLine(.failed).action == .retry)
         #expect(HealthStatusLine(.locked, device: .iPad).text == "Can't sync while iPad is locked")
         #expect(HealthStatusLine(.off).text == nil)
-        #expect(HealthStatusLine(.syncingHistory(HealthFixtures.date("2026-08-15T00:00:00Z")), locale: locale).text == "Syncing history · Aug 2026")
+        #expect(HealthStatusLine(.syncingHistory(HealthFixtures.date("2026-08-15T00:00:00Z")), locale: locale).text == "Syncing history · Aug")
+        let synced = HealthStatusLine(.synced(HealthFixtures.now), rome: "Home", now: HealthFixtures.now.addingTimeInterval(20), locale: locale)
+        #expect(synced.text == "Synced just now · to Home")
+        #expect(synced.action == .syncNow, "Sync now sits at the end of the line")
         #expect(HealthStatusLine(.synced(HealthFixtures.now), now: HealthFixtures.now.addingTimeInterval(20), locale: locale).text == "Synced just now")
     }
 }
@@ -891,40 +893,52 @@ struct SyncRig {
 
     private func plain(_ text: String) -> String { text.replacingOccurrences(of: "\u{202F}", with: " ") }
 
-    @Test func aSyncIsOneLineWhenHowAndHowManyNeverAValue() {
+    @Test func aSyncIsATriggerItsTimeAndACountNeverAValue() {
         var entry = SyncLogEntry(seq: 3, time: HealthFixtures.now, trigger: .observer, outcome: .ok)
-        entry.types = [
-            "stepCount": SyncTypeCount(items: 4, start: HealthFixtures.date("2026-11-08T23:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z")),
-            "heartRate": SyncTypeCount(items: 3, start: HealthFixtures.date("2026-11-08T23:00:00Z"), end: HealthFixtures.date("2026-11-09T01:00:00Z")),
-        ]
-        let line = formatter.line(entry)
-        #expect(plain(line.text) == "Today 6:30 PM · Background · 7 readings")
-        #expect(!line.failed)
+        entry.types = ["stepCount": SyncTypeCount(items: 4), "heartRate": SyncTypeCount(items: 3)]
+        let row = formatter.row(entry)
+        #expect(row.symbol == "moon")
+        #expect(row.title == "Background")
+        #expect(plain(row.detail) == "6:30 PM")
+        #expect(row.count == "7 readings")
+        #expect(!row.failed)
     }
 
-    @Test func eachTriggerHasItsWords() {
-        func words(_ trigger: SyncTrigger, history: Bool = false) -> String {
-            var entry = SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: trigger, outcome: .ok)
-            entry.history = history
-            return formatter.triggerText(entry)
+    @Test func eachTriggerHasItsWordsAndSymbol() {
+        func row(_ trigger: SyncTrigger, history: Bool = false) -> SyncHistoryRow {
+            var entry = SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: trigger, outcome: .ok, history: history)
+            entry.types = ["stepCount": SyncTypeCount(items: 1)]
+            return formatter.row(entry)
         }
-        #expect(words(.foreground) == "Opened Rome")
-        #expect(words(.manual) == "Sync now")
-        #expect(words(.observer, history: true) == "History")
+        #expect(row(.foreground).title == "Opened Rome" && row(.foreground).symbol == "iphone")
+        #expect(row(.manual).title == "Sync now" && row(.manual).symbol == "arrow.clockwise")
+        let history = row(.manual, history: true)
+        #expect(history.title == "History" && history.symbol == "clock.arrow.circlepath")
+        #expect(plain(history.detail) == "6:30 PM · last 6 months")
     }
 
-    @Test func failuresAndSkipsSayWhy() {
-        let locked = SyncLogEntry(seq: 1, time: HealthFixtures.now.addingTimeInterval(-86_400), trigger: .observer, outcome: .skipped, errorCode: "locked")
-        #expect(plain(formatter.line(locked).text) == "Yesterday 6:30 PM · Background · Skipped · iPhone locked")
-        let signedOut = SyncLogEntry(seq: 2, time: HealthFixtures.date("2026-11-03T12:15:00Z"), trigger: .observer, outcome: .error, errorCode: "signed_out")
-        #expect(formatter.line(signedOut).failed)
-        #expect(plain(formatter.line(signedOut).text) == "Nov 3, 8:15 PM · Background · Signed out of your Rome")
-        let deleted = SyncLogEntry(seq: 3, time: HealthFixtures.now, trigger: .manual, outcome: .deleted)
-        #expect(plain(formatter.line(deleted).text) == "Today 6:30 PM · Uploaded data deleted · Sync turned off")
+    @Test func aFailureIsRedWithItsReasonAndNoCount() {
+        let failed = formatter.row(SyncLogEntry(seq: 2, time: HealthFixtures.now, trigger: .observer, outcome: .error, errorCode: "signed_out"))
+        #expect(failed.failed)
+        #expect(failed.symbol == "exclamationmark.circle")
+        #expect(plain(failed.detail) == "6:30 PM · Signed out of your Rome")
+        #expect(failed.count == nil)
+        let locked = formatter.row(SyncLogEntry(seq: 1, time: HealthFixtures.now, trigger: .observer, outcome: .skipped, errorCode: "locked"))
+        #expect(!locked.failed)
+        #expect(plain(locked.detail) == "6:30 PM · Skipped · iPhone locked")
     }
 
-    @Test func quietSyncsAfterTheNewestAddNoLines() {
+    @Test func syncsAreGroupedByDay() {
+        let entries = [
+            SyncLogEntry(seq: 3, time: HealthFixtures.now, trigger: .observer, outcome: .error, errorCode: "network"),
+            SyncLogEntry(seq: 2, time: HealthFixtures.now.addingTimeInterval(-86_400), trigger: .observer, outcome: .error, errorCode: "network"),
+            SyncLogEntry(seq: 1, time: HealthFixtures.date("2026-11-03T12:15:00Z"), trigger: .observer, outcome: .error, errorCode: "network"),
+        ]
+        #expect(formatter.days(entries).map(\.title) == ["Today", "Yesterday", "Tuesday, Nov 3"])
+    }
+
+    @Test func quietSyncsAfterTheNewestAddNoRows() {
         let entries = (1...4).map { SyncLogEntry(seq: 5 - $0, time: HealthFixtures.now.addingTimeInterval(-Double($0) * 60), trigger: .observer, outcome: .ok) }
-        #expect(formatter.lines(entries).count == 1)
+        #expect(formatter.days(entries).flatMap(\.rows).count == 1)
     }
 }

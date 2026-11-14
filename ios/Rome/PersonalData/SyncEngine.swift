@@ -6,7 +6,7 @@ let personalDataLog = Logger(subsystem: "cc.romeos.mobile", category: "PersonalD
 // Runs one source's syncs: one at a time, triggers that arrive meanwhile
 // merged into one follow-up, a throttle on the foreground, batches with caps,
 // and a backoff after a failure. A sync reads nothing while the phone is
-// locked (Health is encrypted then) or while sync is paused, and stops all
+// locked (Health is encrypted then) or while sync is off, and stops all
 // retries once the session is over, until the guardian signs in again.
 
 /// What the engine says while it works, for the Health page's status line.
@@ -19,7 +19,6 @@ struct SyncActivity: Equatable, Sendable {
 /// The settings the engine reads at the start of every sync.
 struct SyncSwitches: Equatable, Sendable {
     var enabled: Bool
-    var paused: Bool
 }
 
 actor SyncEngine {
@@ -48,7 +47,7 @@ actor SyncEngine {
     private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     /// Callers waiting for the engine to go idle (`quiesce`).
     private var idleWaiters: [CheckedContinuation<Void, Never>] = []
-    /// Goes up on every Off, Pause, Delete and sign-out: a run started under
+    /// Goes up on every Off, Delete and sign-out: a run started under
     /// an older generation stops before its next read or batch, and keeps
     /// nothing it read.
     private var generation = 0
@@ -141,8 +140,8 @@ actor SyncEngine {
         waiters.removeValue(forKey: id)?.resume()
     }
 
-    /// Stops what runs and waits until nothing does: Off, Pause, Delete and
-    /// sign-out call it first, so no batch reaches the Rome after they act
+    /// Stops what runs and waits until nothing does: Off, Delete and sign-out
+    /// call it first, so no batch reaches the Rome after they act
     /// and no late confirmation brings old progress back.
     func quiesce() async {
         generation += 1
@@ -166,7 +165,7 @@ actor SyncEngine {
         failures = 0
     }
 
-    /// Sync was turned off, paused or reset: no retry waits.
+    /// Sync was turned off or reset: no retry waits.
     func cancelRetries() {
         retryTask?.cancel()
         retryTask = nil
@@ -180,16 +179,16 @@ actor SyncEngine {
     private struct Stop: Error {}
 
     /// Throws `Stop` when the run may not read or send any more: sync was
-    /// turned off or paused, the generation moved on, or time is up.
+    /// turned off, the generation moved on, or time is up.
     private func checkGoing(_ generation: Int, deadline: Date?) async throws {
         let state = await switches()
-        guard state.enabled, !state.paused, generation == self.generation else { throw Stop() }
+        guard state.enabled, generation == self.generation else { throw Stop() }
         if let deadline, now() >= deadline { throw Stop() }
     }
 
     private func run(_ trigger: SyncTrigger, served: Set<SyncTrigger>, deadline: Date?) async {
         let state = await switches()
-        guard state.enabled, !state.paused else { return }
+        guard state.enabled else { return }
         let myGeneration = generation
         let started = now()
         let asked = served.contains(.manual) || served.contains(.backfill)
@@ -227,7 +226,7 @@ actor SyncEngine {
                 if chunk.kind == .backfill { entry.history = true }
                 await onActivity(SyncActivity(running: true, historyMonth: chunk.historyMonth))
                 let unsupported = try await send(chunk, origin: origin, trigger: trigger, backend: target.backend, index: &index, entry: &entry, generation: myGeneration, deadline: deadline)
-                // Off, Pause or Delete meanwhile: the chunk is not kept, so
+                // Off or Delete meanwhile: the chunk is not kept, so
                 // a reset that follows is never undone by it.
                 try await checkGoing(myGeneration, deadline: nil)
                 await source.confirm(chunk, unsupported: unsupported)
@@ -322,7 +321,7 @@ actor SyncEngine {
         var unsupported = Set<String>()
         for (number, batch) in batches.enumerated() {
             // Before every request: a long chunk stops as soon as sync is
-            // off, paused or deleted, or the wake's time is up.
+            // off or deleted, or the wake's time is up.
             try await checkGoing(generation, deadline: deadline)
             let last = number == batches.count - 1
             let envelope = PersonalDataEnvelope(

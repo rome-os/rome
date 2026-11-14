@@ -141,6 +141,26 @@
         }
       }
     },
+    "%@ · last 6 months" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 最近 6 个月"
+          }
+        }
+      }
+    },
+    "%@ · to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 同步到 %@"
+          }
+        }
+      }
+    },
     "%@, %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1573,12 +1593,12 @@
         }
       }
     },
-    "Delete uploaded data…" : {
+    "Delete uploaded data" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "删除上传的数据…"
+            "value" : "删除上传的数据"
           }
         }
       }
@@ -1899,6 +1919,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "健康数据已停止同步到你的 Rome。打开 Rome 重新登录。"
+          }
+        }
+      }
+    },
+    "Health syncs only to a Rome you own." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "健康数据只会同步到你拥有的 Rome。"
           }
         }
       }
@@ -2881,16 +2911,6 @@
         }
       }
     },
-    "Only to a Rome you own" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅同步到你拥有的 Rome"
-          }
-        }
-      }
-    },
     "Only when" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3067,16 +3087,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "或者自己写…"
-          }
-        }
-      }
-    },
-    "Pause" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂停"
           }
         }
       }
@@ -3521,16 +3531,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "结果可能保留在你的 Rome 的聊天和记忆中。"
-          }
-        }
-      }
-    },
-    "Resume" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "继续"
           }
         }
       }
@@ -4125,16 +4125,6 @@
         }
       }
     },
-    "Skipped · paused" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已跳过 · 已暂停"
-          }
-        }
-      }
-    },
     "Sleep" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4201,6 +4191,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "步数"
+          }
+        }
+      }
+    },
+    "Steps, sleep, heart rate, workouts and the other Health data you allow. Agents read it only in your private chats." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "步数、睡眠、心率、体能训练，以及你允许的其他健康数据。Agent 只会在你的私人聊天中读取。"
           }
         }
       }
@@ -4331,16 +4331,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "立即同步"
-          }
-        }
-      }
-    },
-    "Sync turned off" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同步已关闭"
           }
         }
       }
@@ -5653,16 +5643,6 @@
         }
       }
     },
-    "continues next time" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下次继续"
-          }
-        }
-      }
-    },
     "conversation got long" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5749,16 +5729,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设定已更新"
-          }
-        }
-      }
-    },
-    "some not sent" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "部分未发送"
           }
         }
       }
