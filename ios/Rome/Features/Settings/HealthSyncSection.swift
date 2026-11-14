@@ -56,7 +56,7 @@ struct HealthSyncSection: View {
         if health.instance?.isVisitor != true {
             let line = HealthStatusLine(health.status, device: model.node.device)
             VStack(alignment: .leading, spacing: 8) {
-                SettingsGroup(header: "Sync") {
+                SettingsGroup {
                     PlainRow(title: "Sync with Rome", last: false) {
                         Toggle("Sync with Rome", isOn: Binding(get: { health.isEnabled }, set: { on in health.setEnabled(on) }))
                             .labelsHidden()

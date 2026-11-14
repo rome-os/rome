@@ -294,6 +294,9 @@ actor SyncEngine {
         }
     }
 
+    /// Refusals that hold a type's progress back.
+    static let heldBack: Set<String> = ["unknown_type", "type_cap"]
+
     private func scheduleRetry(after seconds: TimeInterval?) {
         let delay = seconds ?? Self.backoff(attempt: failures, random: random())
         failures += 1
@@ -344,7 +347,11 @@ actor SyncEngine {
             entry.deleted += reply.deleted ?? 0
             for rejected in reply.rejected ?? [] {
                 entry.rejected += 1
-                guard rejected.code == "unknown_type", let index = rejected.index, index < batch.upserts.count else { continue }
+                // A type the Rome does not know, or one it holds the most of
+                // (`type_cap`), keeps its anchor and its mark: the phone never
+                // says the Rome has readings it refused. It is left out until
+                // Sync now tries it again.
+                guard let code = rejected.code, Self.heldBack.contains(code), let index = rejected.index, index < batch.upserts.count else { continue }
                 unsupported.insert(batch.upserts[index].type)
             }
         }

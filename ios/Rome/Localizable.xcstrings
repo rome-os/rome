@@ -4383,16 +4383,6 @@
         }
       }
     },
-    "Sync" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同步"
-          }
-        }
-      }
-    },
     "Sync history" : {
       "localizations" : {
         "zh-Hans" : {

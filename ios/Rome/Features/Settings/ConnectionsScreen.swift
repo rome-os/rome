@@ -213,7 +213,7 @@ private struct LiveAccessSection: View {
         let on = node.liveSwitches[capability.id] ?? false
         let reads = node.recent.filter { capability.handles($0.action) }.count
         VStack(alignment: .leading, spacing: 8) {
-            SettingsGroup(header: "Live access") {
+            SettingsGroup {
                 PlainRow(title: "Live access", last: false) {
                     Toggle("Live access", isOn: Binding(get: { on }, set: { value in node.setLive(capability.id, on: value) }))
                         .labelsHidden()
