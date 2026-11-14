@@ -19,7 +19,7 @@ function inUse(used, atStart) {
   const env = used.environment ?? {};
   const named = used.named ? `${used.named.provider} at ${used.named.host}` : "no place";
   return [
-    `- Transcriber in use: the environment's is ${env.provider ?? "unknown"}${env.model ? `, model ${env.model}` : ""}${env.url ? ` at ${env.url}` : ""}; Rome names ${named}${used.via ? `, via ${used.via}` : ""}`,
+    `- Transcriber in use: the environment's is ${env.provider ?? "unknown"}${env.model ? `, model ${env.model}` : ""}${env.url || env.host ? ` at ${env.url ?? env.host}` : ""}; Rome names ${named}${used.via ? `, via ${used.via}` : ""}`,
   ];
 }
 

@@ -78,12 +78,20 @@ export async function useTranscriber(ctx) {
  */
 async function transcriberInUse(ctx) {
   const version = await ctx.env.version();
-  const environment = version?.transcriberInUse ?? version?.transcriber ?? null;
+  // `transcriberInUse` is Rome Cloud's answer, `{ status, body }`; older environments lack it.
+  const environment = version?.transcriberInUse?.body ?? version?.transcriber ?? null;
   const opened = await openPage(ctx.env, { mic: setMessages(ctx.script, "B")[0].path });
   try {
     const url = new URL("/api/voice-input", opened.page.url()).toString();
-    const response = await opened.page.request.get(url);
-    const body = response.ok() ? await response.json().catch(() => null) : null;
+    // Rome caches what Rome Cloud names for 60 s, so wait for it to catch up with a switch.
+    const start = Date.now();
+    let body;
+    do {
+      const response = await opened.page.request.get(url);
+      body = response.ok() ? await response.json().catch(() => null) : null;
+      if (!environment?.host || body?.place?.host === environment.host) break;
+      await opened.page.waitForTimeout(2000);
+    } while (Date.now() - start < 75000);
     return { environment, named: body?.place ?? null, via: body?.via ?? null };
   } finally {
     await opened.close();
@@ -98,9 +106,10 @@ export function standInReason(ctx) {
   if (ctx.transcriber === "stand-in") return "the stand-in transcriber was asked for";
   const used = ctx.memo.transcriberInUse;
   if (!used) return null;
-  if (used.environment?.provider === "stand-in")
-    return `the environment's transcriber is the stand-in at ${used.environment.url}, though ${ctx.transcriber} was asked for`;
-  if (/^transcriber(:\d+)?$/.test(used.named?.host ?? ""))
+  const standInHost = /^transcriber(:\d+)?$/;
+  if (used.environment?.provider === "stand-in" || standInHost.test(used.environment?.host ?? ""))
+    return `the environment's transcriber is the stand-in at ${used.environment.url ?? used.environment.host}, though ${ctx.transcriber} was asked for`;
+  if (standInHost.test(used.named?.host ?? ""))
     return `Rome names ${used.named.provider} at ${used.named.host}, the stand-in's host`;
   return null;
 }

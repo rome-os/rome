@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { PLACES, RULES_VERSION, RULE_PHASES, SCENARIOS } from "../scenarios/index.mjs";
 import { renderMarkdown } from "./report.mjs";
 import { notChecked } from "./scenario.mjs";
+import { useTranscriber } from "./runs.mjs";
 
 const verifierDir = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -93,8 +94,10 @@ export async function verify({
   if (PLACES.includes(place)) await env.reset();
   const results = [];
   try {
-    // A scenario's `prepare` sees the fresh instance, before any scenario has spoken into it.
+    // A scenario's `prepare` sees the fresh instance, before any scenario has spoken into it,
+    // but already on the transcriber the run uses, so what Rome names is what the run hears.
     if (PLACES.includes(place)) {
+      await useTranscriber(ctx).catch(() => {});
       for (const scenario of SCENARIOS.filter((s) => wanted.includes(s.rule) && s.prepare)) {
         await scenario.prepare(ctx).catch((error) => {
           ctx.memo[`prepare${scenario.rule}`] = { error: error.message };
