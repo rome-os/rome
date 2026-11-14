@@ -27,6 +27,7 @@ const { values, positionals } = parseArgs({
     text: { type: "string" },
     error: { type: "string" },
     chat: { type: "string" },
+    match: { type: "string" },
   },
 });
 const print = (value) => console.log(JSON.stringify(value));
@@ -220,7 +221,13 @@ switch (command) {
     break;
   }
   case "logs":
-    print({ lines: [] });
+    {
+      const match = values.match ?? "";
+      print({
+        lines: (readState(statePath).logs ?? []).filter((l) => JSON.stringify(l).includes(match)),
+      });
+      break;
+    }
     break;
   case "audio-scan":
     print({ findings: readState(statePath).audioFiles });

@@ -236,8 +236,8 @@ async function gateOn(ctx, message) {
           `gate on: Rome Cloud records the seconds, session ${i} of ${repeats}${i === 1 ? ", straight after the gate switch" : ""}`,
           within ? "pass" : "fail",
           seconds === undefined
-            ? `Rome Cloud shows no new usage within ${USAGE_WAIT_MS / 1000} s of listening stopping`
-            : `Rome Cloud records ${seconds} s for a ${message.seconds} s recording (${Math.round(off * 100)}% off); listening lasted ${listened.toFixed(1)} s`,
+            ? `Rome Cloud shows no usage${session.sessionId ? ` for session ${session.sessionId}` : ""} within ${USAGE_WAIT_MS / 1000} s of listening stopping`
+            : `Rome Cloud records ${seconds} s for a ${message.seconds} s recording (${Math.round(off * 100)}% off) ${session.sessionId ? `for session ${session.sessionId}` : "as the next usage event, since Rome logged no session id"}; listening lasted ${listened.toFixed(1)} s`,
           [message.key, ...romeLog],
         ),
       ),
@@ -254,7 +254,10 @@ async function gateOn(ctx, message) {
  */
 async function dictate(ctx, message) {
   const { env } = ctx;
-  const usageBefore = await settledUsage(env);
+  // Until Rome is seen to log each session's id, an earlier rule's late usage event could be
+  // taken for this session's, so the count must settle first.
+  const usageBefore = ctx.memo.romeLogsSessionId ? undefined : await settledUsage(env);
+  const stopsBefore = (await stopEntries(env)).length;
   const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
   let listened;
   let heard;
@@ -275,20 +278,25 @@ async function dictate(ctx, message) {
   } finally {
     await opened.close();
   }
-  const usage = await waitForUsage(env, usageBefore);
   // Rome logs its own count of the session; read it now, before a later restart loses it.
-  const romeLog = await env
-    .logs("voice input stopped")
-    .then((l) =>
-      (l?.lines ?? [])
-        .slice(-1)
-        .map((line) => `Rome logged: ${typeof line === "string" ? line : JSON.stringify(line)}`),
-    )
-    .catch(() => []);
-  return { shown: true, heard, listened, seconds: usage?.seconds, romeLog };
+  const stop = (await stopEntries(env)).slice(stopsBefore).at(-1);
+  const sessionId = stop?.sessionId ?? null;
+  if (sessionId) ctx.memo.romeLogsSessionId = true;
+  const usage = sessionId
+    ? await waitForSessionUsage(env, sessionId)
+    : await waitForUsage(env, usageBefore ?? (await env.cloudUsage()).events.length);
+  const romeLog = stop ? [`Rome logged: ${JSON.stringify(stop)}`] : [];
+  return { shown: true, heard, listened, seconds: usage?.seconds, sessionId, romeLog };
 }
 
-/** The first usage event after the `before` events already shown, or undefined after a wait. */
+/** Rome's "voice input stopped" log entries, oldest first; none when the logs cannot be read. */
+async function stopEntries(env) {
+  return env
+    .logs("voice input stopped")
+    .then((l) => (l?.lines ?? []).filter((line) => typeof line === "object"))
+    .catch(() => []);
+}
+
 /**
  * The number of usage events once no new one has arrived for `usageQuietMs()`. A session's
  * event can reach Rome Cloud well after the session, so an earlier rule's last event could
@@ -309,11 +317,24 @@ async function settledUsage(env) {
   return count;
 }
 
+/** The first usage event after the `before` events already shown, or undefined after a wait. */
 async function waitForUsage(env, before) {
   const start = Date.now();
   while (Date.now() - start < USAGE_WAIT_MS) {
     const { events } = await env.cloudUsage();
     if (events.length > before) return events[before];
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return undefined;
+}
+
+/** The usage event Rome Cloud recorded for the listening session `sessionId`, or undefined after a wait. */
+async function waitForSessionUsage(env, sessionId) {
+  const start = Date.now();
+  while (Date.now() - start < USAGE_WAIT_MS) {
+    const { events } = await env.cloudUsage();
+    const event = events.find((e) => e.sessionId === sessionId);
+    if (event) return event;
     await new Promise((r) => setTimeout(r, 500));
   }
   return undefined;

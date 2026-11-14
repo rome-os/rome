@@ -90,12 +90,17 @@ async function handle(req, res, statePath, script) {
   if (req.method === "POST" && url.pathname === "/api/voice/usage") {
     const { seconds } = JSON.parse(await readBody(req));
     updateState(statePath, (s) => {
+      const sessionId = crypto.randomUUID();
       s.cloud.usage.push({
+        eventId: sessionId,
+        sessionId,
         provider: "soniox",
         model: "stt-rt-v6",
         seconds: s.variant === "fail-11" ? seconds / 2 : seconds,
         at: new Date().toISOString(),
       });
+      s.logs ??= [];
+      s.logs.push({ msg: "voice input stopped", sessionId, outcome: "stopped" });
     });
     return send(204, "text/plain", "");
   }

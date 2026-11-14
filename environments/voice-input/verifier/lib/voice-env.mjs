@@ -56,7 +56,7 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
      * whether its config holds its own `ROME_TRANSCRIPTION_API_KEY`.
      */
     cloudStatus: () => json(["cloud", "status"]),
-    /** `{ events: [{ provider, model, seconds, at }] }`: Rome Cloud's voice usage for the instance, oldest first. */
+    /** `{ events: [{ eventId, sessionId, provider, model, seconds, at }] }`: Rome Cloud's voice usage for the instance, oldest first. */
     cloudUsage: () => json(["cloud", "usage"]),
     /** Restarts Rome not signed in to Rome Cloud, with its own `ROME_TRANSCRIPTION_*`. Prints `cloud status`. */
     cloudSignOut: () => json(["cloud", "sign-out"]),
