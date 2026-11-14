@@ -8,16 +8,20 @@ import type { InitialEntry } from "react-router-dom";
 import { MODE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import i18n from "@/i18n";
 import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
+import { emitSessionsChanged } from "@/lib/session-events";
 import { RecentChats } from "./RecentChats";
 
 const concierge = rs.hoisted(() => ({
   chatId: "concierge" as string | null,
   chats: [] as Array<{ id: string; name: string; main: boolean; unread: number }>,
+  // Reads the Concierge's chats from the server, so a refetch shows.
+  fromServer: false,
 }));
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
-  useConciergeChats: () => concierge.chats,
+  useConciergeChats: () =>
+    concierge.fromServer ? conciergeModule.useConciergeChats() : concierge.chats,
 }));
 
 beforeAll(async () => {
@@ -32,6 +36,7 @@ afterEach(() => {
   rs.unstubAllGlobals();
   concierge.chatId = "concierge";
   concierge.chats = [];
+  concierge.fromServer = false;
 });
 
 interface Row {
@@ -79,6 +84,7 @@ function serve(rows: Row[], settings: Record<string, unknown> = {}) {
       );
     }
     if (url === "/api/concierge/session") return Response.json({ id: "concierge", unread: 0 });
+    if (url === "/api/concierge/chats") return Response.json({ chats: concierge.chats });
     return new Response("not found", { status: 404 });
   }) as typeof fetch);
 }
@@ -502,6 +508,25 @@ describe("the dots on the switch", () => {
     await screen.findByRole("link", { name: "My chat" });
     await act(async () => {});
     expect(screen.queryByRole("img", { name: /Unread Concierge/ })).toBeNull();
+  });
+
+  it("clears the red dot when a read in Chat mode says the unread messages were read", async () => {
+    seedChatListMode({ mode: "chat" });
+    concierge.fromServer = true;
+    concierge.chats = unreadChats(1, 0);
+    serve([chat("mine", "My chat")]);
+    open("/chat/mine");
+    await within(radio("Concierge")).findByRole("img", { name: /Unread Concierge messages/ });
+
+    // The server counts them read, and the open chat says so.
+    concierge.chats = unreadChats(0, 0);
+    act(() => emitSessionsChanged());
+
+    await waitFor(() =>
+      expect(
+        within(radio("Concierge")).queryByRole("img", { name: /Unread Concierge/ }),
+      ).toBeNull(),
+    );
   });
 
   it("shows no dot when nothing is unread, nor on the Chat segment", async () => {
