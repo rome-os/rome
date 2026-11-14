@@ -358,7 +358,7 @@ function ChatModeSwitch({
       aria-label={t("recentChats.modeSwitch")}
       value={mode}
       onValueChange={onChange}
-      className="ml-1 shrink-0"
+      className="shrink-0"
       options={[
         {
           value: "chat",
@@ -464,7 +464,9 @@ export function RecentChats({
     isError,
     refetch,
     update: updateSessions,
-  } = useChatSessions(statusFilter, scope);
+    // Its status stream runs only while it shows, so coming back to Chat reads
+    // the list again. A chat switch keeps it mounted.
+  } = useChatSessions(statusFilter, scope, { refetchOnShow: true });
   // Cached rows show at once and a failed refetch keeps them, so the skeleton
   // is only for a list that has never loaded.
   const phase: LoadPhase = isError ? "error" : cachedSessions ? "ready" : "loading";
@@ -1183,6 +1185,8 @@ export function RecentChats({
             <span className="truncate text-section text-foreground">
               {t(mode === "concierge" ? "recentChats.modeConcierge" : "recentChats.title")}
             </span>
+          </div>
+          <div className="flex items-center gap-1">
             {hasConcierge ? (
               <ChatModeSwitch
                 mode={mode}
@@ -1191,8 +1195,6 @@ export function RecentChats({
                 chatReplying={chatReplying}
               />
             ) : null}
-          </div>
-          <div className="flex items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton

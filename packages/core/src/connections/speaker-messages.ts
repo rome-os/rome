@@ -9,7 +9,7 @@ import type { SaidMessage } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speaker, Speakers } from "../sessions/speakers.js";
-import { contextOf, type ContextLine, type TurnLinks } from "../sessions/turn-links.js";
+import type { TurnLinks } from "../sessions/turn-links.js";
 import { type ChatAdapters, messageKeyAt, platformIdOfMessage } from "./chat-adapter.js";
 
 /** Where a speaker stands and the account it speaks as. */
@@ -70,18 +70,19 @@ export class SpeakerMessages {
 /**
  * The messages a run an app starts names by the platform's ids, where session
  * `sessionId` stands: the message the turn answers, and the one its reply
- * quotes as the agent reads it. Either is null when Rome holds none.
+ * quotes, each by the id Rome holds it under, or null when Rome holds none.
+ * The agent reads them when the turn runs, so who said them is current then.
  */
 export async function runLines(
   speakerMessages: Pick<SpeakerMessages, "recorded"> | undefined,
   sessionId: string,
   run: { readonly platformMessageId?: string; readonly replyTo?: { readonly messageId?: string } },
-): Promise<{ prompt: number | null; quoted: ContextLine | null }> {
+): Promise<{ prompt: number | null; quoted: number | null }> {
   const [prompt, quoted] = await Promise.all([
     run.platformMessageId ? speakerMessages?.recorded(sessionId, run.platformMessageId) : null,
     run.replyTo?.messageId ? speakerMessages?.recorded(sessionId, run.replyTo.messageId) : null,
   ]);
-  return { prompt: prompt?.id ?? null, quoted: quoted ? contextOf(quoted) : null };
+  return { prompt: prompt?.id ?? null, quoted: quoted?.id ?? null };
 }
 
 /** What a run reads its messages through: the messages it names by the platform's

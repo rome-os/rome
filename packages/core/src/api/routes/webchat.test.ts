@@ -40,7 +40,13 @@ import type {
 } from "../../agent/index.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
-import { conciergeTasks, guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
+import {
+  conciergeMessageTurns,
+  conciergeTasks,
+  guardianAuth,
+  romeSessions,
+  webchatProjects,
+} from "../../db/schema.js";
 import { Hono } from "hono";
 import { COOKIE_NAME, createSession as signGuardianSession } from "../../access/auth.js";
 import { sessionActorMiddleware } from "../../access/session-actor.js";
@@ -291,11 +297,9 @@ describe("Webchat API", () => {
       deps: {
         tasks: {
           repo: {
-            threadTitles: async () => new Map(),
+            threadTasks: async () => new Map(),
             onThreadRetired: () => () => {},
           },
-          reactionsOf: async () => new Map(),
-          onReaction: () => () => {},
         },
       },
     } as never;
@@ -846,7 +850,7 @@ describe("Webchat API", () => {
     }
   });
 
-  it("marks the owner's messages working as soon as a Concierge turn takes them", async () => {
+  it("records the owner's messages a Concierge turn takes, so a stopped turn can be told to the next one", async () => {
     let finish!: () => void;
     const terminal = new Promise<void>((resolve) => {
       finish = resolve;
@@ -925,20 +929,27 @@ describe("Webchat API", () => {
           body: JSON.stringify({ inputId, text }),
         }),
       );
-    const reaction = async (key: string) =>
-      (await tasks.reactionsOf("topic", [key])).get(key) ?? null;
+    // Whether the turn that took message `key` has answered it, or null when none took it.
+    const taken = async (key: string) => {
+      const [row] = testDb.db
+        .select({ answeredAt: conciergeMessageTurns.answeredAt })
+        .from(conciergeMessageTurns)
+        .where(eq(conciergeMessageTurns.messageKey, key))
+        .all();
+      return row ? row.answeredAt !== null : null;
+    };
     const a = "00000000-0000-4000-8000-00000000000a";
     const b = "00000000-0000-4000-8000-00000000000b";
     try {
       expect((await post(a, "Weather?")).status).toBe(200);
-      // Queued or sent is not taken: no mark yet.
-      expect(await reaction(a)).toBeNull();
+      // Queued or sent is not taken.
+      expect(await taken(a)).toBeNull();
       await queue.observe(
         { type: "input_status", inputId: a, state: "consumed" },
         "concierge-turn",
       );
-      expect(await reaction(a)).toBe("working");
-      // A second message the same turn takes gets its own mark.
+      expect(await taken(a)).toBe(false);
+      // A second message the same turn takes is recorded too.
       queue.ready("concierge-turn");
       await post(b, "And tomorrow?");
       await rs.waitFor(() => expect(steerUserInput).toHaveBeenCalledOnce());
@@ -946,7 +957,7 @@ describe("Webchat API", () => {
         { type: "input_status", inputId: b, state: "consumed" },
         "concierge-turn",
       );
-      expect([await reaction(a), await reaction(b)]).toEqual(["working", "working"]);
+      expect([await taken(a), await taken(b)]).toEqual([false, false]);
     } finally {
       finish();
     }
@@ -6108,6 +6119,31 @@ describe("Webchat API", () => {
       await anchorTurn(SESSION_ID, TURN_ID);
     });
 
+    it("answers every turn's feedback in one read, and only this session's", async () => {
+      await anchorTurn(SESSION_ID, "turn-fb-2");
+      await deps.webchatRepo.createSession("sess-fb-other", "Other");
+      await anchorTurn("sess-fb-other", "turn-fb-other");
+      const app = createWebchatRuntime(deps).routes;
+      const rate = (sessionId: string, turnId: string, rating: string, comment?: string) =>
+        app.request(`/chat/sessions/${sessionId}/turns/${turnId}/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rating, comment }),
+        });
+      await rate(SESSION_ID, TURN_ID, "positive", "nice");
+      await rate("sess-fb-other", "turn-fb-other", "negative");
+
+      const res = await app.request(`/chat/sessions/${SESSION_ID}/feedback`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { feedback: Record<string, unknown> };
+      expect(Object.keys(body.feedback)).toEqual([TURN_ID]);
+      expect(body.feedback[TURN_ID]).toMatchObject({ rating: "positive", comment: "nice" });
+      // The per-turn read still answers the same record.
+      const one = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`);
+      expect(await one.json()).toEqual({ feedback: body.feedback[TURN_ID] });
+      expect((await app.request("/chat/sessions/missing/feedback")).status).toBe(404);
+    });
+
     it("returns null when no feedback has been submitted", async () => {
       const app = createWebchatRuntime(deps).routes;
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`);
@@ -7246,18 +7282,11 @@ describe("Webchat API", () => {
       await runtime.flushAll();
     });
 
-    it("shows a status reaction on the guardian's message in a Concierge chat, and streams its changes", async () => {
-      const repo = new ConciergeTasksRepository(testDb.db);
-      const tasks = new ConciergeTasks(repo);
-      // The task chat runs while `running` says so.
-      let running = true;
-      tasks.attachFacts({
-        now: () => Date.now(),
-        running: () => running,
-        openWaits: async () => new Map(),
-        reportPending: () => [],
-      });
-      deps.concierge = { deps: { tasks }, onCardSettled: () => () => {} } as never;
+    it("shows the reaction on a guardian message of a chat, and streams its changes", async () => {
+      deps.concierge = {
+        deps: { tasks: new ConciergeTasks(new ConciergeTasksRepository(testDb.db)) },
+        onCardSettled: () => () => {},
+      } as never;
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",
@@ -7267,51 +7296,53 @@ describe("Webchat API", () => {
         undefined,
         "core:concierge",
       );
+      await deps.webchatRepo.createSession("other", "Other");
+      for (const [id, turn] of [
+        ["g1", "turn-1"],
+        ["g2", "turn-2"],
+      ] as const) {
+        await deps.webchatRepo.addMessage(
+          id,
+          "topic",
+          "user",
+          JSON.stringify([{ type: "text", content: id }]),
+          turn,
+        );
+      }
       await deps.webchatRepo.addMessage(
-        "g1",
-        "topic",
+        "o1",
+        "other",
         "user",
-        JSON.stringify([{ type: "text", content: "Weather?" }]),
-        "turn-1",
+        JSON.stringify([{ type: "text", content: "elsewhere" }]),
+        "turn-3",
       );
-      await deps.webchatRepo.addMessage(
-        "g2",
-        "topic",
-        "user",
-        JSON.stringify([{ type: "text", content: "Thanks" }]),
-        "turn-2",
-      );
-      await deps.webchatRepo.createSession("task-chat", "Weather");
-      const [task] = await repo.upsertMany([{ title: "Weather", sessionId: "task-chat" }]);
       const app = createWebchatRuntime(deps).routes;
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
-      const working = readSseUntil(events, "event: message_status_reaction");
-      await repo.linkMessage(task.id, { chatId: "topic", messageKey: "g1" });
-      expect(await working).toContain(
-        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", statusReaction: "working" })}`,
+      const set = readSseUntil(events, "event: message_reaction");
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "👀");
+      expect(await set).toContain(
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", reaction: "👀" })}`,
       );
-      // Finished and reported work shows none: the event carries null.
-      const cleared = readSseUntil(events, '"statusReaction":null');
-      running = false;
-      await repo.setLastOutcome(task.id, "succeeded");
-      await repo.markReported([task.id]);
+      // A reaction in another chat is no event of this one. A new one replaces, and null clears.
+      await deps.webchatRepo.setMessageReaction("other", "o1", "👍");
+      const replaced = readSseUntil(events, '"reaction":"✅"');
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "✅");
+      const text = await replaced;
+      expect(text).toContain('"messageId":"g1"');
+      expect(text).not.toContain('"messageId":"o1"');
+      const cleared = readSseUntil(events, '"reaction":null');
+      await deps.webchatRepo.setMessageReaction("topic", "g1", null);
       expect(await cleared).toContain('"messageId":"g1"');
-      await deps.webchatRepo.createSession("retry-chat", "Retry");
-      const [retry] = await repo.upsertMany([{ title: "Retry", sessionId: "retry-chat" }]);
-      await repo.linkMessage(retry.id, { chatId: "topic", messageKey: "g1" });
-      const failed = readSseUntil(events, '"statusReaction":"failed"');
-      await repo.setLastOutcome(retry.id, "failed");
-      await repo.markReported([retry.id]);
-      expect(await failed).toContain('"messageId":"g1"');
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "❤️");
       await events.cancel();
 
       const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
         id: string;
-        statusReaction?: string;
+        reaction?: string;
       }[];
-      // Only the message a task failed for has one; the other carries no field.
-      expect(listed.find((m) => m.id === "g1")?.statusReaction).toBe("failed");
-      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("statusReaction");
+      // Only the message reacted to carries the field.
+      expect(listed.find((m) => m.id === "g1")?.reaction).toBe("❤️");
+      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("reaction");
     });
 
     it("hands a task card out with its card, in one read per page, and streams a card that settles", async () => {
@@ -7420,8 +7451,9 @@ describe("Webchat API", () => {
       await deps.webchatRepo.addMessage("g3", "topic", "user", text("And this?"), "turn-3");
       await deps.webchatRepo.placeInChatThread("topic", "g1", { starts: true, settle: true });
       await deps.webchatRepo.placeInChatThread("topic", "g3", { starts: true, settle: true });
+      await deps.webchatRepo.createSession("tokyo-chat", "Tokyo weather");
       const [task] = await repo.upsertMany([
-        { title: "Tokyo weather", state: "doing", chatId: "topic" },
+        { title: "Tokyo weather", state: "doing", chatId: "topic", sessionId: "tokyo-chat" },
       ]);
       await repo.setThreadRoot(task.id, "g1");
       // Rows from before one thread per task may share a root: the thread
@@ -7441,6 +7473,8 @@ describe("Webchat API", () => {
       expect(listed.find((m) => m.id === "g1")).toMatchObject({
         chatThreadId: "g1",
         chatThreadTitle: "Tokyo weather",
+        // Its task chat, so the thread view opens it with no card in the thread.
+        chatThreadTaskChatId: "tokyo-chat",
       });
       // Only a task has a thread: one from before that no task has is sent as
       // none, so every client shows it as none.
@@ -7460,7 +7494,7 @@ describe("Webchat API", () => {
       await deps.webchatRepo.placeInChatThread("topic", "g2", { in: "g1", settle: true });
       const told = await placed;
       expect(told).toContain(
-        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g2", chatThreadId: "g1", chatThreadTitle: "Tokyo weather" })}`,
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g2", chatThreadId: "g1", chatThreadTitle: "Tokyo weather", chatThreadTaskChatId: "tokyo-chat" })}`,
       );
       expect(told).not.toContain('"messageId":"g4"');
 
@@ -8010,6 +8044,29 @@ describe("Webchat API", () => {
       unsubscribe();
       await reader.cancel();
       expect(listeners.size).toBe(0);
+    });
+
+    it("tells the status stream a task chat stopped when its task ends, though no turn ran", async () => {
+      let ended: ((row: { sessionId: string | null }) => void) | null = null;
+      deps.concierge = {
+        deps: {
+          tasks: {
+            onEnded: (listener: (row: { sessionId: string | null }) => void) => {
+              ended = listener;
+              return () => {};
+            },
+          },
+        },
+      } as never;
+      const { runtime } = createWebchatRuntime(deps);
+      const emit = rs.fn();
+      const unsubscribe = runtime.subscribeStatusEvents(emit);
+      ended!({ sessionId: "task-chat" });
+      expect(emit).toHaveBeenCalledWith("session_running", {
+        sessionId: "task-chat",
+        running: false,
+      });
+      unsubscribe();
     });
 
     it("reports a running chat in the list and on the status stream", async () => {

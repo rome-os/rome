@@ -25,7 +25,7 @@ const mounted = rs.hoisted(() => rs.fn());
 const catalog = rs.hoisted(() => ({
   apps: [] as { id: string; displayName: string }[] | null,
 }));
-rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: catalog.apps }) }));
+rs.mock("@/hooks/use-apps", () => ({ useAppsList: () => ({ apps: catalog.apps }) }));
 rs.mock("@/shell/ChatSearchHost", () => ({ ChatSearchHost: () => null }));
 rs.mock("@/shell/AppGrid", () => ({ AppGrid: () => null }));
 rs.mock("@/shell/ProfileMenu", () => ({ ProfileMenu: () => null }));

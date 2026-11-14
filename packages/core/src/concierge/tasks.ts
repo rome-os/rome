@@ -7,10 +7,8 @@ import {
   type ConciergeOpenWait,
   type ConciergeTaskDto,
 } from "@rome/api-types/concierge";
-import type { ConciergeStatusReaction } from "@rome/api-types/concierge";
 import {
   CONCIERGE_TASK_WAIT_EXPIRY_MS,
-  messageStatusReaction,
   type ConciergeTaskFacts,
   type ConciergeTaskStatusResult,
   legacyTaskState,
@@ -24,7 +22,6 @@ import type {
   ConciergeTaskRow,
   ConciergeTasksRepository,
   ConciergeTaskWithChat,
-  ReactionTarget,
 } from "../db/repositories/concierge-tasks.js";
 
 const log = createLogger("concierge-tasks");
@@ -91,6 +88,7 @@ export class ConciergeTasks {
   /** The status each task was last told with, so a fact that changes none tells nothing. */
   private told = new Map<string, string>();
   private statusListeners = new Set<(taskId: string, status: TaskStatusView) => void>();
+  private endListeners = new Set<(row: ConciergeTaskRow) => void>();
   /** Per task, the keeping of when it ended that runs now (`keepEndedOf`). */
   private keeping = new Map<string, Promise<void>>();
   /** Task chats whose turn ended and whose outcome is not written yet. */
@@ -219,19 +217,28 @@ export class ConciergeTasks {
     rows: readonly ConciergeTaskRow[],
     read: Map<string, TaskStatusView>,
   ): Promise<void> {
-    const ended = rows.filter((row) => read.get(row.id)?.status === "ended");
-    const open = rows.filter((row) => read.get(row.id)?.status !== "ended");
-    await this.repo
+    const ended = rows.filter((row) => read.get(row.id)?.status === "ended" && !row.endedAt);
+    const reopened = rows.filter((row) => read.get(row.id)?.status !== "ended" && row.endedAt);
+    if (ended.length === 0 && reopened.length === 0) return;
+    const kept = await this.repo
       .keepEnded(
-        ended.filter((row) => !row.endedAt).map((row) => row.id),
-        open.filter((row) => row.endedAt).map((row) => row.id),
+        ended.map((row) => row.id),
+        reopened.map((row) => row.id),
         new Date(this.now()),
       )
-      .catch((error: unknown) =>
-        log.warn("failed to keep when tasks ended", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
+      .then(
+        () => true,
+        (error: unknown) => {
+          log.warn("failed to keep when tasks ended", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return false;
+        },
       );
+    if (!kept) return;
+    for (const row of [...ended, ...reopened]) {
+      for (const listener of this.endListeners) listener(row);
+    }
   }
 
   /**
@@ -279,6 +286,14 @@ export class ConciergeTasks {
   /** How long a wait on the owner keeps a task waiting for them, in milliseconds. */
   get waitExpiry(): number {
     return this.waitExpiryMs;
+  }
+
+  /** Calls `listener` with a task once it ended, or started again after it ended. Returns the unsubscribe. */
+  onEnded(listener: (row: ConciergeTaskRow) => void): () => void {
+    this.endListeners.add(listener);
+    return () => {
+      this.endListeners.delete(listener);
+    };
   }
 
   /** Calls `listener` with each task's status whenever it is read. Returns the unsubscribe. */
@@ -395,76 +410,6 @@ export class ConciergeTasks {
     if (this.told.get(row.id) === keyOf(of)) return;
     this.told.set(row.id, keyOf(of));
     await this.repo.reannounce(row.id);
-  }
-
-  /**
-   * The status reaction of each of `messageKeys` in Concierge chat `chatId`
-   * that has one, derived from its turn and the status of the tasks made
-   * for it (`messageStatusReaction`).
-   */
-  async reactionsOf(
-    chatId: string,
-    messageKeys: readonly string[],
-  ): Promise<Map<string, ConciergeStatusReaction>> {
-    const marks = await this.repo.messageMarks(chatId, messageKeys);
-    const taskIds = [...new Set([...marks.values()].flatMap((mark) => mark.taskIds))];
-    const rows = await this.repo.getMany(taskIds);
-    const status = await this.statusOf(rows);
-    const out = new Map<string, ConciergeStatusReaction>();
-    for (const [key, mark] of marks) {
-      const reaction = messageStatusReaction({
-        answered: mark.answered,
-        turnFailed: mark.turnFailed,
-        tasks: mark.taskIds.flatMap((id) => {
-          const of = status.get(id);
-          const row = rows.find((candidate) => candidate.id === id);
-          return of ? [{ ...of, reportLost: row?.reportGivenUp === true }] : [];
-        }),
-      });
-      if (reaction) out.set(key, reaction);
-    }
-    return out;
-  }
-
-  /**
-   * Calls `listener` whenever a guardian message's status reaction changes,
-   * with null once it has none: a fact of its turn changed, or a task made
-   * for it changed status. Returns the unsubscribe.
-   */
-  onReaction(
-    listener: (target: ReactionTarget, reaction: ConciergeStatusReaction | null) => void,
-  ): () => void {
-    const told = new Map<string, ConciergeStatusReaction | null>();
-    let telling: Promise<void> = Promise.resolve();
-    const check = (targets: readonly ReactionTarget[]) => {
-      telling = telling
-        .then(async () => {
-          for (const target of targets) {
-            const reaction =
-              (await this.reactionsOf(target.chatId, [target.messageKey])).get(target.messageKey) ??
-              null;
-            const key = `${target.chatId}\u0000${target.messageKey}`;
-            if (told.has(key) && told.get(key) === reaction) continue;
-            told.set(key, reaction);
-            listener(target, reaction);
-          }
-        })
-        .catch((error: unknown) =>
-          log.warn("failed to tell a status reaction", {
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-    };
-    const offMessage = this.repo.onMessageChange((target) => check([target]));
-    // Any change of a task, its row or a fact its status reads, reads again
-    // the messages it was made for.
-    const offTask = this.repo.onChange(({ row }) => {
-      void this.repo.messagesOfTask(row.id).then(check);
-    });
-    return () => {
-      offMessage();
-      offTask();
-    };
   }
 
   /** Marks a row the Concierge did not pick up events for. A write clears the mark. */

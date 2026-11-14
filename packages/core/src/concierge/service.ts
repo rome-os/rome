@@ -47,7 +47,7 @@ import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.j
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
-import { openQuestionCards, settledCard, type TaskCardSources } from "./task-cards.js";
+import { openCards, settledCard, type TaskCardSources } from "./task-cards.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -206,6 +206,7 @@ export interface ConciergeDeps {
     | "getReplyTarget"
     | "addBackendMessage"
     | "placeInChatThread"
+    | "setMessageReaction"
     | "setSessionTrigger"
     | "listProjects"
     | "onMessageInserted"
@@ -697,14 +698,14 @@ export class ConciergeService {
 
   /**
    * A retired Concierge chat is archived or deleted now, and its tasks are
-   * `mainChatId`'s. A deleted one's status reactions go with it. Finished rows stay on the retired chat, so no row write
+   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
    * tells the activity that their task chats now move the main chat.
    */
   async chatGone(chatId: string, mainChatId: string, deleted = false): Promise<void> {
-    // A deleted chat's messages are gone, and their marks with them.
+    // A deleted chat's messages are gone, and the turns that took them with them.
     if (deleted) {
       await this.deps.tasks.repo.forgetMessages(chatId).catch((error: unknown) =>
-        log.warn("failed to forget a deleted chat's status reactions", {
+        log.warn("failed to forget a deleted chat's turns", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -1050,12 +1051,14 @@ export class ConciergeService {
   /**
    * A question or approval of task chat `chatId` settled: answered,
    * dismissed, decided, turned down, or out of time (`openQuestions`, as a
-   * wait's expiry ends every one still open). The Concierge chats its task
-   * reports to hear it as it reads now. Every settle comes through here.
+   * wait's expiry ends every one still open), or its task ended or started
+   * again (`openCards`, which closes or opens every card still open). The
+   * Concierge chats its task reports to hear it as it reads now. Every settle
+   * comes through here.
    */
   async cardSettled(
     chatId: string,
-    item: { kind: "question" | "approval"; id: string } | "openQuestions",
+    item: { kind: "question" | "approval"; id: string } | "openQuestions" | "openCards",
   ): Promise<void> {
     if (this.cardListeners.size === 0) return;
     const row = await this.deps.tasks.repo.findBySession(chatId);
@@ -1065,8 +1068,8 @@ export class ConciergeService {
     const chats = new Set([found?.conciergeChat.id, row.chatId]);
     const sources = this.taskCardSources();
     const cards =
-      item === "openQuestions"
-        ? await openQuestionCards(sources, chatId)
+      item === "openQuestions" || item === "openCards"
+        ? await openCards(sources, chatId, { approvals: item === "openCards" })
         : [await settledCard(sources, chatId, item)].filter((card) => card !== null);
     for (const card of cards) {
       for (const sessionId of chats) {

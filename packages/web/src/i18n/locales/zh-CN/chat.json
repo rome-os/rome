@@ -37,7 +37,7 @@
       "checkFailed": "无法检查连接状态"
     },
     "ask": {
-      "expiredFold": "已过期 · 回答后继续",
+      "expired": "已过期：一天内没有回应",
       "unavailable": "这个问题或审批已无法显示",
       "answered": "已回答",
       "answeredWith": "已回答：{{answer}}",
@@ -45,6 +45,7 @@
       "approved": "已批准",
       "rejected": "已拒绝",
       "waitingBelow": "等待回答：见下方卡片",
+      "closed": "已关闭：任务已结束",
       "turnedDown": "已自动拒绝：一天内没有回应",
       "turnedDownStopped": "已自动拒绝：任务已停止",
       "openToAnswer": "打开任务对话来回答"
@@ -57,7 +58,6 @@
         "stopped": "已停止",
         "no_response": "没回应"
       },
-      "expired": "已过期，回答后继续",
       "stop": "停止",
       "sourceMissing": "找不到原消息",
       "findingMessage": "正在查找消息…"
@@ -107,10 +107,7 @@
         "tidyingUp": "正在整理上下文"
       }
     },
-    "statusReaction": {
-      "working": "正在处理",
-      "failed": "未完成"
-    },
+    "reaction": "表情回应",
     "taskList": {
       "title": "任务",
       "close": "关闭任务",
@@ -181,8 +178,7 @@
     "action": "回复",
     "dismiss": "取消回复",
     "jump": "跳到原消息",
-    "openThread": "打开对话串",
-    "toThread": "回复：{{title}}"
+    "openThread": "打开对话串"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -651,19 +647,8 @@
   "thread": {
     "title": "对话串",
     "openTaskChat": "打开任务对话",
-    "close": "关闭对话串",
     "loadFailed": "无法加载这个对话串。",
     "replyPlaceholder": "回复"
-  },
-  "sessionRenewal": {
-    "notice": "已整理上下文 · {{reason}}",
-    "reasons": {
-      "context": "对话较长",
-      "setup": "设定已更新",
-      "idle": "闲置后",
-      "daily": "每日重置",
-      "working_dir": "工作目录不存在"
-    }
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",

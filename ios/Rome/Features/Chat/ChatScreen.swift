@@ -54,6 +54,7 @@ struct ChatScreen: View {
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
+        .background { ChatLeaveWatch(store: store) }
         .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, onThread: { store.reopenThread($0) }, prefill: Binding(
             get: { workspace.composerPrefills[conciergeChatID] },
             set: { workspace.composerPrefills[conciergeChatID] = $0 }
@@ -157,12 +158,12 @@ struct ChatScreen: View {
                 .onTapGesture { composerFocused = false }
             } else {
                 TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks)
+                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                         .equatable()
-                        .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
+                .overlay(alignment: .top) { UnreadPillButton(store: store) }
                 .onAppear { store.arrived() }
                 .onChange(of: store.arrivals) { store.arrived() }
             }
@@ -174,6 +175,20 @@ extension Workspace {
     /// What the Concierge is doing in the main chat.
     var mainChatActivity: ConciergeActivity? {
         topics.activity(for: mainChatServerID ?? conciergeChatID)
+    }
+}
+
+/// Closes the main Chat's open when another page or a sheet covers it, so
+/// coming back opens it again; the drawer over it does not. It reads
+/// `offScreen` itself, so the change never draws Chat's body again.
+private struct ChatLeaveWatch: View {
+    let store: TranscriptStore
+    @Environment(\.offScreen) private var offScreen
+
+    var body: some View {
+        Color.clear.onChange(of: offScreen) { _, hidden in
+            if hidden { store.endOpen() }
+        }
     }
 }
 
@@ -251,9 +266,12 @@ struct ConciergeRow: View, Equatable {
     /// Drawn in an open thread view: no thread labels, no share mode, and a
     /// tap on a message never closes the view.
     var inThread = false
+    /// The row's message is the tinted one: its bubble or card draws the
+    /// tint behind its own shape, never behind the whole row.
+    var tinted = false
 
     nonisolated static func == (lhs: ConciergeRow, rhs: ConciergeRow) -> Bool {
-        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread
+        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread && lhs.tinted == rhs.tinted
     }
 
     @Environment(\.openTaskChat) private var openTaskChat
@@ -285,6 +303,11 @@ struct ConciergeRow: View, Equatable {
     }
 
     var body: some View {
+        content.environment(\.rowTinted, tinted)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         let actions = store.actions
         let _ = PerfProbe.count("rowBody")
         switch row {
@@ -344,6 +367,8 @@ struct ConciergeRow: View, Equatable {
             NoticeLine(text: text)
         case .sessionRenewal(_, let reason, let sessionId):
             SessionRenewalLine(reason: reason)
+        case .unreadDivider:
+            UnreadDivider(pill: store.unreadPill)
         }
     }
 }
@@ -751,6 +776,9 @@ struct CenteredMessage: View {
     }
 }
 
+/// The coordinate space of the visible transcript, between the bars.
+let transcriptScrollSpace = "transcript"
+
 /// A transcript that follows its bottom while the guardian is there, loads
 /// older pages at the top, and offers a back-to-bottom button far up, with a
 /// dot when something arrives while they read above it.
@@ -918,11 +946,13 @@ struct TranscriptList<Row: View>: View {
             }
             .onChange(of: latestRequest) { catchUp(proxy) }
             // A quote led to its original: it comes into view, mid-screen.
+            // The unread line goes to the top, under the header.
             .onChange(of: store.jumps) {
-                guard let target = store.jumpTarget, let row = rows.first(where: { $0.ownMessageId == target }) else { return }
+                guard let target = store.jumpTarget, let row = rows.first(where: { $0.ownMessageId == target || $0.id == target }) else { return }
                 _ = scrollHandle.stop()
                 following = false
-                withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo(row.id, anchor: .center) }
+                let anchor: UnitPoint = row == .unreadDivider ? .top : .center
+                withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo(row.id, anchor: anchor) }
             }
             .onChange(of: store.pending.count) { old, new in
                 if new > old { scrollToBottom(proxy) }
@@ -974,7 +1004,7 @@ struct TranscriptList<Row: View>: View {
         }
     }
 
-    private static var scrollSpace: String { "transcript" }
+    private static var scrollSpace: String { transcriptScrollSpace }
 
     private static var placesInGlide: Bool {
         if #available(iOS 18, *) { return true }

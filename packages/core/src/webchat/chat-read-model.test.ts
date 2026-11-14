@@ -3,7 +3,13 @@ import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
 import { type ChatRef, chatKey } from "../chats/storage/place.js";
 import { WebChatRepository } from "./repository.js";
-import { approvals, channels, romeAgentMessages, romeSessions } from "../db/schema.js";
+import {
+  approvals,
+  channels,
+  conciergeTasks,
+  romeAgentMessages,
+  romeSessions,
+} from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
@@ -627,6 +633,43 @@ describe("ChatReadModel", () => {
         createdAt: new Date(40_000),
       });
       expect(await repo.awaitingGuardianSince(["chat-1"])).toEqual(new Map([["chat-1", 40_000]]));
+    });
+
+    it("says a task chat waits on no one once its task ended, though its card was never answered", async () => {
+      const chat = dashboardChat("task-chat");
+      fixture.say({
+        id: "ask",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: card,
+      });
+      await testDb.db.insert(conciergeTasks).values({
+        id: "task-1",
+        title: "Fruit",
+        state: "doing",
+        sessionId: "task-chat",
+        createdAt: new Date(10_000),
+        updatedAt: new Date(10_000),
+      });
+      expect(await repo.awaitingGuardianOf(["task-chat"])).toEqual(new Set(["task-chat"]));
+      expect(await repo.awaitingGuardianSince(["task-chat"])).toEqual(
+        new Map([["task-chat", 20_000]]),
+      );
+
+      // The guardian stops it: its card closes, and the chat waits on no one.
+      await testDb.db
+        .update(conciergeTasks)
+        .set({ stoppedAt: new Date(30_000), endedAt: new Date(30_000) })
+        .where(sql`${conciergeTasks.id} = 'task-1'`);
+      expect(await repo.awaitingGuardianOf(["task-chat"])).toEqual(new Set());
+      expect(await repo.awaitingGuardianSince(["task-chat"])).toEqual(new Map());
+      const [row] = await testDb.db
+        .select({ awaiting: chatsSessionAwaitingGuardian })
+        .from(romeSessions)
+        .where(sql`${romeSessions.id} = 'task-chat'`);
+      expect(row?.awaiting).toBe(false);
     });
 
     it("lists every open card and pending approval of a chat, oldest first, with how each card renders", async () => {

@@ -39,7 +39,7 @@ function xmlEscape(value: string): string {
 }
 
 /** {@link xmlEscape} for a value inside a double-quoted attribute. */
-function xmlAttr(value: string): string {
+export function xmlAttr(value: string): string {
   return xmlEscape(value).replace(/"/g, "&quot;");
 }
 

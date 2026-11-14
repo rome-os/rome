@@ -1,6 +1,7 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
+import type { MessageReactionEvent } from "@rome/api-types/concierge";
 import { canOpenSql, privateChildren } from "./privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
@@ -55,6 +56,7 @@ import type {
 } from "@rome/api-types/trace-segments";
 import type { Account } from "@rome-os/app-runtime";
 import type { MessagePart } from "../types.js";
+import { sessionTaskEnded } from "./chat-read-model.js";
 import { agentMessageOutbound } from "../chats/history/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../access/session-actor.js";
 import {
@@ -87,6 +89,8 @@ export interface StoredWebchatMessage {
   /** The chat thread the message is in (docs/domains/chats.md#chat-thread),
    *  or null when it is in none. */
   chatThreadId?: string | null;
+  /** The emoji the message was reacted to with (docs/domains/chats.md#reaction), when it has one. */
+  reaction?: string | null;
   createdAt: Date;
 }
 
@@ -299,6 +303,7 @@ export interface TraceBatch {
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
 export type ChatThreadPlacedListener = (event: ChatThreadPlaced) => void;
+export type MessageReactionListener = (event: MessageReactionEvent) => void;
 export type WebchatSessionNameChangedListener = (event: {
   sessionId: string;
   name: string;
@@ -425,7 +430,7 @@ export const sessionLastTurnFailed = sql<boolean>`coalesce((
 // collected once per list rather than scanned per chat. json_valid and the
 // object check skip rows that aren't block arrays (non-JSON, or legacy plain
 // text), which would otherwise fail the whole list.
-export const sessionAwaitingGuardian = sql<boolean>`(exists (
+export const sessionAwaitingGuardian = sql<boolean>`(not ${sessionTaskEnded} and (exists (
   select 1 from "rome_agent_messages" m, json_each(m."content") part
   where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
   and json_valid(m."content")
@@ -438,7 +443,7 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
   where a."status" = 'pending'
   and json_extract(a."payload", '$.channelContext.threadId') is not null
-))`.mapWith(Boolean);
+)))`.mapWith(Boolean);
 // The session's open cards, as a JSON array of { id, messageId, render, at }:
 // the cards after its last prompt that `sessionAwaitingGuardian` counts open,
 // each with its tool use id and how it renders, `at` in unix seconds. Pending
@@ -871,6 +876,33 @@ export class WebChatRepository {
 
   protected emitChatThreadPlaced(event: ChatThreadPlaced): void {
     for (const listener of this.chatThreadPlacedListeners) listener(event);
+  }
+
+  private messageReactionListeners = new Set<MessageReactionListener>();
+
+  /** Told when a message's reaction is set, replaced or cleared. */
+  onMessageReaction(listener: MessageReactionListener): () => void {
+    this.messageReactionListeners.add(listener);
+    return () => {
+      this.messageReactionListeners.delete(listener);
+    };
+  }
+
+  protected emitMessageReaction(event: MessageReactionEvent): void {
+    for (const listener of this.messageReactionListeners) listener(event);
+  }
+
+  /**
+   * Sets message `messageId` of chat `sessionId` to react with `reaction`, or
+   * clears it with null. Answers false when the chat holds no such message or
+   * keeps no reactions. Reactions live in Chats, so this repository keeps none.
+   */
+  async setMessageReaction(
+    _sessionId: string,
+    _messageId: string,
+    _reaction: string | null,
+  ): Promise<boolean> {
+    return false;
   }
 
   /**
@@ -1322,7 +1354,8 @@ export class WebChatRepository {
   /**
    * Which of `sessionIds` wait on the guardian, by the same rule as the
    * `awaitingGuardian` of a listed chat: a card after the last prompt, or a
-   * pending approval in the chat. Ids that name no chat are left out.
+   * pending approval in the chat, unless its task ended. Ids that name no
+   * chat are left out.
    */
   async awaitingGuardianOf(sessionIds: readonly string[]): Promise<Set<string>> {
     if (sessionIds.length === 0) return new Set();
@@ -1339,9 +1372,14 @@ export class WebChatRepository {
    * approval. Sessions that wait on nothing, or name no chat, are left out.
    */
   async awaitingGuardianSince(sessionIds: readonly string[]): Promise<Map<string, number>> {
+    // The same chats as `awaitingGuardian`: one whose task ended waits on no one.
+    const [waits, awaiting] = await Promise.all([
+      this.openWaitsOf(sessionIds),
+      this.awaitingGuardianOf(sessionIds),
+    ]);
     const since = new Map<string, number>();
-    for (const [id, items] of await this.openWaitsOf(sessionIds)) {
-      since.set(id, Math.max(...items.map((item) => item.since)));
+    for (const [id, items] of waits) {
+      if (awaiting.has(id)) since.set(id, Math.max(...items.map((item) => item.since)));
     }
     return since;
   }
@@ -3267,6 +3305,20 @@ export class WebChatRepository {
       )
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /** Every feedback row of the session, by turn id. A session has at most one per turn. */
+  async listTurnFeedback(sessionId: string): Promise<Map<string, StoredTurnFeedback>> {
+    const rows = await this.db
+      .select({
+        turnId: webchatTurnFeedback.turnId,
+        rating: webchatTurnFeedback.rating,
+        comment: webchatTurnFeedback.comment,
+        updatedAt: webchatTurnFeedback.updatedAt,
+      })
+      .from(webchatTurnFeedback)
+      .where(eq(webchatTurnFeedback.sessionId, sessionId));
+    return new Map(rows.map(({ turnId, ...row }) => [turnId, row]));
   }
 
   /**

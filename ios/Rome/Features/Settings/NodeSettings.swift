@@ -1,56 +1,99 @@
 import SwiftUI
 
-/// Settings → iPhone use: the switches that let Rome use this phone as a
-/// device and read Apple Health, what the connection is doing, and the
-/// activity it has answered.
+/// Settings' Apple Health and iPhone use rows, one group: each shows On or
+/// Off and pushes its page inside the sheet.
 struct NodeSettingsGroup: View {
     let onHealth: () -> Void
-    let onRequests: () -> Void
+    let onDevice: () -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let node = model.node
-        SettingsGroup(header: node.device.groupTitle) {
-            SettingsRow(systemImage: node.device.symbol, title: node.device.useSwitchTitle) {
-                Toggle(node.device.useSwitchTitle, isOn: Binding(get: { node.isEnabled }, set: { on in node.setEnabled(on) }))
-                    .labelsHidden()
-                    .tint(Palette.primary)
-            }
-            .accessibilityElement(children: .combine)
+        SettingsGroup {
             // Its own page says what the switch does. Dimmed while the phone is off limits, but still opens.
             let health = HealthRowState(healthOn: node.isHealthEnabled, deviceOn: node.isEnabled)
             Button(action: onHealth) {
-                SettingsRow(systemImage: "heart", title: "Apple Health") {
-                    HStack(spacing: 6) {
-                        Text(verbatim: health.value).romeFont(17).foregroundStyle(Palette.sub)
-                        Image(systemName: "chevron.right")
-                            .romeFont(13, .semibold)
-                            .foregroundStyle(Palette.sub)
-                    }
-                }
-                .opacity(health.opacity)
+                SettingsValueRow(systemImage: "heart", title: "Apple Health", value: health.value)
+                    .opacity(health.opacity)
             }
             .buttonStyle(RowPressStyle())
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Apple Health")
             .accessibilityValue(Text(verbatim: health.value))
             .accessibilityAddTraits(.isButton)
-            SettingsRow(systemImage: "dot.radiowaves.left.and.right", title: "Status") {
-                HStack(spacing: 6) {
-                    Circle().fill(node.status.color).frame(width: 7, height: 7)
-                    Text(node.status.label).romeFont(17).foregroundStyle(Palette.sub)
-                }
-            }
-            .accessibilityElement(children: .combine)
-            Button(action: onRequests) {
-                SettingsRow(systemImage: "list.bullet.rectangle", title: "Recent activity", last: true) {
-                    Image(systemName: "chevron.right")
-                        .romeFont(13, .semibold)
-                        .foregroundStyle(Palette.sub)
-                }
+            let device = node.isEnabled ? String(localized: "On") : String(localized: "Off")
+            Button(action: onDevice) {
+                SettingsValueRow(systemImage: node.device.symbol, title: node.device.groupTitle, value: device, last: true)
             }
             .buttonStyle(RowPressStyle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(node.device.groupTitle))
+            .accessibilityValue(Text(verbatim: device))
+            .accessibilityAddTraits(.isButton)
         }
+    }
+}
+
+/// A row that opens a page: its state as plain text, then a chevron.
+private struct SettingsValueRow: View {
+    let systemImage: String
+    let title: LocalizedStringKey
+    let value: String
+    var last = false
+
+    var body: some View {
+        SettingsRow(systemImage: systemImage, title: title, last: last) {
+            HStack(spacing: 6) {
+                Text(verbatim: value).romeFont(17).foregroundStyle(Palette.sub)
+                Image(systemName: "chevron.right")
+                    .romeFont(13, .semibold)
+                    .foregroundStyle(Palette.sub)
+            }
+        }
+    }
+}
+
+/// Settings → iPhone use: the switch that lets Rome use this phone as a
+/// device, what the connection is doing, and the activity it has answered.
+struct NodeSettingsScreen: View {
+    let onRequests: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let node = model.node
+        ScrollView {
+            SettingsGroup {
+                SettingsRow(systemImage: node.device.symbol, title: node.device.useSwitchTitle) {
+                    Toggle(node.device.useSwitchTitle, isOn: Binding(get: { node.isEnabled }, set: { on in node.setEnabled(on) }))
+                        .labelsHidden()
+                        .tint(Palette.primary)
+                }
+                .accessibilityElement(children: .combine)
+                SettingsRow(systemImage: "dot.radiowaves.left.and.right", title: "Status") {
+                    HStack(spacing: 6) {
+                        Circle().fill(node.status.color).frame(width: 7, height: 7)
+                        Text(node.status.label).romeFont(17).foregroundStyle(Palette.sub)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                Button(action: onRequests) {
+                    SettingsRow(systemImage: "list.bullet.rectangle", title: "Recent activity", last: true) {
+                        Image(systemName: "chevron.right")
+                            .romeFont(13, .semibold)
+                            .foregroundStyle(Palette.sub)
+                    }
+                }
+                .buttonStyle(RowPressStyle())
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+        }
+        .softTopScrollEdge()
+        .floatingTopBar { PageHeader(title: node.device.groupTitle, inSheet: true) }
+        .secondaryPageBackground()
+        .toolbar(.hidden, for: .navigationBar)
+        .background(SwipeBackEnabler())
     }
 }
 
@@ -106,7 +149,7 @@ struct NodeRequestsScreen: View {
         }
         .softTopScrollEdge()
         .floatingTopBar { PageHeader(title: "Recent activity", inSheet: true) }
-        .background(Palette.bg.ignoresSafeArea())
+        .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .task(id: node.requestSerial) { await node.reloadRecent() }

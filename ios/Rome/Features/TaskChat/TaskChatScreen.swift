@@ -198,7 +198,7 @@ private struct TaskChatRow: View, Equatable {
     static func draws(_ row: TranscriptRow, briefID: String?) -> Bool {
         switch row {
         case .separator(let id, _): briefID.map { id != "sep-\($0)" } ?? true
-        case .taskAsk, .threadLabel, .sourceLabel, .sessionRenewal: false
+        case .taskAsk, .threadLabel, .sourceLabel, .sessionRenewal, .unreadDivider: false
         default: true
         }
     }
@@ -238,7 +238,7 @@ private struct TaskChatRow: View, Equatable {
             EmptyView()
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .sessionRenewal:
+        case .sessionRenewal, .unreadDivider:
             // Only a Concierge chat draws its faint lines.
             EmptyView()
         }

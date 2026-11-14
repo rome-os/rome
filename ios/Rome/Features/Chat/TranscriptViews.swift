@@ -94,12 +94,13 @@ struct UserBubble: View {
     /// Removes a send that cannot go through; nil leaves it out.
     var onDelete: (() -> Void)? = nil
     var menu = BubbleMenu()
-    /// Rome's mark on the message: being worked on, or failed.
-    var mark: StatusMark? = nil
+    /// The Concierge's reaction on the message, drawn as the server sends it.
+    var mark: String? = nil
     /// What the message replies to, quoted at the top of the bubble.
     var quote: MessagePart.ReplyQuote? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
+    @Environment(\.rowTinted) private var tinted
 
     private var problem: SendProblem? {
         SendProblem(pending, onRetry: onRetry, onDelete: onDelete)
@@ -141,7 +142,7 @@ struct UserBubble: View {
                             .bubbleMenu(text: text, menu: bubbleMenu)
                     }
                 }
-                // The mark sits on the top leading corner of the bubble, or of the
+                // The reaction sits on the top leading corner of the bubble, or of the
                 // photos, over the corner and clear of the first line's start.
                 .overlay(alignment: .topLeading) {
                     if let mark {
@@ -151,6 +152,8 @@ struct UserBubble: View {
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
+                // Behind the photos and the bubble, not the row.
+                .tinted(tinted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -566,7 +569,7 @@ enum TranscriptSpacing {
         if case .notice = row { return 14 }
         // A faint line stands apart, like a time separator.
         switch (row, previous) {
-        case (.sessionRenewal, _), (_, .sessionRenewal): return 14
+        case (.sessionRenewal, _), (_, .sessionRenewal), (.unreadDivider, _), (_, .unreadDivider): return 14
         default: break
         }
         // Tight under its own message, and apart from the next one.

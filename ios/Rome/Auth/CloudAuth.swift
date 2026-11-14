@@ -496,7 +496,11 @@ final class CloudAuth {
         return (data, status)
     }
 
+    /// Every Cloud request goes out through here, so it is where a Debug build
+    /// adds the test host's access headers.
     private func perform(_ request: URLRequest) async throws -> (Data, Int) {
+        var request = request
+        DevAccess.stamp(&request)
         do {
             let (data, response) = try await http.data(for: request)
             return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)

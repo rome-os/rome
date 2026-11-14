@@ -23,6 +23,9 @@ struct AppsScreen: View {
     @State private var showIdeas = false
     /// The apps last opened from this phone, read again each time the page shows.
     @State private var recentIDs: [String] = []
+    /// An app's sheet covers the page without taking it off screen, so its
+    /// closing is when the page shows again.
+    @Environment(\.offScreen) private var offScreen
     #if DEBUG
     @Environment(AppModel.self) private var model
     /// Snapshot runs draw the sheet in a stand-in frame: Mac Catalyst cannot
@@ -64,6 +67,9 @@ struct AppsScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await load() }
         .onAppear { recentIDs = RecentApps(host: workspace.host).ids() }
+        .onChange(of: offScreen) { _, covered in
+            if !covered { recentIDs = RecentApps(host: workspace.host).ids() }
+        }
         .sheet(isPresented: $showIdeas) {
             AppIdeasSheet { prompt in
                 showIdeas = false

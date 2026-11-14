@@ -37,7 +37,7 @@
       "checkFailed": "Could not check the connection"
     },
     "ask": {
-      "expiredFold": "Expired · answer to continue",
+      "expired": "Expired: no answer within a day",
       "unavailable": "This question or approval can no longer be shown",
       "answered": "Answered",
       "answeredWith": "Answered: {{answer}}",
@@ -45,6 +45,7 @@
       "approved": "Approved",
       "rejected": "Rejected",
       "waitingBelow": "Waiting: answer the card below",
+      "closed": "Closed: the task ended",
       "turnedDown": "Turned down: no answer within a day",
       "turnedDownStopped": "Turned down: task stopped",
       "openToAnswer": "Open the task chat to answer"
@@ -57,7 +58,6 @@
         "stopped": "Stopped",
         "no_response": "No response"
       },
-      "expired": "Expired — answer to continue",
       "stop": "Stop",
       "sourceMissing": "Can't find the original message",
       "findingMessage": "Finding message…"
@@ -107,10 +107,7 @@
         "tidyingUp": "Tidying up context"
       }
     },
-    "statusReaction": {
-      "working": "Working on it",
-      "failed": "Did not finish"
-    },
+    "reaction": "Reaction",
     "taskList": {
       "title": "Tasks",
       "close": "Close tasks",
@@ -181,8 +178,7 @@
     "action": "Reply",
     "dismiss": "Cancel reply",
     "jump": "Go to the original message",
-    "openThread": "Open the chat thread",
-    "toThread": "Reply to {{title}}"
+    "openThread": "Open the chat thread"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -651,19 +647,8 @@
   "thread": {
     "title": "Chat thread",
     "openTaskChat": "Open task chat",
-    "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
     "replyPlaceholder": "Reply"
-  },
-  "sessionRenewal": {
-    "notice": "Context tidied up · {{reason}}",
-    "reasons": {
-      "context": "conversation got long",
-      "setup": "setup updated",
-      "idle": "after a quiet period",
-      "daily": "daily reset",
-      "working_dir": "working folder gone"
-    }
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",

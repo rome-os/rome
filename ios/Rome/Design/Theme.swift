@@ -15,6 +15,14 @@ enum Palette {
     static let pressed = dynamic(0xF1ECE5, 0x221E1C)
     static let drawer = dynamic(0xECE7DF, 0x050404)
     static let drawerField = dynamic(0xE3DCD1, 0x1E1A17)
+    /// A second-level page (Settings, an app, Apple Health): a sheet over
+    /// Chat or Apps. Gray in light, so white cards stand out; a step above
+    /// the black first level in dark, so its top edge reads.
+    static let secondaryPage = dynamic(0xEBE8E2, 0x1C1916)
+    /// A card on a second-level page: a step above `secondaryPage`.
+    static let secondaryCard = dynamic(0xFFFFFF, 0x2A2623)
+    /// An icon tile or a track inside a `secondaryCard`.
+    static let secondaryFill = dynamic(0xEFE9E1, 0x3A3430)
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
@@ -130,10 +138,10 @@ extension View {
     /// agent's bubble can run, so the right edges of cards and long bubbles
     /// line up. A light card or a bubble hugs its content inside this
     /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
-    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`.
+    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`. A
+    /// tinted message's tint goes on before the width, so it hugs the bubble.
     func bubbleWidth() -> some View {
-        frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, Metrics.bubbleInset)
+        modifier(BubbleWidth())
     }
 
     /// Put before a card's background: the card takes the whole width
@@ -146,6 +154,17 @@ extension View {
     /// column of `Metrics.readableWidth` at most (DESIGN.md 4).
     func readableColumn() -> some View {
         frame(maxWidth: Metrics.readableWidth).frame(maxWidth: .infinity)
+    }
+}
+
+private struct BubbleWidth: ViewModifier {
+    @Environment(\.rowTinted) private var tinted
+
+    func body(content: Content) -> some View {
+        content
+            .tinted(tinted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, Metrics.bubbleInset)
     }
 }
 
@@ -210,6 +229,13 @@ private struct PageBackground: ViewModifier {
 extension View {
     /// The page background of a page that can sit beside the drawer.
     func pageBackground() -> some View { modifier(PageBackground()) }
+
+    /// The background of a second-level page, which covers Chat or Apps from
+    /// the bottom (DESIGN.md 12). Its header's fade takes the same color.
+    func secondaryPageBackground() -> some View {
+        background(Palette.secondaryPage.ignoresSafeArea())
+            .environment(\.pageBackground, Palette.secondaryPage)
+    }
 
     /// The design's "soft" elevation: a hairline ring plus a faint two-layer drop shadow.
     func softElevation(radius: CGFloat) -> some View {

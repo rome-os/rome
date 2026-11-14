@@ -29,6 +29,12 @@ import { chatTasksTopicName } from "@rome/api-types/live-events";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  connectorOf,
+  followStateWith,
+  refreshConciergeConnectors,
+  useConciergeConnectors,
+} from "@/hooks/use-concierge-connectors";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import { fetchJson } from "@/lib/fetch-json";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
@@ -40,7 +46,7 @@ import { describeRoutineTrigger, describeTaskSchedule, formatClock } from "./tas
 
 export const chatTaskListKey = (chatId: string) => ["chat-tasks", chatId] as const;
 const listUrl = (chatId: string) => `/api/chats/${encodeURIComponent(chatId)}/tasks`;
-const changedSchema = z.object({ chatId: z.string() });
+const changedSchema = z.object({ chatId: z.string(), follows: z.literal(true).optional() });
 
 /** How many ended rows show at first, and how many more each "Show more" adds. */
 export const ENDED_PAGE = TASK_LIST_ENDED_PAGE;
@@ -343,19 +349,22 @@ function FollowRow({ item }: { item: TaskListFollowItem }) {
           ),
         })
       : null;
+  // Whether the service delivers now comes from the connector list, read once and shared.
+  const { data: connectors } = useConciergeConnectors();
+  const state = followStateWith(connectors, item);
   return (
     <Row
       glyph={<Radio className="size-4 shrink-0 text-subtle-foreground" aria-hidden />}
       title={item.target}
       times={timesOf(t, item.createdAt)}
       state={stateLine(
-        item.label,
-        item.state === "unavailable"
+        connectorOf(connectors, item.source)?.label ?? item.label,
+        state === "unavailable"
           ? t("concierge.taskList.follow.unavailable")
-          : item.state === "off" && t("concierge.taskList.follow.off"),
+          : state === "off" && t("concierge.taskList.follow.off"),
         digest,
       )}
-      dimmed={item.state !== "active"}
+      dimmed={state !== "active"}
     />
   );
 }
@@ -457,8 +466,22 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   const reread = () => queryClient.invalidateQueries({ queryKey: chatTaskListKey(chatId) });
   useLiveEvents(
     { topic: chatTasksTopicName(chatId), sseUrl: `${listUrl(chatId)}/events` },
-    { [TASK_LIST_CHANGED_EVENT]: { schema: changedSchema, fn: reread } },
-    { onReconnect: reread },
+    {
+      [TASK_LIST_CHANGED_EVENT]: {
+        schema: changedSchema,
+        fn: ({ follows }) => {
+          void reread();
+          // A new or changed follow may name a source the snapshot has not read.
+          if (follows) void refreshConciergeConnectors(queryClient);
+        },
+      },
+    },
+    {
+      onReconnect: () => {
+        void reread();
+        void refreshConciergeConnectors(queryClient);
+      },
+    },
   );
   // Times count down by the minute.
   const [now, setNow] = useState(() => Date.now());

@@ -456,10 +456,10 @@ const transcripts: Record<string, ChatMessage[]> = {
       createdAt: "2026-08-07T13:02:01.000Z",
     },
     // The owner's latest message, which the Concierge is still working on: it
-    // carries the working status reaction, as a live turn sets it.
+    // carries the 👀 reaction, as a live turn sets it with `react`.
     {
       ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T13:05:00.000Z", "Book the 9:40 one", [])[0]!,
-      statusReaction: "working",
+      reaction: "👀",
     },
   ],
   // The task chat the conclusion above came from: the full answer, then its conclusion.
@@ -1443,9 +1443,17 @@ export const handlers = [
     found.largeModelSelection = largeModelSelection === "auto" ? null : largeModelSelection;
     return HttpResponse.json(found);
   }),
-  // Thumbs on an assistant turn. Each row hydrates lazily as it scrolls into
-  // view, so this only became reachable once sessions had a transcript. Kept in
+  // Thumbs on an assistant turn. A chat's rows hydrate from one read once the
+  // first scrolls into view, so this only became reachable once sessions had a transcript. Kept in
   // memory rather than always-null so a click actually sticks for the session.
+  http.get("/api/chat/sessions/:sessionId/feedback", ({ params }) => {
+    const prefix = `${params.sessionId}:`;
+    const feedback: Record<string, TurnFeedback> = {};
+    for (const [key, value] of turnFeedback) {
+      if (key.startsWith(prefix)) feedback[key.slice(prefix.length)] = value;
+    }
+    return HttpResponse.json({ feedback });
+  }),
   http.get("/api/chat/sessions/:sessionId/turns/:turnId/feedback", ({ params }) => {
     const key = `${params.sessionId}:${params.turnId}`;
     return HttpResponse.json({ feedback: turnFeedback.get(key) ?? null });

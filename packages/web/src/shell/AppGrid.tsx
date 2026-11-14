@@ -20,7 +20,7 @@ import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
 import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
 import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
-import { useApps, useInvalidateApps } from "@/hooks/use-apps";
+import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
@@ -225,7 +225,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   });
 
   const { data: settings } = useSettings();
-  const { apps: appsFromQuery } = useApps();
+  const { apps: appsFromQuery } = useAppsList();
   const pinnedAppIds = useMemo(
     () => new Set(pins.filter((pin) => pin.type === "app").map((pin) => pin.id)),
     [pins],

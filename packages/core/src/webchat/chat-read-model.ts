@@ -97,6 +97,14 @@ export interface ChatSearchHit {
   createdAt: Date;
 }
 
+// A task chat whose task ended waits on no one: its open cards are closed
+// (concierge/task-cards.ts), and the list, the task card and the Concierge's
+// activity must not say it waits. The session index makes it one lookup.
+export const sessionTaskEnded = sql`exists (
+  select 1 from "concierge_tasks" t
+  where t."session_id" = "rome_sessions"."id" and t."ended_at" is not null
+)`;
+
 /**
  * Whether the session in the current `rome_sessions` row waits on the
  * guardian, read from Chats: a card (question, connect-AI, app component) in
@@ -113,7 +121,7 @@ export interface ChatSearchHit {
  * legacy `sessionAwaitingGuardian` (webchat/repository.ts), for a
  * select over `rome_sessions`.
  */
-export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
+export const chatsSessionAwaitingGuardian = sql<boolean>`(not ${sessionTaskEnded} and (exists (
   select 1 from (
     select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_MESSAGES} u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
@@ -129,7 +137,7 @@ export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
   select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
   where a."status" = 'pending'
   and json_extract(a."payload", '$.channelContext.threadId') is not null
-))`.mapWith(Boolean);
+)))`.mapWith(Boolean);
 
 /**
  * The session's open cards, as a JSON array of { id, messageId, render, at }:

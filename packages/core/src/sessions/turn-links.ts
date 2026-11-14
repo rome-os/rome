@@ -8,7 +8,7 @@
 // Agents' catch-up and turn writes onto it.
 
 import { and, eq, isNull, min, sql } from "drizzle-orm";
-import type { AgentInputState } from "@rome-os/app-runtime";
+import type { Account, AgentInputState } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
@@ -324,7 +324,12 @@ export class TurnLinks {
 /** A message said where a session stands, as it would read it. */
 export interface ContextLine {
   readonly id: number;
+  /** What the message called its sender, as the platform showed it. */
   readonly senderName: string | null;
+  /** The account that said a message to Rome, which People can say who is
+   *  behind. Null on Rome's own messages and on one the record kept no
+   *  account for. */
+  readonly account: Account | null;
   readonly text: string;
   readonly at: Date;
 }
@@ -435,6 +440,7 @@ export function contextOf(message: SaidMessage): ContextLine {
   return {
     id: message.id,
     senderName: message.senderName ?? (message.direction === "fromRome" ? "Rome" : null),
+    account: (message.direction === "toRome" && message.saidBy?.account) || null,
     text: message.body.text,
     at: message.at,
   };

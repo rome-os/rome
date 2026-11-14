@@ -654,6 +654,9 @@ export const chatMessages = sqliteTable(
     // The line is placed in its chat thread for good: its sender chose the
     // thread, or the Concierge placed it. Nothing moves a settled line.
     chatThreadSettled: integer("chat_thread_settled", { mode: "boolean" }).notNull().default(false),
+    // The emoji the Concierge reacted to the line with
+    // (docs/domains/chats.md#reaction); null for none.
+    reaction: text("reaction"),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
@@ -836,8 +839,8 @@ export const conciergeTasks = sqliteTable(
  * Which Concierge turn took each guardian message of a Concierge chat, and
  * when that turn answered it: its turn ended, or the Concierge answered it
  * with `say`. A message handed on to a newer turn is that turn's from then
- * on. A message's status reaction (docs/domains/chats.md#status-reaction)
- * is derived from this and from the status of the tasks made for it.
+ * on. A message whose turn its owner stopped before it answered is told to
+ * the next turn once (docs/domains/chats.md#task).
  */
 export const conciergeMessageTurns = sqliteTable(
   "concierge_message_turns",
@@ -856,31 +859,10 @@ export const conciergeMessageTurns = sqliteTable(
      * Concierge turn in the chat is told not to act on it.
      */
     stoppedUntold: integer("stopped_untold", { mode: "boolean" }).notNull().default(false),
-    /** Set when the turn that took it failed, by an error or a crash, before it answered it. */
-    turnFailed: integer("turn_failed", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.chatId, table.messageKey] }),
     index("idx_concierge_message_turns_turn").on(table.chatId, table.turnId),
-  ],
-);
-
-/**
- * The tasks made for each guardian message of a Concierge chat: the tasks it
- * started, and the ones its words were passed on to. A row goes with its task.
- */
-export const conciergeMessageTasks = sqliteTable(
-  "concierge_message_tasks",
-  {
-    taskId: text("task_id")
-      .notNull()
-      .references(() => conciergeTasks.id, { onDelete: "cascade" }),
-    chatId: text("chat_id").notNull(),
-    messageKey: text("message_key").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
-    index("idx_concierge_message_tasks_message").on(table.chatId, table.messageKey),
   ],
 );
 

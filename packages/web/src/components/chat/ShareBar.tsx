@@ -16,7 +16,7 @@ import {
   type ShareSummary,
 } from "@/lib/chat-api";
 import { relativeTime } from "@/lib/routine-language";
-import { useApps } from "@/hooks/use-apps";
+import { useAppsList } from "@/hooks/use-apps";
 import { useFreeCells, type WidgetPlacement } from "@/pages/free/use-free-cells";
 
 function shareableWidgets(placements: WidgetPlacement[]): WidgetPlacement[] {
@@ -48,7 +48,7 @@ export function ShareBar({
 }) {
   const { t } = useTranslation("chat");
   const { placements } = useFreeCells();
-  const { apps } = useApps();
+  const { apps } = useAppsList();
   const widgets = useMemo(() => shareableWidgets(placements), [placements]);
   const appById = useMemo(() => new Map((apps ?? []).map((a) => [a.id, a])), [apps]);
 

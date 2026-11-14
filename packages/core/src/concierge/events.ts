@@ -386,12 +386,9 @@ export function startConciergeEvents(
     // A turn cut short with nothing carrying it on was stopped by its owner:
     // the messages it took stay stopped, and the next turn is told so.
     await tasks.repo
-      .answerTurns(chatId, running, new Date(), {
-        stopped: status === "interrupted",
-        failed: status === "error",
-      })
+      .answerTurns(chatId, running, new Date(), { stopped: status === "interrupted" })
       .catch((error: unknown) =>
-        log.warn("failed to settle turn status reactions", {
+        log.warn("failed to settle the messages a turn took", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -858,6 +855,12 @@ export function startConciergeEvents(
       heldSummaries.delete(row.id);
     }),
     tasks.onStatus(onTaskStatus),
+    // A task that ended closes the cards it still had open; one that starts again opens them.
+    tasks.onEnded((row) => {
+      if (row.sessionId) {
+        void guard("task cards closed", service.cardSettled(row.sessionId, "openCards"));
+      }
+    }),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
     approvals.onResolved(onApprovalResolved),
     // An answer or a dismissal of a card settles it.
@@ -1024,6 +1027,10 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
       void guard(tracker.taskChanged(row.id, conciergeChat.id));
     }),
     coalescer.onChange(reportChanged),
+    // A task that ended waits on no one: its Concierge chat's "needs you" is read again.
+    tasks.onEnded((row) => {
+      if (row.sessionId) void guard(tracker.sessionChanged(row.sessionId));
+    }),
     // A check scheduled, fired or cancelled moves its task between later and the rest.
     service.deps.checks?.watch((taskId) => {
       void guard(tasks.taskChanged(taskId));

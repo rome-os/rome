@@ -19,7 +19,7 @@ import { prettyAgentName } from "@/lib/agent-name";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
 import { chatPath, MAIN_CHAT_PATH } from "@/lib/chat-session";
-import { useApps } from "@/hooks/use-apps";
+import { useAppsList } from "@/hooks/use-apps";
 import { appDisplayName } from "@/lib/app-display-name";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
@@ -70,7 +70,7 @@ import { createWorkspaceStore, WorkspaceStoreContext } from "./workspace-store";
 // matching the sidebar pins and the composer context chips; the lucide grid is
 // only the fallback while the catalog loads or the icon is missing.
 function useWidgetApp(widget: WidgetPlacement) {
-  const { apps } = useApps();
+  const { apps } = useAppsList();
   return widget.type === "app" && widget.targetId
     ? (apps ?? []).find((a) => a.id === widget.targetId)
     : undefined;
@@ -222,7 +222,7 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
     selectTool,
     setToolsCollapsed,
   } = useFreeCells();
-  const { apps } = useApps();
+  const { apps } = useAppsList();
   const sessionNames = useSessionNames(
     placements.flatMap((widget) =>
       widget.type === "chat" && widget.targetId ? [widget.targetId] : [],

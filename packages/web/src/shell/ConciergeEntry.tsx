@@ -84,8 +84,8 @@ export function topicChatRows(
 
 /**
  * The sidebar's main chat entry, with a badge counting the agent messages the
- * guardian has not read. A new message recounts, and so does a read in this
- * tab; another tab or device catches up on its next focus refetch. The open
+ * guardian has not read. A new message recounts, and a read in this tab clears
+ * it; another tab or device catches up on its next message or reconnect. The open
  * chat reads what arrives, so the entry shows no badge while it is active.
  */
 export function ConciergeEntry({ chatId, active }: { chatId: string; active: boolean }) {

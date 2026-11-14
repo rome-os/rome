@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TaskCard } from "@rome/api-types/chat";
-import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import type { ChatMessage } from "@/lib/chat-types";
 import { waitingTaskCardMessages } from "./waiting-task-cards";
 import { SquareMousePointer } from "lucide-react";
@@ -123,8 +122,8 @@ export function ChatPendingCardJump({
 }
 
 /**
- * The jump in a Concierge chat: its task cards count by what the server says
- * each task waits on its owner for, whether or not a card has drawn yet.
+ * The jump in a Concierge chat: its task cards count by what each card says,
+ * as Rome filled it in and live events settled it, whether or not it has drawn yet.
  */
 export function ConciergeCardJump({
   messages,
@@ -135,10 +134,9 @@ export function ConciergeCardJump({
   /** Cards live events settled since the messages loaded. */
   liveCards: ReadonlyMap<string, TaskCard>;
 }) {
-  const { tasks } = useConciergeTasks({ allDone: true });
   const waiting = useMemo(
-    () => waitingTaskCardMessages(messages, tasks, liveCards),
-    [messages, tasks, liveCards],
+    () => waitingTaskCardMessages(messages, liveCards),
+    [messages, liveCards],
   );
   return <ChatPendingCardJump {...jump} waitingTaskMessageIds={waiting} />;
 }

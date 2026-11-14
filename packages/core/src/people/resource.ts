@@ -9,7 +9,7 @@ import { readdir } from "node:fs/promises";
 import type { Account } from "@rome-os/app-runtime";
 import type { AccountSendState, PersonResource } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
-import { getRelationshipDir, personProfileFileName, RELATIONSHIP_DIR } from "../profile-memory.js";
+import { getRelationshipDir, personProfilePath, RELATIONSHIP_DIR } from "../profile-memory.js";
 import type { AccountNames } from "../chats/accounts/account-names.js";
 import type { Channels, PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
 import type { MessageAccount } from "../chats/history/messages.js";
@@ -149,11 +149,8 @@ async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(strin
   const written = new Set(await readdir(getRelationshipDir()).catch(() => []));
 
   return persons.map((person) => {
-    const stored = person.profilePath?.startsWith(`${RELATIONSHIP_DIR}/`)
-      ? person.profilePath.slice(RELATIONSHIP_DIR.length + 1)
-      : null;
-    const fileName = stored ?? personProfileFileName(person.id);
-    return written.has(fileName) ? `${RELATIONSHIP_DIR}/${fileName}` : null;
+    const path = personProfilePath(person);
+    return written.has(path.slice(RELATIONSHIP_DIR.length + 1)) ? path : null;
   });
 }
 
