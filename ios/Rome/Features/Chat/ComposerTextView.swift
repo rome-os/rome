@@ -39,7 +39,7 @@ struct ComposerTextView: UIViewRepresentable {
             view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
         }
         if view.text != text { view.text = text }
-        view.placeholder = placeholder
+        if view.placeholder != placeholder { view.placeholder = placeholder }
         view.accessibilityLabel = placeholder
         view.onPasteImages = onPasteImages
         if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
@@ -156,14 +156,23 @@ final class PastingTextView: UITextView {
         super.paste(sender)
     }
 
+    /// The placeholder on one line: a long one, such as a topic chat's name,
+    /// ends in "…" instead of running past the field.
     override func draw(_ rect: CGRect) {
         super.draw(rect)
         guard text.isEmpty, !placeholder.isEmpty else { return }
+        let font = self.font ?? .systemFont(ofSize: 16)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? .systemFont(ofSize: 16),
+            .font: font,
             .foregroundColor: UIColor.placeholderText,
+            .paragraphStyle: paragraph,
         ]
-        let origin = CGPoint(x: textContainerInset.left + textContainer.lineFragmentPadding, y: textContainerInset.top)
-        (placeholder as NSString).draw(at: origin, withAttributes: attributes)
+        let left = textContainerInset.left + textContainer.lineFragmentPadding
+        let right = textContainerInset.right + textContainer.lineFragmentPadding
+        // The tail truncation keeps it to one line; the height only has to hold it.
+        let line = CGRect(x: left, y: textContainerInset.top, width: max(0, bounds.width - left - right), height: max(font.lineHeight, bounds.height - textContainerInset.top))
+        (placeholder as NSString).draw(with: line, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes, context: nil)
     }
 }
