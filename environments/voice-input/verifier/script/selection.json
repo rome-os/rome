@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "sources": {
     "fleurs-en_us": {
       "parquet": "https://huggingface.co/api/datasets/google/fleurs/parquet/en_us/test/0.parquet",
@@ -21,6 +21,34 @@
       "licence": "CC BY-SA 4.0",
       "homepage": "https://huggingface.co/datasets/CAiRE/ASCEND",
       "synthesized": false
+    },
+    "piper-kristin": {
+      "voice": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/kristin/medium/en_US-kristin-medium.onnx",
+      "dataset": "Piper voice en_US-kristin-medium, synthesized with piper-tts",
+      "licence": "voice dataset public domain (LibriVox); Piper MIT",
+      "homepage": "https://huggingface.co/rhasspy/piper-voices",
+      "synthesized": true
+    },
+    "piper-bryce": {
+      "voice": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/bryce/medium/en_US-bryce-medium.onnx",
+      "dataset": "Piper voice en_US-bryce-medium, synthesized with piper-tts",
+      "licence": "voice dataset public domain; Piper MIT",
+      "homepage": "https://huggingface.co/rhasspy/piper-voices",
+      "synthesized": true
+    },
+    "piper-joe": {
+      "voice": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/joe/medium/en_US-joe-medium.onnx",
+      "dataset": "Piper voice en_US-joe-medium, synthesized with piper-tts",
+      "licence": "voice dataset CC0; Piper MIT",
+      "homepage": "https://huggingface.co/rhasspy/piper-voices",
+      "synthesized": true
+    },
+    "piper-chaowen": {
+      "voice": "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/chaowen/medium/zh_CN-chaowen-medium.onnx",
+      "dataset": "Piper voice zh_CN-chaowen-medium, synthesized with piper-tts",
+      "licence": "voice dataset CC0; Piper MIT",
+      "homepage": "https://huggingface.co/rhasspy/piper-voices",
+      "synthesized": true
     }
   },
   "messages": [
@@ -29,140 +57,300 @@
       "language": "en",
       "source": "fleurs-en_us",
       "file": "11374239868879585530.wav",
-      "text": "The hot chocolate is up to Belgian standards. Fruit juices are pricey but excellent."
+      "text": "The hot chocolate is up to Belgian standards. Fruit juices are pricey but excellent.",
+      "set": "A"
     },
     {
       "key": "en-2",
       "language": "en",
       "source": "fleurs-en_us",
       "file": "10903101168349732260.wav",
-      "text": "The pyramid sound and light show is one of the most interesting things in the area for kids."
+      "text": "The pyramid sound and light show is one of the most interesting things in the area for kids.",
+      "set": "A"
     },
     {
       "key": "en-3",
       "language": "en",
       "source": "fleurs-en_us",
       "file": "11853072634976133891.wav",
-      "text": "These couples may choose to make an adoption plan for their baby."
+      "text": "These couples may choose to make an adoption plan for their baby.",
+      "set": "A"
     },
     {
       "key": "en-4",
       "language": "en",
       "source": "fleurs-en_us",
       "file": "10481451226514948764.wav",
-      "text": "Women: It is recommended that any women travellers say that they are married, regardless of actual marital status."
+      "text": "Women: It is recommended that any women travellers say that they are married, regardless of actual marital status.",
+      "set": "A"
     },
     {
       "key": "en-5",
       "language": "en",
       "source": "fleurs-en_us",
       "file": "10492135991603561867.wav",
-      "text": "In some areas boiling water for a minute is enough, in others several minutes are needed."
+      "text": "In some areas boiling water for a minute is enough, in others several minutes are needed.",
+      "set": "A"
     },
     {
       "key": "en-6",
       "language": "en",
       "source": "fleurs-en_us",
       "file": "1116140877447157610.wav",
-      "text": "Travellers are strongly advised to be aware of any risk of severe weather affecting their area as they may affect any travel plans."
+      "text": "Travellers are strongly advised to be aware of any risk of severe weather affecting their area as they may affect any travel plans.",
+      "set": "A"
     },
     {
       "key": "en-7",
       "language": "en",
       "source": "fleurs-en_us",
       "file": "10492761258488775721.wav",
-      "text": "Anyone who's going to drive at high latitudes or over mountain passes should consider the possibility of snow, ice, or freezing temperatures."
+      "text": "Anyone who's going to drive at high latitudes or over mountain passes should consider the possibility of snow, ice, or freezing temperatures.",
+      "set": "A"
     },
     {
       "key": "en-8",
       "language": "en",
       "source": "fleurs-en_us",
       "file": "12382404601461539160.wav",
-      "text": "On some routes, the larger companies have their own planes, but for other routes and smaller firms there was a problem."
+      "text": "On some routes, the larger companies have their own planes, but for other routes and smaller firms there was a problem.",
+      "set": "A"
     },
     {
       "key": "zh-1",
       "language": "zh",
       "source": "fleurs-cmn_hans_cn",
       "file": "11031078104467854733.wav",
-      "text": "你也可以咨询除贵国以外其他政府的建议，但他们的建议是为他们的公民而制定的。"
+      "text": "你也可以咨询除贵国以外其他政府的建议，但他们的建议是为他们的公民而制定的。",
+      "set": "A"
     },
     {
       "key": "zh-2",
       "language": "zh",
       "source": "fleurs-cmn_hans_cn",
       "file": "10836453965609915738.wav",
-      "text": "若想从最佳角度欣赏香港的美景，可以离开该岛，前往对面的九龙海滨。"
+      "text": "若想从最佳角度欣赏香港的美景，可以离开该岛，前往对面的九龙海滨。",
+      "set": "A"
     },
     {
       "key": "zh-3",
       "language": "zh",
       "source": "fleurs-cmn_hans_cn",
       "file": "11980122233546007204.wav",
-      "text": "在外围岛屿，可能无法使用信用卡，但可以使用英美货币；请事先与房主联系，确认可接受的付款方式。"
+      "text": "在外围岛屿，可能无法使用信用卡，但可以使用英美货币；请事先与房主联系，确认可接受的付款方式。",
+      "set": "A"
     },
     {
       "key": "zh-4",
       "language": "zh",
       "source": "fleurs-cmn_hans_cn",
       "file": "1153780427490892865.wav",
-      "text": "与所有南非国家公园一样，该公园每天都收取养护费和门票费。"
+      "text": "与所有南非国家公园一样，该公园每天都收取养护费和门票费。",
+      "set": "A"
     },
     {
       "key": "zh-5",
       "language": "zh",
       "source": "fleurs-cmn_hans_cn",
       "file": "10970596972697016742.wav",
-      "text": "在某些航线上，大型公司有自己的飞机，但对于其他航线和小公司来说，就有问题了。"
+      "text": "在某些航线上，大型公司有自己的飞机，但对于其他航线和小公司来说，就有问题了。",
+      "set": "A"
     },
     {
       "key": "zh-6",
       "language": "zh",
       "source": "fleurs-cmn_hans_cn",
       "file": "11109877895501140381.wav",
-      "text": "对儿童来说，金字塔的声光表演是该地区最有趣的活动之一。"
+      "text": "对儿童来说，金字塔的声光表演是该地区最有趣的活动之一。",
+      "set": "A"
     },
     {
       "key": "zh-7",
       "language": "zh",
       "source": "fleurs-cmn_hans_cn",
       "file": "10134195680525011353.wav",
-      "text": "这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。"
+      "text": "这里几乎都是沙滩，游泳很安全，大部分地方都有新西兰圣诞树的树荫。",
+      "set": "A"
     },
     {
       "key": "zh-8",
       "language": "zh",
       "source": "fleurs-cmn_hans_cn",
       "file": "10400579561005332584.wav",
-      "text": "具体说来，据说可以通过正确解读微表情来判断一个人是否在撒谎。"
+      "text": "具体说来，据说可以通过正确解读微表情来判断一个人是否在撒谎。",
+      "set": "A"
     },
     {
       "key": "mixed-1",
       "language": "mixed",
       "source": "ascend",
       "file": "ses1_spk17_L4538_831.4400_4.5200.wav",
-      "text": "深圳啊或者是上海这种比较大的城市会有更多opportunity"
+      "text": "深圳啊或者是上海这种比较大的城市会有更多opportunity",
+      "set": "A"
     },
     {
       "key": "mixed-2",
       "language": "mixed",
       "source": "ascend",
       "file": "ses1_spk3_L6681_301.920_6.780.wav",
-      "text": "所以我我现在主要在做啊就是dialogue system相关就对话系统的研究"
+      "text": "所以我我现在主要在做啊就是dialogue system相关就对话系统的研究",
+      "set": "A"
     },
     {
       "key": "mixed-3",
       "language": "mixed",
       "source": "ascend",
       "file": "ses1_spk3_L6615_208.560_5.780.wav",
-      "text": "就是像那些就是没有deadline的时候也不会那么stress"
+      "text": "就是像那些就是没有deadline的时候也不会那么stress",
+      "set": "A"
     },
     {
       "key": "mixed-4",
       "language": "mixed",
       "source": "ascend",
       "file": "ses2_spk17_L10821_261.1700_6.6200.wav",
-      "text": "所以你平时就现在大部分时间还是tennis就打网球"
+      "text": "所以你平时就现在大部分时间还是tennis就打网球",
+      "set": "A"
+    },
+    {
+      "key": "b-en-1",
+      "set": "B",
+      "language": "en",
+      "source": "piper-kristin",
+      "text": "Remind me to call the dentist tomorrow at nine in the morning."
+    },
+    {
+      "key": "b-en-2",
+      "set": "B",
+      "language": "en",
+      "source": "piper-bryce",
+      "text": "Can you summarize the last three messages from my landlord?"
+    },
+    {
+      "key": "b-en-3",
+      "set": "B",
+      "language": "en",
+      "source": "piper-joe",
+      "text": "Draft a short reply to Anna saying I will be ten minutes late."
+    },
+    {
+      "key": "b-en-4",
+      "set": "B",
+      "language": "en",
+      "source": "piper-kristin",
+      "text": "What is on my calendar for Friday afternoon?"
+    },
+    {
+      "key": "b-en-5",
+      "set": "B",
+      "language": "en",
+      "source": "piper-bryce",
+      "text": "Add milk, eggs and coffee beans to the shopping list."
+    },
+    {
+      "key": "b-en-6",
+      "set": "B",
+      "language": "en",
+      "source": "piper-joe",
+      "text": "Please book a table for four people at the Italian place near the office."
+    },
+    {
+      "key": "b-en-7",
+      "set": "B",
+      "language": "en",
+      "source": "piper-kristin",
+      "text": "Find the email about the flight change and tell me the new departure time."
+    },
+    {
+      "key": "b-en-8",
+      "set": "B",
+      "language": "en",
+      "source": "piper-bryce",
+      "text": "Turn off the living room lights and set an alarm for six thirty."
+    },
+    {
+      "key": "b-zh-1",
+      "set": "B",
+      "language": "zh",
+      "source": "piper-chaowen",
+      "text": "明天上午十点提醒我给妈妈打电话。"
+    },
+    {
+      "key": "b-zh-2",
+      "set": "B",
+      "language": "zh",
+      "source": "piper-chaowen",
+      "text": "帮我看看这周末北京会不会下雨。"
+    },
+    {
+      "key": "b-zh-3",
+      "set": "B",
+      "language": "zh",
+      "source": "piper-chaowen",
+      "text": "把今天会议的要点整理一下发给我。"
+    },
+    {
+      "key": "b-zh-4",
+      "set": "B",
+      "language": "zh",
+      "source": "piper-chaowen",
+      "text": "给小王回个消息，说我晚上七点到。"
+    },
+    {
+      "key": "b-zh-5",
+      "set": "B",
+      "language": "zh",
+      "source": "piper-chaowen",
+      "text": "我下周三下午有空吗？"
+    },
+    {
+      "key": "b-zh-6",
+      "set": "B",
+      "language": "zh",
+      "source": "piper-chaowen",
+      "text": "帮我订一张后天去上海的高铁票。"
+    },
+    {
+      "key": "b-zh-7",
+      "set": "B",
+      "language": "zh",
+      "source": "piper-chaowen",
+      "text": "把购物清单里的牛奶删掉，加上两斤苹果。"
+    },
+    {
+      "key": "b-zh-8",
+      "set": "B",
+      "language": "zh",
+      "source": "piper-chaowen",
+      "text": "提醒我睡觉前把衣服收进来。"
+    },
+    {
+      "key": "b-mixed-1",
+      "set": "B",
+      "language": "mixed",
+      "source": "piper-chaowen",
+      "text": "帮我把这个PDF发给Lisa。"
+    },
+    {
+      "key": "b-mixed-2",
+      "set": "B",
+      "language": "mixed",
+      "source": "piper-chaowen",
+      "text": "明天的meeting改到下午三点。"
+    },
+    {
+      "key": "b-mixed-3",
+      "set": "B",
+      "language": "mixed",
+      "source": "piper-chaowen",
+      "text": "帮我在Google Docs里新建一个文档。"
+    },
+    {
+      "key": "b-mixed-4",
+      "set": "B",
+      "language": "mixed",
+      "source": "piper-chaowen",
+      "text": "这个bug修好了吗？给我一个update。"
     }
   ],
   "long": {

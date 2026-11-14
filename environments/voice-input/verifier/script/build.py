@@ -8,6 +8,8 @@ requests, and writes one WAV per message plus manifest.json to out_dir
 16-bit PCM, with LEAD_S of silence before the recording and TAIL_S after it,
 so the time of the first and last word in the file is known. The manifest
 gives those times, measured on the audio, with the written text and licence.
+Set A is real speech from public datasets. Set B is synthesized with Piper
+voices from messages worded like those a guardian sends an assistant.
 """
 
 import hashlib
@@ -61,6 +63,20 @@ def decode(audio_bytes):
     return np.frombuffer(out, dtype=np.int16).astype(np.float32) / 32768.0
 
 
+def synthesize(voice_url, text):
+    """Speaks `text` with the Piper voice at `voice_url`, downloaded once to the cache."""
+    cache = os.path.expanduser("~/.cache/voice-input-verifier/piper")
+    os.makedirs(cache, exist_ok=True)
+    model = os.path.join(cache, os.path.basename(voice_url))
+    for path, url in ((model, voice_url), (f"{model}.json", f"{voice_url}.json")):
+        if not os.path.exists(path):
+            subprocess.run(["curl", "-fsSL", "-o", path, url], check=True)
+    wav = subprocess.run(
+        ["piper", "-m", model, "-f", "-"], input=text.encode(), capture_output=True, check=True
+    ).stdout
+    return decode(wav)
+
+
 def speech_bounds(samples):
     """First and last 20 ms frame whose energy is above a threshold set from the clip itself."""
     frame = int(RATE * FRAME_S)
@@ -94,7 +110,8 @@ def main():
     sel = json.load(open(os.path.join(HERE, "selection.json")))
     by_source = {}
     for m in sel["messages"]:
-        by_source.setdefault(m["source"], set()).add(m["file"])
+        if "file" in m:
+            by_source.setdefault(m["source"], set()).add(m["file"])
 
     rows = {}
     for source, files in by_source.items():
@@ -102,8 +119,11 @@ def main():
 
     manifest = {"selectionVersion": sel["version"], "sampleRate": RATE, "sources": sel["sources"], "messages": []}
     for m in sel["messages"]:
-        row = rows[m["file"]]
-        samples = decode(row["audio"]["bytes"])
+        source = sel["sources"][m["source"]]
+        if source.get("synthesized"):
+            samples = synthesize(source["voice"], m["text"])
+        else:
+            samples = decode(rows[m["file"]]["audio"]["bytes"])
         start, end = speech_bounds(samples)
         audio = np.concatenate([silence(LEAD_S), samples, silence(TAIL_S)])
         wav = f"{m['key']}.wav"
@@ -130,7 +150,7 @@ def main():
 def build_long(sel, out_dir):
     """Consecutive Mandarin recordings in file order, not used in the 20, up to the target length."""
     spec = sel["long"]
-    used = {m["file"] for m in sel["messages"]}
+    used = {m["file"] for m in sel["messages"] if "file" in m}
     rows = read_rows(sel["sources"][spec["source"]]["parquet"], None)
     plain = re.compile(r"^[一-鿿，。、；：“”！？（）]+$")
     seen_ids = set()
