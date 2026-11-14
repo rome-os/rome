@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useContext } from "react";
+import { useLiveTaskCard } from "./live-task-cards";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -13,6 +14,7 @@ import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
 import { CardBoundary } from "./widget-ui/CardBoundary";
+import { isDrawableCard } from "./widget-ui/drawable";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentCallView } from "./SubagentCallView";
 import { TaskChatCard } from "./TaskChatCard";
@@ -35,11 +37,15 @@ export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntr
 
 function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat" }> }) {
   const latest = useContext(LatestTaskChatsContext);
+  // As a live event settled it since the message loaded.
+  const card = useLiveTaskCard(block.card);
   return (
     <TaskChatCard
       chatId={block.chatId}
       title={block.title}
       isLatestForChat={!latest || latest.get(block.chatId) === block}
+      show={block.show}
+      card={card}
     />
   );
 }
@@ -53,6 +59,9 @@ export interface RenderEntryOptions {
    * interaction state and routes submissions to the right session in the merged
    * (multi-session) transcript. */
   sessionId?: string;
+  /** The message these blocks belong to. A widget is a message of its own, so
+   * this is the id a widget's events go to core by. */
+  messageId?: string;
   /** Turn that owns the rendered text blocks, used to preserve disclosure state
    * when a live block is replaced by its persisted transcript representation. */
   turnId?: string;
@@ -81,6 +90,7 @@ export function renderSingleEntry(
     onApprovalResolved,
     compact = false,
     sessionId,
+    messageId,
     turnId,
     interactionResults,
     onSubmitAppComponent,
@@ -95,6 +105,8 @@ export function renderSingleEntry(
     ? (toolUseId: string, output: Record<string, unknown>, summary?: string) =>
         onSubmitAppComponent(sid, toolUseId, output, summary)
     : () => {};
+  // A widget is a message of its own, so the message's id is the widget's.
+  const widgetId = messageId ?? "";
   const dismiss = onDismissAppComponent
     ? (toolUseId: string) => onDismissAppComponent(sid, toolUseId)
     : () => {};
@@ -199,6 +211,7 @@ export function renderSingleEntry(
           // Parts can arrive unvalidated (e.g. via channels.send); a malformed
           // key falls back to the keyless card rather than failing every create.
           routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
+          chatId={sessionId}
         />
       );
     case "pending_interaction": {
@@ -219,12 +232,37 @@ export function renderSingleEntry(
         return (
           <QuestionCard
             key={`question-card-${block.toolUseId}`}
+            widgetId={widgetId}
             toolUseId={block.toolUseId}
+            appId={block.appId}
+            ui={block.render.ui}
             props={block.render.props}
             result={resultFor(block.toolUseId)}
-            onSubmit={submit}
-            onDismiss={dismiss}
           />
+        );
+      }
+      // An app's card described as data, which the agent waits on: drawn like
+      // any widget, and answered by one of its events, which core routes.
+      if (block.render.ui && block.render.componentId === undefined) {
+        return (
+          <CardBoundary
+            key={`app-widget-${block.toolUseId}`}
+            fallback={
+              block.text ? <p className="text-ui text-muted-foreground">{block.text}</p> : null
+            }
+          >
+            <Suspense fallback={null}>
+              <WidgetUiCard
+                widgetId={widgetId}
+                toolUseId={block.toolUseId}
+                appId={block.appId}
+                ui={block.render.ui}
+                bind={block.render.bind}
+                text={block.text ?? ""}
+                waiting={{ result: resultFor(block.toolUseId) }}
+              />
+            </Suspense>
+          </CardBoundary>
         );
       }
       return (
@@ -232,7 +270,7 @@ export function renderSingleEntry(
           key={`app-component-${block.toolUseId}`}
           toolUseId={block.toolUseId}
           appId={block.appId}
-          componentId={block.render.componentId}
+          componentId={block.render.componentId ?? ""}
           props={block.render.props}
           result={resultFor(block.toolUseId)}
           onSubmit={submit}
@@ -249,6 +287,7 @@ export function renderSingleEntry(
           >
             <Suspense fallback={null}>
               <WidgetUiCard
+                widgetId={widgetId}
                 toolUseId={block.toolUseId}
                 appId={block.appId}
                 ui={block.ui}

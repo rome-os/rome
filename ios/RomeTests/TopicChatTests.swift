@@ -126,27 +126,6 @@ import Testing
     }
 }
 
-@Suite struct TaskFilterTests {
-    private func task(_ id: String, from chat: ConciergeChat?) -> ConciergeTask {
-        ConciergeTask(
-            id: id, title: id, state: .needsUser, summary: nil, waitingOn: nil, dueAt: nil, rank: nil, chat: nil,
-            conciergeChat: chat, sourceMessageId: nil, createdAt: 1, updatedAt: 1, completedAt: nil, archivedAt: nil, notSynced: nil
-        )
-    }
-
-    @Test func eachChatListsItsOwnTasks() {
-        let main = ConciergeChat(id: conciergeChatID, name: "", main: true)
-        let trip = ConciergeChat(id: "c-trip", name: "Trip", main: false)
-        let tasks = [task("a", from: main), task("b", from: trip), task("c", from: nil)]
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let inMain = TasksStore.group(tasks.filter { TasksStore.belongs($0, toChat: conciergeChatID) }, showAllDone: false, now: now)
-        let inTrip = TasksStore.group(tasks.filter { TasksStore.belongs($0, toChat: "c-trip") }, showAllDone: false, now: now)
-        // A row that names no chat comes from an older server: the main chat's.
-        #expect(Set(inMain.flatMap(\.tasks).map(\.id)) == ["a", "c"])
-        #expect(inTrip.flatMap(\.tasks).map(\.id) == ["b"])
-    }
-}
-
 @Suite struct TopicPushRouteTests {
     let topics = [ConciergeChat(id: "c-trip", name: "Trip", main: false)]
 

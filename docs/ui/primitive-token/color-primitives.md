@@ -6,7 +6,7 @@ The scale is a set of names, and a theme supplies the values, one literal per na
 
 ## Tokens
 
-Six ramps, 68 names. Every theme carries all of them.
+Ten ramps, 112 names. Every theme carries all of them.
 
 `--neutral-*` — 22 steps spanning both modes, from white at 0 to the deepest canvas at 950.
 
@@ -46,12 +46,28 @@ A bare figure is the lightness of an OKLCH value. Slate's sit at chroma 0. Ember
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Value | `#ffead9` | `#fbcda6` | `#f4a268` | `#d86f4c` | `#e55a22` | `#d1490f` | `#c05433` | `#c2410c` | `#b0421a` | `#a63a08` | oklch(0.27 0.05 45) |
 
+`--sky-*` at hue 242, `--teal-*` at hue 174, `--violet-*` at hue 286 and `--pink-*` at hue 352 — 11 steps each, on the same step set as `--orange-*`. Every theme holds the same four ramps. Lightness and chroma per step:
+
+| Step | Sky | Teal | Violet | Pink |
+|---|---|---|---|---|
+| 50 | .975 / .006 | .975 / .006 | .975 / .006 | .975 / .006 |
+| 100 | .948 / .016 | .948 / .016 | .948 / .016 | .948 / .016 |
+| 200 | .875 / .066 | .875 / .075 | .895 / .052 | .895 / .062 |
+| 300 | .78 / .085 | .78 / .075 | .78 / .1 | .78 / .09 |
+| 400 | .68 / .08 | .68 / .064 | .68 / .095 | .68 / .082 |
+| 500 | .57 / .096 | .57 / .077 | .59 / .114 | .59 / .098 |
+| 550 | .55 / .084 | .54 / .067 | .55 / .1 | .55 / .086 |
+| 600 | .5 / .08 | .5 / .064 | .5 / .095 | .5 / .082 |
+| 700 | .45 / .076 | .45 / .061 | .45 / .09 | .45 / .078 |
+| 800 | .26 / .052 | .26 / .042 | .26 / .062 | .26 / .053 |
+| 900 | .2 / .032 | .2 / .026 | .2 / .038 | .2 / .033 |
+
 ## How the scale is built
 
 - **A step number tracks lightness.** On every ramp in every theme, a higher number is a darker step. A theme may repeat a value across neighboring steps. A theme may not invert them. `[mech]`
 - **Each chromatic ramp holds one hue.** A step change moves lightness and chroma, never hue. `[mech]`
 - **A name says what the value is, and the theme mapping picks the step.** `--neutral-100` is a pale neutral in every theme, and a different pale neutral in each. Two themes may read different steps for one role. `[mech]`
-- **The scale is the union of what the themes distinguish, and every theme carries all of it.** No Ember mapping reads steps 250, 350 or 400, and no Slate mapping reads six of its own steps. Those steps exist because another theme separates two depths there. A theme with no use for a whole ramp carries it too: Ember reads no `--blue-*`, Slate reads no `--orange-*`. `[mech]`
+- **The scale is the union of what the themes distinguish, and every theme carries all of it.** No Ember mapping reads steps 250, 350 or 400, and no Slate mapping reads six of its own steps. Those steps exist because another theme separates two depths there. A theme with no use for a whole ramp carries it too: Ember reads no `--blue-*`, Slate reads no `--orange-*`, and Ember, Ash and Slate read none of the four accent ramps. `[mech]`
 - **Density follows demand, not a formula.** The lightness gap between neighbors runs from .001 to .33. Reading a ramp as an even scale gives the wrong answer. `[mech]`
 - **Steps bunch at the ends and spread across the middle.** Surfaces stack at the pale end, and in dark mode at the deep end. Text sits mid-ramp, where each text role clears its own contrast bar, so those gaps run wide.
 - **Chroma peaks mid-ramp and drops at both ends.** A status ramp is most saturated near mid lightness. Its pale fills and deep dark-mode fills read as a tinted neutral.
@@ -59,6 +75,8 @@ A bare figure is the lightness of an OKLCH value. Slate's sit at chroma 0. Ember
 - **No one step of a hue reads on both ends of its own ramp.** A deep step clears AA on that hue's pale steps and on the neutral canvases. Nothing clears it on the saturated middle, where only a near-white or near-black neutral does. A ramp therefore supports a text role against its pale end or against its mid fill, never one role against both.
 - **Ash desaturates Ember at constant lightness through the pale half, and copies it through the deep half.** Red minus blue stays at or under 9 across Ash's steps 25 to 400, against 19 on Ember's surfaces and 35 on its text steps. Desaturating rather than lightening holds the contrast ratios steady. Steps 450 and deeper are identical in the two palettes, because those steps sit at chroma .009, where there is no yellow to remove.
 - **`--orange-*` bunches at 500 to 600.** Those three span .04 lightness and differ mainly in chroma. They are the deeper variants Ash needs to clear AA against its lighter surfaces, not three visibly different depths.
+- **The four accent ramps share one lightness ladder.** Steps 50 to 900 sit at the same lightness in each, apart from steps 200 and 500, where it shifts by .02, and Teal's step 550, which sits .01 lower. Their chroma runs lower than a status ramp's: the peak is .114 against the red ramp's .245.
+- **Step 550 is the white-label depth on each accent ramp, and step 800 the depth that holds 3:1 against it.** A white label measures 4.8:1 to 5.1:1 on step 550, and step 800 measures 3.1:1 to 3.2:1 against it.
 
 ## Constraints
 
@@ -72,6 +90,8 @@ Each ratio holds against the named step in the same palette. Moving the value br
 | every theme | `--orange-550` | White label clears AA | 4.6:1 on white |
 | every theme | `--orange-700` | Info text clears AA standalone on a card | 5.7:1 on Ash's `--neutral-25` |
 | every theme | `--orange-700` | Info text clears AA on the info fill | 5.0:1 on `--orange-50` |
+| every theme | `--sky-550`, `--teal-550`, `--violet-550`, `--pink-550` | White label clears AA | 4.8:1 to 5.1:1 on white |
+| every theme | `--sky-800`, `--teal-800`, `--violet-800`, `--pink-800` | Deep step clears the 3:1 non-text bar against its own 550 | 3.1:1 to 3.2:1 on `--*-550` |
 | Ash | `--neutral-550` | Muted text clears AA on a card | 5.2:1 on `--neutral-25` |
 | Ember | `--neutral-550` | Muted text clears AA on a card | 5.2:1 on `--neutral-25` |
 | Ember | `--neutral-450` | Muted text clears AA on the dark canvas | 8.0:1 on `--neutral-950` |

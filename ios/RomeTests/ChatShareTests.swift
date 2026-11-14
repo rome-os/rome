@@ -63,7 +63,7 @@ private let twoTurns = [
         #expect(rows.first { if case .userText = $0 { true } else { false } }.map(ShareCirclePlacement.of) == .gutter)
         #expect(rows.first { if case .agentText = $0 { true } else { false } }.map(ShareCirclePlacement.of) == .shift)
         #expect(ShareCirclePlacement.of(.taskCard(id: "m:0", chatId: "c", title: "T")) == .corner)
-        #expect(ShareCirclePlacement.of(.error(id: "m:0", text: "x")) == .corner)
+        #expect(ShareCirclePlacement.of(.error(id: "m:0", error: TurnError(text: "x"))) == .corner)
         #expect(ShareCirclePlacement.of(.tools(id: "tools-m", traceMessageId: "m", count: 2)) == .corner)
     }
 
@@ -95,7 +95,7 @@ private let twoTurns = [
     @Test func shareModeClosesAnOpenThread() async {
         let backend = FakeBackend()
         let store = await chat(backend, twoTurns)
-        store.openThread(at: "a1", toReply: false)
+        store.openThread(at: "a1")
         store.share.begin(fromRow: "a1:0")
         #expect(store.thread == nil)
     }

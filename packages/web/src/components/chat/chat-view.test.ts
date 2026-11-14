@@ -369,6 +369,36 @@ describe("buildRows session renewal notice", () => {
   });
 });
 
+describe("buildRows automated input line", () => {
+  it("puts a line naming the source before a system turn that ran on an automated input", () => {
+    const source = { type: "routine" as const, name: "Daily summary" };
+    const rows = buildRows(
+      [
+        mk(MAIN, "trace", "t1", [], {
+          traceSummary: {
+            distinctApps: [],
+            totalSteps: 0,
+            invocationCounts: {},
+            automatedInput: source,
+          },
+        }),
+        mk(MAIN, "assistant", "t1", [{ type: "text", content: "Your summary" }]),
+      ],
+      new Map([[MAIN, MAIN_IDENTITY]]),
+      MAIN_IDENTITY,
+      { runningTurnId: null, isStreaming: false },
+    );
+
+    expect(rows.map((r) => r.kind)).toEqual(["automated_input", "agent"]);
+    expect(rows[0]).toEqual({
+      kind: "automated_input",
+      key: "automated-input:t1",
+      source,
+      turnId: "t1",
+    });
+  });
+});
+
 describe("isLastTurnFailed", () => {
   const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
     mk(sessionId, "trace", turnId, [], {

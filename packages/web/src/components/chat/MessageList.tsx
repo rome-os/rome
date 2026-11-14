@@ -1,13 +1,16 @@
+import type { MessageWritingEvent } from "@rome/api-types/concierge";
 import { memo, type ReactNode, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   TraceSegment,
   TraceSnapshot,
   TraceSubagentSummary,
+  TraceSummary,
 } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { renderFlatEntries } from "@/components/chat/entries";
+import { ErrorEventView, hasGuidedErrorCopy } from "@/components/chat/entries/ErrorEventView";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
@@ -49,6 +52,8 @@ export interface LivePreview {
   runningTurnId: string | null;
   /** The running turn is housekeeping for the agent, so the Concierge chat holds back its typing indicator. */
   quiet?: boolean;
+  /** How the running turn shows the typing dots, as the server last said (`message_writing`). */
+  writing?: MessageWritingEvent | null;
   snapshot: TraceSnapshot | null;
   /**
    * The text block being typed. A store rather than a string, so each delivery
@@ -95,6 +100,8 @@ export interface MessageListProps {
   fork?: boolean;
   /** `concierge` shows a texting transcript (see ConciergeTranscript). Defaults to `default`. */
   variant?: ChatVariant;
+  /** In a `concierge` transcript, the id of the first message that was unread when the chat opened. */
+  unreadFrom?: string | null;
 }
 
 /** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
@@ -116,6 +123,23 @@ function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => 
       onOpen={onOpen}
     />
   ) : null;
+}
+
+/**
+ * A stored turn that failed with guidance, such as credits used up, shows the
+ * same guidance as the composer banner did while it ran, so a reload keeps the
+ * way to fix it. It sits in the row's body: the trace line above stays one line.
+ */
+function TraceErrorGuidance({ summary }: { summary: TraceSummary | null | undefined }) {
+  if (!summary?.terminalError || !hasGuidedErrorCopy(summary.terminalErrorCode)) return null;
+  return (
+    <ErrorEventView
+      error={summary.terminalError}
+      code={summary.terminalErrorCode}
+      provider={summary.terminalErrorProvider}
+      reason={summary.terminalErrorReason}
+    />
+  );
 }
 
 function renderSubagents(
@@ -183,6 +207,8 @@ const RowView = memo(function RowView({
   if (row.kind === "user") return <UserMessage msg={row.message} />;
   if (row.kind === "model_switch") return <ModelSwitchNotice model={row.model} />;
   if (row.kind === "session_renewal") return <SessionRenewalNotice reason={row.reason} />;
+  // Only a Concierge chat runs a turn on an automated input; it draws the line itself.
+  if (row.kind === "automated_input") return null;
   const avatar = <AgentAvatar iconUrl={row.identity.iconUrl} label={row.identity.name} />;
   if (row.kind === "trace") {
     const summary = row.message.traceSummary;
@@ -201,6 +227,7 @@ const RowView = memo(function RowView({
         )}
       >
         {row.message.traceArchived ? <ArchivedTraceNote /> : null}
+        <TraceErrorGuidance summary={summary} />
         {plan?.steps.length ? <TurnSummaryGroup plan={plan} live={false} /> : null}
       </MessageRow>
     );
@@ -228,6 +255,11 @@ const RowView = memo(function RowView({
   const recapMessageId = row.messages.find((message) =>
     parseMessageEntries(message).some((block) => block.type === "turn_recap"),
   )?.id;
+  // A turn whose error is stored as its own message, as a model that could not
+  // be resolved is, already shows that error with its guidance.
+  const showsError = row.messages.some((message) =>
+    parseMessageEntries(message).some((block) => block.type === "error"),
+  );
   return (
     <MessageRow
       name={row.identity.name}
@@ -273,6 +305,7 @@ const RowView = memo(function RowView({
               {renderFlatEntries(blocks, {
                 ...actions,
                 sessionId: m.sessionId,
+                messageId: m.id,
                 turnId: m.turnId ?? undefined,
                 transcript: { live: !!live },
               })}
@@ -287,6 +320,7 @@ const RowView = memo(function RowView({
             {renderFlatEntries(blocks.slice(0, recapIndex), {
               ...actions,
               sessionId: m.sessionId,
+              messageId: m.id,
               turnId: m.turnId ?? undefined,
               transcript: { live: !!live },
             })}
@@ -307,6 +341,7 @@ const RowView = memo(function RowView({
             {renderFlatEntries(blocks.slice(recapIndex + 1), {
               ...actions,
               sessionId: m.sessionId,
+              messageId: m.id,
               turnId: m.turnId ?? undefined,
               transcript: { live: !!live },
             })}
@@ -314,6 +349,7 @@ const RowView = memo(function RowView({
         );
       })}
       {live ? <LiveTail live={live} actions={actions} /> : null}
+      {live || showsError ? null : <TraceErrorGuidance summary={row.trace?.traceSummary} />}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
     </MessageRow>
   );
@@ -362,6 +398,7 @@ function StandaloneLiveTail({
 function rowTurnRef(row: ChatRow): { turnId: string | null; sessionId: string } {
   if (row.kind === "model_switch") return { turnId: null, sessionId: row.sessionId };
   if (row.kind === "session_renewal") return { turnId: null, sessionId: row.renewedSessionId };
+  if (row.kind === "automated_input") return { turnId: null, sessionId: "" };
   if (row.kind === "user" || row.kind === "trace") {
     return { turnId: row.message.turnId ?? null, sessionId: row.message.sessionId };
   }
@@ -383,6 +420,7 @@ export function MessageList({
   feedback,
   fork,
   variant = "default",
+  unreadFrom,
 }: MessageListProps) {
   if (variant === "concierge") {
     return (
@@ -393,6 +431,7 @@ export function MessageList({
         actions={actions}
         contentRef={contentRef}
         feedback={feedback}
+        unreadFrom={unreadFrom}
       />
     );
   }
@@ -427,7 +466,7 @@ function TranscriptMessageList({
   actions,
   feedback,
   fork,
-}: Omit<MessageListProps, "variant">) {
+}: Omit<MessageListProps, "variant" | "unreadFrom">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;

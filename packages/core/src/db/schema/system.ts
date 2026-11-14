@@ -62,6 +62,12 @@ export const sessions = sqliteTable(
     supersededBy: text("superseded_by"),
     /** Why the reset replaced it: setup, idle, daily or working_dir. */
     supersededFor: text("superseded_for"),
+    /** The handoff the session it replaced wrote for it in a renewal. Null
+     *  for a session that no renewal handoff started. */
+    handoff: text("handoff"),
+    /** How many tokens the provider's context held at the session's last
+     *  turn that reported it. Null until one does. */
+    contextTokens: integer("context_tokens"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
     status: text("status", {
@@ -365,22 +371,32 @@ export const sentinelLog = sqliteTable("sentinel_log", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const approvals = sqliteTable("approvals", {
-  id: text("id").primaryKey(),
-  type: text("type", { enum: APPROVAL_TYPES }).notNull(),
-  status: text("status", { enum: APPROVAL_STATUSES }).notNull(),
-  executionState: text("execution_state", { enum: APPROVAL_EXECUTION_STATES })
-    .notNull()
-    .default("idle"),
-  requestedBy: text("requested_by").notNull(),
-  description: text("description").notNull(),
-  payload: text("payload", { mode: "json" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
-  resolvedBy: text("resolved_by"),
-  executedAt: integer("executed_at", { mode: "timestamp" }),
-  executionError: text("execution_error"),
-});
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    id: text("id").primaryKey(),
+    type: text("type", { enum: APPROVAL_TYPES }).notNull(),
+    status: text("status", { enum: APPROVAL_STATUSES }).notNull(),
+    executionState: text("execution_state", { enum: APPROVAL_EXECUTION_STATES })
+      .notNull()
+      .default("idle"),
+    requestedBy: text("requested_by").notNull(),
+    description: text("description").notNull(),
+    payload: text("payload", { mode: "json" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+    resolvedBy: text("resolved_by"),
+    executedAt: integer("executed_at", { mode: "timestamp" }),
+    executionError: text("execution_error"),
+  },
+  (table) => [
+    // A chat's approvals are found by the chat their payload names: one copy
+    // of that fact, indexed where it is.
+    index("idx_approvals_thread").on(
+      sql`json_extract(${table.payload}, '$.channelContext.threadId')`,
+    ),
+  ],
+);
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -642,6 +658,8 @@ export const chatMessages = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
+    // A dashboard line by the id clients know it by, such as a widget's.
+    index("idx_chat_messages_by_key").on(table.key),
     // One chat thread's lines.
     index("idx_chat_messages_chat_thread").on(table.chatId, table.chatThreadId),
     // A place's lines by time. Within one second lines keep the order they
@@ -704,11 +722,18 @@ export const conciergeTasks = sqliteTable(
   {
     id: text("id").primaryKey(),
     title: text("title").notNull(),
+    /**
+     * The state the Concierge wrote before Rome derived a task's status. Read
+     * only, by the migration that set the facts it stood for. Only a failed
+     * start still writes it, as dropped, beside its outcome.
+     */
     state: text("state", {
       enum: ["next", "doing", "watching", "needs_user", "done", "dropped"],
     }).notNull(),
     /** One line, the result or the current status. */
     summary: text("summary"),
+    /** What the Concierge keeps for its later self about the task. Never shown to the owner. */
+    note: text("note"),
     /** What a `watching` or `needs_user` row waits for. */
     waitingOn: text("waiting_on"),
     /** The next check of a `watching` row, or the planned time of a `next` one. */
@@ -753,6 +778,51 @@ export const conciergeTasks = sqliteTable(
     /** Set while the state is `done` or `dropped`. */
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
     archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    /**
+     * Set when archiving the task chat archived the row too, so unarchiving
+     * the chat brings back only that row, not one archived before.
+     */
+    archivedWithChat: integer("archived_with_chat", { mode: "boolean" }).notNull().default(false),
+    /** When a task chat was first linked. A row links one task chat in its life. */
+    linkedAt: integer("linked_at", { mode: "timestamp_ms" }),
+    /**
+     * When the task was stopped, and who or what stopped it. Cleared when new
+     * words take the task up again (`resume`).
+     */
+    stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
+    stopReason: text("stop_reason", { enum: ["concierge", "guardian", "archived", "deleted"] }),
+    /** How the task chat's latest turn ended, or its start failed. Rome writes it. */
+    lastOutcome: text("last_outcome", { enum: ["succeeded", "failed", "stopped"] }),
+    /**
+     * Set when the task chat's work ends, cleared once the Concierge reported
+     * it. Kept here so a restart still knows a result was never said.
+     */
+    outcomeUnsaid: integer("outcome_unsaid", { mode: "boolean" }).notNull().default(false),
+    /**
+     * When the wait that ended the task for no response began, once Rome
+     * handled its expiry, so a restart never handles one wait twice.
+     */
+    expiredWaitAt: integer("expired_wait_at", { mode: "timestamp_ms" }),
+    /** Set when the task ended for no response, until a digest of its chat listed it. */
+    noResponseUnlisted: integer("no_response_unlisted", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
+     * When a digest of its chat listed the row as a day old with no task chat
+     * started and nothing scheduled, so the Concierge asked its owner. A row
+     * is listed so once.
+     */
+    unstartedListedAt: integer("unstarted_listed_at", { mode: "timestamp_ms" }),
+    /**
+     * Set when Rome gave up telling the Concierge the task chat's result, so
+     * its owner was never told; cleared by the next result.
+     */
+    reportGivenUp: integer("report_given_up", { mode: "boolean" }).notNull().default(false),
+    /**
+     * When the task's derived status ended, kept as a fact it follows from
+     * changes and cleared if it opens again. The lists age ended rows by it.
+     */
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     // A chat belongs to at most one row, so a chat event maps to exactly one row.
@@ -763,61 +833,54 @@ export const conciergeTasks = sqliteTable(
 );
 
 /**
- * Which guardian messages each task works for, and how that work stands: one
- * row per task a message started or was passed on to. A message's status
- * reaction (docs/domains/chats.md#status-reaction) is read from its rows, so
- * a message that started several tasks has one. A row goes with its task.
+ * Which Concierge turn took each guardian message of a Concierge chat, and
+ * when that turn answered it: its turn ended, or the Concierge answered it
+ * with `say`. A message handed on to a newer turn is that turn's from then
+ * on. A message's status reaction (docs/domains/chats.md#status-reaction)
+ * is derived from this and from the status of the tasks made for it.
  */
-export const conciergeTaskReactions = sqliteTable(
-  "concierge_task_reactions",
+export const conciergeMessageTurns = sqliteTable(
+  "concierge_message_turns",
   {
-    taskId: text("task_id")
-      .notNull()
-      .references(() => conciergeTasks.id, { onDelete: "cascade" }),
     /** The Concierge chat the message is in. */
     chatId: text("chat_id").notNull(),
     /** The message's key in that chat, as the dashboard names it. */
     messageKey: text("message_key").notNull(),
+    /** The turn that took it last. */
+    turnId: text("turn_id").notNull(),
+    takenAt: integer("taken_at", { mode: "timestamp_ms" }).notNull(),
+    /** Null while its turn has not answered it. */
+    answeredAt: integer("answered_at", { mode: "timestamp_ms" }),
     /**
-     * `stopped`: the task was stopped and counts toward no reaction.
-     * `done_unsaid` / `failed_unsaid`: it ended, and its result is not said
-     * yet, so it still works.
+     * Set when its owner stopped the turn before it answered, until the next
+     * Concierge turn in the chat is told not to act on it.
      */
-    state: text("state", {
-      enum: ["working", "done", "failed", "stopped", "done_unsaid", "failed_unsaid"],
-    }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    stoppedUntold: integer("stopped_untold", { mode: "boolean" }).notNull().default(false),
+    /** Set when the turn that took it failed, by an error or a crash, before it answered it. */
+    turnFailed: integer("turn_failed", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
-    primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
-    index("idx_concierge_task_reactions_message").on(table.chatId, table.messageKey),
+    primaryKey({ columns: [table.chatId, table.messageKey] }),
+    index("idx_concierge_message_turns_turn").on(table.chatId, table.turnId),
   ],
 );
 
 /**
- * Which guardian messages each Concierge turn took as input, and how that
- * turn ended: one row per message a turn took. The message shows working
- * from the moment the turn takes it, before the Concierge starts any task,
- * and its status reaction (docs/domains/chats.md#status-reaction) is read
- * from these rows together with its task rows.
+ * The tasks made for each guardian message of a Concierge chat: the tasks it
+ * started, and the ones its words were passed on to. A row goes with its task.
  */
-export const conciergeTurnReactions = sqliteTable(
-  "concierge_turn_reactions",
+export const conciergeMessageTasks = sqliteTable(
+  "concierge_message_tasks",
   {
-    /** The Concierge chat's turn that took the message. */
-    turnId: text("turn_id").notNull(),
-    /** The Concierge chat the message is in. */
+    taskId: text("task_id")
+      .notNull()
+      .references(() => conciergeTasks.id, { onDelete: "cascade" }),
     chatId: text("chat_id").notNull(),
-    /** The message's key in that chat, as the dashboard names it. */
     messageKey: text("message_key").notNull(),
-    /** `stopped`: the turn was stopped and counts toward no reaction. */
-    state: text("state", { enum: ["working", "done", "failed", "stopped"] }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.turnId, table.chatId, table.messageKey] }),
-    index("idx_concierge_turn_reactions_message").on(table.chatId, table.messageKey),
-    index("idx_concierge_turn_reactions_chat_state").on(table.chatId, table.state),
+    primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
+    index("idx_concierge_message_tasks_message").on(table.chatId, table.messageKey),
   ],
 );
 
@@ -1115,41 +1178,52 @@ export const webchatTurnFeedback = sqliteTable(
   ],
 );
 
-export const routines = sqliteTable("routines", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  // Optional caller-assigned identity. Unique when set (SQLite treats multiple
-  // NULLs as distinct, so most routines can leave it null). Lets a caller make
-  // create_routine idempotent/dedup-able without overloading `name` (the human
-  // title): briefing keys its managed routines `briefing-*` and recreates them
-  // by key. A duplicate key is rejected at create time.
-  key: text("key").unique(),
-  // The app that owns and manages this routine (its appId), e.g. "briefing".
-  // Null for routines a guardian or agent created directly. A managed routine is
-  // the app's to maintain: users can't delete it (the dashboard/DELETE path and
-  // agent's delete_routine both refuse), only the managing app can — so an app
-  // can freely recreate its routines on sync without a user pruning them.
-  managedBy: text("managed_by"),
-  enabled: integer("enabled", { mode: "boolean" }).default(true),
+export const routines = sqliteTable(
+  "routines",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    // Optional caller-assigned identity. Unique when set (SQLite treats multiple
+    // NULLs as distinct, so most routines can leave it null). Lets a caller make
+    // create_routine idempotent/dedup-able without overloading `name` (the human
+    // title): briefing keys its managed routines `briefing-*` and recreates them
+    // by key. A duplicate key is rejected at create time.
+    key: text("key").unique(),
+    // The app that owns and manages this routine (its appId), e.g. "briefing".
+    // Null for routines a guardian or agent created directly. A managed routine is
+    // the app's to maintain: users can't delete it (the dashboard/DELETE path and
+    // agent's delete_routine both refuse), only the managing app can — so an app
+    // can freely recreate its routines on sync without a user pruning them.
+    managedBy: text("managed_by"),
+    enabled: integer("enabled", { mode: "boolean" }).default(true),
 
-  // Trigger config (JSON, discriminated by trigger.type)
-  trigger: text("trigger", { mode: "json" }).notNull(),
+    // Trigger config (JSON, discriminated by trigger.type)
+    trigger: text("trigger", { mode: "json" }).notNull(),
 
-  actionName: text("action_name").notNull(),
-  args: text("args", { mode: "json" }).notNull(), // JSON array
-  // Whether a run's record keeps the payload that fired it. Off for a routine
-  // whose payloads are private and large, such as a whole mail: its runs then
-  // keep only the payload's size.
-  keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" }).notNull().default(true),
-  // The person who created the routine, as a session actor (JSON): its fires
-  // act for them, so a reminder's push reaches the person who asked. Null on
-  // rows from before the column, whose fires act for the chat's owner.
-  createdBy: text("created_by", { mode: "json" }),
+    actionName: text("action_name").notNull(),
+    args: text("args", { mode: "json" }).notNull(), // JSON array
+    // Whether a run's record keeps the payload that fired it. Off for a routine
+    // whose payloads are private and large, such as a whole mail: its runs then
+    // keep only the payload's size.
+    keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    // The person who created the routine, as a session actor (JSON): its fires
+    // act for them, so a reminder's push reaches the person who asked. Null on
+    // rows from before the column, whose fires act for the chat's owner.
+    createdBy: text("created_by", { mode: "json" }),
 
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),
-  nextRunAt: integer("next_run_at", { mode: "timestamp" }),
-});
+    // The chat the routine works for: the chat its args send into, else the
+    // chat it was made in. Null for a routine of no one chat, such as the
+    // Concierge's follows and digests. A chat's task list reads it.
+    chatId: text("chat_id"),
+
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),
+    nextRunAt: integer("next_run_at", { mode: "timestamp" }),
+  },
+  (table) => [index("idx_routines_chat_id").on(table.chatId)],
+);
 
 export const routineRuns = sqliteTable(
   "routine_runs",

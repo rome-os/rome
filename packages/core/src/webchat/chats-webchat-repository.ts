@@ -22,6 +22,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
+import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
@@ -36,6 +37,7 @@ import {
   type MessagePageOptions,
   type StoredWebchatHistoryMessage,
   type StoredWebchatMessage,
+  THROUGH_CONTEXT_GROUPS,
   type TraceBatch,
   WebChatRepository,
 } from "./repository.js";
@@ -52,7 +54,8 @@ import { TurnLinks } from "../sessions/turn-links.js";
 import {
   ChatReadModel,
   chatsSessionAwaitingGuardian,
-  chatsSessionAwaitingCardSince,
+  chatsSessionOpenCards,
+  chatsSessionInteractions,
   chatsSessionOwnerSpokeAt,
 } from "./chat-read-model.js";
 import {
@@ -112,7 +115,8 @@ export class ChatsWebChatRepository extends WebChatRepository {
   // A listed session counts and waits on the lines its transcript draws.
   protected override readonly messageCountColumn = chatsSessionMessageCount;
   protected override readonly awaitingGuardianColumn = chatsSessionAwaitingGuardian;
-  protected override readonly awaitingCardSinceColumn = chatsSessionAwaitingCardSince;
+  protected override readonly openCardsColumn = chatsSessionOpenCards;
+  protected override readonly interactionsColumn = chatsSessionInteractions;
   protected override readonly ownerSpokeAtColumn = chatsSessionOwnerSpokeAt;
 
   /** Searches the dashboard chats' messages in Chats, at most one match per
@@ -695,6 +699,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     content: string,
     turnId: string | null = null,
   ) {
+    assertWidgetAloneInContent(content);
     const standing = role === "user" || role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.addMessage(id, sessionId, role, content, turnId);
     this.say(standing, id, role as "user" | "assistant", partsOf(content), turnId);
@@ -708,6 +713,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     id?: string,
     chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
+    assertWidgetAlone(parts);
     const standing = role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.insertBackendMessage(sessionId, turnId, role, parts, id);
     const key = id ?? randomUUID();
@@ -729,10 +735,38 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return this.selectLines([sessionId]);
   }
 
+  /** A dashboard line that holds a widget, by its key, read from one row:
+   *  the session whose turn said it, else the one standing in its chat. A key
+   *  is unique only in its chat, so a key that two dashboard lines share
+   *  finds none. A line said before the switch is still in the session's own
+   *  table. */
+  override async widgetMessage(id: string): Promise<{ chatId: string; content: string } | null> {
+    const rows = this.db.all<{ session_id: string | null; parts: string }>(sql`
+      SELECT COALESCE(
+        (SELECT l.session_id FROM agent_turn_messages l
+          WHERE l.message_id = m.id AND l.role = 'answer' LIMIT 1),
+        (SELECT s.id FROM rome_sessions s
+          WHERE s.chat_id = m.chat_id AND s.thread_id IS m.thread_id
+          ORDER BY s.created_at LIMIT 1)
+      ) AS session_id, m.parts AS parts
+      FROM ${CHAT_MESSAGES} m
+      JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = ${WEBCHAT_PLATFORM}
+      WHERE m.key = ${id}
+      LIMIT 2
+    `);
+    if (rows.length > 1) return null;
+    const [row] = rows;
+    if (row) return row.session_id ? { chatId: row.session_id, content: row.parts } : null;
+    return super.widgetMessage(id);
+  }
+
   /** The newest `options.limit` turn groups of a session, as
    *  WebChatRepository pages them, over the lines where it stands too. */
   override async getMessagesPage(sessionId: string, options: MessagePageOptions) {
     const before = options.before;
+    const limit = options.through
+      ? Math.max(options.limit, await this.groupsThrough(sessionId, before, options.through))
+      : options.limit;
     const groups = this.db.all<{ key: string; startedAt: number }>(sql`
       SELECT key, startedAt FROM (
         SELECT COALESCE(turn_id, id) AS key, MIN(created_at) AS startedAt
@@ -741,9 +775,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
       )
       ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
       ORDER BY startedAt DESC, key DESC
-      LIMIT ${options.limit + 1}
+      LIMIT ${limit + 1}
     `);
-    const pageGroups = groups.slice(0, options.limit);
+    const pageGroups = groups.slice(0, limit);
     if (pageGroups.length === 0) return { rows: [], nextCursor: null };
     const keys = JSON.stringify(pageGroups.map((group) => group.key));
     const rows = this.selectLines(
@@ -754,10 +788,35 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return {
       rows,
       nextCursor:
-        groups.length > options.limit && oldest
+        groups.length > limit && oldest
           ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
           : null,
     };
+  }
+
+  protected override async groupsThrough(
+    sessionId: string,
+    before: MessagePageCursor | null | undefined,
+    through: string,
+  ): Promise<number> {
+    const [row] = this.db.all<{ n: number }>(sql`
+      WITH g AS (
+        SELECT COALESCE(turn_id, id) AS key, MIN(created_at) AS startedAt
+        FROM ${sessionLines([sessionId])}
+        GROUP BY key
+      ),
+      t AS (
+        SELECT g.key, g.startedAt FROM g
+        WHERE g.key = (
+          SELECT COALESCE(turn_id, id) FROM ${sessionLines([sessionId])} WHERE id = ${through}
+        )
+      )
+      SELECT count(*) AS n FROM g, t
+      WHERE (g.startedAt, g.key) >= (t.startedAt, t.key)
+      ${before ? sql`AND (g.startedAt, g.key) < (${before.startedAt}, ${before.key})` : sql``}
+    `);
+    const n = row?.n ?? 0;
+    return n === 0 ? 0 : n + THROUGH_CONTEXT_GROUPS;
   }
 
   override async getMessagesBatch(sessionIds: string[]) {
@@ -1032,6 +1091,29 @@ export class ChatsWebChatRepository extends WebChatRepository {
     });
     this.emitRooted(standing.sessionId, root);
     return at;
+  }
+
+  override async taskChatPartMessages(
+    sessionId: string,
+    since?: Date,
+  ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
+    const from = since ? sql` AND p.created_at >= ${Math.floor(since.getTime() / 1000)}` : sql``;
+    // A turn starts where its first line does, its prompt or trace included:
+    // the start is read over all of them, before the filter keeps the cards,
+    // so two turns whose cards share a second keep the transcript's order.
+    return this.db
+      .all<LineRow>(sql`
+        WITH lines AS ${sessionLines([sessionId])}
+        SELECT p.* FROM lines p
+        WHERE p.role = 'assistant' AND p.content LIKE '%"task_chat"%'${from}
+        ORDER BY (
+            SELECT MIN(l.created_at) FROM lines l
+            WHERE COALESCE(l.turn_id, l.id) = COALESCE(p.turn_id, p.id)
+          ),
+          p.turn_id, p.created_at, p.line_order, p.seq
+      `)
+      .map(storedLine)
+      .map(({ id, content, createdAt }) => ({ id, content, createdAt }));
   }
 
   private selectLines(

@@ -44,6 +44,39 @@ describe("ConciergeHeaderStatus", () => {
     expect(tag.querySelector("span")!.className).toEqual(expect.stringContaining("truncate"));
   });
 
+  it("opens the task list from the badge, with a pointer, or from the name tag without a badge", () => {
+    let opened = 0;
+    const open = () => {
+      opened += 1;
+    };
+    const { container, rerender } = render(
+      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} onOpenTasks={open} />,
+    );
+    const badge = screen.getByRole("button", { name: "Open tasks" });
+    expect(badge.hasAttribute("data-concierge-header-badge")).toBe(true);
+    expect(badge.className).toContain("cursor-pointer");
+    expect(container.querySelector(".rome-mascot")?.getAttribute("class")).toContain(
+      "cursor-pointer",
+    );
+    // Only one opener: the name tag stays a plain box beside the badge.
+    expect(container.querySelector("[data-concierge-header-name]")?.tagName).toBe("DIV");
+    fireEvent.click(badge);
+    expect(opened).toBe(1);
+
+    rerender(
+      <ConciergeHeaderStatus
+        name="Milo"
+        activity={{ kind: "idle" }}
+        badge={false}
+        onOpenTasks={open}
+      />,
+    );
+    const tag = screen.getByRole("button", { name: "Open tasks" });
+    expect(tag.hasAttribute("data-concierge-header-name")).toBe(true);
+    fireEvent.click(tag);
+    expect(opened).toBe(2);
+  });
+
   it("lifts the name tag and the status a row when the badge is left out", () => {
     const { container } = render(
       <ConciergeHeaderStatus name="Milo" activity={{ kind: "working" }} badge={false} />,

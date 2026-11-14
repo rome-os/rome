@@ -142,9 +142,10 @@ function answer(
 
 /**
  * An exact ask resolves to exactly that model or fails. A tier resolves on the
- * first usable provider in order: Codex on the guardian's account, Claude,
- * Codex on Rome credits, then the mock. When that provider's login does not
- * allow the tier's model, the ask fails rather than trying the next provider.
+ * first usable provider in order: Codex subscription capacity, Claude,
+ * Codex on ChatGPT credits, Codex on Rome credits, then the mock. When that
+ * provider's login does not allow the tier's model, the ask fails rather than
+ * trying the next provider.
  */
 export function resolveModel(
   request: ModelResolutionRequest,
@@ -181,8 +182,10 @@ export function resolveModel(
     return onTier(request.providerId, { report: reports.openai, credits: false, served: null });
   }
 
-  if (runs("openai") && providerUsable(reports.openai)) return onTier("openai");
+  const codexAccountUsable = runs("openai") && providerUsable(reports.openai);
+  if (codexAccountUsable && !reports.openai?.requiresChatgptCredits) return onTier("openai");
   if (runs("anthropic") && providerUsable(reports.anthropic)) return onTier("anthropic");
+  if (codexAccountUsable) return onTier("openai");
   // Rome credits take a tier only when no guardian account can, and only one
   // whose default model the gateway serves. A tier model the guardian chose is
   // taken as asked, and fails if the gateway does not serve it.

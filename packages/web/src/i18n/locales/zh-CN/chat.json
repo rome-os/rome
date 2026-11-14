@@ -10,12 +10,17 @@
   "title": "Rome",
   "concierge": {
     "typing": "正在输入",
+    "newMessages": "以下为新消息",
+    "newMessagesPill_one": "{{label}} 条新消息",
+    "newMessagesPill_other": "{{label}} 条新消息",
+    "newMessagesMissing": "找不到新消息的起点",
     "taskChat": "任务对话",
     "taskStatus": {
       "running": "进行中",
       "waiting": "等你处理",
       "failed": "出错停止了",
-      "idle": "已完成"
+      "idle": "已完成",
+      "later": "稍后"
     },
     "openForwardedChat": "打开任务对话：{{title}}",
     "showFullText": "展开全文",
@@ -31,47 +36,31 @@
       "blocked": "弹窗被拦截",
       "checkFailed": "无法检查连接状态"
     },
+    "ask": {
+      "expiredFold": "已过期 · 回答后继续",
+      "unavailable": "这个问题或审批已无法显示",
+      "answered": "已回答",
+      "answeredWith": "已回答：{{answer}}",
+      "dismissed": "已忽略",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "waitingBelow": "等待回答：见下方卡片",
+      "turnedDown": "已自动拒绝：一天内没有回应",
+      "turnedDownStopped": "已自动拒绝：任务已停止",
+      "openToAnswer": "打开任务对话来回答"
+    },
     "taskCardAlreadyAnswered": "这张卡片已在别处回复，任务状态已刷新。",
     "openTaskChat": "打开",
     "tasks": {
-      "title": "任务",
-      "close": "关闭任务",
-      "groups": {
-        "needsYou": "等你处理",
-        "doing": "进行中",
-        "next": "接下来",
-        "watching": "盯着",
-        "done": "已完成"
+      "ended": {
+        "failed": "失败",
+        "stopped": "已停止",
+        "no_response": "没回应"
       },
+      "expired": "已过期，回答后继续",
       "stop": "停止",
-      "done": "完成",
-      "archive": "归档",
-      "retry": "再试一次",
-      "pending": {
-        "stop": "正在停止…",
-        "archive": "正在归档…",
-        "done": "正在发送…"
-      },
-      "unchanged": "{{name}} 没有改动这一项",
-      "timeout": "{{name}} 还没有处理",
-      "failed": "没发出去，请再试一次。",
-      "notSynced": "未同步",
       "sourceMissing": "找不到原消息",
-      "findingMessage": "正在查找消息…",
-      "showMore": "显示更早的 {{count}} 项",
-      "showLess": "收起",
-      "openChat": "打开「{{title}}」的对话",
-      "actionText": {
-        "stop": "停止「{{title}}」",
-        "archive": "归档「{{title}}」",
-        "done": "完成了「{{title}}」",
-        "withId": "（任务 {{id}}）"
-      },
-      "replyText": {
-        "done": "我已经完成了"
-      },
-      "emptyTitle": "还没有任务",
-      "emptyDescription": "{{name}} 正在做、计划做或盯着的任务会显示在这里。"
+      "findingMessage": "正在查找消息…"
     },
     "messageDetails": "消息详情",
     "chooseFolder": "选择文件夹…",
@@ -114,19 +103,86 @@
         "startingTopic": "正在开启话题对话",
         "checkingFollows": "正在查看你的关注",
         "searchingWeb": "正在搜索网页",
-        "readingPage": "正在阅读网页"
+        "readingPage": "正在阅读网页",
+        "tidyingUp": "正在整理上下文"
       }
     },
     "statusReaction": {
       "working": "正在处理",
       "failed": "未完成"
+    },
+    "taskList": {
+      "title": "任务",
+      "close": "关闭任务",
+      "open": "打开任务",
+      "groups": {
+        "needs_you": "需要你",
+        "active": "进行中",
+        "later": "稍后",
+        "on_its_own": "自动运行",
+        "ended": "已结束"
+      },
+      "empty": "这里还没有在运行的事。",
+      "loading": "正在加载任务",
+      "loadFailed": "任务加载失败",
+      "showMore": "再显示 {{count}} 条",
+      "task": {
+        "waitingAnswer": "等你回答",
+        "waitingApproval": "等你批准",
+        "running": "运行中",
+        "checksIn": "{{when}}检查",
+        "notStarted": "未开始",
+        "stopping": "正在停止…",
+        "opening": "正在打开…",
+        "ended": {
+          "done": "已完成",
+          "failed": "失败",
+          "stopped": "已停止",
+          "no_response": "无回应"
+        },
+        "notStartedAge": "未开始 · {{age}}创建"
+      },
+      "schedule": {
+        "daily": "每天 {{time}}",
+        "days": "{{days}} {{time}}",
+        "once": "{{date}} {{time}}",
+        "event": "收到 {{event}} 时",
+        "manual": "仅手动运行",
+        "other": "按计划"
+      },
+      "check": {
+        "waiting": "等待 {{what}}"
+      },
+      "follow": {
+        "digest": "每天 {{times}} 汇总",
+        "unavailable": "不可用",
+        "off": "已关闭"
+      },
+      "routine": {
+        "paused": "已暂停",
+        "lastFailed": "上次运行失败",
+        "fromTask": "来自 {{title}}"
+      },
+      "actions": {
+        "respond": "去处理",
+        "respondTo": "处理「{{title}}」",
+        "stop": "停止",
+        "stopTask": "停止「{{title}}」",
+        "openChat": "打开「{{title}}」的聊天"
+      },
+      "failed": {
+        "stop": "停止任务失败"
+      },
+      "created": "创建于 {{when}}",
+      "endedAt": "结束于 {{when}}"
     }
   },
   "reply": {
     "action": "回复",
     "dismiss": "取消回复",
     "jump": "跳到原消息",
-    "openThread": "打开对话串"
+    "openThread": "打开对话串",
+    "toThread": "回复：{{title}}"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -373,6 +429,9 @@
     "playVideo": "播放",
     "closeImagePreview": "关闭",
     "downloadImage": "下载",
+    "previousImage": "上一张",
+    "nextImage": "下一张",
+    "imageCounter": "{{current}} / {{total}}",
     "filePill": "#文件 {{index}}",
     "uploadProgressFor": "{{name}} 的上传进度",
     "cancelUpload": "取消",
@@ -382,19 +441,20 @@
     "stopGenerating": "停止生成"
   },
   "questionCard": {
+    "sent": "已发送",
     "optional": "可选",
     "addOwn": "添加自己的选项…",
     "typeOwn": "或输入自己的答案…",
     "typeAnswer": "输入你的答案…",
     "dismissed": "已跳过",
     "answered": "已回答",
-    "askedByRome": "Rome 正在提问",
     "dismiss": "跳过",
     "send": "发送"
   },
   "appComponent": {
     "dismiss": "跳过",
     "widgetUnavailable": "无法读取这张卡片的数据。{{text}}",
+    "widgetOpenLink": "打开页面继续",
     "widgetUndrawable": "无法显示这张卡片。{{text}}"
   },
   "aiToolsCard": {
@@ -590,17 +650,31 @@
   },
   "thread": {
     "title": "对话串",
+    "openTaskChat": "打开任务对话",
     "close": "关闭对话串",
     "loadFailed": "无法加载这个对话串。",
     "replyPlaceholder": "回复"
   },
   "sessionRenewal": {
-    "notice": "新会话 · {{reason}}",
+    "notice": "已整理上下文 · {{reason}}",
     "reasons": {
-      "setup": "设定已变",
+      "context": "对话较长",
+      "setup": "设定已更新",
       "idle": "闲置后",
       "daily": "每日重置",
       "working_dir": "工作目录不存在"
+    }
+  },
+  "automatedInput": {
+    "named": "{{kind}} · {{name}}",
+    "kinds": {
+      "routine": "例程",
+      "app": "应用",
+      "agent": "Agent",
+      "automation": "自动化",
+      "following": "关注",
+      "digest": "关注 · 摘要",
+      "check": "检查"
     }
   },
   "routineCard": {

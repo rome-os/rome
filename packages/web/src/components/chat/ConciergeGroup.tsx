@@ -1,12 +1,9 @@
 import { ThreadLabelLine } from "@/components/chat/reply/chat-threads";
 import { Fragment, memo, useMemo, type ReactNode } from "react";
-import type { ForwardedFrom } from "@rome/api-types/chat";
-import { UserMessage } from "./UserMessage";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleContent";
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
-import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
 import { StatusReactionBadge, useStatusReaction } from "@/components/chat/status-reaction";
 import { renderFlatEntries } from "@/components/chat/entries";
@@ -20,6 +17,13 @@ import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
 import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
+
+// Room every guardian bubble keeps above it for its status reaction, whose
+// badge stands 14px above the bubble's top-left corner (status-reaction.tsx).
+// With the group's 8px gap it leaves 10px clear of the message above, its
+// shadow included. It is there whether or not a mark shows, so nothing moves
+// when one comes or goes.
+const GUARDIAN_BUBBLE_GAP = "mt-4";
 
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
@@ -49,6 +53,7 @@ const GuardianBubble = memo(
         }
         anchorId={msg.id}
         arrival={arrival}
+        className={GUARDIAN_BUBBLE_GAP}
       >
         <UserMessageBubble
           msg={msg}
@@ -67,24 +72,11 @@ const GuardianBubble = memo(
     prev.arrival === next.arrival,
 );
 
-// Core stores a text part's origin as it was written, so it is read as unknown.
-function forwardedOrigin(value: unknown): ForwardedFrom | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const { chatId, title } = value as Partial<ForwardedFrom>;
-  return typeof chatId === "string" && typeof title === "string" ? { chatId, title } : undefined;
-}
-
-// The task chat a text part was forwarded from, when it carries one.
-function originOf(part: TranscriptPart): ForwardedFrom | undefined {
-  return part.type === "text" && "forwardedFrom" in part
-    ? forwardedOrigin(part.forwardedFrom)
-    : undefined;
-}
-
 // Each `say` call is its own message, so each text part is its own bubble,
-// cut with a toggle when it is tall. A forwarded report is a bubble of its own
-// with a chip that names its task chat; the intro that came with it is the
-// bubble above. Task chat cards render as they do anywhere.
+// cut with a toggle when it is tall. A forwarded report is a bubble of its own,
+// named, like every message of a task's thread, by the label under it; the
+// intro that came with it is the bubble above. Task chat cards render as they
+// do anywhere.
 const AgentEntry = memo(function AgentEntry({
   entry,
   actions,
@@ -127,8 +119,10 @@ const AgentEntry = memo(function AgentEntry({
           copyText=""
           createdAt={message.createdAt}
           feedbackTurn={null}
-          reply={replyTo(`[Task chat] ${part.title} (chat ${part.chatId})`)}
+          // A card has no text to quote: only a message with text takes a Reply.
+          reply={null}
           anchorId={index === firstBubble ? message.id : undefined}
+          partOf={message.id}
         >
           {renderFlatEntries([part], {
             ...actions,
@@ -145,6 +139,7 @@ const AgentEntry = memo(function AgentEntry({
           {renderFlatEntries([part], {
             ...actions,
             sessionId: message.sessionId,
+            messageId: message.id,
             turnId: message.turnId ?? undefined,
           })}
         </div>
@@ -152,7 +147,6 @@ const AgentEntry = memo(function AgentEntry({
     }
     if (!part.content.trim()) return null;
     const long = "format" in part && part.format === "long";
-    const forwardedFrom = originOf(part);
     return (
       <ConciergeBubble
         key={key}
@@ -166,11 +160,9 @@ const AgentEntry = memo(function AgentEntry({
         }
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
+        partOf={message.id}
       >
         <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
-          {forwardedFrom ? (
-            <ForwardedChip chatId={forwardedFrom.chatId} title={forwardedFrom.title} />
-          ) : null}
           <CollapsibleBubbleContent>
             <Markdown
               className="min-w-0 text-foreground"
@@ -216,22 +208,16 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2",
+        // A card keeps no margin of its own here, so its thread label sits as
+        // close to it as a bubble's does.
+        "flex flex-col gap-2 [&_[data-chat-card]]:mb-0",
         group.sender === "guardian" ? "items-end" : "items-start",
       )}
     >
       {group.entries.map((entry) => {
         const bubble = (
           <>
-            {entry.message.sender?.kind === "automated" ? (
-              <div
-                key={entry.message.id}
-                data-timeline-anchor={entry.message.id}
-                className="w-full self-start"
-              >
-                <UserMessage msg={entry.message} />
-              </div>
-            ) : group.sender === "guardian" ? (
+            {group.sender === "guardian" ? (
               <GuardianBubble
                 key={entry.message.id}
                 msg={entry.message}
@@ -246,7 +232,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 arrival={arrival}
               />
             )}
-            <ThreadLabelLine message={entry.message} />
+            <ThreadLabelLine message={entry.message} source={entry.source} />
           </>
         );
         if (!selection) return <Fragment key={entry.message.id}>{bubble}</Fragment>;

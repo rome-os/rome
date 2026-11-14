@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// A block of Markdown. The parser covers what agents write in chat: paragraphs,
-/// headings, bullet and numbered lists, quotes, fenced code, rules and
-/// GitHub-flavoured tables.
+/// headings, bullet and numbered lists, quotes, fenced code, rules,
+/// GitHub-flavoured tables and picture sets.
 enum MarkdownBlock: Hashable {
     case paragraph(String)
     case heading(level: Int, text: String)
@@ -15,6 +15,21 @@ enum MarkdownBlock: Hashable {
     /// A table: its header, how each column aligns, and its rows, each with
     /// as many cells as the header. Cells keep their inline Markdown.
     case table(header: [String], alignments: [TableAlignment], rows: [[String]])
+    /// A ```` ```pictures ```` fence: one picture per line, laid out as a grid or a list.
+    case pictures(layout: PictureLayout, items: [PictureItem])
+}
+
+/// How a `pictures` fence lays its pictures out: `pictures list` is a list,
+/// and a bare `pictures` is a grid.
+enum PictureLayout: Hashable {
+    case grid, list
+}
+
+/// One line of a `pictures` fence, `![title](address) note`.
+struct PictureItem: Hashable {
+    let alt: String
+    let src: String
+    let note: String
 }
 
 /// How a table column aligns, from its delimiter cell.
@@ -23,7 +38,18 @@ enum TableAlignment: Hashable {
 }
 
 enum MarkdownParser {
+    // Both parses are pure functions of the text, so a cache keyed by it can
+    // never go stale. A bubble's body runs again for reasons that leave its
+    // text alone (a theme change, its row's info, first layout of a page).
+    private static let blocksCache = ParseCache<[MarkdownBlock]>()
+    private static let inlineCache = ParseCache<AttributedString>()
+
     static func parse(_ source: String) -> [MarkdownBlock] {
+        blocksCache.value(for: source, blocks)
+    }
+
+    private static func blocks(_ source: String) -> [MarkdownBlock] {
+        PerfProbe.count("markdownParse")
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var listItems: [String] = []
@@ -60,13 +86,13 @@ enum MarkdownParser {
         let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var next = 0
         while next < lines.count {
-            let line = lines[next]
+            var line = lines[next]
             next += 1
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            var trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if var lines = code {
                 if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                    blocks.append(.code(language: codeLanguage, text: lines.joined(separator: "\n")))
+                    blocks.append(fenced(language: codeLanguage, lines: lines, closed: true))
                     code = nil
                     codeLanguage = nil
                 } else {
@@ -81,6 +107,15 @@ enum MarkdownParser {
                 codeLanguage = language.isEmpty ? nil : language
                 code = []
                 continue
+            }
+            // The two markers that bound a task's conclusion show nothing, as
+            // on the web. A line they leave empty ends the block below, and the
+            // rest of any other line is read as it stands. Any other HTML
+            // comment is text like the rest.
+            if line.contains("<!--") {
+                line = line.replacingOccurrences(
+                    of: "<!--\\s*/?rome:conclusion\\s*-->", with: "", options: .regularExpression)
+                trimmed = line.trimmingCharacters(in: .whitespaces)
             }
             if trimmed.isEmpty {
                 flushAll()
@@ -147,13 +182,71 @@ enum MarkdownParser {
             paragraph.append(line)
         }
         if let lines = code {
-            blocks.append(.code(language: codeLanguage, text: lines.joined(separator: "\n")))
+            blocks.append(fenced(language: codeLanguage, lines: lines, closed: false))
         }
         flushAll()
         return blocks
     }
 
-    nonisolated(unsafe) private static let imagePattern = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)"#)
+    /// A fenced block: a picture set when it is a `pictures` fence with a safe
+    /// picture on at least one line, else code. `language` is the whole info
+    /// string. `closed` is false for a fence the text ends inside.
+    static func fenced(language: String?, lines: [String], closed: Bool) -> MarkdownBlock {
+        pictureSet(language: language, lines: lines, closed: closed)
+            ?? .code(language: language, text: lines.joined(separator: "\n"))
+    }
+
+    /// The picture set a `pictures` fence holds, or nil when the fence is
+    /// another kind or no line yields a safe picture. A line is a Markdown
+    /// image, then its note; any other line is skipped. An address the app
+    /// would not load is skipped too, by the rules of `ImageSource`. The last
+    /// line of a fence still open may be half written, so it waits.
+    static func pictureSet(language: String?, lines: [String], closed: Bool) -> MarkdownBlock? {
+        let words = (language ?? "").split(whereSeparator: \.isWhitespace).map { String($0) }
+        guard words.first == "pictures" else { return nil }
+        let layout: PictureLayout = words.count > 1 && words[1] == "list" ? .list : .grid
+        let complete = closed ? lines : Array(lines.dropLast())
+        var items: [PictureItem] = []
+        for line in complete {
+            let text = line.trimmingCharacters(in: .whitespaces) as NSString
+            guard let match = imagePattern.firstMatch(in: text as String, range: NSRange(location: 0, length: text.length)),
+                  match.range.location == 0
+            else { continue }
+            let src = text.substring(with: match.range(at: 2))
+            guard ImageSource(src: src) != .rejected else { continue }
+            items.append(PictureItem(
+                alt: unescapedLabel(text.substring(with: match.range(at: 1))).trimmingCharacters(in: .whitespaces),
+                src: src,
+                note: text.substring(from: match.range.location + match.range.length).trimmingCharacters(in: .whitespaces)))
+        }
+        return items.isEmpty ? nil : .pictures(layout: layout, items: items)
+    }
+
+    /// A Markdown image. The label may hold backslash escapes (`\[1\]`), and the
+    /// address one level of balanced parentheses (`Mount_Fuji_(Japan).jpg`). The
+    /// web's `PICTURE_LINE` (`packages/web/src/lib/picture-set.ts`) reads the
+    /// same grammar, so keep the two alike.
+    nonisolated(unsafe) private static let imagePattern = try! NSRegularExpression(pattern: #"!\[((?:[^\]\\]|\\.)*)\]\(\s*<?((?:[^()\s<>]|\([^()\s]*\))+)>?(?:\s+"[^"]*")?\s*\)"#)
+
+    /// A label with its Markdown backslash escapes read: `\[1\]` shows as `[1]`.
+    /// A backslash before anything but ASCII punctuation stays.
+    static func unescapedLabel(_ text: String) -> String {
+        var result = ""
+        var escaped = false
+        for character in text {
+            if escaped {
+                if !(character.isASCII && (character.isPunctuation || character.isSymbol)) { result.append("\\") }
+                result.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else {
+                result.append(character)
+            }
+        }
+        if escaped { result.append("\\") }
+        return result
+    }
 
     /// A paragraph's text with its Markdown images as blocks of their own.
     /// Only image syntax counts: a plain link to an image file stays a link.
@@ -167,7 +260,7 @@ enum MarkdownParser {
             let before = nsText.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !before.isEmpty { blocks.append(.paragraph(before)) }
-            blocks.append(.image(alt: nsText.substring(with: match.range(at: 1)), src: nsText.substring(with: match.range(at: 2))))
+            blocks.append(.image(alt: unescapedLabel(nsText.substring(with: match.range(at: 1))), src: nsText.substring(with: match.range(at: 2))))
             cursor = match.range.location + match.range.length
         }
         let after = nsText.substring(from: cursor).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -254,6 +347,10 @@ enum MarkdownParser {
 
     /// Inline Markdown (bold, italics, code, links) as styled text.
     static func inline(_ text: String) -> AttributedString {
+        inlineCache.value(for: text, styledInline)
+    }
+
+    private static func styledInline(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: false,
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
@@ -464,12 +561,26 @@ struct MarkdownText: View {
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
-        blocks.enumerated().compactMap { position, block in
-            if case .image(let alt, let src) = block, case let source = ImageSource(src: src, origin: origin), source != .rejected {
-                return .markdown(source, alt: alt, src: src, position: position)
+        blocks.enumerated().flatMap { position, block -> [ViewerImage] in
+            switch block {
+            case .image(let alt, let src):
+                let source = ImageSource(src: src, origin: origin)
+                return source == .rejected ? [] : [ViewerImage.markdown(source, alt: alt, src: src, position: position)]
+            case .pictures(_, let items):
+                return items.enumerated().compactMap { index, item -> ViewerImage? in
+                    let source = ImageSource(src: item.src, origin: origin)
+                    return source == .rejected ? nil : ViewerImage.markdown(source, alt: item.alt, src: item.src, position: Self.pictureKey(block: position, item: index))
+                }
+            default:
+                return []
             }
-            return nil
         }
+    }
+
+    /// The viewer position of a set's picture. Negative, so it never meets the
+    /// block position of an image.
+    private static func pictureKey(block: Int, item: Int) -> Int {
+        -(block * 1_000 + item) - 1
     }
 
     var body: some View {
@@ -481,7 +592,7 @@ struct MarkdownText: View {
         .foregroundStyle(color)
         .tint(Palette.primaryText)
         // Links in the text: the shell's opener, else the system's.
-        .environment(\.openURL, OpenURLAction { url in linkOpener?(url) ?? .systemAction })
+        .environment(\.openURL, OpenURLAction { url in linkOpener?.run(url) ?? .systemAction })
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }
@@ -544,6 +655,11 @@ struct MarkdownText: View {
             }
         case .table(let header, let alignments, let rows):
             MarkdownTable(header: header, alignments: alignments, rows: rows, fontSize: fontSize - 1)
+        case .pictures(let layout, let items):
+            MarkdownPictureSet(layout: layout, items: items, fontSize: fontSize) { index in
+                viewerStart = gallery.firstIndex { $0.matches(position: Self.pictureKey(block: position, item: index)) } ?? 0
+                showViewer = true
+            }
         }
     }
 }

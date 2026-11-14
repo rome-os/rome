@@ -12,7 +12,10 @@ import {
 } from "@/components/ui/context-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useChatListModeForShell, useLastOrdinaryChatId } from "@/hooks/use-chat-list-mode";
+import { useChatSessionMayExist } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
+import { railChatHref } from "@/lib/chat-list-mode";
 import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
 import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
@@ -184,6 +187,15 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
   const labelled = useContext(RailLabelsContext);
   const tileClass = railLinkClass(labelled);
+  // Chat opens the main chat in Concierge mode, else the ordinary chat last
+  // opened here, which is a blank chat once it is gone from the loaded lists.
+  const chatListMode = useChatListModeForShell(true, "concierge");
+  const lastOrdinaryChatId = useLastOrdinaryChatId();
+  const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
+  const entryHref = (entry: BuiltinNavEntry): string =>
+    entry.id === "chat"
+      ? railChatHref(chatListMode, lastOrdinaryChatId, lastOrdinaryChatExists)
+      : entry.href;
   // A labelled row already names itself, so its tooltip would only repeat it.
   const tip = (text: string): React.ReactNode =>
     labelled ? null : <TooltipContent side="right">{text}</TooltipContent>;
@@ -313,7 +325,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
         <ContextMenuContent>
-          {canOpen ? renderOpenMenuItem(entry.href) : null}
+          {canOpen ? renderOpenMenuItem(entryHref(entry)) : null}
           {canOpen && canUnpin ? <ContextMenuSeparator /> : null}
           {canUnpin ? (
             <ContextMenuItem
@@ -400,7 +412,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             {withBuiltinContextMenu(
               entry,
               <Link
-                to={entry.href}
+                to={entryHref(entry)}
                 aria-label={label}
                 onPointerEnter={chatPeek.onPointerEnter}
                 onPointerLeave={chatPeek.onPointerLeave}
@@ -419,7 +431,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             entry,
             <TooltipTrigger asChild>
               <Link
-                to={entry.href}
+                to={entryHref(entry)}
                 aria-label={label}
                 className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
               >

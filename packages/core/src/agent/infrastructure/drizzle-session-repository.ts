@@ -64,22 +64,29 @@ export class DrizzleSessionRepository implements SessionRepository {
   async add(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    this.db.transaction((tx) => {
-      if (state.continuityKey !== null) {
-        const active = tx
-          .select({ id: sessions.id })
-          .from(sessions)
-          .where(exactlyActive(state.continuityKey, state.agentName))
-          .get();
-        if (active) {
-          throw new ActiveSessionExistsError(state.continuityKey, state.agentName, active.id);
+    // Immediate: the active-session check reads before the insert writes, and a
+    // deferred transaction fails at once with "database is locked" when another
+    // connection holds the write lock; BEGIN IMMEDIATE waits for it under
+    // busy_timeout instead.
+    this.db.transaction(
+      (tx) => {
+        if (state.continuityKey !== null) {
+          const active = tx
+            .select({ id: sessions.id })
+            .from(sessions)
+            .where(exactlyActive(state.continuityKey, state.agentName))
+            .get();
+          if (active) {
+            throw new ActiveSessionExistsError(state.continuityKey, state.agentName, active.id);
+          }
         }
-      }
-      // The row carries every fact the session holds, so a turn recorded
-      // before the add needs only its checkpoint written beside it.
-      tx.insert(sessions).values(toRow(state)).run();
-      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
-    });
+        // The row carries every fact the session holds, so a turn recorded
+        // before the add needs only its checkpoint written beside it.
+        tx.insert(sessions).values(toRow(state)).run();
+        for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      },
+      { behavior: "immediate" },
+    );
     session.markSaved();
   }
 
@@ -93,16 +100,22 @@ export class DrizzleSessionRepository implements SessionRepository {
   async save(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    this.db.transaction((tx) => {
-      const stored = tx
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(eq(sessions.id, state.id))
-        .get();
-      if (!stored) throw new Error(`Session "${state.id}" was never added`);
-      writeChanges(tx, state, pending.changes);
-      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
-    });
+    // Immediate: a deferred read-then-write fails at once with "database is
+    // locked" when another connection holds the write lock; BEGIN IMMEDIATE
+    // waits for it under busy_timeout instead.
+    this.db.transaction(
+      (tx) => {
+        const stored = tx
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(eq(sessions.id, state.id))
+          .get();
+        if (!stored) throw new Error(`Session "${state.id}" was never added`);
+        writeChanges(tx, state, pending.changes);
+        for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      },
+      { behavior: "immediate" },
+    );
     session.markSaved();
   }
 
@@ -241,6 +254,8 @@ function restore(row: SessionRow): Session {
     setup: row.setup,
     supersededBy: row.supersededBy,
     supersededFor: row.supersededFor,
+    handoff: row.handoff,
+    contextTokens: row.contextTokens,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
   });
@@ -260,6 +275,8 @@ function writeChanges(
   }
   if (changes.has("reasoningEffort")) columns.reasoningEffort = state.reasoningEffort;
   if (changes.has("workingDir")) columns.workingDir = state.workingDir;
+  if (changes.has("contextTokens")) columns.contextTokens = state.contextTokens;
+  if (changes.has("setup")) columns.setup = state.setup;
   if (changes.has("lastActiveAt")) columns.lastActiveAt = state.lastActiveAt;
   // A completion is final. A stale instance that still believes the session is
   // active never writes that belief back.
@@ -290,6 +307,8 @@ function toRow(state: SessionState): SessionRow {
     setup: state.setup,
     supersededBy: state.supersededBy,
     supersededFor: state.supersededFor,
+    handoff: state.handoff,
+    contextTokens: state.contextTokens,
     createdAt: state.createdAt,
     lastActiveAt: state.lastActiveAt,
     status: state.status,
