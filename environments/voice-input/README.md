@@ -82,6 +82,17 @@ The same rules on both sides, in `lib/audio.mjs`:
 
 Browser side: Chrome sends every request through the environment's proxy, loopback included. Server side: tcpdump in Rome's network namespace records packet sizes only, never payload. A connection counts as Rome's outbound when it leaves from an ephemeral port of Rome's container; hosts come from Rome's own DNS answers, and the environment names the stand-in `transcriber` and Rome Cloud `cloud` itself, by the host names Rome dials them at.
 
+#### Chrome's update checks are not audio
+
+A run on 2026-11-14 (08:20) counted Rome's uploads to `update.googleapis.com` as audio: 39,297 bytes, "sustained upload over 3 seconds". That was the capture's mistake, and the uploads were not audio:
+
+- **What the capture matched on.** The connection is encrypted, so the capture saw packet sizes and times only, never content. It then added up every connection to that host across the whole 24-minute run, and found 4096 bytes or more in 3 different seconds, minutes apart. Each of those seconds was a separate update check.
+- **Why it no longer matches.** Each connection is now judged on its own, and the 3 busy seconds must fall within 10 seconds. Every update connection was a single burst under 15 KB, lasting less than a second.
+- **Where the uploads came from.** Rome's own Google Chrome made them, the browser its agents use. From inside Rome's process and network namespaces, `ss -tnp` showed Google's addresses held by its `chrome` network service. Rome's voice code is not involved.
+- **Where the audio went.** In the same run, all the audio the browser sent Rome is accounted for at the stand-in, session by session, with matching byte counts.
+
+Blocking the update hosts only stops the environment's Chrome from checking for updates. A production Rome's Chrome keeps checking. That is fine for rule 10, because the checks carry no audio, as above.
+
 ### audio-scan
 
 Searches `/home/rome` (the profile folder, which holds the database `rome.db` and its WAL), `/home/user`, `/app/memory`, `/tmp`, `/var/log`, s6's service logs and the container's logs. A file is a finding when it has an audio extension, starts with an audio signature, or holds a signature or base64 audio anywhere inside. Raw PCM has no signature, so a raw PCM dump without an audio extension would not be found.
