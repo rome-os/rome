@@ -455,6 +455,52 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.jumpTarget == TranscriptRow.unreadDivider.id)
     }
 
+    @Test func comingBackFromTheBackgroundOpensTheChatAgain() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 1)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        store.start()
+        for _ in 0..<100 where backend.reads.isEmpty || !store.loaded {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.unreadFrom == nil)
+
+        // A reply comes while the app is away; back in front, the read waits
+        // for the read mark, and the catch-up read brings the reply.
+        store.leftForBackground()
+        backend.stored.append(chatMessage(2))
+        store.chatShown()
+        store.markRead()
+        await store.reload()
+        for _ in 0..<100 where store.unreadFrom == nil || backend.reads.count < 2 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.readsBeforeMark == [0, 1])
+        #expect(store.unreadFrom == "m2")
+        store.stop()
+    }
+
+    @Test func thePillsSearchStopsWhenTheChatCloses() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<200).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 5)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        for _ in 0..<100 where store.unread == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.unread?.more == true)
+        backend.duringOlderFetch = { store.endOpen() }
+        await store.revealUnread()
+        // One page went in, the one already asked for; no more were fetched.
+        #expect(store.messages.count == 80)
+        #expect(store.notice == nil)
+    }
+
     @Test func aTaskChatHasNoUnreadLine() async {
         let backend = FakeBackend()
         backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]

@@ -468,6 +468,15 @@ final class TranscriptStore {
         }
     }
 
+    /// The app went to the background: coming back in front opens the chat
+    /// again (`chatShown`), and that open waits for the catch-up read that
+    /// brings what arrived meanwhile.
+    func leftForBackground() {
+        guard kind == .concierge else { return }
+        endOpen()
+        needsFetch = true
+    }
+
     /// The chat closed: the line goes, and the next open looks again.
     func endOpen() {
         openRead?.cancel()
@@ -501,7 +510,8 @@ final class TranscriptStore {
     func revealUnread() async {
         guard unread != nil else { return }
         var stalled = 0
-        while unreadFrom == nil, hasOlder, stalled < 2 {
+        // The chat closing ends the search: `endOpen()` drops `unread`.
+        while unread != nil, unreadFrom == nil, hasOlder, stalled < 2 {
             let before = messages.count
             await loadOlder()
             await placeOlderPage()
@@ -512,6 +522,7 @@ final class TranscriptStore {
                 stalled = 0
             }
         }
+        guard unread != nil else { return }
         guard unreadFrom != nil else {
             say(String(localized: "Can't find where the new messages start"))
             return
@@ -1036,6 +1047,8 @@ final class TranscriptStore {
     /// The chat is in front again, or entered: a load that failed before is
     /// tried at once and visibly; otherwise only the running turn is looked at.
     func chatShown() {
+        // Back in front counts as opening it; an open still under way stays.
+        beginOpen()
         if loadFailed { retryLoad() } else { recheckRunning() }
     }
 

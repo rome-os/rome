@@ -123,7 +123,12 @@ struct TopicChatScreen: View {
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
-        .onAppear { store?.start() }
+        // The open starts before the first fetch, so a reply that arrives
+        // live during it is never counted as unread.
+        .onAppear {
+            store?.beginOpen()
+            store?.start()
+        }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
         .onDisappear {
