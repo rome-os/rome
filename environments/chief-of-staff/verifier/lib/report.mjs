@@ -46,7 +46,12 @@ export function renderMarkdown(report) {
     "## Under test",
     "",
     part("Rome", underTest.rome),
-    part("Agent (rome_apps/chief-of-staff)", underTest.agent),
+    ...(underTest.app
+      ? [
+          `- Chief of staff app: \`${underTest.app.repo}\` at \`${underTest.app.commit}\`${underTest.app.dirty ? " (uncommitted changes)" : ""}`,
+          part("Rome build", underTest.agent),
+        ]
+      : [part("Agent (rome_apps/chief-of-staff)", underTest.agent)]),
     ...(underTest.agent?.merged ?? []).map((m) => `  - built with ${m.ref} at \`${m.commit}\``),
     part("Environment", underTest.environment),
     part("Verifier", underTest.verifier),

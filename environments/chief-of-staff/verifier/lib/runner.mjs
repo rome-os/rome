@@ -168,8 +168,10 @@ export function dirtyParts(version) {
     .map(([name]) => name);
 }
 
+// The chief of staff app's commit names the run: the installed app when the environment
+// reports one, else the Rome build that carried the app.
 function agentCommit(version) {
-  return String(version.agent?.commit ?? "unknown").slice(0, 12);
+  return String(version.app?.commit ?? version.agent?.commit ?? "unknown").slice(0, 12);
 }
 
 /**

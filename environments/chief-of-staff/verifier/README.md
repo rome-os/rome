@@ -33,7 +33,7 @@ Each run first calls `cos-env reset`, then hands the agent the seeded team with 
 
 Each run writes `report.json` and `report.md` to `~/.rome-environments/chief-of-staff/runs/<time>-<agent commit>/`, with the seed it handed the agent and Rome's logs for the run (`cos-env logs`, with memory stats) beside them. The report opens with how many of the messages sent to the agent it answered, then states:
 
-- The commits under test: Rome, the agent (`rome_apps/chief-of-staff/`), the environment and the verifier, each marked when it had uncommitted changes. The first three come from `cos-env version`. The verifier reads its own.
+- The commits under test: the chief of staff app (its repository and commit, when the environment installs it from there), the Rome build, the environment and the verifier, each marked when it had uncommitted changes. All but the verifier come from `cos-env version`. The verifier reads its own.
 - The model the test Rome ran on, the judge with its last calibration score, the rules version, the waits used, and the worktree and commit the run was started from.
 
 Then the summary gives two numbers: the rules scored whole (the seven phase 1 rules other than K3), and K3 by leg. Each rule is pass, fail, waiting on a design decision, or not checked, with the reason and the ids of the messages that are the evidence. A rule passes "partly checked" when every check that ran passed and some optional part could not be checked. The report names that part. Failures that wait on a design decision are listed in their own section, apart from the agent's failures.

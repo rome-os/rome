@@ -67,6 +67,7 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     });
     const markdown = readFileSync(join(outDir, "report.md"), "utf8");
     assert.match(markdown, /\| K1 Team \| pass/);
+    assert.match(markdown, /- Chief of staff app: `fake\/chief-of-staff` at `fake-good`/);
     assert.match(markdown, /Rules other than K3: 7 of 7 pass\./);
     assert.match(markdown, /K3 by leg: 4 of 4 pass\./);
     assert.ok(

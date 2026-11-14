@@ -86,6 +86,7 @@ switch (command) {
         agent: { commit: `fake-${agent}`, dirty: false },
         environment: { commit: "fake-environment", dirty: false },
         verifier: { commit: "fake-verifier", dirty: false },
+        app: { repo: "fake/chief-of-staff", ref: "main", commit: `fake-${agent}`, dirty: false },
         model: { login: "scripted stand-in", tierModelMappings: null },
         memory: { current: { since: `start-${state.romeStarts ?? 0}` } },
       }),
