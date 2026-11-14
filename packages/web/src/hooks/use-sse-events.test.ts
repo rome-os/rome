@@ -342,4 +342,130 @@ describe("useSseEvents", () => {
     expect(source.listenerCount("error")).toBe(0);
     expect(source.close).toHaveBeenCalledOnce();
   });
+
+  it("removes remaining listeners and closes the connection when a removeEventListener call throws", () => {
+    const { unmount } = renderHook(() =>
+      useSseEvents("/events", {
+        alpha: { schema: z.string(), fn: rs.fn() },
+        beta: { schema: z.string(), fn: rs.fn() },
+      }),
+    );
+    const source = MockEventSource.instances[0];
+    const originalRemove = source.removeEventListener.bind(source);
+    rs.spyOn(source, "removeEventListener").mockImplementation((type, listener) => {
+      if (type === "open" || type === "alpha") {
+        throw new TypeError("Illegal invocation");
+      }
+      originalRemove(type, listener);
+    });
+
+    expect(() => unmount()).not.toThrow();
+
+    expect(source.listenerCount("beta")).toBe(0);
+    expect(source.listenerCount("error")).toBe(0);
+    expect(source.close).toHaveBeenCalledOnce();
+  });
+
+  it("swallows teardown errors and ignores late events when removeEventListener and close throw", () => {
+    const handler = rs.fn();
+    const onReconnect = rs.fn();
+    const onError = rs.fn();
+    const { unmount } = renderHook(() =>
+      useSseEvents(
+        "/events",
+        { changed: { schema: z.string(), fn: handler } },
+        { onReconnect, onError },
+      ),
+    );
+    const source = MockEventSource.instances[0];
+    act(() => source.emit("open"));
+
+    rs.spyOn(source, "removeEventListener").mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+    source.close.mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+
+    expect(() => unmount()).not.toThrow();
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(source.listenerCount("changed")).toBe(1);
+    expect(source.listenerCount("open")).toBe(1);
+    expect(source.listenerCount("error")).toBe(1);
+
+    act(() => {
+      source.emit("changed", JSON.stringify("late"));
+      source.emit("open");
+      source.emitError(MockEventSource.CLOSED);
+    });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(onReconnect).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("survives teardown errors across URL changes and disable transitions without stale callbacks", () => {
+    const handler = rs.fn();
+    const onReconnect = rs.fn();
+    const onError = rs.fn();
+    const { rerender } = renderHook(
+      ({ enabled, url }: { enabled: boolean; url: string }) =>
+        useMessageEvent(
+          url,
+          { schema: z.string(), fn: handler },
+          { enabled, onReconnect, onError },
+        ),
+      { initialProps: { enabled: true, url: "/first" } },
+    );
+
+    const first = MockEventSource.instances[0];
+    act(() => first.emit("open"));
+    rs.spyOn(first, "removeEventListener").mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+    first.close.mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+
+    expect(() => rerender({ enabled: true, url: "/second" })).not.toThrow();
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(MockEventSource.instances).toHaveLength(2);
+
+    const second = MockEventSource.instances[1];
+    expect(second.url).toBe("/second");
+
+    act(() => {
+      first.emit("message", JSON.stringify("stale-first"));
+      first.emit("open");
+      first.emitError(MockEventSource.CLOSED);
+    });
+    expect(handler).not.toHaveBeenCalled();
+    expect(onReconnect).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+
+    act(() => {
+      second.emit("open");
+      second.emit("message", JSON.stringify("live-second"));
+    });
+    expect(handler).toHaveBeenCalledExactlyOnceWith("live-second");
+
+    rs.spyOn(second, "removeEventListener").mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+    second.close.mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+
+    expect(() => rerender({ enabled: false, url: "/second" })).not.toThrow();
+    expect(second.close).toHaveBeenCalledOnce();
+
+    act(() => {
+      second.emit("message", JSON.stringify("stale-second"));
+      second.emit("open");
+      second.emitError(MockEventSource.CLOSED);
+    });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(onReconnect).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
 });

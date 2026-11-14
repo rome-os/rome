@@ -22,7 +22,8 @@ export type SseEventHandlers<Schemas extends Record<string, z.ZodType>> = {
 
 interface ConnectionState {
   source: EventSource;
-  listeners: Map<string, EventListener>;
+  listeners: [type: string, listener: EventListener][];
+  disposed: boolean;
 }
 
 function errorMessage(error: unknown): string {
@@ -94,6 +95,11 @@ export function dispatchValidatedEvent<Schema extends z.ZodType>(
   );
 }
 
+function listen(state: ConnectionState, type: string, listener: EventListener): void {
+  state.listeners.push([type, listener]);
+  state.source.addEventListener(type, listener);
+}
+
 function addEventListener<
   Schemas extends Record<string, z.ZodType>,
   EventName extends keyof Schemas & string,
@@ -103,11 +109,25 @@ function addEventListener<
   url: string,
   eventName: EventName,
 ): void {
-  const listener = ((event: MessageEvent<string>) => {
+  listen(state, eventName, ((event: MessageEvent<string>) => {
+    if (state.disposed) return;
     invokeHandler(handlersRef, url, eventName, event);
-  }) as EventListener;
-  state.listeners.set(eventName, listener);
-  state.source.addEventListener(eventName, listener);
+  }) as EventListener);
+}
+
+// Browser extensions that proxy `EventSource` without binding its methods throw
+// `Illegal invocation` on `removeEventListener` and `close`, leaving listeners attached.
+function closeConnection(state: ConnectionState): void {
+  state.disposed = true;
+  for (const [type, listener] of state.listeners) {
+    try {
+      state.source.removeEventListener(type, listener);
+    } catch {}
+  }
+  state.listeners.length = 0;
+  try {
+    state.source.close();
+  } catch {}
 }
 
 export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
@@ -126,14 +146,11 @@ export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
     if (!enabled || typeof EventSource !== "function") return;
 
     const source = new EventSource(url, { withCredentials: true });
-    const state: ConnectionState = { source, listeners: new Map() };
-    const activeHandlers = handlersRef.current;
-    for (const eventName in activeHandlers) {
-      addEventListener(state, handlersRef, url, eventName);
-    }
+    const state: ConnectionState = { source, listeners: [], disposed: false };
 
     let hasOpened = false;
     const handleOpen = () => {
+      if (state.disposed) return;
       if (!hasOpened) {
         hasOpened = true;
         return;
@@ -144,8 +161,10 @@ export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
         { url },
       );
     };
-    source.addEventListener("open", handleOpen);
+    listen(state, "open", handleOpen);
+
     const handleError = () => {
+      if (state.disposed) return;
       const context: SseErrorContext = { readyState: source.readyState };
       invokeObservedCallback(
         () => optionsRef.current?.onError?.(context),
@@ -153,16 +172,15 @@ export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
         { url, readyState: context.readyState },
       );
     };
-    source.addEventListener("error", handleError);
+    listen(state, "error", handleError);
+
+    const activeHandlers = handlersRef.current;
+    for (const eventName in activeHandlers) {
+      addEventListener(state, handlersRef, url, eventName);
+    }
 
     return () => {
-      source.removeEventListener("open", handleOpen);
-      source.removeEventListener("error", handleError);
-      for (const [eventName, listener] of state.listeners) {
-        source.removeEventListener(eventName, listener);
-      }
-      state.listeners.clear();
-      source.close();
+      closeConnection(state);
     };
   }, [enabled, url]);
 }
