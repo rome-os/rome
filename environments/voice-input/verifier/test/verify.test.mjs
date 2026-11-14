@@ -1,7 +1,7 @@
 // The verifier against the stand-in product: the good variant passes every phase 1 rule, and
 // each failing variant fails its own rule.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -11,9 +11,10 @@ import { emptyState } from "../fake/state.mjs";
 import { verify } from "../lib/runner.mjs";
 import { loadScript } from "../lib/script.mjs";
 import { voiceEnv } from "../lib/voice-env.mjs";
+import { execFileSync } from "node:child_process";
 
 const fakeEnv = fileURLToPath(new URL("../fake/voice-env.mjs", import.meta.url));
-const PHASE_1 = ["2", "3", "5", "6", "10"];
+const PHASE_1 = ["2", "3", "5", "6", "10", "11"];
 
 /** A script of 20 short messages with the real script's languages and written text. */
 function shortScript(dir) {
@@ -31,12 +32,13 @@ async function runAgainst(variant, options = {}) {
   writeFileSync(statePath, JSON.stringify(emptyState(variant)));
   const script = shortScript(dir);
   const standIn = await startStandIn({ statePath, script });
+  const env = { ...process.env, VOICE_FAKE_STATE: statePath, VOICE_FAKE_URL: standIn.url };
   try {
     return await verify({
       env: voiceEnv({
         command: ["node", fakeEnv],
         resetCommand: ["node", fakeEnv, "reset"],
-        env: { ...process.env, VOICE_FAKE_STATE: statePath, VOICE_FAKE_URL: standIn.url },
+        env,
       }),
       script,
       waits: WAITS,
@@ -46,13 +48,19 @@ async function runAgainst(variant, options = {}) {
       ...options,
     });
   } finally {
+    // No Chrome or profile outlives the test, whatever the verifier did.
+    execFileSync("node", [fakeEnv, "browser", "stop"], { env });
+    try {
+      execFileSync("pkill", ["-KILL", "-f", `--user-data-dir=${dir}`]);
+    } catch {}
+    rmSync(dir, { recursive: true, force: true });
     await standIn.close();
   }
 }
 
 const statuses = (report) => Object.fromEntries(report.results.map((r) => [r.rule, r.status]));
 
-describe("verify against the stand-in product", { concurrency: true, timeout: 600000 }, () => {
+describe("verify against the stand-in product", { concurrency: 3, timeout: 1200000 }, () => {
   for (const variant of VARIANTS) {
     it(`scores ${variant}`, async () => {
       const { report } = await runAgainst(variant);
@@ -79,6 +87,7 @@ describe("verify against the stand-in product", { concurrency: true, timeout: 60
         5: "pass",
         6: "pass",
         10: "pass",
+        11: "pass",
       },
       JSON.stringify(report.results.map((r) => [r.rule, r.reason])),
     );

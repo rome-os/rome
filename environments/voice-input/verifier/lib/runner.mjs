@@ -83,6 +83,14 @@ export async function verify({
   if (PLACES.includes(place)) await env.reset();
   const results = [];
   try {
+    // A scenario's `prepare` sees the fresh instance, before any scenario has spoken into it.
+    if (PLACES.includes(place)) {
+      for (const scenario of SCENARIOS.filter((s) => wanted.includes(s.rule) && s.prepare)) {
+        await scenario.prepare(ctx).catch((error) => {
+          ctx.memo[`prepare${scenario.rule}`] = { error: error.message };
+        });
+      }
+    }
     for (const rule of wanted) results.push(await scoreRule(rule, place, ctx));
   } finally {
     await env.stopBrowser().catch(() => {});

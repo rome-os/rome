@@ -1,6 +1,6 @@
 # Voice input verifier
 
-The verifier scores voice input against rule set V2 (`~/.rome-environments/voice-input/rules-V2.md`), pass or fail per rule. It sees the product only as a guardian does, through Chrome and the contract in the rules. It drives the environment only through the `voice-env` command that `environments/voice-input/` provides.
+The verifier scores voice input against rule set V3 (`~/.rome-environments/voice-input/rules-V3.md`), pass or fail per rule. It sees the product only as a guardian does, through Chrome and the contract in the rules. It drives the environment only through the `voice-env` command that `environments/voice-input/` provides.
 
 ## Run it
 
@@ -75,7 +75,8 @@ Each WAV is 48 kHz mono 16-bit PCM, with 1 s of silence before the speech and 6 
 | 3 The text is what you said | Compares each field's text with the written text, from rule 2's set B runs and the same runs of set A | In each set, English at most 8 wrong words in 100, and Mandarin and mixed together at most 8 wrong characters in 100. Each is pooled over its messages. Each set's numbers, Mandarin alone and mixed alone are reported too. Not checked on the stand-in transcriber |
 | 5 Only you send | In the same set B runs, reads every chat `--send-check` seconds after listening stops, then presses Enter in the field | No new message before Enter in any run. After Enter, one message with the field's text |
 | 6 Speaking is typing | Speaks set B's first message in five cases: an empty field, text with the cursor at the end, text with the cursor in the middle, a picture attached, and a mention. Each case runs three times, each in a new Chrome: speak and send, type the spoken words at the same cursor and send, speak and press undo once | Speaking adds words at the cursor and nothing else, with the contract's leading space. Typing gives the same field and the same stored message, text and attachments. One undo gives back the starting field |
-| 10 Your voice goes only where Rome says | Captures traffic through the set B runs, reads where Rome says speech becomes text, then scans the instance | Rome's read API and Settings page name a provider and host. Every request that carried audio went to that host or to the guardian's own Rome. The scan finds no audio |
+| 10 Your voice goes only where Rome says | Reads where Rome says speech becomes text on the fresh instance, before any dictation, captures traffic through the set B runs, then scans the instance | Rome's read API and Settings page name a provider and host before any dictation, and the audio reached that host. Every request that carried audio went to that host or to the guardian's own Rome. Rome Cloud's session request and usage event carry no audio, so they are allowed, and audio sent to Rome Cloud fails. The scan finds no audio |
+| 11 Rome Cloud provides it | Asks the environment whether the instance is signed in to Rome Cloud without its own `ROME_TRANSCRIPTION_API_KEY`, then speaks set B's first message, listening for the whole recording, and reads Rome Cloud's usage | Text appears in the field. Rome Cloud shows a new usage event within 60 s, whose seconds are within 10% of the recording's length. Not checked when the instance is not signed in to Rome Cloud or has its own credential |
 
 ### How rule 3 counts
 
@@ -104,6 +105,7 @@ The environment's own README (`environments/voice-input/README.md`) is the contr
 - **`chats`** and **`messages --chat <id>`**: the verifier knows no chat id in advance, so it compares snapshots of every chat's messages before and after each action. Messages compare by role, sender, text and attachments. `inputState` and the agent's error reply are ignored.
 - **`capture start`** runs once the first Chrome is up, and **`capture stop`** after set B's 20 messages. Rule 10 reads its `audio` list.
 - **`audio-scan`**: rule 10 fails on any finding.
+- **`cloud status`** and **`cloud usage`** are what rule 11 needs, and the environment does not offer them yet. `cloud status` prints `{ signedIn, ownCredential }`: whether the instance is signed in to Rome Cloud, and whether its config holds `ROME_TRANSCRIPTION_API_KEY`. `cloud usage` prints `{ events: [{ provider, model, seconds, at }] }`, Rome Cloud's voice usage for the instance, oldest first. Until they exist, rule 11 is not checked.
 
 Rome's read API names the transcriber's host as Rome's config has it, such as `transcriber:8790` for the stand-in, while the capture names it `transcriber (stand-in)`. Rule 10 compares host names without the port or the label.
 

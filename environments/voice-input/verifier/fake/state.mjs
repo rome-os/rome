@@ -12,6 +12,7 @@ export function emptyState(variant = "good") {
     capturing: false,
     captured: [],
     audioFiles: [],
+    cloud: { signedIn: true, ownCredential: false, usage: [] },
   };
 }
 

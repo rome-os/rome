@@ -1,5 +1,5 @@
-// Rule 10: Rome names the place where speech becomes text; during the script every request
-// that carries audio goes there; afterwards the instance holds no audio from voice input.
+// Rule 10: Rome names the place where speech becomes text before any dictation; during the
+// script every request that carries audio goes there; afterwards the instance holds no audio from voice input.
 import { openPage } from "../lib/product.mjs";
 import { scriptRuns, setMessages } from "../lib/runs.mjs";
 import { check, required, ruleResult } from "../lib/scenario.mjs";
@@ -16,11 +16,18 @@ export default {
   rule: "10",
   title: "Your voice goes only where Rome says, and is not kept",
   phase: 1,
+  /** Rome must name the place before any dictation, so it is read on the fresh instance. */
+  async prepare(ctx) {
+    ctx.memo.named = await readNamedPlace(ctx, setMessages(ctx.script, "B")[0].path);
+  },
   async run(ctx) {
+    if (ctx.memo.prepare10)
+      throw new Error(`could not read the place: ${ctx.memo.prepare10.error}`);
     await scriptRuns(ctx);
-    const named = await readNamedPlace(ctx, setMessages(ctx.script, "B")[0].path);
+    const named = ctx.memo.named;
     const checks = [named.check, named.settingsCheck];
     checks.push(trafficCheck(ctx.memo.capture, named.place, named.romeHost));
+    checks.push(namedHostUsed(ctx.memo.capture, named.place));
     const scan = await ctx.env.audioScan();
     checks.push(
       required(
@@ -54,17 +61,19 @@ async function readNamedPlace(ctx, mic) {
         place ? "pass" : "fail",
         place
           ? `${PLACE_API} names ${place.provider} at ${place.host}`
-          : `${PLACE_API} answered ${response.status()} without a provider and host`,
+          : `${PLACE_API} answered ${response.status()} without a provider and host${body?.placeUnknown ? ` (placeUnknown "${body.placeUnknown}")` : ""}`,
       ),
     );
     if (!place)
       return { check: apiCheck, settingsCheck: settingsUnread("no place to look for"), romeHost };
     await page.goto(new URL(SETTINGS_PATH, page.url()).toString());
     // The place sits under Settings → Advanced.
+    const name = /^\s*(Advanced|高级)\s*$/;
     const advanced = page
-      .getByRole("link", { name: /^Advanced$/ })
-      .or(page.getByRole("tab", { name: /^Advanced$/ }))
-      .or(page.getByRole("button", { name: /^Advanced$/ }))
+      .getByRole("link", { name })
+      .or(page.getByRole("tab", { name }))
+      .or(page.getByRole("button", { name }))
+      .or(page.getByRole("menuitem", { name }))
       .first();
     if (await advanced.isVisible({ timeout: 5000 }).catch(() => false)) {
       await advanced.click();
@@ -95,13 +104,32 @@ function hostname(host) {
   return host.replace(/\s*\(.*\)$/, "").replace(/:\d+$/, "");
 }
 
+/** The host Rome names must be the one the audio actually reached, not merely allowed. */
+function namedHostUsed(capture, place) {
+  const name = "audio reaches the named host";
+  if (!capture || !place)
+    return required(check(name, "not_checked", "no capture or no named place"));
+  const reached = capture.requests.filter((r) => hostname(r.host ?? "") === hostname(place.host));
+  return required(
+    check(
+      name,
+      reached.length > 0 ? "pass" : "fail",
+      reached.length > 0
+        ? `${reached.length} requests carrying audio reached ${place.host}`
+        : `no request carrying audio reached ${place.host}; audio went to ${[...new Set(capture.requests.map((r) => r.host))].join(", ") || "nowhere captured"}`,
+    ),
+  );
+}
+
 function settingsUnread(reason) {
   return required(check("Settings names the place", "not_checked", reason));
 }
 
 /**
  * Every captured request that carried audio must go to the named host, or to the guardian's
- * own Rome, through which the rules route speech to the transcriber.
+ * own Rome, through which the rules route speech to the transcriber. Rome Cloud's session
+ * request and usage event carry no audio, so they are not in the list; audio sent to Rome
+ * Cloud fails like audio sent anywhere else.
  */
 function trafficCheck(capture, place, romeHost) {
   const name = "audio goes only to the named place";

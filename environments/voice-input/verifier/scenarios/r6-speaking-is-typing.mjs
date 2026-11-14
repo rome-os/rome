@@ -49,11 +49,17 @@ export const CASES = [
   },
   {
     name: "a mention",
-    needs: "typing @ in the field offers mentions as options",
+    // Only a new common chat, not yet bound to an agent, offers mentions.
+    path: "/chat",
+    needs: "a new common chat whose @ menu offers an app with an agent",
     setup: async ({ page, field }) => {
       await field.click();
       await page.keyboard.type("@");
-      await page.getByRole("option").first().waitFor({ state: "visible", timeout: 5000 });
+      const option = page.getByRole("option").first();
+      await option.waitFor({ state: "visible", timeout: 5000 });
+      // The menu lists apps first; Enter on an app lists its agents, and Enter on an agent picks it.
+      await page.keyboard.press("Enter");
+      await option.waitFor({ state: "visible", timeout: 5000 });
       await page.keyboard.press("Enter");
     },
   },
@@ -146,6 +152,7 @@ async function pass(ctx, message, testCase, mode, words) {
   const { env, waits } = ctx;
   const opened = await openPage(env, {
     mic: message.path,
+    path: testCase.path,
     language: browserLanguage(message),
   });
   try {
@@ -203,7 +210,15 @@ function sameMessage(a, b) {
       .map((f) => `${f.type}:${f.name}`)
       .sort()
       .join(",");
-  return a.text === b.text && files(a) === files(b);
+  return sameText(a.text) === sameText(b.text) && files(a) === files(b);
+}
+
+/**
+ * The text with each stored file's link reduced to its name. The same picture attached twice
+ * is stored twice, under two links, so the links differ between the voice and typing passes.
+ */
+function sameText(text) {
+  return (text ?? "").replace(/\(<?\/api\/assets\/[0-9a-f]+(\.\w+)?>?\)/g, "(asset$1)");
 }
 
 function describe(m) {

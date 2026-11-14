@@ -2,11 +2,10 @@
 // A fake `voice-env` over the stand-in product, for the verifier's own tests. It prints what
 // environments/voice-input/voice-env prints. VOICE_FAKE_STATE names the state file and
 // VOICE_FAKE_URL the stand-in's address. `reset` stands in for `env.sh reset`.
-import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { emptyState, readState, updateState } from "./state.mjs";
 
@@ -49,24 +48,45 @@ function freePort() {
   });
 }
 
+// Where systemd is there, each Chrome's memory is capped, as the environment caps its own.
+const SYSTEMD_RUN = "/run/current-system/sw/bin/systemd-run";
+
+/** Stops the Chrome this fake started, every process on its profile, and removes the profile. */
 function stopBrowser() {
-  const { browserPid } = readState(statePath);
+  const { browserPid, browserProfile } = readState(statePath);
   if (browserPid) {
     try {
-      process.kill(-browserPid);
+      process.kill(-browserPid, "SIGKILL");
     } catch {}
   }
+  if (browserProfile) {
+    try {
+      execFileSync("pkill", ["-KILL", "-f", `--user-data-dir=${browserProfile}`]);
+    } catch {}
+    rmSync(browserProfile, { recursive: true, force: true });
+  }
+  updateState(statePath, (s) => {
+    s.browserPid = null;
+    s.browserProfile = null;
+  });
 }
 
 async function startBrowser() {
   stopBrowser();
   const port = await freePort();
+  // Profiles live beside the state file, so a test's folder holds everything it made.
+  const profile = mkdtempSync(join(dirname(statePath), "chrome-"));
+  const chromium = chromiumOnPath();
+  const capped = existsSync(SYSTEMD_RUN)
+    ? [SYSTEMD_RUN, "--user", "--scope", "--quiet", "-p", "MemoryMax=2G", "--", chromium]
+    : [chromium];
   const child = spawn(
-    chromiumOnPath(),
+    capped[0],
     [
+      ...capped.slice(1),
       "--headless=new",
       `--remote-debugging-port=${port}`,
-      `--user-data-dir=${mkdtempSync(join(tmpdir(), "voice-fake-chrome-"))}`,
+      `--user-data-dir=${profile}`,
       "--no-first-run",
       "--use-fake-ui-for-media-stream",
       "--use-fake-device-for-media-stream",
@@ -80,6 +100,7 @@ async function startBrowser() {
   updateState(statePath, (s) => {
     s.mic = values.mic;
     s.browserPid = child.pid;
+    s.browserProfile = profile;
   });
   const cdp = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 100; i++) {
@@ -150,6 +171,15 @@ switch (command) {
       print({ audio: captured });
     }
     break;
+  case "cloud": {
+    const { cloud } = readState(statePath);
+    print(
+      positionals[0] === "usage"
+        ? { events: cloud.usage }
+        : { signedIn: cloud.signedIn, ownCredential: cloud.ownCredential },
+    );
+    break;
+  }
   case "audio-scan":
     print({ findings: readState(statePath).audioFiles });
     break;

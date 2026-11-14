@@ -8,11 +8,12 @@
 //   fail-5   a copy of the field sends itself when listening stops
 //   fail-6   the transcript replaces the field instead of going in at the cursor
 //   fail-10  the server sends the audio to a host Rome does not name
+//   fail-11  Rome Cloud records half the seconds listened
 import { createServer } from "node:http";
 import { basename } from "node:path";
 import { readState, updateState } from "./state.mjs";
 
-export const VARIANTS = ["good", "fail-2", "fail-3", "fail-5", "fail-6", "fail-10"];
+export const VARIANTS = ["good", "fail-2", "fail-3", "fail-5", "fail-6", "fail-10", "fail-11"];
 
 const PLACE = { provider: "Soniox", host: "stt-rt.soniox.com" };
 
@@ -38,7 +39,7 @@ async function handle(req, res, statePath, script) {
     res.writeHead(status, { "content-type": type });
     res.end(body);
   };
-  if (req.method === "GET" && url.pathname === "/")
+  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat"))
     return send(200, "text/html; charset=utf-8", page(state.variant));
   if (req.method === "GET" && url.pathname === "/settings")
     return send(
@@ -60,6 +61,18 @@ async function handle(req, res, statePath, script) {
       });
     });
     return send(201, "application/json", "{}");
+  }
+  if (req.method === "POST" && url.pathname === "/api/voice/usage") {
+    const { seconds } = JSON.parse(await readBody(req));
+    updateState(statePath, (s) => {
+      s.cloud.usage.push({
+        provider: "soniox",
+        model: "stt-rt-v6",
+        seconds: s.variant === "fail-11" ? seconds / 2 : seconds,
+        at: new Date().toISOString(),
+      });
+    });
+    return send(204, "text/plain", "");
   }
   if (req.method === "GET" && url.pathname === "/api/voice/listen")
     return listen(req, res, statePath, script);
@@ -128,7 +141,7 @@ function page(variant) {
 <form id="composer">
   <textarea aria-label="Message" rows="4" cols="60"></textarea>
   <input type="file" aria-label="Attach a picture">
-  <ul role="listbox" hidden><li role="option">Concierge</li></ul>
+  <ul role="listbox" hidden><li role="option">Notes</li></ul>
   <button type="button" aria-pressed="false">Start voice input</button>
 </form>
 <script>
@@ -160,16 +173,23 @@ async function sendMessage() {
   fileInput.value = "";
 }
 
+// Like the product's picker: apps first, then Enter on an app lists its agents.
+const option = mentions.querySelector("[role=option]");
 field.addEventListener("input", () => {
   mentions.hidden = !field.value.slice(0, field.selectionStart).endsWith("@");
+  option.textContent = "Notes";
 });
 
 field.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
   if (!mentions.hidden) {
+    if (option.textContent === "Notes") {
+      option.textContent = "Notes keeper";
+      return;
+    }
     mentions.hidden = true;
-    document.execCommand("insertText", false, "Concierge ");
+    document.execCommand("insertText", false, "Notes keeper ");
     return;
   }
   sendMessage();
@@ -186,7 +206,7 @@ function start() {
   const lead = head === "" || /[\\s\\u3400-\\u9fff]$/u.test(head) ? "" : " ";
   const tail = field.value.slice(field.selectionEnd ?? at);
   const source = new EventSource("/api/voice/listen");
-  listening = { head, tail, source, heard: "" };
+  listening = { head, tail, source, heard: "", startedAt: performance.now() };
   setListening(true);
   source.onmessage = (event) => {
     listening.heard = lead + JSON.parse(event.data);
@@ -197,8 +217,14 @@ function start() {
 }
 
 function stop() {
-  const { head, tail, source, heard } = listening;
+  const { head, tail, source, heard, startedAt } = listening;
   source.close();
+  // Rome reports the seconds listened to Rome Cloud when listening stops.
+  fetch("/api/voice/usage", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ seconds: (performance.now() - startedAt) / 1000 }),
+  });
   listening = null;
   setListening(false);
   if (variant === "fail-6") {

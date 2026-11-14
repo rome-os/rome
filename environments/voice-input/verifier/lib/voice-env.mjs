@@ -51,6 +51,13 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
       if (errorCode !== undefined) args.push("--error", String(errorCode));
       await exec(command, args);
     },
+    /**
+     * `{ signedIn, ownCredential }`: whether the instance is signed in to Rome Cloud, and
+     * whether its config holds its own `ROME_TRANSCRIPTION_API_KEY`.
+     */
+    cloudStatus: () => json(["cloud", "status"]),
+    /** `{ events: [{ provider, model, seconds, at }] }`: Rome Cloud's voice usage for the instance, oldest first. */
+    cloudUsage: () => json(["cloud", "usage"]),
     reset: () => (resetCommand ? exec(resetCommand, []) : Promise.resolve()),
     /**
      * Every stored message in every chat, each `{ id, chat, role, sender, text, attachments }`.
