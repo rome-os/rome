@@ -446,10 +446,15 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     /// a card (`{kind:"card", id, messageId, render, since}`) or an approval
     /// (`{kind:"approval", id, since}`). Null when nothing waits.
     var openWait: JSONValue?
+    /// While it needs its owner: since when, epoch ms.
+    var waitingSince: Double?
+    /// A later task with no check: when it is due, epoch ms.
+    var laterAt: Double?
 
     private enum CodingKeys: String, CodingKey {
         case id, title, state, summary, waitingOn, dueAt, rank, chat, conciergeChat, sourceMessageId
         case createdAt, updatedAt, completedAt, archivedAt, notSynced, threadRoot, status, endReason, openWait
+        case waitingSince, laterAt
     }
 
     init(id: String, title: String, state: TaskState, summary: String? = nil, waitingOn: String? = nil, dueAt: Double? = nil, rank: Double? = nil, chat: LinkedChat? = nil, conciergeChat: ConciergeChat? = nil, sourceMessageId: String? = nil, createdAt: Double, updatedAt: Double, completedAt: Double? = nil, archivedAt: Double? = nil, notSynced: Bool? = nil, threadRoot: String? = nil, status: String? = nil, endReason: String? = nil, openWait: JSONValue? = nil) {
@@ -478,7 +483,16 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
-        state = try c.decode(TaskState.self, forKey: .state)
+        // A state this build does not know reads from the derived status.
+        let derived = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? nil
+        state = (try? c.decode(TaskState.self, forKey: .state)) ?? {
+            switch derived {
+            case "needs_you": return .needsUser
+            case "later": return .next
+            case "ended": return .done
+            default: return .doing
+            }
+        }()
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         waitingOn = try c.decodeIfPresent(String.self, forKey: .waitingOn)
         dueAt = try c.decodeIfPresent(Double.self, forKey: .dueAt)
@@ -496,6 +510,8 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         endReason = try c.decodeIfPresent(String.self, forKey: .endReason)
         // A shape this build cannot read drops only the wait, never the task.
         openWait = (try? c.decodeIfPresent(JSONValue.self, forKey: .openWait)) ?? nil
+        waitingSince = try? c.decodeIfPresent(Double.self, forKey: .waitingSince)
+        laterAt = try? c.decodeIfPresent(Double.self, forKey: .laterAt)
     }
 }
 
@@ -691,6 +707,32 @@ struct ToolCall: Identifiable, Hashable, Sendable {
 
 // MARK: - Dates
 
+/// Remembers what a pure parse made of a string. A chat's rows are rebuilt from
+/// its messages on every update of the chat, and parsing each message's date and
+/// parts again each time (an ISO 8601 formatter, a JSON decode) made a sheet or
+/// the sidebar stutter on a long chat.
+final class ParseCache<Value>: @unchecked Sendable {
+    private final class Box {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+
+    /// Bounded, so one-off strings (timestamps of health samples, audit
+    /// entries, another account's messages) do not pile up.
+    private let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.countLimit = 4000
+        return cache
+    }()
+
+    func value(for key: String, _ make: (String) -> Value) -> Value {
+        if let hit = cache.object(forKey: key as NSString) { return hit.value }
+        let value = make(key)
+        cache.setObject(Box(value), forKey: key as NSString)
+        return value
+    }
+}
+
 enum RomeDate {
     nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -704,9 +746,11 @@ enum RomeDate {
         return formatter
     }()
 
+    private static let parsed = ParseCache<Date?>()
+
     static func parse(_ text: String?) -> Date? {
         guard let text else { return nil }
-        return fractional.date(from: text) ?? plain.date(from: text)
+        return parsed.value(for: text) { fractional.date(from: $0) ?? plain.date(from: $0) }
     }
 
     static func string(_ date: Date) -> String {

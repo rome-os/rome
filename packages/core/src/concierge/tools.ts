@@ -30,7 +30,12 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
-import { CONCLUSION_MAX_CHARS, conclusionOf, withoutMarkers } from "./conclusion.js";
+import {
+  CONCLUSION_MAX_CHARS,
+  NOTHING_TO_REPORT,
+  conclusionOf,
+  withoutMarkers,
+} from "./conclusion.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { ownerOf } from "../webchat/owner.js";
 import {
@@ -883,8 +888,8 @@ export async function buildConciergeTools(
   };
 
   // How `chat_card` shows task chat `chatId`: its question or approval while
-  // the task waits on the guardian, an expired one included, since its card
-  // still takes an answer; else its task card.
+  // the task waits on the guardian; else its task card. An expired question
+  // takes no answer, so it is the task card's then.
   // An `ask` card keeps what the task waits on, so it shows that item even
   // after a newer one is asked and settled.
   const shownAs = async (
@@ -893,7 +898,7 @@ export async function buildConciergeTools(
     const task = await tasks.repo.findBySession(chatId);
     if (!task) return { show: "task" };
     const status = (await tasks.statusOf([task])).get(task.id);
-    if (status?.status !== "needs_you" && status?.endReason !== "no_response") {
+    if (status?.status !== "needs_you") {
       return { show: "task" };
     }
     const wait = status.openWait;
@@ -1173,7 +1178,7 @@ export async function buildConciergeTools(
           taskId: {
             type: "string",
             description:
-              "Link the chat to this existing task row, such as one planned under next, and set it to doing. Without it a doing row is created for the chat.",
+              "Start this existing task row, such as one you wrote earlier with task_upsert, instead of adding a new row for the chat.",
           },
           messageId: {
             type: "string",
@@ -1189,7 +1194,7 @@ export async function buildConciergeTools(
           card: {
             type: "boolean",
             description:
-              "Also show the guardian a card that opens the task chat. The task runs either way. Decide by complexity: on for complex or long-running work they may want to watch, such as code, a PR, or research across many sources; off for a simple task that will finish quickly.",
+              "Also show the guardian a card that opens the task chat. The task runs either way. Only when the guardian asks to see or watch the task; otherwise leave it off, since its result, question or approval reaches them anyway.",
           },
         },
       },
@@ -1579,6 +1584,11 @@ export async function buildConciergeTools(
                   ? "The task chat's latest answer has no conclusion section."
                   : `The task chat's conclusion is ${conclusion.length} characters, over the ${CONCLUSION_MAX_CHARS} limit.`
               } Nothing was sent. Report the outcome yourself with say, in one message of at most two sentences with task set to this task's id, and the guardian can open the task chat for details.`,
+            );
+          }
+          if (conclusion?.kind === "found" && conclusion.text === NOTHING_TO_REPORT) {
+            throw new Error(
+              "The task chat has nothing to report: its conclusion carries no news. Nothing was sent. Send nothing about it.",
             );
           }
           const text = conclusion?.kind === "found" ? conclusion.text : withoutMarkers(answer);

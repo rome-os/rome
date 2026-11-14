@@ -61,11 +61,11 @@ struct InteractionRow: View {
             .bubbleWidth()
         case .question(_, let part, _, let answered?):
             SettledCard(title: SettledOutcome.title(part), outcome: SettledOutcome.answer(answered)) {
-                QuestionCardView(part: part, answered: answered, sending: false) { _ in }
+                QuestionCardView(part: part, answered: answered) { _, _ in WidgetEventReply() }
             }
-        case .question(_, let part, let sessionId, let answered):
-            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { answers in
-                store.answer(part, answers: answers, sessionId: sessionId)
+        case .question(_, let part, _, let answered):
+            QuestionCardView(part: part, answered: answered) { name, context in
+                try await store.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
             }
             .bubbleWidth()
         case .connect(let id, let part, let sessionId):
@@ -74,10 +74,12 @@ struct InteractionRow: View {
             }
             .task(id: id) { await store.checkConnected(part, rowId: id) }
             .bubbleWidth()
-        case .widgetUI(_, let part):
-            WidgetUICardView(part: part) { method, path, body in
+        case .widgetUI(_, let part, _, let answered):
+            WidgetUICardView(part: part, call: { method, path, body in
                 try await store.appCall(appId: part.appId, method: method, path: path, body: body)
-            }
+            }, press: { name, context in
+                try await store.answerWidget(widgetId: part.widgetId, name: name, context: context)
+            }, waiting: part.waits ? .init(answered: answered) : nil)
             .bubbleWidth()
         case .webOnly(_, let kind, let done):
             WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)

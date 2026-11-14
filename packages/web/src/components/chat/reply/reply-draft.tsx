@@ -21,6 +21,22 @@ export interface ReplyTarget {
 }
 
 /**
+ * The task thread a draft sends into while the thread view is open: a message
+ * of it, which the view opens on, and its task's title, which the reply bar
+ * names. A reply in the view goes to the thread, never to one quoted message.
+ */
+export interface ReplyThread {
+  thread: string;
+  title: string;
+}
+
+/** A draft as a failed send puts it back: a reply to a message, or a thread to send into. */
+export interface RestoredDraft {
+  target?: ReplyTarget;
+  thread?: ReplyThread;
+}
+
+/**
  * The reply a chat's composer holds, and the transcript's hooks for it. A
  * surface without a provider (a shared chat, a read-only viewer) offers no
  * Reply.
@@ -28,24 +44,25 @@ export interface ReplyTarget {
 export interface ReplyDraft {
   /** The session the composer sends to. Only its messages can be replied to. */
   sessionId: string | null;
+  /** The message the reply quotes. Null while the thread view is open: a reply there goes to the thread. */
   target: ReplyTarget | null;
-  /** Picks the reply and opens only the reply bar. The thread view stays as
-   *  it is: open when the reply is picked inside it, else closed. Sending the
-   *  reply puts it in the replied message's task thread when it is in one;
-   *  any other reply is only a quote. */
+  /** Picks the reply and opens only the reply bar, with its quote. Inside an
+   *  open thread view it changes nothing: what is sent from there goes to the
+   *  thread. Sending a reply from the timeline puts it in the replied
+   *  message's task thread when it is in one; any other reply is only a
+   *  quote. */
   set: (target: ReplyTarget) => void;
   /** Drops the reply, and closes the thread view with it. Answers the
    *  draft's change count after it, for `restore`. */
   clear: () => number;
   /**
-   * Puts a reply back after a failed send, with its thread view when
-   * `thread` names the one it was sent from. With
-   * `since`, the count `clear` answered when the send cleared the draft, it
-   * does so only when nothing changed the draft since: a reply picked, or
-   * picked and dropped again, meanwhile stays as the guardian left it.
-   * Without it, only when no reply is picked.
+   * Puts a draft back after a failed send: its reply, or its thread with the
+   * thread view. With `since`, the count `clear` answered when the send
+   * cleared the draft, it does so only when nothing changed the draft since:
+   * a reply picked, or picked and dropped again, meanwhile stays as the
+   * guardian left it. Without it, only when nothing is picked.
    */
-  restore: (target: ReplyTarget, since?: number, thread?: string) => void;
+  restore: (draft: RestoredDraft, since?: number) => void;
   /** Whether the loaded transcript holds the message, so a quote can link to it. */
   has: (messageId: string) => boolean;
   jump: (messageId: string) => void;
@@ -57,11 +74,12 @@ export interface ReplyDraft {
   threads: boolean;
   /** A message of the chat thread the thread view shows, or null when it is closed. While it is open, the composer sends into that thread. */
   thread: string | null;
-  /** Opens the thread view on `target`'s task thread, with `target` as the
-   *  reply, or on `thread`, a message of the thread, when `target` is not in
-   *  it, as the original a reply in the thread quotes. Only a task thread's
-   *  label, or a quote in it, opens it. */
-  openThread: (target: ReplyTarget, thread?: string) => void;
+  /** The title of the task whose thread the view shows, for the reply bar. */
+  threadTitle: string | null;
+  /** Opens the thread view on `thread`, a message of a task's thread, with a
+   *  reply to that thread. Only a task thread's label, or a quote in it,
+   *  opens it. */
+  openThread: (thread: ReplyThread) => void;
   /** Closes the thread view and its reply bar: the same as `clear`. */
   closeThread: () => void;
 }
@@ -76,7 +94,7 @@ export function replyFormFields(target: ReplyTarget): Record<string, string> {
 
 const ReplyDraftContext = createContext<ReplyDraft | null>(null);
 
-const CLOSED = { target: null, thread: null };
+const CLOSED = { target: null, thread: null, threadTitle: null };
 
 export const ReplyDraftProvider = ReplyDraftContext.Provider;
 
@@ -105,8 +123,12 @@ export function useReplyDraftState({
   threads?: boolean;
 }): ReplyDraft {
   // The reply and the thread view are one state, so closing one closes both.
-  const [draft, setDraft] = useState<{ target: ReplyTarget | null; thread: string | null }>(CLOSED);
-  const { target, thread } = draft;
+  const [draft, setDraft] = useState<{
+    target: ReplyTarget | null;
+    thread: string | null;
+    threadTitle: string | null;
+  }>(CLOSED);
+  const { target, thread, threadTitle } = draft;
   const focusRef = useRef(focusComposer);
   focusRef.current = focusComposer;
   // Counts every change to the draft, so a late restore can tell whether the
@@ -118,49 +140,45 @@ export function useReplyDraftState({
     setDraft(CLOSED);
   }, [chatId]);
 
-  // The one place the reply bar opens, with the thread view when `openView`
-  // says so and the chat keeps chat threads.
-  const opened = useCallback(
-    (next: ReplyTarget, openView: boolean, thread?: string) => ({
-      target: next,
-      thread: threads && openView ? (thread ?? next.messageId) : null,
-    }),
-    [threads],
-  );
-  const pick = useCallback(
-    (next: ReplyTarget, openView?: boolean, thread?: string) => {
+  const focus = useCallback(() => requestAnimationFrame(() => focusRef.current()), []);
+  const set = useCallback(
+    (next: ReplyTarget) => {
       changes.current += 1;
-      // A reply picked inside an open thread view keeps it open: the view
-      // shows its whole thread, older than the loaded timeline too. One picked
-      // from the timeline opens no view.
-      setDraft((current) => opened(next, openView ?? current.thread !== null, thread));
-      requestAnimationFrame(() => focusRef.current());
+      // Inside an open thread view the reply stays with the thread.
+      setDraft((current) =>
+        current.thread !== null ? current : { target: next, thread: null, threadTitle: null },
+      );
+      focus();
     },
-    [opened],
+    [focus],
   );
-  const set = useCallback((next: ReplyTarget) => pick(next), [pick]);
+  const openThread = useCallback(
+    (next: ReplyThread) => {
+      if (!threads) return;
+      changes.current += 1;
+      setDraft({ target: null, thread: next.thread, threadTitle: next.title });
+      focus();
+    },
+    [threads, focus],
+  );
   const clear = useCallback(() => {
     changes.current += 1;
     setDraft(CLOSED);
     return changes.current;
   }, []);
   const restore = useCallback(
-    (next: ReplyTarget, since?: number, thread?: string) => {
+    (next: RestoredDraft, since?: number) => {
       if (since !== undefined && since !== changes.current) return;
       changes.current += 1;
-      setDraft((current) =>
-        current.target
-          ? current
-          : thread
-            ? { target: next, thread: threads ? thread : null }
-            : opened(next, false),
-      );
+      setDraft((current) => {
+        if (current.target || current.thread !== null) return current;
+        if (next.thread && threads) {
+          return { target: null, thread: next.thread.thread, threadTitle: next.thread.title };
+        }
+        return next.target ? { target: next.target, thread: null, threadTitle: null } : current;
+      });
     },
-    [opened, threads],
-  );
-  const openThread = useCallback(
-    (next: ReplyTarget, thread?: string) => pick(next, true, thread),
-    [pick],
+    [threads],
   );
   const closeThread = clear;
   const has = useCallback((messageId: string) => messageIds.has(messageId), [messageIds]);
@@ -176,9 +194,23 @@ export function useReplyDraftState({
       jump,
       threads,
       thread,
+      threadTitle,
       openThread,
       closeThread,
     }),
-    [sessionId, target, set, clear, restore, has, jump, threads, thread, openThread, closeThread],
+    [
+      sessionId,
+      target,
+      set,
+      clear,
+      restore,
+      has,
+      jump,
+      threads,
+      thread,
+      threadTitle,
+      openThread,
+      closeThread,
+    ],
   );
 }

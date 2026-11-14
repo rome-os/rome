@@ -77,6 +77,8 @@ export interface TaskCardRender {
   builtin?: boolean;
   componentId: string;
   props?: Record<string, unknown>;
+  /** The card described as data, which readers that know it draw. */
+  ui?: unknown;
 }
 
 /** How a task's question ended, once it did. */
@@ -108,9 +110,11 @@ export type TaskCard =
       messageId: string;
       render: TaskCardRender | null;
       since: number;
-      /** Nobody answered it in time: the task ended for no response, yet it takes an answer still. */
+      /** Nobody answered it in time: its wait ran out. It takes no answer; read-only, it says it expired. */
       expired: boolean;
       outcome?: TaskQuestionOutcome;
+      /** See {@link TaskCardClosed}. */
+      closed?: TaskCardClosed;
     }
   | {
       kind: "approval";
@@ -122,8 +126,21 @@ export type TaskCard =
       preview?: unknown;
       since: number;
       outcome?: TaskApprovalOutcome;
+      /** See {@link TaskCardClosed}. */
+      closed?: TaskCardClosed;
     }
   | { kind: "unavailable" };
+
+/**
+ * `closed` on a question or approval card: true when its task ended (done,
+ * failed, stopped, or no response) while the card had no `outcome`, an
+ * expired question included, so it waits on no one and takes no answer.
+ * False while the task runs, and once the card has an outcome, which says how
+ * it ended. A task that starts again sets it false again. Absent from servers
+ * before it. A card waits for its owner when it has no `outcome`, is not
+ * `expired`, and is not `closed`; any other card is read-only.
+ */
+export type TaskCardClosed = boolean;
 
 /**
  * Live event `chat_card_settled`: a task's question or approval that a card

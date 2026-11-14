@@ -11,6 +11,7 @@ import type {
   TaskChatWaitedOn,
   TaskQuestionOutcome,
 } from "@rome/api-types/chat";
+import type { ConciergeOpenWait } from "@rome/api-types/concierge";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
 import type { AskedApproval, AskedQuestion, TaskChatCards } from "../webchat/repository.js";
@@ -39,6 +40,57 @@ function showsAsk(part: Record<string, unknown>): part is {
   waitedOn?: TaskChatWaitedOn;
 } {
   return part.type === "task_chat" && typeof part.chatId === "string" && part.show !== "task";
+}
+
+/** Whether the item an ask card's part names is the wait `wait`. */
+function showsWait(waitedOn: TaskChatWaitedOn, wait: ConciergeOpenWait): boolean {
+  return wait.kind === "approval"
+    ? waitedOn.kind === "approval" && waitedOn.id === wait.id
+    : waitedOn.kind === "question" &&
+        waitedOn.id === wait.id &&
+        waitedOn.messageId === wait.messageId;
+}
+
+/**
+ * For each task chat in `waits`, the message of `messages` whose card the
+ * transcript draws answerable for the wait it now holds: the newest
+ * `task_chat` part for that chat, a task card included, when it is a question
+ * or approval card that shows that wait. A card names what it shows; one from
+ * before names nothing and shows what was asked by its time, so it counts when
+ * said no earlier than the wait's own second. A task chat whose newest part is
+ * anything else is left out, and its owner answers in the task chat.
+ * `messages` come in the order said.
+ */
+export function cardMessagesOf(
+  messages: readonly { id: string; content: string; createdAt: Date }[],
+  /** Each waiting task chat, and the wait it holds now. */
+  waits: ReadonlyMap<string, ConciergeOpenWait>,
+): Map<string, string> {
+  const newest = new Map<string, { messageId: string; shows: boolean }>();
+  for (const message of messages) {
+    // Stored times are whole seconds: a card said in the wait's second shows it.
+    const said = message.createdAt.getTime() + SAME_SECOND_MS - 1;
+    let parts: unknown;
+    try {
+      parts = JSON.parse(message.content);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      if (!part || typeof part !== "object") continue;
+      const record = part as Record<string, unknown>;
+      if (record.type !== "task_chat" || typeof record.chatId !== "string") continue;
+      const wait = waits.get(record.chatId);
+      if (!wait) continue;
+      const waitedOn = record.waitedOn as TaskChatWaitedOn | undefined;
+      const shows = showsAsk(record) && (waitedOn ? showsWait(waitedOn, wait) : said >= wait.since);
+      newest.set(record.chatId, { messageId: message.id, shows });
+    }
+  }
+  return new Map(
+    [...newest].flatMap(([chatId, { messageId, shows }]) => (shows ? [[chatId, messageId]] : [])),
+  );
 }
 
 /** The answer a question card sent, as one line: its answers' values. */
@@ -74,7 +126,19 @@ function approvalOutcome(approval: AskedApproval): TaskApprovalOutcome | undefin
 }
 
 /** The approval as a card draws it. */
-export function approvalCard(approval: AskedApproval): Extract<TaskCard, { kind: "approval" }> {
+/** `card` with `closed` filled in from its task `row`: a card with no outcome whose task ended is closed. */
+function closedBy<C extends Extract<TaskCard, { kind: "question" | "approval" }>>(
+  card: C,
+  row: ConciergeTaskRow | undefined,
+): C {
+  return { ...card, closed: !card.outcome && row?.endedAt != null };
+}
+
+/** The approval as a card draws it; `row` says whether its task ended. */
+export function approvalCard(
+  approval: AskedApproval,
+  row: ConciergeTaskRow | undefined,
+): Extract<TaskCard, { kind: "approval" }> {
   const payload = (approval.payload ?? {}) as { actionName?: unknown; preview?: unknown };
   // A preview the approval card can draw names it; else its description does.
   const preview = payload.preview as
@@ -87,18 +151,21 @@ export function approvalCard(approval: AskedApproval): Extract<TaskCard, { kind:
       ? preview.title
       : approval.description;
   const outcome = approvalOutcome(approval);
-  return {
-    kind: "approval",
-    id: approval.id,
-    title,
-    ...(typeof payload.actionName === "string" ? { actionName: payload.actionName } : {}),
-    ...(payload.preview !== undefined ? { preview: payload.preview } : {}),
-    since: approval.since,
-    ...(outcome ? { outcome } : {}),
-  };
+  return closedBy(
+    {
+      kind: "approval",
+      id: approval.id,
+      title,
+      ...(typeof payload.actionName === "string" ? { actionName: payload.actionName } : {}),
+      ...(payload.preview !== undefined ? { preview: payload.preview } : {}),
+      since: approval.since,
+      ...(outcome ? { outcome } : {}),
+    },
+    row,
+  );
 }
 
-/** The question as a card draws it; `row` says whether its wait expired. */
+/** The question as a card draws it; `row` says whether its wait expired and whether its task ended. */
 export function questionCard(
   question: AskedQuestion,
   row: ConciergeTaskRow | undefined,
@@ -108,15 +175,18 @@ export function questionCard(
   const expiredAt = row?.expiredWaitAt?.getTime();
   // Every item said by an ended wait's deadline was part of it (tasks.ts currentWait).
   const expired = !outcome && expiredAt !== undefined && question.since <= expiredAt + waitExpiry;
-  return {
-    kind: "question",
-    id: question.id,
-    messageId: question.messageId,
-    render: question.render,
-    since: question.since,
-    expired,
-    ...(outcome ? { outcome } : {}),
-  };
+  return closedBy(
+    {
+      kind: "question",
+      id: question.id,
+      messageId: question.messageId,
+      render: question.render,
+      since: question.since,
+      expired,
+      ...(outcome ? { outcome } : {}),
+    },
+    row,
+  );
 }
 
 /**
@@ -138,7 +208,8 @@ export function cardAt(
     .filter((each) => each.since <= by)
     .sort((a, b) => a.since - b.since)
     .at(-1);
-  if (approval && (!question || approval.since > question.since)) return approvalCard(approval);
+  if (approval && (!question || approval.since > question.since))
+    return approvalCard(approval, row);
   if (question) return questionCard(question, row, waitExpiry);
   return { kind: "unavailable" };
 }
@@ -152,7 +223,7 @@ function cardOf(
 ): TaskCard {
   if (waitedOn.kind === "approval") {
     const approval = asked?.approvals.find((each) => each.id === waitedOn.id);
-    return approval ? approvalCard(approval) : { kind: "unavailable" };
+    return approval ? approvalCard(approval, row) : { kind: "unavailable" };
   }
   const question = asked?.questions.find(
     (each) => each.id === waitedOn.id && each.messageId === waitedOn.messageId,
@@ -252,23 +323,33 @@ export async function settledCard(
   ]);
   if (item.kind === "approval") {
     const approval = asked?.approvals.find((each) => each.id === item.id);
-    return approval ? approvalCard(approval) : null;
+    return approval ? approvalCard(approval, row) : null;
   }
   // The newest card asked under that id: a later turn can ask again under it.
   const question = asked?.questions.filter((each) => each.id === item.id).at(-1);
   return question ? questionCard(question, row, sources.waitExpiry) : null;
 }
 
-/** The open questions of task chat `chatId`, as their cards now read: what a wait's expiry settles. */
-export async function openQuestionCards(
+/**
+ * The open cards of task chat `chatId`, as they now read: its questions with
+ * no answer, and with `approvals` its approvals with no decision. A wait's
+ * expiry settles the questions; the task ending or starting again settles both.
+ */
+export async function openCards(
   sources: TaskCardSources,
   chatId: string,
+  { approvals = false }: { approvals?: boolean } = {},
 ): Promise<ChatCardSettledEvent["card"][]> {
   const [asked, [row]] = await Promise.all([
     sources.taskCardsOf([chatId]).then((cards) => cards.get(chatId)),
     sources.findBySessions([chatId]),
   ]);
-  return (asked?.questions ?? [])
+  const questions = (asked?.questions ?? [])
     .filter((question) => !question.output)
     .map((question) => questionCard(question, row, sources.waitExpiry));
+  if (!approvals) return questions;
+  const open = (asked?.approvals ?? [])
+    .map((approval) => approvalCard(approval, row))
+    .filter((card) => !card.outcome);
+  return [...questions, ...open];
 }

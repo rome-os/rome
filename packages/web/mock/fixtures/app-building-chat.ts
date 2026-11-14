@@ -1,4 +1,5 @@
 import type { DemoChat } from "./chats";
+import { questionCardRender } from "./question-card";
 
 // Edited from the user-provided share linked in docs/dashboard-mock-mode.md.
 export const appBuildingChat: DemoChat = {
@@ -17,69 +18,62 @@ export const appBuildingChat: DemoChat = {
           type: "pending_interaction",
           toolUseId: "demo-triage-design",
           appId: "core",
-          render: {
-            kind: "inline",
-            componentId: "question-card",
-            props: {
-              questions: [
-                {
-                  id: "trigger",
-                  question: "When should the app label an issue?",
-                  type: "multi",
-                  options: [
-                    "Auto: when a new issue is opened (GitHub webhook)",
-                    "Auto: also when an issue is edited/reopened",
-                    "Manual: batch-triage existing issues from the dashboard",
-                    "Manual: label a single issue by URL/number",
-                  ],
-                  freeText: true,
-                },
-                {
-                  id: "apply_mode",
-                  question: "Should it apply labels directly, or suggest for review?",
-                  type: "single",
-                  options: [
-                    "Apply labels directly to the GitHub issue",
-                    "Suggest only — I approve in the dashboard before it applies",
-                    "Apply directly but post a comment explaining the reasoning",
-                  ],
-                  freeText: true,
-                },
-                {
-                  id: "label_strategy",
-                  question:
-                    "How should the label set be built? (You mentioned combining the skill's types with the repo's own labels.)",
-                  type: "single",
-                  options: [
-                    "Use the repo's existing GitHub labels + a built-in issue-type taxonomy (type/bug, type/feature, etc.), creating any missing type labels",
-                    "Only ever apply labels that already exist in the repo (never create new ones)",
-                    "Use repo labels as-is, and let me curate/enable which built-in taxonomy labels are allowed per repo in the dashboard",
-                  ],
-                  freeText: true,
-                },
-                {
-                  id: "dimensions",
-                  question: "Which label dimensions should the classifier assign?",
-                  type: "multi",
-                  options: [
-                    "Type (bug / feature / enhancement / docs / question)",
-                    "Priority (low / medium / high / critical)",
-                    "Area / component (from repo's existing labels)",
-                    "Needs-triage / needs-info flags",
-                  ],
-                  freeText: true,
-                },
-                {
-                  id: "repo",
-                  question:
-                    "Which GitHub repo(s) do you want to wire up first for testing? (owner/name — optional, you can add later in the dashboard)",
-                  type: "text",
-                  optional: true,
-                },
+          render: questionCardRender([
+            {
+              id: "trigger",
+              question: "When should the app label an issue?",
+              type: "multi",
+              options: [
+                "Auto: when a new issue is opened (GitHub webhook)",
+                "Auto: also when an issue is edited/reopened",
+                "Manual: batch-triage existing issues from the dashboard",
+                "Manual: label a single issue by URL/number",
               ],
+              freeText: true,
             },
-            builtin: true,
-          },
+            {
+              id: "apply_mode",
+              question: "Should it apply labels directly, or suggest for review?",
+              type: "single",
+              options: [
+                "Apply labels directly to the GitHub issue",
+                "Suggest only — I approve in the dashboard before it applies",
+                "Apply directly but post a comment explaining the reasoning",
+              ],
+              freeText: true,
+            },
+            {
+              id: "label_strategy",
+              question:
+                "How should the label set be built? (You mentioned combining the skill's types with the repo's own labels.)",
+              type: "single",
+              options: [
+                "Use the repo's existing GitHub labels + a built-in issue-type taxonomy (type/bug, type/feature, etc.), creating any missing type labels",
+                "Only ever apply labels that already exist in the repo (never create new ones)",
+                "Use repo labels as-is, and let me curate/enable which built-in taxonomy labels are allowed per repo in the dashboard",
+              ],
+              freeText: true,
+            },
+            {
+              id: "dimensions",
+              question: "Which label dimensions should the classifier assign?",
+              type: "multi",
+              options: [
+                "Type (bug / feature / enhancement / docs / question)",
+                "Priority (low / medium / high / critical)",
+                "Area / component (from repo's existing labels)",
+                "Needs-triage / needs-info flags",
+              ],
+              freeText: true,
+            },
+            {
+              id: "repo",
+              question:
+                "Which GitHub repo(s) do you want to wire up first for testing? (owner/name — optional, you can add later in the dashboard)",
+              type: "text",
+              optional: true,
+            },
+          ]),
         },
       ],
     },

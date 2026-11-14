@@ -312,7 +312,7 @@ export class AgentRunner {
         sharedContext: params.sharedContext,
         romeSessionId,
         replyTo: params.replyTo,
-        ...(lines ? { quoted: lines.quoted } : {}),
+        ...(lines ? { quotedId: lines.quoted, currentId: lines.prompt } : {}),
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
         ...(params.actor ? { actor: params.actor } : {}),

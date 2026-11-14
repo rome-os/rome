@@ -32,6 +32,7 @@ struct ImageDiskCache: Sendable {
     }
 
     func entry(instance: String, key: String) -> Entry? {
+        PerfProbe.count("diskImageRead")
         let base = file(instance: instance, key: key)
         guard let png = try? Data(contentsOf: base.appendingPathExtension("png")),
               let meta = try? Data(contentsOf: base.appendingPathExtension("json")),
@@ -54,6 +55,20 @@ struct ImageDiskCache: Sendable {
     /// Sign-out: every instance's images.
     func removeAll() {
         try? FileManager.default.removeItem(at: root)
+        Self.drawn.removeAllObjects()
+    }
+
+    /// The images read from disk, drawn, by `drawnKey`. A view that shows one
+    /// reads it in its initializer, which runs on each update of its parent:
+    /// from here, that is no file read and no PNG decode.
+    nonisolated(unsafe) static let drawn: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 200
+        return cache
+    }()
+
+    func drawnKey(instance: String, key: String) -> NSString {
+        file(instance: instance, key: key).path(percentEncoded: false) as NSString
     }
 
     /// Oldest first until under the limit.
@@ -84,7 +99,11 @@ struct ImageDiskCache: Sendable {
 enum CachedImage {
     /// The stored image for `key`, drawn at the screen's scale.
     static func cached(instance: String, key: String, cache: ImageDiskCache = .shared) -> UIImage? {
-        cache.entry(instance: instance, key: key).flatMap { UIImage(data: $0.png, scale: UITraitCollection.current.displayScale) }
+        let drawnKey = cache.drawnKey(instance: instance, key: key)
+        if let image = ImageDiskCache.drawn.object(forKey: drawnKey) { return image }
+        let image = cache.entry(instance: instance, key: key).flatMap { UIImage(data: $0.png, scale: UITraitCollection.current.displayScale) }
+        if let image { ImageDiskCache.drawn.setObject(image, forKey: drawnKey) }
+        return image
     }
 
     /// Fetches the source and, when it differs from what is stored, draws and
@@ -103,6 +122,7 @@ enum CachedImage {
         if cache.entry(instance: instance, key: key)?.stamp == stamp { return nil }
         guard let image = await draw(data), let png = image.pngData() else { return nil }
         guard account.ifCurrent({ cache.store(png, stamp: stamp, instance: instance, key: key) }) else { return nil }
+        ImageDiskCache.drawn.setObject(image, forKey: cache.drawnKey(instance: instance, key: key))
         return image
     }
 }

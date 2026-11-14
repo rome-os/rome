@@ -6,6 +6,7 @@ import {
   type PromptSources,
 } from "../domain/system-prompt.js";
 import type { WidgetDrawing } from "../domain/widget-drawing.js";
+import { resolveAgentPolicy } from "../domain/agent-policy.js";
 
 interface PromptOptions {
   contextSuffix?: string;
@@ -45,6 +46,7 @@ export function createSystemPrompts(options: { sources: PromptSources }): System
         memory: carriesMemory(agent) ? sources.memory() : null,
         contextSuffix,
         widgets,
+        delegatesWork: resolveAgentPolicy(agent).delegatesWork,
       });
     },
     setup(agent, { contextSuffix, widgets }) {
@@ -58,6 +60,7 @@ export function createSystemPrompts(options: { sources: PromptSources }): System
         memory: null,
         contextSuffix,
         widgets,
+        delegatesWork: resolveAgentPolicy(agent).delegatesWork,
       });
     },
   };

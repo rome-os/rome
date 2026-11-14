@@ -7,21 +7,14 @@ let transcriptScrollLog = Logger(subsystem: "cc.romeos.mobile", category: "Trans
 /// Board 4: the Concierge chat, the app's home screen.
 struct ChatScreen: View {
     let workspace: Workspace
-    let onMenu: () -> Void
-    /// The header's mascot was tapped: the Agent page.
-    let onAgent: () -> Void
-    let onOpenChat: (String, String) -> Void
+    /// What it calls in its window's shell: the drawer, the Agent page.
+    let shell: ShellActions
     /// Chat is the page in front, with nothing pushed over it.
     var visible = true
 
+    #if DEBUG
     @Environment(AppModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    /// How far the header's status capsule reaches below the header row.
-    private var statusOverhang: CGFloat {
-        let activity = workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID)
-        return activity?.statusLine == nil ? 0 : ChatIdentity.statusHeight(for: dynamicTypeSize)
-    }
+    #endif
     @State private var draft = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -29,6 +22,7 @@ struct ChatScreen: View {
     private var store: TranscriptStore { workspace.concierge }
 
     var body: some View {
+        let _ = PerfProbe.count("chatBody")
         VStack(spacing: 0) {
             content
         }
@@ -38,20 +32,21 @@ struct ChatScreen: View {
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(name: workspace.agentDisplayName, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), announces: model.visibleChat == conciergeChatID, onMenu: {
+                // The status, the access notice and the push prompt are read
+                // by these two, so a change in them never redraws the transcript.
+                ChatHeaderBar(workspace: workspace, store: store, onMenu: { [shell] in
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
-                    onMenu()
-                }, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), showsMenu: false)
-                .shareModeHeader(store.share)
-                banners
+                    shell.toggleNavigation.run(())
+                }, onAgent: { [shell] in shell.openAgent.run(()) })
+                ChatBanners(workspace: workspace, store: store)
             }
             .accessibilityHidden(store.thread != nil)
         }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: { workspace.mainChatActivity }, onClose: { store.closeThread() })
             }
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
@@ -75,10 +70,10 @@ struct ChatScreen: View {
                     // Inside the composer's inset, so the last message rests above it too.
                     UpdatePill(agentName: workspace.agentName)
                     if store.showsQuoteBar {
-                        QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                        QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
+                    if ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) {
                         ConciergeStarters { store.send($0.text) }
                     }
                     // While a chat thread is open, the composer sends into it.
@@ -93,7 +88,7 @@ struct ChatScreen: View {
                     }
                 }
                 .shareModeComposer(store.share)
-                .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
+                .animation(.easeOut(duration: 0.2), value: store.rowsEmpty)
                 .animation(.easeOut(duration: 0.2), value: store.quote)
                 .padding(.horizontal, Metrics.pagePadding)
                 .readableColumn()
@@ -117,39 +112,6 @@ struct ChatScreen: View {
         await attachments.add(images: images)
     }
     #endif
-
-    @ViewBuilder
-    private var banners: some View {
-        VStack(spacing: 8) {
-            if let hint = model.accessNotice {
-                TopBanner(kind: .info, text: hint)
-                    .onTapGesture { model.accessNotice = nil }
-                    .task {
-                        try? await Task.sleep(for: .seconds(5))
-                        withAnimation { model.accessNotice = nil }
-                    }
-            }
-            TranscriptBanners(store: store)
-            if offersPush {
-                PushPromptCard(
-                    onTurnOn: { Task { await model.push.setEnabled(true) } },
-                    onNotNow: { model.push.notNow() }
-                )
-                .padding(.horizontal, Metrics.pagePadding)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        // Below the header's status capsule, which hangs under the header row.
-        .padding(.top, model.accessNotice != nil || TranscriptBanners.shows(store) || offersPush ? 10 + statusOverhang : 0)
-        .readableColumn()
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
-    }
-
-    /// Offered once Concierge is open, never while it loads or is off.
-    private var offersPush: Bool {
-        workspace.conciergeState == .ready && !workspace.isVisitor && model.push.offersPrompt()
-    }
 
     @ViewBuilder
     private var content: some View {
@@ -176,7 +138,7 @@ struct ChatScreen: View {
                 actionTitle: "Try again"
             ) { Task { await workspace.openConcierge() } }
         case .ready:
-            if store.loaded && store.rows.isEmpty {
+            if store.readOnce && store.rowsEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Spacer()
                     Text("What needs doing?")
@@ -195,7 +157,8 @@ struct ChatScreen: View {
                 .onTapGesture { composerFocused = false }
             } else {
                 TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
+                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks)
+                        .equatable()
                         .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
@@ -207,50 +170,137 @@ struct ChatScreen: View {
     }
 }
 
-/// One row of a Concierge chat, the main chat or a topic chat.
-struct ConciergeRow: View {
+extension Workspace {
+    /// What the Concierge is doing in the main chat.
+    var mainChatActivity: ConciergeActivity? {
+        topics.activity(for: mainChatServerID ?? conciergeChatID)
+    }
+}
+
+/// The main Chat's header. It reads the chat's status and whether the chat is
+/// on screen itself, so a change in either redraws it alone.
+private struct ChatHeaderBar: View {
+    let workspace: Workspace
+    let store: TranscriptStore
+    let onMenu: () -> Void
+    let onAgent: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ChatHeader(name: workspace.agentDisplayName, activity: workspace.mainChatActivity, announces: model.visibleChat == conciergeChatID, onMenu: onMenu, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), showsMenu: false)
+            .shareModeHeader(store.share)
+    }
+}
+
+/// What shows under the main Chat's header: the access notice, the store's
+/// banners and the push prompt. It reads their state itself, and the status
+/// the header's capsule hangs under it with.
+private struct ChatBanners: View {
+    let workspace: Workspace
+    let store: TranscriptStore
+    @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// How far the header's status capsule reaches below the header row.
+    private var statusOverhang: CGFloat {
+        workspace.mainChatActivity?.statusLine == nil ? 0 : ChatIdentity.statusHeight(for: dynamicTypeSize)
+    }
+
+    /// Offered once Concierge is open, never while it loads or is off.
+    private var offersPush: Bool {
+        workspace.conciergeState == .ready && !workspace.isVisitor && model.push.offersPrompt()
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if let hint = model.accessNotice {
+                TopBanner(kind: .info, text: hint)
+                    .onTapGesture { model.accessNotice = nil }
+                    .task {
+                        try? await Task.sleep(for: .seconds(5))
+                        withAnimation { model.accessNotice = nil }
+                    }
+            }
+            TranscriptBanners(store: store)
+            if offersPush {
+                PushPromptCard(
+                    onTurnOn: { Task { await model.push.setEnabled(true) } },
+                    onNotNow: { model.push.notNow() }
+                )
+                .padding(.horizontal, Metrics.pagePadding)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        // Below the header's status capsule, which hangs under the header row.
+        .padding(.top, model.accessNotice != nil || TranscriptBanners.shows(store) || offersPush ? 10 + statusOverhang : 0)
+        .readableColumn()
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
+    }
+}
+
+/// One row of a Concierge chat, the main chat or a topic chat. It draws from
+/// values (`row`, `info`) and acts through the store's `ChatActions`, and so
+/// compares equal, and is not drawn again, while its message does not change.
+struct ConciergeRow: View, Equatable {
     let row: TranscriptRow
+    /// What the row draws from its message (`TranscriptStore.info(for:)`).
+    let info: RowInfo
     let store: TranscriptStore
     let tasks: TasksStore
-    let onOpenChat: (String, String) -> Void
     /// Drawn in an open thread view: no thread labels, no share mode, and a
     /// tap on a message never closes the view.
     var inThread = false
-    @Environment(AppModel.self) private var model
+
+    nonisolated static func == (lhs: ConciergeRow, rhs: ConciergeRow) -> Bool {
+        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread
+    }
+
+    @Environment(\.openTaskChat) private var openTaskChat
+
+    /// From a row in a thread view, the thread closes first, or the chat
+    /// would be pushed under it.
+    private func openChat(_ chatId: String, _ title: String) {
+        if inThread { store.closeThread() }
+        openTaskChat?.run((chatId: chatId, title: title))
+    }
+
+    /// Only the Agent's text can be replied to: never a card of any kind
+    /// (task, question, approval, open or folded), nor the guardian's own.
+    static func offersReply(_ row: TranscriptRow) -> Bool {
+        if case .agentText = row { return true }
+        return false
+    }
 
     /// The message's time, and Reply on the Agent's messages: the reply bar,
     /// with an open thread view kept open.
     private func menu(reply: Bool) -> BubbleMenu {
-        let message = row.messageId.flatMap { store.message($0) ?? store.thread?.messages.first { [id = $0] in $0.id == id } }
+        let actions = store.actions
         let onReply: (() -> Void)? = reply
-            ? row.messageId.map { id in { store.reply(to: id) } }
+            ? row.messageId.map { id in { actions.reply(to: id) } }
             : nil
         // Share opens share mode on the message's turn; a pending send has none.
-        let onShare: (() -> Void)? = inThread || message?.turnId == nil ? nil : { [row] in store.share.begin(fromRow: row.id) }
-        return BubbleMenu(date: message?.date, onReply: onReply, onShare: onShare, inThread: inThread)
-    }
-
-    /// The quote a reply carries, on the first bubble of its message.
-    private func quote(_ id: String) -> MessagePart.ReplyQuote? {
-        guard let messageId = row.messageId, let message = store.message(messageId) ?? store.thread?.messages.first(where: { $0.id == messageId }) else { return nil }
-        guard let first = message.parts.firstIndex(where: { $0.textContent != nil }), id == "\(messageId):\(first)" else { return nil }
-        return message.parts.lazy.compactMap(\.replyQuote).first
+        let onShare: (() -> Void)? = inThread || !info.canShare ? nil : { [rowId = row.id] in actions.share(fromRow: rowId) }
+        return BubbleMenu(date: info.date, onReply: onReply, onShare: onShare, inThread: inThread)
     }
 
     var body: some View {
+        let actions = store.actions
+        let _ = PerfProbe.count("rowBody")
         switch row {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            let quote = quote(id)
-            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(reply: false),
-                       mark: store.statusMark(ofRow: row),
-                       quote: quote, onQuote: quote.flatMap { inThread ? nil : store.quoteAction(reply: row.messageId ?? "", original: $0.messageId) })
+            let replyId = row.messageId ?? ""
+            let onQuote: (() -> Void)? = inThread || !info.quoteLeads ? nil : info.quote.map { quote in { actions.quote(reply: replyId, original: quote.messageId) } }
+            UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu(reply: Self.offersReply(row)),
+                       mark: info.mark,
+                       quote: info.quote, onQuote: onQuote)
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: true))
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)))
         case .threadLabel(_, let messageId, let title):
             if !inThread {
-                ThreadLabelLine(title: title) { store.openThread(at: messageId) }
+                ThreadLabelLine(title: title) { actions.openThread(at: messageId) }
             }
         case .sourceLabel(_, let text):
             if !inThread { SourceLabelLine(text: text) }
@@ -267,19 +317,19 @@ struct ConciergeRow: View {
                     stopping: state.taskId.map { tasks.stopping.contains($0) } ?? false,
                     onStop: state.taskId.map { id in { tasks.stopTask(id: id) { store.stopTaskFailed() } } }
                 ) {
-                    onOpenChat(chatId, name)
+                    openChat(chatId, name)
                 }
                 // The newest card from before `show` of a task that waits on
                 // the guardian shows what it asks, answered right here.
-                if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId)) != .settled {
-                    TaskAskView(chatId: chatId, card: ask, latest: true, tasks: tasks, store: store) { onOpenChat(chatId, name) }
+                if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId), tasksListed: tasks.listed) != .settled {
+                    TaskAskView(chatId: chatId, card: ask, latest: true, tasks: tasks, store: store) { openChat(chatId, name) }
                 }
             }
         case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             EmptyView()
         case .taskAsk(_, let chatId, let title, let card, let latest):
             TaskAskView(chatId: chatId, card: card, latest: latest, tasks: tasks, store: store) {
-                onOpenChat(chatId, tasks.title(forChat: chatId, fallback: title))
+                openChat(chatId, tasks.title(forChat: chatId, fallback: title))
             }
             .keepsTaps(inThread)
         case .typing:
@@ -506,6 +556,7 @@ private struct HeaderCapsule: ViewModifier {
 private struct StatusLine: View {
     let text: String
     let shimmers: Bool
+    @Environment(\.offScreen) private var offScreen
 
     var body: some View {
         let line = Text(verbatim: text)
@@ -513,7 +564,8 @@ private struct StatusLine: View {
             .foregroundStyle(Palette.sub)
         if shimmers {
             line.overlay {
-                TimelineView(.animation) { context in
+                TimelineView(.animation(paused: offScreen)) { context in
+                    let _ = PerfProbe.count("shimmerTick")
                     // One pass every two seconds, left to right.
                     let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2) / 2
                     GeometryReader { geometry in

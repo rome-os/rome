@@ -1,9 +1,13 @@
 import {
+  cloneElement,
   createContext,
+  isValidElement,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ComponentPropsWithoutRef,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import { X } from "lucide-react";
@@ -12,9 +16,14 @@ import Zoom from "react-medium-image-zoom";
 import "./composer/pending-image-preview.css";
 import { useDesktop } from "@/hooks/use-desktop";
 import { mediaKindOfSrc, thumbnailSrc } from "@/lib/asset-links";
+import { replyPictures, VIEWER_PICTURE_ATTR } from "@/lib/reply-pictures";
 import { cn } from "@/lib/utils";
 import { FileChip } from "./FileChip";
-import { ImagePreviewContent, type PreviewContentProps } from "./composer/ImagePreviewContent";
+import {
+  ImagePreviewContent,
+  type PreviewContentProps,
+  viewerMargin,
+} from "./composer/ImagePreviewContent";
 
 const NoGlyph = () => null;
 
@@ -28,17 +37,13 @@ export const InsideLinkContext = createContext(false);
 // The viewer and Download use the original.
 const THUMBNAIL_WIDTH = 900;
 
-// Space around an open picture. A phone gives it little, so a picture as wide
-// as the column still opens larger than its thumbnail.
-const VIEWER_MARGIN_WIDE = 64;
-const VIEWER_MARGIN_PHONE = 16;
-
 /**
  * Opens its picture in the viewer on a tap. `src` is the original, which the
  * viewer swaps in and Download saves; `thumbnail` is what `children` shows.
  * The viewer's component is stable for one picture, so a streaming re-render
  * does not remount an open viewer. It downloads the original even while the
- * viewer still shows the thumbnail.
+ * viewer still shows the thumbnail. `children` is the picture's `<img>`, which
+ * it marks, so the viewer can page to the other pictures of the same message.
  */
 export function ZoomableImage({
   src,
@@ -53,13 +58,33 @@ export function ZoomableImage({
 }) {
   const { t } = useTranslation("chat");
   const desktop = useDesktop();
+  const trigger = useRef<HTMLImageElement>(null);
+  // One component for the picture's whole life, so a re-render, or a message
+  // that moves its pictures while it streams, never remounts an open viewer.
+  const latestSrc = useRef(src);
+  latestSrc.current = src;
   const ZoomContent = useMemo(
     () =>
       function ReplyImagePreviewContent(props: PreviewContentProps) {
-        return <ImagePreviewContent {...props} inReply downloadSrc={src} />;
+        return (
+          <ImagePreviewContent
+            {...props}
+            inReply
+            downloadSrc={latestSrc.current}
+            pictures={() => replyPictures(trigger.current)}
+          />
+        );
       },
-    [src],
+    [],
   );
+  const marked = isValidElement(children)
+    ? cloneElement(children as ReactElement<Record<string, unknown>>, {
+        ref: trigger,
+        [VIEWER_PICTURE_ATTR]: "",
+        "data-viewer-src": src,
+        "data-viewer-alt": alt ?? "",
+      })
+    : children;
   return (
     <Zoom
       a11yNameButtonZoom={t("composer.previewImage")}
@@ -70,9 +95,9 @@ export function ZoomableImage({
       ZoomContent={ZoomContent}
       zoomImg={thumbnail === src ? undefined : { src, alt }}
       canSwipeToUnzoom={false}
-      zoomMargin={desktop ? VIEWER_MARGIN_WIDE : VIEWER_MARGIN_PHONE}
+      zoomMargin={viewerMargin(desktop)}
     >
-      {children}
+      {marked}
     </Zoom>
   );
 }

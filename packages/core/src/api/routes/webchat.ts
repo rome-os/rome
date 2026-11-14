@@ -6,6 +6,7 @@ import type {
   ChatPendingChecksResponse,
   ConciergeStatusReaction,
   MessageStatusReactionEvent,
+  MessageWritingEvent,
 } from "@rome/api-types/concierge";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -58,7 +59,7 @@ import {
   TURN_FEEDBACK_COMMENT_MAX_LENGTH,
   isTurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
-import type { TurnFeedback } from "@rome/api-types/trace-segments";
+import type { SessionTurnFeedbackResponse, TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../webchat/repository.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
@@ -117,6 +118,7 @@ import {
 } from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
+import { MessageWriting, messageWritingModeOf } from "./message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
 import type {
@@ -126,7 +128,16 @@ import type {
 } from "../../app-host/backend-turn.js";
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
+import {
+  answersFromQuestionCard,
+  parseAskQuestionInput,
+  type Question,
+  questionCardFromAnswers,
+  questionCardUi,
+} from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
+import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import { cameThroughWidgetEvent } from "./widget-events.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
@@ -242,6 +253,8 @@ function truncateForQuote(text: string): string {
     : text;
 }
 
+/** The task a chat thread is: its title, and its task chat, or null while it has none. */
+type ThreadTask = { title: string; taskChatId: string | null };
 type RatedExchange = { userText: string | null; assistantText: string | null };
 
 function buildTurnFeedbackProcessingPrompt(
@@ -461,7 +474,10 @@ function toolOutputObject(output: unknown): Record<string, unknown> | null {
 }
 
 type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-type ShownWidgetPart = OmitEach<Extract<MessagePart, { type: "widget" }>, "type" | "toolUseId">;
+type ShownWidgetPart = OmitEach<Extract<MessagePart, { type: "widget" }>, "type" | "toolUseId"> & {
+  /** The agent waits on the card until one of its events answers it. */
+  waits?: boolean;
+};
 
 /** A widget that does not wait, pulled from an action's tool_result
  * (`showWidget: true`, written by `actionToolOutput`), or null for any other
@@ -479,6 +495,7 @@ function readWidgetFromOutput(output: unknown): ShownWidgetPart | null {
       text: o.text,
       ui: o.ui as WidgetUi,
       ...(o.bind ? { bind: o.bind as Record<string, string> } : {}),
+      ...(o.waits === true ? { waits: true } : {}),
     };
   }
   if (typeof o.componentId !== "string") return null;
@@ -522,7 +539,7 @@ function trustedWidget(
   actionName: string | undefined,
   deps: Pick<ApiDeps, "appCatalog" | "actionRegistry">,
   sessionId: string,
-): WidgetPart | null {
+): WidgetPart | PendingInteractionPart | null {
   const widget = readWidgetFromOutput(msg.output);
   if (!widget) return null;
   const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
@@ -551,7 +568,20 @@ function trustedWidget(
     });
     return null;
   }
-  return { type: "widget", toolUseId: msg.toolUseId, ...widget };
+  if ("ui" in widget && widget.waits) {
+    // A described card the agent waits on is the same card as a pending
+    // interaction, so the chat waits on it and its answer resumes the agent.
+    return {
+      type: "pending_interaction",
+      toolUseId: msg.toolUseId,
+      appId: widget.appId,
+      render: { kind: "inline", ui: widget.ui, ...(widget.bind ? { bind: widget.bind } : {}) },
+      // The card's line, for a reader that cannot draw it.
+      text: widget.text,
+    };
+  }
+  const { waits: _waits, ...shown } = widget;
+  return { type: "widget", toolUseId: msg.toolUseId, ...shown };
 }
 
 /** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
@@ -591,6 +621,10 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
       emittedBy: (tool) => tool === "ask_question" || tool.endsWith("__ask_question"),
     },
     { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
+    {
+      componentId: "connect-card",
+      emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
+    },
   ];
 
 /** Validate and shape a host-owned suspension a tool result may emit.
@@ -608,6 +642,15 @@ function buildBuiltinCard(
   const toolName = typeof msg.tool === "string" ? msg.tool : "";
   const card = BUILTIN_CARDS.find((c) => c.componentId === suspension.componentId);
   if (card && suspension.appId === "core" && card.emittedBy(toolName)) {
+    // The question card described as data, built here from its questions so
+    // the agent never carries it in its context and no tool can supply one.
+    // Readers that know `ui` draw it; older ones draw their own question card
+    // from `props`.
+    const questions =
+      suspension.componentId === "question-card" ? parseAskQuestionInput(suspension.props) : null;
+    // The connect card described as data, built here for the same reason.
+    const connectUi =
+      suspension.componentId === "connect-card" ? connectCardUiFromProps(suspension.props) : null;
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -618,6 +661,8 @@ function buildBuiltinCard(
         props: suspension.props,
         builtin: true,
         ...(suspension.requiresCard ? { requiresCard: true } : {}),
+        ...(questions?.ok ? { ui: questionCardUi(questions.questions) } : {}),
+        ...(connectUi ? { ui: connectUi } : {}),
       },
     };
   }
@@ -724,6 +769,26 @@ interface OpenSuspensionCard {
   /** A host-owned built-in card (a question or the connect-AI card) that a
    * typed chat reply dismisses — mirrors rome-web's auto-dismiss rule. */
   dismissedByReply?: boolean;
+  /** The questions of an open question card, to read its answers by. */
+  questions?: Question[];
+  /** The message that holds the card. */
+  messageId: string;
+  /** An app's card described as data: only the app answers it, through the
+   *  widget route. */
+  answeredByOwner: boolean;
+}
+
+/** The message an `interaction_result` part says holds its card, when it says. */
+function addressedMessageId(parts: unknown, toolUseId: string): string | undefined {
+  if (!Array.isArray(parts)) return undefined;
+  const part = parts.find(
+    (p) =>
+      !!p &&
+      typeof p === "object" &&
+      (p as { type?: unknown }).type === "interaction_result" &&
+      (p as { toolUseId?: unknown }).toolUseId === toolUseId,
+  ) as { messageId?: unknown } | undefined;
+  return typeof part?.messageId === "string" ? part.messageId : undefined;
 }
 
 async function findOpenSuspensions(
@@ -749,13 +814,37 @@ async function findOpenSuspensions(
       const part = p as {
         type?: unknown;
         toolUseId?: unknown;
-        render?: { builtin?: unknown; componentId?: unknown };
+        appId?: unknown;
+        render?: {
+          builtin?: unknown;
+          componentId?: unknown;
+          props?: { questions?: unknown };
+          ui?: unknown;
+        };
       };
-      if (part.type === "pending_interaction" && typeof part.toolUseId === "string") {
+      // Only a card the agent said opens a wait; a turn cannot carry one.
+      if (
+        part.type === "pending_interaction" &&
+        typeof part.toolUseId === "string" &&
+        msg.role === "assistant"
+      ) {
+        const builtin = part.render?.builtin === true;
+        const questions =
+          builtin && part.render?.componentId === "question-card"
+            ? parseAskQuestionInput(part.render?.props)
+            : null;
         cards.set(part.toolUseId, {
           dismissedByReply:
-            part.render?.builtin === true &&
-            BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
+            builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
+          ...(questions?.ok ? { questions: questions.questions } : {}),
+          messageId: msg.id,
+          // A card whose owner decides its answer: an app's card described as
+          // data, or core's connect card, which answers once the connection works.
+          answeredByOwner:
+            (part.appId !== "core" &&
+              part.render?.ui !== undefined &&
+              part.render?.componentId === undefined) ||
+            (builtin && part.render?.componentId === "connect-card"),
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -861,6 +950,8 @@ interface ActiveWebchatStream {
   interrupt?: (reason?: string) => Promise<void>;
   agentName: string;
   channelThreadKey: string | null;
+  /** How the turn shows the typing dots, from its first event on. */
+  writing?: MessageWriting;
 }
 
 interface IncomingWebchatUpload {
@@ -981,6 +1072,45 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
+  /** Listeners told how a running turn shows the typing dots (`message_writing`). */
+  const writingListeners = new Set<(event: MessageWritingEvent) => void>();
+  const writingEventOf = (stream: ActiveWebchatStream): MessageWritingEvent | null =>
+    stream.writing
+      ? {
+          sessionId: stream.sessionId,
+          turnId: stream.agentTurnId ?? stream.turnId,
+          mode: stream.writing.mode,
+          // A quiet turn shows no dots until it has said something.
+          writing: !stream.finished && stream.writing.writing && !(stream.quiet && !stream.spoke),
+        }
+      : null;
+  const publishWriting = (stream: ActiveWebchatStream): void => {
+    const event = writingEventOf(stream);
+    if (!event) return;
+    for (const listener of writingListeners) listener(event);
+  };
+  /**
+   * Takes a stream's next agent event for its typing dots. Its first event
+   * settles the turn's mode, by its provider, and tells it.
+   */
+  const trackWriting = (
+    stream: ActiveWebchatStream,
+    msg: Parameters<MessageWriting["on"]>[0],
+  ): void => {
+    if (!stream.writing) {
+      const owner = stream.channelThreadKey
+        ? deps.agentSessionManager.find({
+            agentName: stream.agentName,
+            channelThreadKey: stream.channelThreadKey,
+          })
+        : undefined;
+      stream.writing = new MessageWriting(messageWritingModeOf(owner?.providerId));
+      stream.writing.on(msg);
+      publishWriting(stream);
+      return;
+    }
+    if (stream.writing.on(msg) !== null) publishWriting(stream);
+  };
   // Same definition as `GET /chat/sessions/:id/turns`: chat streams here plus
   // turns in the shared registry, such as a fork chat's first answer.
   const isSessionRunning = (sessionId: string): boolean =>
@@ -1012,6 +1142,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (!stream.finished && stream.quiet && !stream.spoke) {
         stream.spoke = true;
         changed = true;
+        // Its typing dots were held back until now.
+        if (stream.writing?.writing) publishWriting(stream);
       }
     }
     if (changed) notifyTurn(message.sessionId);
@@ -1019,6 +1151,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const openTool = (sessionId: string): string | null =>
     openToolOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
+  // A task that ended closes its chat's cards, so the chat waits on no one:
+  // a stop's `session_running` is every client's cue to read the list again,
+  // even when no turn ran, as on a Stop from the Tasks panel or a wait's expiry.
+  deps.concierge?.deps?.tasks?.onEnded?.((row) => {
+    if (row.sessionId) notifyRunning(row.sessionId);
+  });
   const subscribeStatusEvents = (emit: LiveEventEmit): (() => void) => {
     const listener = (event: { sessionId: string; running: boolean }) =>
       emit("session_running", event);
@@ -1044,6 +1182,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
     runningListeners.add(runningListener);
     if (runningSessions.has(sessionId)) runningListener({ sessionId, running: true });
+    // The typing dots: how the running turn shows them, its latest at once.
+    const writingListener = (event: MessageWritingEvent) => {
+      if (event.sessionId === sessionId) emit("message_writing", event);
+    };
+    writingListeners.add(writingListener);
+    for (const stream of activeStreams.get(sessionId) ?? []) {
+      const event = !stream.finished ? writingEventOf(stream) : null;
+      if (event) writingListener(event);
+    }
     const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
       if (message.sessionId !== sessionId) return;
       // A task card arrives with its card, as a page would hand it out.
@@ -1066,11 +1213,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // name it. Only a task has a thread, so a placement in none is not told.
     const unsubscribeChatThread = deps.webchatRepo.onChatThreadPlaced((event) => {
       if (event.sessionId !== sessionId) return;
-      void threadTitlesOf(sessionId, [event.chatThreadId])
-        .catch(() => new Map<string, string>())
-        .then((titles) => {
-          const chatThreadTitle = titles.get(event.chatThreadId);
-          if (chatThreadTitle) emit("message_chat_thread", { ...event, chatThreadTitle });
+      void threadTasksOf(sessionId, [event.chatThreadId])
+        .catch(() => new Map<string, ThreadTask>())
+        .then((tasks) => {
+          const task = tasks.get(event.chatThreadId);
+          if (task) {
+            emit("message_chat_thread", {
+              ...event,
+              chatThreadTitle: task.title,
+              ...(task.taskChatId ? { chatThreadTaskChatId: task.taskChatId } : {}),
+            });
+          }
         });
     });
     // A task that leaves the chat takes its thread with it: its label goes.
@@ -1091,6 +1244,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     return () => {
       runningListeners.delete(runningListener);
+      writingListeners.delete(writingListener);
       unsubscribeThreadRetired?.();
       unsubscribeMessages();
       unsubscribeSessionName();
@@ -1480,17 +1634,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
-  // The title of the task each chat thread of `roots` is, in a Concierge chat.
-  const threadTitlesOf = async (sessionId: string, roots: readonly string[]) =>
-    (await deps.concierge?.deps.tasks.repo.threadTitles(sessionId, roots)) ??
-    new Map<string, string>();
+  // The task each chat thread of `roots` is, in a Concierge chat: its title
+  // and its task chat.
+  const threadTasksOf = async (sessionId: string, roots: readonly string[]) =>
+    (await deps.concierge?.deps.tasks.repo.threadTasks?.(sessionId, roots)) ??
+    new Map<string, ThreadTask>();
   // The title of the task whose thread each message is in, when it is a
   // task's. Only a task has a chat thread, so a thread from before that no
   // task has is sent as none (docs/domains/chats.md#chat-thread).
   const attachChatThreadTitles = async <T extends StoredMessages[number]>(
     sessionId: string,
     messages: T[],
-  ): Promise<(T & { chatThreadTitle?: string })[]> => {
+  ): Promise<(T & { chatThreadTitle?: string; chatThreadTaskChatId?: string })[]> => {
     // Only a transcript line has a chat thread; a trace row has none.
     const threadOf = (message: T) =>
       "chatThreadId" in message && typeof message.chatThreadId === "string"
@@ -1498,12 +1653,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : null;
     const roots = messages.flatMap((message) => threadOf(message) ?? []);
     if (roots.length === 0) return messages;
-    const titles = await threadTitlesOf(sessionId, roots);
+    const tasks = await threadTasksOf(sessionId, roots);
     return messages.map((message) => {
       const thread = threadOf(message);
       if (!thread) return message;
-      const chatThreadTitle = titles.get(thread);
-      return chatThreadTitle ? { ...message, chatThreadTitle } : { ...message, chatThreadId: null };
+      const task = tasks.get(thread);
+      if (!task) return { ...message, chatThreadId: null };
+      return {
+        ...message,
+        chatThreadTitle: task.title,
+        // The thread's task chat, so the thread view opens it with no card in the thread.
+        ...(task.taskChatId ? { chatThreadTaskChatId: task.taskChatId } : {}),
+      };
     });
   };
   // The status reaction on each guardian message that has one, which only a
@@ -1567,7 +1728,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // `limit` and `before` page the list by turn, newest first, and wrap it as
   // `{ messages, nextCursor }`; a request with neither keeps the bare array of
-  // the whole session.
+  // the whole session. `through` names a message the page must reach, so one
+  // read lands on an old message, such as the card a task's Respond opens.
   const encodeMessageCursor = (cursor: MessagePageCursor): string =>
     Buffer.from(JSON.stringify([cursor.startedAt, cursor.key])).toString("base64url");
   const decodeMessageCursor = (raw: string): MessagePageCursor | null => {
@@ -1601,7 +1763,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
-    if (limitParam === undefined && beforeParam === undefined) {
+    const throughParam = c.req.query("through");
+    if (limitParam === undefined && beforeParam === undefined && throughParam === undefined) {
       const messages = await deps.webchatRepo.getMessages(sessionId);
       return c.json(await enrichStoredMessages(sessionId, messages));
     }
@@ -1613,7 +1776,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
-    const page = await deps.webchatRepo.getMessagesPage(sessionId, { limit, before });
+    if (throughParam !== undefined && !throughParam) {
+      return c.json({ error: "through must name a message" }, 400);
+    }
+    const page = await deps.webchatRepo.getMessagesPage(sessionId, {
+      limit,
+      before,
+      ...(throughParam ? { through: throughParam } : {}),
+    });
     return c.json({
       messages: await enrichStoredMessages(sessionId, page.rows),
       nextCursor: page.nextCursor ? encodeMessageCursor(page.nextCursor) : null,
@@ -2264,6 +2434,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // already attached received it live; this only affects future replays.
     stream.events.delete("assistant_text");
     stream.resolveFinish();
+    publishWriting(stream);
     notifyRunning(stream.sessionId);
     if (stream.cleanupTimer) clearTimeout(stream.cleanupTimer);
     stream.cleanupTimer = setTimeout(() => {
@@ -2904,7 +3075,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (isMainConciergeChat(session)) {
       return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
     }
-    const retiredTo = isConciergeChat(session)
+    // `followsAndTasks=stop` ends them first, so retireChat has nothing to move.
+    const isTopic = isConciergeChat(session);
+    if (isTopic && c.req.query("followsAndTasks") === "stop") {
+      await deps.concierge?.endChatWork(sessionId);
+    }
+    const retiredTo = isTopic
       ? ((await deps.concierge?.retireChat(sessionId, "deleted")) ?? null)
       : null;
     // Closing the chat session also closes the live AgentSession
@@ -3348,6 +3524,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // GET and POST agree on errors: an unknown session or an unanchored turn
   // produces 404 on both verbs so a misrouted client surfaces the bug on
   // hydrate instead of silently rendering an empty drawer.
+  // Every turn's feedback in one read, so a transcript does not ask once per
+  // turn. A turn with none is absent.
+  app.get("/chat/sessions/:sessionId/feedback", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    const lookup = await getStoredWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const rows = await deps.webchatRepo.listTurnFeedback(sessionId);
+    const feedback: Record<string, TurnFeedback> = {};
+    for (const [turnId, row] of rows) feedback[turnId] = formatFeedback(row) as TurnFeedback;
+    return c.json({ feedback } satisfies SessionTurnFeedbackResponse);
+  });
+
   app.get("/chat/sessions/:sessionId/turns/:turnId/feedback", async (c) => {
     const sessionId = c.req.param("sessionId");
     const turnId = c.req.param("turnId");
@@ -3756,7 +3944,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
-    said: { saidBy?: Account } = {},
+    said: { saidBy?: Account; fromWidgetEvent?: boolean } = {},
   ): Promise<RouteAnswer> => {
     const actor = await currentSessionActor();
     const sourceId =
@@ -3783,6 +3971,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A resolution from an app interaction surface is a valid turn trigger even
     // with no typed text: it re-drives the calling agent with the artifact.
     const resolution = interpretInteractionResult(body.parts);
+    // A card is Rome's to show: a turn that carries one is refused.
+    if (
+      Array.isArray(body.parts) &&
+      body.parts.some(
+        (p) =>
+          !!p &&
+          typeof p === "object" &&
+          ["widget", "pending_interaction"].includes(String((p as { type?: unknown }).type)),
+      )
+    ) {
+      return answer({ error: "A turn cannot carry a card" }, 400);
+    }
+    // A turn answers one card. More than one result would let a valid answer
+    // carry another past the checks below, which look only at the first.
+    if (
+      Array.isArray(body.parts) &&
+      body.parts.filter(
+        (p) =>
+          !!p && typeof p === "object" && (p as { type?: unknown }).type === "interaction_result",
+      ).length > 1
+    ) {
+      return answer({ error: "A turn answers one card" }, 400);
+    }
 
     // A structured skill selection. Resolved against the catalog up
     // front — an unknown name (e.g. the skill was uninstalled between pick and
@@ -3890,6 +4101,59 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     if (resolution && !openSuspensions.has(resolution.toolUseId)) {
       return answer({ error: "No open interaction matches this toolUseId" }, 400);
+    }
+    // An app's card described as data is answered only by its app, whose
+    // reply the widget route turns into this turn.
+    if (
+      resolution &&
+      openSuspensions.get(resolution.toolUseId)?.answeredByOwner &&
+      !said.fromWidgetEvent
+    ) {
+      return answer({ error: "Only the card's owner answers it" }, 400);
+    }
+    // A widget's event names the message that holds the card. A later card can
+    // reuse the tool-use id, so the answer goes only to the card pressed.
+    const addressed = resolution ? addressedMessageId(body.parts, resolution.toolUseId) : undefined;
+    if (
+      resolution &&
+      addressed !== undefined &&
+      openSuspensions.get(resolution.toolUseId)?.messageId !== addressed
+    ) {
+      return answer({ error: "No open interaction matches this toolUseId" }, 400);
+    }
+    // A question card drawn from its description sends its data model; store
+    // and hand on the answer in the shape the card has always sent.
+    const questions = resolution && openSuspensions.get(resolution.toolUseId)?.questions;
+    if (resolution && questions && !resolution.dismissed) {
+      const answers = answersFromQuestionCard(questions, resolution.output);
+      // A reader that draws its own question card sends the answers as they
+      // are; keep what the described card would have sent beside them, so
+      // every reader shows the same answered card.
+      const card = answers ? null : questionCardFromAnswers(questions, resolution.output);
+      if (card) {
+        for (const part of body.parts as Array<Record<string, unknown>>) {
+          if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+            part.output = { ...(resolution.output as Record<string, unknown>), card };
+          }
+        }
+      }
+      if (answers) {
+        const sent = (resolution.output as { answers?: unknown } | null)?.answers;
+        Object.assign(
+          resolution,
+          interpretInteractionResult([
+            { type: "interaction_result", toolUseId: resolution.toolUseId, output: answers },
+          ]),
+        );
+        // The stored part also keeps what the card sent (`card`), so a reader
+        // draws the answered card from the same data; the agent reads only
+        // `answers`.
+        for (const part of body.parts as Array<Record<string, unknown>>) {
+          if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+            part.output = { ...answers, card: sent };
+          }
+        }
+      }
     }
 
     let reply: Extract<ReplyResolution, { ok: true }> | undefined;
@@ -4381,7 +4645,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             for await (const event of handle.events()) {
               const msg = withRomeSession(event, romeSession);
               if (msg.type === "input_status") continue;
-              // Deltas other than text have no webchat consumer yet.
+              trackWriting(stream, msg);
+              // Other deltas than text have no webchat consumer.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
@@ -4794,7 +5059,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.post("/chat/sessions/:id/turns", async (c) => {
     const body = await parseChatSendBody(c);
-    const sent = await handleChatSend(c.req.param("id"), body);
+    const sent = await handleChatSend(c.req.param("id"), body, {
+      fromWidgetEvent: cameThroughWidgetEvent(c.env),
+    });
     return c.json(sent.body, sent.status);
   });
 
@@ -4904,7 +5171,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           };
         }
       }
-      // Backend turns have no live bubble; drop delta events.
+      trackWriting(stream, msg);
+      // Backend turns have no live bubble; drop the other delta events.
       if (isTransientDelta(msg) || msg.type === "input_status") return recordedCardWrites;
       if (recorded) {
         emitLiveTraceEvent(stream, msg);

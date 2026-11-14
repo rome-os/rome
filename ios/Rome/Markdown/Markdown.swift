@@ -38,7 +38,18 @@ enum TableAlignment: Hashable {
 }
 
 enum MarkdownParser {
+    // Both parses are pure functions of the text, so a cache keyed by it can
+    // never go stale. A bubble's body runs again for reasons that leave its
+    // text alone (a theme change, its row's info, first layout of a page).
+    private static let blocksCache = ParseCache<[MarkdownBlock]>()
+    private static let inlineCache = ParseCache<AttributedString>()
+
     static func parse(_ source: String) -> [MarkdownBlock] {
+        blocksCache.value(for: source, blocks)
+    }
+
+    private static func blocks(_ source: String) -> [MarkdownBlock] {
+        PerfProbe.count("markdownParse")
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var listItems: [String] = []
@@ -336,6 +347,10 @@ enum MarkdownParser {
 
     /// Inline Markdown (bold, italics, code, links) as styled text.
     static func inline(_ text: String) -> AttributedString {
+        inlineCache.value(for: text, styledInline)
+    }
+
+    private static func styledInline(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: false,
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
@@ -577,7 +592,7 @@ struct MarkdownText: View {
         .foregroundStyle(color)
         .tint(Palette.primaryText)
         // Links in the text: the shell's opener, else the system's.
-        .environment(\.openURL, OpenURLAction { url in linkOpener?(url) ?? .systemAction })
+        .environment(\.openURL, OpenURLAction { url in linkOpener?.run(url) ?? .systemAction })
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }

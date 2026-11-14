@@ -8,6 +8,8 @@ struct ComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
     let placeholder: String
+    /// Set when `placeholder` names something: a long name is shortened to fit.
+    var named: NamedPlaceholder? = nil
     /// Gets the pasteboard's image items; nil leaves images alone.
     var onPasteImages: (([NSItemProvider]) -> Void)?
     /// The text without what an input method is still composing.
@@ -26,6 +28,8 @@ struct ComposerTextView: UIViewRepresentable {
         view.tintColor = UIColor(Palette.primary)
         view.textColor = UIColor(Palette.fg)
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The placeholder is fitted to the width: draw it again when that changes.
+        view.contentMode = .redraw
         view.accessibilityLabel = placeholder
         return view
     }
@@ -39,7 +43,8 @@ struct ComposerTextView: UIViewRepresentable {
             view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
         }
         if view.text != text { view.text = text }
-        view.placeholder = placeholder
+        view.named = named
+        if view.placeholder != placeholder { view.placeholder = placeholder }
         view.accessibilityLabel = placeholder
         view.onPasteImages = onPasteImages
         if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
@@ -130,10 +135,21 @@ struct ComposerTextView: UIViewRepresentable {
     }
 }
 
+/// A placeholder that names something, such as a topic chat. A long name is
+/// shortened with "…" until the whole sentence fits on one line, so the words
+/// around it stay, as on the web.
+struct NamedPlaceholder {
+    let name: String
+    /// The sentence with `name` in it.
+    let text: (String) -> String
+}
+
 /// A text view that pastes images out of the field and shows a placeholder.
 final class PastingTextView: UITextView {
     var onPasteImages: (([NSItemProvider]) -> Void)?
     var placeholder = "" { didSet { setNeedsDisplay() } }
+    /// Set with `placeholder` when it names something; its name is shortened to fit.
+    var named: NamedPlaceholder?
     /// The general pasteboard; tests give it their own.
     var pasteboard: UIPasteboard = .general
 
@@ -156,14 +172,42 @@ final class PastingTextView: UITextView {
         super.paste(sender)
     }
 
+    /// The placeholder on one line: a named one shortens its name to fit, and
+    /// any other long one ends in "…" instead of running past the field.
     override func draw(_ rect: CGRect) {
         super.draw(rect)
         guard text.isEmpty, !placeholder.isEmpty else { return }
+        let font = self.font ?? .systemFont(ofSize: 16)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? .systemFont(ofSize: 16),
+            .font: font,
             .foregroundColor: UIColor.placeholderText,
+            .paragraphStyle: paragraph,
         ]
-        let origin = CGPoint(x: textContainerInset.left + textContainer.lineFragmentPadding, y: textContainerInset.top)
-        (placeholder as NSString).draw(at: origin, withAttributes: attributes)
+        let left = textContainerInset.left + textContainer.lineFragmentPadding
+        let right = textContainerInset.right + textContainer.lineFragmentPadding
+        // The tail truncation keeps it to one line; the height only has to hold it.
+        let line = CGRect(x: left, y: textContainerInset.top, width: max(0, bounds.width - left - right), height: max(font.lineHeight, bounds.height - textContainerInset.top))
+        let shown = named.map { Self.fitted($0, width: line.width, attributes: attributes) } ?? placeholder
+        (shown as NSString).draw(with: line, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes, context: nil)
+    }
+
+    /// The named sentence with the longest start of the name, plus "…", that
+    /// fits `width`. Swift's characters are whole graphemes, so an emoji is
+    /// never split.
+    static func fitted(_ named: NamedPlaceholder, width: CGFloat, attributes: [NSAttributedString.Key: Any]) -> String {
+        let fits = { (text: String) in (text as NSString).size(withAttributes: attributes).width <= width }
+        let full = named.text(named.name)
+        if fits(full) { return full }
+        let characters = Array(named.name)
+        let cut = { (count: Int) in named.text(String(characters.prefix(count)).trimmingCharacters(in: .whitespaces) + "…") }
+        var low = 0
+        var high = characters.count
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if fits(cut(mid)) { low = mid } else { high = mid - 1 }
+        }
+        return cut(low)
     }
 }

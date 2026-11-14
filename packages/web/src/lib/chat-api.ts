@@ -196,10 +196,16 @@ export interface ChatMessagePage {
  */
 export async function listSessionMessagePage(
   sessionId: string,
-  options: { limit: number; before?: string | null },
+  options: {
+    limit: number;
+    before?: string | null;
+    /** A message the page must reach, however far back: one read lands on it. */
+    through?: string;
+  },
 ): Promise<ChatMessagePage | null> {
   const params = new URLSearchParams({ limit: String(options.limit) });
   if (options.before) params.set("before", options.before);
+  if (options.through) params.set("through", options.through);
   const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
     credentials: "include",
   });
@@ -422,11 +428,26 @@ export async function updateSessionProject(
   return jsonOrThrow<ChatSession>(res);
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`/api/chat/sessions/${sessionId}`, {
+/**
+ * Deletes a chat. For a topic chat, `followsAndTasks: "stop"` ends its follows
+ * and stops its open tasks; without it they move to the main chat.
+ */
+/** Fired on `window` once a delete has gone through, with the chat's id as `detail`. */
+export const CHAT_SESSION_DELETED_EVENT = "rome:chat-session-deleted";
+
+export async function deleteSession(
+  sessionId: string,
+  options: { followsAndTasks?: "stop" } = {},
+): Promise<void> {
+  const query = options.followsAndTasks ? `?followsAndTasks=${options.followsAndTasks}` : "";
+  const res = await fetch(`/api/chat/sessions/${sessionId}${query}`, {
     method: "DELETE",
     credentials: "include",
   });
+  // A chat that was already gone is gone too, for every list that still shows it.
+  if (res.ok || res.status === 404) {
+    window.dispatchEvent(new CustomEvent(CHAT_SESSION_DELETED_EVENT, { detail: sessionId }));
+  }
 }
 
 export async function markSessionRead(
@@ -479,6 +500,57 @@ export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | 
   const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, { credentials: "include" });
   if (!res.ok) return null;
   return (await res.json()) as TurnInfo[];
+}
+
+/** Where a client sends every event a widget fires. A widget is a message of
+ *  its own, so `widgetId` is its message's id; core routes the event to the
+ *  widget's app, or answers the agent waiting on it. */
+export const widgetEventPath = (widgetId: string) =>
+  `/api/chat/widgets/${encodeURIComponent(widgetId)}/events`;
+
+/** What core said to an event: whether it took it, its status when not,
+ *  whether the event answered the agent waiting on the widget, and a link the
+ *  reply asks the client to open. */
+export interface WidgetEventOutcome {
+  ok: boolean;
+  status: number;
+  answered?: boolean;
+  open?: string;
+  /** Why core or the widget's owner refused the event, to show the guardian. */
+  error?: string;
+}
+
+/** Sends an event a widget fired to core, which decides what it means. `turn`
+ *  is the chat's own turn fields, used only when the event starts a turn. */
+export async function postWidgetEvent(
+  widgetId: string,
+  body: { name: string; context?: unknown; turn?: Record<string, unknown> },
+): Promise<WidgetEventOutcome> {
+  const res = await fetch(widgetEventPath(widgetId), {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...body, turn: { inputId: randomUUID(), ...body.turn } }),
+  });
+  const reply = (await res.json().catch(() => null)) as {
+    answered?: unknown;
+    open?: unknown;
+    error?: unknown;
+  } | null;
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      ...(typeof reply?.error === "string" ? { error: reply.error } : {}),
+    };
+  }
+  return {
+    ok: true,
+    status: res.status,
+    answered: reply?.answered === true,
+    // Core vets the link it sends; the client opens it as given.
+    ...(typeof reply?.open === "string" ? { open: reply.open } : {}),
+  };
 }
 
 export async function postSessionTurnJson(
@@ -678,6 +750,8 @@ export interface CreateRoutinePayload {
    * (other prefixes belong to apps' managed routines). A repeat create with
    * the same key returns the routine that already holds it, not a duplicate. */
   key?: string;
+  /** The chat whose card turns it on. */
+  chatId?: string;
 }
 
 export interface CreateRoutineResult {

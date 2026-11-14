@@ -953,12 +953,13 @@ html.is-electron [data-app-titlebar] {
 /* A Concierge chat's mascot hangs from the title bar and drags the window like
    it, below the bar too. The layer it hangs in spans the page's bar and comes
    after its buttons, so it takes no part, or it would cover them; only the
-   badge drags. Its messages start under the status capsule, which reaches
-   less far below the bar than the floating header does. */
+   badge drags, unless it is the button that opens the chat's tasks, which a
+   drag would swallow. Its messages start under the status capsule, which
+   reaches less far below the bar than the floating header does. */
 html.is-electron [data-titlebar-mascot] {
   -webkit-app-region: initial;
 }
-html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
+html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
   -webkit-app-region: drag;
 }
 @media (width >= 48rem) {

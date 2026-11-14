@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -83,17 +84,41 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderCard(connect: ConciergeConnectEntry = OAUTH, icon: string | null = "glyph:gmail") {
+function renderCard(
+  connect: ConciergeConnectEntry = OAUTH,
+  icon: string | null = "glyph:gmail",
+  count = 1,
+) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter>
-      <ConnectCard service="mail" label="Mail" icon={icon} connect={connect} chatId="concierge" />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        {Array.from({ length: count }, (_, i) => (
+          <ConnectCard
+            key={i}
+            service="mail"
+            label="Mail"
+            icon={icon}
+            connect={connect}
+            chatId="concierge"
+          />
+        ))}
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 const notices = () => calls.filter((call) => call.key.endsWith("/service-connected"));
 
 describe("ConnectCard", () => {
+  it("reads the connector list once for every card in the chat", async () => {
+    working = true;
+    renderCard(OAUTH, "glyph:gmail", 3);
+
+    await waitFor(() => expect(screen.getAllByText("Connected")).toHaveLength(3));
+    expect(calls.filter((call) => call.key === "GET /api/concierge/connectors")).toHaveLength(1);
+  });
+
   it("puts the service's mark before its name", () => {
     const { container } = renderCard();
 

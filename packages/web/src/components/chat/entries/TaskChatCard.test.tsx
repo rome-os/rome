@@ -12,8 +12,10 @@ import { LatestTaskChatsContext, renderFlatEntries } from "./render";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import type { ChatEntry, ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { TaskChatCard } from "./TaskChatCard";
+import { WidgetHostContext } from "./widget-ui/turn-fields";
+import { questionCardRender } from "../../../../mock/fixtures/question-card";
 import type { TaskCard } from "@rome/api-types/chat";
-import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
+import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { cardKey, LiveTaskCardsProvider } from "./live-task-cards";
 import { waitingTaskCardMessages } from "../waiting-task-cards";
 
@@ -29,16 +31,9 @@ const question: TranscriptPart = {
   type: "pending_interaction",
   toolUseId: "item_0",
   appId: "core",
-  render: {
-    kind: "inline",
-    builtin: true,
-    componentId: "question-card",
-    props: {
-      questions: [
-        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
-      ],
-    },
-  },
+  render: questionCardRender([
+    { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+  ]),
 };
 const message = (
   id: string,
@@ -84,6 +79,8 @@ let taskRows: Record<string, unknown>[] = [];
 /** When the task chat was archived, or null. */
 let archivedAt: string | null = null;
 let stopped: string[] = [];
+/** How many times the chat list was read. */
+let sessionReads = 0;
 
 /**
  * What the server says the task chat waits on, as `openWait`: the newest open
@@ -122,6 +119,15 @@ function openWait() {
         since: Date.parse(card.at),
       }
     : null;
+}
+
+/**
+ * Whether the task ended, as Rome reads it for `closed`: a row that says so,
+ * or, with no row, a task chat that neither waits on its owner nor runs.
+ */
+function taskEnded() {
+  if (taskRows.length > 0) return taskRows.some((row) => row.status === "ended");
+  return !waiting && !running;
 }
 
 /**
@@ -198,6 +204,7 @@ function cardNow(until = Number.POSITIVE_INFINITY): TaskCard {
       ...(payload.preview ? { preview: payload.preview } : {}),
       since: Date.parse(asked.createdAt as string),
       ...(outcome ? { outcome } : {}),
+      closed: !outcome && taskEnded(),
     };
   }
   if (!question) return { kind: "unavailable" };
@@ -216,14 +223,16 @@ function cardNow(until = Number.POSITIVE_INFINITY): TaskCard {
           },
         };
   const ended = taskRows.some((row) => row.endReason === "no_response");
+  const expired = !outcome && ended;
   return {
     kind: "question",
     id: question.id,
     messageId: question.messageId,
     render: question.render as Extract<TaskCard, { kind: "question" }>["render"],
     since: question.at,
-    expired: !outcome && ended,
+    expired,
     ...(outcome ? { outcome } : {}),
+    closed: !outcome && taskEnded(),
   };
 }
 
@@ -237,7 +246,8 @@ function Served({
   as?: "task" | "ask";
   until?: number;
 }) {
-  useConciergeTasks({ allDone: true });
+  // Read again whenever the chat lists reload, as a settle does.
+  useChatSessions("all", "all");
   return (
     <TaskChatCard
       chatId={chatId}
@@ -258,7 +268,7 @@ function ServedBlocks({
   /** Whether these blocks end with the chat's newest card; a later message holds it otherwise. */
   newest?: boolean;
 }) {
-  useConciergeTasks({ allDone: true });
+  useChatSessions("all", "all");
   const card = cardNow();
   const served = blocks.map((block) => ({ ...block, card }) as never as ChatEntry);
   // The newest card for the chat is the last one, as the transcript tells it.
@@ -321,19 +331,29 @@ beforeEach(async () => {
       stopped.push(stop[1]!);
       return Response.json({ ok: true });
     }
-    if (url.endsWith("/turns") && init?.method === "POST") {
+    if (url.endsWith("/events") && init?.method === "POST") {
       postAction();
       return Response.json(
         postStatus === 400
           ? { error: "No open suspension" }
-          : { turnId: "task-turn", streamId: "task-stream" },
+          : { turnId: "task-turn", streamId: "task-stream", answered: true },
         { status: postStatus },
       );
     }
-    if (url.startsWith("/api/chat/sessions?"))
+    if (url.startsWith("/api/chat/sessions?")) {
+      // Each read is new, as a settle changes the chat's activity.
+      sessionReads += 1;
       return Response.json([
-        { id: chatId, name: "Draft email", awaitingGuardian: waiting, running, archivedAt },
+        {
+          id: chatId,
+          name: "Draft email",
+          awaitingGuardian: waiting,
+          running,
+          archivedAt,
+          activityAt: String(sessionReads),
+        },
       ]);
+    }
     if (url === `/api/chat/sessions/${chatId}/messages?limit=2`)
       return Response.json({ messages, nextCursor: "older-turn" });
     if (url === "/api/approvals?status=pending") return Response.json(approvals);
@@ -376,46 +396,66 @@ describe("TaskChatCard with its task", () => {
     notSynced: false,
   });
 
-  it("says its task's status, as the task list does, and stops the task from the card", async () => {
+  it("says Working while its task chat runs and Needs you while it waits, from the chat alone", async () => {
+    running = true;
     waiting = false;
-    taskRows = [taskRow("later")];
-    show();
-    expect(await screen.findByText("Task chat · Later")).toBeTruthy();
-    await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
-    await waitFor(() => expect(stopped).toEqual(["task-9"]));
+    const first = show(true, "task");
+    expect(await first.findByText("Task chat · Working")).toBeTruthy();
+    first.unmount();
+    client.clear();
+    running = false;
+    waiting = true;
+    show(true, "task");
+    expect(await screen.findByText("Task chat · Needs you")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
+      false,
+    );
   });
 
-  it("labels a question nobody answered in time as expired, and keeps it answerable", async () => {
+  it("holds no question once it expired: its owner carries on in the task's thread", async () => {
     taskRows = [taskRow("ended", "no_response")];
-    show();
-    expect(await screen.findByText("Expired — answer to continue")).toBeTruthy();
-    expect(await screen.findByText("Task chat · No response")).toBeTruthy();
-  });
-
-  it("says an archived task chat's task was stopped, though the list holds no archived row", async () => {
-    archivedAt = new Date().toISOString();
-    show();
-    expect(await screen.findByText("Task chat · Stopped")).toBeTruthy();
-  });
-
-  it("offers no Stop once its task ended, and says why it ended", async () => {
     waiting = false;
-    taskRows = [taskRow("ended", "no_response")];
     show();
-    expect(await screen.findByText("Task chat · No response")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(await screen.findByText("Task chat")).toBeTruthy();
+    expect(document.querySelector("[data-chat-task-open]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+  });
+
+  it("shows no status line for a task that neither works nor waits, and no Stop", async () => {
+    for (const [status, reason] of [
+      ["later", null],
+      ["ended", "done"],
+      ["ended", "stopped"],
+      ["ended", "failed"],
+    ] as const) {
+      waiting = false;
+      taskRows = [taskRow(status, reason)];
+      const view = show(true, "task");
+      expect(await view.findByText("Task chat")).toBeTruthy();
+      expect(view.queryByText(/Task chat · /)).toBeNull();
+      expect(view.queryByRole("button", { name: "Stop" })).toBeNull();
+      view.unmount();
+      client.clear();
+    }
   });
 });
 
 function show(isLatestForChat = true, as?: "task" | "ask", until?: number) {
+  // The Chat the card is shown in has turn fields of its own.
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/chat/main-chat"]}>
-        <Served isLatestForChat={isLatestForChat} as={as} until={until} />
+        <WidgetHostContext.Provider value={MAIN_CHAT_HOST}>
+          <Served isLatestForChat={isLatestForChat} as={as} until={until} />
+        </WidgetHostContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
+
+const MAIN_CHAT_HOST = {
+  turnFields: () => ({ personaId: "main-persona", workspace: { id: "main-ws" } }),
+};
 
 describe("TaskChatCard shown as one card or the other", () => {
   const expiredRow = {
@@ -491,28 +531,17 @@ describe("TaskChatCard shown as one card or the other", () => {
     expect(card.closest("[data-chat-task-waiting]")).toBeTruthy();
   });
 
-  it("folds an expired question to a card that waits on no one, and opens to the form", async () => {
+  it("folds an expired question read-only, saying it expired, and reads no task list", async () => {
     taskRows = [expiredRow];
     show(true, "ask");
     // In a card like any settled one: what it asked, then that it expired.
-    const line = await screen.findByRole("button", {
-      name: "Which tone?Expired · answer to continue",
-    });
-    expect(line.closest("[data-chat-settled-card]")).toBeTruthy();
-    // Its task is read from the whole list, so it stays expired once it is
-    // older than the panel's window of recent ended tasks.
-    expect(
-      fetchMock.mock.calls.some(([url]) =>
-        String(url).startsWith("/api/concierge/tasks?doneDays=3650"),
-      ),
-    ).toBe(true);
-    expect(screen.queryByRole("button", { name: "Warm" })).toBeNull();
+    const line = await screen.findByText("Expired: no answer within a day");
+    expect(line.closest("[data-chat-settled-card]")?.textContent).toContain("Which tone?");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
+      false,
+    );
     expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
-    await userEvent.setup().click(line);
-    expect(await screen.findByText("Which tone?")).toBeTruthy();
-    expect(screen.getByText("Expired — answer to continue")).toBeTruthy();
-    // Opened, it still takes an answer, but counts as waiting nowhere.
-    expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 
   describe("folded", () => {
@@ -622,7 +651,7 @@ function served(id: string, block: Record<string, unknown>): ChatMessage {
 }
 
 function TaskJumpHarness() {
-  const { tasks } = useConciergeTasks({ allDone: true });
+  useChatSessions("all", "all");
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLDivElement | null>(null);
   const [floor, setFloor] = useState<HTMLDivElement | null>(null);
@@ -647,10 +676,10 @@ function TaskJumpHarness() {
                 content={content}
                 floor={floor}
                 currentReplyMessageIds={new Set(["unrelated-main-reply"])}
-                waitingTaskMessageIds={waitingTaskCardMessages(
-                  [{ ...served("m-older", older) }, { ...served("m-latest", latest) }],
-                  tasks,
-                )}
+                waitingTaskMessageIds={waitingTaskCardMessages([
+                  { ...served("m-older", older) },
+                  { ...served("m-latest", latest) },
+                ])}
               />
             </div>
           </div>
@@ -713,9 +742,9 @@ describe("TaskChatCard width", () => {
     messages = [];
     show(true);
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
-        true,
-      ),
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/chat/sessions?")),
+      ).toBe(true),
     );
     await screen.findByText("Draft email");
     expect(document.querySelector("[data-chat-task-open]")).toBeNull();
@@ -817,10 +846,10 @@ describe("TaskChatCard", () => {
     act(() => {
       handlers?.session_running.fn({ sessionId: chatId, running: true });
     });
-    // The task runs again, so its list says it waits on no one.
-    waiting = false;
+    // The question was answered in the task chat itself, so its card says so.
+    messages.push(message("answer", [result], "user"));
     await act(async () => {
-      await client.invalidateQueries({ queryKey: ["concierge-tasks"] });
+      await client.invalidateQueries({ queryKey: ["chat-sessions"] });
     });
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
@@ -868,16 +897,13 @@ describe("TaskChatCard", () => {
         {
           ...question,
           toolUseId: "item_1",
-          render: {
-            ...question.render,
-            props: { questions: [{ id: "next", question: "Next question?", type: "text" }] },
-          },
+          render: questionCardRender([{ id: "next", question: "Next question?", type: "text" }]),
         },
       ]),
     ];
     // The task list hears of the new wait, as its live event tells it.
     await act(async () => {
-      await client.invalidateQueries({ queryKey: ["concierge-tasks"] });
+      await client.invalidateQueries({ queryKey: ["chat-sessions"] });
     });
     notify(false);
     await screen.findByText("Next question?");
@@ -887,27 +913,25 @@ describe("TaskChatCard", () => {
   it("allows a later question in the same mounted card to be answered", async () => {
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
-    await screen.findByText("Dismissed");
+    await screen.findByText("Sent");
     const nextQuestion = {
       ...question,
       toolUseId: "item_1",
-      render: {
-        ...question.render,
-        props: {
-          questions: [{ id: "next", question: "Next question?", type: "single", options: ["Yes"] }],
-        },
-      },
+      render: questionCardRender([
+        { id: "next", question: "Next question?", type: "single", options: ["Yes"] },
+      ]),
     };
     messages = [message("next", [nextQuestion])];
     await act(async () => {
-      await client.invalidateQueries({ queryKey: ["concierge-tasks"] });
+      await client.invalidateQueries({ queryKey: ["chat-sessions"] });
     });
     await userEvent.click(await screen.findByRole("button", { name: "Yes" }));
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts()).toHaveLength(2));
-    expect(JSON.parse(String(posts()[1][1]?.body)).parts[0]).toMatchObject({
-      toolUseId: "item_1",
-      output: { answers: [{ questionId: "next", value: "Yes" }] },
+    expect(posts()[1][0]).toBe("/api/chat/widgets/next/events");
+    expect(JSON.parse(String(posts()[1][1]?.body))).toMatchObject({
+      name: "send",
+      context: { answers: [{ values: ["Yes"], text: "" }] },
     });
   });
 
@@ -918,18 +942,17 @@ describe("TaskChatCard", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
     const [url, init] = posts()[0];
-    expect(url).toBe(`/api/chat/sessions/${chatId}/turns`);
+    expect(url).toBe("/api/chat/widgets/ask/events");
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      parts: [
-        {
-          type: "interaction_result",
-          toolUseId: "item_0",
-          output: { answers: [{ questionId: "tone", value: "Warm" }] },
-        },
-      ],
+      name: "send",
+      context: { answers: [{ values: ["Warm"], text: "" }] },
     });
+    // The turn is the task chat's, never with the Chat's persona or workspace.
+    const turn = JSON.parse(String(init?.body)).turn;
+    expect(turn.personaId).toBeUndefined();
+    expect(turn.workspace).toBeUndefined();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
-    expect(screen.getByText("Answered: Warm")).toBeTruthy();
+    expect(await screen.findByText("Sent")).toBeTruthy();
     expect(screen.getByRole("link").getAttribute("href")).toBe(`/chat/${chatId}`);
     await waitFor(() =>
       expect(
@@ -939,9 +962,10 @@ describe("TaskChatCard", () => {
     );
   });
 
-  it("collapses after the session refresh says the task no longer needs input", async () => {
+  it("collapses after the refresh says the card was answered", async () => {
     postAction = () => {
       waiting = false;
+      messages.push(message("answer", [result], "user"));
     };
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
@@ -953,8 +977,8 @@ describe("TaskChatCard", () => {
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
-    expect(JSON.parse(String(posts()[0][1]?.body)).parts[0].output).toEqual({ dismissed: true });
-    expect(screen.getByText("Dismissed")).toBeTruthy();
+    expect(JSON.parse(String(posts()[0][1]?.body)).name).toBe("dismiss");
+    expect(await screen.findByText("Sent")).toBeTruthy();
   });
 
   it("shows an approval belonging to this task with the existing approval controls", async () => {
@@ -1027,10 +1051,7 @@ describe("TaskChatCard", () => {
       message("second", [
         {
           ...question,
-          render: {
-            ...question.render,
-            props: { questions: [{ id: "again", question: "Ask again?", type: "text" }] },
-          },
+          render: questionCardRender([{ id: "again", question: "Ask again?", type: "text" }]),
         },
       ]),
     ];
@@ -1043,9 +1064,9 @@ describe("TaskChatCard", () => {
     messages.push(message("answer", [result], "user"));
     show();
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
-        true,
-      ),
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/chat/sessions?")),
+      ).toBe(true),
     );
     expect(screen.queryByText("Which tone?")).toBeNull();
   });
@@ -1063,30 +1084,24 @@ describe("TaskChatCard", () => {
     expect(screen.getByRole("link")).toBeTruthy();
   });
 
-  it("shows no card once its task says it waits on nothing, though the transcript still holds one", async () => {
-    // The owner wrote a plain message after the question: the server no longer counts it.
+  it("folds a card its task left open when it ended, and takes no answer", async () => {
+    waiting = false;
     taskRows = [
       {
         id: "task-9",
         title: "Draft email",
-        state: "doing",
-        status: "active",
-        endReason: null,
+        state: "done",
+        status: "ended",
+        endReason: "done",
         chat: { id: chatId, name: "Draft email" },
         conciergeChat: { id: "concierge", name: "Concierge", main: true },
         createdAt: 1,
         updatedAt: 2,
-        openWait: null,
       },
     ];
     show(true, "ask");
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
-        true,
-      ),
-    );
-    // It folds, and takes no answer here.
-    await waitFor(() => expect(document.querySelector("[data-chat-task-waiting]")).toBeNull());
+    expect(await screen.findByText("Closed: the task ended")).toBeTruthy();
+    expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 
@@ -1180,7 +1195,7 @@ describe("TaskChatCard drawn from the card Rome filled in", () => {
       since: 1,
     };
     const { rerender } = renderCard(asked);
-    expect(await screen.findByText("Waiting: answer the card below")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeTruthy();
     rerender(
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={["/chat/main-chat"]}>

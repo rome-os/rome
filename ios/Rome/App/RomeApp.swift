@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UserNotifications
 
@@ -80,6 +81,7 @@ extension AppDelegate: @preconcurrency UNUserNotificationCenterDelegate {
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @State private var today = Calendar.current.startOfDay(for: .now)
 
     var body: some View {
         ZStack {
@@ -120,6 +122,11 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.3), value: model.update.blocking)
         .animation(.easeInOut(duration: 0.35), value: model.phase == .ready)
         .tint(Palette.primary)
+        .environment(\.today, today)
+        // Also sent when the app comes back after the day turned.
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
+            today = Calendar.current.startOfDay(for: .now)
+        }
         // Past this size the floating headers and cards stop fitting a phone.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         #if DEBUG

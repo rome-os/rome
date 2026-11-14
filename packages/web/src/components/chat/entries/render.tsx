@@ -14,6 +14,7 @@ import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
 import { CardBoundary } from "./widget-ui/CardBoundary";
+import { isDrawableCard } from "./widget-ui/drawable";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentCallView } from "./SubagentCallView";
 import { TaskChatCard } from "./TaskChatCard";
@@ -58,6 +59,9 @@ export interface RenderEntryOptions {
    * interaction state and routes submissions to the right session in the merged
    * (multi-session) transcript. */
   sessionId?: string;
+  /** The message these blocks belong to. A widget is a message of its own, so
+   * this is the id a widget's events go to core by. */
+  messageId?: string;
   /** Turn that owns the rendered text blocks, used to preserve disclosure state
    * when a live block is replaced by its persisted transcript representation. */
   turnId?: string;
@@ -86,6 +90,7 @@ export function renderSingleEntry(
     onApprovalResolved,
     compact = false,
     sessionId,
+    messageId,
     turnId,
     interactionResults,
     onSubmitAppComponent,
@@ -100,6 +105,8 @@ export function renderSingleEntry(
     ? (toolUseId: string, output: Record<string, unknown>, summary?: string) =>
         onSubmitAppComponent(sid, toolUseId, output, summary)
     : () => {};
+  // A widget is a message of its own, so the message's id is the widget's.
+  const widgetId = messageId ?? "";
   const dismiss = onDismissAppComponent
     ? (toolUseId: string) => onDismissAppComponent(sid, toolUseId)
     : () => {};
@@ -204,6 +211,7 @@ export function renderSingleEntry(
           // Parts can arrive unvalidated (e.g. via channels.send); a malformed
           // key falls back to the keyless card rather than failing every create.
           routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
+          chatId={sessionId}
         />
       );
     case "pending_interaction": {
@@ -224,12 +232,38 @@ export function renderSingleEntry(
         return (
           <QuestionCard
             key={`question-card-${block.toolUseId}`}
+            widgetId={widgetId}
             toolUseId={block.toolUseId}
+            appId={block.appId}
+            ui={block.render.ui}
             props={block.render.props}
             result={resultFor(block.toolUseId)}
-            onSubmit={submit}
-            onDismiss={dismiss}
           />
+        );
+      }
+      // A card described as data, which the agent waits on, whether an app's
+      // or core's own: drawn like any widget, and answered by one of its
+      // events, which core routes to its owner.
+      if (block.render.ui) {
+        return (
+          <CardBoundary
+            key={`app-widget-${block.toolUseId}`}
+            fallback={
+              block.text ? <p className="text-ui text-muted-foreground">{block.text}</p> : null
+            }
+          >
+            <Suspense fallback={null}>
+              <WidgetUiCard
+                widgetId={widgetId}
+                toolUseId={block.toolUseId}
+                appId={block.appId}
+                ui={block.render.ui}
+                bind={block.render.bind}
+                text={block.text ?? ""}
+                waiting={{ result: resultFor(block.toolUseId) }}
+              />
+            </Suspense>
+          </CardBoundary>
         );
       }
       return (
@@ -237,7 +271,7 @@ export function renderSingleEntry(
           key={`app-component-${block.toolUseId}`}
           toolUseId={block.toolUseId}
           appId={block.appId}
-          componentId={block.render.componentId}
+          componentId={block.render.componentId ?? ""}
           props={block.render.props}
           result={resultFor(block.toolUseId)}
           onSubmit={submit}
@@ -254,6 +288,7 @@ export function renderSingleEntry(
           >
             <Suspense fallback={null}>
               <WidgetUiCard
+                widgetId={widgetId}
                 toolUseId={block.toolUseId}
                 appId={block.appId}
                 ui={block.ui}

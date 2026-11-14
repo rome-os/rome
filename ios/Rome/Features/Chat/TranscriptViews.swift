@@ -12,9 +12,15 @@ extension EnvironmentValues {
     @Entry var instanceOrigin: URL? = nil
     /// Opens a link tapped in chat text; the shell sets it so app and
     /// instance links stay in the app.
-    @Entry var chatLinkOpener: (@MainActor (URL) -> OpenURLAction.Result)? = nil
+    @Entry var chatLinkOpener: ShellAction<URL, OpenURLAction.Result>? = nil
     /// An allow-listed visitor, not the guardian: approvals are not theirs to answer.
     @Entry var isVisitor = false
+    /// Opens a task chat in this window, over the page the row is on.
+    @Entry var openTaskChat: ShellAction<(chatId: String, title: String), Void>? = nil
+    /// The start of today, moved on at midnight by `RootView`. A view whose
+    /// text says "Today" or "Yesterday" reads it: a row drawn from values is
+    /// not drawn again on its own when the day turns.
+    @Entry var today = Calendar.current.startOfDay(for: .now)
     /// The chat on screen, by its store's id: nil under a sheet, the drawer
     /// or a pushed page. A chat marks what arrives as read only while it is.
     @Entry var visibleChat: String? = nil
@@ -41,8 +47,11 @@ struct BubbleMenu {
 private struct BubbleMenuItems: View {
     let text: String
     let menu: BubbleMenu
+    @Environment(\.today) private var today
 
     var body: some View {
+        // Read, so the header's "Today" follows the day.
+        let _ = today
         if let problem = menu.problem {
             // Not sent, so there is nothing to reply to or share yet.
             SendProblemItems(problem: problem, text: text)
@@ -533,8 +542,11 @@ struct TaskCard: View {
 
 struct TimeSeparator: View {
     let date: Date
+    @Environment(\.today) private var today
 
     var body: some View {
+        // Read, so "Today" becomes "Yesterday" when the day turns.
+        let _ = today
         Text(RelativeTime.separator(date))
             .romeFont(12, .medium)
             .foregroundStyle(Palette.sub)
@@ -577,6 +589,8 @@ enum TranscriptSpacing {
 struct Composer: View {
     @Binding var text: String
     let placeholder: String
+    /// Set when `placeholder` names something: a long name is shortened to fit.
+    var named: NamedPlaceholder? = nil
     var stopVisible = false
     var stopping = false
     @Binding var focused: Bool
@@ -620,6 +634,7 @@ struct Composer: View {
                     text: $text,
                     focused: $focused,
                     placeholder: placeholder,
+                    named: named,
                     onPasteImages: attachments.map { attachments in
                         { providers in Task { await attachments.add(providers: providers) } }
                     },

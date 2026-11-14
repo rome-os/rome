@@ -16,7 +16,7 @@ import {
 } from "@/test/fake-websocket";
 import { MemoryRouter } from "react-router-dom";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
-import { ChatThreadView, chatThreadQueryKey } from "./ChatThreadView";
+import { ChatThreadView, chatThreadQueryKey, taskChatOfThread } from "./ChatThreadView";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import { buildRows } from "./chat-view";
 import type { BlockActions } from "./MessageList";
@@ -113,13 +113,19 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(document.querySelector("[data-reply-bar]")?.textContent).toContain("Which day?");
   });
 
-  it("opens the thread view from its label, and closing it clears the reply", () => {
+  it("opens the thread view from its label with a reply to the thread, and closing it clears it", () => {
     let draft!: ReplyDraft;
-    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)}>
+        <ReplyBar />
+      </ThreadsDraft>,
+    );
 
-    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    act(() => draft.openThread({ thread: "a1", title: "Move my 3pm" }));
     expect(draft.thread).toBe("a1");
-    expect(draft.target?.messageId).toBe("a1");
+    // The reply goes to the thread: no message quoted.
+    expect(draft.target).toBeNull();
+    expect(document.querySelector("[data-reply-bar]")?.textContent).toBe("Reply to Move my 3pm");
 
     act(() => draft.closeThread());
     expect(draft.thread).toBeNull();
@@ -144,15 +150,16 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(draft.target).toBeNull();
   });
 
-  it("keeps the thread view open on Reply inside it, to a message older than the loaded timeline too", () => {
+  it("keeps the thread view and its reply to the thread on Reply inside it", () => {
     let draft!: ReplyDraft;
     render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
-    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    act(() => draft.openThread({ thread: "a1", title: "Move my 3pm" }));
     // "old" is in the open thread, but not in the timeline's loaded pages.
     act(() => draft.set({ messageId: "old", author: "guardian", preview: "Move my 3pm" }));
 
-    expect(draft.thread).toBe("old");
-    expect(draft.target?.messageId).toBe("old");
+    // A Reply inside the view keeps the reply to the thread.
+    expect(draft.thread).toBe("a1");
+    expect(draft.target).toBeNull();
   });
 
   it("opens the thread view from the quote of a reply in a task's thread", () => {
@@ -165,7 +172,13 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     };
     render(
       <ThreadsDraft onDraft={(next) => (draft = next)}>
-        <ChatThreadsProvider value={{ labels: new Map(), taskThreads: new Map([["r1", "m1"]]) }}>
+        <ChatThreadsProvider
+          value={{
+            labels: new Map(),
+            taskThreads: new Map([["r1", "m1"]]),
+            titles: new Map([["m1", "Move my 3pm"]]),
+          }}
+        >
           <QuotedReply part={part} hostId="r1" />
         </ChatThreadsProvider>
       </ThreadsDraft>,
@@ -177,8 +190,9 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     // task's thread: the original it quotes may be in none, as when the reply
     // started the task.
     expect(draft.thread).toBe("r1");
-    // Opening either opens both: the quote also picks the reply.
-    expect(draft.target).toMatchObject({ messageId: "a1", preview: "Which day?" });
+    // The reply goes to the task's thread, named by its title, quoting no message.
+    expect(draft.target).toBeNull();
+    expect(draft.threadTitle).toBe("Move my 3pm");
   });
 
   it("jumps to the original from the quote of a reply in no task, and opens no thread view", () => {
@@ -218,8 +232,9 @@ describe("the reply draft of a chat that keeps chat threads", () => {
   it("puts a failed send's reply and thread back only when nothing changed since the send", () => {
     let draft!: ReplyDraft;
     render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
-    const a = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
-    const b = { messageId: "b1", author: "agent" as const, preview: "Flights?" };
+    const a = { thread: "a1", title: "Flights" };
+    const b = { thread: "b1", title: "Hotels" };
+    const reply = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
 
     // Sent from thread A; the guardian opens B before A's send fails.
     act(() => draft.openThread(a));
@@ -228,34 +243,35 @@ describe("the reply draft of a chat that keeps chat threads", () => {
       sentAt = draft.clear();
     });
     act(() => draft.openThread(b));
-    act(() => draft.restore(a, sentAt, "a1"));
-    expect([draft.target?.messageId, draft.thread]).toEqual(["b1", "b1"]);
+    act(() => draft.restore({ thread: a }, sentAt));
+    expect([draft.thread, draft.threadTitle]).toEqual(["b1", "Hotels"]);
 
-    // B picked and dropped again: the draft stays closed.
+    // B opened and closed again: the draft stays closed.
     act(() => {
       sentAt = draft.clear();
     });
-    act(() => draft.set(b));
+    act(() => draft.openThread(b));
     act(() => {
       draft.clear();
     });
-    act(() => draft.restore(a, sentAt, "a1"));
+    act(() => draft.restore({ thread: a }, sentAt));
     expect([draft.target, draft.thread]).toEqual([null, null]);
 
-    // Nothing changed: A comes back with its thread.
+    // Nothing changed: A's thread comes back.
     act(() => draft.openThread(a));
     act(() => {
       sentAt = draft.clear();
     });
-    act(() => draft.restore(a, sentAt, "a1"));
-    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", "a1"]);
+    act(() => draft.restore({ thread: a }, sentAt));
+    expect([draft.target, draft.thread, draft.threadTitle]).toEqual([null, "a1", "Flights"]);
 
     // A reply sent from the timeline comes back with the reply bar alone.
-    act(() => draft.set(a));
+    act(() => draft.clear());
+    act(() => draft.set(reply));
     act(() => {
       sentAt = draft.clear();
     });
-    act(() => draft.restore(a, sentAt));
+    act(() => draft.restore({ target: reply }, sentAt));
     expect([draft.target?.messageId, draft.thread]).toEqual(["a1", null]);
   });
 
@@ -266,7 +282,7 @@ describe("the reply draft of a chat that keeps chat threads", () => {
         <ReplyBar />
       </ThreadsDraft>,
     );
-    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    act(() => draft.openThread({ thread: "a1", title: "Move my 3pm" }));
     expect(draft.thread).toBe("a1");
     // The phone width is the same dashboard: no class hides the bar there.
     expect(container.querySelector("[data-reply-bar]")!.className).not.toMatch(/hidden/);
@@ -631,5 +647,38 @@ describe("ChatThreadView", () => {
     await screen.findByText("Which day?");
     await waitFor(() => expect(tops.at(-1)).toBe(1150));
     rs.restoreAllMocks();
+  });
+});
+
+describe("taskChatOfThread", () => {
+  const said = (id: string, parts: unknown[], chatThreadId: string | null = "root") =>
+    ({
+      id,
+      sessionId: "concierge",
+      role: "assistant",
+      content: JSON.stringify(parts),
+      createdAt: "2026-11-10T12:00:00Z",
+      chatThreadId,
+    }) as never;
+
+  it("takes the task chat a card in the thread names, with no task list", () => {
+    const messages = [
+      said("other", [{ type: "task_chat", chatId: "elsewhere", title: "B" }], "other-root"),
+      said("root", [{ type: "text", text: "On it." }], null),
+      said("card", [{ type: "task_chat", chatId: "task-chat", title: "A", show: "ask" }]),
+    ];
+    expect(taskChatOfThread(messages, "root")).toBe("task-chat");
+    expect(taskChatOfThread(messages, "no-thread")).toBeNull();
+  });
+
+  it("takes the task chat Rome names on a thread with no card in it", () => {
+    const messages = [
+      said("root", [{ type: "text", text: "Looking into it." }], null),
+      {
+        ...(said("reply", [{ type: "text", text: "Done." }]) as object),
+        chatThreadTaskChatId: "named-chat",
+      } as never,
+    ];
+    expect(taskChatOfThread(messages, "root")).toBe("named-chat");
   });
 });

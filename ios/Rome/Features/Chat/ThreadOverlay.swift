@@ -11,15 +11,15 @@ struct ThreadOverlay: View {
     let tasks: TasksStore
     /// The chat's name and status, as its header shows them.
     let name: String
-    var activity: ConciergeActivity? = nil
-    let onOpenChat: (String, String) -> Void
+    /// Read by the header copy, so a status change redraws it alone.
+    var activity: () -> ConciergeActivity? = { nil }
     let onClose: () -> Void
 
     @State private var shown = false
     @State private var visibleHeight: CGFloat = 0
 
     var body: some View {
-        let rows = thread.rows(answers: chat.answers)
+        let rows = thread.rows
         ZStack {
             Rectangle()
                 .fill(.ultraThinMaterial)
@@ -32,7 +32,8 @@ struct ThreadOverlay: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: openFromRow, inThread: true)
+                        ConciergeRow(row: row, info: thread.info(for: row), store: chat, tasks: tasks, inThread: true)
+                            .equatable()
                             .tinted(chat.tinted != nil && row.ownMessageId == chat.tinted)
                             .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
                     }
@@ -74,22 +75,13 @@ struct ThreadOverlay: View {
         }
     }
 
-    /// A chat opened from a row inside the view: the view closes first, or the
-    /// chat would be pushed under it.
-    private var openFromRow: (String, String) -> Void {
-        { id, title in
-            chat.closeThread()
-            onOpenChat(id, title)
-        }
-    }
-
     /// The chat's own header, laid over it unchanged: the same identity in
     /// the middle, still, and the close button where the "…" sits.
     private var header: some View {
         HStack(alignment: .center) {
             // Where the drawer button sits below, so the identity keeps its place.
             Color.clear.frame(width: 44, height: 44)
-            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, still: true) }
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity(), still: true) }
             GlassCircleButton(accessibilityLabel: "Close", action: close) {
                 Image(systemName: "xmark").romeFont(15, .semibold)
             }
@@ -127,9 +119,12 @@ private struct StayAtBottom: ViewModifier {
 
 /// Above the composer while it replies to a message: a line of that
 /// message, and a cross that drops the reply, and an open thread view with it.
+/// A reply inside a thread view names the task instead, quoting nothing.
 struct QuoteBar: View {
     /// The quoted message; nil while it is not held.
     let message: ChatMessage?
+    /// Reply inside a thread view: the task's title.
+    var threadTitle: String? = nil
     let onCancel: () -> Void
 
     private var preview: String {
@@ -145,7 +140,7 @@ struct QuoteBar: View {
             Image(systemName: "arrowshape.turn.up.left")
                 .romeFont(12)
                 .foregroundStyle(Palette.sub)
-            Text(verbatim: preview.isEmpty ? String(localized: "Reply") : preview)
+            Text(verbatim: threadTitle.map { String(localized: "Reply to \($0)") } ?? (preview.isEmpty ? String(localized: "Reply") : preview))
                 .romeFont(13)
                 .foregroundStyle(Palette.sub)
                 .lineLimit(1)
@@ -168,19 +163,22 @@ struct QuoteBar: View {
     }
 }
 
-/// Under a Concierge message in a task's chat thread: `↳ <task title>`,
-/// faint and on one line, cut with "…". A tap opens the thread view.
+/// Under a Concierge message in a task's chat thread: a small light arrow
+/// and the task's title, faint and on one line, cut with "…". A tap opens
+/// the thread view. A source label has no mark, so the two read apart.
 struct ThreadLabelLine: View {
     let title: String
     let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(spacing: 3) {
-                Text(verbatim: "↳").accessibilityHidden(true)
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.turn.down.right")
+                    .romeFont(9, .light)
+                    .accessibilityHidden(true)
                 Text(verbatim: title).lineLimit(1).truncationMode(.tail)
+                    .romeFont(12)
             }
-            .romeFont(12)
             .foregroundStyle(Palette.sub.opacity(0.75))
             .padding(.horizontal, 6)
             .padding(.vertical, 8)

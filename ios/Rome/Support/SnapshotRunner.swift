@@ -22,6 +22,8 @@ enum DebugCommand: Equatable {
     case appIdeas(Bool)
     /// A page of the instance in its sheet; nil closes it.
     case page(URL?)
+    /// An app in its sheet; nil closes it.
+    case app(InstalledApp?)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -169,6 +171,9 @@ enum SnapshotRunner {
             await capture("13-node-requests", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.requests]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
+            await capture("13a-node-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
             // The Apple Health page is longer than a screen: its top, the data flow, and its end.
             model.debugHealthScroll = nil
             await capture("14-health-access", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
@@ -237,6 +242,12 @@ enum SnapshotRunner {
             await capture("51-thread-open", style: styleName, in: directory, wait: 1.5) {
                 model.workspace?.topicStore("topic-trip").openThread(at: "k1")
             }
+            // Reply inside the thread view: the bar names the task, quoting nothing.
+            await capture("51b-thread-reply", style: styleName, in: directory, wait: 1.5) {
+                let store = model.workspace?.topicStore("topic-trip")
+                if store?.thread == nil { store?.openThread(at: "k1") }
+                store?.reply(to: "k5")
+            }
             model.workspace?.topicStore("topic-trip").closeThread()
             try? await Task.sleep(for: .seconds(0.4))
             // A thread taller than the screen, opened near its foot: the
@@ -261,6 +272,18 @@ enum SnapshotRunner {
             // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.
             await capture("56-markdown-tables", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-table")) }
             await capture("58-error-states", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-errors")) }
+            // The load-error bar: Retry, then its spinner while an attempt runs.
+            if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),
+               let demo = model.workspace?.backend as? DemoBackend, let store = model.workspace?.topicStore("topic-errors") {
+                demo.unreadableChats.insert("topic-errors")
+                await store.reload()
+                await capture("58b-load-failed", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-errors")) }
+                store.retryHold = .seconds(4)
+                await capture("58c-load-retrying", style: styleName, in: directory, wait: 0.8) { store.retryLoad() }
+                demo.unreadableChats.remove("topic-errors")
+                try? await Task.sleep(for: .seconds(4))
+                store.retryHold = .seconds(1)
+            }
             await capture("57-widget-ui-card", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-meals")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
@@ -294,9 +317,9 @@ enum SnapshotRunner {
             for id in ["habits", "reading", "packing"] { RecentApps(host: "me.romeos.cc").record(id) }
             await capture("37-apps", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
             await capture("39-app-open", style: styleName, in: directory, wait: 2.5) {
-                model.debugCommand = .route([.app(InstalledApp(id: "habits", displayName: "习惯打卡", fullHref: "/full/apps/habits", origin: "local"))])
+                model.debugCommand = .app(InstalledApp(id: "habits", displayName: "习惯打卡", fullHref: "/full/apps/habits", origin: "local"))
             }
-            model.debugCommand = .route([])
+            model.debugCommand = .app(nil)
             try? await Task.sleep(for: .seconds(0.6))
             // A dashboard page a card opened, in the app's web view, as a sheet.
             await capture("49-dashboard-page", style: styleName, in: directory, wait: 2.5) {

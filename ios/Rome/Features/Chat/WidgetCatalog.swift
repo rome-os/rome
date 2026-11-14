@@ -18,7 +18,9 @@ enum WidgetCatalog {
     static let catalog = Catalog<ComponentImplementation>(
         id: id,
         protocolVersion: .v09,
-        components: [text, stat, progress, image, row, column, list, button]
+        components: [text, stat, progress, image, row, column, list, button, choicePicker, textField],
+        // The only functions a card may call, in its `checks`.
+        functions: [TrimmedRequired(), OrFunction()]
     )
 
     private static let text = ComponentImplementation(api: BasicCatalogComponents.text) { node in
@@ -71,11 +73,42 @@ enum WidgetCatalog {
         WidgetButton(node: node)
     }
 
+    // Rome's inputs keep A2UI's names and add what the question card needs:
+    // an option's `description` and a field's `placeholder`.
+    private static let choicePicker = ComponentImplementation(
+        name: "ChoicePicker",
+        schema: schema(
+            ["label": "DynamicString", "value": "DynamicStringList"],
+            raw: [
+                "variant": #"{"enum":["multipleSelection","mutuallyExclusive"]}"#,
+                "options": #"{"type":"array","items":{"type":"object","properties":{"label":\#(ref("DynamicString")),"value":{"type":"string"},"description":\#(ref("DynamicString"))},"required":["label","value"]}}"#,
+            ],
+            required: ["options", "value"]
+        )
+    ) { node in
+        WidgetChoicePicker(node: node)
+    }
+
+    private static let textField = ComponentImplementation(
+        name: "TextField",
+        schema: schema(
+            ["label": "DynamicString", "value": "DynamicString", "placeholder": "DynamicString"],
+            raw: ["variant": #"{"enum":["longText","number","shortText","obscured"]}"#],
+            required: ["label"]
+        )
+    ) { node in
+        WidgetTextField(node: node)
+    }
+
+    private static func ref(_ type: String) -> String {
+        #"{"$ref":"https://a2ui.org/schemas/v0_9_1/common.json#/$defs/\#(type)"}"#
+    }
+
     /// A Rome component's schema: an object whose properties each name one of
     /// A2UI's common types, which tells the engine to resolve a `{ path }` in
     /// that property against the card's data.
-    private static func schema(_ properties: KeyValuePairs<String, String>, required: [String]) -> Schema {
-        let props = properties.map { #""\#($0.key)":{"$ref":"https://a2ui.org/schemas/v0_9_1/common.json#/$defs/\#($0.value)"}"# }.joined(separator: ",")
+    private static func schema(_ properties: KeyValuePairs<String, String>, raw: [String: String] = [:], required: [String]) -> Schema {
+        let props = (properties.map { #""\#($0.key)":\#(ref($0.value))"# } + raw.map { #""\#($0.key)":\#($0.value)"# }).joined(separator: ",")
         let names = required.map { #""\#($0)""# }.joined(separator: ",")
         // swiftlint:disable:next force_try
         return try! Schema(
@@ -98,6 +131,24 @@ private struct InButtonKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// Set once a card the agent waits on is answered or dismissed: inputs stop
+/// taking input and buttons are hidden.
+struct WidgetLockedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+/// Rome's `clears`, by component id: the value an input empties when it is
+/// edited, and how to empty it. A2UI's schemas have no such field, so the
+/// card hands it here.
+struct WidgetClears {
+    var targets: [String: String] = [:]
+    var clear: @MainActor (_ path: String, _ list: Bool) -> Void = { _, _ in }
+}
+
+struct WidgetClearsKey: EnvironmentKey {
+    static let defaultValue = WidgetClears()
+}
+
 /// Set while a button's request runs: every button is disabled, so a press is sent once.
 struct WidgetBusyKey: EnvironmentKey {
     static let defaultValue = false
@@ -107,6 +158,16 @@ extension EnvironmentValues {
     fileprivate var widgetInButton: Bool {
         get { self[InButtonKey.self] }
         set { self[InButtonKey.self] = newValue }
+    }
+
+    var widgetLocked: Bool {
+        get { self[WidgetLockedKey.self] }
+        set { self[WidgetLockedKey.self] = newValue }
+    }
+
+    var widgetClears: WidgetClears {
+        get { self[WidgetClearsKey.self] }
+        set { self[WidgetClearsKey.self] = newValue }
     }
 
     var widgetBusy: Bool {
@@ -243,8 +304,13 @@ private struct WidgetStack: View {
 private struct WidgetButton: View {
     let node: Node
     @Environment(\.widgetBusy) private var busy
+    @Environment(\.widgetLocked) private var locked
 
     var body: some View {
+        if !locked { button }
+    }
+
+    @ViewBuilder private var button: some View {
         let variant = node.string(for: "variant")
         let primary = variant == "primary"
         let borderless = variant == "borderless"
@@ -265,5 +331,110 @@ private struct WidgetButton: View {
         }
         .buttonStyle(PressScaleStyle())
         .disabled(busy || !node.isValid)
+    }
+}
+
+/// Options drawn as the question card's chips: a picked chip is filled.
+private struct WidgetChoicePicker: View {
+    let node: Node
+    @Environment(\.widgetLocked) private var locked
+    @Environment(\.widgetClears) private var clears
+
+    private struct Option: Identifiable {
+        let label: String
+        let value: String
+        let description: String?
+        var id: String { value }
+    }
+
+    private var options: [Option] {
+        (node.array(for: "options") ?? []).compactMap { element in
+            guard let option = element as? ResolvedDictionary, let value = option.string(for: "value") else { return nil }
+            return Option(label: option.string(for: "label") ?? value, value: value, description: option.string(for: "description"))
+        }
+    }
+
+    private var picked: [String] {
+        (node.dataBinding(for: "value") as DataBinding<[String]>?)?.value ?? []
+    }
+
+    var body: some View {
+        let picked = picked
+        let multi = node.string(for: "variant") == "multipleSelection"
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(options) { option in
+                let selected = picked.contains(option.value)
+                Button {
+                    let next = multi ? (selected ? picked.filter { $0 != option.value } : picked + [option.value]) : [option.value]
+                    (node.dataBinding(for: "value") as DataBinding<[String]>?)?.set(next)
+                    if !next.isEmpty, let target = clears.targets[node.id] { clears.clear(target, false) }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: option.label)
+                            .romeFont(CardScale.body, .medium)
+                            .foregroundStyle(selected ? Color.white : Palette.fg)
+                        if let description = option.description {
+                            Text(verbatim: description)
+                                .romeFont(CardScale.caption)
+                                .foregroundStyle(selected ? Color.white.opacity(0.8) : Palette.sub)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(selected ? Palette.primary : Palette.fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(PressScaleStyle())
+                .disabled(locked)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+    }
+}
+
+private struct WidgetTextField: View {
+    let node: Node
+    @Environment(\.widgetLocked) private var locked
+    @Environment(\.widgetClears) private var clears
+
+    var body: some View {
+        let value: Binding<String> = node.binding(for: "value", default: "")
+        let text = Binding(
+            get: { value.wrappedValue },
+            set: { typed in
+                value.wrappedValue = typed
+                if !typed.isEmpty, let target = clears.targets[node.id] { clears.clear(target, true) }
+            }
+        )
+        let label = node.string(for: "label") ?? ""
+        TextField(node.string(for: "placeholder") ?? label, text: text, axis: .vertical)
+            .lineLimit(node.string(for: "variant") == "longText" ? 3...6 : 1...4)
+            .romeFont(CardScale.body)
+            .foregroundStyle(Palette.fg)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Palette.fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .disabled(locked)
+            .accessibilityLabel(label)
+    }
+}
+
+/// A2UI's `required`, except that a string of spaces is no answer, as the
+/// question card and the dashboard have always read it.
+private final class TrimmedRequired: FunctionImplementation, Sendable {
+    let api = FunctionAPI(
+        name: "required",
+        returnType: .boolean,
+        // swiftlint:disable:next force_try
+        schema: try! Schema(instance: #"{"type":"object","properties":{"value":{}},"required":["value"]}"#)
+    )
+
+    func evaluate(arguments: [String: JSONSchema.JSONValue], context: DataContext) throws -> JSONSchema.JSONValue {
+        switch arguments["value"] {
+        case .string(let text): .boolean(!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        case .array(let list): .boolean(!list.isEmpty)
+        case .null, nil: .boolean(false)
+        default: .boolean(true)
+        }
     }
 }

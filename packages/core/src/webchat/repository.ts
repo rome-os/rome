@@ -1,4 +1,5 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
+import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import { canOpenSql, privateChildren } from "./privacy.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -54,6 +55,7 @@ import type {
 } from "@rome/api-types/trace-segments";
 import type { Account } from "@rome-os/app-runtime";
 import type { MessagePart } from "../types.js";
+import { sessionTaskEnded } from "./chat-read-model.js";
 import { agentMessageOutbound } from "../chats/history/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../access/session-actor.js";
 import {
@@ -323,7 +325,16 @@ export interface MessagePageOptions {
   limit: number;
   /** Return only groups strictly older than this cursor. */
   before?: MessagePageCursor | null;
+  /**
+   * A message the page must reach: the page holds every group down to the one
+   * with this message, and a few older ones, so one read lands on it however
+   * far back it is. A message the chat does not hold changes nothing.
+   */
+  through?: string;
 }
+
+/** How many groups older than a `through` message a page holds, so it opens with some context. */
+export const THROUGH_CONTEXT_GROUPS = 2;
 
 function traceReadFields(archivedSessionIds: string[]) {
   const archived = archivedSessionIds.length
@@ -415,7 +426,7 @@ export const sessionLastTurnFailed = sql<boolean>`coalesce((
 // collected once per list rather than scanned per chat. json_valid and the
 // object check skip rows that aren't block arrays (non-JSON, or legacy plain
 // text), which would otherwise fail the whole list.
-export const sessionAwaitingGuardian = sql<boolean>`(exists (
+export const sessionAwaitingGuardian = sql<boolean>`(not ${sessionTaskEnded} and (exists (
   select 1 from "rome_agent_messages" m, json_each(m."content") part
   where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
   and json_valid(m."content")
@@ -428,7 +439,7 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
   where a."status" = 'pending'
   and json_extract(a."payload", '$.channelContext.threadId') is not null
-))`.mapWith(Boolean);
+)))`.mapWith(Boolean);
 // The session's open cards, as a JSON array of { id, messageId, render, at }:
 // the cards after its last prompt that `sessionAwaitingGuardian` counts open,
 // each with its tool use id and how it renders, `at` in unix seconds. Pending
@@ -462,7 +473,9 @@ export const sessionInteractions = sql<string | null>`(
       'at', cast(m."created_at" as integer)
     ))
     from "rome_agent_messages" m, json_each(m."content") part
-    where m."session_id" = "rome_sessions"."id" and json_valid(m."content")
+    where m."session_id" = "rome_sessions"."id"
+    -- A cheap look before any JSON parsing: most messages hold no interaction.
+    and instr(m."content", 'interaction') > 0 and json_valid(m."content")
     and case when part."type" = 'object' then json_extract(part."value", '$.type') end
       in ('pending_interaction', 'interaction_result')
 )`;
@@ -1310,7 +1323,8 @@ export class WebChatRepository {
   /**
    * Which of `sessionIds` wait on the guardian, by the same rule as the
    * `awaitingGuardian` of a listed chat: a card after the last prompt, or a
-   * pending approval in the chat. Ids that name no chat are left out.
+   * pending approval in the chat, unless its task ended. Ids that name no
+   * chat are left out.
    */
   async awaitingGuardianOf(sessionIds: readonly string[]): Promise<Set<string>> {
     if (sessionIds.length === 0) return new Set();
@@ -1327,9 +1341,14 @@ export class WebChatRepository {
    * approval. Sessions that wait on nothing, or name no chat, are left out.
    */
   async awaitingGuardianSince(sessionIds: readonly string[]): Promise<Map<string, number>> {
+    // The same chats as `awaitingGuardian`: one whose task ended waits on no one.
+    const [waits, awaiting] = await Promise.all([
+      this.openWaitsOf(sessionIds),
+      this.awaitingGuardianOf(sessionIds),
+    ]);
     const since = new Map<string, number>();
-    for (const [id, items] of await this.openWaitsOf(sessionIds)) {
-      since.set(id, Math.max(...items.map((item) => item.since)));
+    for (const [id, items] of waits) {
+      if (awaiting.has(id)) since.set(id, Math.max(...items.map((item) => item.since)));
     }
     return since;
   }
@@ -2065,6 +2084,7 @@ export class WebChatRepository {
     content: string,
     turnId: string | null = null,
   ) {
+    assertWidgetAloneInContent(content);
     const accounting = traceAccountingColumns(role, content);
     await this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2114,6 +2134,7 @@ export class WebChatRepository {
     id: string = randomUUID(),
     _chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
+    assertWidgetAlone(parts);
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
       const rows = tx
@@ -2371,6 +2392,7 @@ export class WebChatRepository {
   }
 
   async updateMessageContent(id: string, content: string) {
+    assertWidgetAloneInContent(content);
     const rows = await this.db
       .select({ role: romeAgentMessages.role })
       .from(romeAgentMessages)
@@ -2405,6 +2427,9 @@ export class WebChatRepository {
    */
   async getMessagesPage(sessionId: string, options: MessagePageOptions) {
     const before = options.before;
+    const limit = options.through
+      ? Math.max(options.limit, await this.groupsThrough(sessionId, before, options.through))
+      : options.limit;
     const groups = await this.db.all<{ key: string; startedAt: number }>(sql`
       SELECT key, startedAt FROM (
         SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
@@ -2415,9 +2440,9 @@ export class WebChatRepository {
       )
       ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
       ORDER BY startedAt DESC, key DESC
-      LIMIT ${options.limit + 1}
+      LIMIT ${limit + 1}
     `);
-    const pageGroups = groups.slice(0, options.limit);
+    const pageGroups = groups.slice(0, limit);
     if (pageGroups.length === 0) return { rows: [], nextCursor: null };
     const keys = pageGroups.map((group) => group.key);
     const rows = await this.selectMessages(
@@ -2430,10 +2455,79 @@ export class WebChatRepository {
     return {
       rows,
       nextCursor:
-        groups.length > options.limit && oldest
+        groups.length > limit && oldest
           ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
           : null,
     };
+  }
+
+  /**
+   * How many groups a page from `before` must hold to reach the group of
+   * message `through`, with {@link THROUGH_CONTEXT_GROUPS} older ones. Zero
+   * when the chat does not hold that message, or it is not older than `before`.
+   */
+  protected async groupsThrough(
+    sessionId: string,
+    before: MessagePageCursor | null | undefined,
+    through: string,
+  ): Promise<number> {
+    const [row] = await this.db.all<{ n: number }>(sql`
+      WITH g AS (
+        SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
+               MIN(${romeAgentMessages.createdAt}) AS startedAt
+        FROM ${romeAgentMessages}
+        WHERE ${romeAgentMessages.sessionId} = ${sessionId}
+        GROUP BY key
+      ),
+      t AS (
+        SELECT g.key, g.startedAt FROM g
+        WHERE g.key = (
+          SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})
+          FROM ${romeAgentMessages}
+          WHERE ${romeAgentMessages.sessionId} = ${sessionId} AND ${romeAgentMessages.id} = ${through}
+        )
+      )
+      SELECT count(*) AS n FROM g, t
+      WHERE (g.startedAt, g.key) >= (t.startedAt, t.key)
+      ${before ? sql`AND (g.startedAt, g.key) < (${before.startedAt}, ${before.key})` : sql``}
+    `);
+    const n = row?.n ?? 0;
+    return n === 0 ? 0 : n + THROUGH_CONTEXT_GROUPS;
+  }
+
+  /**
+   * The assistant messages of chat `sessionId` that hold a task chat part,
+   * in the order they were said: where a task's card can show. From `since`
+   * on, when given.
+   */
+  async taskChatPartMessages(
+    sessionId: string,
+    since?: Date,
+  ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
+    // A turn starts where its first row does, its user and trace rows
+    // included: the start is read over all of them, not only the cards kept,
+    // so two turns whose cards share a second keep the transcript's order.
+    const turnStart = sql`(
+      SELECT MIN(t.created_at) FROM rome_agent_messages t
+      WHERE t.session_id = ${romeAgentMessages.sessionId}
+        AND COALESCE(t.turn_id, t.id) = COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})
+    )`;
+    return this.db
+      .select({
+        id: romeAgentMessages.id,
+        content: romeAgentMessages.content,
+        createdAt: romeAgentMessages.createdAt,
+      })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "assistant"),
+          like(romeAgentMessages.content, '%"task_chat"%'),
+          since ? gte(romeAgentMessages.createdAt, since) : undefined,
+        ),
+      )
+      .orderBy(turnStart, asc(romeAgentMessages.turnId), asc(romeAgentMessages.createdAt));
   }
 
   private selectMessages(where: SQL | undefined) {
@@ -2948,6 +3042,18 @@ export class WebChatRepository {
     return row?.sessionId ?? null;
   }
 
+  /** A message that holds a widget, by the id clients know it by: its chat and
+   *  its parts, read from one row, or null when no row or more than one has
+   *  that id. */
+  async widgetMessage(id: string): Promise<{ chatId: string; content: string } | null> {
+    const [row] = await this.db
+      .select({ sessionId: romeAgentMessages.sessionId, content: romeAgentMessages.content })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.id, id))
+      .limit(1);
+    return row ? { chatId: row.sessionId, content: row.content } : null;
+  }
+
   /** The chat a stored message belongs to, or null. */
   async sessionIdOfMessage(messageId: string): Promise<string | null> {
     const [row] = await this.db
@@ -3168,6 +3274,20 @@ export class WebChatRepository {
       )
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /** Every feedback row of the session, by turn id. A session has at most one per turn. */
+  async listTurnFeedback(sessionId: string): Promise<Map<string, StoredTurnFeedback>> {
+    const rows = await this.db
+      .select({
+        turnId: webchatTurnFeedback.turnId,
+        rating: webchatTurnFeedback.rating,
+        comment: webchatTurnFeedback.comment,
+        updatedAt: webchatTurnFeedback.updatedAt,
+      })
+      .from(webchatTurnFeedback)
+      .where(eq(webchatTurnFeedback.sessionId, sessionId));
+    return new Map(rows.map(({ turnId, ...row }) => [turnId, row]));
   }
 
   /**

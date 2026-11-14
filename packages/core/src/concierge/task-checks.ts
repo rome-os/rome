@@ -28,6 +28,8 @@ export interface PendingCheck {
   taskId: string | null;
   /** The next run of the task's repeating schedule; cancelling it skips that run only. */
   recurring?: true;
+  /** When it was scheduled, epoch milliseconds. */
+  createdAt?: number;
 }
 
 /**
@@ -61,6 +63,7 @@ function pendingCheckOf(
     at,
     waitingFor: typeof args.waitingFor === "string" ? args.waitingFor : null,
     taskId: typeof args.taskId === "string" ? args.taskId : null,
+    createdAt: routine.createdAt.getTime(),
     chatId: args.threadId,
     // Whose chat scheduled it, as `defer` recorded it.
     owner: typeof args.ownerKey === "string" ? args.ownerKey : "guardian",
@@ -91,6 +94,7 @@ function scheduledRunOf(
     waitingFor: null,
     taskId,
     recurring: true,
+    createdAt: routine.createdAt.getTime(),
     chatId: place.chatId,
     owner: place.owner,
   };

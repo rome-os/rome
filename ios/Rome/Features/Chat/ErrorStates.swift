@@ -250,7 +250,7 @@ struct ErrorLine: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if error.offersUsage, !isVisitor, let openUsage {
-                    Button(action: openUsage) {
+                    Button { openUsage.run(()) } label: {
                         Text("See usage")
                             .romeFont(CardScale.caption, .semibold)
                             .foregroundStyle(Palette.primaryText)
@@ -271,34 +271,55 @@ struct ErrorLine: View {
 
 extension EnvironmentValues {
     /// Opens Settings, where each AI tool's usage shows. Nil where there is no Settings.
-    @Entry var openUsage: (@MainActor () -> Void)? = nil
+    @Entry var openUsage: ShellAction<Void, Void>? = nil
 }
+
+/// The load-error bar: "Couldn't load this chat" with Retry, or with a
+/// spinner in Retry's place while an attempt runs.
+enum LoadBar: Equatable { case failed, retrying }
 
 /// What a transcript's store has to say above the chat: no network, a load
 /// that failed, or a short notice about an action that failed.
 struct TranscriptBanners: View {
     let store: TranscriptStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Whether any banner shows, for the room the screen leaves for it.
     static func shows(_ store: TranscriptStore) -> Bool {
-        store.loadError == .offline || store.loadFailed || store.retrying || store.notice != nil
+        store.loadError == .offline || store.loadBar != nil || store.notice != nil
     }
 
     var body: some View {
         VStack(spacing: 8) {
             if store.loadError == .offline {
                 TopBanner(kind: .warning, text: String(localized: "No network connection"))
-            } else if store.retrying {
-                TopBanner(kind: .info, text: String(localized: "Retrying…"))
-            } else if store.loadFailed {
-                TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry")) { store.retryLoad() }
+            } else if let bar = store.loadBar {
+                // One bar: a retry turns only its button into a spinner, and
+                // a failed one shakes the bar, so the attempt is seen.
+                TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry"), busy: bar == .retrying) {
+                    store.retryLoad()
+                }
+                .keyframeAnimator(initialValue: CGFloat.zero, trigger: store.retryFailures) { content, offset in
+                    content.offset(x: offset)
+                } keyframes: { _ in
+                    // With Reduce Motion the bar stays still; the haptic still tells.
+                    let amount: CGFloat = reduceMotion ? 0 : 1
+                    KeyframeTrack {
+                        LinearKeyframe(-7 * amount, duration: 0.06)
+                        LinearKeyframe(6 * amount, duration: 0.08)
+                        LinearKeyframe(-4 * amount, duration: 0.08)
+                        LinearKeyframe(2 * amount, duration: 0.07)
+                        LinearKeyframe(0, duration: 0.06)
+                    }
+                }
+                .sensoryFeedback(.impact(weight: .light), trigger: store.retryFailures)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
             if let notice = store.notice {
                 TopBanner(kind: .error, text: notice)
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.loadFailed)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.retrying)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.loadBar)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.notice)
     }
 }

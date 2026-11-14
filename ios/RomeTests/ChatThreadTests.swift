@@ -76,8 +76,9 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         return out
     }
 
-    /// Every Concierge message in a task's thread gets one, right under it:
-    /// plain text, a forward and a question shown alone alike.
+    /// A Concierge message in a task's thread gets one, right under it:
+    /// plain text, a forward and a question shown alone alike. Of a run of
+    /// three, the middle one shows none.
     @Test func everyConciergeMessageOfATaskThreadIsLabelled() {
         let ask: [[String: Any]] = [["type": "task_chat", "chatId": "c1", "title": "Book", "show": "ask"]]
         let forward: [[String: Any]] = [["type": "text", "content": "Done", "forwardedFrom": ["chatId": "c1", "title": "Book"]]]
@@ -88,7 +89,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
             message("a3", at: 30, thread: "u", parts: forward),
         ]
         let built = rows(messages)
-        #expect(labels(built) == ["a1": "Book a table", "a2": "Book a table", "a3": "Book a table"])
+        #expect(labels(built) == ["a1": "Book a table", "a3": "Book a table"])
         // Right under its own message.
         let index = built.firstIndex { $0.id == "label-a1" }!
         #expect(built[index - 1].id == "a1:0")
@@ -109,6 +110,38 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(labels(rows(messages)).isEmpty)
         let threaded = [message("a", at: 0, thread: "u", title: "Book")]
         #expect(labels(rows(threaded, threads: false)).isEmpty)
+    }
+
+    /// Only the first and last of a run are labelled; a run of one or two
+    /// labels each. An Agent message from another thread or none, or a task
+    /// card, ends the run; the guardian's messages are skipped.
+    @Test func onlyTheEndsOfARunAreLabelled() {
+        let card: [[String: Any]] = [["type": "task_chat", "chatId": "c1", "title": "Book", "show": "task"]]
+        let messages = [
+            message("a1", at: 0, thread: "u", title: "Book"),
+            message("a2", at: 1, thread: "u"),
+            // The guardian in the middle neither ends the run nor joins it.
+            message("q1", role: "user", at: 2),
+            message("a3", at: 3, thread: "u"),
+            message("q2", role: "user", at: 4, thread: "u"),
+            message("a4", at: 5, thread: "u"),
+            // Another thread ends it.
+            message("b1", at: 6, thread: "v", title: "Fly"),
+            message("a5", at: 7, thread: "u"),
+            message("q3", role: "user", at: 8),
+            message("a6", at: 9, thread: "u"),
+            // A task card ends it.
+            message("c", at: 10, thread: "u", parts: card),
+            message("a7", at: 11, thread: "u"),
+            // An Agent message in no thread ends it.
+            message("x", at: 12),
+            message("a8", at: 13, thread: "u"),
+            message("a9", at: 14, thread: "u"),
+            message("a10", at: 15, thread: "u"),
+        ]
+        #expect(TranscriptBuilder.threadLabels(messages) == [
+            "a1": "Book", "a4": "Book", "b1": "Fly", "a5": "Book", "a6": "Book", "a7": "Book", "a8": "Book", "a10": "Book",
+        ])
     }
 
     /// The title comes from any message of the thread, a live placement too.
@@ -242,11 +275,15 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let store = await chat(backend, [message("u", role: "user", at: 0, thread: "u", title: "T"), message("a1", "sure", at: 10, thread: "u", title: "T"), message("a2", "more", at: 20, thread: "u", title: "T")])
         store.openThread(at: "a2")
         #expect(store.thread != nil && store.tinted == "a2" && store.replies == 0)
+        // Opened from its label: no reply bar.
+        #expect(!store.showsQuoteBar)
         store.reply(to: "a1")
         #expect(store.thread != nil && store.replies == 1)
-        #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a2"))
+        // Reply inside goes to the thread, quoting no message, and its bar names the task.
+        #expect(store.composerThread?.body == ["chatThread": .string("a2")])
+        #expect(store.showsQuoteBar && store.threadReplyTitle == "T" && store.quotedMessage == nil)
         store.cancelQuote()
-        #expect(store.thread == nil && store.quote == nil)
+        #expect(store.thread == nil && store.quote == nil && !store.showsQuoteBar && store.threadReplyTitle == nil)
     }
 
     /// Task chats have no chat threads.
@@ -344,6 +381,15 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(store.composerThread == nil)
     }
 
+    /// Only the Agent's text offers Reply: no card of any kind, open or folded.
+    @Test func cardsOfferNoReply() {
+        #expect(ConciergeRow.offersReply(.agentText(id: "a:0", text: "x", long: false, forwardedFrom: nil, position: .single)))
+        #expect(!ConciergeRow.offersReply(.userText(id: "u:0", text: "x", pending: nil)))
+        #expect(!ConciergeRow.offersReply(.taskCard(id: "c:0", chatId: "c", title: "T")))
+        #expect(!ConciergeRow.offersReply(.taskAsk(id: "k:0", chatId: "c", title: "T", card: nil)))
+        #expect(!ConciergeRow.offersReply(.webOnly(id: "w:0", kind: .unknown)))
+    }
+
     /// The quote is read from its part, and shows nothing of its own.
     @Test func aReplyCarriesItsQuote() {
         let parts = reply("r", to: "a", at: 0).parts
@@ -352,7 +398,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(built.map(\.id) == ["sep-r", "r:1"])
     }
 
-    /// A reply in a task's thread opens the thread view, replying to the
+    /// A reply in a task's thread opens the thread view, tinting the
     /// original; any other jumps to the original and tints it.
     @Test func theQuoteLeadsToTheThreadOrTheOriginal() async {
         let store = await chat([
@@ -363,8 +409,9 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         store.quoteAction(reply: "r1", original: "a")?()
         #expect(store.thread == nil && store.jumpTarget == "a" && store.jumps == 1 && store.tinted == "a")
         store.quoteAction(reply: "r2", original: "a")?()
-        #expect(store.thread?.anchor.id == "r2")
-        #expect(store.composerThread == ThreadTarget(messageId: "a", instanceKnowsThreads: true, quote: true, thread: "r2"))
+        #expect(store.thread?.anchor.id == "r2" && store.tinted == "a")
+        // A send from the thread view goes to the thread, quoting nothing.
+        #expect(store.composerThread?.body == ["chatThread": .string("r2")] && !store.showsQuoteBar)
         store.closeThread()
         // An original not held leads nowhere.
         #expect(store.quoteAction(reply: "r1", original: "gone") == nil)
