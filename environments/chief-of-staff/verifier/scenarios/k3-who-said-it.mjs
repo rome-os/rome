@@ -103,7 +103,8 @@ export default {
 
     // Says a commitment to the agent and waits for it to take it in. Without `chat`, it is
     // said in the member's private chat.
-    const say = async (as, chat, text) => (await ask(ctx, { as, chat, text })).questionId;
+    const say = async (as, chat, text) =>
+      (await ask(ctx, { as, chat, text, statement: true })).questionId;
 
     const single = { ...SINGLE, id: await say(account(SINGLE.member), undefined, SINGLE.text) };
 

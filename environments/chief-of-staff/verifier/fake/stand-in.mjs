@@ -97,6 +97,14 @@ function answer(state, message, breaks) {
 export function respond({ agent, state, message }) {
   if (agent === "silent") return null;
   if (agent === "quiet" && !/are you around/i.test(message.text)) return null;
+  // "held-statement": writes a reply to each K3 commitment said in general, which the envoy holds.
+  if (
+    agent === "held-statement" &&
+    message.chat === "general" &&
+    /commit/i.test(message.text) &&
+    !message.text.trim().endsWith("?")
+  )
+    return { held: true, question: message.id, text: "Noted." };
   // "held-K1": writes the K1 answer, which the envoy holds back.
   if (agent === "held-K1" && /who is on the team/i.test(message.text))
     return { held: true, question: message.id, text: roster(state, null) };

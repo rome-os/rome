@@ -8,7 +8,7 @@ import { secondsBetween, waitForAgent } from "./checks.mjs";
  * `watch` (default: the chat the question was asked in). Resolves to `{ questionId, reply }`,
  * where `reply` is null when the agent stayed silent past the reply wait.
  */
-export async function ask(ctx, { as, chat, thread, text, watch, timeoutMs }) {
+export async function ask(ctx, { as, chat, thread, text, watch, timeoutMs, statement = false }) {
   const chats = watch ?? [chat ?? dmChat(as)];
   const once = async () => {
     const startedAt = await romeStartedAt(ctx.env);
@@ -49,6 +49,8 @@ export async function ask(ctx, { as, chat, thread, text, watch, timeoutMs }) {
     const asked = reply ? (await ctx.env.read(where)).find((m) => m.id === questionId) : null;
     ctx.answerTimes.push({
       rule: ctx.rule ?? "liveness",
+      // A statement, such as a K3 commitment, is said to the agent but is not a question.
+      kind: statement ? "statement" : "question",
       chat: chat ?? dmChat(as).label,
       questionId,
       replyId: reply?.id ?? null,

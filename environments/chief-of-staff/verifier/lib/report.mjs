@@ -122,7 +122,7 @@ export function renderMarkdown(report) {
         .replaceAll("\n", " ");
     for (const s of report.stoppedByEnvoy)
       lines.push(
-        `| ${s.rule ?? "?"} | ${s.chat ?? "?"} | ${s.questionId} | ${s.status} | ${s.scored ? "yes, fails its rule" : "no"} | ${cell(s.reply)} | ${cell(s.reason)} |`,
+        `| ${s.rule ?? "?"} | ${s.chat ?? "?"} | ${s.questionId} | ${s.status} | ${s.scored ? "yes, fails its rule" : `no${s.kind === "statement" ? ", not a question" : ""}`} | ${cell(s.reply)} | ${cell(s.reason)} |`,
       );
   }
   if (report.romeEvents.length > 0) {

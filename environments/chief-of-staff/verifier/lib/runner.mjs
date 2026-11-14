@@ -103,6 +103,7 @@ async function envoyStops(env, startedAt, answerTimes, results) {
       return {
         rule: asked?.rule ?? null,
         chat: asked?.chat ?? null,
+        kind: asked?.kind ?? null,
         questionId: h.question,
         status: h.status,
         reply: h.reply,
@@ -111,6 +112,8 @@ async function envoyStops(env, startedAt, answerTimes, results) {
       };
     });
   for (const stop of stops) {
+    // A held reply to a statement leaves no question unanswered.
+    if (stop.kind !== "question") continue;
     for (const result of results) {
       for (const c of result.checks ?? []) {
         if (

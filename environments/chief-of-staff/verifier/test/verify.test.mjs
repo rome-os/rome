@@ -170,6 +170,13 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.match(markdown, /\| K1 Team \| fail \(the envoy stopped a reply\)/);
   });
 
+  it("lists a held reply to a statement without scoring it", async () => {
+    const { report } = await runAgainst("held-statement", { rules: ["K3"] });
+    assert.deepEqual(statuses(report), { K3: "pass" });
+    assert.ok(report.stoppedByEnvoy.length > 0);
+    assert.ok(report.stoppedByEnvoy.every((s) => s.kind === "statement" && !s.scored));
+  });
+
   it("posts a question again when Rome restarted while it waited", async () => {
     const { report, outDir } = await runAgainst("good", {
       rules: ["A1"],
