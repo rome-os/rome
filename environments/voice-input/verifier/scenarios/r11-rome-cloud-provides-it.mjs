@@ -151,7 +151,11 @@ async function signedOut(env, message) {
     // Nothing may reach the transcriber on the instance's own settings.
     const decoy = await env
       .transcriberStatus()
-      .then((t) => t?.decoyConnections)
+      .then((t) => {
+        // The environment lists each connection on the decoy key; the fake counts them.
+        const decoy = t?.stats?.decoyConnections ?? t?.decoyConnections;
+        return Array.isArray(decoy) ? decoy.length : decoy;
+      })
       .catch(() => undefined);
     const used = typeof decoy === "number" && decoy > 0;
     return required(

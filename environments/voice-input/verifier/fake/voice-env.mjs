@@ -151,7 +151,7 @@ switch (command) {
     break;
   case "transcriber":
     if (positionals[0] === "status") {
-      print({ decoyConnections: 0 });
+      print({ stats: { decoyConnections: [] } });
       break;
     }
     updateState(statePath, (s) => {
