@@ -1,5 +1,14 @@
 import { release } from "os";
-import { app, BrowserWindow, dialog, net, Notification, powerSaveBlocker, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  net,
+  Notification,
+  powerSaveBlocker,
+  session,
+  shell,
+} from "electron";
 import { initDatabase } from "./db/database";
 import { createLogger, LOG_FILE } from "./logger";
 import {
@@ -37,6 +46,7 @@ import { KeepAwake } from "./keep-awake";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
 import { openAudit, registerAuditHandlers } from "./audit";
 import { createAuditWindow } from "./window";
+import { installMicrophonePermission } from "./microphone-permission";
 
 const log = createLogger("main");
 
@@ -168,6 +178,8 @@ async function bootstrap() {
       device,
     });
 
+    // Read at each request: the Rome the window opens can change.
+    installMicrophonePermission(session.defaultSession, () => runtime.getDashboardUrl());
     mainWindow = await createMainWindow(runtime);
     log.info("Main window created");
 
