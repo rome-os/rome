@@ -5,6 +5,7 @@ import { createVoiceInputSource } from "./voice-input-source.js";
 const own: Transcriber = {
   place: { provider: "Soniox", host: "transcriber:8790" },
   model: "stt-rt-v6",
+  providerId: "soniox",
   open: () => ({ sendAudio: () => {}, finish: () => {}, abort: () => {} }),
 };
 

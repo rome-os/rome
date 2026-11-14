@@ -38,6 +38,8 @@ export interface Transcriber {
   readonly place: TranscriptionPlace;
   /** The provider's model, as usage names it. */
   readonly model: string;
+  /** The provider's lower-case id, as Rome Cloud and usage name it, such as `soniox`. */
+  readonly providerId: string;
   /** Opens one stream. Audio sent before the provider answers is held and sent in order. */
   open(options: { sampleRate: number }, listener: TranscriptionListener): TranscriptionStream;
 }
