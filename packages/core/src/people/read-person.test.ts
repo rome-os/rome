@@ -59,7 +59,7 @@ describe("core:read_person", () => {
     // named after their id.
     notes.set(`memory/relationship/${bob}.md`, "Plays bass.");
 
-    expect(await read("ana lopez")).toEqual({
+    expect(await read("ana lopez", { actor: guardian })).toEqual({
       status: "ok",
       data: {
         people: [
@@ -72,7 +72,7 @@ describe("core:read_person", () => {
         ],
       },
     });
-    expect(await read("Bob")).toMatchObject({
+    expect(await read("Bob", { actor: guardian })).toMatchObject({
       status: "ok",
       data: { people: [{ name: "Bob", notes: "Plays bass." }] },
     });
@@ -92,6 +92,11 @@ describe("core:read_person", () => {
     expect((await read("Ana Lopez", { channelContext: visitorChat })).status).toBe("error");
     const goneChat = { channel: "webchat", threadId: "gone-chat" };
     expect((await read("Ana Lopez", { channelContext: goneChat })).status).toBe("error");
+  });
+
+  it("refuses a turn with neither an actor nor a chat, such as an agent summoned from a visitor's task", async () => {
+    await people.create({ displayName: "Ana Lopez", bondLevel: "inner-circle" });
+    expect((await read("Ana Lopez", {})).status).toBe("error");
   });
 
   it("reads for a turn no one started in the guardian's chat or a chat on a connection", async () => {

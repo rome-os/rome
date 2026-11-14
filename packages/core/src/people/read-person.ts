@@ -54,8 +54,10 @@ export function registerReadPersonAction(
     execute: async (args) => {
       // The notes are the guardian's own, so a visitor never reads them: not
       // as the turn's actor, and not through a turn no one started in a chat
-      // the visitor owns, such as a task the Concierge runs for them. A chat
-      // on a connection has no owner and is the guardian's agent's.
+      // the visitor owns, such as a task the Concierge runs for them. A turn
+      // with neither an actor nor a chat, such as an agent summoned from that
+      // task, cannot show it is the guardian's and is refused too. A chat on a
+      // connection has no owner and is the guardian's agent's.
       const context = actionExecutionContext.getStore();
       const refused = {
         status: "error" as const,
@@ -63,6 +65,7 @@ export function registerReadPersonAction(
       };
       if (context?.actor && context.actor.kind !== "guardian") return refused;
       const thread = context?.channelContext;
+      if (!context?.actor && !thread) return refused;
       if (thread?.channel === "webchat") {
         const owner = thread.threadId ? await deps.ownerOfChat(thread.threadId) : null;
         if (owner !== "guardian") return refused;
