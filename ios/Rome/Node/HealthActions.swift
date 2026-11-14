@@ -302,7 +302,7 @@ struct HealthActions: Sendable {
                 workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
                 sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
                 A type the user has not allowed, or that has no data, has no value. \
-                Apple Health is off for Rome until the user turns on Settings → Apple Health → Sync with Rome in the Rome app on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+                Apple Health is off for Rome until the user turns it on: Settings → Apple Health → Sync with Rome in the Rome app on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
                 """,
             "health.samples": """
                 Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \

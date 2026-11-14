@@ -422,7 +422,7 @@ enum HealthFixtures {
 
     @Test func withTheSwitchOffTheHealthActionsAreRefusedBeforeHealthIsTouched() async {
         let health = FakeHealth()
-        var actions = HealthFixtures.actions(health)
+        let actions = HealthFixtures.actions(health)
         actions.enabled.set(false)
         for (action, args) in [("health.stats", #"{"type":"stepCount"}"#), ("health.samples", #"{"type":"heartRate"}"#), ("health.stats", "{}"), ("health.stats", #"{"type":"bloodType"}"#)] {
             let result = await actions.run(action, args: parseJSON(args))

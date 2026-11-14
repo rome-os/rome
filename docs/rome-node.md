@@ -573,7 +573,7 @@ state, personal, actions}`, where `state` is `off`, `needs_permission` or `on`
 and `personal` marks the guardian's personal data (Health is, Device status is
 not). The phone routes an action by its prefix, the text before the first dot.
 An action of a capability that is off fails with `<prefix>_off`, one that lacks
-iOS access with `<prefix>_no_permission`; both are recorded in the audit log, and
+iOS access with `<prefix>_no_permission`. Both are recorded in the audit log, and
 the message tells the agent that the user must change it on the phone. The
 actions are read-only:
 
@@ -624,13 +624,13 @@ on while iOS has never been asked shows the system's access sheet at once, then
 starts the history backfill. Health values go to the user's Rome and to the AI
 model behind it, so the page shows what the Rome can do with Health as three short
 chats, and where the data goes: from the iPhone to the Rome and on to its AI model
-provider. Four short promises follow: Health is kept up to date on the Rome, read
-only and never changed; Rome never sells it, uses it for ads, or uses it to train
-AI models, and the user's AI provider's terms apply to what it receives; the user
-can delete what was sent; results can stay in the Rome's chats and memory. A line
+provider. Four short promises follow. Health is kept up to date on the Rome, read
+only and never changed. Rome never sells it, uses it for ads, or uses it to train
+AI models, and the user's AI provider's terms apply to what it receives. The user
+can delete what was sent. Results can stay in the Rome's chats and memory. A line
 under the switch says how the sync stands, and **Sync history** lists the syncs of
 the last 30 days with Sync now, Pause and Delete uploaded data. A build before sync
-had its own "Allow Rome to read Health" switch under iPhone use; that consent did
+had its own "Allow Rome to read Health" switch under iPhone use. That consent did
 not cover uploading history, so sync starts off, and the page says once that
 Health now syncs.
 
