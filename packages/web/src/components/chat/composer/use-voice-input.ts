@@ -118,7 +118,6 @@ export function useVoiceInput({
     };
   }, []);
 
-
   const commit = useCallback(
     (heard: string) => {
       const anchor = anchorRef.current;
