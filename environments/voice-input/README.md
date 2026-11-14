@@ -1,6 +1,6 @@
 # Voice input environment
 
-Everything the voice input verifier needs to score the product without a person: a Rome instance it can start and reset, signed in to a Rome Cloud of its own, a Chrome whose microphone is a recording, and a transcriber it controls. The rules it serves are in `~/.rome-environments/voice-input/rules-V3.md`. The verifier lives in `verifier/` and drives the environment only through `voice-env`.
+Everything the voice input verifier needs to score the product without a person: a Rome instance it can start and reset, signed in to a Rome Cloud of its own, a Chrome whose microphone is a recording, and a transcriber it controls. The rules it serves are in `~/.rome-environments/voice-input/rules-V4.md`. The verifier lives in `verifier/` and drives the environment only through `voice-env`.
 
 The `try/` folder is separate: a page for hearing the transcription providers side by side. See [try/README.md](try/README.md).
 
