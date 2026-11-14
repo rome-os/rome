@@ -32,6 +32,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   connectorOf,
   followStateWith,
+  refreshConciergeConnectors,
   useConciergeConnectors,
 } from "@/hooks/use-concierge-connectors";
 import { useLiveEvents } from "@/hooks/use-live-events";
@@ -45,7 +46,7 @@ import { describeRoutineTrigger, describeTaskSchedule, formatClock } from "./tas
 
 export const chatTaskListKey = (chatId: string) => ["chat-tasks", chatId] as const;
 const listUrl = (chatId: string) => `/api/chats/${encodeURIComponent(chatId)}/tasks`;
-const changedSchema = z.object({ chatId: z.string() });
+const changedSchema = z.object({ chatId: z.string(), follows: z.literal(true).optional() });
 
 /** How many ended rows show at first, and how many more each "Show more" adds. */
 export const ENDED_PAGE = TASK_LIST_ENDED_PAGE;
@@ -465,8 +466,22 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   const reread = () => queryClient.invalidateQueries({ queryKey: chatTaskListKey(chatId) });
   useLiveEvents(
     { topic: chatTasksTopicName(chatId), sseUrl: `${listUrl(chatId)}/events` },
-    { [TASK_LIST_CHANGED_EVENT]: { schema: changedSchema, fn: reread } },
-    { onReconnect: reread },
+    {
+      [TASK_LIST_CHANGED_EVENT]: {
+        schema: changedSchema,
+        fn: ({ follows }) => {
+          void reread();
+          // A new or changed follow may name a source the snapshot has not read.
+          if (follows) void refreshConciergeConnectors(queryClient);
+        },
+      },
+    },
+    {
+      onReconnect: () => {
+        void reread();
+        void refreshConciergeConnectors(queryClient);
+      },
+    },
   );
   // Times count down by the minute.
   const [now, setNow] = useState(() => Date.now());

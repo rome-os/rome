@@ -181,6 +181,7 @@ describe("TaskList", () => {
         label: "GitHub",
         capabilities: {
           watch: {
+            state: "unlocked",
             follows: [
               { target: "acme/up", state: "active" },
               { target: "acme/down", state: "unavailable" },
@@ -195,6 +196,51 @@ describe("TaskList", () => {
     expect(within(rowOf("acme/up")).queryByText(/Not available/)).toBeNull();
     expect(within(rowOf("acme/up")).getByText(/GitHub/)).toBeTruthy();
     expect(requests.filter((r) => r.url === "/api/concierge/connectors")).toHaveLength(1);
+  });
+
+  it("reads the connector list again when a follow changes, and not for any other change", async () => {
+    parts = {
+      tasks: [],
+      checks: [],
+      follows: [
+        {
+          kind: "follow",
+          source: "github",
+          label: "GitHub",
+          target: "acme/up",
+          state: "active",
+          digestTimes: [],
+        },
+      ],
+      routines: [],
+    };
+    connectors = [
+      {
+        service: "github",
+        label: "GitHub",
+        capabilities: { watch: { state: "unlocked", follows: [] } },
+      },
+    ];
+    renderList();
+    await screen.findByText("acme/up");
+    const connectorReads = () =>
+      requests.filter((r) => r.url === "/api/concierge/connectors").length;
+    await waitFor(() => expect(connectorReads()).toBe(1));
+    const socket = acceptLatestSocket();
+    const changed = (data: Record<string, unknown>) =>
+      socket.receive({
+        type: "event",
+        topic: chatTasksTopicName("concierge"),
+        event: "tasks_changed",
+        data: { chatId: "concierge", ...data },
+      });
+    const listReads = () =>
+      requests.filter((r) => r.method === "GET" && r.url.startsWith("/api/chats/")).length;
+    changed({});
+    await waitFor(() => expect(listReads()).toBe(2));
+    expect(connectorReads()).toBe(1);
+    changed({ follows: true });
+    await waitFor(() => expect(connectorReads()).toBe(2));
   });
 
   it("shows placeholder rows while the first read is on its way", async () => {

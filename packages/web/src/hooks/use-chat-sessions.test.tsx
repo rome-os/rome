@@ -60,6 +60,30 @@ describe("useChatSessions", () => {
     expect(rs.mocked(listSessions).mock.calls.map((call) => call[0])).toEqual(["active", "all"]);
   });
 
+  it("reads its own list once the sidebar's is no longer on screen, as that one goes stale", async () => {
+    rs.mocked(listSessions).mockImplementation(async () => [
+      { id: "open", name: "open", awaitingGuardian: true } as never,
+    ]);
+    const wrapper = wrapperFor(client);
+    const sidebar = renderHook(() => useChatSessions("active", "all"), { wrapper });
+    const card = renderHook(() => useChatSession("open"), { wrapper });
+    await waitFor(() => expect(card.result.current.session).toMatchObject({ id: "open" }));
+    expect(rs.mocked(listSessions).mock.calls.map((call) => call[0])).toEqual(["active"]);
+
+    sidebar.unmount();
+    await waitFor(() =>
+      expect(rs.mocked(listSessions).mock.calls.map((call) => call[0])).toEqual(["active", "all"]),
+    );
+    // An event now refetches the card's own list, which it reads.
+    rs.mocked(listSessions).mockImplementation(async () => [
+      { id: "open", name: "open", awaitingGuardian: false } as never,
+    ]);
+    act(() => emitSessionsChanged());
+    await waitFor(() =>
+      expect(card.result.current.session).toMatchObject({ awaitingGuardian: false }),
+    );
+  });
+
   it("refetches once when many consumers share one sessions-changed event", async () => {
     const wrapper = wrapperFor(client);
     for (let i = 0; i < 12; i += 1) renderHook(() => useChatSessions("all", "all"), { wrapper });

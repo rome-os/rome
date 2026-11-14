@@ -269,12 +269,18 @@ export function ChatThreadView({
 
 /**
  * The task chat of thread `threadRoot`, from the thread's own messages: the
- * chat a task card or question card in it names, or null when none loaded does.
+ * task chat Rome names on them, else the chat a task card or question card in
+ * it names (a server before the name), or null when none loaded does.
  */
 export function taskChatOfThread(
   messages: readonly ChatMessage[],
   threadRoot: string,
 ): string | null {
+  for (const message of messages) {
+    if (message.chatThreadId === threadRoot && message.chatThreadTaskChatId) {
+      return message.chatThreadTaskChatId;
+    }
+  }
   for (const message of messages) {
     if (message.id !== threadRoot && message.chatThreadId !== threadRoot) continue;
     if (message.role !== "assistant") continue;
@@ -294,6 +300,7 @@ export function OpenThreadTaskChat({
   messageId,
   threadRoot,
   messages,
+  liveTaskChat,
   size,
   className,
 }: {
@@ -303,6 +310,8 @@ export function OpenThreadTaskChat({
   threadRoot: string;
   /** The chat's loaded messages. */
   messages: readonly ChatMessage[];
+  /** The thread's task chat a live placement told, if one did. */
+  liveTaskChat?: string | null;
   size: "sm" | "md";
   className?: string;
 }) {
@@ -315,8 +324,11 @@ export function OpenThreadTaskChat({
     enabled: false,
   });
   const chatId = useMemo(
-    () => taskChatOfThread(thread ?? [], threadRoot) ?? taskChatOfThread(messages, threadRoot),
-    [thread, messages, threadRoot],
+    () =>
+      liveTaskChat ??
+      taskChatOfThread(thread ?? [], threadRoot) ??
+      taskChatOfThread(messages, threadRoot),
+    [liveTaskChat, thread, messages, threadRoot],
   );
   if (!chatId) return null;
   return (

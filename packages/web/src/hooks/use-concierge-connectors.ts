@@ -41,18 +41,21 @@ export function connectorOf(
 }
 
 /**
- * A follow row's state with whether its service can deliver now. The task list
- * says only `off` or `active`; a follow the list does not show as active
- * (its service not ready, a kind on not delivered, or the service gone) is
- * unavailable. Until the list is read the row keeps the task list's state.
+ * A follow row's state. The task list says it (`off`, `active`, or, from
+ * sources Rome read moments before, `unavailable`); the connector list only
+ * adds `unavailable`, when it shows the follow's service cannot deliver it.
+ * It never turns a follow on or off: its snapshot can be older than the list.
  */
 export function followStateWith(
   list: ConciergeConnectorsResponse | undefined,
   follow: { source: string; target: string; state: ConciergeFollowDto["state"] },
 ): ConciergeFollowDto["state"] {
-  if (follow.state === "off" || !list) return follow.state;
-  const listed = connectorOf(list, follow.source)?.capabilities.watch.follows?.find(
-    (f) => f.target === follow.target,
-  );
-  return listed?.state ?? "unavailable";
+  if (follow.state !== "active" || !list) return follow.state;
+  const connector = connectorOf(list, follow.source);
+  // A service the snapshot does not list may be one connected since it was read.
+  if (!connector) return follow.state;
+  const watch = connector.capabilities.watch;
+  const listed = watch.follows?.find((f) => f.target === follow.target);
+  const ready = watch.state === "unlocked" && !watch.degradation;
+  return listed?.state === "unavailable" || !ready ? "unavailable" : follow.state;
 }

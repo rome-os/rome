@@ -291,7 +291,7 @@ describe("Webchat API", () => {
       deps: {
         tasks: {
           repo: {
-            threadTitles: async () => new Map(),
+            threadTasks: async () => new Map(),
             onThreadRetired: () => () => {},
           },
           reactionsOf: async () => new Map(),
@@ -7445,8 +7445,9 @@ describe("Webchat API", () => {
       await deps.webchatRepo.addMessage("g3", "topic", "user", text("And this?"), "turn-3");
       await deps.webchatRepo.placeInChatThread("topic", "g1", { starts: true, settle: true });
       await deps.webchatRepo.placeInChatThread("topic", "g3", { starts: true, settle: true });
+      await deps.webchatRepo.createSession("tokyo-chat", "Tokyo weather");
       const [task] = await repo.upsertMany([
-        { title: "Tokyo weather", state: "doing", chatId: "topic" },
+        { title: "Tokyo weather", state: "doing", chatId: "topic", sessionId: "tokyo-chat" },
       ]);
       await repo.setThreadRoot(task.id, "g1");
       // Rows from before one thread per task may share a root: the thread
@@ -7466,6 +7467,8 @@ describe("Webchat API", () => {
       expect(listed.find((m) => m.id === "g1")).toMatchObject({
         chatThreadId: "g1",
         chatThreadTitle: "Tokyo weather",
+        // Its task chat, so the thread view opens it with no card in the thread.
+        chatThreadTaskChatId: "tokyo-chat",
       });
       // Only a task has a thread: one from before that no task has is sent as
       // none, so every client shows it as none.
@@ -7485,7 +7488,7 @@ describe("Webchat API", () => {
       await deps.webchatRepo.placeInChatThread("topic", "g2", { in: "g1", settle: true });
       const told = await placed;
       expect(told).toContain(
-        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g2", chatThreadId: "g1", chatThreadTitle: "Tokyo weather" })}`,
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g2", chatThreadId: "g1", chatThreadTitle: "Tokyo weather", chatThreadTaskChatId: "tokyo-chat" })}`,
       );
       expect(told).not.toContain('"messageId":"g4"');
 
@@ -8035,6 +8038,29 @@ describe("Webchat API", () => {
       unsubscribe();
       await reader.cancel();
       expect(listeners.size).toBe(0);
+    });
+
+    it("tells the status stream a task chat stopped when its task ends, though no turn ran", async () => {
+      let ended: ((row: { sessionId: string | null }) => void) | null = null;
+      deps.concierge = {
+        deps: {
+          tasks: {
+            onEnded: (listener: (row: { sessionId: string | null }) => void) => {
+              ended = listener;
+              return () => {};
+            },
+          },
+        },
+      } as never;
+      const { runtime } = createWebchatRuntime(deps);
+      const emit = rs.fn();
+      const unsubscribe = runtime.subscribeStatusEvents(emit);
+      ended!({ sessionId: "task-chat" });
+      expect(emit).toHaveBeenCalledWith("session_running", {
+        sessionId: "task-chat",
+        running: false,
+      });
+      unsubscribe();
     });
 
     it("reports a running chat in the list and on the status stream", async () => {

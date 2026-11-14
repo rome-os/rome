@@ -1617,6 +1617,28 @@ describe("follows in several Concierge chats", () => {
     s.stop();
   });
 
+  it("says a follow is unavailable from sources read in the last 30 s, and never reads them for it", async () => {
+    const options: Parameters<typeof setup>[0] = {};
+    const s = setup(options);
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "gmail" });
+    s.calling.chat = null;
+    options.gmailStatus = "error";
+    // `list` reads the sources, as the connector list does: they are warm now.
+    await s.following().list();
+    const asked = () => s.calls.filter(([name]) => name === "connector_watch_sources").length;
+    const before = asked();
+    const stateIn = async () =>
+      (await s.following().followsIn!("calendar", GUARDIAN_OWNER)).map((r) => r.state);
+    expect(await stateIn()).toEqual(["unavailable"]);
+    // Past the TTL it reads what is stored, rather than wait for the sources.
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(Date.now() + 31_000);
+    expect(await stateIn()).toEqual(["active"]);
+    expect(asked()).toBe(before);
+    s.stop();
+  });
+
   it("lists only one chat's follows of one owner, and ending them keeps another person's routines", async () => {
     const s = setup();
     const ann = "visitor:acct-ann";

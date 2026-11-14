@@ -1403,20 +1403,29 @@ export function startConciergeFollowing(
     ...unserialized,
     async followsIn(chatId, owner) {
       // The panel reads only what is stored: asking the providers costs a
-      // round trip to each service. Whether a source is ready now comes from
-      // `GET /concierge/connectors`; a label comes from sources read before.
+      // round trip to each service, so this never reads the sources. A label
+      // comes from sources read before. Sources read within their TTL also
+      // say whether each source can deliver now, for clients that do not read
+      // `GET /concierge/connectors`; past it, a follow reads off or active.
       const stored = await readStored();
       const known = sourcesCache?.watch ?? [];
+      const fresh = sourcesCache !== null && now() - sourcesCache.at < SOURCES_TTL_MS;
       const { digestTimes } = rulesOf(stored, owner);
       const items: TaskListFollowItem[] = [];
       for (const follow of followsOf(stored, owner)) {
         if ((await chatRefOf(follow.chat, owner)).id !== chatId) continue;
+        const source = known.find((s) => s.source === follow.source);
+        const stored = follow.kinds.length === 0 ? "off" : "active";
         items.push({
           kind: "follow",
           source: follow.source,
-          label: known.find((s) => s.source === follow.source)?.label ?? follow.source,
+          label: source?.label ?? follow.source,
           target: follow.target,
-          state: follow.kinds.length === 0 ? "off" : "active",
+          state: !fresh
+            ? stored
+            : source
+              ? toDto(source, follow, { id: chatId, name: "", main: false }).state
+              : "unavailable",
           digestTimes,
           ...(follow.createdAt !== undefined ? { createdAt: follow.createdAt } : {}),
         });

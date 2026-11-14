@@ -253,6 +253,8 @@ function truncateForQuote(text: string): string {
     : text;
 }
 
+/** The task a chat thread is: its title, and its task chat, or null while it has none. */
+type ThreadTask = { title: string; taskChatId: string | null };
 type RatedExchange = { userText: string | null; assistantText: string | null };
 
 function buildTurnFeedbackProcessingPrompt(
@@ -1149,6 +1151,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const openTool = (sessionId: string): string | null =>
     openToolOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
+  // A task that ended closes its chat's cards, so the chat waits on no one:
+  // a stop's `session_running` is every client's cue to read the list again,
+  // even when no turn ran, as on a Stop from the Tasks panel or a wait's expiry.
+  deps.concierge?.deps?.tasks?.onEnded?.((row) => {
+    if (row.sessionId) notifyRunning(row.sessionId);
+  });
   const subscribeStatusEvents = (emit: LiveEventEmit): (() => void) => {
     const listener = (event: { sessionId: string; running: boolean }) =>
       emit("session_running", event);
@@ -1205,11 +1213,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // name it. Only a task has a thread, so a placement in none is not told.
     const unsubscribeChatThread = deps.webchatRepo.onChatThreadPlaced((event) => {
       if (event.sessionId !== sessionId) return;
-      void threadTitlesOf(sessionId, [event.chatThreadId])
-        .catch(() => new Map<string, string>())
-        .then((titles) => {
-          const chatThreadTitle = titles.get(event.chatThreadId);
-          if (chatThreadTitle) emit("message_chat_thread", { ...event, chatThreadTitle });
+      void threadTasksOf(sessionId, [event.chatThreadId])
+        .catch(() => new Map<string, ThreadTask>())
+        .then((tasks) => {
+          const task = tasks.get(event.chatThreadId);
+          if (task) {
+            emit("message_chat_thread", {
+              ...event,
+              chatThreadTitle: task.title,
+              ...(task.taskChatId ? { chatThreadTaskChatId: task.taskChatId } : {}),
+            });
+          }
         });
     });
     // A task that leaves the chat takes its thread with it: its label goes.
@@ -1620,17 +1634,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
-  // The title of the task each chat thread of `roots` is, in a Concierge chat.
-  const threadTitlesOf = async (sessionId: string, roots: readonly string[]) =>
-    (await deps.concierge?.deps.tasks.repo.threadTitles(sessionId, roots)) ??
-    new Map<string, string>();
+  // The task each chat thread of `roots` is, in a Concierge chat: its title
+  // and its task chat.
+  const threadTasksOf = async (sessionId: string, roots: readonly string[]) =>
+    (await deps.concierge?.deps.tasks.repo.threadTasks?.(sessionId, roots)) ??
+    new Map<string, ThreadTask>();
   // The title of the task whose thread each message is in, when it is a
   // task's. Only a task has a chat thread, so a thread from before that no
   // task has is sent as none (docs/domains/chats.md#chat-thread).
   const attachChatThreadTitles = async <T extends StoredMessages[number]>(
     sessionId: string,
     messages: T[],
-  ): Promise<(T & { chatThreadTitle?: string })[]> => {
+  ): Promise<(T & { chatThreadTitle?: string; chatThreadTaskChatId?: string })[]> => {
     // Only a transcript line has a chat thread; a trace row has none.
     const threadOf = (message: T) =>
       "chatThreadId" in message && typeof message.chatThreadId === "string"
@@ -1638,12 +1653,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : null;
     const roots = messages.flatMap((message) => threadOf(message) ?? []);
     if (roots.length === 0) return messages;
-    const titles = await threadTitlesOf(sessionId, roots);
+    const tasks = await threadTasksOf(sessionId, roots);
     return messages.map((message) => {
       const thread = threadOf(message);
       if (!thread) return message;
-      const chatThreadTitle = titles.get(thread);
-      return chatThreadTitle ? { ...message, chatThreadTitle } : { ...message, chatThreadId: null };
+      const task = tasks.get(thread);
+      if (!task) return { ...message, chatThreadId: null };
+      return {
+        ...message,
+        chatThreadTitle: task.title,
+        // The thread's task chat, so the thread view opens it with no card in the thread.
+        ...(task.taskChatId ? { chatThreadTaskChatId: task.taskChatId } : {}),
+      };
     });
   };
   // The status reaction on each guardian message that has one, which only a

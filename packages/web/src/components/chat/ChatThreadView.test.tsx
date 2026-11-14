@@ -670,4 +670,15 @@ describe("taskChatOfThread", () => {
     expect(taskChatOfThread(messages, "root")).toBe("task-chat");
     expect(taskChatOfThread(messages, "no-thread")).toBeNull();
   });
+
+  it("takes the task chat Rome names on a thread with no card in it", () => {
+    const messages = [
+      said("root", [{ type: "text", text: "Looking into it." }], null),
+      {
+        ...(said("reply", [{ type: "text", text: "Done." }]) as object),
+        chatThreadTaskChatId: "named-chat",
+      } as never,
+    ];
+    expect(taskChatOfThread(messages, "root")).toBe("named-chat");
+  });
 });

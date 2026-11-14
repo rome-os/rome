@@ -212,29 +212,37 @@ const isAllChatsKey = (key: readonly unknown[]) =>
   key.length === ALL_CHATS_KEY.length && key.every((part, i) => part === ALL_CHATS_KEY[i]);
 
 /**
- * Chat `id` from a list this tab holds other than the list of every chat, or
- * "loading" while such a list is on its first read and may still hold it.
+ * Chat `id` from a list a view on screen keeps current, other than the list
+ * of every chat: the newest such read that holds it. A list no view observes
+ * (the sidebar closed, a filter left) is not kept current, so it never
+ * counts. "loading" while such a list is on its first read and may hold it.
  */
 function chatSessionElsewhere(
   queryClient: QueryClient,
   id: string,
 ): ChatSession | "loading" | null {
   let loading = false;
+  let found: { session: ChatSession; at: number } | null = null;
   for (const query of queryClient.getQueryCache().findAll({ queryKey: CHAT_SESSIONS_QUERY_KEY })) {
-    if (isAllChatsKey(query.queryKey)) continue;
+    if (isAllChatsKey(query.queryKey) || !query.isActive()) continue;
     const list = query.state.data as ChatSession[] | undefined;
-    const found = list?.find((session) => session.id === id);
-    if (found) return found;
-    if (list === undefined && query.state.fetchStatus === "fetching") loading = true;
+    if (list === undefined) {
+      if (query.state.fetchStatus === "fetching") loading = true;
+      continue;
+    }
+    const session = list.find((each) => each.id === id);
+    if (session && (!found || query.state.dataUpdatedAt > found.at)) {
+      found = { session, at: query.state.dataUpdatedAt };
+    }
   }
-  return loading ? "loading" : null;
+  return found?.session ?? (loading ? "loading" : null);
 }
 
 /**
- * One chat's row, for a view that shows one chat. It reads the lists this tab
- * already holds, such as the sidebar's, and keeps the list of every chat
- * (`all`, `all`) only when none of them holds the chat once they have loaded:
- * an archived chat, or no list loaded at all.
+ * One chat's row, for a view that shows one chat. It reads a list a view on
+ * screen keeps current, such as the sidebar's, and keeps the list of every
+ * chat (`all`, `all`) only when none of them holds the chat once they have
+ * loaded: an archived chat, the sidebar closed, or no list loaded at all.
  */
 export function useChatSession(id: string) {
   const queryClient = useQueryClient();

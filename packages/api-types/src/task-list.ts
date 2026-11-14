@@ -149,6 +149,8 @@ export interface TaskListResponse {
 export const TASK_LIST_CHANGED_EVENT = "tasks_changed";
 export interface TaskListChangedEvent {
   chatId: string;
+  /** Present when a follow was among what changed, so a client reads the follows' sources again. */
+  follows?: true;
 }
 
 /** What the server gathers for one chat, before grouping. */

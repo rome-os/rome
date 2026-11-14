@@ -290,6 +290,8 @@ const messageChatThreadSchema = z.object({
   chatThreadId: z.string(),
   /** The task's title, when the thread is a task's. */
   chatThreadTitle: z.string().optional(),
+  /** The task's own chat, when it has one. */
+  chatThreadTaskChatId: z.string().optional(),
 });
 
 /** A task left the chat, and its chat thread with it. */
@@ -584,6 +586,10 @@ export function Chat({
   const [liveThreadTitles, setLiveThreadTitles] = useState<ReadonlyMap<string, string | null>>(
     new Map(),
   );
+  // Each task thread's task chat live placements told, by the thread.
+  const [liveThreadTaskChats, setLiveThreadTaskChats] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const handleChatThreadRetired = useCallback(
     ({ chatThreadId }: z.infer<typeof chatThreadRetiredSchema>) =>
       setLiveThreadTitles((prev) =>
@@ -592,10 +598,22 @@ export function Chat({
     [],
   );
   const handleMessageChatThread = useCallback(
-    ({ messageId, chatThreadId, chatThreadTitle }: z.infer<typeof messageChatThreadSchema>) => {
+    ({
+      messageId,
+      chatThreadId,
+      chatThreadTitle,
+      chatThreadTaskChatId,
+    }: z.infer<typeof messageChatThreadSchema>) => {
       setRethreaded((prev) =>
         placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
       );
+      if (chatThreadTaskChatId) {
+        setLiveThreadTaskChats((prev) =>
+          prev.get(chatThreadId) === chatThreadTaskChatId
+            ? prev
+            : new Map(prev).set(chatThreadId, chatThreadTaskChatId),
+        );
+      }
       if (chatThreadTitle) {
         setLiveThreadTitles((prev) =>
           prev.get(chatThreadId) === chatThreadTitle
@@ -2994,6 +3012,7 @@ export function Chat({
                           messageId={threadView}
                           threadRoot={threadRootOfView}
                           messages={displayMessages}
+                          liveTaskChat={liveThreadTaskChats.get(threadRootOfView) ?? null}
                           size={floating ? "md" : "sm"}
                           className={actionBadge}
                         />
