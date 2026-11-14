@@ -1,17 +1,26 @@
 import { z } from "zod";
+import { type DictationStop, dictationStopReasonSchema } from "./voice-input/dictation";
 import { currentAuthEpoch } from "./new-chat-draft-storage";
 
 // One draft per open chat, kept in local storage so it survives a reload and
-// a switch to another chat. It holds text only: an attachment or a pick does
-// not survive. Logging out removes every draft.
+// a switch to another chat. It holds the field's text and, when listening
+// stopped on its own, why. Text only: an attachment or a pick does not
+// survive. Logging out removes every draft.
 const PREFIX = "rome:chat-draft:";
 const recordSchema = z.object({
   version: z.literal(1),
   text: z.string(),
+  // Optional, so drafts saved before stops were kept still load.
+  stop: z
+    .object({ reason: dictationStopReasonSchema, detail: z.string().optional() })
+    .nullable()
+    .optional(),
   authEpoch: z.string(),
 });
 export interface ChatDraft {
   text: string;
+  /** Why listening last stopped on its own, until the next edit or send. */
+  stop: DictationStop | null;
 }
 
 export function loadChatDraft(chatId: string): ChatDraft | null {
@@ -24,19 +33,19 @@ export function loadChatDraft(chatId: string): ChatDraft | null {
       clearChatDraft(chatId);
       return null;
     }
-    return { text: result.data.text };
+    return { text: result.data.text, stop: result.data.stop ?? null };
   } catch {
     return null;
   }
 }
 
 /**
- * Saves `draft` for the chat, or removes it when the text is empty. A tab
- * that was open across a logout passes the epoch it loaded under, and saves
+ * Saves `draft` for the chat, or removes it when it holds nothing. A tab that
+ * was open across a logout passes the epoch it loaded under, and saves
  * nothing.
  */
 export function saveChatDraft(chatId: string, draft: ChatDraft, authEpoch: string | null) {
-  if (!draft.text) {
+  if (!draft.text && !draft.stop) {
     clearChatDraft(chatId);
     return;
   }
@@ -44,7 +53,7 @@ export function saveChatDraft(chatId: string, draft: ChatDraft, authEpoch: strin
     if (authEpoch === null || authEpoch !== currentAuthEpoch()) return;
     localStorage.setItem(
       PREFIX + chatId,
-      JSON.stringify({ version: 1, text: draft.text, authEpoch }),
+      JSON.stringify({ version: 1, text: draft.text, stop: draft.stop, authEpoch }),
     );
   } catch {
     // Full or disabled storage must not break typing.

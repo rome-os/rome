@@ -62,7 +62,7 @@ import { useFittedPlaceholder } from "./use-fitted-placeholder";
 import { useSlashSkill } from "./use-slash-skill";
 import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
-import { useChatDraftText } from "./use-chat-draft";
+import { useChatDraft } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice } from "./VoiceInputControl";
 import type { ReplyTarget } from "../reply/reply-draft";
@@ -123,7 +123,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       ? settings.webchatReasoningEffort
       : DEFAULT_REASONING_EFFORT;
 
-    const [inputText, setInputText] = useChatDraftText(chatId);
+    const draft = useChatDraft(chatId);
+    const { text: inputText, setText: setInputText } = draft;
     const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(null);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const [uploadInFlight, setUploadInFlight] = useState(false);
@@ -170,7 +171,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       skill: SkillSelection | null;
     } | null>(null);
 
-    const voice = useVoiceInput({ textareaRef, value: inputText, setValue: setInputText });
+    const voice = useVoiceInput({
+      textareaRef,
+      value: inputText,
+      setValue: setInputText,
+      notice: draft.notice,
+      setNotice: draft.setNotice,
+      keepNotice: draft.keepNotice,
+    });
 
     // Programmatic clears fire no `input` event, so resize on every change.
     useLayoutEffect(() => {
@@ -254,6 +262,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           : randomUUID();
       // Text alone clears at once and comes back on failure. Attachments keep
       // the text on screen until the server accepts the upload.
+      voice.dismissNotice();
       const clearsOptimistically = uploads.length === 0;
       const replyTo = replyDraft?.target ?? undefined;
       const chatThread = replyDraft?.thread ?? undefined;
