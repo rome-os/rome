@@ -746,6 +746,10 @@ describe("message reply bond-level settings", () => {
     for (const call of agentRunner.calls) {
       expect(String(call.contextSuffix ?? "")).not.toContain("Casey");
     }
+    // Its session is the sender's own, so no other sender's notes are in it.
+    expect(agentRunner.calls[0].channelThreadKey).toBe(
+      "sentinel:email:mail-thread-1:casey@example.com",
+    );
     expect(sentMessages).toEqual([
       {
         channel: "email",

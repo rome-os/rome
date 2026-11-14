@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import type { PeopleRepository, Person } from "../db/repositories/people.js";
-import { resolveProfileMemoryPath } from "../profile-memory.js";
+import { personProfilePath, resolveProfileMemoryPath } from "../profile-memory.js";
 
 export const READ_PERSON_ACTION = "core:read_person";
 
@@ -24,8 +24,11 @@ export function registerReadPersonAction(
   actions: Pick<ActionRegistry, "register">,
   deps: {
     people: Pick<PeopleRepository, "all">;
-    /** The notes file at `profilePath`, or null when there is none. */
-    readNotes?: (profilePath: string) => Promise<string | null>;
+    /** Whose chat it is ("guardian" or "visitor:<account>"), or null for a
+     *  chat that no longer exists. */
+    ownerOfChat(chatId: string): Promise<string | null>;
+    /** The notes at `path` under the memory root, or null when there are none. */
+    readNotes?: (path: string) => Promise<string | null>;
   },
 ): void {
   const readNotes = deps.readNotes ?? readNotesFile;
@@ -49,11 +52,20 @@ export function registerReadPersonAction(
       additionalProperties: false,
     },
     execute: async (args) => {
-      // The notes are the guardian's own. A visitor's chat, or a request with
-      // no session, never reads them.
-      const actor = actionExecutionContext.getStore()?.actor;
-      if (actor && actor.kind !== "guardian") {
-        return { status: "error", error: "Only the guardian's agents can read a person's notes." };
+      // The notes are the guardian's own, so a visitor never reads them: not
+      // as the turn's actor, and not through a turn no one started in a chat
+      // the visitor owns, such as a task the Concierge runs for them. A chat
+      // on a connection has no owner and is the guardian's agent's.
+      const context = actionExecutionContext.getStore();
+      const refused = {
+        status: "error" as const,
+        error: "Only the guardian's agents can read a person's notes.",
+      };
+      if (context?.actor && context.actor.kind !== "guardian") return refused;
+      const thread = context?.channelContext;
+      if (thread?.channel === "webchat") {
+        const owner = thread.threadId ? await deps.ownerOfChat(thread.threadId) : null;
+        if (owner !== "guardian") return refused;
       }
       const name = typeof args.name === "string" ? args.name.trim() : "";
       if (!name) return { status: "error", error: "Pass the person's name." };
@@ -70,7 +82,7 @@ export function registerReadPersonAction(
             id,
             ...(delegate ? { delegate } : {}),
           })),
-          notes: person.profilePath ? await readNotes(person.profilePath) : null,
+          notes: await readNotes(personProfilePath(person)),
         })),
       );
       return { status: "ok", data: { people } };
@@ -78,9 +90,9 @@ export function registerReadPersonAction(
   });
 }
 
-async function readNotesFile(profilePath: string): Promise<string | null> {
+async function readNotesFile(path: string): Promise<string | null> {
   try {
-    const notes = (await readFile(resolveProfileMemoryPath(profilePath), "utf8")).trim();
+    const notes = (await readFile(resolveProfileMemoryPath(path), "utf8")).trim();
     return notes || null;
   } catch {
     return null;

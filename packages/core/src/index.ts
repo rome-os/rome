@@ -1390,7 +1390,10 @@ async function main() {
 
   registerShowFileAction(actionRegistry);
   registerTaskRunAction(actionRegistry, concierge);
-  registerReadPersonAction(actionRegistry, { people: peopleRepo });
+  registerReadPersonAction(actionRegistry, {
+    people: peopleRepo,
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),

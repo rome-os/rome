@@ -525,7 +525,10 @@ async function handleUntrustedMessage(
       // The sender's own notes go on each message: the sentinel's session is
       // the chat's, where many people speak, and it reads no one else's.
       prompt: `<sender>\n${senderInfo}\n</sender>\n\nTriage this message from ${displayName} (${bondLevel}):\n\n${text}`,
-      channelThreadKey: `sentinel:${channelThreadKey}`,
+      // One sentinel session per sender: each message carries its sender's
+      // notes, and a session shared by a group would carry every sender's
+      // notes into the next stranger's triage.
+      channelThreadKey: `sentinel:${channelThreadKey}:${channelUserId}`,
       contextSuffix,
       workingDir,
     },

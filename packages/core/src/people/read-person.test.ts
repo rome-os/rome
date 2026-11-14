@@ -14,14 +14,22 @@ let testDb: TestDb;
 let people: PeopleRepository;
 let registry: ActionRegistryImpl;
 let engine: ActionEngine;
+let notes: Map<string, string>;
 
 beforeEach(async () => {
   testDb = createTestDb();
+  notes = new Map([["memory/relationship/ana.md", "Runs the venue."]]);
   people = new PeopleRepository(testDb.db);
   registry = new ActionRegistryImpl();
   registerReadPersonAction(registry, {
     people,
-    readNotes: async (path) => (path === "memory/relationship/ana.md" ? "Runs the venue." : null),
+    ownerOfChat: async (chatId) =>
+      chatId === "visitor-chat"
+        ? "visitor:visitor"
+        : chatId === "guardian-chat"
+          ? "guardian"
+          : null,
+    readNotes: async (path) => notes.get(path) ?? null,
   });
   engine = new ActionEngine(registry, createActionEngineRepos(testDb.db), {
     processRole: "main",
@@ -46,7 +54,10 @@ describe("core:read_person", () => {
       profilePath: "memory/relationship/ana.md",
       links: [{ platform: "discord", id: "ana" }],
     });
-    await people.create({ displayName: "Bob", bondLevel: "acquaintance" });
+    const bob = await people.create({ displayName: "Bob", bondLevel: "acquaintance" });
+    // A person created with no profile path keeps their notes in the file
+    // named after their id.
+    notes.set(`memory/relationship/${bob}.md`, "Plays bass.");
 
     expect(await read("ana lopez")).toEqual({
       status: "ok",
@@ -63,7 +74,7 @@ describe("core:read_person", () => {
     });
     expect(await read("Bob")).toMatchObject({
       status: "ok",
-      data: { people: [{ name: "Bob", notes: null }] },
+      data: { people: [{ name: "Bob", notes: "Plays bass." }] },
     });
   });
 
@@ -74,9 +85,21 @@ describe("core:read_person", () => {
     });
   });
 
-  it("refuses a visitor's chat", async () => {
+  it("refuses a visitor, and a turn no one started in a chat a visitor owns", async () => {
     await people.create({ displayName: "Ana Lopez", bondLevel: "inner-circle" });
     expect((await read("Ana Lopez", { actor: visitor })).status).toBe("error");
+    const visitorChat = { channel: "webchat", threadId: "visitor-chat" };
+    expect((await read("Ana Lopez", { channelContext: visitorChat })).status).toBe("error");
+    const goneChat = { channel: "webchat", threadId: "gone-chat" };
+    expect((await read("Ana Lopez", { channelContext: goneChat })).status).toBe("error");
+  });
+
+  it("reads for a turn no one started in the guardian's chat or a chat on a connection", async () => {
+    await people.create({ displayName: "Ana Lopez", bondLevel: "inner-circle" });
+    const guardianChat = { channel: "webchat", threadId: "guardian-chat" };
+    expect((await read("Ana Lopez", { channelContext: guardianChat })).status).toBe("ok");
+    const group = { channel: "discord", threadId: "group-1" };
+    expect((await read("Ana Lopez", { channelContext: group })).status).toBe("ok");
   });
 
   it("is available through the main agent wildcard", () => {

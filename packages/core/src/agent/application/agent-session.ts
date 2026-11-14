@@ -131,7 +131,7 @@ import { createTurnsById, type TurnsById } from "./turns-by-id.js";
 
 export interface AgentSessionKey {
   agentName: string;
-  /** e.g. `webchat:<id>`, `telegram:<chatId>`, `sentinel:<channel>:<thread>`. */
+  /** e.g. `webchat:<id>`, `telegram:<chatId>`, `sentinel:<channel>:<thread>:<sender>`. */
   channelThreadKey: string;
 }
 
