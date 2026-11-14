@@ -58,8 +58,9 @@ export interface ChatTaskListDeps {
       onChange(
         listener: (task: { owner: string; conciergeChat: { id: string } }) => void,
       ): () => void;
-      /** The chat's task chats, each with its task, ended or not. */
-      taskChatsOf(
+      /** Which of `chatIds` are the chat's task chats, each with its task, ended or not. */
+      taskChatsAmong(
+        chatIds: readonly string[],
         conciergeChatId: string,
         owner: ConciergeOwner,
       ): Promise<Array<{ chatId: string; task: { id: string; title: string } }>>;
@@ -67,7 +68,7 @@ export interface ChatTaskListDeps {
   };
   checks?: Pick<TaskChecks, "inChatForApi">;
   following?: () => Pick<ConciergeFollowing, "followsIn" | "onChange"> | null;
-  routines: Pick<RoutinesRepository, "findByChats" | "listRoutines" | "findById">;
+  routines: Pick<RoutinesRepository, "findWithChat" | "listRoutines" | "findById">;
   routineRuns: Pick<RoutineRunsRepository, "findLatestByRoutineIds">;
   routineEngine: Pick<RoutineEngine, "onChange">;
   /**
@@ -209,25 +210,31 @@ export class ChatTaskList {
   }
 
   /**
-   * The routines of chat `chatId` and of its task chats, in one read. A
-   * task chat's routine names its task, whoever it works for.
+   * The routines of chat `chatId` and of its task chats. Only the chats
+   * other routines work for are looked up as task chats, never the owner's
+   * whole task history. A task chat's routine names its task, whoever it
+   * works for.
    */
   private async routinesIn(chatId: string, owner: ConciergeOwner): Promise<TaskListRoutineItem[]> {
+    const shown = (await this.deps.routines.findWithChat())
+      .map((row) => ({ row, routine: toRoutine(row) }))
+      .filter(({ routine }) => !NOT_A_CHAT_ROUTINE.has(routine.actionName) && !spent(routine));
+    const elsewhere = shown.flatMap(({ row }) =>
+      row.chatId && row.chatId !== chatId ? [row.chatId] : [],
+    );
     const taskChats = new Map(
-      (await this.deps.tasks.repo.taskChatsOf(chatId, owner)).map(
+      (await this.deps.tasks.repo.taskChatsAmong(elsewhere, chatId, owner)).map(
         (taskChat) => [taskChat.chatId, taskChat.task] as const,
       ),
     );
-    const rows = await this.deps.routines.findByChats([chatId, ...taskChats.keys()]);
-    const fromTask = new Map(
-      rows.flatMap((row) => {
-        const task = row.chatId === chatId ? undefined : taskChats.get(row.chatId ?? "");
-        return task ? [[row.id, task] as const] : [];
-      }),
-    );
-    const routines = rows
-      .map(toRoutine)
-      .filter((routine) => !NOT_A_CHAT_ROUTINE.has(routine.actionName) && !spent(routine));
+    const fromTask = new Map<string, { id: string; title: string }>();
+    const routines = shown.flatMap(({ row, routine }) => {
+      if (row.chatId === chatId) return [routine];
+      const task = taskChats.get(row.chatId ?? "");
+      if (!task) return [];
+      fromTask.set(routine.id, task);
+      return [routine];
+    });
     const latest = await this.deps.routineRuns.findLatestByRoutineIds(
       routines.map((routine) => routine.id),
     );
@@ -276,8 +283,12 @@ export class ChatTaskList {
             const routine = toRoutine(row);
             if (this.concerns(routine, row.chatId, chatId)) return tell();
             if (row.chatId && !NOT_A_CHAT_ROUTINE.has(routine.actionName)) {
-              const taskChats = await this.deps.tasks.repo.taskChatsOf(chatId, owner);
-              if (taskChats.some((taskChat) => taskChat.chatId === row.chatId)) tell();
+              const taskChats = await this.deps.tasks.repo.taskChatsAmong(
+                [row.chatId],
+                chatId,
+                owner,
+              );
+              if (taskChats.length > 0) tell();
             }
           })
           .catch(() => tell());
