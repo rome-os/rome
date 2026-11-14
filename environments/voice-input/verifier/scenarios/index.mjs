@@ -7,7 +7,7 @@ import r10 from "./r10-voice-goes-where-named.mjs";
 import r11 from "./r11-rome-cloud-provides-it.mjs";
 
 /** The rules version the scenarios encode. Change it with the rules doc. */
-export const RULES_VERSION = "V3";
+export const RULES_VERSION = "V4";
 
 /** Rules and the phase each belongs to, including those with no scenario yet. */
 export const RULE_PHASES = { 1: 3, 2: 1, 3: 1, 4: 2, 5: 1, 6: 1, 7: 2, 8: 2, 9: 2, 10: 1, 11: 1 };

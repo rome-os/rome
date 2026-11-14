@@ -4,7 +4,8 @@ import { scriptRuns, textTimes } from "../lib/runs.mjs";
 import { check, notChecked, required, ruleResult } from "../lib/scenario.mjs";
 
 export const BAR_SECONDS = 2;
-export const MESSAGES_NEEDED = 18;
+/** 18 of the script's 20 messages; a shorter script, as in the tests, keeps the same share. */
+export const SHARE_NEEDED = 18 / 20;
 
 export default {
   rule: "2",
@@ -29,14 +30,15 @@ export default {
       };
     });
     const passing = scored.filter((s) => s.ok).length;
+    const needed = Math.ceil(runs.length * SHARE_NEEDED - 1e-9);
     const perMessage = scored.map((s) =>
       check(s.key, "info", `${s.ok ? "within" : "outside"} the bar: ${s.detail}`, [s.key]),
     );
     const tally = required(
       check(
         "messages within the bar",
-        passing >= MESSAGES_NEEDED ? "pass" : "fail",
-        `${passing} of ${runs.length} messages within ${BAR_SECONDS} s; the bar is ${MESSAGES_NEEDED} of 20`,
+        passing >= needed ? "pass" : "fail",
+        `${passing} of ${runs.length} messages within ${BAR_SECONDS} s; the bar is ${needed} of ${runs.length}`,
         scored.filter((s) => !s.ok).map((s) => s.key),
       ),
     );

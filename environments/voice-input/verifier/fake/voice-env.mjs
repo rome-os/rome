@@ -171,13 +171,28 @@ switch (command) {
       print({ audio: captured });
     }
     break;
+  case "gate":
+    updateState(statePath, (s) => {
+      s.cloud.gate = positionals[0] === "on";
+    });
+    break;
   case "cloud": {
+    if (positionals[0] === "session") {
+      // fail-11g mints a credential for an account the gate refuses.
+      const { cloud, variant } = updateState(statePath, (s) => {
+        if (s.cloud.gate || s.variant === "fail-11g") s.cloud.minted++;
+      });
+      print(
+        cloud.gate
+          ? { status: 201, body: { sessionId: "s1", provider: "soniox" } }
+          : { status: 403, body: { error: "voice_input_not_allowed", variant } },
+      );
+      break;
+    }
     const { cloud } = readState(statePath);
-    print(
-      positionals[0] === "usage"
-        ? { events: cloud.usage }
-        : { signedIn: cloud.signedIn, ownCredential: cloud.ownCredential },
-    );
+    if (positionals[0] === "usage") print({ events: cloud.usage });
+    else if (positionals[0] === "minted") print({ count: cloud.minted });
+    else print({ signedIn: cloud.signedIn, ownCredential: cloud.ownCredential });
     break;
   }
   case "audio-scan":

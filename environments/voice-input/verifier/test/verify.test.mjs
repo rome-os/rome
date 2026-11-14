@@ -14,12 +14,36 @@ import { voiceEnv } from "../lib/voice-env.mjs";
 import { execFileSync } from "node:child_process";
 
 const fakeEnv = fileURLToPath(new URL("../fake/voice-env.mjs", import.meta.url));
+
+/** Every test folder, so their Chromes die even when a test times out or the run is killed. */
+const testDirs = [];
+function killChromes() {
+  for (const dir of testDirs) {
+    try {
+      execFileSync("pkill", ["-KILL", "-f", `--user-data-dir=${dir}`]);
+    } catch {}
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+process.on("exit", killChromes);
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    killChromes();
+    process.exit(1);
+  });
+}
 const PHASE_1 = ["2", "3", "5", "6", "10", "11"];
 
-/** A script of 20 short messages with the real script's languages and written text. */
+/**
+ * A short copy of the script: per set, two English, one Mandarin and one mixed message, with
+ * the real written text and 0.4 s of speech each.
+ */
 function shortScript(dir) {
   const real = loadScript(fileURLToPath(new URL("../script", import.meta.url)));
-  const messages = real.messages.map((m) => ({ ...m, firstWordAt: 0.2, lastWordAt: 0.6 }));
+  const keep = /^(b-)?(en-[12]|zh-1|mixed-1)$/;
+  const messages = real.messages
+    .filter((m) => keep.test(m.key))
+    .map((m) => ({ ...m, firstWordAt: 0.2, lastWordAt: 0.6 }));
   writeFileSync(join(dir, "manifest.json"), JSON.stringify({ sources: real.sources, messages }));
   return loadScript(dir);
 }
@@ -28,6 +52,7 @@ const WAITS = { afterSpeechMs: 2200, sendCheckMs: 300, sendMs: 3000, steadyMs: 3
 
 async function runAgainst(variant, options = {}) {
   const dir = mkdtempSync(join(tmpdir(), `voice-verify-${variant}-`));
+  testDirs.push(dir);
   const statePath = join(dir, "state.json");
   writeFileSync(statePath, JSON.stringify(emptyState(variant)));
   const script = shortScript(dir);
@@ -44,7 +69,7 @@ async function runAgainst(variant, options = {}) {
       waits: WAITS,
       allowDirty: true,
       outDir: join(dir, "run"),
-      log: () => {},
+      log: process.env.VERIFY_TEST_LOG ? (line) => console.error(`${variant}: ${line}`) : () => {},
       ...options,
     });
   } finally {
@@ -60,11 +85,11 @@ async function runAgainst(variant, options = {}) {
 
 const statuses = (report) => Object.fromEntries(report.results.map((r) => [r.rule, r.status]));
 
-describe("verify against the stand-in product", { concurrency: 3, timeout: 1200000 }, () => {
+describe("verify against the stand-in product", { concurrency: 3, timeout: 480000 }, () => {
   for (const variant of VARIANTS) {
     it(`scores ${variant}`, async () => {
       const { report } = await runAgainst(variant);
-      const broken = variant === "good" ? [] : [variant.slice("fail-".length)];
+      const broken = variant === "good" ? [] : [variant.slice("fail-".length).replace(/\D+$/, "")];
       assert.deepEqual(
         statuses(report),
         Object.fromEntries(PHASE_1.map((r) => [r, broken.includes(r) ? "fail" : "pass"])),

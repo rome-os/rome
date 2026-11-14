@@ -9,11 +9,21 @@
 //   fail-6   the transcript replaces the field instead of going in at the cursor
 //   fail-10  the server sends the audio to a host Rome does not name
 //   fail-11  Rome Cloud records half the seconds listened
+//   fail-11g Rome Cloud mints a credential for an account the gate refuses
 import { createServer } from "node:http";
 import { basename } from "node:path";
 import { readState, updateState } from "./state.mjs";
 
-export const VARIANTS = ["good", "fail-2", "fail-3", "fail-5", "fail-6", "fail-10", "fail-11"];
+export const VARIANTS = [
+  "good",
+  "fail-2",
+  "fail-3",
+  "fail-5",
+  "fail-6",
+  "fail-10",
+  "fail-11",
+  "fail-11g",
+];
 
 const PLACE = { provider: "Soniox", host: "stt-rt.soniox.com" };
 
@@ -40,7 +50,7 @@ async function handle(req, res, statePath, script) {
     res.end(body);
   };
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/chat"))
-    return send(200, "text/html; charset=utf-8", page(state.variant));
+    return send(200, "text/html; charset=utf-8", page(state.variant, state.cloud.gate));
   if (req.method === "GET" && url.pathname === "/settings")
     return send(
       200,
@@ -48,7 +58,15 @@ async function handle(req, res, statePath, script) {
       `<main><h1>Settings</h1><p>Voice input: ${PLACE.provider}, ${PLACE.host}</p></main>`,
     );
   if (req.method === "GET" && url.pathname === "/api/voice-input")
-    return send(200, "application/json", JSON.stringify({ place: PLACE }));
+    return send(
+      200,
+      "application/json",
+      JSON.stringify(
+        state.cloud.gate
+          ? { available: true, via: "rome-cloud", place: PLACE }
+          : { available: false, via: null, place: null },
+      ),
+    );
   const post = url.pathname.match(/^\/api\/chats\/([^/]+)\/messages$/);
   if (req.method === "POST" && post) {
     const body = JSON.parse(await readBody(req));
@@ -134,7 +152,7 @@ function garble(text) {
     .join("");
 }
 
-function page(variant) {
+function page(variant, gate) {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Chat</title></head>
 <body>
@@ -142,7 +160,7 @@ function page(variant) {
   <textarea aria-label="Message" rows="4" cols="60"></textarea>
   <input type="file" aria-label="Attach a picture">
   <ul role="listbox" hidden><li role="option">Notes</li></ul>
-  <button type="button" aria-pressed="false">Start voice input</button>
+  <button type="button" aria-pressed="false"${gate ? "" : " hidden"}>Start voice input</button>
 </form>
 <script>
 const variant = ${JSON.stringify(variant)};

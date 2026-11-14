@@ -58,6 +58,12 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
     cloudStatus: () => json(["cloud", "status"]),
     /** `{ events: [{ provider, model, seconds, at }] }`: Rome Cloud's voice usage for the instance, oldest first. */
     cloudUsage: () => json(["cloud", "usage"]),
+    /** Turns Rome Cloud's voice input gate `on` or `off` for the test account. */
+    gate: (state) => exec(command, ["gate", state]),
+    /** `{ status, body }`: Rome Cloud's answer to `POST /v1/transcription/sessions` as the instance. */
+    cloudSession: () => json(["cloud", "session"]),
+    /** `{ count }`: the temporary credentials the transcriber has minted so far. */
+    cloudMinted: () => json(["cloud", "minted"]),
     reset: () => (resetCommand ? exec(resetCommand, []) : Promise.resolve()),
     /**
      * Every stored message in every chat, each `{ id, chat, role, sender, text, attachments }`.
