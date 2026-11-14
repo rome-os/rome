@@ -224,6 +224,7 @@ async function gateOn(ctx, message) {
   else await useTranscriber(ctx);
 
   const repeats = ctx.secondsRepeats ?? SECONDS_REPEATS;
+  const where = ctx.place === "phone" ? "the socket's text" : "the field";
   const checks = [];
   // The first session follows the gate switch straight away; the rest follow one another.
   for (let i = 1; i <= repeats; i++) {
@@ -242,8 +243,8 @@ async function gateOn(ctx, message) {
             "gate on: text appears with no credential in the instance",
             session.heard.trim() ? "pass" : "fail",
             session.heard.trim()
-              ? `the field shows "${session.heard}" for ${message.key}`
-              : `the field stayed empty for ${message.key}`,
+              ? `${where} shows "${session.heard}" for ${message.key}`
+              : `${where} stayed empty for ${message.key}`,
             [message.key],
           ),
         ),
