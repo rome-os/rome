@@ -295,13 +295,17 @@ export class PersonalDataRepository {
   }
 
   /**
-   * The origin a query of `type` reads: the one whose device reports the type
-   * synced furthest, then the one with the latest reading. An origin set off
-   * is never read. Undefined when no origin has the type.
+   * The origin a query of `type` over a window from `windowStart` reads: one
+   * whose readings reach back to the window's start, so a device still
+   * backfilling does not hide an older one's history. Among those, and when
+   * none reaches back, the one its device reports synced furthest, then the
+   * one with the latest reading. An origin set off is never read. Undefined
+   * when no origin has the type.
    */
   originFor(
     source: string,
     type: string,
+    windowStart: number,
   ): { origin: string; syncedThroughAt: number | null } | undefined {
     return this.db
       .select({
@@ -324,6 +328,7 @@ export class PersonalDataRepository {
         ),
       )
       .orderBy(
+        sql`coalesce(${personalDataTypes.earliestAt} <= ${windowStart}, 0) desc`,
         sql`coalesce(${personalDataTypes.syncedThroughAt}, 0) desc`,
         sql`coalesce(${personalDataTypes.latestAt}, 0) desc`,
       )

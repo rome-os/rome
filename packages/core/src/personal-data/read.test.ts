@@ -229,6 +229,29 @@ describe("queryPersonalData", () => {
     });
   });
 
+  it("keeps reading the older origin for a window a new one has not backfilled yet", () => {
+    // A new origin mid-backfill: it has reached Nov 11 and reports itself synced to now.
+    repo.ingest(
+      APPLE_HEALTH,
+      {
+        ...batch("new-1", {
+          upserts: [stepDay(NOV_10 + DAY, 6100)],
+          types: [{ type: "stepCount", syncedThrough: new Date(NOW).toISOString() }],
+        }),
+        origin: { id: "backfilling-origin", name: "iPhone", platform: "ios" },
+      },
+      NOW,
+    );
+    // The window from Nov 10 reaches past the new origin's earliest day: the old one answers.
+    expect(
+      query({ type: "stepCount", start: "2026-11-10", end: "2026-11-11" }).results[0],
+    ).toMatchObject({ value: 14000 });
+    // A window the new origin covers reads the new one.
+    expect(
+      query({ type: "stepCount", start: "2026-11-11", end: "2026-11-11" }).results[0],
+    ).toMatchObject({ value: 6100 });
+  });
+
   it("converts units and takes the latest sample", () => {
     expect(
       query({

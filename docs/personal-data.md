@@ -103,7 +103,7 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 - A summed type adds up. An averaged type takes the mean of its daily averages, labelled `avg_of_days`, or of its hours, labelled `avg_of_hours`. `min` and `max` are the exact extremes. `latest` does not fit a summed type, and `sum` does not fit an averaged one.
 - A sample or record belongs to the bucket it starts in. A night of sleep belongs to the day it ends on, as its key says. A record adds up what comes with it, such as minutes per sleep stage, and counts how many there were. An averaged record averages what comes with it too.
 - A bucket with no value is left out, never 0.
-- Each type is read from one origin: the one that reports it synced furthest, then the one with the latest reading. An origin set off is never read. A second device, or a new origin after a sign-in, takes over a type once it has caught up.
+- Each type is read from one origin: one whose readings reach back to the window's start, and among those the one that reports the type synced furthest. When none reaches back, the one synced furthest answers. An origin set off is never read. A second device, or a new origin after a sign-in, takes over a window once its backfill reaches it.
 
 ```json
 {

@@ -51,9 +51,9 @@ export function queryPersonalData(
   if ("error" in plan) return plan;
   const freshness: Record<string, Freshness> = {};
   const results = plan.types.map((spec) => {
-    // Each type reads the origin that covers it furthest, so a second device
+    // Each type reads the origin that covers the window, so a second device
     // or a new origin after a sign-in takes over once it has caught up.
-    const reading = repo.originFor(source.source, spec.type);
+    const reading = repo.originFor(source.source, spec.type, plan.start);
     const at = reading?.syncedThroughAt ?? undefined;
     const windowEnd = Math.min(plan.end, defaults.now);
     freshness[spec.type] = {
