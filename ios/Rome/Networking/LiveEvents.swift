@@ -16,9 +16,9 @@ enum LiveEvent: Sendable {
     /// A task left the chat and took its thread with it (`chat_thread_retired`):
     /// its messages are in no thread now.
     case threadRetired(sessionId: String, chatThreadId: String)
-    /// Rome's mark on a guardian message changed (`message_status_reaction`).
+    /// The Concierge's reaction on a guardian message changed (`message_reaction`).
     /// Nil: it has none now.
-    case statusReaction(sessionId: String, messageId: String, reaction: String?)
+    case reaction(sessionId: String, messageId: String, reaction: String?)
     /// A task's question or approval that a card in the chat shows ended
     /// (`chat_card_settled`): `card` replaces the card of every part that shows it.
     case cardSettled(sessionId: String, card: JSONValue)
@@ -362,9 +362,9 @@ final class LiveEventsSocket: LiveEventSource {
         case "message_insert":
             guard let message = data.decoded(ChatMessage.self) else { return nil }
             return .messageInsert(message)
-        case "message_status_reaction":
+        case "message_reaction":
             guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
-            return .statusReaction(sessionId: id, messageId: message, reaction: data["statusReaction"]?.string)
+            return .reaction(sessionId: id, messageId: message, reaction: data["reaction"]?.string)
         case "chat_card_settled":
             guard let id = data["sessionId"]?.string, let card = data["card"], card["kind"]?.string != nil, card["id"]?.string != nil else { return nil }
             return .cardSettled(sessionId: id, card: card)

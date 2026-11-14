@@ -2,12 +2,7 @@ import { withTaskCards } from "../../concierge/task-cards.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
-import type {
-  ChatPendingChecksResponse,
-  ConciergeStatusReaction,
-  MessageStatusReactionEvent,
-  MessageWritingEvent,
-} from "@rome/api-types/concierge";
+import type { ChatPendingChecksResponse, MessageWritingEvent } from "@rome/api-types/concierge";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { existsSync, readFileSync } from "node:fs";
@@ -1231,16 +1226,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (retired.chatId !== sessionId) return;
       emit("chat_thread_retired", { sessionId, chatThreadId: retired.root });
     });
-    // A status reaction is no message, so it only changes the bubble and
-    // never pushes (docs/domains/chats.md#status-reaction).
-    const unsubscribeReaction = deps.concierge?.deps.tasks.onReaction((target, reaction) => {
-      if (target.chatId !== sessionId) return;
-      const event: MessageStatusReactionEvent = {
-        sessionId,
-        messageId: target.messageKey,
-        statusReaction: reaction,
-      };
-      emit("message_status_reaction", event);
+    // A reaction is no message, so it only changes the bubble and never
+    // pushes (docs/domains/chats.md#reaction).
+    const unsubscribeReaction = deps.webchatRepo.onMessageReaction((event) => {
+      if (event.sessionId === sessionId) emit("message_reaction", event);
     });
     return () => {
       runningListeners.delete(runningListener);
@@ -1249,7 +1238,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       unsubscribeMessages();
       unsubscribeSessionName();
       unsubscribeChatThread();
-      unsubscribeReaction?.();
+      unsubscribeReaction();
       unsubscribeCards?.();
     };
   };
@@ -1667,22 +1656,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       };
     });
   };
-  // The status reaction on each guardian message that has one, which only a
-  // Concierge chat's can.
-  const attachStatusReactions = async <T extends StoredMessages[number]>(
-    sessionId: string,
-    messages: T[],
-  ): Promise<(T & { statusReaction?: ConciergeStatusReaction })[]> => {
-    const tasks = deps.concierge?.deps.tasks;
-    const asked = messages.filter((message) => message.role === "user").map((m) => m.id);
-    if (!tasks || asked.length === 0) return messages;
-    const reactions = await tasks.reactionsOf(sessionId, asked);
-    if (reactions.size === 0) return messages;
-    return messages.map((message) => {
-      const statusReaction = reactions.get(message.id);
-      return statusReaction ? { ...message, statusReaction } : message;
-    });
-  };
   // A task card's question or approval and how it ended, read for the whole
   // page at once (concierge/task-cards.ts). Only a Concierge chat has them.
   const fillTaskCards = async <
@@ -1705,10 +1678,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachChatThreadTitles(
       sessionId,
-      await attachStatusReactions(
-        sessionId,
-        await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
-      ),
+      await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
     );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
@@ -5011,14 +4981,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       romeSessionId: sessionId,
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
-        // A Concierge turn that takes its owner's message marks it working at
-        // once, before the Concierge says or starts anything
-        // (docs/domains/chats.md#status-reaction).
+        // A Concierge turn that takes its owner's message records it, so a
+        // turn its owner stops before it answers can be told to the next one
+        // (docs/domains/chats.md#task).
         if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
           await deps.concierge?.deps.tasks.repo
             .takeMessage(status.turnId, { chatId: sessionId, messageKey: status.inputId })
             .catch((error: unknown) =>
-              log.warn("failed to mark a status reaction", {
+              log.warn("failed to record the message a turn took", {
                 sessionId,
                 error: error instanceof Error ? error.message : String(error),
               }),

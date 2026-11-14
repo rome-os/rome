@@ -182,9 +182,9 @@ export interface ChatMessage {
   /** The task chat of the task whose chat thread the message is in, when it
    *  has one. Absent from servers before it. */
   chatThreadTaskChatId?: string | null;
-  /** Rome's status reaction on a guardian message in a Concierge chat: how
-   *  the task it started or was passed on to stands. Absent when it has none. */
-  statusReaction?: import("@rome/api-types/concierge").ConciergeStatusReaction | null;
+  /** The emoji the Concierge reacted to a guardian message of its chat with.
+   *  Absent when it has none, and from servers before it. */
+  reaction?: string | null;
 }
 
 export interface ProjectOption {

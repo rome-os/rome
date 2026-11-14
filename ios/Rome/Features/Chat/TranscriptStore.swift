@@ -660,7 +660,7 @@ final class TranscriptStore {
             let held = messages.first { $0.id == message.id }
             let isNew = held == nil
             // A live insert leaves the mark out: keep the one already known.
-            if message.statusReaction == nil { message.statusReaction = held?.statusReaction }
+            if message.reaction == nil { message.reaction = held?.reaction }
             let newest = messages.map(\.date).max()
             // Only a message that arrives live may wait behind the dots: never
             // history, a catch-up read on return, or an older page.
@@ -678,9 +678,9 @@ final class TranscriptStore {
                 // The turn's trace summary and reply are final now.
                 Task { await reload() }
             }
-        case .statusReaction(let id, let messageId, let reaction) where id == sessionId:
+        case .reaction(let id, let messageId, let reaction) where id == sessionId:
             if let index = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[index].statusReaction = reaction
+                messages[index].reaction = reaction
             }
         case .messageThread(let id, let messageId, let root, let title) where id == sessionId:
             if messages.contains(where: { $0.id == messageId }) {

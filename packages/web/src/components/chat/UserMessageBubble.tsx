@@ -27,7 +27,7 @@ export function UserMessageBubble({
   text: string;
   own: boolean;
   className?: string;
-  /** Sits on the bubble's own surface, positioned against it, as a status reaction does. Pass it, null included, to keep the bubble its anchor. */
+  /** Sits on the bubble's own surface, positioned against it, as a reaction does. Pass it, null included, to keep the bubble its anchor. */
   badge?: ReactNode;
 }) {
   const { t } = useTranslation("chat");

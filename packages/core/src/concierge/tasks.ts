@@ -7,10 +7,8 @@ import {
   type ConciergeOpenWait,
   type ConciergeTaskDto,
 } from "@rome/api-types/concierge";
-import type { ConciergeStatusReaction } from "@rome/api-types/concierge";
 import {
   CONCIERGE_TASK_WAIT_EXPIRY_MS,
-  messageStatusReaction,
   type ConciergeTaskFacts,
   type ConciergeTaskStatusResult,
   legacyTaskState,
@@ -24,7 +22,6 @@ import type {
   ConciergeTaskRow,
   ConciergeTasksRepository,
   ConciergeTaskWithChat,
-  ReactionTarget,
 } from "../db/repositories/concierge-tasks.js";
 
 const log = createLogger("concierge-tasks");
@@ -413,76 +410,6 @@ export class ConciergeTasks {
     if (this.told.get(row.id) === keyOf(of)) return;
     this.told.set(row.id, keyOf(of));
     await this.repo.reannounce(row.id);
-  }
-
-  /**
-   * The status reaction of each of `messageKeys` in Concierge chat `chatId`
-   * that has one, derived from its turn and the status of the tasks made
-   * for it (`messageStatusReaction`).
-   */
-  async reactionsOf(
-    chatId: string,
-    messageKeys: readonly string[],
-  ): Promise<Map<string, ConciergeStatusReaction>> {
-    const marks = await this.repo.messageMarks(chatId, messageKeys);
-    const taskIds = [...new Set([...marks.values()].flatMap((mark) => mark.taskIds))];
-    const rows = await this.repo.getMany(taskIds);
-    const status = await this.statusOf(rows);
-    const out = new Map<string, ConciergeStatusReaction>();
-    for (const [key, mark] of marks) {
-      const reaction = messageStatusReaction({
-        answered: mark.answered,
-        turnFailed: mark.turnFailed,
-        tasks: mark.taskIds.flatMap((id) => {
-          const of = status.get(id);
-          const row = rows.find((candidate) => candidate.id === id);
-          return of ? [{ ...of, reportLost: row?.reportGivenUp === true }] : [];
-        }),
-      });
-      if (reaction) out.set(key, reaction);
-    }
-    return out;
-  }
-
-  /**
-   * Calls `listener` whenever a guardian message's status reaction changes,
-   * with null once it has none: a fact of its turn changed, or a task made
-   * for it changed status. Returns the unsubscribe.
-   */
-  onReaction(
-    listener: (target: ReactionTarget, reaction: ConciergeStatusReaction | null) => void,
-  ): () => void {
-    const told = new Map<string, ConciergeStatusReaction | null>();
-    let telling: Promise<void> = Promise.resolve();
-    const check = (targets: readonly ReactionTarget[]) => {
-      telling = telling
-        .then(async () => {
-          for (const target of targets) {
-            const reaction =
-              (await this.reactionsOf(target.chatId, [target.messageKey])).get(target.messageKey) ??
-              null;
-            const key = `${target.chatId}\u0000${target.messageKey}`;
-            if (told.has(key) && told.get(key) === reaction) continue;
-            told.set(key, reaction);
-            listener(target, reaction);
-          }
-        })
-        .catch((error: unknown) =>
-          log.warn("failed to tell a status reaction", {
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-    };
-    const offMessage = this.repo.onMessageChange((target) => check([target]));
-    // Any change of a task, its row or a fact its status reads, reads again
-    // the messages it was made for.
-    const offTask = this.repo.onChange(({ row }) => {
-      void this.repo.messagesOfTask(row.id).then(check);
-    });
-    return () => {
-      offMessage();
-      offTask();
-    };
   }
 
   /** Marks a row the Concierge did not pick up events for. A write clears the mark. */

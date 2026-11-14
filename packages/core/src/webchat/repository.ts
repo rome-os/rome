@@ -1,6 +1,7 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
+import type { MessageReactionEvent } from "@rome/api-types/concierge";
 import { canOpenSql, privateChildren } from "./privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
@@ -88,6 +89,8 @@ export interface StoredWebchatMessage {
   /** The chat thread the message is in (docs/domains/chats.md#chat-thread),
    *  or null when it is in none. */
   chatThreadId?: string | null;
+  /** The emoji the message was reacted to with (docs/domains/chats.md#reaction), when it has one. */
+  reaction?: string | null;
   createdAt: Date;
 }
 
@@ -300,6 +303,7 @@ export interface TraceBatch {
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
 export type ChatThreadPlacedListener = (event: ChatThreadPlaced) => void;
+export type MessageReactionListener = (event: MessageReactionEvent) => void;
 export type WebchatSessionNameChangedListener = (event: {
   sessionId: string;
   name: string;
@@ -872,6 +876,33 @@ export class WebChatRepository {
 
   protected emitChatThreadPlaced(event: ChatThreadPlaced): void {
     for (const listener of this.chatThreadPlacedListeners) listener(event);
+  }
+
+  private messageReactionListeners = new Set<MessageReactionListener>();
+
+  /** Told when a message's reaction is set, replaced or cleared. */
+  onMessageReaction(listener: MessageReactionListener): () => void {
+    this.messageReactionListeners.add(listener);
+    return () => {
+      this.messageReactionListeners.delete(listener);
+    };
+  }
+
+  protected emitMessageReaction(event: MessageReactionEvent): void {
+    for (const listener of this.messageReactionListeners) listener(event);
+  }
+
+  /**
+   * Sets message `messageId` of chat `sessionId` to react with `reaction`, or
+   * clears it with null. Answers false when the chat holds no such message or
+   * keeps no reactions. Reactions live in Chats, so this repository keeps none.
+   */
+  async setMessageReaction(
+    _sessionId: string,
+    _messageId: string,
+    _reaction: string | null,
+  ): Promise<boolean> {
+    return false;
   }
 
   /**
