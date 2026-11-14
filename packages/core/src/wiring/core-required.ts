@@ -2,8 +2,23 @@ import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { getRepoAppsDir } from "../paths.js";
-import { getCoreAgentsRoot } from "./authoring.js";
+import { getProjectRoot, getRepoAppsDir } from "../paths.js";
+
+/**
+ * Apps Rome cannot start without, even when no core agent references their
+ * subagents. `system` provides the core action set; the others are baseline
+ * capabilities the runtime depends on.
+ */
+export const ALWAYS_REQUIRED_APPS = [
+  "system",
+  "assistant",
+  "coding",
+  "inbox",
+  "browser-automation",
+  "connector",
+  // Guardian-facing skills surface: browse/invoke + import/generate.
+  "skills",
+] as const;
 
 export interface CoreRequiredAppFailure {
   appId: string;
@@ -135,13 +150,14 @@ async function readCoreAgentSubagentRefs(coreAgentsRoot: string): Promise<string
 export interface DeriveCoreRequiredAppsOptions {
   projectRoot: string;
   /** Apps required even when no core agent references their subagents. */
-  alwaysRequired: readonly string[];
+  alwaysRequired?: readonly string[];
   coreAgentsRoot?: string;
   seedAppsRoot?: string;
 }
 
 /**
  * Compute the set of rome_apps the core runtime depends on: `alwaysRequired`
+ * (by default {@link ALWAYS_REQUIRED_APPS})
  * plus the apps found by joining
  * `packages/core/agents/*.yaml` `allowedSubagents` against the agent yamls
  * under `rome_apps/<app>/{agents,src/agents}/*.yaml`. Throws if any subagent
@@ -166,7 +182,7 @@ export async function deriveCoreRequiredApps(
     if (!subagentToApp.has(agent.name)) subagentToApp.set(agent.name, agent.appId);
   }
 
-  const required = new Set<string>(options.alwaysRequired);
+  const required = new Set<string>(options.alwaysRequired ?? ALWAYS_REQUIRED_APPS);
   const orphans: string[] = [];
   for (const ref of subagentRefs) {
     const owner = subagentToApp.get(ref);
@@ -182,4 +198,8 @@ export async function deriveCoreRequiredApps(
   }
 
   return [...required].sort();
+}
+
+export function getCoreAgentsRoot(projectRoot: string = getProjectRoot()): string {
+  return join(projectRoot, "packages", "core", "agents");
 }

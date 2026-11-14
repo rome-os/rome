@@ -305,8 +305,7 @@ import {
   subagentSessions,
   subagentTurnLog,
 } from "./core/subagent-call-ports.js";
-import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
-import { ALWAYS_REQUIRED_APPS } from "./wiring/required-apps.js";
+import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./wiring/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
@@ -860,10 +859,7 @@ async function main() {
     appCatalog,
     projectRoot: getProjectRoot(),
   });
-  const coreRequiredAppIds = await deriveCoreRequiredApps({
-    projectRoot: getProjectRoot(),
-    alwaysRequired: ALWAYS_REQUIRED_APPS,
-  });
+  const coreRequiredAppIds = await deriveCoreRequiredApps({ projectRoot: getProjectRoot() });
   assertCoreRequiredAppsPacked(coreRequiredAppIds, firstPartyBoot.firstPartyAppIds);
   appsLog.info("first-party apps converged at boot", {
     firstParty: firstPartyBoot.firstPartyAppIds,
