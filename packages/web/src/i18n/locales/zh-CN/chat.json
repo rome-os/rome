@@ -451,6 +451,14 @@
     "connected": "已连接",
     "notConnected": "未连接"
   },
+  "locationCard": {
+    "shared": "已共享位置 · ±{{accuracy}}",
+    "notShared": "未共享",
+    "locating": "正在获取你的位置…",
+    "denied": "此网站的位置权限已关闭。请在浏览器中开启，或点按“暂不”。",
+    "unavailable": "无法获取你的位置。请重试，或点按“暂不”。",
+    "unsupported": "此浏览器无法共享位置。请点按“暂不”，并在消息中说明地点。"
+  },
   "appComponent": {
     "dismiss": "跳过",
     "widgetUnavailable": "无法读取这张卡片的数据。{{text}}",

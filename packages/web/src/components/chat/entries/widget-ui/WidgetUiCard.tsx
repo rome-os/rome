@@ -10,8 +10,11 @@ import {
   useRef,
   useState,
 } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { isLocationCard, SHARE_LOCATION_EVENT } from "@rome/api-types/location-card";
 import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
+import { formatAccuracy, readDevicePosition } from "@/lib/device-location";
 import { fetchJson } from "@/lib/fetch-json";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
@@ -112,6 +115,7 @@ export function WidgetUiCard({
   const [sendFailed, setSendFailed] = useState<string | false>(false);
   const [blockedLink, setBlockedLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [sent, setSent] = useState(false);
   const result = waiting?.result;
   const dismissed = result?.dismissed === true;
@@ -140,6 +144,7 @@ export function WidgetUiCard({
     );
   }, [uiKey, t]);
   const waits = waiting !== undefined;
+  const locationCard = useMemo(() => isLocationCard(parts.components), [parts]);
   // Only the newest read writes the data: a slow first read must not land
   // after a press's refresh and put back an older value.
   const reads = useRef(0);
@@ -179,9 +184,21 @@ export function WidgetUiCard({
       const host = waitingRef.current;
       let outcome: WidgetEventOutcome = { ok: false, status: 0 };
       try {
+        let context = action.context ?? {};
+        // Share on the share-location card carries the device's position,
+        // read on the press so the browser asks for permission then.
+        if (action.name === SHARE_LOCATION_EVENT) {
+          setLocating(true);
+          const read = await readDevicePosition().finally(() => setLocating(false));
+          if (!read.ok) {
+            outcome = { ok: false, status: 0, error: t(`locationCard.${read.failure}`) };
+            throw new Error("No position to share");
+          }
+          context = { ...context, ...read.position };
+        }
         outcome = await postWidgetEvent(widgetId, {
           name: action.name,
-          context: action.context ?? {},
+          context,
           turn: widgetHostRef.current.turnFields(),
         });
         if (!outcome.ok) throw new Error(`The widget's event failed: ${outcome.status}`);
@@ -239,7 +256,7 @@ export function WidgetUiCard({
       return { processor: p, drawable: false };
     }
     return { processor: p, drawable: true };
-  }, [load, widgetId, toolUseId, uiKey, parts, valid]);
+  }, [load, widgetId, toolUseId, uiKey, parts, valid, t]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
   // A dismissed card was never answered, so it shows nothing picked rather
@@ -305,14 +322,18 @@ export function WidgetUiCard({
           it, so it says how the card ended only when it did. */}
       {waiting && (result !== undefined || sent) ? (
         <span className="text-aux text-muted-foreground">
-          {t(
-            result === undefined
-              ? "questionCard.sent"
-              : dismissed
-                ? "questionCard.dismissed"
-                : "questionCard.answered",
-          )}
+          {locationCard && result !== undefined
+            ? locationOutcome(result, t)
+            : t(
+                result === undefined
+                  ? "questionCard.sent"
+                  : dismissed
+                    ? "questionCard.dismissed"
+                    : "questionCard.answered",
+              )}
         </span>
+      ) : locating ? (
+        <span className="text-aux text-muted-foreground">{t("locationCard.locating")}</span>
       ) : null}
       {blockedLink ? (
         <a
@@ -336,6 +357,15 @@ export function WidgetUiCard({
       ) : null}
     </div>
   );
+}
+
+/** How an answered share-location card ended: shared, with how precise the
+ *  position was, or not shared (declined, or skipped by a message). */
+function locationOutcome(result: Record<string, unknown>, t: TFunction<"chat">) {
+  const accuracy = result.accuracyMeters;
+  return result.status === "shared" && typeof accuracy === "number"
+    ? t("locationCard.shared", { accuracy: formatAccuracy(accuracy) })
+    : t("locationCard.notShared");
 }
 
 /**

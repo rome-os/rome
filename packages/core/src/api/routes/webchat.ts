@@ -132,6 +132,12 @@ import {
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import {
+  locationAnswerPrompt,
+  locationCardUiFromProps,
+  storedLocationAnswer,
+} from "../../webchat/location-card.js";
+import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import { cameThroughWidgetEvent } from "./widget-events.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
 
@@ -620,6 +626,10 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
       componentId: "connect-card",
       emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
     },
+    {
+      componentId: LOCATION_CARD_ID,
+      emittedBy: (tool) => tool === "share_location" || tool.endsWith("__share_location"),
+    },
   ];
 
 /** Validate and shape a host-owned suspension a tool result may emit.
@@ -646,6 +656,10 @@ function buildBuiltinCard(
     // The connect card described as data, built here for the same reason.
     const connectUi =
       suspension.componentId === "connect-card" ? connectCardUiFromProps(suspension.props) : null;
+    const locationUi =
+      suspension.componentId === LOCATION_CARD_ID
+        ? locationCardUiFromProps(suspension.props)
+        : null;
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -658,6 +672,7 @@ function buildBuiltinCard(
         ...(suspension.requiresCard ? { requiresCard: true } : {}),
         ...(questions?.ok ? { ui: questionCardUi(questions.questions) } : {}),
         ...(connectUi ? { ui: connectUi } : {}),
+        ...(locationUi ? { ui: locationUi } : {}),
       },
     };
   }
@@ -766,6 +781,8 @@ interface OpenSuspensionCard {
   dismissedByReply?: boolean;
   /** The questions of an open question card, to read its answers by. */
   questions?: Question[];
+  /** A share-location card, whose answer the agent reads in its own words. */
+  location?: true;
   /** The message that holds the card. */
   messageId: string;
   /** An app's card described as data: only the app answers it, through the
@@ -832,14 +849,20 @@ async function findOpenSuspensions(
           dismissedByReply:
             builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
           ...(questions?.ok ? { questions: questions.questions } : {}),
+          ...(builtin && part.render?.componentId === LOCATION_CARD_ID
+            ? { location: true as const }
+            : {}),
           messageId: msg.id,
           // A card whose owner decides its answer: an app's card described as
-          // data, or core's connect card, which answers once the connection works.
+          // data, core's connect card, which answers once the connection works,
+          // or core's share-location card, which checks the position it is sent.
           answeredByOwner:
             (part.appId !== "core" &&
               part.render?.ui !== undefined &&
               part.render?.componentId === undefined) ||
-            (builtin && part.render?.componentId === "connect-card"),
+            (builtin &&
+              (part.render?.componentId === "connect-card" ||
+                part.render?.componentId === LOCATION_CARD_ID)),
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -4122,6 +4145,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
             part.output = { ...answers, card: sent };
           }
+        }
+      }
+    }
+
+    // A share-location card's answer reads in its own words, which say how
+    // far to trust the position and that it is for this turn only.
+    if (resolution && openSuspensions.get(resolution.toolUseId)?.location) {
+      resolution.prompt = locationAnswerPrompt(resolution.output);
+      // The position reaches this turn only: the chat keeps how the card
+      // ended and how precise it was, never where the guardian was.
+      for (const part of body.parts as Array<Record<string, unknown>>) {
+        if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+          part.output = storedLocationAnswer(resolution.output);
         }
       }
     }

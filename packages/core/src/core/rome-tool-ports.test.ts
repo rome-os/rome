@@ -197,7 +197,11 @@ describe("romeToolPorts sessionTools", () => {
     };
     const { sessionTools } = ports(rs.fn(async () => [connectCard]));
     const tools = await sessionTools.forTurn(turn(), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["connect_card", "propose_routine"]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "connect_card",
+      "propose_routine",
+      "share_location",
+    ]);
   });
 
   it("serves connect_account for device kinds alone beside the session's own connect card", async () => {
@@ -217,6 +221,7 @@ describe("romeToolPorts sessionTools", () => {
       "connect_card",
       "propose_routine",
       "connect_account",
+      "share_location",
     ]);
     const connect = tools.find((tool) => tool.name === "connect_account")!;
     const schema = connect.inputSchema as { properties: { kind: { enum: string[] } } };
@@ -234,7 +239,12 @@ describe("romeToolPorts sessionTools", () => {
     };
     const { sessionTools, provided } = ports(rs.fn(async () => [extra]));
     const tools = await sessionTools.forTurn(turn(), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["extra", "propose_routine", "connect_account"]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "extra",
+      "propose_routine",
+      "connect_account",
+      "share_location",
+    ]);
     expect(provided).toHaveBeenCalledWith(
       expect.objectContaining({
         agentName: "core:main",
@@ -244,17 +254,21 @@ describe("romeToolPorts sessionTools", () => {
     );
   });
 
-  it("serves only propose_routine and connect_account to a turn with no speaker", async () => {
+  it("serves only propose_routine, connect_account and share_location to a turn with no speaker", async () => {
     const { sessionTools, provided } = ports();
     const tools = await sessionTools.forTurn(turn(), false);
-    expect(tools.map((tool) => tool.name)).toEqual(["propose_routine", "connect_account"]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "propose_routine",
+      "connect_account",
+      "share_location",
+    ]);
     expect(provided).not.toHaveBeenCalled();
   });
 
-  it("serves only connect_account where cards draw as plain text", async () => {
+  it("serves only connect_account and share_location where cards draw as plain text", async () => {
     const { sessionTools } = ports();
     const tools = await sessionTools.forTurn(turn({ widgets: "plain_text" }), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["connect_account"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["connect_account", "share_location"]);
   });
 });
 

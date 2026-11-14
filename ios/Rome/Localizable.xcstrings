@@ -1311,6 +1311,16 @@
         }
       }
     },
+    "Couldn't find your location. Try again, or tap Not now." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法获取你的位置。请重试，或轻点“暂不”。"
+          }
+        }
+      }
+    },
     "Couldn't load the links." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1741,6 +1751,16 @@
         }
       }
     },
+    "Finding your location…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在获取你的位置…"
+          }
+        }
+      }
+    },
     "Flights climbed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2105,6 +2125,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本地 Rome"
+          }
+        }
+      }
+    },
+    "Location access is off for Rome. Turn it on in Settings, or tap Not now." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 的位置权限已关闭。请在设置中开启，或轻点“暂不”。"
+          }
+        }
+      }
+    },
+    "Location shared · ±%@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已共享位置 · ±%@"
           }
         }
       }
@@ -2585,6 +2625,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未发送 · %@"
+          }
+        }
+      }
+    },
+    "Not shared" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未共享"
           }
         }
       }

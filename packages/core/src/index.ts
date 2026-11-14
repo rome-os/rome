@@ -1316,6 +1316,10 @@ async function main() {
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
         deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+        // The turn's audience, narrowed by the chat's as it stands now, so a
+        // chat that opens to visitors after the turn started is no longer private.
+        privateTurn: async (turn) =>
+          turn.audience() === "private" && (await chatAudience(turn.threadContext())) === "private",
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),

@@ -1,6 +1,7 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { askQuestionToolOutput, type Question, questionCardUi } from "../../agent/index.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import { locationCardUiFromProps } from "../../webchat/location-card.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5357,6 +5358,116 @@ describe("Webchat API", () => {
         }),
       });
       expect(lateRes.status).toBe(400);
+    });
+
+    const locationCardEvents = (toolUseId: string) =>
+      async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId,
+          tool: "share_location",
+          output: {
+            pendingInteraction: true,
+            appId: "core",
+            render: {
+              kind: "inline",
+              componentId: "location-card",
+              props: { reason: "To find coffee near you" },
+              builtin: true,
+            },
+          },
+        };
+        yield { type: "result", content: "" };
+      };
+
+    it("answers a share-location card only through its event, in the card's own words", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(locationCardEvents("tu-loc"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "coffee near me?" }),
+        }),
+      );
+      const card = await findCard(sessionId, "tu-loc");
+      expect(card?.render).toMatchObject({
+        ui: locationCardUiFromProps({ reason: "To find coffee near you" }),
+      });
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const shared = {
+        status: "shared",
+        latitude: 31.23,
+        longitude: 121.47,
+        accuracyMeters: 25_000,
+        fixedAt: "2026-11-14T08:00:00.000Z",
+      };
+      const answerBody = JSON.stringify({
+        parts: [{ type: "interaction_result", toolUseId: "tu-loc", output: shared }],
+      });
+      // A client cannot post a position itself: only the card's event answers it.
+      const forged = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: answerBody,
+      });
+      expect(forged.status).toBe(400);
+
+      const res = await app.request(
+        `/chat/sessions/${sessionId}/turns`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: answerBody },
+        { [Symbol.for("rome.widget-event")]: true },
+      );
+      expect(res.status).toBe(200);
+      await drainTurn(app, res);
+      const prompt = ctl.sentTurns.at(-1)?.prompt ?? "";
+      expect(prompt).toContain("latitude: 31.23");
+      expect(prompt).toContain("around <city>");
+      // The chat keeps how the card ended, never where the guardian was.
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-loc",
+        output: { status: "shared", accuracyMeters: 25_000, fixedAt: "2026-11-14T08:00:00.000Z" },
+      });
+      expect(JSON.stringify(await userPartsIn(sessionId))).not.toContain("31.23");
+    });
+
+    it("expires an open share-location card when the guardian types a reply instead", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(locationCardEvents("tu-loc-typed"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "weather here?" }),
+        }),
+      );
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "I'm in Hangzhou" }),
+        }),
+      );
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain("skipped your open card");
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-loc-typed",
+        output: { dismissed: true },
+      });
     });
 
     it("leaves an app's inline card open when the guardian types a reply", async () => {
