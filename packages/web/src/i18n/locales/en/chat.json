@@ -699,5 +699,29 @@
     "channel": "Channel",
     "sendMessage": "Send a message",
     "action": "Action"
+  },
+  "voiceInput": {
+    "start": "Start voice input",
+    "stop": "Stop voice input",
+    "finishing": "Finishing voice input",
+    "stopped": {
+      "provider-unavailable": "Transcription service unavailable. Listening stopped",
+      "provider-refused": "Transcription service refused the request. Listening stopped",
+      "bad-request": "Listening stopped after an error",
+      "microphone-blocked": "Microphone blocked. Allow it in the browser's site settings",
+      "microphone-missing": "No microphone found",
+      "connection-lost": "Connection to Rome lost. Listening stopped",
+      "microphone-failed": "Microphone could not start. Listening stopped",
+      "time-limit": "Listening stopped at the time limit",
+      "service-refused": "Rome Cloud refused voice input ({{code}}). Listening stopped",
+      "service-unavailable": "Rome Cloud could not be reached. Listening stopped",
+      "service-signed-out": "Rome Cloud does not accept this Rome's sign-in. Sign in to Rome Cloud again. Listening stopped"
+    },
+    "romeCloud": {
+      "voice_input_rate_limited": "Too many voice inputs in the last minute. Try again shortly",
+      "voice_input_not_configured": "Rome Cloud has not set up voice input yet. Listening stopped",
+      "provider_unavailable": "Rome Cloud's transcription service is unavailable. Listening stopped",
+      "insufficient_credits": "Not enough Rome credits for voice input. Listening stopped"
+    }
   }
 }

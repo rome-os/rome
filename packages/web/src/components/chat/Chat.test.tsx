@@ -52,6 +52,7 @@ const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }))
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
+const conciergeStopVoiceInput = rs.hoisted(() => rs.fn());
 const toast = rs.hoisted(() => ({
   loading: rs.fn(() => "finding"),
   error: rs.fn(),
@@ -406,6 +407,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
       focus: () => {},
+      stopVoiceInput: conciergeStopVoiceInput,
     }));
     return (
       <div
@@ -2951,6 +2953,59 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
     drop();
     expect(conciergeAddFiles).toHaveBeenCalledOnce();
+  });
+
+  it("stops listening when share mode hides the composer", async () => {
+    const user = userEvent.setup();
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    await screen.findByTestId("share-bar");
+    expect(conciergeStopVoiceInput).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId("share-exit"));
+    await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
+    expect(conciergeStopVoiceInput).toHaveBeenCalledOnce();
+  });
+
+  it("stops listening when the tool pane covers a narrow chat", async () => {
+    const tasksHost = (compact: boolean): ToolTasksHost => ({
+      active: false,
+      compact,
+      show: rs.fn(),
+      hide: rs.fn(),
+    });
+    const at = (compact: boolean, paneOpen: boolean) => (
+      <MemoryRouter>
+        <ToolTasksContext.Provider value={tasksHost(compact)}>
+          <ToolTraceContext.Provider
+            value={{
+              outlet: null,
+              paneOpen,
+              setPaneCollapsed: rs.fn(),
+              reveal: rs.fn(),
+              set: rs.fn(),
+            }}
+          >
+            <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
+          </ToolTraceContext.Provider>
+        </ToolTasksContext.Provider>
+      </MemoryRouter>
+    );
+    twoTurns();
+    const view = render(at(true, false), { wrapper: withQueries() });
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+
+    // Beside the chat on a wide screen, the pane hides nothing.
+    view.rerender(at(false, true));
+    expect(conciergeStopVoiceInput).not.toHaveBeenCalled();
+
+    // On a narrow screen the pane shows in place of the chat.
+    view.rerender(at(true, true));
+    await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
   });
 
   it("keeps the composer, and its draft, through share mode", async () => {

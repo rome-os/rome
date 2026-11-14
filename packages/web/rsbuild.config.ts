@@ -97,6 +97,7 @@ export default defineConfig({
       "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
       "/ws/events": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
       "/ws/node": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
+      "/ws/voice-input": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
       // Route /desktop-proxy through the backend so its WebSocket upgrade
       // handler can authorize the connection before reaching noVNC.
       "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true, xfwd: true },
