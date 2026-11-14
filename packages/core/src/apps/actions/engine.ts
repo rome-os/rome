@@ -22,6 +22,7 @@ import type {
 } from "../repositories/action-executions.js";
 import type { ApprovalsRepository } from "../repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
+import { isPersonalDataAction, PERSONAL_DATA_PRIVATE_ONLY } from "./personal-data.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../../logger.js";
@@ -146,6 +147,9 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "system:publish_event",
   "core:set_agent_name",
   "core:show_file",
+  // Reads of the user-data store (user-data/actions.ts).
+  "core:user_data_catalog",
+  "core:user_data_query",
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",
@@ -181,6 +185,13 @@ export interface ActionRunContext {
    * agent / user / system-initiated calls. */
   callerAppId?: string;
   channelContext?: ThreadContext;
+  /**
+   * Who can read what the calling turn says. A personal-data action runs only
+   * when it is `private`; absent, it is refused. Read on the call it is given
+   * to and never inherited, so a nested call reads no personal data.
+   * Domain: docs/domains/participation.md#audience.
+   */
+  audience?: "private" | "shared";
   sharedContext?: Record<string, unknown>;
   hookInvocationContext?: HookInvocationContext;
   replayJournal?: JournalEntry[];
@@ -544,6 +555,13 @@ export class ActionEngine {
     const action = this.registry.get(name);
     if (!action) {
       throw new ActionNotFoundError(name);
+    }
+    if (isPersonalDataAction(action.config.name) && context?.audience !== "private") {
+      log.info("personal-data action refused outside a private turn", {
+        action: action.config.name,
+        initiator: context?.initiator,
+      });
+      return { status: "error", error: PERSONAL_DATA_PRIVATE_ONLY };
     }
     const runContext = withCurrentHookInvocationContext(context);
 

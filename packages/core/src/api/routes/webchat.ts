@@ -65,6 +65,7 @@ import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
 import type { AgentSession, AgentTurnHandle } from "../../agent/index.js";
 import { openedInChat, withRomeSession } from "../../core/session-conversation.js";
+import { dashboardChatAudience } from "../../core/session-opening.js";
 import {
   type Account,
   checkWidgetUi,
@@ -1932,7 +1933,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const source = await deps.agentSessionManager.open(
         { agentName, channelThreadKey },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...deps.sessionOpeningFor(
+            channelThreadKey,
+            threadContext,
+            await dashboardChatAudience(deps.webchatRepo, threadContext),
+          ),
           kind: "conversation",
           workingDir,
           threadContext,
@@ -4460,7 +4465,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           channelThreadKey,
         },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...deps.sessionOpeningFor(
+            channelThreadKey,
+            threadContext,
+            await dashboardChatAudience(deps.webchatRepo, threadContext),
+          ),
           kind: "conversation",
           workingDir,
           threadContext,
@@ -5325,7 +5334,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const opened = await deps.agentSessionManager.open(
         { agentName: session.agentName ?? "main", channelThreadKey },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...deps.sessionOpeningFor(
+            channelThreadKey,
+            threadContext,
+            await dashboardChatAudience(deps.webchatRepo, threadContext),
+          ),
           kind: "conversation",
           workingDir,
           threadContext,

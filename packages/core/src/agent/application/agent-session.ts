@@ -41,6 +41,7 @@ import {
 } from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
 import { type TurnFacts, type PushLevel, type TurnActor } from "../domain/turn-facts.js";
+import { type Audience, turnAudience } from "../domain/turn-audience.js";
 import {
   NO_ROME_TOOLS,
   type RomeTool,
@@ -262,6 +263,11 @@ export interface SendTurnOptions {
    * arrives. Absent, the turn acts for no one.
    */
   actor?: TurnActor;
+  /**
+   * The audience of the turn that started this one, such as a subagent's
+   * caller. The turn is never more private than it.
+   */
+  parentAudience?: Audience;
   /** The Concierge task the turn reports on, which no message of the owner started (TurnFacts.reportedTask). */
   reportedTask?: string;
 }
@@ -806,6 +812,8 @@ interface TurnExecRefs {
   bindTurnCtx: <T>(fn: () => T) => T;
   /** Who the running turn acts for; its subagents' turns act for the same person. */
   getActor: () => TurnActor | undefined;
+  /** Who can read the running turn; its subagents' turns are never more private. */
+  getAudience: () => Audience;
 }
 
 /** Per-fork identity handed to `buildForkOpenParams` by `fork`. */
@@ -1032,6 +1040,7 @@ function sessionSetupOf(
         sharedContext: () => opening.sharedContext,
         pushLevel: () => undefined,
         actor: () => undefined,
+        audience: () => "shared",
         reportedTask: () => undefined,
         inTurn: (fn) => fn(),
       };
@@ -1413,6 +1422,7 @@ async function openSession(
     attachSubagentCall: (toolUseId, call) => impl.addSubagentCall(toolUseId, call),
     bindTurnCtx: inCurrentTurnCtx,
     getActor: () => impl.currentTurnActorRef,
+    getAudience: () => impl.currentTurnAudienceRef,
   };
 
   // The facts the ports behind the Rome tools read, for the turns the refs run.
@@ -1440,6 +1450,7 @@ async function openSession(
     sharedContext: refs.getSharedContext,
     pushLevel,
     actor: refs.getActor,
+    audience: refs.getAudience,
     reportedTask,
     inTurn: refs.bindTurnCtx,
   });
@@ -1479,6 +1490,7 @@ async function openSession(
             sharedContext: refs.getSharedContext(),
           },
           actor: refs.getActor(),
+          audience: refs.getAudience(),
         });
         try {
           refs.attachSubagentCall(toolContext.toolUseId, call);
@@ -1667,6 +1679,7 @@ async function openSession(
         ...(use.startedAt ? { startedAt: use.startedAt } : {}),
       });
     };
+    const forkAudience = turnAudience(opening.threadContext, { actor: fork.actor });
     const refs: TurnExecRefs = {
       sessionId: fork.forkSessionId,
       getRomeSessionId: () => fork.forkSessionId,
@@ -1695,6 +1708,9 @@ async function openSession(
       // OTel context instead of re-binding into a source turn's span.
       bindTurnCtx: (fn) => fn(),
       getActor: () => fork.actor,
+      // A fork answers for the turn it was forked from, so it reads the
+      // source's place and person.
+      getAudience: () => forkAudience,
     };
     const liveOpenParams = lastOpenParams;
     return {
@@ -2005,6 +2021,8 @@ interface TurnSink {
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
   actor?: TurnActor;
+  /** Who can read the turn, read once when it starts. */
+  audience: Audience;
   reportedTask?: string;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
@@ -2342,6 +2360,11 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnActorRef(): TurnActor | undefined {
     return this.currentSink?.actor;
+  }
+
+  /** The running turn's audience; between turns, the session's place read alone. */
+  get currentTurnAudienceRef(): Audience {
+    return this.currentSink?.audience ?? turnAudience(this.threadContext);
   }
 
   /** The next turn resumes what an earlier session of the chat started, so
@@ -3543,6 +3566,10 @@ class AgentSessionImpl implements AgentSession {
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
       actor: options?.actor,
+      audience: turnAudience(options?.threadContext ?? this.threadContext, {
+        actor: options?.actor,
+        parent: options?.parentAudience,
+      }),
       reportedTask: options?.reportedTask,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,

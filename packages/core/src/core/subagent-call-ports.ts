@@ -34,6 +34,7 @@ function subagentSession(child: AgentSession): SubagentSession {
           initiatedBy: "system",
           // The subagent acts for the person its parent turn acts for.
           ...(context.actor ? { actor: context.actor } : {}),
+          ...(context.audience ? { parentAudience: context.audience } : {}),
         },
       );
       return {

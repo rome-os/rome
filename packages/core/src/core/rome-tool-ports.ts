@@ -4,13 +4,15 @@
 // Vocabulary: docs/domains/agents.md#rome-tools.
 
 import type { ThreadContext } from "@rome-os/app-runtime";
-import type {
-  AgentAction,
-  AgentActions,
-  DeferTool,
-  RomeTool,
-  SessionTools,
-  TurnFacts,
+import {
+  type Audience,
+  type AgentAction,
+  type AgentActions,
+  narrowerAudience,
+  type DeferTool,
+  type RomeTool,
+  type SessionTools,
+  type TurnFacts,
 } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
 import type { Action, ActionRegistry, ActionResult } from "../apps/actions/types.js";
@@ -97,6 +99,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           return actionEngine.run(action.config.name, input as Record<string, unknown>, {
             initiator: `agent:${turn.agentName}`,
             ...(actor ? { actor } : {}),
+            audience: await placeAudience(deps.webchatRepo, turn),
             channelContext: turn.threadContext(),
             sharedContext: turn.sharedContext(),
             sessionId: turn.sessionId,
@@ -235,6 +238,20 @@ function toAgentAction(a: Action): AgentAction {
     cancellable: !!a.config.cancellable,
     inputSchema: a.inputSchema!,
   };
+}
+
+/**
+ * The turn's audience, narrowed by whose dashboard chat it runs in: a
+ * visitor's chat is shared. A dashboard chat Rome cannot look up is shared.
+ */
+async function placeAudience(
+  webchatRepo: Pick<WebChatRepository, "getSession"> | undefined,
+  turn: TurnFacts,
+): Promise<Audience> {
+  const audience = turn.audience();
+  if (audience === "shared" || turn.threadContext()?.channel !== "webchat") return audience;
+  const owner = await dashboardChatOwner(webchatRepo, turn.threadContext());
+  return narrowerAudience(audience, owner === "guardian" ? "private" : "shared");
 }
 
 /** Whose a dashboard chat is, for work scheduled in it; undefined for any other thread. */

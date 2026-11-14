@@ -89,6 +89,26 @@ function callingTurn(sessions: SubagentSessions, toolUseId = "tool-1"): CallingT
 }
 
 describe("SubagentCalls", () => {
+  it("hands the subagent's turn the calling turn's audience and person", async () => {
+    const { calls } = setup({ chat: parentRow });
+    const child = fakeSession("sub-1", answering("done"));
+    const sessions: SubagentSessions = { open: async () => child.session, resume: rs.fn() };
+    const actor = { kind: "guardian", userId: "seat" };
+
+    const call = await calls.call(
+      "core:helper",
+      { prompt: "plan" },
+      {
+        ...callingTurn(sessions),
+        actor,
+        audience: "shared",
+      },
+    );
+    await call.outcome;
+
+    expect(child.submitted[0][2]).toMatchObject({ actor, audience: "shared" });
+  });
+
   it("opens a fresh session, adds it to the recorded, and answers with the turn's result", async () => {
     const { calls, added, order, logged, finish, registered } = setup({ chat: parentRow });
     const child = fakeSession("sub-1", answering("done"));
