@@ -133,8 +133,9 @@ private struct InstancePageSheet: ViewModifier {
 }
 
 /// Opens an app of the instance in a sheet from the bottom, as every
-/// second-level page opens (DESIGN.md 12), with the same detent and grabber
-/// as a dashboard page.
+/// second-level page opens (DESIGN.md 12). Only its close button closes it:
+/// an app may use a vertical drag itself, so a drag down never does, and the
+/// sheet shows no grabber.
 private struct AppSheet: ViewModifier {
     let workspace: Workspace
     @Binding var app: InstalledApp?
@@ -143,17 +144,21 @@ private struct AppSheet: ViewModifier {
         content.sheet(item: $app) { app in
             AppWebScreen(workspace: workspace, app: app)
                 .id(app.id)
-                .modifier(WebSheetPresentation())
+                .modifier(WebSheetPresentation(dragToClose: false))
         }
     }
 }
 
-/// An app's or a dashboard page's sheet: the large detent only, with the grabber.
+/// An app's or a dashboard page's sheet: the large detent only, with the
+/// grabber where a drag down closes it.
 private struct WebSheetPresentation: ViewModifier {
+    var dragToClose = true
+
     func body(content: Content) -> some View {
         content
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(dragToClose ? .visible : .hidden)
+            .interactiveDismissDisabled(!dragToClose)
             .presentationBackground(Palette.secondaryPage)
             .modifier(PageSizing())
     }
