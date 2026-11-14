@@ -67,6 +67,11 @@ export function voiceEnv({ command, resetCommand, env = process.env }) {
     logs: (match) => json(["logs", "--match", match]),
     /** The transcriber's counters, such as `decoyConnections`: connections on the signed-out settings' key. */
     transcriberStatus: () => json(["transcriber", "status"]),
+    /**
+     * `cut` breaks Rome's open connections to the real provider and refuses new ones; `restore`
+     * lets them through; `status` gives `{ cut, open, connections }`.
+     */
+    route: (state) => json(["transcriber", "route", state]),
     /** Cuts the browser's network (`cut`): open connections drop and new ones are refused; `restore` lets them through. */
     network: (state) => exec(command, ["network", state]),
     /** Turns Rome Cloud's voice input gate `on` or `off` for the test account. */

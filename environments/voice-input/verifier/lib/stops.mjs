@@ -51,8 +51,10 @@ export async function runStops(ctx) {
 
 async function runStop(ctx, message, stop) {
   const { env } = ctx;
-  // A transcriber error can only be caused at the stand-in; the other stops use the run's.
-  const onStandIn = stop.kind === "transcriber error";
+  // A transcriber error is caused at the stand-in with its error, or on a real provider by
+  // cutting Rome's route to it mid-message. The other stops use the run's transcriber.
+  const isError = stop.kind === "transcriber error";
+  const onStandIn = isError && ctx.transcriber === "stand-in";
   const midway = (message.firstWordAt + message.lastWordAt) / 2;
   if (onStandIn) {
     await env.transcriber({
@@ -66,32 +68,40 @@ async function runStop(ctx, message, stop) {
     await useTranscriber(ctx);
   }
   const opened = await openPage(env, { mic: message.path, language: browserLanguage(message) });
+  let routeCut = false;
   try {
     const { page } = opened;
     await watchPage(page);
     let { control, form, field } = await voiceForm(page);
     await recordField(field, control);
     await control.click();
-    const startedAt = await page.evaluate(() => performance.now());
     await waitForListening(page, control);
-    let stoppedAt;
-    if (onStandIn) {
-      // The stop is the product's own, when listening ends after the error.
-      const deadline = Date.now() + (message.lastWordAt + 15) * 1000;
-      while ((await isListening(control)) && Date.now() < deadline) await page.waitForTimeout(50);
-      if (await isListening(control))
-        throw new Error("listening went on after the transcriber's error");
-      stoppedAt = await page.evaluate(() => performance.now());
-    } else {
+    if (!onStandIn) {
       await page.waitForTimeout(midway * 1000);
       // Words must be in the field before the stop for the stop to test anything.
       const deadline = Date.now() + 5000;
       while (!(await fieldText(field)).trim() && Date.now() < deadline)
         await page.waitForTimeout(100);
     }
-    // For the product's own stop, the record holds the field as it was when listening ended.
-    const before = onStandIn ? lastText(await readRecord(page), stoppedAt) : await fieldText(field);
-    if (!onStandIn) stoppedAt = await page.evaluate(() => performance.now());
+    let stoppedAt;
+    let before;
+    if (isError) {
+      if (!onStandIn) {
+        await env.route("cut");
+        routeCut = true;
+      }
+      // The stop is the product's own, when listening ends after the error.
+      const deadline = Date.now() + (message.lastWordAt + 15) * 1000;
+      while ((await isListening(control)) && Date.now() < deadline) await page.waitForTimeout(50);
+      if (await isListening(control))
+        throw new Error("listening went on after the transcriber's error");
+      stoppedAt = await page.evaluate(() => performance.now());
+      // For the product's own stop, the record holds the field as it was when listening ended.
+      before = lastText(await readRecord(page), stoppedAt);
+    } else {
+      before = await fieldText(field);
+      stoppedAt = await page.evaluate(() => performance.now());
+    }
 
     let micClosedMs;
     let since = stoppedAt;
@@ -122,9 +132,17 @@ async function runStop(ctx, message, stop) {
     }
     ({ control, form, field } = await voiceForm(page));
     const notice = await waitForNotice(page, form, since, { timeoutMs: NOTICE_MS });
-    return await finish({ before, field, notice, micClosedMs, ctx, onStandIn });
+    const route = routeCut ? await env.route("status").catch(() => null) : null;
+
+    const outcome = await finish({ before, field, notice, micClosedMs, ctx, onStandIn });
+    if (routeCut) {
+      const cut = (route?.connections ?? []).filter((c) => c.closedBy === "cut").length;
+      outcome.transcriber += `, its route cut mid-message (${cut} connection${cut === 1 ? "" : "s"} closed by the cut)`;
+    }
+    return outcome;
   } finally {
     await opened.close();
+    if (routeCut) await env.route("restore");
     if (onStandIn) await useTranscriber(ctx);
   }
 }

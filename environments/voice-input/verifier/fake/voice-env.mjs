@@ -182,6 +182,18 @@ switch (command) {
       print({ stats: { decoyConnections: [] } });
       break;
     }
+    if (positionals[0] === "route") {
+      const state = updateState(statePath, (s) => {
+        if (positionals[1] === "cut") s.routeCut = true;
+        if (positionals[1] === "restore") s.routeCut = false;
+      });
+      print({
+        cut: !!state.routeCut,
+        open: 0,
+        connections: Array.from({ length: state.routeClosed ?? 0 }, () => ({ closedBy: "cut" })),
+      });
+      break;
+    }
     updateState(statePath, (s) => {
       s.transcriber = {
         mode: positionals[0],

@@ -208,8 +208,17 @@ function listen(req, res, statePath, script) {
       ),
     );
   // A cut network drops the open stream, as it drops Rome's websocket.
+  // A cut route to the provider ends the session with an error, as Rome reports one.
   const watch = setInterval(() => {
-    if (readState(statePath).networkCut) res.destroy();
+    const now = readState(statePath);
+    if (now.networkCut) res.destroy();
+    else if (now.routeCut && !res.writableEnded) {
+      res.write(`event: failure\ndata: "route"\n\n`);
+      res.end();
+      updateState(statePath, (s) => {
+        s.routeClosed = (s.routeClosed ?? 0) + 1;
+      });
+    }
   }, 100);
   req.on("close", () => {
     clearInterval(watch);
