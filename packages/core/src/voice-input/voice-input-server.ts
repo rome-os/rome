@@ -32,6 +32,10 @@ export const MAX_DICTATION_MS = 10 * 60 * 1000;
 // How long the provider has to send the rest of the text once asked.
 export const FINISH_TIMEOUT_MS = 5_000;
 
+// A microphone delivers audio no faster than real time. The slack covers
+// frames that arrive in a burst after a network stall.
+const AUDIO_SLACK_MS = 5_000;
+
 const STOP_REASON: Record<TranscriptionFailure, VoiceInputStopReason> = {
   unavailable: "provider-unavailable",
   refused: "provider-refused",
@@ -103,8 +107,11 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   let timedOut = false;
   let limit: ReturnType<typeof setTimeout> | null = null;
   let finishing: ReturnType<typeof setTimeout> | null = null;
+  let finishAsked = false;
   let frames = 0;
   let bytes = 0;
+  // When `start` arrived and at what rate, to hold audio to real time.
+  let pace: { since: number; sampleRate: number } | null = null;
 
   const reply = (message: VoiceInputServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
@@ -140,10 +147,16 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     });
   }
 
-  const sendAudio = (chunk: Uint8Array) => {
+  // Counts one frame, or closes the socket when the client sends audio
+  // faster than a microphone records it.
+  const accept = (chunk: Uint8Array): boolean => {
+    if (!pace) return false;
     frames += 1;
     bytes += chunk.byteLength;
-    stream?.sendAudio(chunk);
+    const allowed = (pace.sampleRate * 2 * (Date.now() - pace.since + AUDIO_SLACK_MS)) / 1000;
+    if (bytes <= allowed) return true;
+    close({ type: "error", reason: "bad-request" });
+    return false;
   };
 
   async function begin(sampleRate: number) {
@@ -175,23 +188,24 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
         },
       },
     );
-    for (const chunk of early.splice(0)) sendAudio(chunk);
+    for (const chunk of early.splice(0)) stream.sendAudio(chunk);
+    if (stopAsked) return finish();
     limit = setTimeout(() => {
       timedOut = true;
       finish();
     }, maxDictationMs);
-    if (stopAsked) finish();
   }
 
   ws.on("message", (data: RawData, isBinary) => {
     if (closed) return;
     if (isBinary) {
-      if (starting) {
-        early.push(toBytes(data));
-        return;
-      }
-      if (!stream) return close({ type: "error", reason: "bad-request" });
-      sendAudio(toBytes(data));
+      if (!starting && !stream) return close({ type: "error", reason: "bad-request" });
+      // Audio after a stop is not part of the dictation.
+      if (stopAsked || finishAsked) return;
+      const chunk = toBytes(data);
+      if (!accept(chunk)) return;
+      if (starting) early.push(chunk);
+      else stream?.sendAudio(chunk);
       return;
     }
     let parsed: unknown;
@@ -204,6 +218,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (!message.success) return close({ type: "error", reason: "bad-request" });
     if (message.data.type === "start") {
       if (stream || starting) return close({ type: "error", reason: "bad-request" });
+      pace = { since: Date.now(), sampleRate: message.data.sampleRate };
       void begin(message.data.sampleRate).catch((err: unknown) => {
         log.error("voice input could not start", {
           error: err instanceof Error ? err.message : String(err),
@@ -213,21 +228,35 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       return;
     }
     if (starting) {
+      // The stop deadline runs from the stop, whether or not the source has
+      // answered yet.
       stopAsked = true;
+      armDeadline();
       return;
     }
     if (!stream) return close({ type: "error", reason: "bad-request" });
     finish();
   });
 
-  // Asks the provider for the rest of the text, and gives up on a provider
-  // that never answers.
+  // Asks the provider for the rest of the text.
   function finish() {
-    if (!stream || finishing) return;
+    if (!stream || finishAsked) return;
+    finishAsked = true;
+    if (limit) clearTimeout(limit);
     stream.finish();
-    finishing = setTimeout(() => {
+    armDeadline();
+  }
+
+  // Gives up on a source or provider that never answers a stop.
+  function armDeadline() {
+    finishing ??= setTimeout(() => {
       stream?.abort();
-      close({ type: "error", reason: timedOut ? "time-limit" : "provider-unavailable" });
+      const reason = timedOut
+        ? "time-limit"
+        : stream
+          ? "provider-unavailable"
+          : "service-unavailable";
+      close({ type: "error", reason });
     }, finishTimeoutMs);
   }
 

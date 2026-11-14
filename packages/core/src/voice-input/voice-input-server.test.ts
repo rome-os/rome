@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { WebSocket, WebSocketServer } from "ws";
@@ -240,6 +241,7 @@ describe("voice input socket", () => {
 
     await until(() => fake.closed());
   });
+
   it("stops at the time limit, keeping the text, when a temporary key's stream expires", async () => {
     const fake = await fakeSoniox();
     const { client, messages, closed } = await dictation(fake);
@@ -259,6 +261,102 @@ describe("voice input socket", () => {
       { type: "text", settled: "Hello", pending: "" },
       { type: "error", reason: "time-limit" },
     ]);
+  });
+
+  it("clears the words still pending when the provider sends no tokens", async () => {
+    const fake = await fakeSoniox();
+    const { client, messages } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await until(() => fake.received.length === 1);
+    fake.say({ tokens: [{ text: "wor", is_final: false }] });
+    fake.say({ tokens: [] });
+    await until(() => messages.length === 2);
+
+    expect(messages).toEqual([
+      { type: "text", settled: "", pending: "wor" },
+      { type: "text", settled: "", pending: "" },
+    ]);
+  });
+
+  it("closes a client that sends audio faster than a microphone records it", async () => {
+    const fake = await fakeSoniox();
+    const { client, messages, closed } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    // Over five seconds of 16 kHz audio at once.
+    client.send(Buffer.alloc(100_000, 1));
+    client.send(Buffer.alloc(100_000, 1));
+    await closed;
+
+    expect(messages).toEqual([{ type: "error", reason: "bad-request" }]);
+  });
+
+  it("sends the provider no audio that arrives after the stop", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(Buffer.from([1, 2]));
+    client.send(JSON.stringify({ type: "stop" }));
+    client.send(Buffer.from([3, 4]));
+    await closed;
+
+    expect(fake.received.slice(1)).toEqual([
+      { kind: "audio", bytes: [1, 2] },
+      { kind: "text", text: "" },
+    ]);
+    expect(messages).toEqual([{ type: "ended" }]);
+  });
+
+  it("ends a dictation stopped just before the length limit as a plain stop", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => {
+      if (text === "") setTimeout(() => fake.say({ tokens: [], finished: true }), 150);
+      return [];
+    };
+    const { client, messages, closed } = await dictation(fake, 80);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await until(() => fake.received.length === 1);
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+
+    expect(messages).toEqual([{ type: "ended" }]);
+  });
+
+  it("closes a stopped dictation whose source never answers", async () => {
+    const fake = await fakeSoniox();
+    const { client, messages, closed } = await dictation(fake, undefined, 50, {
+      source: { open: () => new Promise(() => {}) },
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+
+    expect(messages).toEqual([{ type: "error", reason: "service-unavailable" }]);
+  });
+
+  it("says the provider is unavailable when it never accepts the connection", async () => {
+    // Takes the TCP connection and never answers the upgrade.
+    const silent = createTcpServer(() => {});
+    await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+    servers.push({ close: () => silent.close() });
+    const url = `ws://127.0.0.1:${(silent.address() as AddressInfo).port}`;
+    const transcriber = createSonioxTranscriber({ apiKey: "key-1", url, connectTimeoutMs: 50 });
+    const fake = await fakeSoniox();
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      source: {
+        open: async () => ({ ok: true, source: { transcriber, romeCloudSessionId: null } }),
+      },
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await closed;
+
+    expect(messages).toEqual([{ type: "error", reason: "provider-unavailable" }]);
   });
 });
 
