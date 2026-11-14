@@ -37,7 +37,17 @@ struct TranscriptList<Row: View>: View {
                 alignTop: alignTop,
                 scroll: scroll,
                 row: row,
-                onNearTop: { Task { await store.loadOlder() } },
+                onNearTop: {
+                    Task {
+                        // A page of only hidden messages adds no row and no
+                        // scroll, so nothing would ask for the next one.
+                        while true {
+                            let held = (messages: store.messages.count, rows: store.rows.count)
+                            await store.loadOlder()
+                            guard store.hasOlder, store.messages.count > held.messages, store.rows.count == held.rows else { break }
+                        }
+                    }
+                },
                 onDividerAbove: { [pill = store.unreadPill] in pill.dividerAbove($0) }
             )
             .environment(\.shareTurns, store.share.isSelecting ? ShareTurns(messages: store.messages, rows: rows) : nil)

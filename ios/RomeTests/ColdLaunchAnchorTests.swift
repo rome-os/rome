@@ -422,12 +422,13 @@ private final class Anchor {
         func message(_ index: Int, role: String) -> ChatMessage {
             ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index)", role: role, content: role == "trace" ? "[]" : "Message \(index), a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
         }
-        // Thirty older messages, then a newest page of traces (no rows in a
-        // Concierge chat) ending in two bubbles.
+        // Thirty older messages, a page of only traces (no rows in a
+        // Concierge chat), then a newest page of traces ending in two bubbles.
         let older = (0..<30).map { message($0, role: $0.isMultiple(of: 2) ? "user" : "assistant") }
-        let newest = (30..<68).map { message($0, role: "trace") } + [message(68, role: "user"), message(69, role: "assistant")]
+        let hidden = (30..<70).map { message($0, role: "trace") }
+        let newest = (70..<108).map { message($0, role: "trace") } + [message(108, role: "user"), message(109, role: "assistant")]
         let backend = FakeBackend()
-        backend.stored = older + newest
+        backend.stored = older + hidden + newest
         let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
         store.start()
         for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
@@ -446,8 +447,8 @@ private final class Anchor {
             window.windowScene = nil
             store.stop()
         }
-        for _ in 0..<200 where store.messages.count == TranscriptStore.pageSize { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(store.messages.count > TranscriptStore.pageSize, "no older page loaded under a short screen")
+        for _ in 0..<300 where store.messages.count < 110 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.count == 110, "paging stopped at \(store.messages.count) messages under a short screen")
     }
 }
 
