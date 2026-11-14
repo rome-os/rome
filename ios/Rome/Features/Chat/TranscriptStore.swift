@@ -33,10 +33,6 @@ final class TranscriptStore {
     /// once is still seen.
     @ObservationIgnored var retryHold: Duration = .seconds(1)
     private(set) var loadingOlder = false
-    /// An older page fetched and waiting for the list to place it.
-    private(set) var olderPage: MessagePage?
-    /// An older page is going in above the rows.
-    private(set) var placingOlder = false
     private(set) var hasOlder = false
     /// The chat is running a turn.
     private(set) var running = false
@@ -326,7 +322,6 @@ final class TranscriptStore {
             if gap {
                 messages = []
                 seen = [:]
-                olderPage = nil
             } else if fromCache {
                 pruneCached(against: page)
             }
@@ -380,28 +375,19 @@ final class TranscriptStore {
         return true
     }
 
-    /// Fetches the page before the oldest message held. It waits in
-    /// `olderPage` until the list places it with `placeOlderPage()`.
+    /// Fetches the page before the oldest message held and puts it above the
+    /// rows at once: the list keeps the rows in view where they are.
     func loadOlder() async {
-        guard hasOlder, !loadingOlder, olderPage == nil, let cursor else { return }
+        guard hasOlder, !loadingOlder, let cursor else { return }
         loadingOlder = true
         defer { loadingOlder = false }
-        let page = try? await backend.messages(sessionId: sessionId, before: cursor, limit: Self.pageSize)
+        guard let page = try? await backend.messages(sessionId: sessionId, before: cursor, limit: Self.pageSize) else { return }
         // A reload that found a gap started the history over while this ran;
         // a page from the old cursor would leave a hole in it.
         guard self.cursor == cursor else { return }
-        olderPage = page
-    }
-
-    /// Puts the fetched older page above the rows. The list calls it when the
-    /// scroll is at rest: a page placed under a moving finger pushes the rows
-    /// in view down.
-    func placeOlderPage() async {
-        guard let page = olderPage else { return }
-        olderPage = nil
-        placingOlder = true
+        PerfProbe.count("olderPlaced")
         merge(page.messages)
-        cursor = page.nextCursor
+        self.cursor = page.nextCursor
         hasOlder = page.nextCursor != nil
         // An older page was never live: its unread messages count.
         if var unread = openUnread, let openMark {
@@ -409,10 +395,6 @@ final class TranscriptStore {
             openUnread = unread
             summarizeUnread()
         }
-        // The list keeps the rows in view still while this is set; hold it
-        // through the layout that places the page above them.
-        try? await Task.sleep(for: .milliseconds(150))
-        placingOlder = false
     }
 
     func markRead() {
@@ -514,7 +496,6 @@ final class TranscriptStore {
         while unread != nil, unreadFrom == nil, hasOlder, stalled < 2 {
             let before = messages.count
             await loadOlder()
-            await placeOlderPage()
             if messages.count == before {
                 stalled += 1
                 try? await Task.sleep(for: .milliseconds(150))

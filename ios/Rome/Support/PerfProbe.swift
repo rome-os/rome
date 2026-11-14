@@ -22,15 +22,30 @@ enum PerfProbe {
         guard scenario != nil else { return }
         counts.withLock { $0[key, default: 0] += 1 }
     }
+
+    nonisolated private static let samples = OSAllocatedUnfairLock(initialState: [String: [Double]]())
+
+    /// Records one measured value for `key`; the result line gives its
+    /// count, smallest, mean and largest.
+    nonisolated static func sample(_ key: String, _ value: Double) {
+        guard scenario != nil else { return }
+        samples.withLock { $0[key, default: []].append(value) }
+    }
     #else
     @inline(__always)
     nonisolated static func count(_ key: String) {}
+    @inline(__always)
+    nonisolated static func sample(_ key: String, _ value: Double) {}
     #endif
 }
 
 #if DEBUG
 extension PerfProbe {
     @MainActor private static var started = false
+    /// A fling the `paging` scenario starts in code, which the list takes as a drag.
+    static let flingStarted = Notification.Name("RomePerfFlingStarted")
+    /// The fling came to rest; the list may measure how still it holds.
+    static let flingEnded = Notification.Name("RomePerfFlingEnded")
 
     /// Starts the scenario named by `ROME_PERF` once the main Chat has loaded.
     @MainActor
@@ -44,13 +59,23 @@ extension PerfProbe {
             frames.start()
             try? await Task.sleep(for: .seconds(1))
             counts.withLock { $0 = [:] }
+            samples.withLock { $0 = [:] }
             frames.reset()
-            let began = CACurrentMediaTime()
-            await drive(scenario, model: model)
+            var began = CACurrentMediaTime()
+            await drive(scenario, model: model) {
+                // The scenario's setup is done: measure from here.
+                counts.withLock { $0 = [:] }
+                samples.withLock { $0 = [:] }
+                frames.reset()
+                began = CACurrentMediaTime()
+            }
             let seconds = CACurrentMediaTime() - began
             frames.stop()
             var line = String(format: "PERF %@ secs=%.1f hitch_ms_per_s=%.1f worst_ms=%.0f frames=%d", scenario, seconds, frames.hitch / seconds, frames.worst, frames.count)
             for (key, value) in counts.withLock({ $0 }).sorted(by: { $0.key < $1.key }) { line += " \(key)=\(value)" }
+            for (key, values) in samples.withLock({ $0 }).sorted(by: { $0.key < $1.key }) where !values.isEmpty {
+                line += String(format: " %@=n%d/min%.0f/mean%.0f/max%.0f", key, values.count, values.min() ?? 0, values.reduce(0, +) / Double(values.count), values.max() ?? 0)
+            }
             log.notice("\(line, privacy: .public)")
             try? line.write(toFile: NSTemporaryDirectory() + "perf-\(scenario).txt", atomically: true, encoding: .utf8)
         }
@@ -87,6 +112,7 @@ extension PerfProbe {
                 let gap = link.timestamp - last
                 if gap > frame * 1.5 { hitch += (gap - frame) * 1000 }
                 worst = max(worst, gap * 1000)
+                if gap > 0.1 { PerfProbe.log.notice("long frame \(Int(gap * 1000), privacy: .public) ms") }
             }
             count += 1
             last = link.timestamp
@@ -94,7 +120,7 @@ extension PerfProbe {
     }
 
     @MainActor
-    private static func drive(_ scenario: String, model: AppModel) async {
+    private static func drive(_ scenario: String, model: AppModel, measureFromHere: () -> Void) async {
         switch scenario {
         case "idle", "idle-apps":
             if scenario == "idle-apps" { model.debugCommand = .section(.apps) }
@@ -130,6 +156,32 @@ extension PerfProbe {
                 }
                 try? await Task.sleep(for: .milliseconds(250))
             }
+        case "paging":
+            // Twelve flings up through older pages, each a glide that slows
+            // the way UIKit's does; `TranscriptScroll` logs each page.
+            for _ in 0..<12 {
+                NotificationCenter.default.post(name: flingStarted, object: nil)
+                if let scroll = transcriptScroll() { await Glide(scroll: scroll, speed: 6000).run() }
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+        case "pagingdown":
+            // Up through older pages until 520 messages are held (past the
+            // lazy switch), then from the top, measured: ten flings back down.
+            for _ in 0..<60 where (model.workspace?.concierge.messages.count ?? 0) < 520 {
+                NotificationCenter.default.post(name: flingStarted, object: nil)
+                if let scroll = transcriptScroll() { await Glide(scroll: scroll, speed: 6000).run() }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+            NotificationCenter.default.post(name: flingStarted, object: nil)
+            if let scroll = transcriptScroll() { scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false) }
+            try? await Task.sleep(for: .seconds(2))
+            measureFromHere()
+            if let scroll = transcriptScroll() { log.notice("pagingdown from \(scroll.contentOffset.y, privacy: .public) of \(scroll.contentSize.height, privacy: .public)") }
+            for _ in 0..<10 {
+                if let scroll = transcriptScroll() { await Glide(scroll: scroll, speed: -6000).run() }
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            if let scroll = transcriptScroll() { log.notice("pagingdown to \(scroll.contentOffset.y, privacy: .public) of \(scroll.contentSize.height, privacy: .public)") }
         case "chats":
             // Opens and leaves 24 task chats, for the memory the kept stores take.
             let chats = (model.workspace?.tasks.tasks.compactMap(\.chat?.id) ?? []) + (0..<24).map { "perf-chat-\($0)" }
@@ -141,6 +193,48 @@ extension PerfProbe {
             }
         default:
             try? await Task.sleep(for: .seconds(5))
+        }
+    }
+
+    /// A fling up: the offset moves each frame and slows at UIKit's normal
+    /// deceleration rate, until it stops or meets the top.
+    @MainActor
+    private final class Glide: NSObject {
+        private let scroll: UIScrollView
+        private var speed: Double
+        private var last: CFTimeInterval = 0
+        private var done: CheckedContinuation<Void, Never>?
+
+        init(scroll: UIScrollView, speed: Double) {
+            self.scroll = scroll
+            self.speed = speed
+        }
+
+        func run() async {
+            NotificationCenter.default.post(name: PerfProbe.flingStarted, object: nil)
+            await withCheckedContinuation { continuation in
+                done = continuation
+                CADisplayLink(target: self, selector: #selector(tick(_:))).add(to: .main, forMode: .common)
+            }
+        }
+
+        @objc private func tick(_ link: CADisplayLink) {
+            if last > 0 {
+                let dt = link.timestamp - last
+                let top = -scroll.adjustedContentInset.top
+                let end = max(top, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
+                scroll.contentOffset.y = min(end, max(top, scroll.contentOffset.y - speed * dt))
+                speed *= pow(UIScrollView.DecelerationRate.normal.rawValue, dt * 1000)
+                // A positive speed flings up, toward older rows; a negative one down.
+                let stopped = speed > 0 ? scroll.contentOffset.y <= top : scroll.contentOffset.y >= end
+                if abs(speed) < 30 || stopped {
+                    link.invalidate()
+                    NotificationCenter.default.post(name: PerfProbe.flingEnded, object: nil)
+                    done?.resume()
+                    done = nil
+                }
+            }
+            last = link.timestamp
         }
     }
 

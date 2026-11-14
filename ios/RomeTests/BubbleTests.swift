@@ -91,14 +91,10 @@ import UIKit
 
     /// Read from a phone: header and banner above, the keyboard below.
     @Test func theBottomIsZeroWithTheKeyboardUp() {
-        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2395.67, topInset: 236, visibleHeight: 246) < 1)
-        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2102, topInset: 236, visibleHeight: 540) == 0)
-        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2062, topInset: 236, visibleHeight: 540) == 40)
-    }
-
-    @Test func theDotClearsOnceTheListFollowsAgain() {
-        // A tap and a scroll down by hand both end in following.
-        #expect(BackToBottom.unseen(2, following: false) == 2)
-        #expect(BackToBottom.unseen(2, following: true) == 0)
+        // An 874 pt list with the keyboard and composer (392 pt) under it.
+        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2395.67, viewHeight: 874, bottomInset: 392) < 1)
+        // The composer alone (98 pt) under it.
+        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2102, viewHeight: 874, bottomInset: 98) == 0)
+        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2062, viewHeight: 874, bottomInset: 98) == 40)
     }
 }
