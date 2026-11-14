@@ -889,6 +889,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
     const value = event.target.value;
+    voice.noticeEdited();
     setInputText(value);
     const cursor = event.target.selectionEnd ?? value.length;
     reevaluateMentionContext(value, cursor);
