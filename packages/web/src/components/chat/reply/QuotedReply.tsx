@@ -9,23 +9,18 @@ import { plainQuote } from "./reply-source";
 /**
  * The quote a reply carries, inside the reply's bubble: a gray left edge, a
  * reply arrow, and the first two lines of what was quoted. A reply in a task's
- * chat thread opens the thread view, as does any inside the open view. Any
- * other jumps to the original when the loaded transcript holds it, and is
- * plain text otherwise (docs/domains/chats.md#chat-thread).
+ * chat thread, seen in the chat's timeline, opens the thread tab. Any other
+ * jumps to the original when the loaded transcript holds it, and is plain text
+ * otherwise (docs/domains/chats.md#chat-thread).
  */
 export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: string }) {
   const { t } = useTranslation("chat");
   const draft = useReplyDraft();
   const threads = useChatThreads();
-  // The thread view's own transcript has no threads provider: all of it is the task's.
-  const inTaskThread = threads
-    ? hostId !== undefined && threads.taskThreads.has(hostId)
-    : draft?.thread !== null && draft?.thread !== undefined;
-  const opensThread = draft?.threads === true && inTaskThread;
-  // The task the thread is, for the reply bar: from the timeline's threads,
-  // or the open view's own.
+  // The thread tab's own transcript has no threads provider: its quotes jump.
   const threadOf = threads && hostId !== undefined ? threads.taskThreads.get(hostId) : undefined;
-  const threadTitle = threadOf ? threads?.titles.get(threadOf) : draft?.threadTitle;
+  const opensThread = draft?.threads === true && threadOf !== undefined;
+  const threadTitle = threadOf ? threads?.titles.get(threadOf) : undefined;
   const jumpable = opensThread || draft?.has(part.messageId) === true;
   const body = (
     <>
@@ -52,7 +47,7 @@ export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: stri
         opensThread
           ? draft.openThread({
               // The reply is in the task's thread; the original it quotes may
-              // be in none, as when the reply started the task. The view and
+              // be in none, as when the reply started the task. The tab and
               // what is sent from it follow the reply.
               thread: hostId ?? part.messageId,
               title: threadTitle ?? "",

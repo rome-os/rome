@@ -2,13 +2,15 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
 import { useToolTasks } from "./tool-tasks";
+import { useToolThread } from "./tool-thread";
 import { useToolTrace } from "./tool-trace";
 import * as store from "./use-free-cells";
 import type { ToolView, WidgetPlacement } from "./use-free-cells";
@@ -951,5 +953,297 @@ describe("ToolWorkspace Tasks tab", () => {
     cleanup();
     render(<TasksHarness />);
     expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).compact).toBe(false);
+  });
+});
+
+// Stands in for the Concierge chat: it owns the thread and draws its body into
+// the pane's outlet, the way Chat does.
+function ThreadOwner({ id = "chat" }: { id?: string }) {
+  const host = useToolThread();
+  const [thread, setThread] = useState<string | null>(null);
+  const set = host?.set;
+  const closeThread = useCallback(() => setThread(null), []);
+  useEffect(() => {
+    set?.(
+      id,
+      thread
+        ? {
+            title: thread === "three" ? "" : `Thread ${thread}`,
+            taskChatId: thread === "one" ? "task-1" : null,
+            onClose: closeThread,
+          }
+        : null,
+    );
+  }, [set, id, thread, closeThread]);
+  useEffect(() => () => set?.(id, null), [set, id]);
+  return (
+    <>
+      {["one", "two", "three"].map((name) => (
+        <button
+          key={name}
+          type="button"
+          onClick={() => {
+            setThread(name);
+            host?.reveal();
+          }}
+        >
+          Open thread {name} {id}
+        </button>
+      ))}
+      <button type="button" onClick={() => setThread(null)}>
+        Drop thread {id}
+      </button>
+      {thread &&
+        host?.outlet &&
+        createPortal(<textarea aria-label={`Reply in ${thread}`} />, host.outlet)}
+    </>
+  );
+}
+
+function ThreadHarness({
+  initial = { activeId: "a", collapsed: false, unreadIds: [] },
+  selectTool = rs.fn(),
+  setCollapsed = rs.fn(),
+  withSecondOwner = false,
+  withTrace = false,
+}: {
+  initial?: ToolView;
+  selectTool?: (id: string) => void;
+  setCollapsed?: (collapsed: boolean) => void;
+  withSecondOwner?: boolean;
+  withTrace?: boolean;
+}) {
+  const [view, setView] = useState(initial);
+  return (
+    <MemoryRouter>
+      <ToolWorkspace
+        placements={placements}
+        view={view}
+        selectTool={(id) => {
+          selectTool(id);
+          setView((v) => ({ ...v, activeId: id, collapsed: false }));
+        }}
+        setCollapsed={(collapsed) => {
+          setCollapsed(collapsed);
+          setView((v) => ({ ...v, collapsed }));
+        }}
+        addWidget={rs.fn()}
+        removeWidget={rs.fn()}
+        label={(widget) => widget.type}
+        icon={() => null}
+        content={(widget) => <ToolContent id={widget.id} />}
+        fullHref={() => null}
+      >
+        <input aria-label="Chat draft" />
+        <ThreadOwner />
+        {withSecondOwner && <ThreadOwner id="pinned" />}
+        {withTrace && <TraceOwner />}
+        <TasksOwner />
+      </ToolWorkspace>
+    </MemoryRouter>
+  );
+}
+
+describe("ToolWorkspace Chat thread tab", () => {
+  const selected = (name: string) =>
+    screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
+
+  it("adds an ephemeral tab named for the task and selects it, with the chat still on screen and usable", async () => {
+    const user = userEvent.setup();
+    const selectTool = rs.fn();
+    const setCollapsed = rs.fn();
+    render(<ThreadHarness selectTool={selectTool} setCollapsed={setCollapsed} />);
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+
+    expect(tabNames()).toEqual(["Thread one", "desktop", "projects"]);
+    expect(selected("Thread one")).toBe(true);
+    expect(selected("desktop")).toBe(false);
+    expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
+    // Side by side: the chat keeps its draft in view.
+    await user.type(screen.getByRole("textbox", { name: "Chat draft" }), "still typing");
+    expect((screen.getByRole("textbox", { name: "Chat draft" }) as HTMLInputElement).value).toBe(
+      "still typing",
+    );
+    // View state only: nothing reaches the layout or the pane's saved state.
+    expect(selectTool).not.toHaveBeenCalled();
+    expect(setCollapsed).not.toHaveBeenCalled();
+  });
+
+  it("is not part of the saved layout: nothing about it reaches storage", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    const before = JSON.stringify({ ...localStorage });
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(JSON.stringify({ ...localStorage })).toBe(before);
+  });
+
+  it("swaps the thread in the same tab, and renames the tab", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    await user.click(screen.getByRole("button", { name: "Open thread two chat" }));
+
+    expect(tabNames()).toEqual(["Thread two", "desktop", "projects"]);
+    expect(screen.queryByRole("textbox", { name: "Reply in one" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Reply in two" })).toBeTruthy();
+  });
+
+  it("falls back to a general name while the task's title is unknown", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread three chat" }));
+    expect(tabNames()).toEqual(["Chat thread", "desktop", "projects"]);
+  });
+
+  it("names the tab in full in its tooltip and its close button", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.getByRole("tab", { name: "Thread one" }).getAttribute("title")).toBe(
+      "Thread one",
+    );
+    expect(screen.getByRole("button", { name: "Close Thread one" })).toBeTruthy();
+  });
+
+  it("opens the task chat from the pane's header, when the thread has one", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.getByRole("link", { name: "Open task chat" }).getAttribute("href")).toBe(
+      "/chat/task-1",
+    );
+
+    // No task chat known, or another tab selected: no link.
+    await user.click(screen.getByRole("tab", { name: "projects" }));
+    expect(screen.queryByRole("link", { name: "Open task chat" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Open thread two chat" }));
+    expect(screen.queryByRole("link", { name: "Open task chat" })).toBeNull();
+  });
+
+  it("has one close control: the tab's own, and nothing else in the pane", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.getAllByRole("button", { name: /^Close Thread one/ })).toHaveLength(1);
+  });
+
+  it("keeps its body, and the reply in it, mounted while an app tab is shown, and selects again on open", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    await user.type(screen.getByRole("textbox", { name: "Reply in one" }), "half a reply");
+    await user.click(screen.getByRole("tab", { name: "projects" }));
+    expect(selected("Thread one")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(selected("Thread one")).toBe(true);
+    expect(
+      (screen.getByRole("textbox", { name: "Reply in one" }) as HTMLTextAreaElement).value,
+    ).toBe("half a reply");
+  });
+
+  it("is removed by its close button, and the app tab it covered comes back", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    await user.click(screen.getByRole("button", { name: "Close Thread one" }));
+
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+    expect(screen.queryByRole("textbox", { name: "Reply in one" })).toBeNull();
+    expect(selected("desktop")).toBe(true);
+  });
+
+  it("is removed by the Delete key on its tab, and by its owner", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    screen.getByRole("tab", { name: "Thread one" }).focus();
+    await user.keyboard("{Delete}");
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    await user.click(screen.getByRole("button", { name: "Drop thread chat" }));
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+  });
+
+  it("shows over a collapsed pane without writing the pane state, and lets it go when it closes", async () => {
+    const user = userEvent.setup();
+    const setCollapsed = rs.fn();
+    render(
+      <ThreadHarness
+        initial={{ activeId: "a", collapsed: true, unreadIds: [] }}
+        setCollapsed={setCollapsed}
+      />,
+    );
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
+    expect(setCollapsed).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Close Thread one" }));
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(setCollapsed).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pane it holds open while another built-in tab is still open", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness initial={{ activeId: "a", collapsed: true, unreadIds: [] }} withTrace />);
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    await user.click(screen.getByRole("button", { name: "Close Trace" }));
+
+    expect(tabNames()).toEqual(["Thread one", "desktop", "projects"]);
+    expect(selected("Thread one")).toBe(true);
+    expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
+  });
+
+  it("takes the whole width in a narrow window, and closing it returns to the chat", async () => {
+    viewportWidth = 390;
+    const user = userEvent.setup();
+    render(<ThreadHarness initial={{ activeId: "a", collapsed: true, unreadIds: [] }} />);
+    expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.queryByRole("textbox", { name: "Chat draft" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open task chat" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Close Thread one" }));
+    expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
+  });
+
+  it("takes turns with the Tasks and Trace tabs", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness withTrace />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+
+    expect(tabNames()).toEqual(["Trace", "Tasks", "Thread one", "desktop", "projects"]);
+    expect(selected("Thread one")).toBe(true);
+    expect(selected("Trace")).toBe(false);
+    expect(selected("Tasks")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(selected("Tasks")).toBe(true);
+    expect(selected("Thread one")).toBe(false);
+    // Closing one leaves the others.
+    await user.click(screen.getByRole("button", { name: "Close Tasks" }));
+    expect(tabNames()).toEqual(["Trace", "Thread one", "desktop", "projects"]);
+  });
+
+  it("is lost to the last chat to open one, which is told to close its own", async () => {
+    const user = userEvent.setup();
+    render(<ThreadHarness withSecondOwner />);
+    await user.click(screen.getByRole("button", { name: "Open thread one chat" }));
+    expect(screen.getByRole("textbox", { name: "Reply in one" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Open thread two pinned" }));
+
+    expect(tabNames().filter((name) => name?.startsWith("Thread"))).toEqual(["Thread two"]);
+    expect(screen.queryByRole("textbox", { name: "Reply in one" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Reply in two" })).toBeTruthy();
   });
 });

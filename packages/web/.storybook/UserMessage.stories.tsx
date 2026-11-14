@@ -76,9 +76,7 @@ const meta = {
             jump: fn(),
             threads: false,
             thread: null,
-            threadTitle: null,
             openThread: fn(),
-            closeThread: fn(),
           }}
         >
           <div className="min-h-screen bg-chat-canvas p-4">

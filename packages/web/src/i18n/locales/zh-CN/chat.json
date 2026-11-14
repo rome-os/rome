@@ -181,8 +181,7 @@
     "action": "回复",
     "dismiss": "取消回复",
     "jump": "跳到原消息",
-    "openThread": "打开对话串",
-    "toThread": "回复：{{title}}"
+    "openThread": "打开对话串"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -651,7 +650,6 @@
   "thread": {
     "title": "对话串",
     "openTaskChat": "打开任务对话",
-    "close": "关闭对话串",
     "loadFailed": "无法加载这个对话串。",
     "replyPlaceholder": "回复"
   },

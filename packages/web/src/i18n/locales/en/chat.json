@@ -181,8 +181,7 @@
     "action": "Reply",
     "dismiss": "Cancel reply",
     "jump": "Go to the original message",
-    "openThread": "Open the chat thread",
-    "toThread": "Reply to {{title}}"
+    "openThread": "Open the chat thread"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -651,7 +650,6 @@
   "thread": {
     "title": "Chat thread",
     "openTaskChat": "Open task chat",
-    "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
     "replyPlaceholder": "Reply"
   },
