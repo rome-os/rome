@@ -6,8 +6,7 @@ import type { ActionRegistry } from "../apps/actions/types.js";
 import { queryInputSchema } from "./domain/query.js";
 import { queryPersonalData } from "./read.js";
 import type { PersonalDataRepository } from "./repository.js";
-import { connectionPointer } from "./connection-pointer.js";
-import type { DeviceConnection } from "../connections/device/repository.js";
+import { type ConnectionLookup, connectionPointer, NO_CONNECTIONS } from "./connection-pointer.js";
 import { sourceSpec, PERSONAL_DATA_SOURCES } from "./sources/index.js";
 
 export const PERSONAL_DATA_CATALOG_ACTION = "core:personal_data_catalog";
@@ -21,8 +20,8 @@ export interface PersonalDataActionDeps {
   personalData: PersonalDataRepository;
   /** The guardian's time zone, the default zone of a query. */
   guardianTimeZone: () => Promise<string>;
-  /** The device connection with an id, as a source's sync names it. */
-  connectionOf?: (id: string) => DeviceConnection | undefined;
+  /** The device connections, which a source's pointer names. */
+  connections?: ConnectionLookup;
   now?: () => number;
 }
 
@@ -31,7 +30,7 @@ export function registerPersonalDataActions(
   deps: PersonalDataActionDeps,
 ): void {
   const now = deps.now ?? Date.now;
-  const connectionOf = deps.connectionOf ?? (() => undefined);
+  const connections = deps.connections ?? NO_CONNECTIONS;
   actions.register({
     config: {
       name: PERSONAL_DATA_CATALOG_ACTION,
@@ -48,15 +47,25 @@ export function registerPersonalDataActions(
       sideEffects: "read-only",
     },
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    execute: async () => ({
-      status: "ok",
-      data: {
-        sources: deps.personalData.catalog().map(({ connectionId, ...entry }) => ({
-          ...entry,
-          connection: connectionPointer(connectionId, connectionOf),
-        })),
-      },
-    }),
+    execute: async () => {
+      const stored = deps.personalData.catalog().map(({ connectionId, ...entry }) => ({
+        ...entry,
+        connection: connectionPointer(entry.source, connectionId, connections),
+      }));
+      // A source no device has synced yet, but whose device reads it live,
+      // as just after a connect: listed with no types, so the Agent reads live.
+      const unsynced = PERSONAL_DATA_SOURCES.filter(
+        (spec) =>
+          !stored.some((entry) => entry.source === spec.source) && connections.feeding(spec.source),
+      ).map((spec) => ({
+        source: spec.source,
+        title: spec.title,
+        note: spec.note,
+        types: [],
+        connection: connectionPointer(spec.source, null, connections),
+      }));
+      return { status: "ok", data: { sources: [...stored, ...unsynced] } };
+    },
   });
 
   const sourceNames = PERSONAL_DATA_SOURCES.map((source) => source.source);
@@ -155,7 +164,7 @@ export function registerPersonalDataActions(
           tz: await deps.guardianTimeZone(),
           now: now(),
         },
-        connectionOf,
+        connections,
       );
       if ("error" in answer) return { status: "error", error: answer.error };
       return { status: "ok", data: answer };

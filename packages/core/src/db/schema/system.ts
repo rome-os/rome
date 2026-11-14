@@ -1589,6 +1589,10 @@ export const deviceConnections = sqliteTable(
     permission: text("permission").notNull(), // granted | denied | not_needed | unknown
     // The device's Live access switch.
     live: integer("live", { mode: "boolean" }).notNull(),
+    // What the capability also syncs to, as the device names it, such as
+    // `apple_health`: opaque here, so a reader of that data can find the
+    // connection before the first sync. Null when it syncs nothing.
+    feeds: text("feeds"),
     // When a report last listed the row.
     lastSeenAt: integer("last_seen_at").notNull(),
   },

@@ -82,9 +82,9 @@ Both are personal-data actions. They run only in a private turn and are refused 
 
 ## Live
 
-The store points to where the rest can be read. It never says how to run the device. A source row names the [device connection](domains/connections.md#device-connection) that reads the same data live, when the device's sync names one in the envelope's `connectionId`. A source with no connection, such as an import, leaves it empty.
+The store points to where the rest can be read. It never says how to run the device. A source row names the [device connection](domains/connections.md#device-connection) that reads the same data live, when the device's sync names one in the envelope's `connectionId`. A source with no connection, such as an import, leaves it empty. Before a first sync, or with sync off, the store finds the connection whose device says its capability syncs to the source, so a fresh connect reads live at once.
 
-When the stored data does not cover a query's window, the reply's `connection` names that device connection: its id, title, device id and name, state and `lastSeenAt`. With no connection, or one the device has stopped reporting, it says `not_connected` and points to `connect_account`. An empty store after a fresh connect reads the same way. The catalog gives each source the same pointer.
+When the stored data does not cover a query's window, the reply's `connection` names that device connection: its id, title, device id and name, state and `lastSeenAt`. With no connection, or one the device has stopped reporting, it says `not_connected` and points to `connect_account`. The catalog gives each source the same pointer, and lists a source no device has synced yet when a connection says it syncs to it.
 
 The agent reads the device with `rome-node device run <device id> <action>`, with arguments from `rome-node device describe`. When the device does not answer, or the connection is `off`, it answers from stored data and says how fresh it is. Live answers are never written to the store.
 

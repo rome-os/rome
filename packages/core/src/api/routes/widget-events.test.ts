@@ -627,6 +627,7 @@ describe("an event on the connect card for a device kind", () => {
     render: {
       kind: "inline",
       componentId: "connect-card",
+      props: { kind: "apple_health", label: "Apple Health", device: true },
       ui: {
         components: [
           { id: "root", component: "Column", children: ["connect", "check", "dismiss"] },
@@ -672,5 +673,16 @@ describe("an event on the connect card for a device kind", () => {
     expect(working.forwarded[0]?.body).toMatchObject({
       parts: [{ output: { kind: "apple_health", status: "connected" } }],
     });
+  });
+
+  it("reads the card as a device's from what core stored, whatever context the client sends", async () => {
+    const working = card(health("working"));
+    await working.fire("m", { name: "check", context: { kind: "apple_health" } });
+    expect(working.forwarded[0]?.body).toMatchObject({
+      parts: [{ output: { kind: "apple_health", status: "connected" } }],
+    });
+    const off = card(health("off"));
+    const res = await off.fire("m", { name: "connect", context: {} });
+    expect(await res.json()).toEqual({ open: "http://localhost/connections/device/apple_health" });
   });
 });

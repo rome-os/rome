@@ -1427,7 +1427,7 @@ async function main() {
   registerPersonalDataActions(actionRegistry, {
     personalData: personalDataRepo,
     guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
-    connectionOf: (id) => deviceConnectionsRepo.byId(id),
+    connections: deviceConnectionsRepo,
   });
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {

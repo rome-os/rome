@@ -23,6 +23,8 @@ export interface DeviceConnection {
   operations: { name: string; access: "read" | "write" }[];
   permission: Permission;
   live: boolean;
+  /** What the capability also syncs to, as the device names it, or null. */
+  feeds: string | null;
   state: DeviceConnectionState;
   lastSeenAt: string;
 }
@@ -62,6 +64,7 @@ export class DeviceConnectionsRepository {
           operations: connection.operations,
           permission: connection.permission,
           live: connection.live,
+          feeds: connection.feeds ?? null,
           lastSeenAt: now,
         };
         tx.insert(deviceConnections)
@@ -84,6 +87,21 @@ export class DeviceConnectionsRepository {
       .orderBy(asc(deviceConnections.deviceId), asc(deviceConnections.capability))
       .all()
       .map(toConnection);
+  }
+
+  /**
+   * The connection whose device says its capability syncs to `feeds`: a
+   * working one first, then the one heard from last. Undefined when none does.
+   */
+  feeding(feeds: string): DeviceConnection | undefined {
+    const rank = { working: 0, off: 1, broken: 2 } as const;
+    return this.db
+      .select()
+      .from(deviceConnections)
+      .where(eq(deviceConnections.feeds, feeds))
+      .all()
+      .map(toConnection)
+      .sort((a, b) => rank[a.state] - rank[b.state] || b.lastSeenAt.localeCompare(a.lastSeenAt))[0];
   }
 
   /** The connection with id `<deviceId>:<capability>`, or undefined. */
@@ -116,6 +134,7 @@ function toConnection(row: Row): DeviceConnection {
     operations: row.operations,
     permission: row.permission as Permission,
     live: row.live,
+    feeds: row.feeds,
     state: deviceConnectionState(row),
     lastSeenAt: new Date(row.lastSeenAt).toISOString(),
   };

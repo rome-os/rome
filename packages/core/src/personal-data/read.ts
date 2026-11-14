@@ -16,8 +16,12 @@ import {
 import type { SourceSpec, TypeSpec } from "./domain/source.js";
 import { isoInZone } from "./domain/zoned-time.js";
 import type { PersonalDataRepository } from "./repository.js";
-import { type ConnectionPointer, connectionPointer } from "./connection-pointer.js";
-import type { DeviceConnection } from "../connections/device/repository.js";
+import {
+  type ConnectionLookup,
+  type ConnectionPointer,
+  connectionPointer,
+  NO_CONNECTIONS,
+} from "./connection-pointer.js";
 
 export interface Freshness {
   syncedThrough?: string;
@@ -60,7 +64,7 @@ export function queryPersonalData(
   source: SourceSpec,
   input: QueryInput,
   defaults: { tz: string; now: number },
-  connectionOf: (id: string) => DeviceConnection | undefined = () => undefined,
+  connections: ConnectionLookup = NO_CONNECTIONS,
 ): QueryAnswer | { error: string } {
   const plan = planQuery(source, input, defaults);
   if ("error" in plan) return plan;
@@ -117,8 +121,9 @@ export function queryPersonalData(
     ...(gapOrigin !== undefined
       ? {
           connection: connectionPointer(
+            source.source,
             repo.connectionIdOf(source.source, gapOrigin ?? undefined),
-            connectionOf,
+            connections,
           ),
         }
       : {}),

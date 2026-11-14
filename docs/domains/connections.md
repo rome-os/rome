@@ -59,7 +59,7 @@ What one of the guardian's devices lets Agents reach on it live, over rome-node:
 - Its grant is the device's own permission, such as the iOS permission for Health, and the device's Live access switch for that capability. A capability that needs no permission says so.
 - A device connection is **working**, **off** (Live access is off) or **broken** (the device's permission is denied). Rome reads the state from the device's last report when asked, and stores none of its own.
 - Offline is not broken. Rome keeps when the device last reported and never claims it is online: whether it answers shows only when an Agent asks it.
-- A device connection holds only what live access needs. [Personal data](../personal-data.md) may name the device connection that reads the same data live, and never the reverse: a connection knows nothing of sync, and neither stores the other's state. Screens that show both read both.
+- A device connection holds only what live access needs, and the name of what its capability also syncs to, which it does not read. [Personal data](../personal-data.md) may name the device connection that reads the same data live, and never the reverse: a connection knows nothing of sync, and neither stores the other's state. Screens that show both read both.
 - The guardian connects a device connection on the device itself. A connect card in a chat leads there.
 
 

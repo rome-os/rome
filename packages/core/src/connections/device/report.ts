@@ -28,6 +28,9 @@ export const deviceReportSchema = z.object({
           .max(100),
         permission: z.enum(["granted", "denied", "not_needed", "unknown"]),
         live: z.boolean(),
+        // What the capability also syncs to, such as `apple_health`. Opaque
+        // to connections.
+        feeds: identifier.optional(),
       }),
     )
     .max(50)

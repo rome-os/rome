@@ -18,6 +18,7 @@ const health = {
   ],
   permission: "unknown",
   live: true,
+  feeds: "apple_health",
 };
 const status = {
   capability: "device",
@@ -77,10 +78,16 @@ describe("/device-connections routes", () => {
         operations: health.operations,
         permission: "unknown",
         live: true,
+        feeds: "apple_health",
         state: "working",
         lastSeenAt: new Date(NOW).toISOString(),
       },
-      expect.objectContaining({ id: "dev-1:device", state: "off", permission: "not_needed" }),
+      expect.objectContaining({
+        id: "dev-1:device",
+        state: "off",
+        permission: "not_needed",
+        feeds: null,
+      }),
     ]);
   });
 

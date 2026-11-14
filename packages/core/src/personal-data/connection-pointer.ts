@@ -2,7 +2,19 @@
 // a source names. The store points; it never says how to run the device.
 // Contract: docs/personal-data.md#live.
 
-import type { DeviceConnection } from "../connections/device/repository.js";
+import type {
+  DeviceConnection,
+  DeviceConnectionsRepository,
+} from "../connections/device/repository.js";
+
+/** How personal data finds a device connection. */
+export type ConnectionLookup = Pick<DeviceConnectionsRepository, "byId" | "feeding">;
+
+/** Finds none: a store read with no device connections. */
+export const NO_CONNECTIONS: ConnectionLookup = {
+  byId: () => undefined,
+  feeding: () => undefined,
+};
 
 export type ConnectionPointer =
   | {
@@ -21,12 +33,18 @@ const NOT_CONNECTED: ConnectionPointer = {
     "No device connection reads this source live. Ask the guardian to connect it with connect_account.",
 };
 
-/** The pointer for a source row's `connectionId`, read when asked. */
+/**
+ * The pointer for a source, read when asked: the connection its sync named,
+ * or, before a first sync or with sync off, the one whose device says it
+ * syncs to the source.
+ */
 export function connectionPointer(
+  source: string,
   connectionId: string | null | undefined,
-  connectionOf: (id: string) => DeviceConnection | undefined,
+  connections: ConnectionLookup,
 ): ConnectionPointer {
-  const connection = connectionId ? connectionOf(connectionId) : undefined;
+  const connection: DeviceConnection | undefined =
+    (connectionId ? connections.byId(connectionId) : undefined) ?? connections.feeding(source);
   if (!connection) return NOT_CONNECTED;
   return {
     id: connection.id,

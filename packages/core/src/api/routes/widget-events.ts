@@ -19,6 +19,8 @@ interface CoreIo {
   deviceConnections(): Promise<DeviceConnectionStatus[]>;
   /** The origin the caller reached Rome at, for turning a path into a link. */
   origin: string;
+  /** The props core stored with the widget, which a client cannot change. */
+  props: Record<string, unknown>;
 }
 
 type CoreHandler = (context: Record<string, unknown>, io: CoreIo) => Promise<CoreReply>;
@@ -66,8 +68,8 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
   },
   "connect-card": {
     connect: async (context, io) => {
-      const kind = String(context.kind ?? "");
-      if (context.device === true) {
+      const kind = String(io.props.kind ?? context.kind ?? "");
+      if (io.props.device === true) {
         const device = await deviceKindState(kind, io);
         if (device.working) return { answer: { kind, status: "connected" } };
         return { open: deviceConnectPath(kind) };
@@ -87,8 +89,8 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
       return { open: connect.url };
     },
     check: async (context, io) => {
-      const kind = String(context.kind ?? "");
-      if (context.device === true) {
+      const kind = String(io.props.kind ?? context.kind ?? "");
+      if (io.props.device === true) {
         const device = await deviceKindState(kind, io);
         if (device.working) return { answer: { kind, status: "connected" } };
         return Response.json(
@@ -146,6 +148,8 @@ interface StoredWidget {
   appId: string;
   /** The kind of a widget core owns, such as `question-card`. */
   componentId?: string;
+  /** The props core stored with a widget it owns. */
+  props: Record<string, unknown>;
   components: unknown[];
   waits: boolean;
 }
@@ -228,6 +232,7 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
       const origin = getExternalRequestOrigin(c.req.raw).origin;
       const reply = await handle(context, {
         origin,
+        props: widget.props,
         connections: async () => {
           const res = await deps.forward(
             new Request(new URL("/api/connections", c.req.url), { headers }),
@@ -375,6 +380,7 @@ function readWidget(chatId: string, content: string | null): StoredWidget | null
       isObject(part.render) && typeof part.render.componentId === "string"
         ? part.render.componentId
         : undefined,
+    props: isObject(part.render) && isObject(part.render.props) ? part.render.props : {},
     components: ui.components,
     waits: part.type === "pending_interaction",
   };

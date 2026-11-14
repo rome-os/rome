@@ -52,9 +52,9 @@ export function connectAccountTools(input: {
             isError: true,
           };
         }
-        const parsed = input.devicesOnly
-          ? parseConnectAccountInput(args, devices, { devicesOnly: true })
-          : parseConnectAccountInput(args, devices);
+        const parsed = parseConnectAccountInput(args, devices, {
+          devicesOnly: input.devicesOnly,
+        });
         if (!parsed.ok) return { content: [{ type: "text", text: parsed.error }], isError: true };
         const output = parsed.device
           ? deviceConnectToolOutput(parsed.device, widgetsShow)

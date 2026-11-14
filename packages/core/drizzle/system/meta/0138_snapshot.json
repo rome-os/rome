@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7ff46ff3-03e9-4339-9a28-cc52c419dfa7",
+  "id": "a0c60125-5c8e-44dc-9a9e-15325119c453",
   "prevId": "65b2f472-20d9-4508-a8b4-27ee98e24303",
   "tables": {
     "account_profiles": {
@@ -1858,6 +1858,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "feeds": {
+          "name": "feeds",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "last_seen_at": {

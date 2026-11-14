@@ -33,7 +33,7 @@ describe("personal-data actions", () => {
     registerPersonalDataActions(registry, {
       personalData: repo,
       guardianTimeZone: async () => TZ,
-      connectionOf: (id) => devices.byId(id),
+      connections: devices,
       now: () => NOV_10 + 2 * DAY + 9 * HOUR,
     });
     engine = new ActionEngine(registry, createActionEngineRepos(), {
@@ -128,6 +128,65 @@ describe("personal-data actions", () => {
     expect(catalog).toMatchObject({
       data: { sources: [{ connection: { id: "dev-1:apple_health", state: "working" } }] },
     });
+  });
+
+  it("finds the connection by the source its device feeds when no sync has named one", async () => {
+    // A fresh store: the phone connected Health, but no batch arrived yet.
+    testDb.close();
+    testDb = createTestDb();
+    devices = new DeviceConnectionsRepository(testDb.db);
+    const registry = new ActionRegistryImpl();
+    registerPersonalDataActions(registry, {
+      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
+      guardianTimeZone: async () => TZ,
+      connections: devices,
+      now: () => NOV_10 + 9 * HOUR,
+    });
+    engine = new ActionEngine(registry, createActionEngineRepos(), {
+      processRole: "main",
+      isFirstPartyAction: () => true,
+    });
+    const reportHealth = (permission: "unknown" | "denied", live: boolean) =>
+      devices.report(
+        {
+          version: 1,
+          device: { id: "dev-1", name: "iPhone", platform: "ios" },
+          connections: [
+            {
+              capability: "apple_health",
+              title: "Apple Health",
+              prefix: "health",
+              personal: true,
+              operations: [{ name: "health.stats", access: "read" }],
+              permission,
+              live,
+              feeds: "apple_health",
+            },
+          ],
+        },
+        NOV_10 + 8 * HOUR,
+      );
+    const query = () =>
+      engine.run(
+        "core:personal_data_query",
+        { source: "apple_health", type: "stepCount" },
+        { audience: "private" },
+      );
+    reportHealth("unknown", true);
+    expect(await query()).toMatchObject({
+      data: { connection: { id: "dev-1:apple_health", state: "working" } },
+    });
+    expect(
+      await engine.run("core:personal_data_catalog", {}, { audience: "private" }),
+    ).toMatchObject({
+      data: {
+        sources: [{ source: "apple_health", types: [], connection: { id: "dev-1:apple_health" } }],
+      },
+    });
+    reportHealth("unknown", false);
+    expect(await query()).toMatchObject({ data: { connection: { state: "off" } } });
+    reportHealth("denied", true);
+    expect(await query()).toMatchObject({ data: { connection: { state: "broken" } } });
   });
 
   it("returns a query it cannot answer as an error the Agent reads", async () => {
