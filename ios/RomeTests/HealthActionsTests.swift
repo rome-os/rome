@@ -5,7 +5,10 @@ import Testing
 @testable import Rome
 
 /// A Health that answers from what a test puts in it, and remembers what it was asked.
+/// The phone answers several requests at once, so what it records is behind a lock.
 final class FakeHealth: HealthReading, @unchecked Sendable {
+    private let lock = NSLock()
+
     var available = true
     var accessError: HealthReadError?
     /// True until iOS has been asked, as on a fresh install.
@@ -24,38 +27,55 @@ final class FakeHealth: HealthReading, @unchecked Sendable {
     var isAvailable: Bool { available }
 
     func requestAccess() async throws {
-        accessRequests += 1
-        if let accessError { throw accessError }
-        neverAsked = false
+        let error = lock.withLock { () -> HealthReadError? in
+            accessRequests += 1
+            return accessError
+        }
+        if let error { throw error }
+        lock.withLock { neverAsked = false }
     }
 
-    func shouldRequestAccess() async -> Bool { neverAsked }
+    func shouldRequestAccess() async -> Bool { lock.withLock { neverAsked } }
 
     /// Set, every quantity read waits here until it opens: a read still under way.
     var gate: ReadGate?
 
     func quantityStats(_ request: QuantityRequest) async throws -> [Double?] {
-        reads += 1
+        let gate = lock.withLock { () -> ReadGate? in
+            reads += 1
+            return self.gate
+        }
         if let gate { await gate.wait() }
-        quantityRequests.append(request)
-        return quantities[request.type.name] ?? Array(repeating: nil, count: request.buckets.count)
+        return lock.withLock {
+            quantityRequests.append(request)
+            return quantities[request.type.name] ?? Array(repeating: nil, count: request.buckets.count)
+        }
     }
 
     func segments(_ type: HealthType, in window: DateInterval) async throws -> [HealthSegment] {
-        reads += 1
-        return (segmentsByType[type.name] ?? []).filter { $0.end > window.start && $0.start < window.end }
+        let all = lock.withLock { () -> [HealthSegment] in
+            reads += 1
+            return segmentsByType[type.name] ?? []
+        }
+        return all.filter { $0.end > window.start && $0.start < window.end }
     }
 
     func workouts(in window: DateInterval, activity: String?) async throws -> [WorkoutRecord] {
-        reads += 1
-        workoutActivities.append(activity)
-        return workoutRecords.filter { $0.end > window.start && $0.start < window.end && (activity == nil || $0.activity == activity) }
+        let records = lock.withLock { () -> [WorkoutRecord] in
+            reads += 1
+            workoutActivities.append(activity)
+            return workoutRecords
+        }
+        return records.filter { $0.end > window.start && $0.start < window.end && (activity == nil || $0.activity == activity) }
     }
 
     func samples(_ request: SampleRequest) async throws -> [HealthSample] {
-        reads += 1
-        sampleRequests.append(request)
-        var found = sampleStore.enumerated().filter { _, sample in
+        let store = lock.withLock { () -> [HealthSample] in
+            reads += 1
+            sampleRequests.append(request)
+            return sampleStore
+        }
+        var found = store.enumerated().filter { _, sample in
             sample.end >= request.window.start && sample.start < request.window.end
                 && (request.sources.isEmpty || request.sources.contains(sample.source.name) || request.sources.contains(sample.source.bundleId))
         }
