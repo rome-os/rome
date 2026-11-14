@@ -419,7 +419,11 @@ function daysByDeviceDate(
     if (startAt < plan.start || startAt >= plan.end) continue;
     days.set(startAt, [...(days.get(startAt) ?? []), hour]);
   }
-  return [...days.entries()].map(([startAt, list]) => dayOf(spec, plan, startAt, list));
+  // Each day keeps the zone its hours were split by.
+  return [...days.entries()].map(([startAt, list]) => ({
+    ...dayOf(spec, plan, startAt, list),
+    tz: list[0].tz,
+  }));
 }
 
 /** Adds the hours of each day up into one reading per day in the plan's zone,

@@ -379,7 +379,7 @@ describe("queryPersonalData", () => {
         end: "2026-11-12",
         timeZone: "America/Los_Angeles",
       }).results[0],
-    ).toMatchObject({ value: 500 });
+    ).toMatchObject({ value: 500, dayZones: [TZ] });
   });
 
   it("says where hourly detail starts, and does not claim an hourly window before it", () => {
