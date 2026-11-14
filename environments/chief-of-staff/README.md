@@ -21,9 +21,9 @@ A Rome container of its own, built from this checkout, connected to a test Disco
 
 ## Setup
 
-The secrets live in the 1Password item `Chief of staff test` in the vault `Rome Dev`, one field per variable below, each field named exactly like the variable. Every command reads them from there with a service account scoped to that vault. The devbox holds the service account's token at `~/.config/op/service-account-token`, and runs the 1Password CLI through Nix, so nothing else is installed. `COS_OP_VAULT`, `COS_OP_ITEM` and `COS_OP_TOKEN_FILE` point elsewhere.
+The secrets live in a file on the devbox, `~/.config/rome/cos.env`, outside the repository, with mode 600 and one `KEY=value` line per variable below. `COS_SECRETS_FILE` points elsewhere. The file is never committed or printed. A variable already set in the shell wins over the file, so a run can override one value, such as `COS_MODEL`.
 
-Without that token, the commands fall back to a secrets file at `~/.rome-environments/chief-of-staff/secrets.env`, outside the repository, with the same variables. Neither is ever committed or printed. A variable already set in the shell wins over both, so a run can override one value, such as `COS_MODEL`.
+Without that file, the commands read the same variables from the 1Password item `Chief of staff test` in the vault `Rome Dev`, one field per variable, through a service account whose token sits at `~/.config/op/service-account-token`. That path needs a 1Password plan with service accounts. `COS_OP_VAULT`, `COS_OP_ITEM` and `COS_OP_TOKEN_FILE` point elsewhere.
 
 ```
 COS_DISCORD_SERVER_ID=      # the test Discord server's id

@@ -24,7 +24,7 @@ STATE_DIR="${ROME_ENV_STATE_DIR:-$HOME/.rome-environments/$NAME}"
 OP_VAULT="${COS_OP_VAULT:-Rome Dev}"
 OP_ITEM="${COS_OP_ITEM:-Chief of staff test}"
 OP_TOKEN_FILE="${COS_OP_TOKEN_FILE:-$HOME/.config/op/service-account-token}"
-SECRETS_FILE="${COS_SECRETS_FILE:-$STATE_DIR/secrets.env}"
+SECRETS_FILE="${COS_SECRETS_FILE:-$HOME/.config/rome/cos.env}"
 RUN_DIR="$STATE_DIR/run"
 STATE_FILE="$RUN_DIR/state.json"
 BUILD_FILE="$RUN_DIR/build.json"
@@ -84,22 +84,32 @@ load_from_1password() {
     });' <<<"$item_json")
 }
 
-# Reads the secrets into the environment from the 1Password vault when the
-# devbox holds a service account token, otherwise from the secrets file, and
+# Reads KEY=value lines from the secrets file. A value already set in the shell
+# wins, as with 1Password. Blank lines and # comments are skipped.
+load_from_file() {
+  local line name value
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line#export }"
+    [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=(.*)$ ]] || continue
+    name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
+    value="${value%\"}" value="${value#\"}" value="${value%\'}" value="${value#\'}"
+    [ -n "${!name:-}" ] || export "$name=$value"
+  done <"$SECRETS_FILE"
+}
+
+# Reads the secrets into the environment from the secrets file when it exists,
+# otherwise from the 1Password vault through a service account token, and
 # stops naming the first one missing. Values are never echoed.
 load_secrets() {
   local source
-  if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ -s "$OP_TOKEN_FILE" ]; then
+  if [ -f "$SECRETS_FILE" ]; then
+    source="$SECRETS_FILE"
+    load_from_file
+  elif [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ -s "$OP_TOKEN_FILE" ]; then
     source="the 1Password item \"$OP_ITEM\" in the vault \"$OP_VAULT\""
     load_from_1password
-  elif [ -f "$SECRETS_FILE" ]; then
-    source="$SECRETS_FILE"
-    set -a
-    # shellcheck disable=SC1090
-    . "$SECRETS_FILE"
-    set +a
   else
-    die "no secrets: put a 1Password service account token in $OP_TOKEN_FILE, or write $SECRETS_FILE. README.md lists what either holds."
+    die "no secrets: write $SECRETS_FILE, or put a 1Password service account token in $OP_TOKEN_FILE. README.md lists what either holds."
   fi
   local name
   for name in COS_DISCORD_SERVER_ID COS_AGENT_BOT_TOKEN COS_DRIVER_BOT_TOKEN; do
