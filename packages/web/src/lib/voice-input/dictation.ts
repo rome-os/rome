@@ -3,6 +3,7 @@
 // `@rome/api-types/voice-input`.
 
 import {
+  VOICE_INPUT_ALIVE_INTERVAL_MS,
   VOICE_INPUT_SOCKET_PATH,
   type VoiceInputClientMessage,
   type VoiceInputStopReason,
@@ -57,6 +58,10 @@ export interface DictationDeps {
 // source to open and 5 s more for the provider, so Rome's reason arrives first.
 const STOP_TIMEOUT_MS = 20_000;
 
+// Silence from Rome this long means the connection is gone: Rome says it is
+// there every second while the socket is open.
+const QUIET_LIMIT_MS = VOICE_INPUT_ALIVE_INTERVAL_MS * 3;
+
 function socketUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}${VOICE_INPUT_SOCKET_PATH}`;
@@ -84,6 +89,7 @@ export function startDictation(
   let microphone: Microphone | null = null;
   let socket: DictationSocket | null = null;
   let finishTimer: ReturnType<typeof setTimeout> | null = null;
+  let quietTimer: ReturnType<typeof setTimeout> | null = null;
   // Audio captured before the socket opens.
   const queued: ArrayBuffer[] = [];
 
@@ -93,6 +99,8 @@ export function startDictation(
     done = true;
     microphone?.close();
     if (finishTimer) clearTimeout(finishTimer);
+    if (quietTimer) clearTimeout(quietTimer);
+    window.removeEventListener("offline", lost);
     if (socket) {
       socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
       if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
@@ -106,6 +114,17 @@ export function startDictation(
     teardown();
     handlers.onDone(heard(), reason ? { reason, ...(detail ? { detail } : {}) } : null);
   };
+
+  // The browser losing its network ends the dictation at once; a connection
+  // that dies without the browser knowing ends it once Rome falls quiet.
+  function lost() {
+    finish("connection-lost");
+  }
+  const heardFromRome = () => {
+    if (quietTimer) clearTimeout(quietTimer);
+    quietTimer = setTimeout(lost, QUIET_LIMIT_MS);
+  };
+  window.addEventListener("offline", lost);
 
   const send = (message: VoiceInputClientMessage) => socket?.send(JSON.stringify(message));
 
@@ -132,12 +151,14 @@ export function startDictation(
       }
       socket = deps.openSocket();
       socket.onopen = () => {
+        heardFromRome();
         send({ type: "start", sampleRate: opened.sampleRate });
         for (const chunk of queued.splice(0)) socket?.send(chunk);
         sendStop();
       };
       socket.onmessage = (event: MessageEvent) => {
         if (typeof event.data !== "string") return;
+        heardFromRome();
         let parsed: unknown;
         try {
           parsed = JSON.parse(event.data);
@@ -152,7 +173,7 @@ export function startDictation(
           handlers.onText(heard());
         } else if (message.data.type === "ended") {
           finish(null);
-        } else {
+        } else if (message.data.type === "error") {
           finish(message.data.reason, message.data.detail);
         }
       };

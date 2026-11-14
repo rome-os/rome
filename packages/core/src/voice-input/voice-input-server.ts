@@ -7,6 +7,7 @@ import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
 import {
+  VOICE_INPUT_ALIVE_INTERVAL_MS,
   VOICE_INPUT_SOCKET_PATH,
   type VoiceInputServerMessage,
   type VoiceInputStopReason,
@@ -114,6 +115,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   let limit: ReturnType<typeof setTimeout> | null = null;
   let finishing: ReturnType<typeof setTimeout> | null = null;
   let opening: ReturnType<typeof setTimeout> | null = null;
+  let alive: ReturnType<typeof setInterval> | null = null;
   let finishAsked = false;
   let frames = 0;
   let bytes = 0;
@@ -132,6 +134,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (limit) clearTimeout(limit);
     if (finishing) clearTimeout(finishing);
     if (opening) clearTimeout(opening);
+    if (alive) clearInterval(alive);
     const since = pace?.since ?? Date.now();
     log.info("voice input stopped", {
       sessionId: listening?.source.romeCloudSessionId ?? null,
@@ -247,6 +250,8 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (message.data.type === "start") {
       if (stream || starting) return close({ type: "error", reason: "bad-request" });
       pace = { since: Date.now(), sampleRate: message.data.sampleRate };
+      // Lets the client tell a quiet stream from a dead connection.
+      alive = setInterval(() => reply({ type: "alive" }), VOICE_INPUT_ALIVE_INTERVAL_MS);
       void begin(message.data.sampleRate).catch((err: unknown) => {
         log.error("voice input could not start", {
           error: err instanceof Error ? err.message : String(err),

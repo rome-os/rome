@@ -109,6 +109,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // React Query pauses every later fetch after an `offline` event until it
+  // hears `online`.
+  window.dispatchEvent(new Event("online"));
   rs.useRealTimers();
   cleanup();
   rs.restoreAllMocks();
@@ -307,6 +310,41 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
       "disabled",
       false,
+    );
+  });
+
+  it("keeps the words heard and closes the microphone the moment the browser goes offline", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+
+    expect(field().value).toBe("hello the");
+    expect(microphone.closed).toBe(1);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+  });
+
+  it("notices a connection that dies quietly within 5 seconds", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    act(() => rs.advanceTimersByTime(2_000));
+    socket.say({ type: "alive" });
+    act(() => rs.advanceTimersByTime(2_900));
+    expect(screen.queryByRole("status")).toBeNull();
+
+    act(() => rs.advanceTimersByTime(200));
+    rs.useRealTimers();
+
+    expect(field().value).toBe("hello");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
     );
   });
 
