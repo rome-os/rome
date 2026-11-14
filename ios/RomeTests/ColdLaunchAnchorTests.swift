@@ -113,7 +113,12 @@ private struct ScrollState: CustomStringConvertible {
         workspace.topics.setActivity(.needsYou, for: workspace.mainChatServerID ?? conciergeChatID)
         var samples: [ScrollState] = []
         var justAfterPill: ScrollState?
-        for step in 0..<40 {
+        // At least 4 s, then until the list holds still for half a second:
+        // a busy CI simulator can stall for many seconds, so a fixed count
+        // of samples could end before the fetch has landed.
+        let deadline = Date.now.addingTimeInterval(30)
+        var step = 0
+        while step < 40 || (samples.suffix(5).contains { abs($0.toEnd - samples.last!.toEnd) > 0.5 || abs($0.bottomInset - samples.last!.bottomInset) > 0.5 } && Date.now < deadline) {
             // The late check's answer, a second after the fetch.
             if pill == .comesLate, step == 10 {
                 model.update.debugShow(Self.offered)
@@ -123,6 +128,7 @@ private struct ScrollState: CustomStringConvertible {
             }
             try await Task.sleep(for: .milliseconds(100))
             samples.append(Self.state(scroll))
+            step += 1
         }
         let settled = try #require(samples.last)
         #expect(workspace.concierge.hasOlder, "the fetch should page")
