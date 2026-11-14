@@ -196,6 +196,7 @@ cmd_cloud() {
         where table_name = 'usage_events' and column_name = 'audio_ms'")" ] ||
         die "this Rome Cloud ($(json ref <"$CLOUD_BUILD_FILE")) does not record voice usage. Set VOICE_CLOUD_REF to one that does."
       cloud_sql -c "select coalesce(json_agg(json_build_object(
+          'eventId', event_id, 'sessionId', transcription_session_id,
           'provider', provider, 'model', model, 'seconds', audio_ms / 1000.0,
           'at', occurred_at) order by occurred_at), '[]')
         from usage_events where type = 'transcription' and instance_id = '$instance_id'" |
