@@ -40,6 +40,7 @@ export function createSonioxTranscriber(options: {
   return {
     place: { provider: "Soniox", host: new URL(url).host },
     model,
+    providerId: "soniox",
     open: ({ sampleRate }, listener) =>
       openSonioxStream(url, options.apiKey, model, sampleRate, listener, connectTimeoutMs),
   };
