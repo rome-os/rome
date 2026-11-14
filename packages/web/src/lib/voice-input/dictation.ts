@@ -6,18 +6,25 @@ import {
   VOICE_INPUT_ALIVE_INTERVAL_MS,
   VOICE_INPUT_SOCKET_PATH,
   type VoiceInputClientMessage,
-  type VoiceInputStopReason,
   voiceInputServerMessageSchema,
+  voiceInputStopReasonSchema,
 } from "@rome/api-types/voice-input";
+import { z } from "zod";
 import { type Microphone, openMicrophone } from "./microphone";
 
 /** Why listening stopped without the guardian's stop action. */
-export type DictationStopReason =
-  | VoiceInputStopReason
-  | "microphone-blocked"
-  | "microphone-missing"
-  | "microphone-failed"
-  | "connection-lost";
+export const dictationStopReasonSchema = z.enum([
+  ...voiceInputStopReasonSchema.options,
+  "microphone-blocked",
+  "microphone-missing",
+  "microphone-failed",
+  "connection-lost",
+  /** The guardian opened another chat while listening. */
+  "left-chat",
+  /** The page reloaded, or closed, while listening. */
+  "page-reloaded",
+]);
+export type DictationStopReason = z.infer<typeof dictationStopReasonSchema>;
 
 /** Why listening stopped, with Rome Cloud's reason code for `service-refused`. */
 export interface DictationStop {

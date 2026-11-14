@@ -49,33 +49,48 @@ export function spokenInsertion(before: string, heard: string, after = ""): stri
  * focused element, so this does nothing unless focus reached `el`.
  */
 function insertNatively(el: HTMLTextAreaElement, text: string): boolean {
-  return (
-    document.activeElement === el &&
-    typeof document.execCommand === "function" &&
-    document.execCommand("insertText", false, text)
-  );
+  if (document.activeElement !== el || typeof document.execCommand !== "function") return false;
+  inserting = true;
+  try {
+    return document.execCommand("insertText", false, text);
+  } finally {
+    inserting = false;
+  }
 }
+
+// True while `insertNatively` runs, so its input event is not read as an edit.
+let inserting = false;
 
 /**
  * Dictation into a composer's textarea. While listening, the heard text shows
  * at the cursor and the field is read-only. When listening ends the text is
  * inserted the way typing inserts it, as one edit, so one undo removes it and
  * the field's change handler sees it as typed text.
+ *
+ * Why listening stopped on its own is the notice, which the caller keeps with
+ * the field's draft. It goes away on the next edit or send. Leaving the chat
+ * or the page while listening stops it, and `keepNotice` saves why at once,
+ * since the field is going away.
  */
 export function useVoiceInput({
   textareaRef,
   value,
   setValue,
+  notice,
+  setNotice,
+  keepNotice,
   deps,
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
   setValue: (next: string) => void;
+  notice: DictationStop | null;
+  setNotice: (next: DictationStop | null) => void;
+  keepNotice: (stop: DictationStop) => void;
   deps?: DictationDeps;
 }) {
   const info = useVoiceInputInfo();
   const [state, setState] = useState<VoiceInputState>("idle");
-  const [notice, setNotice] = useState<DictationStop | null>(null);
   const anchorRef = useRef<Anchor | null>(null);
   const dictationRef = useRef<Dictation | null>(null);
   const valueRef = useRef(value);
@@ -83,13 +98,35 @@ export function useVoiceInput({
   // Waits for a hidden field to show again, to insert the spoken text natively.
   const waitingRef = useRef<ResizeObserver | null>(null);
 
-  useEffect(
-    () => () => {
-      dictationRef.current?.cancel();
+  const keepNoticeRef = useRef(keepNotice);
+  keepNoticeRef.current = keepNotice;
+  useEffect(() => {
+    // The heard words are in the field, so the draft already holds them.
+    const leave = (reason: "left-chat" | "page-reloaded") => {
+      if (!dictationRef.current) return;
+      dictationRef.current.cancel();
+      dictationRef.current = null;
+      keepNoticeRef.current({ reason });
+    };
+    const onPageHide = () => leave("page-reloaded");
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      leave("left-chat");
       waitingRef.current?.disconnect();
-    },
-    [],
-  );
+    };
+  }, []);
+
+  // An edit clears the notice. The field is mounted for the hook's life.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const onInput = () => {
+      if (!inserting) setNotice(null);
+    };
+    el.addEventListener("input", onInput);
+    return () => el.removeEventListener("input", onInput);
+  }, [setNotice, textareaRef]);
 
   const commit = useCallback(
     (heard: string) => {
@@ -168,7 +205,9 @@ export function useVoiceInput({
       },
       deps,
     );
-  }, [commit, deps, setValue, textareaRef]);
+  }, [commit, deps, setNotice, setValue, textareaRef]);
+
+  const dismissNotice = useCallback(() => setNotice(null), [setNotice]);
 
   const stop = useCallback(() => {
     if (!dictationRef.current) return;
@@ -186,6 +225,8 @@ export function useVoiceInput({
     state,
     /** Why listening last stopped on its own, or null. */
     notice,
+    /** Clears the notice, as a send does. */
+    dismissNotice,
     /** While true, the field is read-only and sending waits. */
     active: state !== "idle",
     toggle: state === "listening" ? stop : start,
