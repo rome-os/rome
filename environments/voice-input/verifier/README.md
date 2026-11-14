@@ -128,7 +128,7 @@ The rules' contract leaves these open. The planner has the list.
 - **A mention** is typed as `@`, which offers mentions as `option` elements, and Enter picks the first.
 - **The Settings page** is `/settings`, and the place sits under its Advanced section, opened by a link, tab or button named "Advanced". The read API, `GET /api/voice-input` answering `{ place: { provider, host } | null }`, comes from the product builder. Both paths sit in `scenarios/r10-voice-goes-where-named.mjs`.
 - **Audio through Rome**: a request carrying audio from the browser to the guardian's own Rome is allowed, since the rules route speech to the transcriber through it.
-- **Another chat** is opened by clicking a link on the page whose path ends in `/chat/<id>` or `/chats/<id>` and differs from the current one. The guardian comes back with the browser's back. This sits in `lib/stops.mjs`.
+- **Another chat** is opened by clicking a link on the page to `/chat/<id>` or `/chats/<id>` other than the current one, or else to the dashboard's `/chat` (a new chat) or `/message` page. Stops start on `/message`, where the dashboard opens. The guardian comes back with the browser's back. This sits in `lib/stops.mjs`.
 - **The microphone** is reached through `navigator.mediaDevices.getUserMedia`, whose audio tracks rule 9 watches. A track counts as closed when it is stopped or ended.
 
 When a case cannot be set up, rule 6 reports that case as not checked and names what it needed.

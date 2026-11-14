@@ -145,10 +145,13 @@ function describeInUse(ctx) {
   return named ? `${named.provider} at ${named.host}` : ctx.transcriber;
 }
 
-/** The field's text last recorded at or before `at` (page clock), or the latest when `at` is unset. */
+/**
+ * The field's last non-empty text recorded at or before `at` (page clock): the words heard when
+ * the product stopped listening by itself, even if it then emptied the field.
+ */
 function lastText({ samples }, at) {
-  const upTo = at === undefined ? samples : samples.filter(([t]) => t <= at);
-  return (upTo.at(-1) ?? samples[0])[1];
+  const upTo = samples.filter(([t, text]) => t <= at && text.trim());
+  return upTo.at(-1)?.[1] ?? "";
 }
 
 /**
@@ -161,12 +164,15 @@ export async function openAnotherChat(page) {
   const hrefs = await page
     .locator("a[href]")
     .evaluateAll((links) => links.map((a) => a.getAttribute("href")));
-  const to = hrefs.find((href) => {
-    const path = new URL(href, from).pathname;
-    return /\/chats?\/[^/]+$/.test(path) && path !== here;
-  });
+  // A link to one chat by its id first, else the dashboard's other chat pages, such as a new
+  // chat when the guardian is in the Concierge chat.
+  const paths = hrefs.map((href) => new URL(href, from).pathname);
+  const others = paths.filter((p) => p !== here);
+  const to =
+    others.find((p) => /^\/chats?\/[^/]+$/.test(p)) ??
+    others.find((p) => /^\/(chats?|message)$/.test(p));
   if (!to) throw new Error("the page links to no other chat");
-  await page.locator(`a[href="${to}"]`).first().click();
+  await page.locator("a[href]").nth(paths.indexOf(to)).click();
   await page.waitForURL((url) => url.pathname !== here, { timeout: 10000 });
   return { from, to: page.url() };
 }
