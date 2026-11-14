@@ -1,4 +1,6 @@
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
+import { useQueryClient } from "@tanstack/react-query";
+import { markChatSessionReadInCache } from "@/hooks/use-chat-sessions";
+import { CONCIERGE_CHAT_ID, markConciergeChatReadInCache } from "@/hooks/use-concierge";
 import {
   cardKey,
   chatCardSettledSchema,
@@ -288,6 +290,8 @@ const messageChatThreadSchema = z.object({
   chatThreadId: z.string(),
   /** The task's title, when the thread is a task's. */
   chatThreadTitle: z.string().optional(),
+  /** The task's own chat, when it has one. */
+  chatThreadTaskChatId: z.string().optional(),
 });
 
 /** A task left the chat, and its chat thread with it. */
@@ -582,6 +586,10 @@ export function Chat({
   const [liveThreadTitles, setLiveThreadTitles] = useState<ReadonlyMap<string, string | null>>(
     new Map(),
   );
+  // Each task thread's task chat live placements told, by the thread.
+  const [liveThreadTaskChats, setLiveThreadTaskChats] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const handleChatThreadRetired = useCallback(
     ({ chatThreadId }: z.infer<typeof chatThreadRetiredSchema>) =>
       setLiveThreadTitles((prev) =>
@@ -590,10 +598,22 @@ export function Chat({
     [],
   );
   const handleMessageChatThread = useCallback(
-    ({ messageId, chatThreadId, chatThreadTitle }: z.infer<typeof messageChatThreadSchema>) => {
+    ({
+      messageId,
+      chatThreadId,
+      chatThreadTitle,
+      chatThreadTaskChatId,
+    }: z.infer<typeof messageChatThreadSchema>) => {
       setRethreaded((prev) =>
         placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
       );
+      if (chatThreadTaskChatId) {
+        setLiveThreadTaskChats((prev) =>
+          prev.get(chatThreadId) === chatThreadTaskChatId
+            ? prev
+            : new Map(prev).set(chatThreadId, chatThreadTaskChatId),
+        );
+      }
       if (chatThreadTitle) {
         setLiveThreadTitles((prev) =>
           prev.get(chatThreadId) === chatThreadTitle
@@ -1150,6 +1170,7 @@ export function Chat({
     }
   }, []);
 
+  const queryClient = useQueryClient();
   const isMountedRef = useRef(true);
   useEffect(() => {
     isMountedRef.current = true;
@@ -1181,12 +1202,15 @@ export function Chat({
       }
       try {
         await apiMarkSessionRead(id);
-        notifySessionsChanged();
+        // A read changes only this chat's unread mark: clear it in the cached
+        // lists rather than refetch every list that holds it.
+        void markChatSessionReadInCache(queryClient, id);
+        void markConciergeChatReadInCache(queryClient, id);
       } catch {
         // Best effort. The next successful active-session load can retry.
       }
     },
-    [notifySessionsChanged, pendingMark],
+    [queryClient, pendingMark],
   );
   useEffect(() => {
     const flush = () => {
@@ -2626,6 +2650,7 @@ export function Chat({
   const threadRootOfView = threadView
     ? (chatThreads.taskThreads.get(threadView) ?? threadView)
     : null;
+
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
@@ -2983,7 +3008,11 @@ export function Chat({
                     <>
                       {threadRootOfView ? (
                         <OpenThreadTaskChat
+                          sessionId={mainSessionId}
+                          messageId={threadView}
                           threadRoot={threadRootOfView}
+                          messages={displayMessages}
+                          liveTaskChat={liveThreadTaskChats.get(threadRootOfView) ?? null}
                           size={floating ? "md" : "sm"}
                           className={actionBadge}
                         />

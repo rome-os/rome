@@ -11,7 +11,7 @@ struct HealthRowState: Equatable {
     var opacity: Double { deviceOn ? 1 : 0.45 }
 }
 
-/// Settings → iPhone use → Apple Health: the switch that lets the guardian's
+/// Settings → Apple Health: the switch that lets the guardian's
 /// Rome read Health, and what that means. Health data goes to the Rome and
 /// the AI model behind it, so the page says what is read, for what, and where it goes.
 struct HealthAccessScreen: View {
@@ -52,7 +52,7 @@ struct HealthAccessScreen: View {
             #endif
         }
         .floatingTopBar { PageHeader(title: "", inSheet: true) }
-        .background(Palette.bg.ignoresSafeArea())
+        .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
     }

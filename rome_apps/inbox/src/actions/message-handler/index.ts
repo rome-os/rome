@@ -232,6 +232,7 @@ async function envoyCheck(
   outgoingText: string,
   originalMessage: string,
   bondLevel: string,
+  replyingAgent: string,
   workingDir?: string,
 ): Promise<{ action: "approve" | "reject" | "require_approval"; reason?: string }> {
   const prompt = [
@@ -239,6 +240,8 @@ async function envoyCheck(
     ``,
     `Original user message: ${originalMessage}`,
     `Bond level: ${bondLevel}`,
+    `Replying agent: ${replyingAgent}`,
+    `The reply goes to the chat the original message was sent in.`,
     ``,
     `Proposed reply:`,
     outgoingText,
@@ -443,7 +446,14 @@ async function handleTrustedMessage(
 
   // Envoy check before sending (non-guardian trusted senders)
   log.info("running envoy check", { channel, channelUserId });
-  const envoyResult = await envoyCheck(deps.agentRunner, response, text, bondLevel, workingDir);
+  const envoyResult = await envoyCheck(
+    deps.agentRunner,
+    response,
+    text,
+    bondLevel,
+    targetAgent,
+    workingDir,
+  );
   log.info("envoy decision", { action: envoyResult.action, channel, channelUserId });
 
   if (envoyResult.action === "approve") {

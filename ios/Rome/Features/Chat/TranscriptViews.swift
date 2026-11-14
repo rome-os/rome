@@ -589,6 +589,8 @@ enum TranscriptSpacing {
 struct Composer: View {
     @Binding var text: String
     let placeholder: String
+    /// Set when `placeholder` names something: a long name is shortened to fit.
+    var named: NamedPlaceholder? = nil
     var stopVisible = false
     var stopping = false
     @Binding var focused: Bool
@@ -632,6 +634,7 @@ struct Composer: View {
                     text: $text,
                     focused: $focused,
                     placeholder: placeholder,
+                    named: named,
                     onPasteImages: attachments.map { attachments in
                         { providers in Task { await attachments.add(providers: providers) } }
                     },

@@ -126,7 +126,19 @@ function approvalOutcome(approval: AskedApproval): TaskApprovalOutcome | undefin
 }
 
 /** The approval as a card draws it. */
-export function approvalCard(approval: AskedApproval): Extract<TaskCard, { kind: "approval" }> {
+/** `card` with `closed` filled in from its task `row`: a card with no outcome whose task ended is closed. */
+function closedBy<C extends Extract<TaskCard, { kind: "question" | "approval" }>>(
+  card: C,
+  row: ConciergeTaskRow | undefined,
+): C {
+  return { ...card, closed: !card.outcome && row?.endedAt != null };
+}
+
+/** The approval as a card draws it; `row` says whether its task ended. */
+export function approvalCard(
+  approval: AskedApproval,
+  row: ConciergeTaskRow | undefined,
+): Extract<TaskCard, { kind: "approval" }> {
   const payload = (approval.payload ?? {}) as { actionName?: unknown; preview?: unknown };
   // A preview the approval card can draw names it; else its description does.
   const preview = payload.preview as
@@ -139,18 +151,21 @@ export function approvalCard(approval: AskedApproval): Extract<TaskCard, { kind:
       ? preview.title
       : approval.description;
   const outcome = approvalOutcome(approval);
-  return {
-    kind: "approval",
-    id: approval.id,
-    title,
-    ...(typeof payload.actionName === "string" ? { actionName: payload.actionName } : {}),
-    ...(payload.preview !== undefined ? { preview: payload.preview } : {}),
-    since: approval.since,
-    ...(outcome ? { outcome } : {}),
-  };
+  return closedBy(
+    {
+      kind: "approval",
+      id: approval.id,
+      title,
+      ...(typeof payload.actionName === "string" ? { actionName: payload.actionName } : {}),
+      ...(payload.preview !== undefined ? { preview: payload.preview } : {}),
+      since: approval.since,
+      ...(outcome ? { outcome } : {}),
+    },
+    row,
+  );
 }
 
-/** The question as a card draws it; `row` says whether its wait expired. */
+/** The question as a card draws it; `row` says whether its wait expired and whether its task ended. */
 export function questionCard(
   question: AskedQuestion,
   row: ConciergeTaskRow | undefined,
@@ -160,15 +175,18 @@ export function questionCard(
   const expiredAt = row?.expiredWaitAt?.getTime();
   // Every item said by an ended wait's deadline was part of it (tasks.ts currentWait).
   const expired = !outcome && expiredAt !== undefined && question.since <= expiredAt + waitExpiry;
-  return {
-    kind: "question",
-    id: question.id,
-    messageId: question.messageId,
-    render: question.render,
-    since: question.since,
-    expired,
-    ...(outcome ? { outcome } : {}),
-  };
+  return closedBy(
+    {
+      kind: "question",
+      id: question.id,
+      messageId: question.messageId,
+      render: question.render,
+      since: question.since,
+      expired,
+      ...(outcome ? { outcome } : {}),
+    },
+    row,
+  );
 }
 
 /**
@@ -190,7 +208,8 @@ export function cardAt(
     .filter((each) => each.since <= by)
     .sort((a, b) => a.since - b.since)
     .at(-1);
-  if (approval && (!question || approval.since > question.since)) return approvalCard(approval);
+  if (approval && (!question || approval.since > question.since))
+    return approvalCard(approval, row);
   if (question) return questionCard(question, row, waitExpiry);
   return { kind: "unavailable" };
 }
@@ -204,7 +223,7 @@ function cardOf(
 ): TaskCard {
   if (waitedOn.kind === "approval") {
     const approval = asked?.approvals.find((each) => each.id === waitedOn.id);
-    return approval ? approvalCard(approval) : { kind: "unavailable" };
+    return approval ? approvalCard(approval, row) : { kind: "unavailable" };
   }
   const question = asked?.questions.find(
     (each) => each.id === waitedOn.id && each.messageId === waitedOn.messageId,
@@ -304,23 +323,33 @@ export async function settledCard(
   ]);
   if (item.kind === "approval") {
     const approval = asked?.approvals.find((each) => each.id === item.id);
-    return approval ? approvalCard(approval) : null;
+    return approval ? approvalCard(approval, row) : null;
   }
   // The newest card asked under that id: a later turn can ask again under it.
   const question = asked?.questions.filter((each) => each.id === item.id).at(-1);
   return question ? questionCard(question, row, sources.waitExpiry) : null;
 }
 
-/** The open questions of task chat `chatId`, as their cards now read: what a wait's expiry settles. */
-export async function openQuestionCards(
+/**
+ * The open cards of task chat `chatId`, as they now read: its questions with
+ * no answer, and with `approvals` its approvals with no decision. A wait's
+ * expiry settles the questions; the task ending or starting again settles both.
+ */
+export async function openCards(
   sources: TaskCardSources,
   chatId: string,
+  { approvals = false }: { approvals?: boolean } = {},
 ): Promise<ChatCardSettledEvent["card"][]> {
   const [asked, [row]] = await Promise.all([
     sources.taskCardsOf([chatId]).then((cards) => cards.get(chatId)),
     sources.findBySessions([chatId]),
   ]);
-  return (asked?.questions ?? [])
+  const questions = (asked?.questions ?? [])
     .filter((question) => !question.output)
     .map((question) => questionCard(question, row, sources.waitExpiry));
+  if (!approvals) return questions;
+  const open = (asked?.approvals ?? [])
+    .map((approval) => approvalCard(approval, row))
+    .filter((card) => !card.outcome);
+  return [...questions, ...open];
 }

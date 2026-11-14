@@ -22,6 +22,8 @@ enum DebugCommand: Equatable {
     case appIdeas(Bool)
     /// A page of the instance in its sheet; nil closes it.
     case page(URL?)
+    /// An app in its sheet; nil closes it.
+    case app(InstalledApp?)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -169,6 +171,9 @@ enum SnapshotRunner {
             await capture("13-node-requests", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.requests]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
+            await capture("13a-node-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
             // The Apple Health page is longer than a screen: its top, the data flow, and its end.
             model.debugHealthScroll = nil
             await capture("14-health-access", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
@@ -312,9 +317,9 @@ enum SnapshotRunner {
             for id in ["habits", "reading", "packing"] { RecentApps(host: "me.romeos.cc").record(id) }
             await capture("37-apps", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
             await capture("39-app-open", style: styleName, in: directory, wait: 2.5) {
-                model.debugCommand = .route([.app(InstalledApp(id: "habits", displayName: "习惯打卡", fullHref: "/full/apps/habits", origin: "local"))])
+                model.debugCommand = .app(InstalledApp(id: "habits", displayName: "习惯打卡", fullHref: "/full/apps/habits", origin: "local"))
             }
-            model.debugCommand = .route([])
+            model.debugCommand = .app(nil)
             try? await Task.sleep(for: .seconds(0.6))
             // A dashboard page a card opened, in the app's web view, as a sheet.
             await capture("49-dashboard-page", style: styleName, in: directory, wait: 2.5) {

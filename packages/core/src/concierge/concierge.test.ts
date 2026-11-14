@@ -2002,6 +2002,22 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("chat_card shows a task whose wait ran out as its task card, since its question takes no answer", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      openWaits: async (ids) =>
+        approvalWaits(new Map(ids.map((id) => [id, Date.now() - 2 * 24 * 60 * 60 * 1000]))),
+      reportPending: () => [],
+    });
+    await s.tool("chat_card", { chatId: "task-1" });
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "task" }],
+    ]);
+  });
+
   it("chat_forward stores the task chat it came from, and the intro in the same message", async () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
@@ -3648,6 +3664,24 @@ describe("Concierge events", () => {
           outcome: { kind: "rejected" },
         }),
       },
+    ]);
+  });
+
+  it("closes the cards a task left open once it ends, and tells the chat showing them", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    const question = { id: "ask-1", messageId: "m1", render: null, since: Date.now() };
+    (s.deps.webchatRepo as { taskCardsOf: unknown }).taskCardsOf = async () =>
+      new Map([[chatId, { questions: [question], approvals: [] }]]);
+    const events: { card: { id: string; closed?: boolean } }[] = [];
+    s.service.onCardSettled((event) => events.push(event as never));
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await s.settle();
+    expect(events.map((event) => [event.card.id, event.card.closed])).toContainEqual([
+      "ask-1",
+      true,
     ]);
   });
 

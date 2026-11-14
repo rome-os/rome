@@ -400,23 +400,26 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * The title of the task whose chat thread each of `roots` names in
-   * Concierge chat `chatId`, for the roots a task's thread has. A task has
-   * its own thread; rows from before that share a root keep the name of the
-   * oldest.
+   * The task whose chat thread each of `roots` names in Concierge chat
+   * `chatId`, for the roots a task's thread has: its title, and its task
+   * chat, or null while it has none. A task has its own thread; rows from
+   * before that share a root keep the oldest.
    */
-  async threadTitles(chatId: string, roots: readonly string[]): Promise<Map<string, string>> {
-    const titles = new Map<string, string>();
-    if (roots.length === 0) return titles;
+  async threadTasks(
+    chatId: string,
+    roots: readonly string[],
+  ): Promise<Map<string, { title: string; taskChatId: string | null }>> {
+    const tasks = new Map<string, { title: string; taskChatId: string | null }>();
+    if (roots.length === 0) return tasks;
     for (const { row, conciergeChat } of await this.withChat(
       inArray(conciergeTasks.threadRoot, [...new Set(roots)]),
     )) {
-      // Oldest first, so the first title kept is the thread's own.
-      if (row.threadRoot && conciergeChat.id === chatId && !titles.has(row.threadRoot)) {
-        titles.set(row.threadRoot, row.title);
+      // Oldest first, so the first task kept is the thread's own.
+      if (row.threadRoot && conciergeChat.id === chatId && !tasks.has(row.threadRoot)) {
+        tasks.set(row.threadRoot, { title: row.title, taskChatId: row.sessionId });
       }
     }
-    return titles;
+    return tasks;
   }
 
   /**

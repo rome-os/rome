@@ -768,6 +768,8 @@ describe("message reply bond-level settings", () => {
     expect(agentRunner.calls[0].channelThreadKey).toBe(
       "sentinel:email:mail-thread-1:casey@example.com",
     );
+    // Envoy judges what is private by who is replying, so it is told the agent.
+    expect(agentRunner.calls[2]?.prompt).toContain("Replying agent: main");
     expect(sentMessages).toEqual([
       {
         channel: "email",
