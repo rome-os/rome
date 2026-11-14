@@ -279,6 +279,38 @@ describe("voice input socket", () => {
     ]);
   });
 
+  it("still clears pending words after a message that carries no tokens", async () => {
+    const fake = await fakeSoniox();
+    const { client, messages, closed } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await until(() => fake.received.length === 1);
+    fake.say({ tokens: [{ text: "wor", is_final: false }] });
+    fake.say({});
+    fake.say({ tokens: [], finished: true });
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "", pending: "wor" },
+      { type: "text", settled: "", pending: "" },
+      { type: "ended" },
+    ]);
+  });
+
+  it("says the provider is unavailable when it sends a malformed message", async () => {
+    for (const malformed of [null, { tokens: {} }, { tokens: [null] }]) {
+      const fake = await fakeSoniox();
+      const { client, messages, closed } = await dictation(fake);
+
+      client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+      await until(() => fake.received.length === 1);
+      fake.say(malformed as object);
+      await closed;
+
+      expect(messages).toEqual([{ type: "error", reason: "provider-unavailable" }]);
+    }
+  });
+
   it("closes a client that sends audio faster than a microphone records it", async () => {
     const fake = await fakeSoniox();
     const { client, messages, closed } = await dictation(fake);
@@ -433,6 +465,41 @@ describe("voice input on Rome Cloud", () => {
         seconds: 1.5,
         status: "ended",
       }),
+    ]);
+  });
+
+  it("counts only the audio it forwarded when a client sends too fast", async () => {
+    const fake = await fakeSoniox();
+    const cloud = romeCloud(() =>
+      Response.json({
+        sessionId: "session-1",
+        provider: "soniox",
+        url: fake.url,
+        model: "stt-rt-v6",
+        token: "temporary-1",
+        expiresAt: "2026-11-14T03:35:00Z",
+      }),
+    );
+    const source = createVoiceInputSource({
+      own: null,
+      romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
+      fetch: cloud.fetch,
+    });
+    const usage = usageSink();
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      source,
+      usage,
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await until(() => fake.received.length === 1);
+    client.send(Buffer.alloc(100_000, 1));
+    client.send(Buffer.alloc(100_000, 1));
+    await closed;
+
+    expect(messages).toEqual([{ type: "error", reason: "bad-request" }]);
+    expect(usage.recorded).toEqual([
+      expect.objectContaining({ sessionId: "session-1", seconds: 3.1, status: "bad-request" }),
     ]);
   });
 

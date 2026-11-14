@@ -5,6 +5,7 @@ import { createVoiceInputSource } from "./voice-input-source.js";
 const own: Transcriber = {
   place: { provider: "Soniox", host: "transcriber:8790" },
   model: "stt-rt-v6",
+  providerId: "soniox",
   open: () => ({ sendAudio: () => {}, finish: () => {}, abort: () => {} }),
 };
 
@@ -78,7 +79,7 @@ describe("voice input source", () => {
       Response.json({ error: "voice_input_not_configured" }, { status: 503 }),
     );
     expect(
-      await createVoiceInputSource({ own, romeCloud: signedIn, fetch: unset.fetch }).info(),
+      await createVoiceInputSource({ own: null, romeCloud: signedIn, fetch: unset.fetch }).info(),
     ).toEqual({
       available: true,
       via: "rome-cloud",
@@ -206,5 +207,45 @@ describe("voice input source", () => {
         body: JSON.stringify({ providers: ["soniox"] }),
       },
     ]);
+  });
+
+  it("keeps the instance's own provider where Rome Cloud has none set up", async () => {
+    const bare = answering(() =>
+      Response.json({ error: "voice_input_not_configured" }, { status: 503 }),
+    );
+    const source = createVoiceInputSource({ own, romeCloud: signedIn, fetch: bare.fetch });
+    expect(await source.info()).toEqual({
+      available: true,
+      via: "instance",
+      place: { provider: "Soniox", host: "transcriber:8790" },
+    });
+    expect(await source.open()).toEqual({
+      ok: true,
+      source: { transcriber: own, romeCloudSessionId: null },
+    });
+  });
+
+  it("asks Rome Cloud again for another account rather than reusing the last answer", async () => {
+    let bearer = "instance-1";
+    const cloud = answering(() =>
+      bearer === "instance-1"
+        ? provider()
+        : Response.json({ error: "voice_input_not_allowed" }, { status: 403 }),
+    );
+    const caller = () => ({ origin: "https://cloud.example", bearer: async () => bearer });
+    let signed = true;
+    const source = createVoiceInputSource({
+      own: null,
+      romeCloud: () => (signed ? caller() : null),
+      fetch: cloud.fetch,
+    });
+    expect((await source.info()).available).toBe(true);
+    signed = false;
+    await source.info();
+    signed = true;
+    bearer = "instance-2";
+
+    expect(await source.info()).toEqual({ available: false, via: null, place: null });
+    expect(cloud.calls()).toEqual(["/v1/transcription/provider", "/v1/transcription/provider"]);
   });
 });
