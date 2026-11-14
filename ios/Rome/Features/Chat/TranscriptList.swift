@@ -462,14 +462,17 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
             let width = view.bounds.width
             for index in stride(from: top - 1, through: max(0, top - 12), by: -1) {
                 guard let id = self.items[safe: index], let box = self.boxes[id] else { continue }
-                let host = UIHostingController(rootView: RowHost(box: box, cells: self.cells) { [weak self] row, previous in
+                let host = UIHostingController(rootView: AnyView(RowHost(box: box, cells: self.cells) { [weak self] row, previous in
                     self.map { AnyView($0.row(row, previous)) } ?? AnyView(EmptyView())
-                })
+                }))
                 let size = host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
                 // Drawn once too: text and pictures are rasterized on first draw.
                 host.view.frame = CGRect(origin: .zero, size: CGSize(width: width, height: max(1, size.height)))
                 host.view.layoutIfNeeded()
                 _ = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in host.view.layer.render(in: context.cgContext) }
+                // The host can outlive this loop; emptied, it stops redrawing
+                // off screen each time its row or the list changes.
+                host.rootView = AnyView(EmptyView())
                 await Task.yield()
                 try? await Task.sleep(for: .milliseconds(16))
             }

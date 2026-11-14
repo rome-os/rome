@@ -8,7 +8,10 @@ import Testing
 @Observable
 private final class Growth {
     var extra: [String: CGFloat] = [:]
-    @ObservationIgnored var frames: [String: CGRect] = [:]
+    @ObservationIgnored var frames: [String: CGRect] = [:] {
+        didSet { reports += 1 }
+    }
+    @ObservationIgnored var reports = 0
 }
 
 private struct GrowthHost: View {
@@ -83,6 +86,15 @@ private struct GrowthHost: View {
         window.rootViewController = host
         window.isHidden = false
         try await Task.sleep(for: .milliseconds(800))
+        // The rows above the screen are drawn once off screen after the
+        // chat opens, and report frames outside the window: wait until
+        // they are done, then keep only what the cells report from here.
+        var heard = -1
+        for _ in 0..<40 where heard != growth.reports {
+            heard = growth.reports
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        growth.frames = [:]
         let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
         return Shown(window: window, scroll: scroll, growth: growth, store: store)
     }
@@ -105,7 +117,7 @@ private struct GrowthHost: View {
         let shown = try await show()
         defer { shown.close() }
         try await shown.scrollUp(by: 1200)
-        let anchor = try #require(shown.middleRow())
+        let anchor = try #require(shown.middleRow(), "offset \(shown.scroll.contentOffset.y), frames \(shown.growth.frames.mapValues { Int($0.minY) }.sorted { $0.value < $1.value })")
 
         shown.growth.extra[shown.store.rows.last!.id] = 300
         try await Task.sleep(for: .milliseconds(500))
