@@ -32,6 +32,7 @@ import {
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
+import { ToolThreadContext, type ToolThreadHost } from "@/pages/free/tool-thread";
 import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
 import {
   createSession,
@@ -207,6 +208,13 @@ function ReplyJump() {
         onClick={() => reply?.openThread({ thread: "u-1", title: "First" })}
       >
         open thread
+      </button>
+      <button
+        type="button"
+        data-testid="open-other-thread"
+        onClick={() => reply?.openThread({ thread: "u-2", title: "Second" })}
+      >
+        open other thread
       </button>
       {/* An older thread message the timeline has not loaded, as the thread view draws it. */}
       <div data-testid="older-thread-message">
@@ -407,11 +415,14 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       addFiles: conciergeAddFiles,
       focus: () => {},
     }));
+    // The thread the composer's draft sends into: none for the chat's own.
+    const thread = useReplyDraft()?.thread;
     return (
       <div
         data-testid="chat-composer"
         data-streaming={props.isStreaming ? "true" : "false"}
         data-chat-name={props.chatName ?? ""}
+        data-thread={thread ?? ""}
       >
         <button
           type="button"
@@ -2892,6 +2903,139 @@ describe("Chat Concierge empty state", () => {
     await userEvent.click(within(row!).getByRole("button", { name: "message.share" }));
   };
 
+  describe("Chat thread in the tool pane", () => {
+    const outlet = () => {
+      const element = document.createElement("div");
+      document.body.append(element);
+      return element;
+    };
+    const host = (target: HTMLElement | null) =>
+      ({ outlet: target, open: rs.fn(), close: rs.fn() }) satisfies ToolThreadHost;
+    const concierge = (toolThread: ToolThreadHost | null) => (
+      <ToolThreadContext.Provider value={toolThread}>
+        <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
+      </ToolThreadContext.Provider>
+    );
+    const threadView = (target: HTMLElement) => target.querySelector("[data-chat-thread-view]");
+    const composers = () => screen.getAllByTestId("chat-composer");
+    // The thread tab's composer is in the pane, which sits before the chat in the document.
+    const threadsOf = () =>
+      composers()
+        .map((composer) => composer.dataset.thread)
+        .sort();
+
+    it("opens the thread in the pane's tab, beside the chat, with a composer of its own", async () => {
+      twoTurns();
+      const toolThread = host(outlet());
+      renderChat(concierge(toolThread));
+      await screen.findAllByTestId("user-row");
+      expect(composers()).toHaveLength(1);
+
+      fireEvent.click(screen.getByTestId("open-thread"));
+
+      expect(toolThread.open).toHaveBeenCalledWith(expect.any(String), expect.any(Function));
+      const view = threadView(toolThread.outlet!)!;
+      expect(view.textContent).toContain("First");
+      // The chat stays as it was, and its own composer sends to the chat.
+      expect(screen.getByTestId("message-list")).toBeTruthy();
+      expect(threadsOf()).toEqual(["", "u-1"]);
+      expect(within(view as HTMLElement).getByTestId("chat-composer").dataset.thread).toBe("u-1");
+    });
+
+    it("sends from the thread's composer through the chat's own send", async () => {
+      twoTurns();
+      const toolThread = host(outlet());
+      renderChat(concierge(toolThread));
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-thread"));
+      rs.mocked(postSessionTurn).mockClear();
+
+      fireEvent.click(
+        within(threadView(toolThread.outlet!) as HTMLElement).getByTestId("concierge-send-button"),
+      );
+
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+      // Sending closes nothing.
+      expect(threadView(toolThread.outlet!)).toBeTruthy();
+    });
+
+    it("shows another task's thread in the same tab", async () => {
+      twoTurns();
+      const toolThread = host(outlet());
+      renderChat(concierge(toolThread));
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-thread"));
+
+      fireEvent.click(screen.getByTestId("open-other-thread"));
+
+      expect(toolThread.open).toHaveBeenCalledTimes(2);
+      expect(toolThread.outlet!.querySelectorAll("[data-chat-thread-view]")).toHaveLength(1);
+      expect(threadView(toolThread.outlet!)!.textContent).toContain("Second");
+      expect(threadsOf()).toEqual(["", "u-2"]);
+    });
+
+    it("closes when the pane's tab asks, and when its own close button does", async () => {
+      twoTurns();
+      const toolThread = host(outlet());
+      renderChat(concierge(toolThread));
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-thread"));
+      const close = rs.mocked(toolThread.open).mock.calls[0]![1];
+
+      act(() => close());
+      expect(threadView(toolThread.outlet!)).toBeNull();
+      expect(toolThread.close).toHaveBeenLastCalledWith(
+        rs.mocked(toolThread.open).mock.calls[0]![0],
+      );
+
+      fireEvent.click(screen.getByTestId("open-thread"));
+      fireEvent.click(
+        within(threadView(toolThread.outlet!) as HTMLElement).getByRole("button", {
+          name: "thread.close",
+        }),
+      );
+      expect(threadView(toolThread.outlet!)).toBeNull();
+      expect(toolThread.close).toHaveBeenCalledTimes(2);
+    });
+
+    it("leaves the thread open when Share opens share mode in the chat", async () => {
+      twoTurns();
+      const toolThread = host(outlet());
+      renderChat(concierge(toolThread));
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-thread"));
+
+      fireEvent.click(
+        within(screen.getAllByTestId("user-row")[1]!).getByRole("button", {
+          name: "message.share",
+        }),
+      );
+
+      expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
+      expect(threadView(toolThread.outlet!)).toBeTruthy();
+    });
+
+    it("removes the tab when the chat goes away", async () => {
+      twoTurns();
+      const toolThread = host(outlet());
+      const { unmount } = renderChat(concierge(toolThread));
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-thread"));
+      unmount();
+      expect(toolThread.close).toHaveBeenLastCalledWith(
+        rs.mocked(toolThread.open).mock.calls[0]![0],
+      );
+    });
+
+    it("keeps no chat threads outside a tool pane", async () => {
+      twoTurns();
+      renderChat(concierge(null));
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-thread"));
+      expect(composers()).toHaveLength(1);
+    });
+  });
+
   it("opens share mode from a message's Share, with only that message's turn selected", async () => {
     twoTurns();
     renderChat(<Chat sessionId="session-1" />);
@@ -2981,22 +3125,6 @@ describe("Chat Concierge empty state", () => {
     );
     await shareFrom("Second");
     expect((await screen.findByTestId("share-bar")).dataset.agentName).toBe("Flint");
-  });
-
-  it("closes the thread view before a message's Share opens share mode behind it", async () => {
-    twoTurns();
-    // The thread view reads its messages through a query.
-    renderChat(
-      <QueryClientProvider client={new QueryClient()}>
-        <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
-      </QueryClientProvider>,
-    );
-    await screen.findAllByTestId("user-row");
-    fireEvent.click(screen.getByTestId("open-thread"));
-    expect(await screen.findByRole("button", { name: "thread.close" })).toBeTruthy();
-    await shareFrom("Second");
-    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
-    expect(screen.queryByRole("button", { name: "thread.close" })).toBeNull();
   });
 
   it("heads the main chat and a topic chat alike, with the agent's chosen name", async () => {

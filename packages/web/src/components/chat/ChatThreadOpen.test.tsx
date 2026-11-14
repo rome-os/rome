@@ -318,9 +318,10 @@ function renderTranscript(shown: ChatMessage[] = messages) {
       messageIds: new Set(shown.map((m) => m.id)),
       jump: () => {},
       focusComposer: () => {},
-      threads: true,
+      onOpenThread: (next) => {
+        box.thread = next.thread;
+      },
     });
-    box.thread = draft.thread;
     return (
       <MemoryRouter>
         <ReplyDraftProvider value={draft}>
@@ -361,7 +362,7 @@ describe("the thread label in the transcript", () => {
     const labels = screen.getAllByRole("button", { name: "Kyoto trip" });
     expect(labels).toHaveLength(2);
     expect(labels[0]?.getAttribute("title")).toBe("Kyoto trip");
-    // The thread view loads a thread named by any of its messages.
+    // The thread tab loads a thread named by any of its messages.
     fireEvent.click(labels[1]!);
     expect(thread()).toBe("a2");
   });
@@ -415,7 +416,7 @@ describe("the thread label in the transcript", () => {
     expect(classes).toContain("focus-visible:outline-solid");
   });
 
-  it("offers no Reply on a card, and its label opens the thread with a reply to it", () => {
+  it("offers no Reply on a card, and its label opens the thread tab", () => {
     const card = {
       ...message("c1", "assistant", "", "m1", 4),
       content: JSON.stringify([
@@ -435,7 +436,8 @@ describe("the thread label in the transcript", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Kyoto trip" }).at(-1)!);
     expect(thread()).toBe("c1");
-    expect(document.querySelector("[data-reply-bar]")?.textContent).toBe("Reply to Kyoto trip");
+    // The thread tab has its own composer: the chat's reply bar stays closed.
+    expect(document.querySelector("[data-reply-bar]")).toBeNull();
   });
 
   it("sits under none of the guardian's messages", () => {

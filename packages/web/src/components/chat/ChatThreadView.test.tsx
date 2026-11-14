@@ -3,7 +3,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, StrictMode } from "react";
-import { createPortal } from "react-dom";
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { chatSessionTopicName } from "@rome/api-types/live-events";
 import i18n from "@/i18n";
@@ -14,20 +13,20 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
-import { MemoryRouter } from "react-router-dom";
-import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
-import { ChatThreadView, chatThreadQueryKey, taskChatOfThread } from "./ChatThreadView";
-import { ConciergeTranscript } from "./ConciergeTranscript";
-import { buildRows } from "./chat-view";
-import type { BlockActions } from "./MessageList";
+import { ChatThreadView, taskChatOfThread } from "./ChatThreadView";
 import { ChatThreadsProvider } from "./reply/chat-threads";
 import { QuotedReply } from "./reply/QuotedReply";
 import { ReplyBar } from "./reply/ReplyBar";
-import { ReplyDraftProvider, useReplyDraftState, type ReplyDraft } from "./reply/reply-draft";
+import {
+  ReplyDraftProvider,
+  type ReplyDraft,
+  type ReplyThread,
+  useReplyDraftState,
+} from "./reply/reply-draft";
 
 // The thread view of a Concierge chat (docs/domains/chats.md#chat-thread):
-// Reply and a reply's quote open it, it reads one thread and follows it live,
-// and it closes on Esc or a press on its blurred area.
+// a thread label and a reply's quote open it in the tool pane, it reads one
+// thread and follows it live, and it closes on Esc inside it.
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -77,12 +76,19 @@ function host(children: ReactNode) {
   );
 }
 
-/** Holds the real draft of a chat that keeps chat threads, and hands it out. */
+/**
+ * Holds the real draft of a chat that keeps chat threads, and hands it out.
+ * With `thread`, it is the thread tab's draft; without, the chat's own.
+ */
 function ThreadsDraft({
   onDraft,
+  onOpenThread = () => {},
+  thread,
   children,
 }: {
   onDraft: (draft: ReplyDraft) => void;
+  onOpenThread?: (thread: ReplyThread) => void;
+  thread?: string;
   children: ReactNode;
 }) {
   const draft = useReplyDraftState({
@@ -91,7 +97,8 @@ function ThreadsDraft({
     messageIds: new Set(),
     jump: () => {},
     focusComposer: () => {},
-    threads: true,
+    onOpenThread,
+    thread,
   });
   onDraft(draft);
   return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
@@ -100,70 +107,63 @@ function ThreadsDraft({
 describe("the reply draft of a chat that keeps chat threads", () => {
   it("opens only the reply bar on Reply, even to a message in a thread", () => {
     let draft!: ReplyDraft;
+    const open = rs.fn();
     render(
-      <ThreadsDraft onDraft={(next) => (draft = next)}>
+      <ThreadsDraft onDraft={(next) => (draft = next)} onOpenThread={open}>
         <ReplyBar />
       </ThreadsDraft>,
     );
 
     act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
 
+    expect(open).not.toHaveBeenCalled();
     expect(draft.thread).toBeNull();
     expect(draft.target?.messageId).toBe("a1");
     expect(document.querySelector("[data-reply-bar]")?.textContent).toContain("Which day?");
   });
 
-  it("opens the thread view from its label with a reply to the thread, and closing it clears it", () => {
+  it("asks for the thread tab from a thread's label and leaves its own draft alone", () => {
     let draft!: ReplyDraft;
+    const open = rs.fn();
     render(
-      <ThreadsDraft onDraft={(next) => (draft = next)}>
+      <ThreadsDraft onDraft={(next) => (draft = next)} onOpenThread={open}>
         <ReplyBar />
       </ThreadsDraft>,
     );
 
     act(() => draft.openThread({ thread: "a1", title: "Move my 3pm" }));
-    expect(draft.thread).toBe("a1");
-    // The reply goes to the thread: no message quoted.
-    expect(draft.target).toBeNull();
-    expect(document.querySelector("[data-reply-bar]")?.textContent).toBe("Reply to Move my 3pm");
 
-    act(() => draft.closeThread());
+    expect(open).toHaveBeenCalledWith({ thread: "a1", title: "Move my 3pm" });
+    // The chat's own composer keeps sending to the chat, with no reply bar.
     expect(draft.thread).toBeNull();
     expect(draft.target).toBeNull();
+    expect(document.querySelector("[data-reply-bar]")).toBeNull();
   });
 
-  it("keeps the timeline on Reply to a message in no thread, with the quote bar on the main composer", () => {
+  it("drops a reply with its ✕, and keeps the thread tab's draft sending into its thread", () => {
     let draft!: ReplyDraft;
     render(
-      <ThreadsDraft onDraft={(next) => (draft = next)}>
+      <ThreadsDraft onDraft={(next) => (draft = next)} thread="a1">
         <ReplyBar />
       </ThreadsDraft>,
     );
-
-    act(() => draft.set({ messageId: "a9", author: "agent", preview: "168" }));
-
-    expect(draft.thread).toBeNull();
-    expect(draft.target?.messageId).toBe("a9");
-    expect(document.querySelector("[data-reply-bar]")?.textContent).toContain("168");
-    // Its ✕ drops the reply.
-    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
-    expect(draft.target).toBeNull();
-  });
-
-  it("keeps the thread view and its reply to the thread on Reply inside it", () => {
-    let draft!: ReplyDraft;
-    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
-    act(() => draft.openThread({ thread: "a1", title: "Move my 3pm" }));
-    // "old" is in the open thread, but not in the timeline's loaded pages.
+    // A Reply inside the thread tab picks a reply in its own draft. "old" is
+    // in the thread, but not in the timeline's loaded pages.
     act(() => draft.set({ messageId: "old", author: "guardian", preview: "Move my 3pm" }));
-
-    // A Reply inside the view keeps the reply to the thread.
+    expect(draft.target?.messageId).toBe("old");
     expect(draft.thread).toBe("a1");
+    expect(document.querySelector("[data-reply-bar]")?.textContent).toContain("Move my 3pm");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
+
     expect(draft.target).toBeNull();
+    expect(draft.thread).toBe("a1");
+    expect(document.querySelector("[data-reply-bar]")).toBeNull();
   });
 
-  it("opens the thread view from the quote of a reply in a task's thread", () => {
+  it("opens the thread tab from the quote of a reply in a task's thread", () => {
     let draft!: ReplyDraft;
+    const open = rs.fn();
     const part: ReplyToPart = {
       type: "reply_to",
       messageId: "a1",
@@ -171,7 +171,7 @@ describe("the reply draft of a chat that keeps chat threads", () => {
       text: "Which day?",
     };
     render(
-      <ThreadsDraft onDraft={(next) => (draft = next)}>
+      <ThreadsDraft onDraft={(next) => (draft = next)} onOpenThread={open}>
         <ChatThreadsProvider
           value={{
             labels: new Map(),
@@ -186,18 +186,15 @@ describe("the reply draft of a chat that keeps chat threads", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open the chat thread" }));
 
-    // The view, and what is sent from it, follow the reply, which is in the
-    // task's thread: the original it quotes may be in none, as when the reply
-    // started the task.
-    expect(draft.thread).toBe("r1");
-    // The reply goes to the task's thread, named by its title, quoting no message.
+    // The tab follows the reply, which is in the task's thread: the original
+    // it quotes may be in none, as when the reply started the task.
+    expect(open).toHaveBeenCalledWith({ thread: "r1", title: "Move my 3pm" });
     expect(draft.target).toBeNull();
-    expect(draft.threadTitle).toBe("Move my 3pm");
   });
 
-  it("jumps to the original from the quote of a reply in no task, and opens no thread view", () => {
-    let draft!: ReplyDraft;
+  it("jumps to the original from the quote of a reply in no task, and opens no thread tab", () => {
     const jump = rs.fn();
+    const open = rs.fn();
     const part: ReplyToPart = {
       type: "reply_to",
       messageId: "a1",
@@ -205,13 +202,13 @@ describe("the reply draft of a chat that keeps chat threads", () => {
       text: "Which day?",
     };
     function Draft({ children }: { children: ReactNode }) {
-      draft = useReplyDraftState({
+      const draft = useReplyDraftState({
         chatId: "concierge",
         sessionId: "concierge",
         messageIds: new Set(["a1"]),
         jump,
         focusComposer: () => {},
-        threads: true,
+        onOpenThread: open,
       });
       return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
     }
@@ -226,71 +223,77 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }));
 
     expect(jump).toHaveBeenCalledWith("a1");
-    expect(draft.thread).toBeNull();
+    expect(open).not.toHaveBeenCalled();
   });
 
-  it("puts a failed send's reply and thread back only when nothing changed since the send", () => {
+  it("jumps to the original from a quote inside the thread tab, which is open already", () => {
+    const jump = rs.fn();
+    const open = rs.fn();
+    const part: ReplyToPart = {
+      type: "reply_to",
+      messageId: "a1",
+      author: "agent",
+      text: "Which day?",
+    };
+    function Draft({ children }: { children: ReactNode }) {
+      const draft = useReplyDraftState({
+        chatId: "concierge",
+        sessionId: "concierge",
+        messageIds: new Set(["a1"]),
+        jump,
+        focusComposer: () => {},
+        onOpenThread: open,
+        thread: "m1",
+      });
+      return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
+    }
+    // The thread tab's own transcript has no threads provider.
+    render(
+      <Draft>
+        <QuotedReply part={part} hostId="r1" />
+      </Draft>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }));
+
+    expect(jump).toHaveBeenCalledWith("a1");
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("puts a failed send's reply back only when nothing changed since the send", () => {
     let draft!: ReplyDraft;
     render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
-    const a = { thread: "a1", title: "Flights" };
-    const b = { thread: "b1", title: "Hotels" };
-    const reply = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
+    const a = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
+    const b = { messageId: "b1", author: "agent" as const, preview: "Which hotel?" };
 
-    // Sent from thread A; the guardian opens B before A's send fails.
-    act(() => draft.openThread(a));
+    // Sent with reply A; the guardian picks B before A's send fails.
+    act(() => draft.set(a));
     let sentAt = 0;
     act(() => {
       sentAt = draft.clear();
     });
-    act(() => draft.openThread(b));
-    act(() => draft.restore({ thread: a }, sentAt));
-    expect([draft.thread, draft.threadTitle]).toEqual(["b1", "Hotels"]);
+    act(() => draft.set(b));
+    act(() => draft.restore(a, sentAt));
+    expect(draft.target?.messageId).toBe("b1");
 
-    // B opened and closed again: the draft stays closed.
+    // B picked and dropped again: the draft stays empty.
     act(() => {
       sentAt = draft.clear();
     });
-    act(() => draft.openThread(b));
+    act(() => draft.set(b));
     act(() => {
       draft.clear();
     });
-    act(() => draft.restore({ thread: a }, sentAt));
-    expect([draft.target, draft.thread]).toEqual([null, null]);
-
-    // Nothing changed: A's thread comes back.
-    act(() => draft.openThread(a));
-    act(() => {
-      sentAt = draft.clear();
-    });
-    act(() => draft.restore({ thread: a }, sentAt));
-    expect([draft.target, draft.thread, draft.threadTitle]).toEqual([null, "a1", "Flights"]);
-
-    // A reply sent from the timeline comes back with the reply bar alone.
-    act(() => draft.clear());
-    act(() => draft.set(reply));
-    act(() => {
-      sentAt = draft.clear();
-    });
-    act(() => draft.restore({ target: reply }, sentAt));
-    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", null]);
-  });
-
-  it("keeps the reply bar at every width while the thread is open, and closes the thread with its ✕", () => {
-    let draft!: ReplyDraft;
-    const { container } = render(
-      <ThreadsDraft onDraft={(next) => (draft = next)}>
-        <ReplyBar />
-      </ThreadsDraft>,
-    );
-    act(() => draft.openThread({ thread: "a1", title: "Move my 3pm" }));
-    expect(draft.thread).toBe("a1");
-    // The phone width is the same dashboard: no class hides the bar there.
-    expect(container.querySelector("[data-reply-bar]")!.className).not.toMatch(/hidden/);
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
-
+    act(() => draft.restore(a, sentAt));
     expect(draft.target).toBeNull();
-    expect(draft.thread).toBeNull();
+
+    // Nothing changed: A comes back.
+    act(() => draft.set(a));
+    act(() => {
+      sentAt = draft.clear();
+    });
+    act(() => draft.restore(a, sentAt));
+    expect(draft.target?.messageId).toBe("a1");
   });
 });
 
@@ -303,17 +306,19 @@ const paragraphs = (messages: { id: string; content: string }[]) =>
   ));
 
 describe("ChatThreadView", () => {
+  const view = (props: Partial<Parameters<typeof ChatThreadView>[0]> = {}) => (
+    <ChatThreadView
+      sessionId="concierge"
+      messageId="a1"
+      title="Move my 3pm"
+      onClose={() => {}}
+      renderMessages={paragraphs}
+      {...props}
+    />
+  );
+
   it("shows the thread's messages and new ones as they are said", async () => {
-    render(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={() => {}}
-          renderMessages={paragraphs}
-        />,
-      ),
-    );
+    render(host(view()));
 
     expect(await screen.findByText("Which day?")).toBeTruthy();
     expect(requested[0]).toBe("/api/chat/sessions/concierge/messages?thread=a1");
@@ -332,111 +337,87 @@ describe("ChatThreadView", () => {
     expect(await screen.findByText("Make it tomorrow instead")).toBeTruthy();
   });
 
-  it("floats the header it is given over its messages", async () => {
-    render(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={() => {}}
-          header={<header>Milo</header>}
-          renderMessages={paragraphs}
-        />,
-      ),
-    );
-    const view = await screen.findByRole("dialog", { name: "Chat thread" });
-    expect(view.className).toContain("absolute");
-    expect(view.className).toContain("inset-0");
-    expect(screen.getByText("Milo")).toBeTruthy();
-    // No title of its own.
-    expect(screen.queryByText(/repl(y|ies)/)).toBeNull();
+  it("is a panel in the flow, with no overlay or backdrop over the chat", async () => {
+    render(host(view()));
+    await screen.findByText("Which day?");
+    const panel = screen.getByRole("region", { name: "Chat thread" });
+    expect(panel.className).not.toMatch(/absolute|inset-0|z-\d/);
+    expect(panel.querySelector("[aria-hidden]")).toBeNull();
+    expect(panel.querySelector("[class*=backdrop]")).toBeNull();
+    // Blend modes in a message stay inside the list.
+    const list = screen.getByText("Which day?").closest("div.isolate");
+    expect(list).toBeTruthy();
   });
 
-  it("keeps open on a press on any bubble of a message, a forwarded report included", async () => {
-    rs.stubGlobal("IntersectionObserver", undefined);
-    rs.stubGlobal(
-      "matchMedia",
-      rs.fn((query: string) => ({
-        matches: false,
-        media: query,
-        addEventListener: rs.fn(),
-        removeEventListener: rs.fn(),
-      })),
-    );
-    thread = [
-      {
-        ...message("a1", "assistant", "x"),
-        turnId: "t1",
-        content: JSON.stringify([
-          { type: "text", content: "Here it is" },
-          {
-            type: "text",
-            content: "# Report\n\nThree hotels near the river.",
-            format: "long",
-            forwardedFrom: { chatId: "task-1", title: "Hotels" },
-          },
-        ]),
-      },
-    ];
+  it("names the task in its header, beside its actions and a close button", async () => {
     const onClose = rs.fn();
-    const identity = { name: "Rome", iconUrl: null };
-    render(
-      host(
-        <MemoryRouter>
-          <ChatThreadView
-            sessionId="concierge"
-            messageId="a1"
-            onClose={onClose}
-            renderMessages={(messages) => (
-              <ConciergeTranscript
-                rows={buildRows(messages, new Map(), identity, {
-                  runningTurnId: null,
-                  isStreaming: false,
-                })}
-                live={{
-                  isStreaming: false,
-                  runningTurnId: null,
-                  snapshot: null,
-                  textStore: EMPTY_LIVE_TEXT,
-                  identity,
-                }}
-                actions={
-                  {
-                    onApprovalResolved: () => {},
-                    onSubmitAppComponent: () => {},
-                    onDismissAppComponent: () => {},
-                    interactionResults: new Map(),
-                  } as BlockActions
-                }
-                contentRef={() => {}}
-              />
-            )}
-          />
-        </MemoryRouter>,
-      ),
-    );
-    const report = await screen.findByText("Three hotels near the river.");
-    // Nothing stops the press, so a drag from it still selects text.
-    expect(fireEvent.pointerDown(report)).toBe(true);
-    fireEvent.pointerDown(screen.getByText("Here it is"));
-    expect(onClose).not.toHaveBeenCalled();
-    fireEvent.pointerDown(screen.getByRole("dialog", { name: "Chat thread" }));
+    render(host(view({ onClose, actions: <button type="button">Open task chat</button> })));
+    await screen.findByText("Which day?");
+
+    expect(screen.getByTitle("Move my 3pm").textContent).toBe("Move my 3pm");
+    expect(screen.getByRole("button", { name: "Open task chat" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close chat thread" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("closes on Esc and on a press on its blurred area, not on a message or outside it", async () => {
+  it("falls back to its own name when no task title is known", async () => {
+    render(host(view({ title: "" })));
+    await screen.findByText("Which day?");
+    expect(screen.getAllByText("Chat thread").length).toBeGreaterThan(0);
+    expect(document.querySelector("[data-chat-thread-view] span[title]")).toBeNull();
+  });
+
+  it("draws the composer it is given below its messages", async () => {
+    render(host(view({ composer: <textarea aria-label="reply" /> })));
+    const message = await screen.findByText("Which day?");
+    const composer = screen.getByLabelText("reply");
+    expect(
+      message.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("closes on Esc inside it, unless the focused control used the key", async () => {
+    const onClose = rs.fn();
+    render(
+      host(
+        <div>
+          <textarea aria-label="main composer" />
+          {view({
+            onClose,
+            composer: (
+              <>
+                <textarea aria-label="reply" />
+                <input
+                  aria-label="menu"
+                  onKeyDown={(event) => event.key === "Escape" && event.preventDefault()}
+                />
+              </>
+            ),
+          })}
+        </div>,
+      ),
+    );
+    await screen.findByText("Which day?");
+
+    // The chat's own composer is outside it: Esc there leaves the thread alone.
+    fireEvent.keyDown(screen.getByLabelText("main composer"), { key: "Escape" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    // A control that used the key first, as a reply bar's Esc does.
+    fireEvent.keyDown(screen.getByLabelText("menu"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByLabelText("reply"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays open on a press anywhere in or around it", async () => {
     const onClose = rs.fn();
     render(
       host(
         <div>
           <nav>sidebar</nav>
-          <textarea aria-label="composer" />
-          <ChatThreadView
-            sessionId="concierge"
-            messageId="a1"
-            onClose={onClose}
-            renderMessages={paragraphs}
-          />
+          {view({ onClose })}
         </div>,
       ),
     );
@@ -444,48 +425,13 @@ describe("ChatThreadView", () => {
 
     fireEvent.pointerDown(screen.getByText("Which day?"));
     fireEvent.pointerDown(screen.getByText("sidebar"));
-    fireEvent.pointerDown(screen.getByLabelText("composer"));
+    fireEvent.pointerDown(screen.getByRole("region", { name: "Chat thread" }));
     expect(onClose).not.toHaveBeenCalled();
-
-    fireEvent.pointerDown(screen.getByRole("dialog", { name: "Chat thread" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-    fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
   });
 
-  it("covers the chat behind with a near-opaque backdrop and keeps blend modes inside the list", async () => {
-    render(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={() => {}}
-          renderMessages={paragraphs}
-        />,
-      ),
-    );
-    await screen.findByText("Which day?");
-    const view = screen.getByRole("dialog", { name: "Chat thread" });
-    const [backdrop, list] = view.querySelectorAll<HTMLElement>("[data-chat-thread-fade]");
-    // Readable without the blur: an avatar's blend ring once cut it off.
-    expect(backdrop?.className).toContain("bg-chat-canvas/95");
-    expect(backdrop?.className).not.toMatch(/supports-\[backdrop-filter\]/);
-    expect(list?.className.split(" ")).toContain("isolate");
-  });
-
-  it("tints the message it opened from once it has faded in, then lets it go", async () => {
-    render(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={() => {}}
-          renderMessages={paragraphs}
-        />,
-      ),
-    );
+  it("tints the message it opened from, then lets it go", async () => {
+    render(host(view()));
     const copy = (await screen.findByText("Which day?")).closest("[data-timeline-anchor]")!;
-    expect(copy.hasAttribute("data-timeline-landed")).toBe(false);
     await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(true));
     await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(false), {
       timeout: 2000,
@@ -516,16 +462,7 @@ describe("ChatThreadView", () => {
         ]),
       },
     ];
-    render(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={() => {}}
-          renderMessages={bubbles}
-        />,
-      ),
-    );
+    render(host(view({ renderMessages: bubbles })));
     const first = (await screen.findByText("Which day?")).closest("[data-message-part]")!;
     const later = screen.getByText("Which day? (more)");
     await waitFor(() => expect(first.hasAttribute("data-timeline-landed")).toBe(true));
@@ -536,19 +473,11 @@ describe("ChatThreadView", () => {
     // The dashboard runs under StrictMode, which runs a view's effects twice
     // on mount; a reopened thread draws its cached messages at once.
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const view = (open: boolean) => (
+    const tree = (open: boolean) => (
       <StrictMode>
         <QueryClientProvider client={client}>
           <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
-            {open ? (
-              <ChatThreadView
-                key="a1"
-                sessionId="concierge"
-                messageId="a1"
-                onClose={() => {}}
-                renderMessages={paragraphs}
-              />
-            ) : null}
+            {open ? view() : null}
           </LiveEventsClientContext.Provider>
         </QueryClientProvider>
       </StrictMode>
@@ -557,96 +486,61 @@ describe("ChatThreadView", () => {
       const copy = (await screen.findByText("Which day?")).closest("[data-timeline-anchor]")!;
       await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(true));
     };
-    const { rerender } = render(view(true));
+    const { rerender } = render(tree(true));
     await opensWithTint();
-    rerender(view(false));
+    rerender(tree(false));
     expect(screen.queryByText("Which day?")).toBeNull();
-    rerender(view(true));
+    rerender(tree(true));
     await opensWithTint();
   });
 
-  it("reads where the message it opened from sat once, on open", async () => {
-    const originTop = rs.fn(() => 320);
-    const { rerender } = render(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={() => {}}
-          originTop={originTop}
-          renderMessages={paragraphs}
-        />,
-      ),
-    );
-    await screen.findByText("Which day?");
-    rerender(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={() => {}}
-          originTop={originTop}
-          renderMessages={paragraphs}
-        />,
-      ),
-    );
-    expect(originTop).toHaveBeenCalledTimes(1);
-  });
-
-  it("stays open on a press inside a layer its content opened in a portal", async () => {
-    const onClose = rs.fn();
-    render(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={onClose}
-          renderMessages={(messages) => (
-            <>
-              {paragraphs(messages)}
-              {createPortal(<div>popover padding</div>, document.body)}
-            </>
-          )}
-        />,
-      ),
-    );
-    await screen.findByText("Which day?");
-    fireEvent.pointerDown(screen.getByText("popover padding"));
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it("puts a cached thread's newest message above the composer once its floor is measured", async () => {
-    // A list's content is 1000px tall, plus the floor it keeps clear of.
-    const tops: number[] = [];
-    rs.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (
-      this: HTMLElement,
-    ) {
-      return 1000 + (Number.parseFloat(this.style.paddingBottom) || 0);
+  describe("following the newest message", () => {
+    const scrolled: number[] = [];
+    beforeEach(() => {
+      scrolled.length = 0;
+      // The list's content is 1000px tall in a 400px view.
+      rs.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(1000);
+      rs.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+      rs.spyOn(HTMLElement.prototype, "scrollTop", "get").mockReturnValue(600);
+      rs.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation((value: number) => {
+        scrolled.push(value);
+      });
     });
-    rs.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation((value: number) => {
-      tops.push(value);
+    afterEach(() => rs.restoreAllMocks());
+
+    const arrives = async () => {
+      const socket = acceptLatestSocket();
+      thread = [...thread, message("m2", "user", "Make it tomorrow instead")];
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: chatSessionTopicName("concierge"),
+          event: "message_insert",
+          data: { sessionId: "concierge", messageId: "m2" },
+        }),
+      );
+      await screen.findByText("Make it tomorrow instead");
+    };
+
+    it("keeps it at the bottom, in view, as messages arrive", async () => {
+      render(host(view()));
+      await screen.findByText("Which day?");
+      await waitFor(() => expect(scrolled.at(-1)).toBe(1000));
+      scrolled.length = 0;
+      await arrives();
+      expect(scrolled.at(-1)).toBe(1000);
     });
-    const floor = document.createElement("div");
-    floor.getBoundingClientRect = () => ({ height: 150 }) as DOMRect;
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    // Opened before: its messages are drawn at once, before the floor is measured.
-    client.setQueryData(chatThreadQueryKey("concierge", "a1"), thread);
-    render(
-      <QueryClientProvider client={client}>
-        <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
-          <ChatThreadView
-            sessionId="concierge"
-            messageId="a1"
-            onClose={() => {}}
-            floor={floor}
-            renderMessages={paragraphs}
-          />
-        </LiveEventsClientContext.Provider>
-      </QueryClientProvider>,
-    );
-    await screen.findByText("Which day?");
-    await waitFor(() => expect(tops.at(-1)).toBe(1150));
-    rs.restoreAllMocks();
+
+    it("leaves a reader who scrolled up where they are", async () => {
+      render(host(view()));
+      await screen.findByText("Which day?");
+      // 600 + 400 = 1000: at the bottom. Scrolled up is 200 + 400 < 1000.
+      rs.spyOn(HTMLElement.prototype, "scrollTop", "get").mockReturnValue(200);
+      fireEvent.scroll(screen.getByText("Which day?").closest("div.isolate")!);
+      scrolled.length = 0;
+      await arrives();
+      expect(scrolled).toEqual([]);
+    });
   });
 });
 

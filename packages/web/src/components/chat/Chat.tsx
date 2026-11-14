@@ -8,7 +8,7 @@ import {
   LiveTaskCardsProvider,
 } from "./entries/live-task-cards";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   useCallback,
   useEffect,
@@ -78,6 +78,7 @@ import {
 } from "@/components/chat/ShareMessageButton";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
+import { useToolThread } from "@/pages/free/tool-thread";
 import { useToolTrace } from "@/pages/free/tool-trace";
 import type {
   TraceSegment,
@@ -97,12 +98,11 @@ import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import {
   ReplyDraftProvider,
   replyFormFields,
+  type ReplyThread,
   useReplyDraftState,
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
-import { chatFloorLayering } from "@/components/chat/chat-floor";
-import { isAnchorInView, LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
-import { useDesktop } from "@/hooks/use-desktop";
+import { LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
@@ -899,28 +899,6 @@ export function Chat({
     [scrollerEl, landOn, scrollToAnchor],
   );
 
-  // Brings a message back into view after the thread view opened from it
-  // closes, and tints it, so the reader finds where they were. A message
-  // still in view only gets the tint.
-  const revealMessage = useCallback(
-    (messageId: string) => {
-      const scroller = scrollerEl;
-      const anchor = scroller ? findMessageAnchor(scroller, messageId) : null;
-      if (!scroller || !anchor) return;
-      const box = scroller.getBoundingClientRect();
-      const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
-      const bottom = floorEl
-        ? Math.min(box.bottom, floorEl.getBoundingClientRect().top)
-        : box.bottom;
-      if (isAnchorInView(anchor.getBoundingClientRect(), { top: box.top + clear, bottom })) {
-        landOn(scroller, anchor);
-      } else {
-        jumpToMessage(messageId);
-      }
-    },
-    [scrollerEl, floorEl, landOn, jumpToMessage],
-  );
-
   // Respond in the Tasks panel points to a Concierge message that may sit
   // pages above the loaded ones, so the jump reads history down through it in
   // one page; the unread divider pages older history in until it renders.
@@ -1015,15 +993,46 @@ export function Chat({
     () => new Set(displayMessages.map((message) => message.id)),
     [displayMessages],
   );
+  // The chat thread open in the tool pane's Chat thread tab, which is view
+  // state: nothing keeps it across a reload. The tab holds the thread while
+  // the pane is open; its X and Delete key, and the thread's own close button,
+  // end it through `closeThread`.
+  const toolThread = useToolThread();
+  const openToolThread = toolThread?.open;
+  const closeToolThread = toolThread?.close;
+  const threadOwner = useId();
+  const [thread, setThread] = useState<ReplyThread | null>(null);
+  const closeThread = useCallback(() => {
+    setThread(null);
+    closeToolThread?.(threadOwner);
+  }, [closeToolThread, threadOwner]);
+  const openThread = useCallback(
+    (next: ReplyThread) => {
+      setThread(next);
+      openToolThread?.(threadOwner, closeThread);
+    },
+    [openToolThread, threadOwner, closeThread],
+  );
+  useEffect(() => () => closeToolThread?.(threadOwner), [closeToolThread, threadOwner]);
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
     sessionId: mainSessionId ?? null,
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
-    // A Concierge chat keeps chat threads. Only a thread label opens the
-    // thread view; Reply opens the reply bar alone.
-    threads: concierge,
+    // A Concierge chat beside a tool pane keeps chat threads: a thread label
+    // opens the thread tab, and Reply opens the reply bar alone.
+    onOpenThread: concierge && openToolThread ? openThread : undefined,
+  });
+  // The thread tab's own draft: what it sends goes into its thread.
+  const threadComposerRef = useRef<ChatComposerHandle>(null);
+  const threadDraft = useReplyDraftState({
+    chatId: thread?.thread,
+    sessionId: mainSessionId ?? null,
+    messageIds: displayedMessageIds,
+    jump: jumpToMessage,
+    focusComposer: () => threadComposerRef.current?.focus(),
+    thread: thread?.thread ?? null,
   });
 
   // Share chat picks every turn in a common chat. A Concierge chat holds its
@@ -1036,12 +1045,8 @@ export function Chat({
   // Share on a message: the same share mode, with only that message's turn
   // selected. A message outside the chat's own turns selects nothing. Read
   // through the ref so the shortcut keeps one identity while messages arrive.
-  // From the thread view, the view closes first: share mode picks turns in the
-  // chat's own timeline, which the view covers.
-  const { thread: openThreadId, closeThread } = replyDraft;
   const shareMessageTurn = useCallback(
     (messageId: string, turn?: SharedMessageTurn) => {
-      if (openThreadId) closeThread();
       // The loaded timeline first; else the turn the message's own view knows,
       // for an older thread message the timeline has not loaded.
       const turnId = mainSessionId
@@ -1051,7 +1056,7 @@ export function Chat({
       setSelectedShareTurns(new Set(turnId ? [turnId] : []));
       setShareMode(true);
     },
-    [mainSessionId, openThreadId, closeThread],
+    [mainSessionId],
   );
 
   const exitShareMode = useCallback(() => {
@@ -2569,8 +2574,7 @@ export function Chat({
   // mascot's badge with the name pill under it in the middle, and round
   // buttons either side, centred on the badge. The equal side columns keep the
   // middle centred over the chat. Only its pieces take the pointer, so the
-  // messages under the gaps stay reachable. The thread view floats the same
-  // header with its close button on the right.
+  // messages under the gaps stay reachable.
   // A narrow workspace shows the open tool pane in place of the chat.
   const toolTasksHost = useToolTasks();
   const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
@@ -2610,49 +2614,18 @@ export function Chat({
         </>
       )
     : floatingHeader;
-  const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
-  // The thread view stays on the message it opened from while it is open,
-  // a reply picked inside it included. It fades in, and closes at once: the
-  // backdrop's blur cannot fade out cleanly, and the composer and header
-  // return under a fading view, so a fade out flashes.
-  const draftThread = threadOpen ? replyDraft.thread : null;
-  const [threadView, setThreadView] = useState<string | null>(null);
-  if (draftThread && !threadView) setThreadView(draftThread);
-  else if (!draftThread && threadView) setThreadView(null);
-  const openedFromRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (draftThread) {
-      openedFromRef.current ??= draftThread;
-      return;
-    }
-    const from = openedFromRef.current;
-    openedFromRef.current = null;
-    if (from) revealMessage(from);
-  }, [draftThread, revealMessage]);
-  // On a desktop the thread view holds the message it opened from where it
-  // sat in the timeline; a phone keeps the thread on the composer.
-  const desktop = useDesktop();
-  const threadOrigin = useCallback(
-    (messageId: string) => () => {
-      if (!desktop || !scrollerEl) return null;
-      return findMessageAnchor(scrollerEl, messageId)?.getBoundingClientRect().top ?? null;
-    },
-    [desktop, scrollerEl],
-  );
-  // The thread view's transcript feeds none of the chat's scroll measures.
+  // The thread tab's transcript feeds none of the chat's scroll measures.
   const ignoreThreadContent = useCallback(() => {}, []);
   loadedThreads.current = new Map(
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
   const chatThreads = useChatThreadsValue(displayMessages, rethreaded, liveThreadTitles);
-  // The open thread view's thread, whose task chat its header opens.
-  const threadRootOfView = threadView
-    ? (chatThreads.taskThreads.get(threadView) ?? threadView)
-    : null;
+  // The open thread tab's thread, whose task chat its header opens.
+  const threadRoot = thread ? (chatThreads.taskThreads.get(thread.thread) ?? thread.thread) : null;
 
   const conciergeHeader = concierge ? (
     <>
-      {threadOpen ? null : conciergeHeaderWith(navbarActions)}
+      {conciergeHeaderWith(navbarActions)}
       {taskList.sheet}
     </>
   ) : null;
@@ -2807,7 +2780,7 @@ export function Chat({
                 and bottom padding sit outside the box's blur, and on a phone a
                 transparent strip there shows table rows and text beside and
                 below the box, which reads as a second transcript. The floor
-                also takes pointer events there, while no thread view is open, so a tap on the canvas cannot
+                also takes pointer events there, so a tap on the canvas cannot
                 land on a link it hides. It stays inside the scroller, so the
                 scroll and keyboard geometry match the desktop layout. */}
                 <div
@@ -2815,8 +2788,7 @@ export function Chat({
                   data-chat-floor
                   className={cn(
                     "pointer-events-none sticky bottom-0 px-3 md:px-6",
-                    // Over an open thread view only the composer takes presses.
-                    chatFloorLayering(threadOpen),
+                    "z-10 max-md:pointer-events-auto max-md:bg-chat-canvas",
                     // Presentation mode gives the draft's bottom gap 5x its normal
                     // size so a recording framed on the empty state keeps the
                     // composer clear of the capture's lower edge.
@@ -2857,15 +2829,13 @@ export function Chat({
                       // rail, has no width gate: it is reachable on a phone, where
                       // the 36px step is under the 44px floor.
                       "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                      !mainSessionId || isAtBottom || threadOpen
-                        ? "invisible opacity-0"
-                        : "visible opacity-100",
+                      !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
                     )}
                   />
                   <div className="pointer-events-auto relative mx-auto max-w-5xl">
                     {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
-                    {mainSessionId && !threadOpen && (
+                    {mainSessionId && (
                       <div className="pointer-events-none absolute right-0 bottom-full mb-2">
                         {concierge ? (
                           <ConciergeCardJump
@@ -2969,14 +2939,7 @@ export function Chat({
               </div>
               {concierge && unread && mainSessionId ? (
                 // Under the floating header, on the transcript's top-right corner.
-                // Kept mounted under a thread view: the pill's state is the
-                // guardian's progress through the unread messages.
-                <div
-                  className={cn(
-                    "pointer-events-none absolute top-[calc(var(--rome-concierge-header-offset)+0.5rem)] right-3 z-10 md:right-6",
-                    threadOpen && "invisible",
-                  )}
-                >
+                <div className="pointer-events-none absolute top-[calc(var(--rome-concierge-header-offset)+0.5rem)] right-3 z-10 md:right-6">
                   <ConciergeUnreadPill
                     scroller={scrollerEl}
                     content={contentEl}
@@ -2995,65 +2958,72 @@ export function Chat({
                   onJump={jumpToMessage}
                 />
               )}
-              {threadView && mainSessionId ? (
-                <ChatThreadView
-                  key={threadView}
-                  sessionId={mainSessionId}
-                  messageId={threadView}
-                  onClose={replyDraft.closeThread}
-                  floor={floorEl}
-                  originTop={threadOrigin(threadView)}
-                  header={conciergeHeaderWith(
-                    <>
-                      {threadRootOfView ? (
-                        <OpenThreadTaskChat
-                          sessionId={mainSessionId}
-                          messageId={threadView}
-                          threadRoot={threadRootOfView}
-                          messages={displayMessages}
-                          liveTaskChat={liveThreadTaskChats.get(threadRootOfView) ?? null}
-                          size={floating ? "md" : "sm"}
-                          className={actionBadge}
-                        />
-                      ) : null}
-                      <IconButton
-                        size={floating ? "md" : "sm"}
-                        label={t("thread.close")}
-                        icon={<X />}
-                        onClick={replyDraft.closeThread}
-                        className={actionBadge}
+              {thread && mainSessionId && toolThread?.outlet
+                ? createPortal(
+                    <ReplyDraftProvider value={threadDraft}>
+                      <ChatThreadView
+                        key={thread.thread}
+                        sessionId={mainSessionId}
+                        messageId={thread.thread}
+                        title={(threadRoot && chatThreads.titles.get(threadRoot)) || thread.title}
+                        onClose={closeThread}
+                        actions={
+                          threadRoot ? (
+                            <OpenThreadTaskChat
+                              sessionId={mainSessionId}
+                              messageId={thread.thread}
+                              threadRoot={threadRoot}
+                              messages={displayMessages}
+                              liveTaskChat={liveThreadTaskChats.get(threadRoot) ?? null}
+                              size="sm"
+                              className="text-muted-foreground hover:text-foreground"
+                            />
+                          ) : null
+                        }
+                        renderMessages={(threadMessages) => (
+                          // The thread tab offers Copy and Reply, not Share: a share
+                          // is made from the chat's own timeline.
+                          <MessageSharingContext.Provider value={null}>
+                            <ConciergeTranscript
+                              rows={buildRows(threadMessages, identityBySession, mainIdentity, {
+                                runningTurnId: null,
+                                isStreaming: false,
+                              })}
+                              live={{
+                                isStreaming: false,
+                                runningTurnId: null,
+                                snapshot: null,
+                                textStore: liveTextStore,
+                                identity: mainIdentity,
+                              }}
+                              actions={{
+                                ...blockActions,
+                                interactionResults: threadInteractionResults(threadMessages, {
+                                  messages: displayMessages,
+                                  results: blockActions.interactionResults,
+                                }),
+                              }}
+                              contentRef={ignoreThreadContent}
+                            />
+                          </MessageSharingContext.Provider>
+                        )}
+                        composer={
+                          isArchived ? null : (
+                            <ConciergeComposer
+                              ref={threadComposerRef}
+                              boxClassName="rounded-16 border border-border bg-surface p-2"
+                              onSend={handleComposerSend}
+                              isStreaming={displayedStreaming}
+                              onStop={stopComposerTurn}
+                              streamError={streamError}
+                            />
+                          )
+                        }
                       />
-                    </>,
-                  )}
-                  renderMessages={(threadMessages) => (
-                    // The thread view offers Copy and Reply, not Share: a share
-                    // is made from the chat's own timeline.
-                    <MessageSharingContext.Provider value={null}>
-                      <ConciergeTranscript
-                        rows={buildRows(threadMessages, identityBySession, mainIdentity, {
-                          runningTurnId: null,
-                          isStreaming: false,
-                        })}
-                        live={{
-                          isStreaming: false,
-                          runningTurnId: null,
-                          snapshot: null,
-                          textStore: liveTextStore,
-                          identity: mainIdentity,
-                        }}
-                        actions={{
-                          ...blockActions,
-                          interactionResults: threadInteractionResults(threadMessages, {
-                            messages: displayMessages,
-                            results: blockActions.interactionResults,
-                          }),
-                        }}
-                        contentRef={ignoreThreadContent}
-                      />
-                    </MessageSharingContext.Provider>
-                  )}
-                />
-              ) : null}
+                    </ReplyDraftProvider>,
+                    toolThread.outlet,
+                  )
+                : null}
             </div>
           </div>
           <TraceDrawer
