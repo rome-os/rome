@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { RULES_VERSION, SCENARIOS } from "../scenarios/index.mjs";
 import { renderMarkdown } from "./report.mjs";
 import { JUDGE_CALIBRATION } from "./judge.mjs";
-import { ask } from "./scenario.mjs";
+import { ask, ruleResult } from "./scenario.mjs";
 import { loadK5Questions, loadTeam, writeSeed } from "./seed.mjs";
 
 const verifierDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -79,6 +79,55 @@ export function failureHistory(runsRoot, currentDir, results) {
   }
   for (const r of results) if (r.status === "fail") add(r.rule);
   return { earlierRuns: runs, counts, limit: FAILURE_LIMIT };
+}
+
+const NO_ANSWER = /no answer|no reply/;
+
+/**
+ * The agent's replies the envoy held or rejected during the run, each with the rule whose
+ * question it answered. A failed check whose missing answer is one of them keeps its failure
+ * (the team got no answer) but is tagged as stopped by the envoy, so it never reads as the
+ * agent's fault. K7 handles its own probes. Environments without `cos-env rome held` list none.
+ */
+async function envoyStops(env, startedAt, answerTimes, results) {
+  let held;
+  try {
+    held = await env.held(startedAt.toISOString());
+  } catch {
+    return [];
+  }
+  const stops = (Array.isArray(held) ? held : [])
+    .filter((h) => h.status !== "approved")
+    .map((h) => {
+      const asked = answerTimes.find((t) => t.questionId === h.question);
+      return {
+        rule: asked?.rule ?? null,
+        chat: asked?.chat ?? null,
+        questionId: h.question,
+        status: h.status,
+        reply: h.reply,
+        reason: h.reason,
+        scored: false,
+      };
+    });
+  for (const stop of stops) {
+    for (const result of results) {
+      for (const c of result.checks ?? []) {
+        if (
+          c.status !== "fail" ||
+          !c.evidence.includes(stop.questionId) ||
+          !NO_ANSWER.test(c.detail)
+        )
+          continue;
+        c.detail = `${c.detail} (fail: the envoy stopped the agent's reply, ${stop.status}: ${stop.reason})`;
+        c.stoppedByEnvoy = true;
+        result.stoppedByEnvoy = true;
+        result.reason = ruleResult(result.checks).reason;
+        stop.scored = true;
+      }
+    }
+  }
+  return stops;
 }
 
 /** The scenarios for `rules` when given, else every rule of `phase` and the phases before it. */
@@ -220,6 +269,8 @@ export async function verify({
     });
   }
 
+  const stoppedByEnvoy = await envoyStops(env, startedAt, answerTimes, results);
+
   // Rome's logs sit beside the report so a silent or failing run can be traced. A copy that
   // fails is noted in the report, not fatal: the scores stand without it.
   let logs = "logs";
@@ -249,6 +300,7 @@ export async function verify({
     answered,
     answerTimes,
     romeEvents,
+    stoppedByEnvoy,
     logs,
     summary: summarize(results),
     failures: failureHistory(runsDir ?? (outDir ? dirname(dir) : DEFAULT_RUNS_DIR), dir, results),

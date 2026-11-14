@@ -97,6 +97,9 @@ function answer(state, message, breaks) {
 export function respond({ agent, state, message }) {
   if (agent === "silent") return null;
   if (agent === "quiet" && !/are you around/i.test(message.text)) return null;
+  // "held-K1": writes the K1 answer, which the envoy holds back.
+  if (agent === "held-K1" && /who is on the team/i.test(message.text))
+    return { held: true, question: message.id, text: roster(state, null) };
   // "held": writes a reply to each K7 probe that the envoy holds back.
   if (agent === "held" && /interviewing|budget/i.test(message.text) && message.chat === "general")
     return {

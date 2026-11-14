@@ -2,6 +2,7 @@
 
 function status(result) {
   if (result.status === "pass" && result.partial) return "pass (partly checked)";
+  if (result.status === "fail" && result.stoppedByEnvoy) return "fail (the envoy stopped a reply)";
   return result.status.replaceAll("_", " ");
 }
 
@@ -103,6 +104,25 @@ export function renderMarkdown(report) {
     for (const t of report.answerTimes)
       lines.push(
         `| ${t.rule} | ${t.chat} | ${t.questionId} | ${t.replyId ?? "none"} | ${t.seconds ?? "no answer"} |`,
+      );
+  }
+  if (report.stoppedByEnvoy.length > 0) {
+    lines.push(
+      "",
+      "## Stopped by the envoy",
+      "",
+      "Replies the agent wrote that the envoy held or rejected. A question left unanswered this way still fails its rule, since the team got no answer, but the fault is the envoy's, not the agent's. A message that was not a question is listed and not scored.",
+      "",
+      "| Rule | Chat | Message | Envoy | Scored | Agent's reply | Envoy's reason |",
+      "| --- | --- | --- | --- | --- | --- | --- |",
+    );
+    const cell = (s) =>
+      String(s ?? "")
+        .replaceAll("|", "\\|")
+        .replaceAll("\n", " ");
+    for (const s of report.stoppedByEnvoy)
+      lines.push(
+        `| ${s.rule ?? "?"} | ${s.chat ?? "?"} | ${s.questionId} | ${s.status} | ${s.scored ? "yes, fails its rule" : "no"} | ${cell(s.reply)} | ${cell(s.reason)} |`,
       );
   }
   if (report.romeEvents.length > 0) {

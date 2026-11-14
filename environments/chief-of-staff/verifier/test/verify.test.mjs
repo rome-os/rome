@@ -158,6 +158,18 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.match(report.results[0].reason, /the envoy stopped a reply/);
   });
 
+  it("fails a question whose reply the envoy stopped, and tags the envoy, not the agent", async () => {
+    const { report, outDir } = await runAgainst("held-K1", { rules: ["K1"] });
+    assert.deepEqual(statuses(report), { K1: "fail" });
+    assert.equal(report.results[0].stoppedByEnvoy, true);
+    assert.match(report.results[0].reason, /the envoy stopped the agent's reply, pending/);
+    assert.equal(report.stoppedByEnvoy.length, 1);
+    assert.equal(report.stoppedByEnvoy[0].scored, true);
+    const markdown = readFileSync(join(outDir, "report.md"), "utf8");
+    assert.match(markdown, /## Stopped by the envoy/);
+    assert.match(markdown, /\| K1 Team \| fail \(the envoy stopped a reply\)/);
+  });
+
   it("posts a question again when Rome restarted while it waited", async () => {
     const { report, outDir } = await runAgainst("good", {
       rules: ["A1"],
