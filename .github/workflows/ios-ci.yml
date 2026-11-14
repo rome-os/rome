@@ -112,12 +112,53 @@ jobs:
         run: |
           name=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9]+( Pro)?' | sort -V | tail -1)
           echo "name=$name" >> "$GITHUB_OUTPUT"
-      - name: Run the UI tests
+      # The voice input tests run against a stand-in instance that the
+      # voice-input environment keeps on its own branch. Without it, only the
+      # launch test runs.
+      - name: Fetch the stand-in instance
+        id: standin
         run: |
+          if git fetch --quiet --depth=1 origin voice-input 2>/dev/null &&
+             git cat-file -e FETCH_HEAD:environments/voice-input/ios-stand-in/server.mjs 2>/dev/null; then
+            mkdir -p /tmp/stand-in
+            git archive FETCH_HEAD environments/voice-input/ios-stand-in | tar -x -C /tmp/stand-in
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "commit=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No stand-in instance on the voice-input branch, so only LaunchTests run; the voice input UI tests are skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Start the stand-in instance
+        if: steps.standin.outputs.present == 'true'
+        run: |
+          node /tmp/stand-in/environments/voice-input/ios-stand-in/server.mjs --port 4790 --log /tmp/stand-in.log &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4790/__stand-in/health && break; sleep 1; done
+      - name: Run the UI tests
+        env:
+          STANDIN: ${{ steps.standin.outputs.present }}
+        run: |
+          # xcodebuild hands TEST_RUNNER_* environment variables to the tests
+          # without the prefix; the tests pass them to the app.
+          extra=()
+          if [ "$STANDIN" = "true" ]; then
+            export TEST_RUNNER_ROME_LOCAL_ORIGIN=http://127.0.0.1:4790
+            export TEST_RUNNER_ROME_LOCAL_USER=guardian
+            export TEST_RUNNER_ROME_LOCAL_PASSWORD=stand-in
+          else
+            extra=(-only-testing:RomeUITests/LaunchTests)
+          fi
           xcodebuild test \
             -project Rome.xcodeproj \
             -scheme RomeUITests \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
             -skipPackagePluginValidation \
             -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            "${extra[@]}"
+      - name: Keep the stand-in's log
+        if: always() && steps.standin.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stand-in-log
+          path: /tmp/stand-in.log
+          if-no-files-found: ignore
