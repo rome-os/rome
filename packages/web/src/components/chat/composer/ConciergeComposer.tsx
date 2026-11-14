@@ -642,7 +642,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 }
               />
             </div>
-            {voice.available && !uploadInFlight ? (
+            {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
             {isStreaming && onStop && (
