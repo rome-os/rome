@@ -25,6 +25,10 @@ enum SettingsRoute: Hashable {
     case health
     /// iPhone use (iPad use on an iPad): Rome's use of this device.
     case device
+    /// One thing iPhone use can do, by its prefix.
+    case capability(String)
+    /// Apple Health → Sync history.
+    case syncHistory
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -269,6 +273,18 @@ struct MainShell: View {
         .onChange(of: model.widgetRequest, initial: true) {
             guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
             Task { await follow(link) }
+        }
+        // A tapped "sign in again" notice: Settings at Apple Health's Sync history.
+        // Taken on appear too: a tap that launched the app came before this shell.
+        .onChange(of: model.settingsRequest, initial: true) {
+            guard let routes = model.takeSettingsRequest() else { return }
+            agentPage = nil
+            page = nil
+            openApp = nil
+            settingsPage = nil
+            closeDrawer()
+            settingsPath = routes
+            showSettings = true
         }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
@@ -557,9 +573,16 @@ struct MainShell: View {
                 case .requests:
                     NodeRequestsScreen()
                 case .health:
-                    HealthAccessScreen()
+                    HealthAccessScreen(onHistory: { settingsPath.append(.syncHistory) })
                 case .device:
-                    NodeSettingsScreen(onRequests: { settingsPath.append(.requests) })
+                    NodeSettingsScreen(
+                        onRequests: { settingsPath.append(.requests) },
+                        onCapability: { settingsPath.append(.capability($0)) }
+                    )
+                case .capability(let prefix):
+                    NodeCapabilityScreen(prefix: prefix, onFollow: { settingsPath.append($0) })
+                case .syncHistory:
+                    SyncHistoryScreen()
                 }
             }
         }

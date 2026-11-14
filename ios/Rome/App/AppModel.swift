@@ -26,6 +26,21 @@ final class TokenBox: Sendable {
     }
 }
 
+/// Reaches the model from Health sync's threads without keeping it alive.
+private final class TargetBox: @unchecked Sendable {
+    @MainActor weak var model: AppModel?
+
+    func resolve() async -> PersonalDataTarget? {
+        await MainActor.run { model?.personalDataTarget() }
+    }
+}
+
+/// Settings opened at some pages from outside the sheet.
+struct SettingsRequest: Equatable {
+    let serial: Int
+    let routes: [SettingsRoute]
+}
+
 /// The role, name and picture an instance's session had last time, kept on
 /// this phone per instance so a cached launch shows them before `/auth/me`.
 struct KeptIdentity: Codable, Equatable, Sendable {
@@ -599,6 +614,8 @@ final class AppModel {
         // the sign-in screen.
         didSet {
             if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) }
+            // Back on a Rome after the session ran out: Health sync goes on.
+            if phase == .ready, oldValue != .ready { health.instanceOpened() }
             if !phase.isSignedIn { stackGame = nil }
             // Signed out, however it came about: the widget offers to make an app.
             if phase == .signedOut, oldValue != .signedOut { WidgetShelf.shared.clear() }
@@ -659,8 +676,12 @@ final class AppModel {
 
     let cloud: CloudAuth
     let push: PushCenter
-    /// This iPhone as a rome-node device: Apple Health for the instance's agent.
+    /// This iPhone as a rome-node device: what the instance's Agent may use live.
     let node: NodeHost
+    /// Apple Health's Sync with Rome.
+    let health: HealthSettings
+    /// Settings opened at these pages, as a tapped "sign in again" notice asks.
+    private(set) var settingsRequest = SettingsRequest(serial: 0, routes: [])
     /// Light, dark or automatic, for the whole app; kept across sign-out.
     let appearance = AppearanceSetting()
     /// Keeps the open instance on its latest release.
@@ -690,7 +711,15 @@ final class AppModel {
         self.images = images
         self.instanceConfiguration = instanceConfiguration
         push = PushCenter(registry: cloud)
-        node = NodeHost(credentials: cloud)
+        let target = TargetBox()
+        let health = HealthSettings(target: { await target.resolve() })
+        self.health = health
+        let device = DeviceKind.current
+        node = NodeHost(credentials: cloud, registry: NodeCapabilityRegistry(capabilities: [
+            HealthCapability(health: HealthActions(reader: health.reader, device: device), enabled: health.flag),
+            DeviceCapability(enabled: NodeFlag(), device: device),
+        ]), device: device)
+        target.model = self
         node.onCredentialRejected = { [weak self] in self?.nodeCredentialRejected() }
     }
 
@@ -1193,6 +1222,8 @@ final class AppModel {
         KeptIdentity.removeAll()
         // The device's switches and its Recent activity.
         node.forgetAccount()
+        // Health sync's switch, anchors, history and origin; the Rome keeps what it has.
+        health.forgetAccount()
     }
 
     // MARK: Session expiry
@@ -1256,6 +1287,43 @@ final class AppModel {
         if renewal?.box === box { renewal = nil }
         return result
     }
+
+    // MARK: Personal data
+
+    /// Where Health sync sends: the Rome open now, else the one opened last,
+    /// with this phone's guardian session. A visitor has no personal data to send.
+    fileprivate func personalDataTarget() -> PersonalDataTarget? {
+        guard cloud.hasCredential else { return nil }
+        guard let instance = currentInstance ?? Self.rememberedInstance(), !instance.isVisitor,
+              let origin = URL(string: instance.origin), let session = cloud.storedSession(for: instance),
+              session.cookie == InstanceSession.guardianCookie
+        else { return nil }
+        let box = TokenBox()
+        box.use(session)
+        let cloud = cloud
+        let client = APIClient(origin: origin, token: { box.token }, cookieName: { box.cookieName }, configuration: instanceConfiguration(), renew: {
+            // A background wake can renew a session past its time, as long
+            // as Rome Cloud still knows this phone.
+            guard let renewed = try? await cloud.session(for: instance, forceRefresh: true) else { return false }
+            box.use(renewed)
+            return true
+        })
+        return PersonalDataTarget(instanceId: instance.id, backend: PersonalDataClient(client: client))
+    }
+
+    /// Settings, at Apple Health's Sync history.
+    func openHealthHistory() {
+        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.health, .syncHistory])
+    }
+
+    /// The pages to open, once: the shell takes them when it shows.
+    func takeSettingsRequest() -> [SettingsRoute]? {
+        guard settingsRequest.serial > settingsTaken else { return nil }
+        settingsTaken = settingsRequest.serial
+        return settingsRequest.routes
+    }
+
+    @ObservationIgnored private var settingsTaken = 0
 
     func reauthenticate() async {
         sessionExpired = false
@@ -1398,6 +1466,7 @@ final class AppModel {
     func appDidBecomeActive() {
         appearance.apply()
         node.setActive(true)
+        health.foreground()
         // Back in front on a chat counts as opening it: its delivered pushes go.
         if let visibleChat {
             clearDelivered(for: visibleChat)

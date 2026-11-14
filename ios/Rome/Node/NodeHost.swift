@@ -85,7 +85,6 @@ final class NodeHost {
 
     private enum Defaults {
         static let enabled = "nodeEnabled"
-        static let health = "nodeHealthEnabled"
     }
 
     /// Requests answered at once. HealthKit reads are heavy, and an instance
@@ -98,19 +97,18 @@ final class NodeHost {
     /// The guardian's switch in Settings: off until turned on, so nothing
     /// connects until the person chooses it.
     private(set) var isEnabled: Bool
-    /// The guardian's "Apple Health" switch: off until turned on. Health data
-    /// goes to the Rome and its AI model, so it is the guardian's choice. Off,
-    /// the health actions are refused with `health_off`.
-    private(set) var isHealthEnabled: Bool
+    /// What Rome can do with this device, in Settings' order.
+    let registry: NodeCapabilityRegistry
+    /// The capabilities' own switches by prefix, each off until turned on.
+    /// One that follows another page (Health) is not here.
+    private(set) var capabilitySwitches: [String: Bool]
     /// Goes up when a request has been answered, so Settings reloads its list.
     private(set) var requestSerial = 0
     private(set) var recent: [NodeAuditEntry] = []
 
     @ObservationIgnored private let credentials: NodeCredentials
-    @ObservationIgnored private let reader: HealthReading
     @ObservationIgnored private let pingInterval: TimeInterval
     @ObservationIgnored private let pingTimeout: TimeInterval
-    @ObservationIgnored private let healthSwitch: HealthSwitch
     @ObservationIgnored private let executor: NodeExecutor
     @ObservationIgnored private let audit: NodeAuditing
     @ObservationIgnored private let defaults: UserDefaults
@@ -135,7 +133,7 @@ final class NodeHost {
     init(
         credentials: NodeCredentials,
         audit: NodeAuditing = NodeAuditLog(),
-        health: HealthActions = HealthActions(reader: LiveHealth()),
+        registry: NodeCapabilityRegistry,
         device: DeviceKind = .current,
         defaults: UserDefaults = .standard,
         http: URLSession? = nil,
@@ -150,21 +148,23 @@ final class NodeHost {
         self.pingInterval = pingInterval
         self.pingTimeout = pingTimeout
         self.credentials = credentials
-        reader = health.reader
-        let healthOn = defaults.object(forKey: Defaults.health) as? Bool ?? false
-        healthSwitch = HealthSwitch(healthOn)
-        isHealthEnabled = healthOn
+        self.registry = registry
         self.device = device
-        var health = health
-        health.enabled = healthSwitch
-        health.device = device
+        var switches: [String: Bool] = [:]
+        for capability in registry.capabilities {
+            guard case .own(let key) = capability.switchKind, let flag = capability.ownFlag else { continue }
+            let on = defaults.object(forKey: key) as? Bool ?? false
+            flag.set(on)
+            switches[capability.prefix] = on
+        }
+        capabilitySwitches = switches
         self.audit = audit
         self.defaults = defaults
         self.connect = connect
         self.pause = pause
         self.random = random
         self.now = now
-        executor = NodeExecutor(name: name, audit: audit, health: health, now: now)
+        executor = NodeExecutor(name: name, audit: audit, registry: registry, device: device, now: now)
         isEnabled = defaults.object(forKey: Defaults.enabled) as? Bool ?? false
         if let http {
             self.http = http
@@ -183,30 +183,33 @@ final class NodeHost {
         sync()
     }
 
-    /// The "Apple Health" switch. Turning it on while iOS has never been asked
-    /// shows the system sheet at once; once asked, iOS shows nothing more, and
-    /// neither does the app. The task is the prompt, for tests.
-    @discardableResult
-    func setHealthEnabled(_ on: Bool) -> Task<Void, Never>? {
-        isHealthEnabled = on
-        defaults.set(on, forKey: Defaults.health)
-        healthSwitch.set(on)
-        guard on else { return nil }
-        return Task { [reader] in
-            if await reader.shouldRequestAccess() { try? await reader.requestAccess() }
-        }
+    /// A capability's own switch, such as Device status. Nothing to ask iOS:
+    /// a capability that needs access asks on its own page.
+    func setCapability(_ prefix: String, on: Bool) {
+        guard let capability = registry.capability(prefix: prefix), case .own(let key) = capability.switchKind else { return }
+        capability.ownFlag?.set(on)
+        capabilitySwitches[prefix] = on
+        defaults.set(on, forKey: key)
+        capabilitySerial += 1
     }
 
-    /// Another account may sign in next: both switches go back to their
-    /// defaults and the activity log is emptied, so nothing of this account
+    /// Goes up when a capability's switch changes, so Settings reads the states again.
+    private(set) var capabilitySerial = 0
+
+    /// Another account may sign in next: every switch goes back to its
+    /// default and the activity log is emptied, so nothing of this account
     /// carries over. The task empties the log, for tests.
     @discardableResult
     func forgetAccount() -> Task<Void, Never> {
         defaults.removeObject(forKey: Defaults.enabled)
-        defaults.removeObject(forKey: Defaults.health)
         isEnabled = false
-        isHealthEnabled = false
-        healthSwitch.set(false)
+        for capability in registry.capabilities {
+            guard case .own(let key) = capability.switchKind else { continue }
+            defaults.removeObject(forKey: key)
+            capability.ownFlag?.set(false)
+            capabilitySwitches[capability.prefix] = false
+        }
+        capabilitySerial += 1
         recent = []
         sync()
         return Task { [audit] in

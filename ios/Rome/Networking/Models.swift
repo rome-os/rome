@@ -808,3 +808,63 @@ struct ChatShareLink: Codable, Identifiable, Hashable, Sendable {
 
     var date: Date? { createdAt.flatMap(RomeDate.parse) }
 }
+
+// MARK: - Personal data
+
+/// The answer of `POST /personal-data/ingest`.
+struct PersonalDataIngestReply: Codable, Equatable, Sendable {
+    var batchId: String?
+    /// `ok` or `partial`.
+    var status: String?
+    var inserted: Int?
+    var updated: Int?
+    var unchanged: Int?
+    var deleted: Int?
+    var rejected: [Rejected]?
+    var receivedAt: String?
+
+    struct Rejected: Codable, Equatable, Sendable {
+        /// Upserts first, then deletes after the last upsert.
+        var index: Int?
+        var key: String?
+        /// `unknown_type`, `bad_unit`, `bad_range`, `type_cap`, `too_large`, `bad_item`.
+        var code: String?
+    }
+}
+
+/// One source in `GET /personal-data/sources`: what the Rome holds from one device.
+struct PersonalDataCatalogSource: Codable, Equatable, Sendable {
+    var source: String
+    var title: String?
+    var origin: Origin?
+    /// `active`, `paused` or `off`.
+    var state: String?
+    var firstSyncAt: String?
+    var lastSyncAt: String?
+    var lastResult: String?
+    var types: [CatalogType]?
+
+    struct Origin: Codable, Equatable, Sendable {
+        var id: String?
+        var name: String?
+        var platform: String?
+    }
+
+    struct CatalogType: Codable, Equatable, Sendable {
+        var type: String
+        var shape: String?
+        var pointCount: Int?
+        var earliest: String?
+        var latest: String?
+        var syncedThrough: String?
+    }
+}
+
+struct PersonalDataCatalog: Codable, Equatable, Sendable {
+    var sources: [PersonalDataCatalogSource]?
+}
+
+/// The answer of `DELETE /personal-data/sources/:source/origins/:origin`.
+struct PersonalDataDeleteReply: Codable, Equatable, Sendable {
+    var deletedPoints: Int?
+}

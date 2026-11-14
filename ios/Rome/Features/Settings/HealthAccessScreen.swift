@@ -1,32 +1,81 @@
 import SwiftUI
 
-/// What the Apple Health row in Settings shows, and how: its state on the
-/// right, and dimmed while the phone is off limits as a device (the page
-/// still opens, so the guardian can read what the switch does).
+/// What the Apple Health row in Settings shows on its right.
 struct HealthRowState: Equatable {
-    let healthOn: Bool
-    let deviceOn: Bool
+    let status: HealthSyncStatus
 
-    var value: String { healthOn ? String(localized: "On") : String(localized: "Off") }
-    var opacity: Double { deviceOn ? 1 : 0.45 }
+    var value: String {
+        switch status {
+        case .off: return String(localized: "Off")
+        case .paused: return String(localized: "Paused")
+        case .needsSignIn: return String(localized: "Needs sign-in")
+        default: return String(localized: "On")
+        }
+    }
 }
 
-/// Settings → Apple Health: the switch that lets the guardian's
-/// Rome read Health, and what that means. Health data goes to the Rome and
-/// the AI model behind it, so the page says what is read, for what, and where it goes.
+/// The line under Sync with Rome, and the button it offers.
+struct HealthStatusLine: Equatable {
+    enum Action: Equatable { case signIn, retry }
+
+    let text: String?
+    let action: Action?
+    let failed: Bool
+
+    init(_ status: HealthSyncStatus, device: DeviceKind = .iPhone, now: Date = Date(), locale: Locale = .current) {
+        switch status {
+        case .off:
+            text = nil; action = nil; failed = false
+        case .paused:
+            text = String(localized: "Paused"); action = nil; failed = false
+        case .waiting:
+            text = String(localized: "Not synced yet"); action = nil; failed = false
+        case .syncing:
+            text = String(localized: "Syncing…"); action = nil; failed = false
+        case .syncingHistory(let month):
+            let name = month.formatted(Date.FormatStyle(locale: locale).month(.abbreviated).year())
+            text = String(localized: "Syncing history · \(name)"); action = nil; failed = false
+        case .synced(let date):
+            text = String(localized: "Synced \(Self.ago(date, now: now, locale: locale))"); action = nil; failed = false
+        case .locked:
+            text = String(localized: "Can't sync while \(device.name) is locked"); action = nil; failed = false
+        case .needsSignIn:
+            text = String(localized: "Sign in again to keep Health syncing"); action = .signIn; failed = true
+        case .needsUpdate:
+            text = String(localized: "Your Rome needs an update to sync Health"); action = nil; failed = true
+        case .failed:
+            text = String(localized: "Last sync failed"); action = .retry; failed = true
+        }
+    }
+
+    /// "12 min ago", "just now".
+    static func ago(_ date: Date, now: Date, locale: Locale) -> String {
+        if now.timeIntervalSince(date) < 60 { return String(localized: "just now") }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: now)
+    }
+}
+
+/// Settings → Apple Health: Sync with Rome, which keeps the Health data the
+/// guardian allows up to date on their Rome, and what that means. Health data
+/// goes to the Rome and the AI model behind it, so the page says what is
+/// read, for what, and where it goes.
 struct HealthAccessScreen: View {
     static let privacyURL = URL(string: "https://romeos.cc/privacy")!
 
+    let onHistory: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        let node = model.node
+        let health = model.health
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     header
-                    toggleCard(node)
+                    toggleCard(health)
                     capabilities
                     dataFlow
                     Button { openURL(Self.privacyURL) } label: {
@@ -80,20 +129,43 @@ struct HealthAccessScreen: View {
         .padding(.bottom, 4)
     }
 
-    private func toggleCard(_ node: NodeHost) -> some View {
-        SettingsGroup {
-            HStack(spacing: 12) {
-                Text("Allow Rome to read Health").romeFont(17).foregroundStyle(Palette.fg)
-                Spacer(minLength: 8)
-                Toggle("Allow Rome to read Health", isOn: Binding(get: { node.isHealthEnabled }, set: { on in node.setHealthEnabled(on) }))
-                    .labelsHidden()
-                    .tint(Palette.primary)
-                    .disabled(!node.isEnabled)
+    private func toggleCard(_ health: HealthSettings) -> some View {
+        let line = HealthStatusLine(health.status, device: model.node.device)
+        return VStack(alignment: .leading, spacing: 8) {
+            SettingsGroup {
+                HStack(spacing: 12) {
+                    Text("Sync with Rome").romeFont(17).foregroundStyle(Palette.fg)
+                    Spacer(minLength: 8)
+                    Toggle("Sync with Rome", isOn: Binding(get: { health.isEnabled }, set: { on in health.setEnabled(on) }))
+                        .labelsHidden()
+                        .tint(Palette.primary)
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 52)
+                .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
+                .accessibilityElement(children: .combine)
+                Button(action: onHistory) {
+                    HStack(spacing: 12) {
+                        Text("Sync history").romeFont(17).foregroundStyle(Palette.fg)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .romeFont(13, .semibold)
+                            .foregroundStyle(Palette.sub)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 52)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 52)
-            .opacity(node.isEnabled ? 1 : 0.45)
-            .accessibilityElement(children: .combine)
+            if health.showsMigrationNote {
+                NoteLine(text: String(localized: "Health now syncs to your Rome. Turn on Sync to keep using it."))
+            } else if let text = line.text {
+                HealthStatusRow(line: line, text: text)
+            }
+            if health.isEnabled, health.backgroundRefreshOff {
+                NoteLine(text: String(localized: "Turn on Background App Refresh so Health stays up to date"))
+            }
         }
     }
 
@@ -137,11 +209,57 @@ struct HealthAccessScreen: View {
             .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(model.node.device.dataFlowLabel)
-            Promise(text: "Read only when your Rome asks. Never changed.")
+            Promise(text: "Kept up to date on your Rome. Read only, never changed.")
             Promise(text: "Rome never sells it, uses it for ads, or uses it to train AI models. Your AI provider's terms apply to what it receives.")
+            Promise(text: "You can delete what was sent.")
             Promise(text: "Results can stay in your Rome's chats and memory.", last: true)
         }
         .id("where")
+    }
+}
+
+/// The sync's status under the switch, with Sign in or Retry when it needs one.
+struct HealthStatusRow: View {
+    let line: HealthStatusLine
+    let text: String
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(verbatim: text)
+                .romeFont(13)
+                .foregroundStyle(line.failed ? Palette.destructive : Palette.sub)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            switch line.action {
+            case .signIn?:
+                Button("Sign in") { Task { await model.reauthenticate() } }
+                    .romeFont(13, .semibold)
+                    .foregroundStyle(Palette.primaryText)
+                    .buttonStyle(PressScaleStyle())
+            case .retry?:
+                Button("Retry") { model.health.syncNow() }
+                    .romeFont(13, .semibold)
+                    .foregroundStyle(Palette.primaryText)
+                    .buttonStyle(PressScaleStyle())
+            case nil:
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
+/// One quiet line under a card.
+struct NoteLine: View {
+    let text: String
+
+    var body: some View {
+        Text(verbatim: text)
+            .romeFont(13)
+            .foregroundStyle(Palette.sub)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16)
     }
 }
 

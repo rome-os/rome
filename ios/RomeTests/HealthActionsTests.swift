@@ -393,7 +393,7 @@ enum HealthFixtures {
         #expect(HealthActions.usage()["health.samples"]?.contains("health_off") == true)
         for action in ["health.stats", "health.samples"] {
             let text = HealthActions.usage()[action] ?? ""
-            #expect(text.contains("Settings → Apple Health in the Rome app"), "\(action)")
+            #expect(text.contains("Settings → Apple Health → Sync with Rome in the Rome app"), "\(action)")
             #expect(text.contains("on the iPhone"), "\(action)")
         }
         #expect(HealthActions.usage()["health.stats"]?.contains("off for Rome until the user turns it on") == true, "off is the default")
@@ -429,7 +429,7 @@ enum HealthFixtures {
             #expect(HealthFixtures.code(result) == "health_off", "\(action) \(args)")
         }
         guard case .failed(code: _, message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else { return }
-        #expect(message.contains("Settings → Apple Health in the Rome app"), "the agent is told where the user turns it on")
+        #expect(message.contains("Settings → Apple Health → Sync with Rome in the Rome app"), "the agent is told where the user turns it on")
         #expect(message.contains("on the iPhone"))
         #expect(health.accessRequests == 0 && health.reads == 0)
         // Other actions are not Health's to refuse.
@@ -908,33 +908,33 @@ enum HealthFixtures {
 
     @Test func anIPadTellsTheAgentWhereItsSwitchIs() async {
         var actions = actions(.iPad)
-        actions.enabled = HealthSwitch(false)
+        actions.enabled = NodeFlag(false)
         guard case .failed(code: "health_off", message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else {
             Issue.record("expected health_off")
             return
         }
-        #expect(message.contains("Settings → Apple Health in the Rome app"))
+        #expect(message.contains("Settings → Apple Health → Sync with Rome in the Rome app"))
         #expect(!message.contains("iPhone"))
         for text in HealthActions.usage(.iPad).values {
             #expect(!text.contains("iPhone") && !text.contains("phone's"), "\(text.prefix(40))")
         }
-        #expect(HealthActions.usage(.iPad)["health.stats"]?.contains("Settings → Apple Health in the Rome app") == true)
+        #expect(HealthActions.usage(.iPad)["health.stats"]?.contains("Settings → Apple Health → Sync with Rome in the Rome app") == true)
     }
 
     @Test func anIPhoneStillSaysIPhone() async {
         var actions = actions(.iPhone)
-        actions.enabled = HealthSwitch(false)
+        actions.enabled = NodeFlag(false)
         guard case .failed(code: _, message: let message) = await actions.run("health.samples", args: parseJSON(#"{"type":"heartRate"}"#)) else {
             Issue.record("expected health_off")
             return
         }
-        #expect(message.contains("Settings → Apple Health in the Rome app"))
+        #expect(message.contains("Settings → Apple Health → Sync with Rome in the Rome app"))
     }
 
     @Test func theAuditRefusalNamesTheDevice() async throws {
         let audit = FakeAudit()
         audit.refuse = true
-        let executor = NodeExecutor(name: { "iPad" }, audit: audit, health: actions(.iPad))
+        let executor = NodeExecutor(name: { "iPad" }, audit: audit, registry: .testing(actions(.iPad)), device: .iPad)
         let reply = parseJSON(try #require(await executor.respond(
             to: #"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#,
             session: NodeSession()

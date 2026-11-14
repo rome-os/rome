@@ -26,6 +26,35 @@ enum DebugCommand: Equatable {
     case app(InstalledApp?)
 }
 
+/// Health sync's demo: a few syncs of today and yesterday, and the Rome's copy.
+enum HealthDemo {
+    static func history(now: Date) -> [SyncLogEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ trigger: SyncTrigger, _ types: [String: Int], history: Bool = false) -> SyncLogEntry {
+            let time = now.addingTimeInterval(-minutesAgo * 60)
+            var entry = SyncLogEntry(seq: seq, time: time, trigger: trigger, outcome: .ok, history: history)
+            for (type, items) in types {
+                entry.types[type] = SyncTypeCount(items: items, start: time.addingTimeInterval(-2 * 3600), end: time.addingTimeInterval(-5 * 60))
+            }
+            entry.inserted = types.values.reduce(0, +)
+            return entry
+        }
+        return [
+            entry(8, minutesAgo: 12, .observer, ["stepCount": 3, "heartRate": 4]),
+            entry(7, minutesAgo: 75, .foreground, ["stepCount": 2, "activeEnergyBurned": 2, "heartRate": 2]),
+            entry(6, minutesAgo: 60 * 9, .observer, ["sleep": 1, "restingHeartRate": 1]),
+            entry(5, minutesAgo: 60 * 26, .observer, ["workouts": 1, "activeEnergyBurned": 2]),
+            entry(4, minutesAgo: 60 * 27, .backfill, ["stepCount": 8_900, "heartRate": 8_700, "sleep": 183, "bodyMass": 40], history: true),
+        ]
+    }
+
+    static let stored = PersonalDataCatalogSource(source: "apple_health", origin: .init(id: "demo", name: "iPhone", platform: "ios"), state: "active", types: [
+        .init(type: "stepCount", pointCount: 4_600, earliest: "2026-05-10"),
+        .init(type: "heartRate", pointCount: 4_500, earliest: "2026-05-10"),
+        .init(type: "sleep", pointCount: 180, earliest: "2026-05-11"),
+        .init(type: "bodyMass", pointCount: 40, earliest: "2026-05-14"),
+    ])
+}
+
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
 /// walks every screen in light and dark, and writes a PNG of each. It lets the
 /// UI be reviewed where no simulator runs (Mac Catalyst).
@@ -171,7 +200,17 @@ enum SnapshotRunner {
             await capture("13-node-requests", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.requests]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
+            model.health.showDemo(HealthDemo.history(now: .now), stored: HealthDemo.stored)
             await capture("13a-node-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13b-node-capability-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device, .capability("device")]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13c-node-capability-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device, .capability("health")]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health, .syncHistory]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
             // The Apple Health page is longer than a screen: its top, the data flow, and its end.
@@ -181,6 +220,12 @@ enum SnapshotRunner {
             await capture("16-health-access-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
             model.debugHealthScroll = nil
             model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // The expired session: the status line offers a sign-in.
+            model.health.showDemo([SyncLogEntry(seq: 9, time: .now.addingTimeInterval(-3 * 3600), trigger: .observer, outcome: .error, errorCode: "signed_out")] + HealthDemo.history(now: .now), stored: HealthDemo.stored)
+            await capture("14b-health-sign-in", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
+            model.debugCommand = .settings(nil)
+            model.health.showDemo(HealthDemo.history(now: .now), stored: HealthDemo.stored)
             // A second command in the same pass would hide this one from the shell.
             try? await Task.sleep(for: .seconds(0.6))
             // On Mac Catalyst a pushed task chat does not pop for these runs

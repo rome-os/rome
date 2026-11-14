@@ -264,20 +264,11 @@ struct ActionFailure: Error {
 
 // MARK: - Actions
 
-/// The user's "Apple Health" switch, readable from the executor's threads.
-final class HealthSwitch: Sendable {
-    private let state: OSAllocatedUnfairLock<Bool>
-
-    init(_ on: Bool = true) { state = OSAllocatedUnfairLock(initialState: on) }
-
-    var isOn: Bool { state.withLock { $0 } }
-    func set(_ on: Bool) { state.withLock { $0 = on } }
-}
-
 struct HealthActions: Sendable {
     let reader: HealthReading
-    /// Off: the health actions are refused before Health is touched.
-    var enabled = HealthSwitch()
+    /// Apple Health's Sync with Rome. Off: the health actions are refused
+    /// before Health is touched.
+    var enabled = NodeFlag(true)
     var now: @Sendable () -> Date = { Date() }
     /// The phone's calendar. Only its time zone and first weekday count: the
     /// wire speaks Gregorian dates (see `HealthDates.wire`).
@@ -311,21 +302,23 @@ struct HealthActions: Sendable {
                 workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
                 sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
                 A type the user has not allowed, or that has no data, has no value. \
-                Apple Health is off for Rome until the user turns it on in Settings → Apple Health in the Rome app on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+                Apple Health is off for Rome until the user turns on Settings → Apple Health → Sync with Rome in the Rome app on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
                 """,
             "health.samples": """
                 Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
                 limit 1-1000 (default 100), order desc (default) | asc by start, cursor (nextCursor of the previous reply), \
                 sources (array of app names or bundle ids), includeMetadata (bool, default false), activity (workouts only). \
-                A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn it on in Settings → Apple Health in the Rome app on the \(name). Example: {"type":"heartRate","start":"2026-11-08","limit":50}
+                A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn on Settings → Apple Health → Sync with Rome in the Rome app on the \(name). Example: {"type":"heartRate","start":"2026-11-08","limit":50}
                 """,
         ]
     }
 
+    static func off(_ device: DeviceKind) -> NodeActionResult {
+        .failed(code: "health_off", message: "Apple Health is off for Rome on this \(device.name). The user must turn on Settings → Apple Health → Sync with Rome in the Rome app on the \(device.name).")
+    }
+
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
-        if Self.actions.contains(action), action != "system.info", !enabled.isOn {
-            return .failed(code: "health_off", message: "Apple Health is off for Rome on this \(device.name). The user must turn it on in Settings → Apple Health in the Rome app on the \(device.name).")
-        }
+        if Self.actions.contains(action), action != "system.info", !enabled.isOn { return Self.off(device) }
         do {
             switch action {
             case "health.stats": return try await stats(args)

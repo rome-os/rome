@@ -3,19 +3,10 @@ import Testing
 @testable import Rome
 
 @Suite struct HealthAccessPageTests {
-    @Test func theRowShowsOnOrOff() {
-        #expect(HealthRowState(healthOn: true, deviceOn: true).value == "On")
-        #expect(HealthRowState(healthOn: false, deviceOn: true).value == "Off")
-        // The state shows even while the row is dimmed.
-        #expect(HealthRowState(healthOn: true, deviceOn: false).value == "On")
-        #expect(HealthRowState(healthOn: false, deviceOn: false).value == "Off")
-    }
-
-    @Test func theRowIsDimmedOnlyWhileThePhoneIsOffLimits() {
-        #expect(HealthRowState(healthOn: true, deviceOn: true).opacity == 1)
-        #expect(HealthRowState(healthOn: false, deviceOn: true).opacity == 1)
-        #expect(HealthRowState(healthOn: true, deviceOn: false).opacity < 1)
-        #expect(HealthRowState(healthOn: false, deviceOn: false).opacity < 1)
+    @Test func theRowIsNotDimmedByIPhoneUse() {
+        // Sync runs whether or not Rome may use the phone live: the row shows its own state.
+        #expect(HealthRowState(status: .synced(.now)).value == "On")
+        #expect(HealthRowState(status: .off).value == "Off")
     }
 
     @Test func thePrivacyPolicyIsOnRomesSiteOverHTTPS() {

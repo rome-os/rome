@@ -26,7 +26,7 @@ struct PageHeader: View {
             } else {
                 Color.clear.frame(width: 44, height: 44)
             }
-            PlainHeaderTitle(title: Text(title))
+            PlainHeaderTitle(title: Text(title), size: inSheet ? PlainHeaderTitle.secondarySize : 15)
             if let onClose {
                 GlassCircleButton(accessibilityLabel: "Close", action: onClose) {
                     Image(systemName: "xmark").romeFont(16, .semibold)

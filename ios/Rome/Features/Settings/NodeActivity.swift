@@ -20,11 +20,11 @@ struct NodeActivityDay: Identifiable, Equatable {
 }
 
 struct NodeActivityFormatter {
+    /// Words come from the capability an action belongs to.
+    var registry: NodeCapabilityRegistry
     var now: Date = Date()
     var calendar: Calendar = .current
     var locale: Locale = .current
-
-    private static let maxTypes = 3
 
     // MARK: Days
 
@@ -44,26 +44,22 @@ struct NodeActivityFormatter {
     }
 
     func row(_ entry: NodeAuditEntry) -> NodeActivityRow {
-        let args = entry.argsValue
-        let known = ["health.stats", "health.samples"].contains(entry.action)
-        let title = known ? self.title(entry.action, args) : String(localized: "Unsupported request")
+        let capability = registry.capability(for: entry.action)
+        let known = capability?.activityTitle(entry)
+        let title = known ?? String(localized: "Unsupported request")
         var parts: [String] = []
         var failed = false
         switch entry.outcome {
-        case .error where !known:
+        case .error where known == nil:
             // The action's name says it all, in the plain color.
             parts = [entry.action]
         case .error:
             failed = true
             parts = [failureText(entry.errorCode)]
         case .interrupted, nil:
-            parts = [window(entry, args), String(localized: "Interrupted")]
+            parts = [capability?.activityDetail(entry, formatter: self) ?? "", String(localized: "Interrupted")].filter { !$0.isEmpty }
         case .ok:
-            parts = [window(entry, args)]
-            if entry.action == "health.stats", let interval = args?["interval"]?.string, let mode = modeText(interval) { parts.append(mode) }
-            // A stats count is only the number of types asked for: not shown.
-            if entry.action == "health.samples", let count = entry.count { parts.append(String(localized: "\(count) records")) }
-            if args?["cursor"]?.string != nil { parts.append(String(localized: "next page")) }
+            parts = [capability?.activityDetail(entry, formatter: self) ?? entry.count.map { String(localized: "\($0) records") } ?? String(localized: "Done")]
         }
         return NodeActivityRow(
             id: entry.seq, title: title, detail: parts.joined(separator: " · "), failed: failed,
@@ -73,30 +69,6 @@ struct NodeActivityFormatter {
 
     // MARK: Words
 
-    private func title(_ action: String, _ args: JSONValue?) -> String {
-        var names: [String] = []
-        if let list = args?["types"]?.array { names = list.compactMap(\.string) }
-        if let single = args?["type"]?.string { names.append(single) }
-        guard !names.isEmpty else { return String(localized: "Health request") }
-        let words = names.map(Self.typeName)
-        if action == "health.samples" { return String(localized: "\(words[0]) records") }
-        let shown = words.prefix(Self.maxTypes).reduce(nil as String?) { joined, word in
-            joined.map { String(localized: "\($0), \(word)") } ?? word
-        } ?? ""
-        let more = words.count - Self.maxTypes
-        return more > 0 ? String(localized: "\(shown) +\(more)") : shown
-    }
-
-    private func modeText(_ interval: String) -> String? {
-        switch interval {
-        case "hour": return String(localized: "by hour")
-        case "day": return String(localized: "by day")
-        case "week": return String(localized: "by week")
-        case "month": return String(localized: "by month")
-        default: return nil
-        }
-    }
-
     /// A short line for each way a request can fail.
     func failureText(_ code: String?) -> String {
         switch code {
@@ -104,10 +76,14 @@ struct NodeActivityFormatter {
         case "unsupported_type": return String(localized: "Not a supported type")
         case "unsupported_action": return String(localized: "Not supported")
         case "health_off": return String(localized: "Apple Health is off")
+        case "health_no_permission": return String(localized: "No access to Health")
+        case "device_off": return String(localized: "Device status is off")
         case "health_unavailable": return String(localized: "Health isn't available")
         case "health_locked": return String(localized: "Health unavailable while locked")
         case "audit_unavailable": return String(localized: "Couldn't record activity")
         case "health_failed": return String(localized: "Couldn't read Health")
+        case let code? where code.hasSuffix("_off"): return String(localized: "Turned off")
+        case let code? where code.hasSuffix("_no_permission"): return String(localized: "No access")
         default: return String(localized: "Something went wrong")
         }
     }
@@ -150,7 +126,7 @@ struct NodeActivityFormatter {
 
     /// The window the request read: the reply's own when the log has it,
     /// else worked out from the args the way the action does.
-    private func window(_ entry: NodeAuditEntry, _ args: JSONValue?) -> String {
+    func window(_ entry: NodeAuditEntry, _ args: JSONValue?) -> String {
         var start = entry.windowStart
         var end = entry.windowEnd
         if start == nil || end == nil {

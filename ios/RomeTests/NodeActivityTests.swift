@@ -8,7 +8,7 @@ import Testing
     private let calendar = HealthFixtures.calendar("Asia/Shanghai")
 
     private var formatter: NodeActivityFormatter {
-        NodeActivityFormatter(now: now, calendar: calendar, locale: Locale(identifier: "en_US"))
+        NodeActivityFormatter(registry: .testing(HealthFixtures.actions(FakeHealth())), now: now, calendar: calendar, locale: Locale(identifier: "en_US"))
     }
 
     private func entry(
