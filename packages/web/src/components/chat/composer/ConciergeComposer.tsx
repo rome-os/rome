@@ -62,6 +62,7 @@ import { useFittedPlaceholder } from "./use-fitted-placeholder";
 import { useSlashSkill } from "./use-slash-skill";
 import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
+import { useChatDraftText } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice } from "./VoiceInputControl";
 import type { ReplyTarget } from "../reply/reply-draft";
@@ -83,6 +84,8 @@ export interface ConciergeComposerProps {
   streamError?: string | ChatErrorNotice | null;
   /** An open topic chat's own name, which the placeholder says it is a message "in". Unset in the main chat. */
   chatName?: string | null;
+  /** The chat whose draft the field keeps. */
+  chatId?: string | null;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
   onSend: (
@@ -99,7 +102,16 @@ export interface ConciergeComposerProps {
  */
 export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeComposerProps>(
   function ConciergeComposer(
-    { boxClassName, isStreaming = false, onStop, streamError, chatName, modelSelection, onSend },
+    {
+      boxClassName,
+      isStreaming = false,
+      onStop,
+      streamError,
+      chatName,
+      chatId,
+      modelSelection,
+      onSend,
+    },
     ref,
   ) {
     const { t } = useTranslation("chat");
@@ -111,7 +123,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       ? settings.webchatReasoningEffort
       : DEFAULT_REASONING_EFFORT;
 
-    const [inputText, setInputText] = useState("");
+    const [inputText, setInputText] = useChatDraftText(chatId);
     const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(null);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const [uploadInFlight, setUploadInFlight] = useState(false);
