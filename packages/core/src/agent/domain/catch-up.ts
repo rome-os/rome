@@ -31,13 +31,24 @@ function shownName(sender: string | null | undefined): string | null {
   return sender?.replace(/[[\]]/g, "").trim() || null;
 }
 
+/** A message's text as one context line reads it. Its later lines are
+ *  indented and its markup escaped, so nothing a sender writes reads as
+ *  another message or closes the block it sits in. */
+function shownText(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\r?\n/g, "\n  ");
+}
+
 function contextLine(message: ContextMessage): string {
   const name = shownName(message.sender) ?? "Unknown sender";
   const who = message.who?.trim();
   return replyContextLine({
     createdAt: message.createdAt,
     sender: who ? `${name} [${who}]` : name,
-    text: message.text,
+    text: shownText(message.text),
   });
 }
 
