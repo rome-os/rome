@@ -3,6 +3,7 @@
 // starts a topic chat, `react` puts an emoji on a guardian message, and
 // `connect_card` shows a card that connects a service.
 
+import { pushBody } from "./push.js";
 import { settledCard } from "./task-cards.js";
 import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
@@ -884,7 +885,7 @@ export async function buildConciergeTools(
     // task's title and a preview of what it brought back (the guardian's
     // call, 2026-11-14). A secret is kept off the lock screen only by
     // `say … private`.
-    said(chatId, turnId, intro ?? (task?.title ? `${task.title}: ${text}` : text));
+    said(chatId, turnId, intro ?? (task?.title ? `${task.title}: ${pushBody(text)}` : text));
     return id;
   };
 
