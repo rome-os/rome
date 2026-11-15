@@ -181,11 +181,18 @@ final class VoiceInputTests: XCTestCase {
     }
 
     /// The element with `identifier` the guardian can touch: a pushed chat leaves the Chat's
-    /// field under it, so there can be more than one.
+    /// field under it, so there can be more than one. Waits up to 15 s for one to be touchable,
+    /// since a chat that is still sliding in is not yet.
     @MainActor
     private func onScreen(_ query: XCUIElementQuery, _ identifier: String) -> XCUIElement {
         let matches = query.matching(identifier: identifier)
-        return matches.allElementsBoundByIndex.last(where: { $0.isHittable }) ?? matches.firstMatch
+        let deadline = Date().addingTimeInterval(15)
+        repeat {
+            if let touchable = matches.allElementsBoundByIndex.last(where: { $0.isHittable }) {
+                return touchable
+            }
+        } while Date() < deadline
+        return matches.firstMatch
     }
 
     /// Launches the app signed in to the stand-in instance, playing `recording` (a WAV in this
