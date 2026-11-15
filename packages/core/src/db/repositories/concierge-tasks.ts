@@ -102,6 +102,8 @@ export interface MessageMarkRow {
   answered: boolean | null;
   /** Whether that turn showed it working. */
   working: boolean;
+  /** Whether that turn reacted to it. */
+  reacted: boolean;
   /** Whether that turn failed, by an error or a crash, before it answered it. */
   turnFailed: boolean;
   /** The tasks it follows: its live links. */
@@ -749,14 +751,14 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * The open messages of Concierge chat `chatId` show working from now: its
-   * turn called a working tool, or ran 5 seconds without answering them. A
-   * message the turn reacted to is left out. `messageKey` limits it to that
-   * one. Answers the ones that changed.
+   * The open messages of Concierge chat `chatId` show working from now: a
+   * working tool its turn called ran 2 seconds. A message the turn reacted
+   * to is left out, and so are those of `except`. Answers the ones that
+   * changed.
    */
   async markWorking(
     chatId: string,
-    options: { messageKey?: string } = {},
+    options: { except?: readonly string[] } = {},
     now = new Date(),
   ): Promise<MessageTarget[]> {
     const changed = await this.db
@@ -768,8 +770,8 @@ export class ConciergeTasksRepository {
           isNull(conciergeMessageTurns.answeredAt),
           isNull(conciergeMessageTurns.workingAt),
           eq(conciergeMessageTurns.reacted, false),
-          options.messageKey !== undefined
-            ? eq(conciergeMessageTurns.messageKey, options.messageKey)
+          options.except?.length
+            ? notInArray(conciergeMessageTurns.messageKey, [...options.except])
             : undefined,
         ),
       )
@@ -804,6 +806,36 @@ export class ConciergeTasksRepository {
         messageKey: conciergeMessageTurns.messageKey,
       });
     this.messageChanged(changed);
+  }
+
+  /**
+   * Whether guardian message `messageKey` of chat `chatId` ever showed
+   * working: its turn showed it so, or a task was made for it.
+   */
+  async showedWorking(chatId: string, messageKey: string): Promise<boolean> {
+    const [turn] = await this.db
+      .select({ key: conciergeMessageTurns.messageKey })
+      .from(conciergeMessageTurns)
+      .where(
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          eq(conciergeMessageTurns.messageKey, messageKey),
+          isNotNull(conciergeMessageTurns.workingAt),
+        ),
+      )
+      .limit(1);
+    if (turn) return true;
+    const [task] = await this.db
+      .select({ key: conciergeMessageTasks.messageKey })
+      .from(conciergeMessageTasks)
+      .where(
+        and(
+          eq(conciergeMessageTasks.chatId, chatId),
+          eq(conciergeMessageTasks.messageKey, messageKey),
+        ),
+      )
+      .limit(1);
+    return task !== undefined;
   }
 
   /**
@@ -1107,6 +1139,11 @@ export class ConciergeTasksRepository {
     this.messageChanged(changed);
   }
 
+  /** Tells the message listeners about the messages task `taskId` was made for again, for state kept outside them. */
+  async retellMessagesOf(taskId: string): Promise<void> {
+    this.messageChanged(await this.messagesOfTask(taskId));
+  }
+
   /** The guardian messages task `taskId` was made for. */
   async messagesOfTask(taskId: string): Promise<MessageTarget[]> {
     return this.db
@@ -1136,6 +1173,7 @@ export class ConciergeTasksRepository {
       const found = out.get(key) ?? {
         answered: null,
         working: false,
+        reacted: false,
         turnFailed: false,
         taskIds: [],
         earlierTaskIds: [],
@@ -1149,6 +1187,7 @@ export class ConciergeTasksRepository {
         messageKey: conciergeMessageTurns.messageKey,
         answeredAt: conciergeMessageTurns.answeredAt,
         workingAt: conciergeMessageTurns.workingAt,
+        reacted: conciergeMessageTurns.reacted,
         turnFailed: conciergeMessageTurns.turnFailed,
       })
       .from(conciergeMessageTurns)
@@ -1161,6 +1200,7 @@ export class ConciergeTasksRepository {
       const mark = of(row.messageKey);
       mark.answered = row.answeredAt !== null;
       mark.working = row.workingAt !== null;
+      mark.reacted = row.reacted;
       mark.turnFailed = row.turnFailed;
     }
     for (const row of await this.db

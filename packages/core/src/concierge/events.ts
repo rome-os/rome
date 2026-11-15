@@ -994,6 +994,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
     recurringOf: async (taskIds) =>
       (await service.deps.checks?.recurringOf?.(taskIds)) ?? new Set<string>(),
+    // Whether a waiting task's card shows yet, which keeps its message working.
+    taskChatPartMessages: (chatId, since) => webchatRepo.taskChatPartMessages(chatId, since),
   });
   // What a restart lost from memory, such as a running turn, may have ended a task.
   void guard(tasks.keepEndedAll());

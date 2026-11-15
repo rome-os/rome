@@ -20,6 +20,7 @@ import {
 import type { LiveEventEmit } from "../lib/live-event.js";
 import type { OpenWaitItem } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
+import { cardMessagesOf } from "./task-cards.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 import type {
   ConciergeTaskRow,
@@ -45,6 +46,11 @@ export interface TaskFactSources {
   laterOf?(taskIds: readonly string[]): Promise<Map<string, number>>;
   /** The tasks whose pending check is a repeating schedule's next run, not a one-off check. */
   recurringOf?(taskIds: readonly string[]): Promise<Set<string>>;
+  /** The messages of Concierge chat `chatId` said from `since` on that hold a task chat part, in the order said. */
+  taskChatPartMessages?(
+    chatId: string,
+    since: Date,
+  ): Promise<Array<{ id: string; content: string; createdAt: Date }>>;
 }
 
 /**
@@ -431,18 +437,27 @@ export class ConciergeTasks {
     const taskIds = [...new Set([...marks.values()].flatMap((mark) => mark.taskIds))];
     const rows = await this.repo.getMany(taskIds);
     const status = await this.statusOf(rows);
+    const cards = await this.shownCardsOf(chatId, rows, status);
     const out = new Map<string, ConciergeMessageStatus>();
     for (const [key, mark] of marks) {
       const found = messageStatus({
         answered: mark.answered,
         working: mark.working,
+        reacted: mark.reacted,
         turnFailed: mark.turnFailed,
         handedToNewer: mark.earlierTaskIds.length > 0,
         tasks: [
           ...mark.taskIds.flatMap((id) => {
             const of = status.get(id);
             const row = rows.find((candidate) => candidate.id === id);
-            return of ? [{ ...of, reportLost: row?.reportGivenUp === true }] : [];
+            if (!of) return [];
+            return [
+              {
+                ...of,
+                reportLost: row?.reportGivenUp === true,
+                ...(cards ? { cardShown: row?.sessionId ? cards.has(row.sessionId) : false } : {}),
+              },
+            ];
           }),
           // A task that ended for it with its result told stays as it ended.
           ...mark.endedAs.map((reason) => ({
@@ -457,15 +472,56 @@ export class ConciergeTasks {
   }
 
   /**
+   * For the tasks of `rows` that wait on their owner, the task chats whose
+   * card for that wait shows in Concierge chat `chatId`
+   * (docs/domains/chats.md#status). Null when no source can tell, so such a
+   * task reads as its card shown.
+   */
+  private async shownCardsOf(
+    chatId: string,
+    rows: readonly ConciergeTaskRow[],
+    status: ReadonlyMap<string, TaskStatusView>,
+  ): Promise<Set<string> | null> {
+    const read = this.facts?.taskChatPartMessages;
+    if (!read) return null;
+    const waits = new Map(
+      rows.flatMap((row) => {
+        const of = status.get(row.id);
+        return of?.status === "needs_you" && of.openWait && row.sessionId
+          ? [[row.sessionId, of.openWait] as const]
+          : [];
+      }),
+    );
+    if (waits.size === 0) return new Set();
+    // A card that shows a wait is said once the wait began.
+    const since = new Date(Math.min(...[...waits.values()].map((wait) => wait.since)) - 1_000);
+    return new Set(cardMessagesOf(await read(chatId, since), waits).keys());
+  }
+
+  /**
+   * Task `taskId`'s result was just said, as a message naming it or a
+   * forward: its messages settle now (docs/domains/chats.md#status), not
+   * when the turn that said it ends.
+   */
+  async resultSaid(taskId: string): Promise<void> {
+    const row = await this.repo.get(taskId);
+    if (row) await this.endLinksIfEnded(row, { resultSaid: true });
+  }
+
+  /**
    * Ends the links of task row `row` to its messages once it ended with its
    * result told (docs/domains/chats.md#status): they keep how it ended, and
    * its later work leaves them alone. A result Rome gave up telling ends
-   * them failed.
+   * them failed. `resultSaid` reads a result that waits as told.
    */
-  async endLinksIfEnded(row: ConciergeTaskRow): Promise<void> {
+  async endLinksIfEnded(
+    row: ConciergeTaskRow,
+    { resultSaid = false }: { resultSaid?: boolean } = {},
+  ): Promise<void> {
     // Only a result, told, ends them: a task that has not run yet reads as
     // ended too, and one whose result waits is still the message's work.
-    const told = row.stoppedAt !== null || (row.lastOutcome !== null && !row.outcomeUnsaid);
+    const told =
+      row.stoppedAt !== null || (row.lastOutcome !== null && (!row.outcomeUnsaid || resultSaid));
     if (!told) return;
     // Read before the state, at once: a link made after it is new work and
     // has a higher order, so this ending never reaches it.
@@ -473,6 +529,7 @@ export class ConciergeTasks {
     if (upTo === null) return;
     const facts = (await this.factsOf([row])).get(row.id);
     if (!facts) return;
+    if (resultSaid) facts.reportPending = false;
     let of = taskStatus(facts, this.now(), this.waitExpiryMs);
     // A task waiting for its repeating schedule's next run, as one made
     // scheduled after it started, has told its result: it ends for the

@@ -223,6 +223,7 @@ export interface ConciergeDeps {
     | "archiveSessionIn"
     | "deleteSessionIn"
     | "deleteSession"
+    | "taskChatPartMessages"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;

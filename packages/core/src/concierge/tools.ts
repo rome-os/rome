@@ -853,7 +853,10 @@ export async function buildConciergeTools(
     if (repeated) return repeated;
     const id = await addMessage(parts, await placementFor(answers, taskId ? { taskId } : {}));
     service.keepSaid(turnId, key, id);
-    if (taskId) service.noteSaid(taskId);
+    if (taskId) {
+      service.noteSaid(taskId);
+      await writeStatus("settle", () => tasks.resultSaid(taskId));
+    }
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
     await settleAnswered(answers, taskId);
@@ -866,7 +869,6 @@ export async function buildConciergeTools(
     const { chatId } = currentTurn();
     const answered = answers ?? (await certainlyAnswered(taskId));
     if (!answered) return;
-    service.messageStatus.answered(chatId, answered);
     await tasks.repo.answerMessage(chatId, answered).catch((error: unknown) =>
       log.warn("failed to settle an answered message", {
         chatId,
@@ -933,7 +935,10 @@ export async function buildConciergeTools(
       await placementFor(answers, { taskId: task?.id ?? null }),
     );
     // Only a result the guardian was shown counts as said.
-    if (task) service.noteSaid(task.id);
+    if (task) {
+      service.noteSaid(task.id);
+      await writeStatus("settle", () => tasks.resultSaid(task.id));
+    }
     noteAnswers(id, answers);
     await settleAnswered(answers, task?.id);
     // The push shows the message: the Concierge's lead-in, or else the
@@ -984,6 +989,11 @@ export async function buildConciergeTools(
     // The push shows what the card asks: its question or approval, else the
     // task's title.
     said(conciergeChatId, turnId, (await cardLine(chatId, waitedOn)) ?? title);
+    // A question or approval shown answers the message its task works for
+    // (docs/domains/chats.md#status).
+    if (show === "ask" && task) {
+      await writeStatus("settle", () => tasks.repo.retellMessagesOf(task.id));
+    }
     return id;
   };
 
@@ -1071,11 +1081,16 @@ export async function buildConciergeTools(
             throw new Error(`emoji must be one of ${CONCIERGE_REACTIONS.join(" ")}, or null`);
           }
           const messageId = await reactionTarget(optionalString(args, "message_id"));
+          // A message shows one emoji for its whole life: one that showed
+          // working takes no reaction (docs/domains/chats.md#reaction).
+          if (emoji !== null && (await tasks.repo.showedWorking(chatId, messageId))) {
+            return "Not reacted: this message already showed 👀 working, and a message shows one emoji. Answer it in one short line with say instead.";
+          }
           if (!(await webchatRepo.setMessageReaction(chatId, messageId, emoji as string | null))) {
             throw new Error(`No guardian message ${messageId} in this chat.`);
           }
-          // A reaction is how the turn handles the message, so its turn shows
-          // it working no more (docs/domains/chats.md#status).
+          // A reaction is how the turn handles the message, so it never shows
+          // working (docs/domains/chats.md#status).
           if (emoji !== null) await service.messageStatus.reactedTo(chatId, messageId);
           // Taken back, the message is the turn's work again.
           else await service.messageStatus.reactionCleared(chatId, messageId);
