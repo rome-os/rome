@@ -491,8 +491,12 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
 
   it("notices a connection that dies quietly within 5 seconds", async () => {
     const { field } = renderComposer(kind);
-    const socket = await startListening();
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    // Every dictation timer is fake, so only the quiet limit can run out.
     rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    const socket = FakeSocket.last!;
     socket.say({ type: "text", settled: "hello", pending: "" });
     act(() => rs.advanceTimersByTime(2_000));
     socket.say({ type: "alive" });
