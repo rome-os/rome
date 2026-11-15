@@ -10,6 +10,7 @@ import {
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
+import { createVaultHandler } from "./vault.js";
 
 const KEY_FILE = "signer-key.jwk";
 const TOKEN_LIFETIME_SECONDS = 60;
@@ -22,7 +23,7 @@ export interface SignerOptions {
   socketPath: string;
   /** Epoch milliseconds. Tests only. */
   now?: () => number;
-  /** One line per issued token. Defaults to stdout. */
+  /** One line per issued token and per vault write, grant or release. Defaults to stdout. */
   log?: (line: string) => void;
 }
 
@@ -52,7 +53,11 @@ export function normalizeAudience(value: string): string {
 
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 
-/** Starts the signer. It issues 60-second ES256 tokens and signs nothing else. */
+/**
+ * Starts the signer. It issues 60-second ES256 tokens and signs nothing else.
+ * It also holds the vault: the guardian's named secrets and the grants that let
+ * a command read them (see vault.ts).
+ */
 export async function startSigner(
   options: SignerOptions,
 ): Promise<{ server: Server; jkt: string }> {
@@ -86,12 +91,18 @@ export async function startSigner(
     return `${input}.${signature.toString("base64url")}`;
   };
 
+  const vault = createVaultHandler({ keyDir: options.keyDir, now, log });
+
   const server = createServer((req, res) => {
-    req.resume();
     const reply = (status: number, body: unknown) => {
       res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(JSON.stringify(body));
     };
+    if (req.url?.startsWith("/v1/secrets") || req.url?.startsWith("/v1/grants")) {
+      vault(req, reply).catch(() => reply(500, { error: "vault_unavailable" }));
+      return;
+    }
+    req.resume();
     if (req.method === "POST" && req.url === "/v1/token") {
       const token = issue();
       if (token) reply(200, { token });

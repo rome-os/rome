@@ -91,7 +91,7 @@ import {
   ADVANCED_EASTER_EGG_INITIAL_SEQUENCE,
   advanceAdvancedEasterEggSequence,
 } from "@/lib/advanced-easter-egg";
-import { AppKeysRow } from "@/components/app-keys-section";
+import { AppKeysRow, VaultRow } from "@/components/app-keys-section";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import { ChannelsSettingsPage } from "@/components/channels/channels-settings-page";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
@@ -1500,6 +1500,7 @@ function AccessControlSection({
       </SectionHeader>
       <FormRows>
         <AppKeysRow />
+        <VaultRow />
         <SettingsToggleRow
           title={t("advanced.feedback.agentReports.title")}
           description={t("advanced.feedback.agentReports.description")}

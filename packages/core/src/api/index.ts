@@ -45,6 +45,7 @@ import { conciergeRoutes } from "./routes/concierge.js";
 import { chatTaskListRoutes, ownsConciergeChat, subscribeChatTasks } from "./routes/task-list.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
+import { vaultRoutes } from "./routes/vault.js";
 import { uptimeRoutes } from "./routes/uptime.js";
 import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
@@ -204,6 +205,7 @@ export function buildApp(
   api.route("/", personalDataRoutes(deps));
   api.route("/", deviceConnectionRoutes(deps));
   api.route("/", appKeysRoutes(deps));
+  api.route("/", vaultRoutes());
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
   api.route("/", peopleRoutes(deps));
