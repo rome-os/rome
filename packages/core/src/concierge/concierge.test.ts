@@ -6760,6 +6760,30 @@ describe("scheduled tasks", () => {
     expect(started.scheduled).toContain("2026-11-13T04:25:00.000Z");
   });
 
+  it("runs a scheduled brief with no asking device, so a device saved by a handoff cannot pin it", async () => {
+    const s = setup();
+    withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    // A follow-up from the phone saved its device id on the task chat.
+    s.askFrom("dev-signed-out");
+    await s.tool("chat_send", { chatId, text: "Add my sleep too" });
+    expect(s.deps.webchatRepo.setAskingDevice).toHaveBeenLastCalledWith(chatId, "dev-signed-out");
+    s.fakeTimers();
+    const order: string[] = [];
+    rs.mocked(s.deps.webchatRepo.setAskingDevice).mockImplementation(async (_id, deviceId) => {
+      order.push(`device:${deviceId}`);
+    });
+    const realSend = s.send.getMockImplementation()!;
+    s.send.mockImplementationOnce(async (...args) => {
+      order.push("send");
+      return realSend(...args);
+    });
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+    // Cleared before the brief goes in, so the run's turn takes a working device.
+    expect(order).toEqual(["device:null", "send"]);
+  });
+
   it("sends each run's brief into the task's own chat as the Concierge's words, reported as its own", async () => {
     const s = setup();
     withSchedules(s, "every_run");

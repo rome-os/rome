@@ -1525,6 +1525,10 @@ export class ConciergeService {
     }
     const chatId = row.sessionId;
     if (schedule.report === "when_it_matters") this.quietRuns.add(chatId);
+    // No one is asking from a device in a scheduled run, and a device id saved
+    // by an earlier handoff ends at the next sign-in: the run's live reads
+    // take a working device instead. A later handoff from a device sets it again.
+    await this.deps.webchatRepo.setAskingDevice(chatId, null);
     const sent = await this.dashboard.send(
       taskChatPlace(chatId),
       { text: schedule.brief, ...(schedule.skill ? { skillName: schedule.skill } : {}) },
