@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fake Service</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font: 16px/1.5 system-ui, sans-serif; background: #f6f6f4; color: #1d1d1b; }
+    main { width: min(360px, calc(100% - 32px)); padding: 32px 24px; background: #fff;
+      border: 1px solid #e3e3df; border-radius: 12px; text-align: center; }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    p { margin: 0 0 24px; color: #5f5f5a; }
+    button { width: 100%; padding: 12px; font: inherit; font-weight: 600; color: #fff;
+      background: #1d1d1b; border: 0; border-radius: 8px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Fake Service</h1>
+    <p>Rome wants to connect to your Fake Service account.</p>
+    <form method="post">
+      <input type="hidden" name="username" value="rome-test">
+      <button type="submit">Allow</button>
+    </form>
+  </main>
+</body>
+</html>

@@ -270,7 +270,9 @@ start_cloud() {
 start_oauth_server() {
   docker rm -f "$OAUTH" >/dev/null 2>&1 || true
   docker run -d --name "$OAUTH" --network "$NETWORK" --restart unless-stopped --memory 512m \
-    -e SERVER_PORT=8080 -e 'JSON_CONFIG={"interactiveLogin":true}' "$OAUTH_IMAGE" >/dev/null
+    -v "$ENV_DIR/fake-service/sign-in.html:/sign-in.html:ro" \
+    -e SERVER_PORT=8080 -e 'JSON_CONFIG={"interactiveLogin":true,"loginPagePath":"/sign-in.html"}' \
+    "$OAUTH_IMAGE" >/dev/null
 }
 
 # Routes <slug>.rome.localhost to the Rome container Rome Cloud named rome-vm-<slug>.

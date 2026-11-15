@@ -3,7 +3,7 @@
 // - core's connect card: the agent shows it, Dismiss answers it, and the
 //   agent's next turn follows;
 // - Fake Service's card, an app's card: Connect opens Fake Service's sign-in on
-//   the OAuth test server, the walk signs in, I've authorized answers the
+//   the OAuth test server, the walk presses Allow, I've authorized answers the
 //   agent, and the agent's next turn follows;
 // - for each kind in TEST_APPS, a real provider's test app in Rome Cloud,
 //   Connect reaches that provider's authorization page. Signing in there is a
@@ -140,8 +140,7 @@ await step("fake-service-connected", async () => {
   const tab = await openConnect(await press(card, "Connect"));
   await tab.waitForURL((url) => url.hostname === oauthHost, { timeout: 60_000 });
   await tab.screenshot({ path: `${out}/cards-fake-service-sign-in.png` });
-  await tab.locator("input[name=username]").fill("rome-test");
-  await tab.locator("input[type=submit], button[type=submit]").first().click();
+  await tab.getByRole("button", { name: "Allow" }).click();
   await tab.getByText("Fake Service is connected").waitFor({ timeout: 60_000 });
   await tab.screenshot({ path: `${out}/cards-fake-service-connected.png` });
   await tab.close();
