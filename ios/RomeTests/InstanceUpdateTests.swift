@@ -277,11 +277,11 @@ final class Counter: @unchecked Sendable {
 
     @Test func behindButSupportedIsOnlyOffered() async {
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.194"), latest: .init(version: "1.1.195"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.195"), latest: .init(version: "1.1.196"), upgradeAvailable: true))
         let updater = updater(defaults())
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(!updater.blocking)
-        #expect(updater.offered == "1.1.195")
+        #expect(updater.offered == "1.1.196")
         #expect(updater.showsBanner)
 
         updater.openPage()
