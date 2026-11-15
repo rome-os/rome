@@ -388,8 +388,6 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
-          subscribeConciergeTasks: (owner, emit) =>
-            deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
           subscribeConciergeActivity: (owner, emit) =>
             deps.concierge?.activity?.subscribe(owner, emit) ?? (() => {}),
           hasChatTasks: async (chatId, owner) =>

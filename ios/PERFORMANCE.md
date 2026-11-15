@@ -11,7 +11,7 @@ How the app keeps the transcript, lists and streaming smooth on a long chat. The
 
 Examples of these principles:
 
-- **Look up by an index, not a scan in a loop.** `RowInfo.build` scanned every message for each quoted row; `TasksStore` indexes tasks by chat.
+- **Look up by an index, not a scan in a loop.** `RowInfo.build` scanned every message for each quoted row; `TaskChatsStore` keeps the chat list by id.
 - **Cache pure parsing by its input with `ParseCache`.** Markdown parses while streaming fell from 8 to 2 per run.
 - **Update a known item in place.** A streamed message whose turn and time are unchanged keeps its place, instead of sorting the whole chat again.
 - **Store derived lists and rebuild them when an input changes.** `TranscriptStore.rows` was computed on every read, about four times per body.

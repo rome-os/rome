@@ -113,7 +113,7 @@ final class Workspace {
     private(set) var accountLabel: String
     /// The Rome Cloud picture of who is signed in, when they have one.
     private(set) var avatarURL: URL?
-    let tasks: TasksStore
+    let taskChats: TaskChatsStore
     private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
@@ -203,7 +203,7 @@ final class Workspace {
         self.drafts = drafts ?? DraftStore(instance: host, account: backend.account)
         // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
         transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance, account: backend.account)
-        tasks = TasksStore(backend: backend)
+        taskChats = TaskChatsStore(backend: backend)
         // The main chat's id from last time, else the guardian's until the
         // server names this person's. Its kept rows show before any fetch.
         let mainId = transcripts.mainChat() ?? conciergeChatID
@@ -370,7 +370,7 @@ final class Workspace {
         guard (try? await backend.deleteChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
         // Its open tasks now belong to the main Chat, or have stopped.
-        tasks.resync()
+        taskChats.resync()
         return true
     }
 
@@ -415,7 +415,7 @@ final class Workspace {
     }
 
     private func dropTaskChat(_ chatId: String) {
-        tasks.forget(chat: chatId)
+        taskChats.forget(chat: chatId)
         taskStores.removeValue(forKey: chatId)?.close()
     }
 
@@ -428,7 +428,7 @@ final class Workspace {
     func start() async {
         drafts.discardBlankChats()
         watchAgentName()
-        tasks.start()
+        taskChats.start()
         topics.start()
         Task {
             if role == .unknown { await readRole() }
@@ -576,7 +576,7 @@ final class Workspace {
     func stop() {
         if let nameWatch { backend.events.unsubscribe(nameWatch) }
         nameWatch = nil
-        tasks.stop()
+        taskChats.stop()
         concierge.close()
         topics.stop()
         for store in topicStores.values { store.close() }

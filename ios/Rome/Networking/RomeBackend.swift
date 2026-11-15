@@ -70,9 +70,6 @@ protocol RomeBackend: AnyObject, Sendable {
     func sessions() async throws -> [ChatSession]
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
     func interrupt(turnId: String) async throws
-    func tasks() async throws -> [ConciergeTask]
-    /// Stops a task now, as its owner asked from its card.
-    func stopTask(id: String) async throws
     /// `GET /chats/:chatId/tasks`: the Concierge chat's task list, by the
     /// chat's server id.
     func taskList(chatId: String) async throws -> TaskListResponse
@@ -259,10 +256,6 @@ final class LiveBackend: RomeBackend {
         try await client.post("/chat/turns/\(escape(turnId))/interrupt")
     }
 
-    func stopTask(id: String) async throws {
-        try await client.post("/concierge/tasks/\(escape(id))/stop")
-    }
-
     func taskList(chatId: String) async throws -> TaskListResponse {
         try await client.get("/chats/\(escape(chatId))/tasks")
     }
@@ -273,14 +266,6 @@ final class LiveBackend: RomeBackend {
 
     func stopListedTask(chatId: String, taskId: String) async throws {
         try await client.post("/chats/\(escape(chatId))/tasks/\(escape(taskId))/stop")
-    }
-
-    func tasks() async throws -> [ConciergeTask] {
-        let response: ConciergeTasksResponse = try await client.get(
-            "/concierge/tasks",
-            query: [URLQueryItem(name: "doneDays", value: "30")]
-        )
-        return response.tasks
     }
 
     func pendingApprovals() async throws -> [PendingApproval] {
@@ -460,8 +445,6 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
-    /// Demo data and test doubles stop nothing.
-    func stopTask(id: String) async throws { throw APIError.notFound }
     /// Demo data and test doubles move a chat's work, as an older instance does.
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }

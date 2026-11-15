@@ -1728,24 +1728,6 @@ describe("Concierge tools", () => {
     expect((await s.taskRepo.get(taskId))?.stoppedAt).toEqual(expect.any(Date));
   });
 
-  it("tells the Concierge quietly when the owner cancels a task's checks, and lets a failure through", async () => {
-    const s = setup();
-    const [row] = await s.taskRepo.upsertMany([{ title: "PR 42", chatId: CONCIERGE_CHAT }]);
-    const pending = () =>
-      (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents.pending;
-    s.deps.checks = {
-      cancelFor: async () => {
-        throw new Error("database is locked");
-      },
-      laterOf: async () => new Map(),
-    } as never;
-    await expect(s.service.cancelChecksByOwner(row!.id)).rejects.toThrow("database is locked");
-    expect(pending()).not.toContain(row!.id);
-    s.deps.checks = { cancelFor: async () => 1, laterOf: async () => new Map() } as never;
-    await s.service.cancelChecksByOwner(row!.id);
-    expect(pending()).toContain(row!.id);
-  });
-
   it("tells the Concierge quietly when the owner cancels a task's check from the chat's checks", async () => {
     const s = setup();
     const [row] = await s.taskRepo.upsertMany([{ title: "PR 42", chatId: CONCIERGE_CHAT }]);
@@ -2473,7 +2455,9 @@ describe("Concierge task anchors", () => {
     s.tasks.markNotSynced(taskId);
     await s.settle();
     const emit = rs.fn();
-    s.tasks.subscribe(emit);
+    s.taskRepo.onChange((task) => {
+      void s.tasks.toDtos([task]).then(([read]) => emit({ task: read }));
+    });
     s.messages.get(chatId)?.push({
       role: "assistant",
       content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
@@ -2498,8 +2482,9 @@ describe("Concierge task anchors", () => {
       // A task moved to another Concierge chat leaves its chat thread behind.
       threadRoot: createdIn === forwardedIn ? "g0" : null,
     });
+    await s.settle();
     expect(emit).toHaveBeenCalledTimes(1);
-    expect(emit).toHaveBeenCalledWith("task_upsert", {
+    expect(emit).toHaveBeenCalledWith({
       task: expect.objectContaining({
         id: taskId,
         conciergeChat: expect.objectContaining({ id: forwardedIn }),
@@ -6455,19 +6440,6 @@ describe("scheduled tasks", () => {
 
     expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("stopped");
     expect(s.posted).toEqual([]);
-  });
-
-  it("keeps a task's schedule when its owner cancels its checks from its row", async () => {
-    const s = setup();
-    const schedules = withSchedules(s, "every_run");
-    const { taskId } = await startScheduled(s);
-    const cancelFor = rs.fn(async () => 1);
-    s.deps.checks = { cancelFor, laterOf: async () => new Map() } as never;
-
-    await s.service.cancelChecksByOwner(taskId);
-    // The row's cancel skips the next run only; a stop removes the schedule.
-    expect(cancelFor).toHaveBeenCalledWith(taskId, "guardian", { keepSchedule: true });
-    expect(schedules.remove).not.toHaveBeenCalled();
   });
 
   it("changes or removes a task's schedule from task_upsert, keeping its brief", async () => {
