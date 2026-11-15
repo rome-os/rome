@@ -145,12 +145,12 @@ final class VoiceInputTests: XCTestCase {
     func testRule7LeavingTheChatKeepsTheWords() throws {
         let app = try launch(recording: Self.hum)
         try checkWordsKept(app, stop: "leaving the chat", notice: "Listening stopped when you left this chat") {
-            app.buttons["Open navigation"].tap()
+            touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
             let other = app.buttons.matching(identifier: "topic-chat").firstMatch
             if other.waitForExistence(timeout: 3) { other.tap() } else { app.buttons["New topic chat"].tap() }
             _ = onScreen(app.textViews, "message-field").waitForExistence(timeout: 10)
-            app.buttons["Open navigation"].tap()
-            app.buttons["Chat"].firstMatch.tap()
+            touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
+            touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Chat"))).tap()
             return app
         }
     }
@@ -240,6 +240,14 @@ final class VoiceInputTests: XCTestCase {
         let control = onScreen(app.buttons, "voice-input")
         try requireControl(app, control, "\(stop): the Chat has no voice control")
         let field = onScreen(app.textViews, "message-field")
+        // Spoken words go in at the cursor, so start from an empty field: a draft an earlier
+        // test left is sent, which is how a guardian empties it.
+        let send = onScreen(app.buttons, "send")
+        if send.isEnabled {
+            send.tap()
+            let emptied = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: send)
+            XCTAssertEqual(XCTWaiter().wait(for: [emptied], timeout: 10), .completed, "\(stop): the earlier draft did not send")
+        }
         let empty = fieldText(field)
         guard tapUntil(control, NSPredicate(format: "label == %@", stopLabel)) else {
             printScreen(app, "\(stop): listening never started")
@@ -251,10 +259,10 @@ final class VoiceInputTests: XCTestCase {
         let deadline = Date().addingTimeInterval(20)
         while Date() < deadline, control.label == stopLabel {
             before = fieldText(field)
-            if words(before).count >= words(empty).count + 3 { break }
+            if before != empty, words(before).count >= 3 { break }
             Thread.sleep(forTimeInterval: 0.5)
         }
-        XCTAssertGreaterThan(words(before).count, words(empty).count, "\(stop): no words showed before the stop")
+        XCTAssertNotEqual(before, empty, "\(stop): no words showed before the stop")
         let back = try makeStop()
         let notice = back.descendants(matching: .any)["voice-input-notice"]
         let noticeShown = notice.waitForExistence(timeout: 5)
@@ -356,7 +364,12 @@ final class VoiceInputTests: XCTestCase {
     /// touchable one.
     @MainActor
     private func onScreen(_ query: XCUIElementQuery, _ identifier: String) -> XCUIElement {
-        let matches = query.matching(identifier: identifier)
+        touchable(query.matching(identifier: identifier))
+    }
+
+    /// The one of `matches` the guardian can touch, as `onScreen` finds it.
+    @MainActor
+    private func touchable(_ matches: XCUIElementQuery) -> XCUIElement {
         let deadline = Date().addingTimeInterval(15)
         while matches.count != 1, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.5)
