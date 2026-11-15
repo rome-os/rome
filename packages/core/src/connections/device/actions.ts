@@ -61,8 +61,10 @@ export function registerDeviceActions(
         "List what the guardian's devices, such as their phone, let you read live: each device, " +
         "whether the guardian is asking from it, whether it is stale (no report for 7 days), " +
         "each capability on it with its state (working, off, broken) and whether it is personal, " +
-        "and each operation with what it does, its arguments and examples. Call it before " +
-        `${DEVICE_RUN_ACTION}. It reads what the devices last reported and asks no device.`,
+        "and each operation with what it does, its arguments and examples. askingDevice names the " +
+        "device the guardian is asking from, and whether it reports any connection. Call it before " +
+        `${DEVICE_RUN_ACTION}. It reads what the devices last reported and asks no device. Read ` +
+        "another device only when the guardian names it.",
       complexity: "simple",
       speed: "fast",
       reliability: "high",
@@ -83,7 +85,8 @@ export function registerDeviceActions(
         "Run one operation on one of the guardian's devices now, such as reading its status, with " +
         `the operation and arguments ${DEVICE_DESCRIBE_ACTION} lists. With several devices it uses ` +
         "the one the guardian is asking from, and never another; otherwise a working one that " +
-        "reported in the last 7 days, unless you name a device. When the " +
+        "reported in the last 7 days. Name another device only when the guardian names it, such as " +
+        "their other phone; never to get around an asking device that cannot answer. When the " +
         "connection is off or broken, it asks no device and the error says what the guardian can " +
         "turn on. A device that is offline answers target_unavailable at once. A personal " +
         "capability runs only in a private chat with the guardian.",
@@ -106,7 +109,8 @@ export function registerDeviceActions(
         },
         device: {
           type: "string",
-          description: "A device id from the listing, to pick one device among several.",
+          description:
+            "A device id from the listing, only for a device the guardian names. Default: the device they are asking from.",
         },
       },
       additionalProperties: false,
@@ -245,9 +249,15 @@ export function describeDevices(
     if (entry.id === askingDeviceId) entry.asking = true;
     if (isStale(entry, now)) entry.stale = true;
   }
+  // Named even when the device reports nothing, so the Agent can tell the
+  // guardian is on a device with no connection rather than reach for another.
+  const asking = askingDeviceId
+    ? { askingDevice: { id: askingDeviceId, connected: devices.has(askingDeviceId) } }
+    : {};
   return devices.size > 0
-    ? { devices: [...devices.values()] }
+    ? { ...asking, devices: [...devices.values()] }
     : {
+        ...asking,
         devices: [],
         note: "No device has reported a connection. Ask the guardian to connect one in the Rome app on their device.",
       };

@@ -328,6 +328,35 @@ describe("device actions", () => {
     });
   });
 
+  it("names the asking device in the listing, connected or not, and keeps a named device", async () => {
+    devices.report(report("dev-other", "iPad", [deviceConnection(true)]), NOW);
+    const from = (deviceId: string) => ({
+      audience: "private" as const,
+      channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, deviceId),
+    });
+    // The guardian asks from a device that reports nothing.
+    expect(await engine.run(DEVICE_DESCRIBE_ACTION, {}, from("dev-asking"))).toMatchObject({
+      data: {
+        askingDevice: { id: "dev-asking", connected: false },
+        devices: [{ id: "dev-other" }],
+      },
+    });
+    devices.report(report("dev-asking", "iPhone", [deviceConnection(false)]), NOW);
+    expect(await engine.run(DEVICE_DESCRIBE_ACTION, {}, from("dev-asking"))).toMatchObject({
+      data: { askingDevice: { id: "dev-asking", connected: true } },
+    });
+    // A turn no device started names none.
+    const web = await engine.run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" });
+    expect((web as { data: Record<string, unknown> }).data.askingDevice).toBeUndefined();
+    // "My iPad's battery": a device the guardian names is read, whatever device asks.
+    await engine.run(
+      DEVICE_RUN_ACTION,
+      { operation: "device.status", device: "dev-other" },
+      from("dev-asking"),
+    );
+    expect(calls.map((call) => call.deviceId)).toEqual(["dev-other"]);
+  });
+
   it("answers target_unavailable at once for a device that is offline", async () => {
     devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
     answer = { ok: false, code: "target_unavailable", message: "Device is not connected." };
