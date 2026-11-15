@@ -16,7 +16,7 @@ struct TaskChatScreen: View {
     @State private var attachments = ComposerAttachments()
     @State private var confirmDelete = false
 
-    private var title: String { workspace.tasks.title(forChat: chatId, fallback: initialTitle) }
+    private var title: String { workspace.taskChats.title(forChat: chatId, fallback: initialTitle) }
 
     /// The header shows a spinner only while this chat runs a turn. The
     /// task's own state is left out: it is not reported accurately enough.

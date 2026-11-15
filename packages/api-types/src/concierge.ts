@@ -100,7 +100,7 @@ export interface ConciergeChatWorkResponse {
   openTasks: { id: string; title: string }[];
 }
 
-/** How many days of finished rows `GET /concierge/tasks` returns by default. */
+/** How many days of finished task rows the Concierge reads by default. */
 export const CONCIERGE_DONE_DAYS = 7;
 
 /** The longest `summary` the Concierge writes. */
@@ -194,16 +194,6 @@ export interface ChatPendingCheckDto {
 /** `GET /chat/sessions/:id/checks`, the soonest first. */
 export interface ChatPendingChecksResponse {
   checks: ChatPendingCheckDto[];
-}
-
-/** `GET /concierge/tasks`. */
-export interface ConciergeTasksResponse {
-  tasks: ConciergeTaskDto[];
-}
-
-/** Payload of the `task_upsert` event on the `concierge.tasks` topic. */
-export interface ConciergeTaskUpsertEvent {
-  task: ConciergeTaskDto;
 }
 
 /** A daily window in the guardian's timezone, `HH:mm` to `HH:mm`; it may wrap midnight. */

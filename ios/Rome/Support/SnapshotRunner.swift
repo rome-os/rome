@@ -575,7 +575,8 @@ enum SnapshotRunner {
             _ = workspace.concierge.send(prompt)
             await capture("live-02-sent", style: "live", in: directory, wait: 1.0) {}
             await capture("live-03-typing", style: "live", in: directory, wait: 3) {}
-            for _ in 0..<60 where workspace.concierge.running || workspace.tasks.tasks.isEmpty {
+            let taskChat = { workspace.taskChats.chats.values.first { $0.triggerKind == "concierge" } }
+            for _ in 0..<60 where workspace.concierge.running || taskChat() == nil {
                 try? await Task.sleep(for: .seconds(2))
             }
             try? await Task.sleep(for: .seconds(4))
@@ -583,11 +584,11 @@ enum SnapshotRunner {
             await capture("live-05-tasks", style: "live", in: directory, wait: 2) { model.debugCommand = .agent(.tasks) }
             model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
-            if let task = workspace.tasks.tasks.first(where: { $0.chat != nil }), let chat = task.chat {
+            if let chat = taskChat() {
                 await capture("live-06-task", style: "live", in: directory, wait: 3) {
                     model.debugCommand = .route([.taskChat(chatId: chat.id, title: chat.name)])
                 }
-                for _ in 0..<45 where workspace.tasks.tone(forChat: chat.id) == .running {
+                for _ in 0..<45 where workspace.taskChats.isRunning(chat: chat.id) {
                     try? await Task.sleep(for: .seconds(2))
                 }
                 await capture("live-07-task-done", style: "live", in: directory, wait: 3) {}

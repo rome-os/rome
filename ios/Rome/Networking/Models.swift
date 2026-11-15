@@ -453,7 +453,8 @@ enum TaskState: String, Codable, Sendable, CaseIterable {
     case next, doing, watching, needsUser = "needs_user", done, dropped
 }
 
-/// One row of the Concierge's own todo list (`GET /concierge/tasks`). Times are epoch ms.
+/// One task of the Concierge's, as a task row of `GET /chats/:chatId/tasks`
+/// carries it. Times are epoch ms.
 struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     struct LinkedChat: Codable, Hashable, Sendable {
         var id: String
@@ -554,20 +555,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         waitingSince = try? c.decodeIfPresent(Double.self, forKey: .waitingSince)
         laterAt = try? c.decodeIfPresent(Double.self, forKey: .laterAt)
     }
-}
-
-extension ConciergeTask {
-    /// The id of the card or approval the task waits on: the card it shows
-    /// takes an answer only while this names it.
-    var waitId: String? { openWait?["id"]?.string }
-}
-
-struct ConciergeTasksResponse: Codable, Sendable {
-    var tasks: [ConciergeTask]
-}
-
-struct TaskUpsertEvent: Codable, Sendable {
-    var task: ConciergeTask
 }
 
 // MARK: - Approvals

@@ -17,9 +17,9 @@ final class FakeBackend: RomeBackend {
 
     /// Runs while an older page is in flight, after the page was read.
     var duringOlderFetch: (() async -> Void)?
-    /// How many times the newest page and the task list were fetched.
+    /// How many times the newest page and the chat list were fetched.
     var newestFetches = 0
-    var taskFetches = 0
+    var sessionFetches = 0
     /// Runs while the newest page is in flight.
     var duringNewestFetch: (() async -> Void)?
 
@@ -266,20 +266,11 @@ final class FakeBackend: RomeBackend {
         readsBeforeMark.append(reads.count)
         return readMarkValue
     }
-    /// The chats and tasks the lists hold.
+    /// The chats the list holds.
     var sessionRows: [ChatSession] = []
-    var taskRows: [ConciergeTask] = []
-    var stoppedTasks: [String] = []
-    func sessions() async throws -> [ChatSession] { sessionRows }
-    func tasks() async throws -> [ConciergeTask] {
-        taskFetches += 1
-        return taskRows
-    }
-    /// What a stop on a task fails with; nil lets it through.
-    var stopError: APIError?
-    func stopTask(id: String) async throws {
-        if let stopError { throw stopError }
-        stoppedTasks.append(id)
+    func sessions() async throws -> [ChatSession] {
+        sessionFetches += 1
+        return sessionRows
     }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
     /// What a decision on an approval fails with; nil lets it through.
@@ -307,7 +298,13 @@ final class FakeBackend: RomeBackend {
     var connectCalls: [(method: String, path: String, body: JSONValue?)] = []
     var notified: [(chatId: String, service: String)] = []
 
+    /// Runs inside a connector read, before it answers, once.
+    var duringConnectorRead: (() async -> Void)?
     func connectors() async throws -> [ConnectorState] {
+        if let during = duringConnectorRead {
+            duringConnectorRead = nil
+            await during()
+        }
         guard !connectorReads.isEmpty else { return [] }
         let index = min(connectorReadCount, connectorReads.count - 1)
         connectorReadCount += 1
