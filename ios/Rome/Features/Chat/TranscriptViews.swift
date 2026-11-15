@@ -662,11 +662,12 @@ struct Composer: View {
                     },
                     committedText: $committedText,
                     handle: textHandle,
-                    editable: !voice.active
+                    editable: !voice.active,
+                    onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
                 )
                 if let voiceInput, voiceInput.available {
                     VoiceInputButton(state: voice.state) {
-                        voice.toggle(service: voiceInput, field: voiceField, text: $text, handle: textHandle)
+                        voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
                     }
                     .padding(.bottom, controlPadding)
                 }
@@ -685,7 +686,10 @@ struct Composer: View {
                         .accessibilityLabel("Stop")
                         .transition(.scale.combined(with: .opacity))
                     } else {
-                        Button(action: onSend) {
+                        Button {
+                            voice.edited(service: voiceInput, chat: voiceKey)
+                            onSend()
+                        } label: {
                             Image(systemName: "arrow.up")
                                 .romeFont(16, .bold)
                                 .foregroundStyle(.white)
@@ -713,17 +717,16 @@ struct Composer: View {
         .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
         .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
         .task { await voiceInput?.refresh() }
-        .onAppear { voice.arrive(service: voiceInput, chat: voiceKey, text: text) }
+        .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
         .onChange(of: voice.state) { voice.stateShown() }
         .onChange(of: onScreen) { _, now in
             if now {
-                voice.arrive(service: voiceInput, chat: voiceKey, text: text)
+                voice.arrive(service: voiceInput, chat: voiceKey)
             } else {
                 voice.leave(service: voiceInput, chat: voiceKey)
             }
         }
-        .onChange(of: text) { _, now in voice.textChanged(now) }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: stopVisible)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: attachments?.images.count)
