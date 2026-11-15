@@ -33,11 +33,6 @@ final class VoiceInputService {
     func takeNotice(for chat: String) -> VoiceInputStop? { leftNotices.removeValue(forKey: chat) }
 }
 
-extension EnvironmentValues {
-    /// The instance's voice input; nil (demo data, previews) shows no control.
-    @Entry var voiceInput: VoiceInputService? = nil
-}
-
 /// The message field's UIKit view, so spoken text can go in the way typing does.
 @MainActor
 final class ComposerTextHandle {
