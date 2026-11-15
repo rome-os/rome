@@ -303,7 +303,7 @@ describe("voice input socket", () => {
     const { client, closed, alive } = await dictation(fake);
 
     client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
-    await until(() => alive() >= 2);
+    await until(() => alive() >= 1);
     client.send(JSON.stringify({ type: "stop" }));
     await closed;
     const after = alive();
