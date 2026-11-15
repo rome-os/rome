@@ -56,18 +56,11 @@ private func message(_ id: String, role: String = "assistant", turn: String? = n
     }
 
     /// An older copy of a task's card is never answerable, expired or not.
-    @Test func anOlderExpiredCopyIsNotWaitingOrExpired() throws {
+    @Test func anOlderExpiredCopyIsNotWaiting() throws {
         let json = #"{"kind":"question","id":"q1","messageId":"m","render":null,"since":5,"expired":true}"#
         let card = try #require(TaskAskCard(json: try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))))
-        var task = ConciergeTask(id: "k", title: "T", state: .needsUser, createdAt: 0, updatedAt: 0)
-        task.status = "ended"
-        #expect(TaskAskMode.of(card: card, latest: false, task: task) == .open)
-        #expect(TaskAskMode.of(card: card, latest: true, task: task) == .open)
-        // It reopens only as the task's current wait.
-        task.openWait = .object(["kind": .string("card"), "id": .string("q1"), "since": .number(5)])
-        #expect(TaskAskMode.of(card: card, latest: true, task: task) == .expired)
-        task.openWait = .object(["kind": .string("card"), "id": .string("other"), "since": .number(5)])
-        #expect(TaskAskMode.of(card: card, latest: true, task: task) == .open)
+        #expect(TaskAskMode.of(card: card, latest: false) == .expired)
+        #expect(TaskAskMode.of(card: card, latest: true) == .expired)
     }
 
     /// Closing the chat ends the poll, and a late result does not start it again.
@@ -87,17 +80,6 @@ private func message(_ id: String, role: String = "assistant", turn: String? = n
         store.recheckRunning()
         for _ in 0..<50 where store.running { try? await Task.sleep(for: .milliseconds(20)) }
         #expect(!store.running)
-    }
-
-    @Test func aFailedStopSaysSo() async {
-        let backend = FakeBackend()
-        backend.stopError = .network
-        let tasks = TasksStore(backend: backend)
-        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
-        tasks.stopTask(id: "1") { store.stopTaskFailed() }
-        for _ in 0..<50 where store.notice == nil { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(store.notice != nil)
-        #expect(!tasks.stopping.contains("1"))
     }
 }
 

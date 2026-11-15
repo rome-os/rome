@@ -4,13 +4,15 @@
 // Vocabulary: docs/domains/agents.md#rome-tools.
 
 import type { ThreadContext } from "@rome-os/app-runtime";
-import type {
-  AgentAction,
-  AgentActions,
-  DeferTool,
-  RomeTool,
-  SessionTools,
-  TurnFacts,
+import type { PlaceAudience } from "./place-audience.js";
+import {
+  type AgentAction,
+  type AgentActions,
+  narrowerAudience,
+  type DeferTool,
+  type RomeTool,
+  type SessionTools,
+  type TurnFacts,
 } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
 import type { Action, ActionRegistry, ActionResult } from "../apps/actions/types.js";
@@ -25,7 +27,12 @@ import {
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
 import { connectAccountTools } from "./connect-account-tool.js";
+import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js";
+import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
+import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
+import { withTaskInputActor } from "../webchat/task-input-actor.js";
+import { sameActor } from "../agent/index.js";
 
 export interface RomeToolPortsDeps {
   actionRegistry: ActionRegistry;
@@ -35,6 +42,8 @@ export interface RomeToolPortsDeps {
   eventSources?: EventSources;
   /** Whose a dashboard chat is, for a wake scheduled in one. */
   webchatRepo?: Pick<WebChatRepository, "getSession">;
+  /** Who can read a chat. Absent, every chat is shared. */
+  placeAudience?: PlaceAudience;
   /** The tools Rome adds for an agent. When absent, a session carries none. */
   sessionTools?: SessionToolsProvider;
   /**
@@ -42,6 +51,12 @@ export interface RomeToolPortsDeps {
    * a task of its own chat's owner. When absent, no check names a task.
    */
   taskOwner?: (taskId: string) => Promise<string | null>;
+  /** The device kinds `connect_account` connects. When absent, none. */
+  deviceKinds?: () => readonly DeviceKind[];
+  /** How a device kind stands for a turn, on its asking device alone when it has one. */
+  deviceState?: (kind: string, turn: LiveTurn) => DeviceKindState | undefined;
+  /** Whether a turn is read by the guardian alone. When absent, none is. */
+  privateTurn?: PrivateTurn;
 }
 
 export interface RomeToolPorts {
@@ -97,6 +112,12 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           return actionEngine.run(action.config.name, input as Record<string, unknown>, {
             initiator: `agent:${turn.agentName}`,
             ...(actor ? { actor } : {}),
+            // Read again on each call, so a chat that opens to visitors after
+            // the turn started reads no personal data.
+            audience: narrowerAudience(
+              turn.audience(),
+              (await deps.placeAudience?.(turn.threadContext())) ?? "shared",
+            ),
             channelContext: turn.threadContext(),
             sharedContext: turn.sharedContext(),
             sessionId: turn.sessionId,
@@ -197,6 +218,57 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             getThreadContext: turn.threadContext,
             getTurnPushLevel: turn.pushLevel,
             getTurnReportedTask: turn.reportedTask,
+            captureTaskInput: () => {
+              if (turn.live?.() === false) throw new Error("Task input source is not live");
+              const thread = turn.threadContext();
+              const turnId = turn.turnId();
+              const admitted = turn.actor() as SessionActor | undefined;
+              const actor = admitted ? Object.freeze({ ...admitted }) : undefined;
+              const sourceChatId = thread?.threadId;
+              const channel = thread?.channel;
+              const threadType = thread?.threadType;
+              const audience = turn.audience();
+              const sameSource = () => {
+                const live = turn.threadContext();
+                return (
+                  turn.turnId() === turnId &&
+                  sameActor(turn.actor(), actor) &&
+                  turn.audience() === audience &&
+                  live?.channel === channel &&
+                  live?.threadType === threadType &&
+                  live?.threadId === sourceChatId
+                );
+              };
+              const sourceCurrent =
+                turn.captureTaskInputLiveness?.() ?? (() => turn.live?.() === true && sameSource());
+              const source =
+                turn.live?.() === true &&
+                actor &&
+                (actor.kind === "guardian" || actor.kind === "visitor") &&
+                (actor.kind !== "guardian" || audience === "private") &&
+                turn.agentName === "core:concierge" &&
+                !turn.isSubagent &&
+                turnId &&
+                channel === "webchat" &&
+                threadType === "private" &&
+                sourceChatId
+                  ? {
+                      agentName: turn.agentName,
+                      chatId: sourceChatId,
+                      turnId,
+                      actor,
+                      audience,
+                      isCurrent: sourceCurrent,
+                    }
+                  : undefined;
+              return async (chatId, body, send) =>
+                turn.inTurn(() => {
+                  if (source && !source.isCurrent()) {
+                    throw new Error("Task input source changed before delivery; it was not sent");
+                  }
+                  return withoutSessionActor(() => withTaskInputActor(source, chatId, body, send));
+                });
+            },
           })) ?? [])
         : [];
       return [
@@ -210,11 +282,24 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             actions.run(turn, name, input),
         }),
         // A session whose own tools already show a connect card (the
-        // Concierge's `connect_card`) keeps that one, so the agent has one way
-        // to ask for a connection.
-        ...(provided.some((tool) => tool.name === "connect_card")
-          ? []
-          : connectAccountTools({ widgets: turn.widgets, hasSpeaker })),
+        // Concierge's `connect_card`) keeps that one for the kinds Rome
+        // connects itself, so the agent has one way to ask for each, and gets
+        // `connect_account` for device kinds alone, which that card does not
+        // connect.
+        ...connectAccountTools({
+          widgets: turn.widgets,
+          hasSpeaker,
+          devices: deps.deviceKinds?.(),
+          deviceState: (kind) =>
+            deps.deviceState?.(kind, { askingDeviceId: askingDeviceOf(turn.threadContext()) }),
+          devicesOnly: provided.some((tool) => tool.name === "connect_card"),
+        }),
+        ...shareLocationTools({
+          turn,
+          widgets: turn.widgets,
+          hasSpeaker,
+          privateTurn: deps.privateTurn,
+        }),
       ];
     },
   };

@@ -39,10 +39,14 @@ final class APIClient: Sendable {
     /// Renews the session after a 401, and says whether it worked; the
     /// request then goes once more with the new session.
     private let renew: (@Sendable () async -> Bool)?
+    /// This phone's rome-node device id, sent with each message the guardian
+    /// sends, so a live read asks this phone. Nil without a Cloud sign-in.
+    private let deviceId: String?
 
     /// `configuration`: tests pass one with a stub protocol.
-    init(origin: URL, token: @escaping @Sendable () -> String?, cookieName: @escaping @Sendable () -> String = { InstanceSession.guardianCookie }, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}, renew: (@Sendable () async -> Bool)? = nil) {
+    init(origin: URL, token: @escaping @Sendable () -> String?, cookieName: @escaping @Sendable () -> String = { InstanceSession.guardianCookie }, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}, renew: (@Sendable () async -> Bool)? = nil, deviceId: String? = nil) {
         self.renew = renew
+        self.deviceId = deviceId
         self.origin = origin
         self.token = token
         self.cookieName = cookieName
@@ -128,9 +132,15 @@ final class APIClient: Sendable {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
+    /// Every POST can start a turn (a message, a card's answer, an approval),
+    /// so each names this phone's device id, and a live read in that turn
+    /// asks this phone. Never to a visitor's Rome.
     @discardableResult
     func post(_ path: String, json: JSONValue? = nil) async throws -> Data {
         var request = request(path, method: "POST")
+        if let deviceId, cookieName() == InstanceSession.guardianCookie {
+            request.setValue(deviceId, forHTTPHeaderField: Self.deviceHeader)
+        }
         if let json {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(json)
@@ -159,8 +169,49 @@ final class APIClient: Sendable {
     }
 
     @discardableResult
-    func delete(_ path: String) async throws -> Data {
-        try await send(request(path, method: "DELETE"))
+    func delete(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+        try await send(request(path, query: query, method: "DELETE"))
+    }
+
+    /// A request whose status the caller reads itself, for personal-data sync,
+    /// which tells a missing route, a rate limit and a refused batch apart.
+    /// A 401 renews the session and goes once more, as every request does;
+    /// one that stays 401 throws `unauthorized`. A lost network throws as
+    /// the other calls do.
+    func raw(_ method: String, _ path: String, json body: Data? = nil, retried: Bool = false) async throws -> RawReply {
+        var request = request(path, method: method)
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            switch error.code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed: throw APIError.offline
+            case .cancelled: throw CancellationError()
+            default: throw APIError.network
+            }
+        }
+        guard let http = response as? HTTPURLResponse else { throw APIError.network }
+        if http.statusCode == 401 {
+            if !retried, let renew, await renew() { return try await raw(method, path, json: body, retried: true) }
+            throw APIError.unauthorized
+        }
+        let retryAfter = (http.value(forHTTPHeaderField: "Retry-After")).flatMap(TimeInterval.init)
+        return RawReply(status: http.statusCode, data: data, retryAfter: retryAfter)
+    }
+
+    struct RawReply: Sendable {
+        let status: Int
+        let data: Data
+        /// Seconds, from a 429's `Retry-After`.
+        let retryAfter: TimeInterval?
+
+        /// The body's `error` code, when it is JSON with one.
+        var errorCode: String? { (try? JSONDecoder().decode(JSONValue.self, from: data))?["error"]?.string }
     }
 
     /// A request to an `/api/…` path on this instance that answers any status
@@ -257,6 +308,8 @@ final class APIClient: Sendable {
     /// The live-events upgrade header that marks the phone app's socket.
     static let clientHeader = "x-rome-client"
     static let phoneClient = "phone"
+    /// The header that names the phone a message was sent from.
+    static let deviceHeader = "x-rome-device"
 
     static func originString(_ url: URL) -> String {
         var text = "\(url.scheme ?? "https")://\(url.host() ?? "")"

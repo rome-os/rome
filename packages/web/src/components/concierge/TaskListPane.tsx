@@ -44,5 +44,5 @@ export function useTaskList(chatId: string | null) {
       </div>
     </Sheet>
   ) : null;
-  return { open, sheet };
+  return { open, sheet, sheetOpen };
 }

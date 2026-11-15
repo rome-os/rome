@@ -11,6 +11,7 @@ import { SystemInputView } from "./SystemInputView";
 import { AiToolsCard } from "./AiToolsCard";
 import { AppComponentView } from "./AppComponentView";
 import { ConnectCard } from "./ConnectCard";
+import { DeviceConnectSettled, isDeviceConnectCard } from "./DeviceConnectSettled";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
 import { CardBoundary } from "./widget-ui/CardBoundary";
@@ -239,6 +240,14 @@ export function renderSingleEntry(
             props={block.render.props}
             result={resultFor(block.toolUseId)}
           />
+        );
+      }
+      // A device's connect card, once answered, is one line: the device's app
+      // ran the flow, so nothing is left to press.
+      const deviceResult = isDeviceConnectCard(block) ? resultFor(block.toolUseId) : undefined;
+      if (deviceResult) {
+        return (
+          <DeviceConnectSettled key={`device-connect-${block.toolUseId}`} result={deviceResult} />
         );
       }
       // A card described as data, which the agent waits on, whether an app's

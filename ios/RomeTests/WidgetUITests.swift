@@ -1,5 +1,6 @@
 import A2UICore
 import Foundation
+import SwiftUI
 import Testing
 @testable import Rome
 
@@ -322,5 +323,65 @@ final class Box<T>: @unchecked Sendable {
         #expect(WidgetSurface.sentCard(sent) == sent["answers"])
         let stored: Rome.JSONValue = .object(["answers": .array([.object(["questionId": .string("tone"), "value": .string("Plain")])])])
         #expect(WidgetSurface.sentCard(stored) == nil)
+    }
+}
+
+/// A card drawn again after its view went away, as in a reused list cell,
+/// keeps what the guardian typed when the list keeps its surface, and a
+/// card in another row with the same tool use id keeps its own.
+@MainActor @Suite(.serialized) struct WidgetSurfacesTests {
+    @MainActor @Observable final class Shown { var on = true }
+
+    private struct Host: View {
+        let part: WidgetUIPart
+        let kept: WidgetSurfaces
+        let shown: Shown
+
+        var body: some View {
+            VStack {
+                if shown.on {
+                    WidgetUICardView(part: part, call: { _, _, _ in throw APIError.notFound }, waiting: .init(answered: nil))
+                        .environment(\.widgetSurfaces, kept.row("r1"))
+                }
+                // The same tool use id in a later turn: a card of its own.
+                WidgetUICardView(part: part, call: { _, _, _ in throw APIError.notFound }, waiting: .init(answered: nil))
+                    .environment(\.widgetSurfaces, kept.row("r2"))
+            }
+        }
+    }
+
+    @Test func aCardDrawnAgainKeepsWhatWasTyped() async throws {
+        guard case .question(let question) = MessagePart.parse(JSONValue.array([DemoBackend.dinnerQuestion]).prettyText).first else {
+            Issue.record("not a question")
+            return
+        }
+        let part = try #require(question.ui)
+        let kept = WidgetSurfaces()
+        let shown = Shown()
+        let host = UIHostingController(rootView: Host(part: part, kept: kept, shown: shown))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        let surface = kept.surface(row: "r1", card: part.toolUseId)
+        let other = kept.surface(row: "r2", card: part.toolUseId)
+        for _ in 0..<100 where !surface.loaded || !other.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(surface.loaded && other.loaded, "the cards did not draw from the kept surfaces")
+        #expect(surface !== other)
+        surface.viewModel?.dataModel.set("/answers/0/text", value: .string("Soup"))
+
+        shown.on = false
+        try await Task.sleep(for: .milliseconds(100))
+        shown.on = true
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(kept.surface(row: "r1", card: part.toolUseId) === surface)
+        #expect(surface.viewModel?.dataModel.get("/answers/0/text")?.stringValue == "Soup")
+        #expect(other.viewModel?.dataModel.get("/answers/0/text")?.stringValue != "Soup")
     }
 }

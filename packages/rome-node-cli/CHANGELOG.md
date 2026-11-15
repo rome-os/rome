@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/rome-os/rome/compare/node-v0.1.10...node-v0.1.11) (2026-11-15)
+
+
+### Features
+
+* personal data, device connections, Health sync and the share-location card ([#2165](https://github.com/rome-os/rome/issues/2165)) ([4df16fd](https://github.com/rome-os/rome/commit/4df16fd90efe73b6a81528e17a31ff3ad66d04de))
+
 ## [0.1.10](https://github.com/rome-os/rome/compare/node-v0.1.9...node-v0.1.10) (2026-11-11)
 
 

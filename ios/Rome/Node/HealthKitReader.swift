@@ -52,7 +52,7 @@ final class LiveHealth: HealthReading, @unchecked Sendable {
         quantityIdentifiers[type.name].map { HKQuantityType($0) }
     }
 
-    private static func sampleType(_ type: HealthType) -> HKSampleType? {
+    static func sampleType(_ type: HealthType) -> HKSampleType? {
         switch type.kind {
         case .quantity: return quantityType(type)
         case .sleep: return HKCategoryType(.sleepAnalysis)
@@ -61,8 +61,8 @@ final class LiveHealth: HealthReading, @unchecked Sendable {
         }
     }
 
-    /// Everything the actions read; the one access sheet asks for all of it.
-    static let readTypes: Set<HKObjectType> = Set(HealthTypes.all.compactMap { sampleType($0) })
+    /// The requested types; the one access sheet asks for these alone.
+    static let readTypes: Set<HKObjectType> = Set(HealthTypes.requested.compactMap { sampleType($0) })
 
     // MARK: Access
 
@@ -255,7 +255,7 @@ final class LiveHealth: HealthReading, @unchecked Sendable {
 
     // MARK: Mapping
 
-    private static func stage(_ value: Int) -> SleepStage {
+    static func stage(_ value: Int) -> SleepStage {
         switch HKCategoryValueSleepAnalysis(rawValue: value) {
         case .inBed: return .inBed
         case .awake: return .awake
@@ -266,7 +266,7 @@ final class LiveHealth: HealthReading, @unchecked Sendable {
         }
     }
 
-    private static func record(_ workout: HKWorkout) -> WorkoutRecord {
+    static func record(_ workout: HKWorkout) -> WorkoutRecord {
         func sum(_ identifier: HKQuantityTypeIdentifier, _ unit: HKUnit) -> Double? {
             workout.statistics(for: HKQuantityType(identifier))?.sumQuantity()?.doubleValue(for: unit)
         }

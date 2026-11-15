@@ -47,8 +47,12 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// Where a guardian message stands with the agent: `failed` and `unknown`
     /// mean it was not (or may not have been) handed over. Nil from older instances.
     var inputState: String? = nil
-    /// Rome's mark on a guardian message in a Chat: `working` or `failed`.
-    var statusReaction: String? = nil
+    /// The emoji the Concierge reacted to a guardian message of its chat with.
+    /// Nil when it has none, and from older instances.
+    var reaction: String? = nil
+    /// Rome's status on a guardian message of its Chat: `working` or `failed`.
+    /// It shows over the reaction. Nil when it has none, and from older instances.
+    var status: String? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -64,7 +68,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, statusReaction
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction, status
     }
 }
 
@@ -100,7 +104,8 @@ extension ChatMessage {
         // An unknown shape never costs the message itself.
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
-        statusReaction = (try? container.decodeIfPresent(String.self, forKey: .statusReaction)) ?? nil
+        reaction = (try? container.decodeIfPresent(String.self, forKey: .reaction)) ?? nil
+        status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? nil
     }
 
     /// Writes `chatThreadId` as null when the instance sent it as null, so a
@@ -118,7 +123,8 @@ extension ChatMessage {
         try container.encodeIfPresent(chatThreadTitle, forKey: .chatThreadTitle)
         try container.encodeIfPresent(sender, forKey: .sender)
         try container.encodeIfPresent(inputState, forKey: .inputState)
-        try container.encodeIfPresent(statusReaction, forKey: .statusReaction)
+        try container.encodeIfPresent(reaction, forKey: .reaction)
+        try container.encodeIfPresent(status, forKey: .status)
     }
 
     /// The chat thread it is in, by its first message: its own id when alone.
@@ -254,6 +260,11 @@ struct ConciergeSessionInfo: Codable, Sendable {
     var unread: Int
 }
 
+/// `GET /chat/sessions/:id`, the one field read from it.
+struct SessionReadMark: Decodable, Sendable {
+    var lastSeenActivityAt: String?
+}
+
 /// `POST /chat/sessions/:id/turns`.
 struct CreatedTurn: Codable, Sendable {
     var turnId: String?
@@ -319,6 +330,41 @@ struct ConciergeChat: Codable, Identifiable, Hashable, Sendable {
         try container.encodeIfPresent(unread, forKey: .unread)
         try container.encodeIfPresent(activity?.json, forKey: .activity)
     }
+}
+
+/// What deleting a topic chat would move to the main chat, from
+/// `GET /concierge/chats/:chatId/follows-and-tasks`: its follows and its open
+/// tasks. A missing list reads as empty.
+struct ConciergeChatWork: Codable, Hashable, Sendable {
+    struct Follow: Codable, Hashable, Sendable {
+        var source: String
+        /// The source's name, as the connectors list shows it.
+        var label: String
+        var target: String
+    }
+
+    struct OpenTask: Codable, Hashable, Sendable {
+        var id: String
+        var title: String
+    }
+
+    var follows: [Follow]
+    var openTasks: [OpenTask]
+
+    private enum CodingKeys: String, CodingKey { case follows, openTasks }
+
+    init(follows: [Follow] = [], openTasks: [OpenTask] = []) {
+        self.follows = follows
+        self.openTasks = openTasks
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        follows = try container.decodeIfPresent([Follow].self, forKey: .follows) ?? []
+        openTasks = try container.decodeIfPresent([OpenTask].self, forKey: .openTasks) ?? []
+    }
+
+    var isEmpty: Bool { follows.isEmpty && openTasks.isEmpty }
 }
 
 /// What the Concierge is doing in one of its chats, as the server works it
@@ -412,7 +458,8 @@ enum TaskState: String, Codable, Sendable, CaseIterable {
     case next, doing, watching, needsUser = "needs_user", done, dropped
 }
 
-/// One row of the Concierge's own todo list (`GET /concierge/tasks`). Times are epoch ms.
+/// One task of the Concierge's, as a task row of `GET /chats/:chatId/tasks`
+/// carries it. Times are epoch ms.
 struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     struct LinkedChat: Codable, Hashable, Sendable {
         var id: String
@@ -513,20 +560,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         waitingSince = try? c.decodeIfPresent(Double.self, forKey: .waitingSince)
         laterAt = try? c.decodeIfPresent(Double.self, forKey: .laterAt)
     }
-}
-
-extension ConciergeTask {
-    /// The id of the card or approval the task waits on: the card it shows
-    /// takes an answer only while this names it.
-    var waitId: String? { openWait?["id"]?.string }
-}
-
-struct ConciergeTasksResponse: Codable, Sendable {
-    var tasks: [ConciergeTask]
-}
-
-struct TaskUpsertEvent: Codable, Sendable {
-    var task: ConciergeTask
 }
 
 // MARK: - Approvals
@@ -807,4 +840,64 @@ struct ChatShareLink: Codable, Identifiable, Hashable, Sendable {
     var createdAt: String?
 
     var date: Date? { createdAt.flatMap(RomeDate.parse) }
+}
+
+// MARK: - Personal data
+
+/// The answer of `POST /personal-data/ingest`.
+struct PersonalDataIngestReply: Codable, Equatable, Sendable {
+    var batchId: String?
+    /// `ok` or `partial`.
+    var status: String?
+    var inserted: Int?
+    var updated: Int?
+    var unchanged: Int?
+    var deleted: Int?
+    var rejected: [Rejected]?
+    var receivedAt: String?
+
+    struct Rejected: Codable, Equatable, Sendable {
+        /// Upserts first, then deletes after the last upsert.
+        var index: Int?
+        var key: String?
+        /// `unknown_type`, `bad_unit`, `bad_range`, `type_cap`, `too_large`, `bad_item`.
+        var code: String?
+    }
+}
+
+/// One source in `GET /personal-data/sources`: what the Rome holds from one device.
+struct PersonalDataCatalogSource: Codable, Equatable, Sendable {
+    var source: String
+    var title: String?
+    var origin: Origin?
+    /// `active`, `paused` or `off`.
+    var state: String?
+    var firstSyncAt: String?
+    var lastSyncAt: String?
+    var lastResult: String?
+    var types: [CatalogType]?
+
+    struct Origin: Codable, Equatable, Sendable {
+        var id: String?
+        var name: String?
+        var platform: String?
+    }
+
+    struct CatalogType: Codable, Equatable, Sendable {
+        var type: String
+        var shape: String?
+        var pointCount: Int?
+        var earliest: String?
+        var latest: String?
+        var syncedThrough: String?
+    }
+}
+
+struct PersonalDataCatalog: Codable, Equatable, Sendable {
+    var sources: [PersonalDataCatalogSource]?
+}
+
+/// The answer of `DELETE /personal-data/sources/:source/origins/:origin`.
+struct PersonalDataDeleteReply: Codable, Equatable, Sendable {
+    var deletedPoints: Int?
 }

@@ -80,10 +80,46 @@ final class DemoBackend: RomeBackend {
     private func lengthenMainChat() {
         let start = Date.now.addingTimeInterval(-2 * 86400)
         var earlier: [ChatMessage] = []
-        for index in 0..<60 {
-            let at = start.addingTimeInterval(Double(index) * 600)
+        // `ROME_DEMO_PAIRS` makes it deeper and mixed like a real chat, for
+        // paging through many pages (`ROME_PERF=paging`): long Markdown,
+        // pictures that load after they show, and approval cards that fill in
+        // once their record comes.
+        let pairs = ProcessInfo.processInfo.environment["ROME_DEMO_PAIRS"].flatMap(Int.init)
+        let picture = assets["projects/demo/trip/hotel.jpg"]
+        // A deeper history starts before the oldest demo message (3 days ago),
+        // so its pages go in above the rows, as a real chat's do.
+        let first = pairs.map { Date.now.addingTimeInterval(-4 * 86400 - Double($0) * 600) } ?? start
+        for index in 0..<(pairs ?? 60) {
+            let at = first.addingTimeInterval(Double(index) * 600)
             earlier.append(user("long-u\(index)", "第 \(index + 1) 个问题：今天有什么要注意的？", at: at))
-            earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))
+            guard pairs != nil else {
+                earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))
+                continue
+            }
+            switch index % 6 {
+            case 0:
+                let items = (1...(3 + index % 7)).map { "\($0). 下午三点和设计团队过首页文案，记得带上上周的反馈。" }.joined(separator: "\n")
+                earlier.append(agent("## 第 \(index + 1) 个回答\n\n\(items)\n\n| 事项 | 时间 | 谁 |\n|---|---|---|\n| 首页文案 | 15:00 | 设计 |\n| 周报 | 17:30 | 我 |", at: at.addingTimeInterval(30)))
+            case 2:
+                // A path of its own, so the picture is not cached and loads late.
+                let path = "projects/demo/deep/pic-\(index).jpg"
+                assets[path] = picture
+                earlier.append(agent("第 \(index + 1) 个回答：这是现场的照片。\n\n![现场](/api/projects/asset/pic.jpg?path=\(path.replacingOccurrences(of: "/", with: "%2F")))\n\n看起来没问题。", at: at.addingTimeInterval(30)))
+            case 3:
+                let id = "ap-deep-\(index)"
+                approvals[id] = ApprovalRecord(id: id, status: index % 12 == 3 ? "approved" : "pending")
+                earlier.append(parts([.object([
+                    "type": .string("approval_card"), "approvalId": .string(id), "actionName": .string("calendar:create_event"), "status": .string("pending"),
+                    "preview": .object(["kind": .string("generic"), "title": .string("添加日程"), "summary": .string(""), "fields": .array([
+                        .object(["label": .string("标题"), "value": .string("第 \(index + 1) 次例会")]),
+                        .object(["label": .string("时间"), "value": .string("明天 15:00–15:30")]),
+                    ])]),
+                ])], at: at.addingTimeInterval(30), session: conciergeChatID))
+            case 5:
+                earlier.append(agent("第 \(index + 1) 个回答：上午的会议改到了下午，地点不变。会后需要把讨论的要点整理成文档发给大家，截止时间是周五。", at: at.addingTimeInterval(30)))
+            default:
+                earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))
+            }
         }
         let digest = (1...24).map { "\($0). 今天的邮件摘要第 \($0) 条：项目进度、会议时间和需要你回复的事项。" }.joined(separator: "\n")
         messages[conciergeChatID] = earlier + (messages[conciergeChatID] ?? []) + [agent(digest, at: .now.addingTimeInterval(-60))]
@@ -344,11 +380,6 @@ final class DemoBackend: RomeBackend {
         }
     }
 
-    func tasks() async throws -> [ConciergeTask] {
-        try await pause(0.2)
-        return tasks
-    }
-
     /// The demo's task list: its tasks in the groups their status gives
     /// them, with a schedule, a lone check, a follow and a routine.
     func taskList(chatId: String) async throws -> TaskListResponse {
@@ -359,7 +390,7 @@ final class DemoBackend: RomeBackend {
         for task in tasks where task.archivedAt == nil && task.conciergeChat?.id == chat {
             let status = TaskListWords.status(task)
             // Where Respond goes: the message of this chat with the card it waits on.
-            let card = task.waitId.flatMap { wait in
+            let card = task.openWait?["id"]?.string.flatMap { wait in
                 messages[chatId]?.first { message in
                     message.parts.contains { if case .taskChat(_, _, _, let card) = $0 { return card?.id == wait } else { return false } }
                 }?.id
@@ -432,9 +463,15 @@ final class DemoBackend: RomeBackend {
                 approvals[id]?.executionState = "succeeded"
                 if let index = tasks.firstIndex(where: { $0.chat?.id == "chat-price" }) {
                     tasks[index].state = .done
+                    tasks[index].status = "ended"
+                    tasks[index].endReason = "done"
+                    tasks[index].openWait = nil
                     tasks[index].updatedAt = Date.now.timeIntervalSince1970 * 1000
                     tasks[index].completedAt = tasks[index].updatedAt
-                    bus.emit(LiveTopic.conciergeTasks, .taskUpsert(tasks[index]))
+                    // The task ended: its chat waits on no one, as the chat list says.
+                    chats["chat-price"]?.awaitingGuardian = false
+                    bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "chat-price", running: false))
+                    bus.emit(LiveTopic.chatTasks(conciergeChatID), .taskListChanged(chatId: conciergeChatID))
                 }
             }
         }
@@ -568,6 +605,34 @@ final class DemoBackend: RomeBackend {
     /// is shown as (`questionCardFromAnswers`).
     static let questionCards: JSONValue = try! JSONDecoder().decode(JSONValue.self, from: Data(#"{"q-hk":{"components":[{"id":"q0-text","component":"Text","text":"你是想查海口明天的天气，还是了解海口这座城市？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"查明天的天气","value":"查明天的天气"},{"label":"了解这座城市","value":"了解这座城市"}],"value":{"path":"/answers/0/values"},"clears":{"path":"/answers/0/text"}},{"id":"q0-own","component":"TextField","label":"你是想查海口明天的天气，还是了解海口这座城市？","value":{"path":"/answers/0/text"},"variant":"shortText","placeholder":{"string":"typeOwn"},"clears":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick","q0-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"or","args":{"values":[{"call":"required","args":{"value":{"path":"/answers/0/values"}}},{"call":"required","args":{"value":{"path":"/answers/0/text"}}}]}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-mail":{"components":[{"id":"q0-text","component":"Text","text":"摘要里要包括哪些？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"multipleSelection","options":[{"label":"需要我回复的","value":"需要我回复的","description":"别人在等你答复的邮件"},{"label":"账单和收据","value":"账单和收据"},{"label":"新闻简报","value":"新闻简报","description":"订阅的周报和新闻"}],"value":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick"]},{"id":"q1-text","component":"Text","text":"几点发给你？","variant":"h5"},{"id":"q1-title","component":"Row","children":["q1-text"]},{"id":"q1-own","component":"TextField","label":"几点发给你？","value":{"path":"/answers/1/text"},"variant":"longText","placeholder":{"string":"typeAnswer"}},{"id":"q1","component":"Column","children":["q1-title","q1-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"required","args":{"value":{"path":"/answers/0/values"}}},"message":""},{"condition":{"call":"required","args":{"value":{"path":"/answers/1/text"}}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","q1","actions"]}],"data":{"answers":[{"values":["需要我回复的"],"text":""},{"values":[],"text":"每天早上 8 点"}]}},"q-1":{"components":[{"id":"q0-text","component":"Text","text":"调研范围只看国内产品，还是包括海外？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"只看国内","value":"只看国内"},{"label":"包括海外","value":"包括海外"}],"value":{"path":"/answers/0/values"},"clears":{"path":"/answers/0/text"}},{"id":"q0-own","component":"TextField","label":"调研范围只看国内产品，还是包括海外？","value":{"path":"/answers/0/text"},"variant":"shortText","placeholder":{"string":"typeOwn"},"clears":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick","q0-own"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"or","args":{"values":[{"call":"required","args":{"value":{"path":"/answers/0/values"}}},{"call":"required","args":{"value":{"path":"/answers/0/text"}}}]}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-login":{"components":[{"id":"q0-text","component":"Text","text":"深色模式下按钮用珊瑚色，还是用中性色？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"珊瑚色","value":"珊瑚色"},{"label":"中性色","value":"中性色"}],"value":{"path":"/answers/0/values"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"send","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"required","args":{"value":{"path":"/answers/0/values"}}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","actions"]}],"data":{"answers":[{"values":[],"text":""}]}},"q-login-card":[{"values":["珊瑚色"],"text":""}]}"#.utf8))
 
+    /// A share-location card as core stores it (`locationCardUi`).
+    /// `autoShare` marks the card as core does for a turn the guardian's own
+    /// message started, so the app may answer it by itself.
+    static func locationCard(_ toolUseId: String, reason: String, autoShare: Bool = false, appId: String = "core") -> JSONValue {
+        func c(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
+            .object(props.merging(["id": .string(id), "component": .string(kind)]) { a, _ in a })
+        }
+        let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
+        let event = { (name: String) in JSONValue.object(["event": .object(["name": .string(name)])]) }
+        return .object([
+            "type": .string("pending_interaction"), "toolUseId": .string(toolUseId), "appId": .string(appId),
+            "render": .object([
+                "kind": .string("inline"), "componentId": .string("location-card"), "builtin": .bool(true),
+                "props": .object(autoShare ? ["reason": .string(reason), "autoShare": .bool(true)] : ["reason": .string(reason)]),
+                "ui": .object((autoShare ? ["data": .object(["autoShare": .bool(true)])] : [:]).merging(["components": .array([
+                    c("root", "Column", ["children": ids(["title", "reason", "actions"])]),
+                    c("title", "Text", ["text": .string("Share your location?"), "variant": .string("h5")]),
+                    c("reason", "Text", ["text": .string(reason)]),
+                    c("actions", "Row", ["children": ids(["decline", "share"]), "justify": .string("end")]),
+                    c("decline", "Button", ["child": .string("decline-label"), "variant": .string("borderless"), "action": event("decline")]),
+                    c("decline-label", "Text", ["text": .string("Not now")]),
+                    c("share", "Button", ["child": .string("share-label"), "variant": .string("primary"), "action": event("share-location")]),
+                    c("share-label", "Text", ["text": .string("Share")]),
+                ])]) { a, _ in a }),
+            ]),
+        ])
+    }
+
     static let mealCard: JSONValue = {
         func c(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
             .object(props.merging(["id": .string(id), "component": .string(kind)]) { a, _ in a })
@@ -603,10 +668,10 @@ final class DemoBackend: RomeBackend {
 
     // MARK: Updates
 
-    static let releasedVersion = "1.1.195"
+    static let releasedVersion = "1.1.197"
     /// Below the app's minimum, and between it and the latest.
     static let tooOldVersion = "1.1.120"
-    static let offeredFromVersion = "1.1.194"
+    static let offeredFromVersion = "1.1.196"
     private lazy var runningVersion = switch variant {
     case .updateRequired: Self.tooOldVersion
     case .updateOffered: Self.offeredFromVersion
@@ -715,7 +780,8 @@ final class DemoBackend: RomeBackend {
             "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
                 .object(["id": .string("q"), "question": .string(question), "type": .string("single"), "options": .array(options.map { .string($0) })]),
             ])])]),
-            "since": .number(since.timeIntervalSince1970 * 1000), "expired": .bool(expired),
+            // An expired question closes too, as the instance fills it in.
+            "since": .number(since.timeIntervalSince1970 * 1000), "expired": .bool(expired), "closed": .bool(expired),
         ]
         if let answered {
             card["outcome"] = .object(["kind": .string("answered"), "answer": .object(["text": .string(answered), "output": .object(["answers": .array([.object(["questionId": .string("q"), "value": .string(answered)])])])])])
@@ -789,7 +855,7 @@ final class DemoBackend: RomeBackend {
 
         chats = [
             "chat-price": ChatSession(id: "chat-price", name: "价格追踪：发提醒邮件", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: true),
-            "chat-research": ChatSession(id: "chat-research", name: "竞品定价调研", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: true),
+            "chat-research": ChatSession(id: "chat-research", name: "竞品定价调研", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: false),
             "chat-site": ChatSession(id: "chat-site", name: "官网首页双语文案", triggerKind: "concierge", running: true, lastTurnFailed: false, awaitingGuardian: false),
             "chat-notes": ChatSession(id: "chat-notes", name: "整理本周会议纪要", triggerKind: "concierge", running: true, lastTurnFailed: false, awaitingGuardian: false),
             "chat-notion": ChatSession(id: "chat-notion", name: "同步 Notion 数据库：把客户、订单和每周报告三张表合到一起", triggerKind: "concierge", running: false, lastTurnFailed: true, awaitingGuardian: false),
@@ -805,9 +871,11 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),
             ConciergeChat(id: "topic-home", name: "家里装修：厨房翻新、浴室防水和客厅灯具的预算与师傅安排", main: false, unread: 0),
             ConciergeChat(id: "topic-meals", name: "今天吃了什么", main: false, unread: 0),
+            ConciergeChat(id: "topic-location", name: "附近的咖啡馆", main: false, unread: 0),
             ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
+            ConciergeChat(id: "topic-health", name: "睡眠和电量", main: false, unread: 0),
             ConciergeChat(id: "topic-routine", name: "每周读书提醒", main: false, unread: 0),
             ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
             ConciergeChat(id: "topic-errors", name: "出错的情况", main: false, unread: 0),
@@ -898,6 +966,26 @@ final class DemoBackend: RomeBackend {
             parts([Self.mealCard], at: at(12, 41), session: "topic-meals"),
             agent("到现在 1,240 千卡，离目标还差 760。晚饭可以吃点蛋白质多的。", at: at(12, 41).addingTimeInterval(2), session: "topic-meals"),
             parts([Self.dinnerQuestion], at: at(12, 41).addingTimeInterval(3), session: "topic-meals"),
+        ]
+
+        // Share-location cards in each state: shared, not shared, and open.
+        let location = "topic-location"
+        messages[location] = [
+            user("l1", "明天这里会下雨吗？", at: at(9, 10), session: location),
+            parts([Self.locationCard("loc-rain", reason: "查你所在地明天的天气")], at: at(9, 10).addingTimeInterval(2), session: location),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("loc-rain"), "output": .object([
+                "status": .string("shared"), "latitude": .number(31.2), "longitude": .number(121.4),
+                "accuracyMeters": .number(18), "fixedAt": .string("2026-11-14T01:10:00.000Z"),
+            ])])], at: at(9, 11), session: location, role: "user"),
+            agent("明天下午有小雨，出门记得带伞。", at: at(9, 11).addingTimeInterval(3), session: location),
+            user("l2", "离机场多远？", at: at(9, 30), session: location),
+            parts([Self.locationCard("loc-airport", reason: "算你到机场的距离")], at: at(9, 30).addingTimeInterval(2), session: location),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("loc-airport"), "output": .object([
+                "status": .string("declined"), "dismissed": .bool(true),
+            ])])], at: at(9, 31), session: location, role: "user"),
+            agent("好的。你从哪里出发？告诉我地点就能算。", at: at(9, 31).addingTimeInterval(3), session: location),
+            user("l3", "附近有什么好的咖啡馆？", at: at(10, 5), session: location),
+            parts([Self.locationCard("loc-coffee", reason: "找你附近的咖啡馆")], at: at(10, 5).addingTimeInterval(2), session: location),
         ]
 
         // Concierge, as on the design's Chat board.
@@ -1012,10 +1100,11 @@ final class DemoBackend: RomeBackend {
         ]
         // What goes wrong: a limit before a turn ran, a turn that failed midway, a
         // switch of model, and messages the instance could not hand over.
-        func marked(_ message: ChatMessage, _ reaction: String?, inputState: String? = nil, turn: String? = nil) -> ChatMessage {
+        func marked(_ message: ChatMessage, _ reaction: String?, status: String? = nil, inputState: String? = nil, turn: String? = nil) -> ChatMessage {
             var message = message
             message.turnId = turn
-            message.statusReaction = reaction
+            message.reaction = reaction
+            message.status = status
             message.inputState = inputState
             return message
         }
@@ -1025,12 +1114,12 @@ final class DemoBackend: RomeBackend {
             return message
         }
         messages["topic-errors"] = [
-            marked(user("er1", "把今天的邮件整理一下。", at: at(13, 0), session: "topic-errors"), "failed"),
+            marked(user("er1", "把今天的邮件整理一下。", at: at(13, 0), session: "topic-errors"), "👍"),
             parts([.object(["type": .string("error"), "error": .string("Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit"), "code": .string("model_provider_unavailable"), "provider": .string("openai"), "reason": .string("quota_exhausted")])], at: at(13, 0), session: "topic-errors"),
-            marked(user("er2", "那就现在发给我吧。", at: at(13, 5), session: "topic-errors"), "failed", turn: "er-t2"),
+            marked(user("er2", "那就现在发给我吧。", at: at(13, 5), session: "topic-errors"), nil, status: "failed", turn: "er-t2"),
             failedTrace(turn: "er-t2", error: "You've hit your limit · resets 3pm", code: "usage_limit", provider: "openai", at: at(13, 6)),
             parts([.object(["type": .string("quota_switch"), "from": .string("openai"), "to": .string("anthropic"), "reason": .string("quota"), "fromModel": .string("gpt-6-luna"), "model": .string("claude-sonnet-5-5")])], at: at(13, 7), session: "topic-errors"),
-            marked(user("er3", "好，继续。", at: at(13, 8), session: "topic-errors"), "working"),
+            marked(user("er3", "好，继续。", at: at(13, 8), session: "topic-errors"), "👍", status: "working"),
             marked(user("er4", "顺便查一下周五的航班。", at: at(13, 9), session: "topic-errors"), nil, inputState: "failed"),
             marked(user("er5", "再提醒我带护照。", at: at(13, 10), session: "topic-errors"), nil, inputState: "unknown"),
         ]
@@ -1055,6 +1144,41 @@ final class DemoBackend: RomeBackend {
             | Bose QC Ultra | 接近 Sony，人声压得更干净 | 最轻最松，适合长时间戴 | 一般 | 每天通勤、要戴一整天的人 |
             | AirPods Max | 比前两款弱一些 | 重，但做工最好 | 很好 | 已经在用 `iPhone` 和 Mac 的人 |
             """, at: at(12, 2), session: "topic-table"),
+        ]
+        // A device connection's card, as core draws it: answered once the
+        // phone connected Health, then a new one for Device.
+        func deviceCard(_ id: String, kind: String, label: String) -> JSONValue {
+            func c(_ id: String, _ type: String, _ fields: [String: JSONValue]) -> JSONValue {
+                var object = fields
+                object["id"] = .string(id)
+                object["component"] = .string(type)
+                return .object(object)
+            }
+            let context: JSONValue = .object(["kind": .string(kind)])
+            return .object([
+                "type": .string("pending_interaction"), "toolUseId": .string(id), "appId": .string("core"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("connect-card"), "builtin": .bool(true),
+                    "props": .object(["kind": .string(kind), "label": .string(label), "device": .bool(true)]),
+                    "ui": .object(["components": .array([
+                        c("root", "Column", ["children": .array([.string("title"), .string("note"), .string("actions")])]),
+                        c("title", "Text", ["text": .string("Connect \(label)"), "variant": .string("h4")]),
+                        c("note", "Text", ["text": .string("Connect it on this iPhone, then your Rome can read it."), "variant": .string("caption")]),
+                        c("actions", "Row", ["children": .array([.string("dismiss"), .string("connect")]), "justify": .string("end")]),
+                        c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("borderless"), "action": .object(["event": .object(["name": .string("dismiss"), "context": context])])]),
+                        c("dismiss-label", "Text", ["text": .string("Not now")]),
+                        c("connect", "Button", ["child": .string("connect-label"), "variant": .string("primary"), "action": .object(["event": .object(["name": .string("connect"), "context": context])])]),
+                        c("connect-label", "Text", ["text": .string("Connect")]),
+                    ])]),
+                ]),
+            ])
+        }
+        messages["topic-health"] = [
+            user("h1", "这周睡得怎么样？", at: at(9, 1), session: "topic-health"),
+            parts([deviceCard("dc-health", kind: "apple_health", label: "Apple Health")], at: at(9, 2), session: "topic-health"),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("dc-health"), "output": .object(["kind": .string("apple_health"), "status": .string("connected")])])], at: at(9, 3), session: "topic-health", role: "user"),
+            agent("这周平均每晚睡 6 小时 48 分，周三最少，只有 5 小时 10 分。", at: at(9, 4), session: "topic-health"),
+            user("h2", "手机还剩多少电？", at: at(9, 20), session: "topic-health"),
+            parts([deviceCard("dc-device", kind: "device", label: "Device")], at: at(9, 21), session: "topic-health"),
         ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),

@@ -27,22 +27,7 @@ enum DeviceKind: Sendable, Equatable {
         }
     }
 
-    /// Settings' group for this device.
-    var groupTitle: LocalizedStringKey {
-        switch self {
-        case .iPhone: return "iPhone use"
-        case .iPad: return "iPad use"
-        }
-    }
-
-    var useSwitchTitle: LocalizedStringKey {
-        switch self {
-        case .iPhone: return "Can Rome use this iPhone"
-        case .iPad: return "Can Rome use this iPad"
-        }
-    }
-
-    /// The first stop of "Where your data goes".
+    /// Settings → Connections' group for this device's connections.
     var thisDevice: LocalizedStringKey {
         switch self {
         case .iPhone: return "This iPhone"
@@ -50,10 +35,11 @@ enum DeviceKind: Sendable, Equatable {
         }
     }
 
+    /// The data-flow row, read out as one line.
     var dataFlowLabel: LocalizedStringKey {
         switch self {
-        case .iPhone: return "This iPhone, your Rome, your AI model provider"
-        case .iPad: return "This iPad, your Rome, your AI model provider"
+        case .iPhone: return "This iPhone, then your Rome, then your AI model"
+        case .iPad: return "This iPad, then your Rome, then your AI model"
         }
     }
 }

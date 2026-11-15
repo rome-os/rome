@@ -41,6 +41,8 @@ export const OPEN_TIMEOUT_MS = 12_000;
 // A microphone delivers audio no faster than real time. The slack covers
 // frames that arrive in a burst after a network stall.
 const AUDIO_SLACK_MS = 5_000;
+// The most audio a client may say it recorded before its socket opened.
+const MAX_BUFFERED_MS = 15_000;
 
 const STOP_REASON: Record<TranscriptionFailure, VoiceInputStopReason> = {
   unavailable: "provider-unavailable",
@@ -160,6 +162,9 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     reply(last);
     ws.close(1000);
     settle(last.type === "error" ? last.reason : last.type);
+    // At once, not on the client's side of the close: a client that never
+    // answers would hold the provider open for ws's 30 s close timeout.
+    stream?.abort();
   };
 
   // Every listening session is a Rome Cloud session, so each one reports.
@@ -171,8 +176,8 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       sessionId,
       provider: transcriber.providerId,
       model: transcriber.model,
-      // PCM s16le mono: two bytes a sample.
-      seconds: Math.round((bytes / 2 / listening.sampleRate) * 10) / 10,
+      // PCM s16le mono: two bytes a sample. Only what reached the provider.
+      seconds: Math.round(((stream?.sentBytes ?? 0) / 2 / listening.sampleRate) * 10) / 10,
       status,
       durationMs: Date.now() - listening.startedAt,
     });
@@ -281,7 +286,9 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (!message.success) return close({ type: "error", reason: "bad-request" });
     if (message.data.type === "start") {
       if (stream || starting) return close({ type: "error", reason: "bad-request" });
-      pace = { since: Date.now(), sampleRate: message.data.sampleRate };
+      // Audio recorded while the socket connected counts as if it had come in real time.
+      const buffered = Math.min(message.data.bufferedMs ?? 0, MAX_BUFFERED_MS);
+      pace = { since: Date.now() - buffered, sampleRate: message.data.sampleRate };
       // Lets the client tell a quiet stream from a dead connection.
       alive = setInterval(() => reply({ type: "alive" }), VOICE_INPUT_ALIVE_INTERVAL_MS);
       void begin(message.data.sampleRate).catch((err: unknown) => {
