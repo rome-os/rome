@@ -145,6 +145,12 @@ describe("vault store", () => {
     expect((await put(s, "A_KEY", value)).status).toBe(400);
   });
 
+  it("rejects a value with a NUL character, and stores nothing", async () => {
+    const s = await start();
+    expect((await put(s, "A_KEY", "secret\u0000value")).status).toBe(400);
+    expect((await call(s.socketPath, "GET", "/v1/secrets")).body.secrets).toEqual([]);
+  });
+
   it("rejects bad bodies and caps the body size", async () => {
     const s = await start();
     expect((await call(s.socketPath, "PUT", "/v1/secrets/A_KEY", "not json")).status).toBe(400);

@@ -158,6 +158,25 @@ describe("a secret-access approval card", () => {
   });
 });
 
+describe("a secret-access preview from another action", () => {
+  it("draws the generic card, with its action name", async () => {
+    mockFetchApproval.mockResolvedValue(record({ status: "pending" }));
+    mount(preview(), "full", "other:use_secret");
+    expect(screen.getByText("Guardian approval needed")).toBeTruthy();
+    expect(screen.getByText("use_secret")).toBeTruthy();
+    expect(screen.getByText("Use GITHUB_TOKEN for 15 min")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Allow 15 min" })).toBeNull();
+  });
+
+  it("folds to its title and the generic outcome", async () => {
+    mockFetchApproval.mockResolvedValue(record({ status: "approved" }));
+    mount(preview(), "fold", "other:use_secret");
+    const fold = await screen.findByRole("button", { name: /Use GITHUB_TOKEN for 15 min/ });
+    expect(fold.textContent).toBe("Use GITHUB_TOKEN for 15 minApproved");
+  });
+});
+
 describe("the generic approval card", () => {
   it("keeps its warning frame, action name and title", async () => {
     mockFetchApproval.mockResolvedValue(record({ status: "pending" }));

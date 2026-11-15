@@ -165,9 +165,17 @@ export function createVaultHandler(options: VaultOptions) {
       const body = await readJson(req);
       const value = body?.value;
       const description = body?.description;
-      if (typeof value !== "string" || value.length === 0 || value.length > MAX_VALUE_LENGTH) {
+      if (
+        typeof value !== "string" ||
+        value.length === 0 ||
+        value.length > MAX_VALUE_LENGTH ||
+        // A NUL cannot go in an environment variable, so `vault load` could never use the value.
+        value.includes("\0")
+      ) {
         record("vault_put", name, "invalid_value");
-        reply(400, { error: `The value must be 1 to ${MAX_VALUE_LENGTH} characters.` });
+        reply(400, {
+          error: `The value must be 1 to ${MAX_VALUE_LENGTH} characters, with no NUL character.`,
+        });
         return;
       }
       if (

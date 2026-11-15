@@ -1,8 +1,8 @@
 # Vault
 
-The vault holds named secrets, such as an access token, that an agent can use for one command after the guardian approves. A value lives in the [signer](self-hosting.md) service and nowhere else: not in the database, not in a chat transcript, not in memory, and not in the environment of the agent's shell.
+The vault holds named secrets, such as an access token, that an agent can use for one command after the guardian approves. Rome stores a value in the [signer](self-hosting.md) service, not in the database, a chat transcript or memory, and does not put it in the environment of the agent's shell. The vault hands a value to a command only through `vault load`, after the guardian approves.
 
-[App keys](concepts/apps.md) are a different store. An app key is read by apps and is visible to every agent shell. A vault secret reaches only the one command that asked for it.
+[App keys](concepts/apps.md) are a different store. An app key is read by apps and is visible to every agent shell. A vault secret goes only to the command `vault load` starts, and only while a grant is live.
 
 ## Use a secret
 

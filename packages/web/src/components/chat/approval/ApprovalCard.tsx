@@ -13,6 +13,9 @@ import { ApprovalPreviewBody } from "./ApprovalPreviewBody";
 import { SecretAccessCard } from "./SecretAccessCard";
 import { useApprovalCard } from "./use-approval-card";
 
+/** The action whose approval draws as a key card. */
+const VAULT_APPLY_ACTION = "system:vault_apply";
+
 const STATUS_BADGE_TONES: Record<ApprovalCardStatus, string> = {
   pending: "bg-warning-bg text-warning-fg border-warning-border",
   approved: "bg-success-bg text-success-fg border-success-border",
@@ -56,6 +59,10 @@ export function ApprovalCard({
   const resolvedActionName = actionName
     ? artifactLocalName(actionName)
     : t("approvals.fallbackActionName");
+  // The key card belongs to vault_apply. Another action that returns the same preview kind reads
+  // as a generic card, with its action name.
+  const secretAccess =
+    actionName === VAULT_APPLY_ACTION && preview.kind === "secret_access" ? preview : null;
   const statusLabel = t(`approvals.status.${status}`);
   const headerTitle =
     status === "pending" ? t("approvals.headerPending") : t("approvals.headerResolved");
@@ -65,15 +72,15 @@ export function ApprovalCard({
       <SettledCard
         // A secret-access request folds to its one outcome line.
         title={
-          preview.kind === "secret_access"
+          secretAccess
             ? null
-            : preview.kind === "generic"
+            : preview.kind === "generic" || preview.kind === "secret_access"
               ? preview.title
               : resolvedActionName
         }
         outcome={
-          preview.kind === "secret_access"
-            ? secretAccessOutcome(t, preview, status, record?.resolvedBy)
+          secretAccess
+            ? secretAccessOutcome(t, secretAccess, status, record?.resolvedBy)
             : approvalOutcome(t, status, record?.resolvedBy)
         }
         full={
@@ -90,10 +97,10 @@ export function ApprovalCard({
     );
   }
 
-  if (preview.kind === "secret_access") {
+  if (secretAccess) {
     return (
       <SecretAccessCard
-        preview={preview}
+        preview={secretAccess}
         header={header}
         pending={record !== null && status === "pending"}
         awaiting={!isTerminal && status === "pending"}

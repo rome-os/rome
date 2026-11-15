@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
+import type { Readable } from "node:stream";
 import { request } from "node:http";
 import { createMasker } from "./vault-mask.js";
 
@@ -142,10 +143,16 @@ async function load(
     secrets.push({ name, value: body.value });
   }
 
-  const child = spawn(command[0], command.slice(1), {
-    env: { ...env, ...Object.fromEntries(secrets.map((secret) => [secret.name, secret.value])) },
-    stdio: ["inherit", "pipe", "pipe"],
-  });
+  // Node's error for a bad environment quotes the offending value, so none of its text is shown.
+  let child: ChildProcessByStdio<null, Readable, Readable>;
+  try {
+    child = spawn(command[0], command.slice(1), {
+      env: { ...env, ...Object.fromEntries(secrets.map((secret) => [secret.name, secret.value])) },
+      stdio: ["inherit", "pipe", "pipe"],
+    });
+  } catch {
+    throw new VaultCliError(`cannot run ${command[0]}: invalid environment`);
+  }
   // The child outlives a grant on purpose: nothing here stops it at expiry.
   const forwarders = (["SIGINT", "SIGTERM"] as const).map((signal) => {
     const forward = () => child.kill(signal);
@@ -169,7 +176,7 @@ async function load(
   const code = await new Promise<number>((resolve) => {
     child.on("error", (error: NodeJS.ErrnoException) => {
       io.err(
-        `vault: cannot run ${command[0]}: ${error.code === "ENOENT" ? "not found" : error.message}\n`,
+        `vault: cannot run ${command[0]}: ${error.code === "ENOENT" ? "not found" : "could not start"}\n`,
       );
       resolve(127);
     });
@@ -221,8 +228,8 @@ export async function runVault(
     io.err(`Unknown command: ${command}\n\n${HELP}`);
     return 2;
   } catch (error) {
-    if (!(error instanceof VaultCliError)) throw error;
-    io.err(`vault: ${error.message}\n`);
+    // Only a message written for the guardian is shown: any other error may quote a secret.
+    io.err(`vault: ${error instanceof VaultCliError ? error.message : "failed"}\n`);
     return 1;
   }
 }

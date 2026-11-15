@@ -169,6 +169,7 @@ describe("vaultRoutes", () => {
     expect((await put("GITHUB_TOKEN", {})).status).toBe(400);
     expect((await put("GITHUB_TOKEN", { value: "" })).status).toBe(400);
     expect((await put("GITHUB_TOKEN", { value: "x".repeat(32769) })).status).toBe(400);
+    expect((await put("GITHUB_TOKEN", { value: "secret\u0000value" })).status).toBe(400);
     expect((await put("GITHUB_TOKEN", { value: "v", description: 5 })).status).toBe(400);
     expect((await put("GITHUB_TOKEN", { value: "v", description: "d".repeat(201) })).status).toBe(
       400,

@@ -78,6 +78,9 @@ export function vaultRoutes(): Hono {
     if (typeof input.value !== "string" || input.value.length === 0) {
       return c.json({ error: "Value is required." }, 400);
     }
+    if (input.value.includes("\0")) {
+      return c.json({ error: "Value must not contain a NUL character." }, 400);
+    }
     if (input.value.length > VAULT_MAX_VALUE_LENGTH) {
       return c.json({ error: `Value must be at most ${VAULT_MAX_VALUE_LENGTH} characters.` }, 400);
     }

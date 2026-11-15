@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "@rstest/core";
@@ -127,6 +127,30 @@ describe("vault load", () => {
     });
     expect(result.code).toBe(1);
     expect(result.err).toBe("vault: The vault is not available on this instance (no signer).\n");
+  });
+
+  it("shows no secret when a released value cannot go in an environment", async () => {
+    // A stub signer releases a value with a NUL, which the signer itself now refuses to store.
+    const dir = mkdtempSync(join(tmpdir(), "vault-cli-stub-"));
+    const socketPath = join(dir, "signer.sock");
+    const stub = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({ value: "topsecret\u0000value", expiresAt: "2099-01-01T00:00:00.000Z" }),
+      );
+    });
+    await new Promise<void>((resolve) => stub.listen(socketPath, resolve));
+    cleanups.push(() => {
+      stub.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    const result = await run(["load", "FIRST_KEY", ...node("console.log('ran')")], {
+      ROME_SIGNER_SOCKET: socketPath,
+    });
+    expect(result.code).toBe(1);
+    expect(result.out).toBe("");
+    expect(result.err).toBe(`vault: cannot run ${process.execPath}: invalid environment\n`);
+    expect(`${result.out}${result.err}`).not.toContain("topsecret");
   });
 
   it("rejects bad usage", async () => {
