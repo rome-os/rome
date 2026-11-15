@@ -72,10 +72,12 @@ export function clearSentChatDraft(chatId: string, sent: string) {
 
 /**
  * After a send that failed: puts the text back as the draft, unless the chat
- * has a newer one or a logout came in between.
+ * has newer text or a logout came in between. A saved reason stays.
  */
 export function restoreUnsentChatDraft(chatId: string, text: string, authEpoch: string | null) {
-  if (!loadChatDraft(chatId)) saveChatDraft(chatId, { text, stop: null }, authEpoch);
+  const current = loadChatDraft(chatId);
+  if (current?.text) return;
+  saveChatDraft(chatId, { text, stop: current?.stop ?? null }, authEpoch);
 }
 
 export function clearChatDraft(chatId: string) {
