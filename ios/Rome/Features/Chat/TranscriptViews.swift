@@ -596,14 +596,18 @@ struct Composer: View {
     @Binding var focused: Bool
     /// Photos to send with the message; nil leaves out the +.
     var attachments: ComposerAttachments? = nil
+    /// The instance's voice input; nil (demo data, previews) shows no control.
+    var voiceInput: VoiceInputService? = nil
     /// The chat this field writes in, so voice input stopped by leaving it
     /// says why on return; nil keeps no such notice.
     var voiceKey: String? = nil
+    /// False while the field's chat is covered or hidden but still mounted
+    /// (Chat under another section, a sheet, the drawer): listening stops.
+    var onScreen = true
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.voiceInput) private var voiceInput
     @State private var voice = VoiceInputController()
     @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
@@ -662,7 +666,8 @@ struct Composer: View {
                     .padding(.bottom, controlPadding)
                 }
                 Group {
-                    if stopVisible && !canSend {
+                    // While listening, the field's stop is the voice control's.
+                    if stopVisible && !canSend && !voice.active {
                         Button(action: onStop) {
                             RoundedRectangle(cornerRadius: 3, style: .continuous)
                                 .fill(Palette.bg)
@@ -704,6 +709,13 @@ struct Composer: View {
         .task { await voiceInput?.refresh() }
         .onAppear { voice.arrive(service: voiceInput, chat: voiceKey, text: text) }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
+        .onChange(of: onScreen) { _, now in
+            if now {
+                voice.arrive(service: voiceInput, chat: voiceKey, text: text)
+            } else {
+                voice.leave(service: voiceInput, chat: voiceKey)
+            }
+        }
         .onChange(of: text) { _, now in voice.textChanged(now) }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: stopVisible)
