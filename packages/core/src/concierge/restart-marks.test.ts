@@ -109,13 +109,12 @@ describe("messages after a restart", () => {
     expect(await status("topic", "topic-input")).toBe("failed");
   });
 
-  it("keeps the working status of a turn startup continues", async () => {
+  it("shows a turn startup continues working", async () => {
     await running("concierge");
     await tasks.takeMessage("concierge-turn", {
       chatId: "concierge",
       messageKey: "concierge-input",
     });
-    await tasks.markWorking("concierge");
     await boot();
     expect(await status("concierge", "concierge-input")).toBe("working");
   });

@@ -6266,6 +6266,84 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(s.reactions.get(`${CONCIERGE_CHAT}:g1`)).toBe("👍");
     });
 
+    it("keeps a newer turn's triggers when an older turn's end arrives after it started", async () => {
+      const s = setup({ said: false });
+      s.fakeTimers();
+      guardianSays(s, "g1", "turn-a");
+      await taken(s, "g1", "turn-a");
+      guardianSays(s, "g2", "turn-b");
+      await taken(s, "g2", "turn-b");
+      // Turn a's end lands while turn b already runs.
+      s.chats.activeTurns = () => ["turn-b"];
+      await conciergeEnds(s, "completed", "turn-a");
+      await rs.advanceTimersByTimeAsync(100);
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      expect(await statusOf(s, "g2")).toBe("working");
+    });
+
+    it("works out each change once, however many chats listen", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const reads = rs.spyOn(s.tasks, "messageStatusesOf");
+      const seen: unknown[] = [];
+      const stops = [1, 2, 3].map(() => s.service.onMessageStatus((event) => seen.push(event)));
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      await s.settle();
+      expect(reads).toHaveBeenCalledTimes(1);
+      expect(seen).toEqual(
+        Array(3).fill({ sessionId: CONCIERGE_CHAT, messageId: "g1", status: "working" }),
+      );
+      for (const stop of stops) stop();
+    });
+
+    it("shows no ⚠️ for a turn that failed after starting a task that got done", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const { chatId } = await started(s);
+      await conciergeEnds(s, "error");
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe("working");
+      await finishTask(s, chatId);
+      expect(await statusOf(s, "g1")).toBeNull();
+    });
+
+    it("lets only the newest message given to a task follow it", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId);
+      s.inTurn("follow-up");
+      guardianSays(s, "g2", "follow-up");
+      await s.tool("chat_send", { chatId, text: "And tomorrow?" });
+      expect([await statusOf(s, "g1"), await statusOf(s, "g2")]).toEqual([null, "working"]);
+      await finishTask(s, chatId, "error");
+      expect([await statusOf(s, "g1"), await statusOf(s, "g2")]).toEqual([null, "failed"]);
+    });
+
+    it("works again when a stopped turn is continued", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await conciergeEnds(s, "error");
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe("failed");
+      await s.taskRepo.reopenTurn(CONCIERGE_CHAT, "concierge-turn-1");
+      expect(await statusOf(s, "g1")).toBe("working");
+    });
+
+    it("keeps a task whose start failed on its message, which then shows failed", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      s.refuseSends({ ok: false, invalid: "busy" });
+      expect((await s.tool("chat_start", { title: "Weather", brief: "Check" })).isError).toBe(true);
+      await conciergeEnds(s);
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe("failed");
+    });
+
     it("never pushes a status to the phone", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");

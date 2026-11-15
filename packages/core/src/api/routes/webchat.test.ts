@@ -7458,9 +7458,15 @@ describe("Webchat API", () => {
 
     it("shows a guardian message's status beside its reaction, and streams its changes", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
+      const tasks = new ConciergeTasks(repo);
       deps.concierge = {
-        deps: { tasks: new ConciergeTasks(repo) },
+        deps: { tasks },
         onCardSettled: () => () => {},
+        // As the service fans out its one watch.
+        onMessageStatus: (listener: (event: unknown) => void) =>
+          tasks.onMessageStatus((target, status) =>
+            listener({ sessionId: target.chatId, messageId: target.messageKey, status }),
+          ),
       } as never;
       await deps.webchatRepo.createSession(
         "topic",

@@ -8,7 +8,11 @@ import { automatedInputLabel } from "./automated-input.js";
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { DashboardActivity } from "../lib/dashboard-activity.js";
 import { MessageStatusTracker } from "./message-status.js";
-import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
+import {
+  CONCIERGE_CHAT_ID,
+  type ConciergeChatRef,
+  type MessageStatusEvent,
+} from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
@@ -313,6 +317,9 @@ export class ConciergeService {
   private stoppedRunWrites: Promise<void> = Promise.resolve();
   private taskEvents: TaskEventCoalescer | null = null;
   private readonly cardListeners = new Set<(event: ChatCardSettledEvent) => void>();
+  private readonly statusListeners = new Set<(event: MessageStatusEvent) => void>();
+  /** The one watch on message statuses while anyone listens, and its stop. */
+  private stopStatusWatch: (() => void) | null = null;
   private readonly inputListeners = new Set<(event: InputsSettledEvent) => void>();
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
@@ -1042,6 +1049,25 @@ export class ConciergeService {
     if (inputIds.length === 0) return;
     for (const listener of this.inputListeners)
       listener({ sessionId: chatId, inputIds: [...inputIds] });
+  }
+
+  /**
+   * Calls `listener` whenever a guardian message's status changes
+   * (docs/domains/chats.md#status), in any Concierge chat. Each change is
+   * worked out once, however many listen. Returns the unsubscribe.
+   */
+  onMessageStatus(listener: (event: MessageStatusEvent) => void): () => void {
+    this.statusListeners.add(listener);
+    this.stopStatusWatch ??= this.deps.tasks.onMessageStatus((target, status) => {
+      const event = { sessionId: target.chatId, messageId: target.messageKey, status };
+      for (const each of this.statusListeners) each(event);
+    });
+    return () => {
+      this.statusListeners.delete(listener);
+      if (this.statusListeners.size > 0) return;
+      this.stopStatusWatch?.();
+      this.stopStatusWatch = null;
+    };
   }
 
   /** Calls `listener` whenever a card a task card shows settles. Returns the unsubscribe. */

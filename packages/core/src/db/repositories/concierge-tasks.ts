@@ -883,7 +883,12 @@ export class ConciergeTasksRepository {
   async reopenTurn(chatId: string, turnId: string): Promise<number> {
     const changed = await this.db
       .update(conciergeMessageTurns)
-      .set({ answeredAt: null, turnFailed: false })
+      // It runs again, so it works from now, whatever triggered it before.
+      .set({
+        answeredAt: null,
+        turnFailed: false,
+        workingAt: sql`COALESCE(${conciergeMessageTurns.workingAt}, ${Date.now()})`,
+      })
       .where(
         and(eq(conciergeMessageTurns.chatId, chatId), eq(conciergeMessageTurns.turnId, turnId)),
       )
@@ -912,6 +917,20 @@ export class ConciergeTasksRepository {
       .from(conciergeMessageTurns)
       .where(isNull(conciergeMessageTurns.answeredAt));
     const ending = open.filter((row) => !continuing.has(row.chatId));
+    // A turn startup continues works from its start.
+    const going = open.filter((row) => continuing.has(row.chatId));
+    for (const row of going) {
+      await this.db
+        .update(conciergeMessageTurns)
+        .set({ workingAt: sql`COALESCE(${conciergeMessageTurns.workingAt}, ${now.getTime()})` })
+        .where(
+          and(
+            eq(conciergeMessageTurns.chatId, row.chatId),
+            eq(conciergeMessageTurns.messageKey, row.messageKey),
+          ),
+        );
+    }
+    this.messageChanged(going);
     for (const row of ending) {
       await this.db
         .update(conciergeMessageTurns)
@@ -927,13 +946,25 @@ export class ConciergeTasksRepository {
     return ending.length;
   }
 
-  /** Task `taskId` was made for guardian message `target`: started for it, or given its words. */
+  /**
+   * Task `taskId` was made for guardian message `target`: started for it, or
+   * given its words. The task's newest message follows it from now on, so the
+   * ones before it settle.
+   */
   async linkMessage(taskId: string, target: MessageTarget): Promise<void> {
     await this.db
       .insert(conciergeMessageTasks)
       .values({ taskId, ...target })
       .onConflictDoNothing();
     this.messageChanged([target]);
+    // The messages before it settle; told after, so the send is not held up.
+    void this.messagesOfTask(taskId)
+      .then((all) =>
+        this.messageChanged(
+          all.filter((one) => one.messageKey !== target.messageKey || one.chatId !== target.chatId),
+        ),
+      )
+      .catch(() => {});
   }
 
   /** Takes back {@link linkMessage}, as when the task never heard the message. */
@@ -1004,10 +1035,11 @@ export class ConciergeTasksRepository {
       mark.working = row.workingAt !== null;
       mark.turnFailed = row.turnFailed;
     }
-    for (const row of await this.db
+    const links = await this.db
       .select({
         messageKey: conciergeMessageTasks.messageKey,
         taskId: conciergeMessageTasks.taskId,
+        at: sql<number>`${conciergeMessageTasks}.rowid`,
       })
       .from(conciergeMessageTasks)
       .where(
@@ -1015,8 +1047,27 @@ export class ConciergeTasksRepository {
           eq(conciergeMessageTasks.chatId, chatId),
           inArray(conciergeMessageTasks.messageKey, keys),
         ),
-      )) {
-      of(row.messageKey).taskIds.push(row.taskId);
+      );
+    // A task follows only the newest message made for it: an older one does
+    // not light up again when the task runs for a newer one.
+    const newest = new Map(
+      links.length === 0
+        ? []
+        : (
+            await this.db
+              .select({
+                taskId: conciergeMessageTasks.taskId,
+                at: sql<number>`max(${conciergeMessageTasks}.rowid)`,
+              })
+              .from(conciergeMessageTasks)
+              .where(
+                inArray(conciergeMessageTasks.taskId, [...new Set(links.map((row) => row.taskId))]),
+              )
+              .groupBy(conciergeMessageTasks.taskId)
+          ).map((row) => [row.taskId, row.at]),
+    );
+    for (const row of links) {
+      if (newest.get(row.taskId) === row.at) of(row.messageKey).taskIds.push(row.taskId);
     }
     return out;
   }

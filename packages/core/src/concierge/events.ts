@@ -383,7 +383,8 @@ export function startConciergeEvents(
     // ends, so the session says whether a newer input took it over.
     if (status === "interrupted" && (handedOn || running.length > 0)) return;
     service.turnSettled(chatId);
-    service.messageStatus.turnSettled(chatId);
+    // A newer turn already running keeps its own timers and triggers.
+    if (running.length === 0) service.messageStatus.turnSettled(chatId);
     // A turn cut short with nothing carrying it on was stopped by its owner:
     // the messages it took stay stopped, and the next turn is told so.
     await tasks.repo

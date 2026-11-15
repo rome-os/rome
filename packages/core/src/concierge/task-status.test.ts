@@ -124,6 +124,11 @@ describe("messageStatus", () => {
     expect(messageStatus({ ...turn, answered: true, tasks: [failed, task("later")] })).toBeNull();
   });
 
+  it("shows none for a failed turn whose task got done", () => {
+    const done = { status: "ended" as const, endReason: "done" as const };
+    expect(messageStatus({ ...turn, answered: true, turnFailed: true, tasks: [done] })).toBeNull();
+  });
+
   it("fails for a result Rome gave up telling, unless its task was stopped or got no response", () => {
     const lost = { status: "ended" as const, reportLost: true };
     const answered = { ...turn, answered: true };

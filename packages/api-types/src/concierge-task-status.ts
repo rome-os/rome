@@ -167,7 +167,8 @@ export interface MessageStatusFacts {
 /**
  * A guardian message's status (docs/domains/chats.md#status): working while
  * its turn shows it working and has not answered it, or while a task made
- * for it is active, its report included; failed when its turn failed, a task
+ * for it is active, its report included; failed when its turn failed and no
+ * task made for it got done, a task
  * made for it ended failed, or Rome gave up telling the result of a task not
  * stopped since, once none of its tasks is still open; else none. A task that
  * waits on its owner or for later shows none: its card says so. A task that
@@ -181,8 +182,9 @@ export function messageStatus(facts: MessageStatusFacts): ConciergeMessageStatus
     return "working";
   }
   if (facts.tasks.some((task) => task.status !== "ended")) return null;
+  // A task made for the message that got done answers it, though its turn failed.
   const failed =
-    facts.turnFailed ||
+    (facts.turnFailed && !facts.tasks.some((task) => task.endReason === "done")) ||
     facts.tasks.some(
       (task) =>
         task.endReason === "failed" ||

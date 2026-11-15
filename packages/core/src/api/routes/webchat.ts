@@ -5,7 +5,6 @@ import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
   ChatPendingChecksResponse,
   ConciergeMessageStatus,
-  MessageStatusEvent,
   MessageWritingEvent,
 } from "@rome/api-types/concierge";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -1265,10 +1264,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (event.sessionId === sessionId) emit("message_reaction", event);
     });
     // Nor is a status: it never pushes either (docs/domains/chats.md#status).
-    const unsubscribeStatus = deps.concierge?.deps.tasks.onMessageStatus?.((target, status) => {
-      if (target.chatId !== sessionId) return;
-      const event: MessageStatusEvent = { sessionId, messageId: target.messageKey, status };
-      emit("message_status", event);
+    const unsubscribeStatus = deps.concierge?.onMessageStatus?.((event) => {
+      if (event.sessionId === sessionId) emit("message_status", event);
     });
     return () => {
       runningListeners.delete(runningListener);

@@ -415,12 +415,14 @@ export async function buildConciergeTools(
 
   // Sends `send` on to task `taskId` with guardian message `messageKey`
   // linked to it, so the message shows working while the task does: linked
-  // first, so a task that ends at once still settles it, and taken back when
-  // the task never hears it.
+  // first, so a task that ends at once still settles it. When the task never
+  // hears it the link is taken back, unless `keepOnFailure`: a task whose
+  // start failed stays, failed, and its message shows it.
   const sendLinked = async (
     taskId: string,
     messageKey: string | undefined,
     send: () => Promise<void>,
+    { keepOnFailure = false }: { keepOnFailure?: boolean } = {},
   ) => {
     if (!messageKey) return send();
     const target = { chatId: currentTurn().chatId, messageKey };
@@ -428,7 +430,9 @@ export async function buildConciergeTools(
     try {
       await send();
     } catch (error) {
-      await writeStatus("unlink", () => tasks.repo.unlinkMessage(taskId, target));
+      if (!keepOnFailure) {
+        await writeStatus("unlink", () => tasks.repo.unlinkMessage(taskId, target));
+      }
       throw error;
     }
   };
@@ -1388,8 +1392,11 @@ export async function buildConciergeTools(
                 schedule,
               );
             } else {
-              await sendLinked(started, start?.answered, () =>
-                sendInput(chatId, brief, skill?.name),
+              await sendLinked(
+                started,
+                start?.answered,
+                () => sendInput(chatId, brief, skill?.name),
+                { keepOnFailure: true },
               );
             }
             // A planned row that was stopped is taken up again by its start.
