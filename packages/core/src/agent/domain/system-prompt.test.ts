@@ -234,4 +234,18 @@ describe("the prompts and device connections", () => {
       }
     }
   });
+
+  it("sends every live device read through the device actions, and keeps rome-node for computers", () => {
+    const { systemPromptPrefix, actions, policy } = definition("main");
+    const prompt = buildPromptPrefix(
+      { name: "main", owner: "core", systemPromptPrefix, actions, policy },
+      { ...material, charter: "", identity: "" },
+    );
+    expect(prompt).toContain(
+      "goes through `core:device_describe` and `core:device_run`, never `rome-node`",
+    );
+    expect(prompt).toContain(
+      "`rome-node` runs programs and reads files on the guardian's computers",
+    );
+  });
 });

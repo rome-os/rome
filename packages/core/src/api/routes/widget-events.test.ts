@@ -647,7 +647,17 @@ describe("an event on the connect card for a device kind", () => {
       ui: connectCardUi("apple_health", "Apple Health", true),
     },
   };
-  const health = (state: string) => [{ capability: "apple_health", title: "Apple Health", state }];
+  /** A Health row as `GET /api/device-connections` lists it, reported `ago` ms before now. */
+  const row = (state: string, deviceId = "dev-1", ago = 0) => ({
+    id: `${deviceId}:apple_health`,
+    device: { id: deviceId, name: null, platform: "ios" },
+    capability: "apple_health",
+    title: "Apple Health",
+    state,
+    operations: [],
+    lastSeenAt: new Date(Date.now() - ago).toISOString(),
+  });
+  const health = (state: string) => [row(state)];
   const card = (rows: unknown[]) =>
     setup({ m: { chatId: "c1", content: [deviceCard] } }, "guardian", undefined, [], rows);
 
@@ -693,20 +703,7 @@ describe("an event on the connect card for a device kind", () => {
       },
     };
     // The guardian's own install has Health off; another install reports it working.
-    const rows = [
-      {
-        capability: "apple_health",
-        title: "Apple Health",
-        state: "off",
-        device: { id: "dev-asking" },
-      },
-      {
-        capability: "apple_health",
-        title: "Apple Health",
-        state: "working",
-        device: { id: "dev-other" },
-      },
-    ];
+    const rows = [row("off", "dev-asking"), row("working", "dev-other")];
     const off = setup(
       { m: { chatId: "c1", content: [forAsking] } },
       "guardian",
@@ -738,14 +735,7 @@ describe("an event on the connect card for a device kind", () => {
       ...deviceCard,
       render: { ...deviceCard.render, props: { ...deviceCard.render.props, deviceId: "dev-card" } },
     };
-    const rows = [
-      {
-        capability: "apple_health",
-        title: "Apple Health",
-        state: "working",
-        device: { id: "dev-card" },
-      },
-    ];
+    const rows = [row("working", "dev-card")];
     const answerFrom = async (
       content: unknown,
       headers: Record<string, string>,
@@ -772,6 +762,15 @@ describe("an event on the connect card for a device kind", () => {
     // A card raised for no device: the device the chat was last handed work from.
     expect(await answerFrom(deviceCard, {}, "dev-chat")).toBe("dev-chat");
     expect(await answerFrom(deviceCard, {}, null)).toBeUndefined();
+  });
+
+  it("treats a device silent for 7 days as not connected, as the live read does", async () => {
+    const stale = card([row("working", "dev-old", 8 * 24 * 60 * 60 * 1000)]);
+    expect(await (await stale.fire("m", { name: "connect", context })).json()).toEqual({
+      open: "http://localhost/connections/device/apple_health",
+    });
+    expect((await stale.fire("m", { name: "check", context })).status).toBe(409);
+    expect(stale.forwarded).toEqual([]);
   });
 
   it("takes check with no button for it only on core's own card", async () => {
