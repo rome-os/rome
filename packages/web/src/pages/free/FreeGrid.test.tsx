@@ -223,34 +223,7 @@ describe("FreeGrid mobile header", () => {
       "fetch",
       rs.fn((input: RequestInfo | URL) => {
         const url = String(input);
-        return Promise.resolve(
-          Response.json(
-            url === "/api/settings"
-              ? settings
-              : url.startsWith("/api/concierge/tasks")
-                ? {
-                    tasks: [
-                      {
-                        id: "t1",
-                        title: "Blocked",
-                        state: "needs_user",
-                        summary: null,
-                        waitingOn: "an answer",
-                        dueAt: null,
-                        rank: null,
-                        chat: null,
-                        createdAt: 1,
-                        updatedAt: 1,
-                        completedAt: null,
-                        archivedAt: null,
-                        notSynced: false,
-                        conciergeChat: { id: "concierge", name: "Concierge", main: true },
-                      },
-                    ],
-                  }
-                : [],
-          ),
-        );
+        return Promise.resolve(Response.json(url === "/api/settings" ? settings : []));
       }),
     );
     return render(

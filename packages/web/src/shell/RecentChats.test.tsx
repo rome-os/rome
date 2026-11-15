@@ -420,11 +420,9 @@ describe("RecentChats", () => {
               ? []
               : url === "/api/concierge/session"
                 ? { id: "concierge", unread: 0 }
-                : url.startsWith("/api/concierge/tasks")
-                  ? { tasks: [] }
-                  : method !== "GET"
-                    ? {}
-                    : null;
+                : method !== "GET"
+                  ? {}
+                  : null;
         if (body === null) return new Response("not found", { status: 404 });
         return new Response(JSON.stringify(body), {
           status: 200,
@@ -504,7 +502,6 @@ describe("RecentChats", () => {
         if (method !== "GET") return Response.json({ ok: true });
         if (url.startsWith("/api/chat/sessions")) return Response.json([]);
         if (url === "/api/concierge/session") return Response.json({ id: "concierge", unread: 0 });
-        if (url.startsWith("/api/concierge/tasks")) return Response.json({ tasks: [] });
         return new Response("not found", { status: 404 });
       }) as typeof fetch);
     const openDialog = async (user: ReturnType<typeof userEvent.setup>) => {
@@ -609,7 +606,7 @@ describe("RecentChats", () => {
   });
 
   describe("Concierge unread badge", () => {
-    const server = { unread: 0, tasks: [] as unknown[], settings: {} as Record<string, unknown> };
+    const server = { unread: 0, settings: {} as Record<string, unknown> };
     const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>
       spy.mock.calls.filter(([input]) => String(input) === "/api/concierge/session").length;
     const mockConcierge = () =>
@@ -621,9 +618,7 @@ describe("RecentChats", () => {
             ? server.settings
             : url === "/api/concierge/session"
               ? { id: "concierge", unread: server.unread }
-              : url.startsWith("/api/concierge/tasks")
-                ? { tasks: server.tasks }
-                : null;
+              : null;
         if (body === null) return new Response("not found", { status: 404 });
         return new Response(JSON.stringify(body), {
           status: 200,
@@ -634,27 +629,8 @@ describe("RecentChats", () => {
     beforeEach(() => {
       concierge.chatId = "concierge";
       server.unread = 0;
-      server.tasks = [];
       server.settings = {};
       FakeWebSocket.instances = [];
-    });
-
-    const taskRow = (id: string, state: string, extra: Record<string, unknown> = {}) => ({
-      id,
-      title: `Task ${id}`,
-      state,
-      summary: null,
-      waitingOn: null,
-      dueAt: null,
-      rank: null,
-      chat: null,
-      createdAt: 1,
-      updatedAt: 1,
-      completedAt: null,
-      archivedAt: null,
-      notSynced: false,
-      conciergeChat: { id: "concierge", name: "Concierge", main: true },
-      ...extra,
     });
 
     it("counts unread messages", async () => {
@@ -708,12 +684,11 @@ describe("RecentChats", () => {
       expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
     });
 
-    it("shows no tasks badge, even when tasks need the guardian", async () => {
+    it("shows the unread count as its only badge", async () => {
       server.unread = 3;
-      server.tasks = [taskRow("a", "needs_user"), taskRow("b", "needs_user")];
       mockConcierge();
       renderRecentChats();
-      // The link's label is the unread count alone: the tasks live in the chat's pill.
+      // The link's label is the unread count alone: the tasks live in the chat's Tasks panel.
       const entry = await screen.findByRole("link", { name: "Main chat, 3 unread messages" });
       expect(
         within(entry)

@@ -119,6 +119,60 @@ final class TaskListStore {
         tokens = []
     }
 
+    // MARK: Follow sources
+
+    /// The Concierge's connector list, read for the follow rows: it alone
+    /// says a follow's service cannot deliver now. Nil before a read.
+    private(set) var connectors: [ConnectorState]?
+    @ObservationIgnored private var connectorsReadAt: Date?
+    @ObservationIgnored private var readingConnectors = false
+    /// Goes up when the list may have changed (a follow changed, a
+    /// reconnect): a read that started before it neither counts as fresh nor
+    /// is the last one.
+    @ObservationIgnored private var connectorsGeneration = 0
+    /// How long a read stays fresh: reading asks every service whether it
+    /// works, about a second when nothing is cached on the server.
+    @ObservationIgnored var connectorsFresh: Duration = .seconds(60)
+
+    /// A follow row as it shows: its state with what the connector list adds.
+    func shown(_ follow: TaskListItem.Follow) -> TaskListItem.Follow {
+        var shown = follow
+        shown.state = ConnectorState.followState(follow, in: connectors)
+        return shown
+    }
+
+    /// Reads the connector list when a follow is on and the last read is
+    /// stale. The list shows without waiting for it.
+    private func readConnectorsIfNeeded() {
+        let following = groups.contains { group in
+            group.items.contains { item in
+                guard case .follow(let follow) = item else { return false }
+                return follow.state == "active"
+            }
+        }
+        guard following, !readingConnectors else { return }
+        if let at = connectorsReadAt, Date.now.timeIntervalSince(at) < Double(connectorsFresh.components.seconds) { return }
+        readingConnectors = true
+        let generation = connectorsGeneration
+        Task {
+            let list = try? await backend.connectors()
+            readingConnectors = false
+            if let list {
+                if list != connectors { connectors = list }
+                if generation == connectorsGeneration { connectorsReadAt = .now }
+            }
+            // A change came while it ran: what it read may be older than the change.
+            if generation != connectorsGeneration { readConnectorsIfNeeded() }
+        }
+    }
+
+    /// The connector list may have changed: the next chance reads it again,
+    /// even while a read is on its way.
+    private func connectorsChanged() {
+        connectorsReadAt = nil
+        connectorsGeneration += 1
+    }
+
     func load() async {
         reads += 1
         let mine = reads
@@ -141,6 +195,7 @@ final class TaskListStore {
             groups = newGroups
             loadFailed = false
             loaded = true
+            readConnectorsIfNeeded()
             // A stop shows its effect once the task reads as ended.
             stopping = stopping.filter { id in task(id).map { !TaskListWords.isEnded($0.task) } ?? false }
         } catch is CancellationError {
@@ -158,9 +213,12 @@ final class TaskListStore {
 
     private func handle(_ event: LiveEvent) {
         switch event {
-        case .taskListChanged(let id) where id == chatId:
+        case .taskListChanged(let id, let follows) where id == chatId:
+            // A follow changed: its source is read again with the list.
+            if follows { connectorsChanged() }
             Task { await load() }
         case .reconnected:
+            connectorsChanged()
             Task { await load() }
         default:
             break
