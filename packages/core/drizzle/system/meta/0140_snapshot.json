@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "283b1267-ec7b-49b8-a56e-a74b9676d277",
+  "id": "bddbbe59-4fb8-4300-a7fa-47a25594eb73",
   "prevId": "906f9929-0957-4c57-bd26-badf0e2fb59e",
   "tables": {
     "account_profiles": {
@@ -1283,6 +1283,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0
+        },
+        "ended_as": {
+          "name": "ended_as",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

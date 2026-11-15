@@ -847,16 +847,22 @@ export async function buildConciergeTools(
     if (taskId) service.noteSaid(taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
-    const answered = answers ?? (await certainlyAnswered(taskId));
-    if (answered) {
-      await tasks.repo.answerMessage(chatId, answered).catch((error: unknown) =>
-        log.warn("failed to settle an answered message", {
-          chatId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
+    await settleAnswered(answers, taskId);
     return id;
+  };
+
+  // A message, said or forwarded, answers the guardian message it names, or
+  // the one it certainly answers: that message is settled.
+  const settleAnswered = async (answers: string | undefined, taskId: string | undefined) => {
+    const { chatId } = currentTurn();
+    const answered = answers ?? (await certainlyAnswered(taskId));
+    if (!answered) return;
+    await tasks.repo.answerMessage(chatId, answered).catch((error: unknown) =>
+      log.warn("failed to settle an answered message", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   };
 
   // The guardian message a `say` naming no `answers` answers, when that is
@@ -919,6 +925,7 @@ export async function buildConciergeTools(
     // Only a result the guardian was shown counts as said.
     if (task) service.noteSaid(task.id);
     noteAnswers(id, answers);
+    await settleAnswered(answers, task?.id);
     // The push shows the message: the Concierge's lead-in, or else the
     // task's title and a preview of what it brought back (the guardian's
     // call, 2026-11-14). A secret is kept off the lock screen only by
@@ -1479,8 +1486,10 @@ export async function buildConciergeTools(
           if (task) await tasks.repo.resume(task.id);
           // The guardian message whose words go on: the one named, or the
           // turn's only one. It shows working while the task works for it.
+          // A scheduled task's runs are no work for one message: it links none.
           const relayed = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
-          if (task) await sendLinked(task.id, relayed, () => sendInput(chatId, text));
+          const scheduled = task ? await service.deps.schedules?.of(task.id) : null;
+          if (task && !scheduled) await sendLinked(task.id, relayed, () => sendInput(chatId, text));
           else await sendInput(chatId, text);
           await relayToTaskThread(chatId, answers);
           return "Sent; the task chat takes it as input.";

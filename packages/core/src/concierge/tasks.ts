@@ -11,6 +11,7 @@ import type { ConciergeMessageStatus } from "@rome/api-types/concierge";
 import {
   CONCIERGE_TASK_WAIT_EXPIRY_MS,
   messageStatus,
+  parseTaskStatus,
   type ConciergeTaskFacts,
   type ConciergeTaskStatusResult,
   legacyTaskState,
@@ -435,15 +436,39 @@ export class ConciergeTasks {
         working: mark.working,
         turnFailed: mark.turnFailed,
         handedToNewer: mark.earlierTaskIds.length > 0,
-        tasks: mark.taskIds.flatMap((id) => {
-          const of = status.get(id);
-          const row = rows.find((candidate) => candidate.id === id);
-          return of ? [{ ...of, reportLost: row?.reportGivenUp === true }] : [];
-        }),
+        tasks: [
+          ...mark.taskIds.flatMap((id) => {
+            const of = status.get(id);
+            const row = rows.find((candidate) => candidate.id === id);
+            return of ? [{ ...of, reportLost: row?.reportGivenUp === true }] : [];
+          }),
+          // A task that ended for it with its result told stays as it ended.
+          ...mark.endedAs.map((reason) => ({
+            status: "ended" as const,
+            endReason: parseTaskStatus("ended", reason).endReason,
+          })),
+        ],
       });
       if (found) out.set(key, found);
     }
     return out;
+  }
+
+  /**
+   * Ends the links of task row `row` to its messages once it ended with its
+   * result told (docs/domains/chats.md#status): they keep how it ended, and
+   * its later work leaves them alone. A result Rome gave up telling ends
+   * them failed.
+   */
+  async endLinksIfEnded(row: ConciergeTaskRow): Promise<void> {
+    // Only a result, told, ends them: a task that has not run yet reads as
+    // ended too, and one whose result waits is still the message's work.
+    const told = row.stoppedAt !== null || (row.lastOutcome !== null && !row.outcomeUnsaid);
+    if (!told) return;
+    const of = (await this.statusOf([row])).get(row.id);
+    if (of?.status !== "ended") return;
+    const lost = row.reportGivenUp && of.endReason !== "stopped" && of.endReason !== "no_response";
+    await this.repo.endLinks(row.id, lost ? "failed" : (of.endReason ?? "done"));
   }
 
   /**

@@ -894,6 +894,12 @@ export const conciergeMessageTasks = sqliteTable(
     messageKey: text("message_key").notNull(),
     /** The order it was made in, raised each time it is made again: a task follows its highest. */
     seq: integer("seq").notNull().default(0),
+    /**
+     * How the task ended for this message once it ended with its result told,
+     * after which the task's later work leaves the message alone; null while
+     * the message follows it.
+     */
+    endedAs: text("ended_as"),
   },
   (table) => [
     primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),

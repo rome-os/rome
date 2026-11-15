@@ -1030,6 +1030,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     tasks.repo.onChange(({ row, conciergeChat }) => {
       if (row.sessionId) movedBy.delete(row.sessionId);
       void guard(tracker.taskChanged(row.id, conciergeChat.id));
+      // A task that ended with its result told lets go of its messages.
+      void guard(tasks.endLinksIfEnded(row));
     }),
     coalescer.onChange(reportChanged),
     // A task that ended waits on no one: its Concierge chat's "needs you" is read again.

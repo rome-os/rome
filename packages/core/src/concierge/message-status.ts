@@ -33,7 +33,10 @@ export function isWorkingTool(tool: string): boolean {
   return !ANSWER_TOOLS.has(bareTool(tool));
 }
 
-type StatusRepo = Pick<ConciergeTasksRepository, "markWorking" | "markReacted" | "anyWorking">;
+type StatusRepo = Pick<
+  ConciergeTasksRepository,
+  "markWorking" | "markReacted" | "anyInheritedWorking"
+>;
 
 /**
  * The running turns' working triggers, one tracker per process. A message
@@ -65,7 +68,7 @@ export class MessageStatusTracker {
     if (before) clearTimeout(before);
     const timer = setTimeout(() => {
       this.timers.delete(key);
-      void this.guard(this.ranLong(chatId, messageKey));
+      void this.guard(this.ranLong(chatId));
     }, this.workingAfterMs);
     timer.unref?.();
     this.timers.set(key, timer);
@@ -76,7 +79,7 @@ export class MessageStatusTracker {
     if (!this.open.has(chatId) || !isWorkingTool(tool)) return;
     await this.guard(
       (async () => {
-        if (await this.repo.anyWorking(chatId)) return;
+        if (await this.repo.anyInheritedWorking(chatId)) return;
         await this.repo.markWorking(chatId);
       })(),
     );
@@ -116,9 +119,10 @@ export class MessageStatusTracker {
     this.timers.clear();
   }
 
-  private async ranLong(chatId: string, messageKey: string): Promise<void> {
-    if (await this.repo.anyWorking(chatId)) return;
-    await this.repo.markWorking(chatId, { messageKey });
+  private async ranLong(chatId: string): Promise<void> {
+    // Every message the turn took is treated alike, whichever trigger fires first.
+    if (await this.repo.anyInheritedWorking(chatId)) return;
+    await this.repo.markWorking(chatId);
   }
 
   // The status only shows how the work stands, so failing to write it never
