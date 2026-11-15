@@ -1891,16 +1891,6 @@
         }
       }
     },
-    "Get notified when Rome has something for you" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 有消息给你时通知你"
-          }
-        }
-      }
-    },
     "Guardian" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3603,16 +3593,6 @@
         }
       }
     },
-    "Respond" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "去处理"
-          }
-        }
-      }
-    },
     "Restarting your Rome…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3639,6 +3619,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "静息心率"
+          }
+        }
+      }
+    },
+    "Results, questions and reminders" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结果、提问和提醒"
           }
         }
       }
@@ -4959,6 +4949,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开启 Chat"
+          }
+        }
+      }
+    },
+    "Turn on notifications" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开通知"
           }
         }
       }

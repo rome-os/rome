@@ -234,6 +234,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           widgets: turn.widgets,
           hasSpeaker,
           devices: deps.deviceKinds?.(),
+          deviceStates: deps.deviceKinds,
           devicesOnly: provided.some((tool) => tool.name === "connect_card"),
         }),
         ...shareLocationTools({

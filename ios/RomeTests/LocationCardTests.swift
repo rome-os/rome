@@ -106,6 +106,7 @@ import Testing
         await surface.shareIfAllowed()
         #expect(sent.value.first?["name"]?.string == "share-location")
         #expect(sent.value.first?["context"]?["accuracy"]?.number == 9)
+        #expect(sent.value.first?["context"]?["auto"]?.bool == true, "core marks it as shared by itself")
         #expect(surface.sent)
         // Drawn again, it sends no second share.
         await surface.shareIfAllowed()
@@ -156,6 +157,25 @@ import Testing
         await surface.shareIfAllowed()
         #expect(!surface.autoSharing)
         #expect(sent.value.isEmpty && locator.reads == 0)
+    }
+
+    /// A card read back from history, as the instance stores it: still core's
+    /// share-location card, drawable, never a generic app card.
+    @Test func aStoredCardReadBackFromHistoryIsStillTheLocationCard() throws {
+        let stored = #"[{"type":"pending_interaction","toolUseId":"t1","appId":"core","render":{"kind":"inline","componentId":"location-card","props":{"reason":"r","autoShareToken":"k"},"builtin":true,"ui":{"data":{"autoShare":true},"components":[{"id":"root","component":"Column","children":["title","reason","actions"]},{"id":"title","component":"Text","text":"Share your location?","variant":"h5"},{"id":"reason","component":"Text","text":"r"},{"id":"actions","component":"Row","children":["decline","share"],"justify":"end"},{"id":"decline","component":"Button","child":"decline-label","variant":"borderless","action":{"event":{"name":"decline"}}},{"id":"decline-label","component":"Text","text":"Not now"},{"id":"share","component":"Button","child":"share-label","variant":"primary","action":{"event":{"name":"share-location"}}},{"id":"share-label","component":"Text","text":"Share"}]}}}]"#
+        guard case .widgetUI(let part) = MessagePart.parse(stored).first else {
+            Issue.record("a stored location card should parse as a card described as data")
+            return
+        }
+        #expect(LocationCard.isLocationCard(part) && part.isDrawable && part.waits)
+        #expect(LocationCard.mayAutoShare(part))
+        let answered = #"[{"type":"interaction_result","toolUseId":"t1","messageId":"m1","output":{"status":"shared","accuracyMeters":37,"fixedAt":"2026-11-14T23:20:21.115Z","auto":true}}]"#
+        guard case .interactionResult(_, let output, _) = MessagePart.parse(answered).first else {
+            Issue.record("the answer should parse")
+            return
+        }
+        #expect(output["auto"]?.bool == true)
+        #expect(LocationCard.outcome(output) == "Location shared · ±37 m")
     }
 
     @Test func anAnsweredCardSaysHowItEnded() {

@@ -58,6 +58,13 @@ describe("share_location", () => {
     });
   });
 
+  it("reads a request for places that names none as near the guardian, with no questions first", async () => {
+    const { tool } = await call({ privateTurn: async () => true });
+    expect(tool?.description).toContain("names no place means near them");
+    expect(tool?.description).toContain("never ask which city");
+    expect(tool?.description).toContain("suggest a varied few");
+  });
+
   it("refuses in a turn others can read, with a reason the agent passes on", async () => {
     const { result } = await call({ privateTurn: async () => false });
     expect(result.isError).toBe(true);

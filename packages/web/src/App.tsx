@@ -10,8 +10,7 @@ import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
 import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
 import { useSettingsBackdrop } from "./hooks/use-settings-backdrop";
-import FreePage, { MainChatRedirect } from "./pages/free/FreePage";
-import { MAIN_CHAT_PATH } from "@/lib/chat-session";
+import FreePage, { HomeRedirect, MainChatRedirect } from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
 // /chat is the home route and what the first-load trace targets, so FreePage +
@@ -156,7 +155,7 @@ export default function App() {
               </AuthGate>
             }
           >
-            <Route path="/" element={<Navigate to={MAIN_CHAT_PATH} replace />} />
+            <Route path="/" element={<HomeRedirect />} />
             <Route path="/chat/concierge" element={<MainChatRedirect />} />
             <Route path="/chat/*" element={<FreePage />} />
             {/* The signed-in person's main Concierge chat. It shares FreePage

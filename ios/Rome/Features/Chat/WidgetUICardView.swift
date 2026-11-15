@@ -74,7 +74,51 @@ private struct WidgetCardBody: View {
 
     private var locked: Bool { waiting?.answered != nil || surface.sent || surface.autoSharing }
 
+    /// A share the card made by itself, as core stored it: no question the
+    /// guardian answered, so it shows as one line in place of the card.
+    private var autoShared: JSONValue? {
+        guard let answered = waiting?.answered, answered["auto"]?.bool == true, LocationCard.isLocationCard(part) else { return nil }
+        return answered
+    }
+
     var body: some View {
+        // One container whatever shows, so the card's reads and its share
+        // keep one task while the branch inside changes.
+        VStack(spacing: 0) {
+            if let answered = autoShared ?? surface.autoSent {
+                // In the thread label's style: a quiet line, not a card. Until
+                // the stored answer arrives, the share just sent says it.
+                Text(verbatim: LocationCard.outcome(answered))
+                    .romeFont(12)
+                    .foregroundStyle(Palette.sub.opacity(0.75))
+                    .padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if surface.autoSharing, !surface.sendFailed, LocationCard.isLocationCard(part) {
+                // While the card shares by itself, nothing shows.
+                Color.clear.frame(height: 0)
+            } else {
+                card
+            }
+        }
+        .task(id: part) {
+            surface.answered = waiting?.answered != nil
+            surface.show(part, call: call, press: press, open: { openURL($0) }, connectDevice: { [connectDevice] url in
+                await connectDevice?.run(url)
+            })
+            surface.showAnswered(waiting?.answered)
+            await surface.load()
+            await surface.shareIfAllowed()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            Task { await surface.shareIfAllowed() }
+        }
+        .onChange(of: waiting?.answered) {
+            surface.answered = waiting?.answered != nil
+            surface.showAnswered(waiting?.answered)
+        }
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let viewModel = surface.viewModel {
                 Surface(viewModel: viewModel, catalog: WidgetCatalog.catalog)
@@ -104,7 +148,11 @@ private struct WidgetCardBody: View {
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
             }
-            if surface.sendFailed, let why = surface.refusal {
+            // An answered card shows how it ended, never a failed send: the
+            // answer landed, whichever press or client sent it.
+            if waiting?.answered != nil {
+                EmptyView()
+            } else if surface.sendFailed, let why = surface.refusal {
                 Text(verbatim: why)
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.destructive)
@@ -127,22 +175,6 @@ private struct WidgetCardBody: View {
         .hairline(radius: Metrics.cardRadius)
         .padding(.top, 4)
         .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
-        .task(id: part) {
-            surface.answered = waiting?.answered != nil
-            surface.show(part, call: call, press: press, open: { openURL($0) }, connectDevice: { [connectDevice] url in
-                await connectDevice?.run(url)
-            })
-            surface.showAnswered(waiting?.answered)
-            await surface.load()
-            await surface.shareIfAllowed()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            Task { await surface.shareIfAllowed() }
-        }
-        .onChange(of: waiting?.answered) {
-            surface.answered = waiting?.answered != nil
-            surface.showAnswered(waiting?.answered)
-        }
     }
 }
 
@@ -153,6 +185,9 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var viewModel: SurfaceViewModel?
     @Published private(set) var loaded = false
     @Published private(set) var failed = false
+    /// A share the card sent by itself and core took, as its answer reads,
+    /// until the stored answer arrives.
+    @Published private(set) var autoSent: Rome.JSONValue?
     /// Core did not take the last event the card sent.
     @Published private(set) var sendFailed = false
     /// Why core or the card's owner refused the last event, when it said.
@@ -328,7 +363,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             guard appActive() else { return }
             Self.autoShared.insert(autoKey)
             autoSharing = true
-            await press(LocationCard.shareEvent, body: .object([:]), auto: true)
+            await press(LocationCard.shareEvent, body: .object(["auto": .bool(true)]), auto: true)
             autoSharing = false
         case .denied:
             autoSharing = false
@@ -372,9 +407,19 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             var reply = try await send(name, body)
             // A device connection's link runs the app's own authorization,
             // and the card checks once it is done: core reads the report.
-            if let url = reply.open, let connected = await connectDevice(url) {
-                guard connected else { return }
-                reply = try await send("check", body)
+            // The card is busy only while it posts: during the authorization
+            // its Not now stays usable, and a card answered meanwhile checks
+            // nothing.
+            if let url = reply.open {
+                busy = false
+                let connected = await connectDevice(url)
+                if let connected {
+                    guard connected, !(waits && (answered || sent)), !busy else { return }
+                    busy = true
+                    reply = try await send("check", body)
+                } else {
+                    busy = true
+                }
             }
             // A link the reply names opens; a card core says is answered is
             // sent, and any other card reads its data again, and that read
@@ -383,9 +428,19 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             refusal = nil
             failed = false
             if let url = reply.open { open(url) }
-            if waits && reply.answered { sent = true } else { await load() }
+            if waits && reply.answered {
+                sent = true
+                if auto, let meters = body["accuracy"]?.number {
+                    autoSent = .object(["status": .string("shared"), "accuracyMeters": .number(meters.rounded()), "auto": .bool(true)])
+                }
+            } else { await load() }
         } catch {
             if auto { return }
+            // Answered already, by another press or client: nothing failed.
+            if waits, case APIError.server(400, let message?) = error, message.contains("already answered") {
+                sent = true
+                return
+            }
             sendFailed = true
             if case APIError.server(_, let message?) = error, !message.isEmpty { refusal = message } else { refusal = nil }
         }

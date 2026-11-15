@@ -47,20 +47,24 @@ describe("connect_account", () => {
 });
 
 describe("connect_account for a device kind", () => {
-  const row = (deviceId: string, capability: string, title: string) =>
-    ({ device: { id: deviceId }, capability, title }) as DeviceConnection;
+  const row = (
+    deviceId: string,
+    capability: string,
+    title: string,
+    state: DeviceConnection["state"] = "off",
+  ) => ({ device: { id: deviceId, name: "iPhone" }, capability, title, state }) as DeviceConnection;
 
-  it("takes its device kinds from what devices reported, each once, never an OAuth kind's name", () => {
+  it("takes its device kinds from what devices reported, each once at its best state, never an OAuth kind's name", () => {
     expect(
       deviceKinds([
-        row("dev-1", "apple_health", "Apple Health"),
-        row("dev-2", "apple_health", "Apple Health"),
-        row("dev-1", "device", "Device"),
+        row("dev-1", "apple_health", "Apple Health", "off"),
+        row("dev-2", "apple_health", "Apple Health", "working"),
+        row("dev-1", "device", "Device", "broken"),
         row("dev-1", "github", "Not GitHub"),
       ]),
     ).toEqual([
-      { kind: "apple_health", label: "Apple Health" },
-      { kind: "device", label: "Device" },
+      { kind: "apple_health", label: "Apple Health", state: "working", device: "iPhone" },
+      { kind: "device", label: "Device", state: "broken", device: "iPhone" },
     ]);
   });
 

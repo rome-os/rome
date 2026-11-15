@@ -29,9 +29,6 @@ struct AgentPage: View {
     let onUse: (String) -> Void
     /// A task's chat was asked for: it opens inside the page.
     let onOpenTask: (ConciergeTask.LinkedChat) -> Void
-    /// Respond on a task that needs the guardian: the page closes and the
-    /// chat shows the message with the card it waits on.
-    let onRespond: (_ messageId: String) -> Void
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
@@ -65,7 +62,7 @@ struct AgentPage: View {
             case .uses:
                 uses
             case .tasks:
-                TaskListView(store: taskList, onRespond: respond, onOpenChat: onOpenTask)
+                TaskListView(store: taskList, onOpenChat: onOpenTask)
             }
         }
         .task(id: route.tasksChatId) {
@@ -90,17 +87,6 @@ struct AgentPage: View {
         }
     }
 
-    /// To the card in the chat; with no message of this chat showing it,
-    /// to the task chat that holds it.
-    private func respond(_ item: TaskListItem.Task) {
-        if let messageId = item.cardMessageId {
-            onRespond(messageId)
-        } else if let chat = item.task.chat {
-            onOpenTask(chat)
-        } else {
-            taskList?.fail(String(localized: "Could not find the card"))
-        }
-    }
 
     private var header: some View {
         VStack(spacing: 12) {

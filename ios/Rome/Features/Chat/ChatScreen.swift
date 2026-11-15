@@ -68,8 +68,6 @@ struct ChatScreen: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if workspace.conciergeState == .ready {
                 VStack(spacing: 10) {
-                    // Inside the composer's inset, so the last message rests above it too.
-                    UpdatePill(agentName: workspace.agentName)
                     if store.showsQuoteBar {
                         QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
