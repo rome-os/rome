@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import type { InputStatusEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import { createWebchatRuntime } from "./webchat.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
@@ -11,7 +12,7 @@ const body = { text: "inspect metadata, not a data request" };
 
 function harness(owner = "guardian", audience: "private" | "shared" = "private") {
   let active = true;
-  const inputs = new Map<string, unknown>();
+  const inputs = new Map<string, { inputState: InputStatusEvent["state"]; turnId?: string }>();
   const rows = new Map([
     [
       "source",
@@ -53,7 +54,19 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
     release,
   };
   const open = rs.fn(async () => session);
-  const updateUserInput = rs.fn(async () => {});
+  const updateUserInput = rs.fn(async (_chat: string, status: InputStatusEvent) => {
+    if (inputs.has(status.inputId)) {
+      inputs.set(status.inputId, {
+        inputState: status.state,
+        ...(status.turnId ? { turnId: status.turnId } : {}),
+      });
+    }
+  });
+  const failQueuedUserInput = rs.fn(async (_chat: string, inputId: string) => {
+    if (inputs.get(inputId)?.inputState === "queued") {
+      inputs.set(inputId, { ...inputs.get(inputId)!, inputState: "failed" });
+    }
+  });
   const repo = {
     onMessageInserted: () => () => {},
     getSession: async (id: string) => rows.get(id) ?? null,
@@ -67,13 +80,13 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
       archivedAt: null,
     }),
     recordSessionInChat: async () => null,
-    recordUserInput: rs.fn(async (id: string, _chat: string, _content: string, actor: unknown) => {
-      inputs.set(id, actor);
+    recordUserInput: rs.fn(async (id: string, _chat: string, _content: string, _actor: unknown) => {
+      inputs.set(id, { inputState: "queued" });
       return true;
     }),
-    getUserInput: async (_chat: string, id: string) =>
-      inputs.has(id) ? { inputState: "queued" } : null,
+    getUserInput: async (_chat: string, id: string) => inputs.get(id) ?? null,
     updateUserInput,
+    failQueuedUserInput,
   };
   const agent = {
     name: "core:concierge",
@@ -113,15 +126,17 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
   return {
     ...built,
     rows,
+    inputs,
     repo,
     submit,
     release,
     open,
     updateUserInput,
+    failQueuedUserInput,
     revoke: () => {
       active = false;
     },
-    send: (actor = guardian) =>
+    send: (actor = guardian, sentBody = body) =>
       withTaskInputActor(
         {
           agentName: "core:concierge",
@@ -132,8 +147,8 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
           isCurrent: () => active,
         },
         "target",
-        body,
-        () => built.runtime.post("target", body, speaker),
+        sentBody,
+        () => built.runtime.post("target", sentBody, speaker),
       ),
   };
 }
@@ -277,6 +292,53 @@ describe("webchat task actor admission without a database or provider", () => {
         "target",
         expect.objectContaining({ state: "failed" }),
       );
+    });
+  }
+
+  it("marks a recorded attributed input failed after a generic open error, without resending", async () => {
+    const s = harness();
+    s.open.mockRejectedValue(new Error("synthetic setup failure"));
+    expect(await s.send()).toMatchObject({ ok: false });
+    expect([...s.inputs.values()]).toEqual([{ inputState: "failed" }]);
+    expect(s.failQueuedUserInput).toHaveBeenCalledTimes(1);
+    expect(s.updateUserInput).not.toHaveBeenCalled();
+    expect(s.open).toHaveBeenCalledTimes(1);
+    expect(s.repo.recordUserInput).toHaveBeenCalledTimes(1);
+    expect(s.submit).not.toHaveBeenCalled();
+  });
+
+  it("preserves ordinary unattributed delivery's recorded state on the same open error", async () => {
+    const s = harness();
+    s.open.mockRejectedValue(new Error("synthetic setup failure"));
+    expect(await s.runtime.post("target", body, speaker)).toMatchObject({ ok: true });
+    expect([...s.inputs.values()]).toEqual([{ inputState: "queued" }]);
+    expect(s.updateUserInput).not.toHaveBeenCalled();
+    expect(s.open).toHaveBeenCalledTimes(1);
+    expect(s.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not invent a failed record for a refusal before input recording", async () => {
+    const s = harness();
+    expect(await s.send(guardian, { text: " " })).toMatchObject({ ok: false });
+    expect(s.inputs.size).toBe(0);
+    expect(s.updateUserInput).not.toHaveBeenCalled();
+    expect(s.open).not.toHaveBeenCalled();
+    expect(s.submit).not.toHaveBeenCalled();
+  });
+
+  for (const state of ["submitted", "accepted", "consumed", "unknown", "failed"] as const) {
+    it(`does not overwrite a recorded ${state} input on an open error`, async () => {
+      const s = harness();
+      s.open.mockImplementation(async () => {
+        const id = [...s.inputs.keys()][0]!;
+        s.inputs.set(id, { inputState: state, turnId: "existing-turn" });
+        throw new Error("synthetic setup failure");
+      });
+      expect(await s.send()).toMatchObject({ ok: false });
+      expect([...s.inputs.values()]).toEqual([{ inputState: state, turnId: "existing-turn" }]);
+      expect(s.updateUserInput).not.toHaveBeenCalled();
+      expect(s.open).toHaveBeenCalledTimes(1);
+      expect(s.submit).not.toHaveBeenCalled();
     });
   }
 

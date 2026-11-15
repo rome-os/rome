@@ -5416,7 +5416,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
       if (sent.status >= 400) {
         // A refused attributed input never reached submit, even if recorded.
-        if (claim) return { ok: false, error: `${routeError(sent)}; task input was not admitted` };
+        if (claim) {
+          await deps.webchatRepo.failQueuedUserInput(chatId, inputId);
+          return { ok: false, error: `${routeError(sent)}; task input was not admitted` };
+        }
         // Once the input is recorded it is said, even when the agent could not
         // be woken on it: answering failed would invite a second message.
         if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
