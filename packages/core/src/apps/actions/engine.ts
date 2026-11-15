@@ -22,6 +22,7 @@ import type {
 } from "../repositories/action-executions.js";
 import type { ApprovalsRepository } from "../repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
+import { isPersonalDataAction, PERSONAL_DATA_PRIVATE_ONLY } from "./personal-data.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../../logger.js";
@@ -149,6 +150,13 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // registers.
   "core:read_person",
   "core:show_file",
+  // Reads of the personal-data store (personal-data/actions.ts).
+  "core:personal_data_catalog",
+  "core:personal_data_query",
+  // The device actions (connections/device/actions.ts). The node client that
+  // calls a device lives in main.
+  "core:device_describe",
+  "core:device_run",
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",
@@ -184,6 +192,14 @@ export interface ActionRunContext {
    * agent / user / system-initiated calls. */
   callerAppId?: string;
   channelContext?: ThreadContext;
+  /**
+   * Who can read what the calling turn says. A personal-data action runs only
+   * when the call itself is given `private`; absent, it is refused. A nested
+   * call inherits it for the turns it starts, never for this check, so a
+   * nested call reads no personal data.
+   * Domain: docs/domains/participation.md#audience.
+   */
+  audience?: "private" | "shared";
   sharedContext?: Record<string, unknown>;
   hookInvocationContext?: HookInvocationContext;
   replayJournal?: JournalEntry[];
@@ -297,6 +313,9 @@ interface ActionEngineOptions {
    * worker. Trust never comes from the action's own manifest. Absent, every
    * root takes a worker as before. */
   isFirstPartyAction?: (actionName: string) => boolean;
+  /** Main-only: who can read a chat. A first-party root run given a chat and
+   *  no audience, such as the inbox's message handler, takes the chat's. */
+  placeAudience?: (context: ThreadContext) => Promise<"private" | "shared">;
 }
 
 /** The arguments as an execution record keeps them, without the values a root run omits. */
@@ -426,6 +445,7 @@ export class ActionEngine {
   private actionSubprocessRunner: ActionSubprocessRunner | null;
   private actionWorkerFork: ActionEngineOptions["actionWorkerFork"];
   private isFirstPartyAction: ActionEngineOptions["isFirstPartyAction"];
+  private placeAudience: ActionEngineOptions["placeAudience"];
   private onWorkerInterrupted: ActionEngineOptions["onWorkerInterrupted"];
   private onApprovalCreated: ActionEngineOptions["onApprovalCreated"];
   private clock: Clock;
@@ -462,6 +482,7 @@ export class ActionEngine {
     this.actionSubprocessRunner = options?.actionSubprocessRunner ?? null;
     this.actionWorkerFork = options?.actionWorkerFork;
     this.isFirstPartyAction = options?.isFirstPartyAction;
+    this.placeAudience = options?.placeAudience;
     this.workerWarmPoolSize =
       this.processRole === "main"
         ? Math.max(0, Math.floor(options?.workerWarmPoolSize ?? DEFAULT_WORKER_WARM_POOL_SIZE))
@@ -547,6 +568,24 @@ export class ActionEngine {
     const action = this.registry.get(name);
     if (!action) {
       throw new ActionNotFoundError(name);
+    }
+    if (isPersonalDataAction(action.config.name) && context?.audience !== "private") {
+      log.info("personal-data action refused outside a private turn", {
+        action: action.config.name,
+        initiator: context?.initiator,
+      });
+      return { status: "error", error: PERSONAL_DATA_PRIVATE_ONLY };
+    }
+    // Only a first-party action carries the audience on to the turns it
+    // starts, so a third-party app cannot start a private turn and read
+    // personal data through it. The worker cannot tell, so it never passes
+    // one on to a nested call (handleNestedCall).
+    if (
+      context?.audience !== undefined &&
+      this.processRole === "main" &&
+      !this.isTrustedForAudience(action.config.name)
+    ) {
+      context = { ...context, audience: undefined };
     }
     const runContext = withCurrentHookInvocationContext(context);
 
@@ -680,6 +719,18 @@ export class ActionEngine {
     if (!actor && isReplay && context?.replayRootExecutionId) {
       const priorRoot = await this.executionsRepo.findById(context.replayRootExecutionId);
       actor = (priorRoot?.actor as SessionActor | null | undefined) ?? undefined;
+    }
+    // Only a run main starts itself, such as the inbox hook's, reads the
+    // audience off the chat it names. An app's run, detached or not, names
+    // its caller's chat but carries no audience of its own, so it is shared.
+    if (
+      context?.audience === undefined &&
+      context?.channelContext &&
+      !context.callerAppId &&
+      this.placeAudience &&
+      this.isTrustedForAudience(action.config.name)
+    ) {
+      context = { ...context, audience: await this.placeAudience(context.channelContext) };
     }
     if (actor && context?.actor !== actor) {
       context = { ...(context ?? {}), actor };
@@ -940,6 +991,10 @@ export class ActionEngine {
       // accountable for every hop underneath it.
       actor: parentStore?.actor ?? context?.actor,
       channelContext: context?.channelContext ?? parentStore?.channelContext,
+      audience:
+        this.processRole === "main" && this.isTrustedForAudience(action.config.name)
+          ? (context?.audience ?? parentStore?.audience)
+          : undefined,
       sharedContext: mergeSharedContext(parentStore?.sharedContext, context?.sharedContext),
       sessionId: context?.sessionId ?? parentStore?.sessionId,
       turnId: context?.turnId ?? parentStore?.turnId,
@@ -1136,6 +1191,7 @@ export class ActionEngine {
       parentExecutionId: invocation.parentId,
       parentActionName: invocation.context?.parentActionName,
       channelContext: invocation.context?.channelContext,
+      audience: invocation.context?.audience,
       sharedContext: invocation.context?.sharedContext,
       sessionId: invocation.context?.sessionId,
       turnId: invocation.context?.turnId,
@@ -1829,6 +1885,16 @@ export class ActionEngine {
       return replayContext.getStore()?.coordinationRoot ? "in_process" : "subprocess";
     }
     return action.config.cancellable ? "subprocess" : "in_process";
+  }
+
+  /** Whether a root run's chat is trusted to say who reads it: only a
+   *  first-party action's caller names a chat main believes. */
+  private isTrustedForAudience(actionName: string): boolean {
+    try {
+      return this.isFirstPartyAction?.(actionName) === true;
+    } catch {
+      return false;
+    }
   }
 
   /** Whether a root runs in main: a first-party coordination action that is

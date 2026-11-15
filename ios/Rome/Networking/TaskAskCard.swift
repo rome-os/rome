@@ -18,9 +18,11 @@ struct TaskAskCard: Hashable, Sendable {
         var messageId: String? = nil
         let render: JSONValue?
         let since: Double
-        /// Nobody answered it in time: its task ended for no response, and it takes an answer still.
+        /// Nobody answered it in time: its wait ran out. It takes no answer.
         let expired: Bool
         let outcome: QuestionOutcome?
+        /// Its task ended while it had no outcome (`closed`; missing reads as false).
+        var closed = false
     }
 
     enum QuestionOutcome: Hashable, Sendable {
@@ -44,6 +46,8 @@ struct TaskAskCard: Hashable, Sendable {
         let preview: JSONValue?
         let since: Double
         let outcome: ApprovalOutcome?
+        /// Its task ended while it had no outcome (`closed`; missing reads as false).
+        var closed = false
     }
 
     enum ApprovalOutcome: Hashable, Sendable {
@@ -76,7 +80,8 @@ struct TaskAskCard: Hashable, Sendable {
                 render: json["render"],
                 since: json["since"]?.number ?? 0,
                 expired: json["expired"]?.bool ?? false,
-                outcome: outcome
+                outcome: outcome,
+                closed: json["closed"]?.bool ?? false
             ))
         case "approval":
             guard let id = json["id"]?.string else { return nil }
@@ -93,7 +98,8 @@ struct TaskAskCard: Hashable, Sendable {
                 actionName: json["actionName"]?.string,
                 preview: json["preview"],
                 since: json["since"]?.number ?? 0,
-                outcome: outcome
+                outcome: outcome,
+                closed: json["closed"]?.bool ?? false
             ))
         case "unavailable":
             self.kind = .unavailable
@@ -120,10 +126,25 @@ struct TaskAskCard: Hashable, Sendable {
         }
     }
 
-    /// Whether it is an open, expired question (it takes an answer, yet waits on no one).
+    /// Whether it is an expired question with no outcome.
     var expired: Bool {
         if case .question(let question) = kind { return question.outcome == nil && question.expired }
         return false
+    }
+
+    /// Whether its task ended while it had no outcome.
+    var closed: Bool {
+        switch kind {
+        case .question(let question): return question.outcome == nil && question.closed
+        case .approval(let approval): return approval.outcome == nil && approval.closed
+        case .unavailable: return false
+        }
+    }
+
+    /// Whether it waits on its owner: no outcome, not expired, not closed.
+    /// Every other card is read-only (docs/domains/chats.md).
+    var waits: Bool {
+        id != nil && !settled && !expired && !closed
     }
 
     /// The question's form, when its render is the built-in question card;

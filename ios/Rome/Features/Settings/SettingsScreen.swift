@@ -26,7 +26,7 @@ struct PageHeader: View {
             } else {
                 Color.clear.frame(width: 44, height: 44)
             }
-            PlainHeaderTitle(title: Text(title))
+            PlainHeaderTitle(title: Text(title), size: inSheet ? PlainHeaderTitle.secondarySize : 15)
             if let onClose {
                 GlassCircleButton(accessibilityLabel: "Close", action: onClose) {
                     Image(systemName: "xmark").romeFont(16, .semibold)
@@ -55,16 +55,21 @@ enum AppLanguage {
 
 /// An inset group: a white rounded card with hairline rows.
 struct SettingsGroup<Content: View>: View {
+    /// Text around a card (its header, a status line, a footer) starts where
+    /// the card's row text does, as in iOS inset-grouped lists.
+    static var textInset: CGFloat { 16 }
+
     var header: LocalizedStringKey? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let header {
-                // At the card's edge, like every section title.
+                // In line with the rows' text, like every section header.
                 Text(header)
                     .romeFont(13, .medium)
                     .foregroundStyle(Palette.sub)
+                    .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
             }
             VStack(spacing: 0, content: content)
                 .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
@@ -104,13 +109,12 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
-/// Board 3: account, AI tool usage, Apple Health and iPhone use, the app's
+/// Board 3: account, AI tool usage, Connections, the app's
 /// own settings and links, sign out. Groups carry no titles.
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
-    let onHealth: () -> Void
-    let onDevice: () -> Void
+    let onConnections: () -> Void
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
@@ -135,7 +139,7 @@ struct SettingsScreen: View {
                     }
                     .padding(.horizontal, 16)
                 }
-                NodeSettingsGroup(onHealth: onHealth, onDevice: onDevice)
+                SettingsGroup { ConnectionsRow(action: onConnections) }
                     .padding(.horizontal, 16)
                 SettingsGroup {
                     SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {
@@ -241,14 +245,6 @@ struct SettingsScreen: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                if model.update.cannotCheck {
-                    // Quiet: the app works as usual when the check cannot decide.
-                    Text("Can't check for updates")
-                        .romeFont(13)
-                        .foregroundStyle(Palette.sub)
-                        .padding(.horizontal, 32)
-                        .padding(.top, -18)
-                }
                 SettingsGroup {
                     Button { confirmSignOut = true } label: {
                         Text("Sign out")

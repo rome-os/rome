@@ -105,10 +105,9 @@ export interface SaidInTurn {
   turnId: string;
   chatId: string;
   /**
-   * The message in the Concierge's own words: what it wrote in this message,
-   * never content it forwarded or quoted, nor a task's title or chat name,
-   * which may hold a secret it would not repeat. Null when it wrote none, as
-   * for a bare forward or a card: the push then says {@link FIXED_LINE}.
+   * What the message shows on the lock screen: the Concierge's words, a
+   * forward's title and text, or what a card asks. Null when it shows none:
+   * the push then says {@link FIXED_LINE}.
    */
   ownWords: string | null;
   /** The Concierge marked the message private: the push says {@link FIXED_LINE}. */

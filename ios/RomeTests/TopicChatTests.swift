@@ -108,6 +108,41 @@ import Testing
         #expect(workspace.topics.chats.map(\.id) == ["topic-2"])
     }
 
+    /// As on the web: a delete moves the chat's follows and open tasks unless
+    /// the guardian chose to stop them.
+    @Test func deleteStopsTheChatsWorkOnlyWhenAsked() async {
+        let backend = FakeBackend()
+        backend.topicChats = [
+            ConciergeChat(id: "topic-1", name: "Trip", main: false, unread: 0),
+            ConciergeChat(id: "topic-2", name: "Home", main: false, unread: 0),
+        ]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await workspace.deleteTopic("topic-1"))
+        #expect(await workspace.deleteTopic("topic-2", stoppingWork: true))
+        #expect(backend.calls == ["delete topic-1", "delete topic-2 stopping work"])
+        #expect(workspace.topics.chats.isEmpty)
+    }
+
+    /// The list arrives; a failed read, or one slower than the wait, gives
+    /// nil, and the delete moves them. The waits are far apart, so a busy
+    /// test machine cannot flip the outcome.
+    @Test func theDeleteReadsTheChatsWorkOrGivesUp() async {
+        let backend = FakeBackend()
+        let workspace = workspace(backend)
+        #expect(await workspace.topicWork("topic-1", wait: .seconds(60)) == nil)
+        let work = ConciergeChatWork(openTasks: [.init(id: "t1", title: "Book the hotel")])
+        backend.chatWorkAnswer = work
+        #expect(await workspace.topicWork("topic-1", wait: .seconds(60)) == work)
+        // An answer that would take two minutes is given up on long before.
+        backend.chatWorkDelay = .seconds(120)
+        let started = ContinuousClock.now
+        #expect(await workspace.topicWork("topic-1", wait: .milliseconds(50)) == nil)
+        #expect(ContinuousClock.now - started < .seconds(60))
+        #expect(backend.calls == ["work topic-1", "work topic-1", "work topic-1"])
+    }
+
     @Test func aTurnInAnUnknownChatRefetchesTheList() async {
         let backend = FakeBackend()
         let store = TopicChatsStore(backend: backend)
@@ -133,6 +168,52 @@ import Testing
         let json = #"{"id":"t","title":"T","state":"doing","createdAt":1,"updatedAt":1,"conciergeChat":{"id":"c-2","name":"Trip","main":false}}"#
         let task = try JSONDecoder().decode(ConciergeTask.self, from: Data(json.utf8))
         #expect(task.conciergeChat?.id == "c-2")
+    }
+}
+
+/// The delete alert of a topic chat says what the web's dialog says.
+@Suite struct TopicDeletePromptTests {
+    @Test func listsFiveThenCountsTheRestAndAsks() {
+        let work = ConciergeChatWork(
+            follows: [.init(source: "github", label: "GitHub", target: "rome-os/rome"), .init(source: "gmail", label: "Gmail", target: "inbox")],
+            openTasks: (1...5).map { .init(id: "t\($0)", title: "Task \($0)") }
+        )
+        let prompt = TopicDeletePrompt(id: "topic-1", name: "Trip", work: work)
+        #expect(prompt.title == "Delete “Trip”?")
+        #expect(prompt.asksAboutWork)
+        #expect(prompt.message == """
+        This chat is deleted permanently. It has:
+        • Following GitHub · rome-os/rome
+        • Following Gmail · inbox
+        • Open task: Task 1
+        • Open task: Task 2
+        • Open task: Task 3
+        and 2 more
+
+        What happens to them?
+        """)
+    }
+
+    @Test func anEmptyChatHasNothingToChoose() {
+        let prompt = TopicDeletePrompt(id: "topic-1", name: "Trip", work: ConciergeChatWork())
+        #expect(!prompt.asksAboutWork)
+        #expect(prompt.message == "This chat is deleted permanently.")
+    }
+
+    /// Unread (an older instance, a slow network), they move, and the alert says so.
+    @Test func anUnreadListSaysTheyMove() {
+        let prompt = TopicDeletePrompt(id: "topic-1", name: "Trip", work: nil)
+        #expect(!prompt.asksAboutWork)
+        #expect(prompt.message == "This chat is deleted permanently. Its follows and open tasks move to Chat.")
+    }
+
+    @Test func parsesTheServersList() throws {
+        let json = #"{"follows":[{"source":"github","label":"GitHub","target":"rome-os/rome"}],"openTasks":[{"id":"t1","title":"Book the hotel"}]}"#
+        let work = try JSONDecoder().decode(ConciergeChatWork.self, from: Data(json.utf8))
+        #expect(work.follows.map(\.label) == ["GitHub"])
+        #expect(work.openTasks.map(\.title) == ["Book the hotel"])
+        let partial = try JSONDecoder().decode(ConciergeChatWork.self, from: Data(#"{"follows":[]}"#.utf8))
+        #expect(partial.isEmpty)
     }
 }
 
