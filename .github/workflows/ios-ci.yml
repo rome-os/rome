@@ -158,7 +158,48 @@ jobs:
             -skipPackagePluginValidation \
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
+            -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             "${extra[@]}"
+      # Rule 1: the field shows listening within 0.5 s of the start action. The app marks each
+      # start with a StartListening signpost interval, and the voice input tests measure it;
+      # XCTest has no way to assert on a measurement, so this step reads the result bundle.
+      - name: "Rule 1: every start shows listening within 0.5 s"
+        if: steps.standin.outputs.present == 'true'
+        run: |
+          xcrun xcresulttool get test-results metrics --path "$RUNNER_TEMP/ui-tests.xcresult" > "$RUNNER_TEMP/metrics.json"
+          python3 - "$RUNNER_TEMP/metrics.json" <<'PY'
+          import json, sys
+
+          BAR_S = 0.5
+          found = []
+
+          def walk(node, test=None):
+              if isinstance(node, dict):
+                  test = node.get("testIdentifier") or test
+                  name = str(node.get("displayName") or node.get("identifier") or "")
+                  if "StartListening" in name and isinstance(node.get("measurements"), list):
+                      found.append((test, name, node.get("unitOfMeasurement", ""), node["measurements"]))
+                  for value in node.values():
+                      walk(value, test)
+              elif isinstance(node, list):
+                  for value in node:
+                      walk(value, test)
+
+          walk(json.load(open(sys.argv[1])))
+          if not found:
+              print(open(sys.argv[1]).read()[:4000])
+              sys.exit("::error::No StartListening measurement in the result bundle, so rule 1's 0.5 s was not checked.")
+          over = []
+          for test, name, unit, values in found:
+              seconds = [v / 1000 if unit == "ms" else v for v in values]
+              print(f"{test}: {name}: " + ", ".join(f"{v:.3f} s" for v in seconds))
+              over += [(test, v) for v in seconds if v > BAR_S]
+          if over:
+              for test, v in over:
+                  print(f"::error::{test}: a start took {v:.3f} s to show listening; the bar is {BAR_S} s")
+              sys.exit(1)
+          print(f"Every start showed listening within {BAR_S} s.")
+          PY
       - name: Keep the stand-in's log
         if: always() && steps.standin.outputs.present == 'true'
         uses: actions/upload-artifact@v4

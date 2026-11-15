@@ -6,10 +6,11 @@ import XCTest
 /// input" while the last words arrive. The notice is its own element. Each test names the rule
 /// it scores, so the verifier's report can say which leg scored which rule.
 ///
-/// Rule 1's 0.5 s is not timed here. XCUITest waits for the app to go idle around every tap,
-/// which takes 1 to 13 s on a CI runner, so a tap's duration says nothing about how soon the
-/// field showed the change. These tests check that each tap shows the change; each tap's
-/// duration is reported for information only.
+/// Rule 1's 0.5 s is timed inside the app, since XCUITest waits for the app to go idle around
+/// every tap (1 to 13 s on a CI runner). The app marks each start with a `StartListening`
+/// signpost interval, from the tap arriving to the field drawing listening; each test measures
+/// it over five starts, and the CI job fails when any interval in the result bundle is over
+/// 0.5 s.
 ///
 /// The stand-in instance comes from the CI job through `TEST_RUNNER_ROME_LOCAL_ORIGIN`,
 /// `TEST_RUNNER_ROME_LOCAL_USER` and `TEST_RUNNER_ROME_LOCAL_PASSWORD`. Without them every test
@@ -129,35 +130,40 @@ final class VoiceInputTests: XCTestCase {
     // MARK: Helpers
 
     /// Starts and stops `repeats` times in the open field: one tap shows listening, with the
-    /// selected trait, and one tap shows finishing or idle.
+    /// selected trait, and one tap shows finishing or idle. Each start's `StartListening`
+    /// interval is measured; the CI job holds every one to rule 1's 0.5 s.
     @MainActor
     private func checkStartsAndStops(_ app: XCUIApplication, field: String) throws {
         let control = onScreen(app.buttons, "voice-input")
         try requireControl(app, control, "\(field) has no voice control")
         XCTAssertTrue(onScreen(app.textViews, "message-field").exists, "\(field) has no message field")
-        var taps: [String] = []
-        for index in 1...Self.repeats {
+        let options = XCTMeasureOptions()
+        options.iterationCount = Self.repeats
+        options.invocationOptions = [.manuallyStop]
+        var index = 0
+        let startListening = XCTOSSignpostMetric(
+            subsystem: "cc.romeos.voice-input", category: "VoiceInput", name: "StartListening")
+        measure(metrics: [startListening], options: options) {
+            index += 1
             XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 30), "\(field): not idle before start \(index)")
-            let start = tapUntil(control, ["Stop voice input"])
-            XCTAssertNotNil(start, "\(field): start \(index) never showed listening")
+            XCTAssertTrue(tapUntil(control, ["Stop voice input"]), "\(field): start \(index) never showed listening")
+            stopMeasuring()
             XCTAssertTrue(control.isSelected, "\(field): listening has no selected trait")
-            let stop = tapUntil(control, ["Finishing voice input", "Start voice input"])
-            XCTAssertNotNil(stop, "\(field): stop \(index) never showed finishing or idle")
-            taps.append(String(format: "%.1f/%.1f", start ?? -1, stop ?? -1))
+            XCTAssertTrue(
+                tapUntil(control, ["Finishing voice input", "Start voice input"]),
+                "\(field): stop \(index) never showed finishing or idle")
         }
-        print("\(field): tap durations in s, start/stop, information only: \(taps.joined(separator: ", "))")
     }
 
-    /// Taps `control` and returns the seconds from the tap to its label being one of `labels`,
-    /// or nil when it is not within `settleSeconds` of the tap returning.
+
+    /// Taps `control` and returns whether its label becomes one of `labels` within
+    /// `settleSeconds` of the tap returning.
     @MainActor
-    private func tapUntil(_ control: XCUIElement, _ labels: [String]) -> TimeInterval? {
-        let tapped = Date()
+    private func tapUntil(_ control: XCUIElement, _ labels: [String]) -> Bool {
         control.tap()
         let predicate = NSPredicate(format: "label IN %@", labels)
         let shown = XCTNSPredicateExpectation(predicate: predicate, object: control)
-        guard XCTWaiter().wait(for: [shown], timeout: Self.settleSeconds) == .completed else { return nil }
-        return Date().timeIntervalSince(tapped)
+        return XCTWaiter().wait(for: [shown], timeout: Self.settleSeconds) == .completed
     }
 
     /// The element with `identifier` the guardian can touch: a pushed chat leaves the Chat's
