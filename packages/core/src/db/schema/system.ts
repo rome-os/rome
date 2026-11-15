@@ -527,6 +527,10 @@ export const romeSessions = sqliteTable(
     // Folder on a rome-node device the chat works in, set only when the chat
     // is created. NULL for every chat without one and every other session type.
     deviceFolder: text("device_folder", { mode: "json" }).$type<DeviceFolder>(),
+    // The rome-node device the guardian asked from when the Concierge last
+    // handed this task chat work, so the task's live reads ask that device.
+    // NULL for every other chat, and for a task started with no device.
+    askingDeviceId: text("asking_device_id"),
     // Agent the session is bound to. NULL means the default "main" agent.
     // Locked on first turn so the session can't switch agents mid-thread.
     agentName: text("agent_name"),
@@ -840,7 +844,9 @@ export const conciergeTasks = sqliteTable(
  * when that turn answered it: its turn ended, or the Concierge answered it
  * with `say`. A message handed on to a newer turn is that turn's from then
  * on. A message whose turn its owner stopped before it answered is told to
- * the next turn once (docs/domains/chats.md#task).
+ * the next turn once (docs/domains/chats.md#task). A message's status
+ * (docs/domains/chats.md#status) is derived from this and from the status of
+ * the tasks made for it.
  */
 export const conciergeMessageTurns = sqliteTable(
   "concierge_message_turns",
@@ -859,10 +865,49 @@ export const conciergeMessageTurns = sqliteTable(
      * Concierge turn in the chat is told not to act on it.
      */
     stoppedUntold: integer("stopped_untold", { mode: "boolean" }).notNull().default(false),
+    /**
+     * When its turn started to show it working: it called a working tool, or
+     * ran 5 seconds without answering it. Null while it has not.
+     */
+    workingAt: integer("working_at", { mode: "timestamp_ms" }),
+    /** Set when the turn that took it failed, by an error or a crash, before it answered it. */
+    turnFailed: integer("turn_failed", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Set when its turn reacted to it: the turn handled it so, and shows it
+     * neither working nor failed. It is the turn's, so it goes with it.
+     */
+    reacted: integer("reacted", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.chatId, table.messageKey] }),
     index("idx_concierge_message_turns_turn").on(table.chatId, table.turnId),
+  ],
+);
+
+/**
+ * The tasks made for each guardian message of a Concierge chat: the tasks it
+ * started, and the ones its words were passed on to. A row goes with its task.
+ */
+export const conciergeMessageTasks = sqliteTable(
+  "concierge_message_tasks",
+  {
+    taskId: text("task_id")
+      .notNull()
+      .references(() => conciergeTasks.id, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull(),
+    messageKey: text("message_key").notNull(),
+    /** The order it was made in, raised each time it is made again: a task follows its highest. */
+    seq: integer("seq").notNull().default(0),
+    /**
+     * How the task ended for this message once it ended with its result told,
+     * after which the task's later work leaves the message alone; null while
+     * the message follows it.
+     */
+    endedAs: text("ended_as"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
+    index("idx_concierge_message_tasks_message").on(table.chatId, table.messageKey),
   ],
 );
 
@@ -1583,8 +1628,18 @@ export const deviceConnections = sqliteTable(
     // The command prefix, without the dot, such as `health`.
     prefix: text("prefix").notNull(),
     personal: integer("personal", { mode: "boolean" }).notNull(),
+    // Each operation as the device reports it: name, access, and the optional
+    // description, input schema and examples.
     operations: text("operations", { mode: "json" })
-      .$type<{ name: string; access: "read" | "write" }[]>()
+      .$type<
+        {
+          name: string;
+          access: "read" | "write";
+          description?: string;
+          input?: Record<string, unknown>;
+          examples?: Record<string, unknown>[];
+        }[]
+      >()
       .notNull(),
     permission: text("permission").notNull(), // granted | denied | not_needed | unknown
     // The device's Live access switch.
@@ -1593,6 +1648,10 @@ export const deviceConnections = sqliteTable(
     // `apple_health`: opaque here, so a reader of that data can find the
     // connection before the first sync. Null when it syncs nothing.
     feeds: text("feeds"),
+    // The personal-data origin of the app install that reports the row, which
+    // stays the same across its sign-ins while the device id does not. Null
+    // for an app that reports none.
+    originId: text("origin_id"),
     // When a report last listed the row.
     lastSeenAt: integer("last_seen_at").notNull(),
   },

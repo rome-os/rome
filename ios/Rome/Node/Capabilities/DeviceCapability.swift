@@ -45,7 +45,9 @@ struct DeviceCapability: NodeCapability {
                 expensive, constrained (Low Data Mode), thermalState (nominal | fair | serious | critical), osVersion, appVersion. \
                 Fails with live_off while Live access to Device is off: only the user can turn it on, in the Rome app on the \(device.name): \
                 Settings → Connections → Device. Example: {}
-                """
+                """,
+            input: .object(["type": .string("object"), "properties": .object([:]), "additionalProperties": .bool(false)]),
+            examples: [.object([:])]
         )]
     }
 

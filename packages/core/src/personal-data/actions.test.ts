@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { ActionEngine } from "../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
@@ -5,18 +8,21 @@ import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.j
 import { registerPersonalDataActions } from "./actions.js";
 import { PersonalDataRepository } from "./repository.js";
 import { DeviceConnectionsRepository } from "../connections/device/repository.js";
+import { createLiveRoutes, withAskingDevice } from "../connections/device/live-route.js";
+import { withDeviceLifecycle } from "../connections/device/lifecycle.js";
 import { APPLE_HEALTH } from "./sources/apple-health.js";
 import { PERSONAL_DATA_SOURCES } from "./sources/index.js";
-import { batch, DAY, HOUR, NOV_10, stepDay, TZ } from "./__fixtures__/apple-health.js";
+import { batch, DAY, HOUR, NOV_10, ORIGIN, stepDay, TZ } from "./__fixtures__/apple-health.js";
 
 describe("personal-data actions", () => {
   let testDb: TestDb;
   let engine: ActionEngine;
   let devices: DeviceConnectionsRepository;
+  let repo: PersonalDataRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
-    const repo = new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES);
+    repo = new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES);
     repo.ingest(
       APPLE_HEALTH,
       {
@@ -33,7 +39,7 @@ describe("personal-data actions", () => {
     registerPersonalDataActions(registry, {
       personalData: repo,
       guardianTimeZone: async () => TZ,
-      connections: devices,
+      connections: createLiveRoutes(devices, () => NOV_10 + 2 * DAY + 9 * HOUR),
       now: () => NOV_10 + 2 * DAY + 9 * HOUR,
     });
     engine = new ActionEngine(registry, createActionEngineRepos(), {
@@ -78,7 +84,7 @@ describe("personal-data actions", () => {
     expect(result).toMatchObject({ status: "ok", data: { results: [{ value: 14000 }] } });
   });
 
-  it("points at the device connection where the store does not cover the window", async () => {
+  it("points at the install whose origin holds the data, where the store does not cover the window", async () => {
     const today = { source: "apple_health", type: "stepCount", start: "2026-11-12" };
     const before = await engine.run("core:personal_data_query", today, { audience: "private" });
     expect(before).toMatchObject({
@@ -88,7 +94,7 @@ describe("personal-data actions", () => {
     devices.report(
       {
         version: 1,
-        device: { id: "dev-1", name: "iPhone", platform: "ios" },
+        device: { id: "dev-1", name: "iPhone", platform: "ios", originId: ORIGIN },
         connections: [
           {
             capability: "apple_health",
@@ -98,6 +104,7 @@ describe("personal-data actions", () => {
             operations: [{ name: "health.stats", access: "read" }],
             permission: "unknown",
             live: true,
+            feeds: "apple_health",
           },
         ],
       },
@@ -139,7 +146,7 @@ describe("personal-data actions", () => {
     registerPersonalDataActions(registry, {
       personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
       guardianTimeZone: async () => TZ,
-      connections: devices,
+      connections: createLiveRoutes(devices, () => NOV_10 + 9 * HOUR),
       now: () => NOV_10 + 9 * HOUR,
     });
     engine = new ActionEngine(registry, createActionEngineRepos(), {
@@ -185,7 +192,7 @@ describe("personal-data actions", () => {
     });
     // A working connection is read live now, never by a check scheduled for later.
     const working = (await query()) as { data: { connection: { next?: string } } };
-    expect(working.data.connection.next).toContain("rome-node device run dev-1 <action>");
+    expect(working.data.connection.next).toContain('core:device_run and device "dev-1"');
     expect(working.data.connection.next).toContain("Do not schedule a later check");
     reportHealth("unknown", false);
     const off = (await query()) as { data: { connection: { next?: string } } };
@@ -224,6 +231,134 @@ describe("personal-data actions", () => {
       expect(result).toEqual({
         status: "error",
         error: expect.stringMatching(/^personal_data_private_only: /),
+      });
+    }
+  });
+
+  const healthOn = (device: string, live: boolean, originId: string) =>
+    devices.report(
+      {
+        version: 1,
+        device: { id: device, name: "iPhone", platform: "ios", originId },
+        connections: [
+          {
+            capability: "apple_health",
+            title: "Apple Health",
+            prefix: "health",
+            personal: true,
+            operations: [{ name: "health.stats", access: "read" }],
+            permission: "unknown",
+            live,
+            feeds: "apple_health",
+          },
+        ],
+      },
+      NOV_10 + 2 * DAY + 8 * HOUR,
+    );
+  const today = { source: "apple_health", type: "stepCount", start: "2026-11-12" };
+
+  it("asked from a device whose Health is off, offers its card and never points at another", async () => {
+    healthOn("dev-asking", false, "origin-dev");
+    healthOn("dev-other", true, ORIGIN);
+    const result = await engine.run("core:personal_data_query", today, {
+      audience: "private",
+      channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, "dev-asking"),
+    });
+    expect(result).toMatchObject({
+      status: "ok",
+      data: {
+        connection: {
+          device: { id: "dev-asking" },
+          state: "off",
+          next: expect.stringContaining('connect_account and kind "apple_health"'),
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("dev-other");
+  });
+
+  it("lists a source no device has synced when only another device reads it, with its card's kind", async () => {
+    testDb.close();
+    testDb = createTestDb();
+    devices = new DeviceConnectionsRepository(testDb.db);
+    const registry = new ActionRegistryImpl();
+    registerPersonalDataActions(registry, {
+      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
+      guardianTimeZone: async () => TZ,
+      connections: createLiveRoutes(devices, () => NOV_10 + 2 * DAY + 9 * HOUR),
+    });
+    engine = new ActionEngine(registry, createActionEngineRepos(), {
+      processRole: "main",
+      isFirstPartyAction: () => true,
+    });
+    healthOn("dev-other", true, "origin-other");
+    const catalog = await engine.run(
+      "core:personal_data_catalog",
+      {},
+      {
+        audience: "private",
+        channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, "dev-asking"),
+      },
+    );
+    expect(catalog).toMatchObject({
+      status: "ok",
+      data: {
+        sources: [
+          {
+            source: "apple_health",
+            types: [],
+            connection: {
+              state: "not_connected",
+              kind: "apple_health",
+              device: { id: "dev-asking" },
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("reads none of a removed device's data, and points at no connection of it", async () => {
+    healthOn("dev-1", true, ORIGIN);
+    const lifecycle = withDeviceLifecycle(
+      {
+        removeDevice: async (_deviceId: string) => ({ ok: true as const }),
+      },
+      {
+        connections: () => devices,
+        turnOriginOff: (origin) => repo.setState("apple_health", origin, "off"),
+      },
+    );
+    await lifecycle.removeDevice("dev-1");
+    expect(devices.list()).toEqual([]);
+    const result = await engine.run(
+      "core:personal_data_query",
+      { source: "apple_health", type: "stepCount", start: "2026-11-10", end: "2026-11-11" },
+      { audience: "private" },
+    );
+    expect(result).toMatchObject({
+      status: "ok",
+      data: { connection: { state: "not_connected" } },
+    });
+    expect(
+      (result as { data: { results: { value?: number }[] } }).data.results[0]?.value,
+    ).toBeUndefined();
+  });
+});
+
+describe("personal data and the device table", () => {
+  it("asks the connection layer, and never imports the device-connections repository", () => {
+    const folder = dirname(fileURLToPath(import.meta.url));
+    const files = readdirSync(folder, { recursive: true, encoding: "utf8" }).filter(
+      (file) =>
+        file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.includes("__fixtures__"),
+    );
+    expect(files.length).toBeGreaterThan(5);
+    for (const file of files) {
+      const text = readFileSync(join(folder, file), "utf8");
+      expect({ file, imports: /connections\/device\/repository/.test(text) }).toEqual({
+        file,
+        imports: false,
       });
     }
   });

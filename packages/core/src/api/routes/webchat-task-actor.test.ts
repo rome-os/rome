@@ -57,6 +57,7 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
   const repo = {
     onMessageInserted: () => () => {},
     getSession: async (id: string) => rows.get(id) ?? null,
+    askingDeviceOf: rs.fn(async (_id: string): Promise<string | null> => null),
     getMessages: async () => [],
     getMessageCount: async () => 1,
     getProjectRecordByPath: async () => ({
@@ -173,6 +174,20 @@ describe("webchat task actor admission without a database or provider", () => {
     const s = harness("guardian", "shared");
     await expect(s.send()).rejects.toThrow("Task input attribution is unavailable");
     expect(s.submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the task's asking device while admitting its verified actor", async () => {
+    const s = harness();
+    s.repo.askingDeviceOf.mockResolvedValue("synthetic-device");
+    expect(await s.send()).toMatchObject({ ok: true });
+    expect(s.submit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        actor: guardian,
+        parentAudience: "private",
+        threadContext: expect.objectContaining({ askingDeviceId: "synthetic-device" }),
+      }),
+    );
   });
 
   it("preserves a visitor through the route, even with an unrelated guardian ambient scope", async () => {

@@ -2,7 +2,9 @@
 // data. Both are personal-data actions, so they run only in a private turn
 // (docs/domains/participation.md#audience). Contract: docs/personal-data.md#agent-access.
 
+import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
+import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
 import { queryInputSchema } from "./domain/query.js";
 import { queryPersonalData } from "./read.js";
 import type { PersonalDataRepository } from "./repository.js";
@@ -33,6 +35,11 @@ export interface PersonalDataActionDeps {
   now?: () => number;
 }
 
+/** The running turn as a live read needs it: the device the guardian asks from. */
+function liveTurn(): LiveTurn {
+  return { askingDeviceId: askingDeviceOf(actionExecutionContext.getStore()?.channelContext) };
+}
+
 export function registerPersonalDataActions(
   actions: Pick<ActionRegistry, "register">,
   deps: PersonalDataActionDeps,
@@ -56,22 +63,23 @@ export function registerPersonalDataActions(
     },
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     execute: async () => {
-      const stored = deps.personalData.catalog().map(({ connectionId, ...entry }) => ({
+      const turn = liveTurn();
+      // The envelope's connectionId is no longer read: the connection layer
+      // chooses, by the asking device and the origin's install.
+      const stored = deps.personalData.catalog().map(({ connectionId: _link, ...entry }) => ({
         ...entry,
-        connection: connectionPointer(entry.source, connectionId, connections),
+        connection: connectionPointer(entry.source, turn, connections, entry.origin.id),
       }));
       // A source no device has synced yet, but whose device reads it live,
       // as just after a connect: listed with no types, so the Agent reads live.
-      const unsynced = PERSONAL_DATA_SOURCES.filter(
-        (spec) =>
-          !stored.some((entry) => entry.source === spec.source) && connections.feeding(spec.source),
-      ).map((spec) => ({
-        source: spec.source,
-        title: spec.title,
-        note: spec.note,
-        types: [],
-        connection: connectionPointer(spec.source, null, connections),
-      }));
+      // Listed too when only the asking device lacks the connection: the
+      // pointer then names its kind, so the Agent can offer that device's card.
+      const unsynced = PERSONAL_DATA_SOURCES.flatMap((spec) => {
+        if (stored.some((entry) => entry.source === spec.source)) return [];
+        const connection = connectionPointer(spec.source, turn, connections);
+        if (connection.state === "not_connected" && !connection.kind) return [];
+        return [{ source: spec.source, title: spec.title, note: spec.note, types: [], connection }];
+      });
       return { status: "ok", data: { sources: [...stored, ...unsynced] } };
     },
   });
@@ -174,6 +182,7 @@ export function registerPersonalDataActions(
           now: now(),
         },
         connections,
+        liveTurn(),
       );
       if ("error" in answer) return { status: "error", error: answer.error };
       return { status: "ok", data: answer };

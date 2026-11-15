@@ -71,6 +71,7 @@ describe("/device-connections routes", () => {
       {
         id: "dev-1:apple_health",
         device: { id: "dev-1", name: "iPhone", platform: "ios" },
+        originId: null,
         capability: "apple_health",
         title: "Apple Health",
         prefix: "health",

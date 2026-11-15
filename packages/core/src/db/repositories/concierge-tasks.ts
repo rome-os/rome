@@ -9,6 +9,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lte,
   ne,
   notInArray,
   or,
@@ -21,8 +22,15 @@ import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
 import { MAIN_CHAT_NAME, mainChatIdOf } from "../../concierge/main-chat.js";
 import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
-import { conciergeMessageTurns, conciergeTasks, romeSessions } from "../schema.js";
+import { createLogger } from "../../logger.js";
+import {
+  conciergeMessageTasks,
+  conciergeMessageTurns,
+  conciergeTasks,
+  romeSessions,
+} from "../schema.js";
 
+const log = createLogger("concierge-tasks");
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
 type ConciergeTaskState = ConciergeTaskRow["state"];
 
@@ -77,6 +85,33 @@ export interface MessageTarget {
   messageKey: string;
 }
 
+/** How a link that a newer message took over over ends: settled, showing nothing. */
+export const LINK_SUPERSEDED = "superseded";
+
+/** What {@link ConciergeTasksRepository.linkMessage} changed, to put back. */
+export interface LinkUndo {
+  /** The message's own link as it stood, or null when it is new. */
+  before: { seq: number; endedAs: string | null } | null;
+  /** The links it superseded. */
+  superseded: MessageTarget[];
+}
+
+/** What a guardian message's status is derived from, as stored. */
+export interface MessageMarkRow {
+  /** Whether the turn that took it answered it; null when no turn took it. */
+  answered: boolean | null;
+  /** Whether that turn showed it working. */
+  working: boolean;
+  /** Whether that turn failed, by an error or a crash, before it answered it. */
+  turnFailed: boolean;
+  /** The tasks it follows: its live links. */
+  taskIds: string[];
+  /** The tasks made for it that a newer message took over. */
+  earlierTaskIds: string[];
+  /** How each task made for it ended for it, once it did with its result told. */
+  endedAs: string[];
+}
+
 /** A task's chat thread in Concierge chat `chatId`, rooted at `root`, ended: its task left the chat. */
 export interface ChatThreadRetired {
   chatId: string;
@@ -90,6 +125,7 @@ export interface ChatThreadRetired {
  */
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
+  private messageListeners = new Set<(target: MessageTarget) => void>();
   private threadListeners = new Set<(retired: ChatThreadRetired) => void>();
 
   /** Where a task's source message is looked up: its Concierge chat's
@@ -324,6 +360,15 @@ export class ConciergeTasksRepository {
   async get(id: string): Promise<ConciergeTaskRow | null> {
     const [row] = await this.db.select().from(conciergeTasks).where(eq(conciergeTasks.id, id));
     return row ?? null;
+  }
+
+  /** The rows of `ids` that exist, in one read. */
+  async getMany(ids: readonly string[]): Promise<ConciergeTaskRow[]> {
+    if (ids.length === 0) return [];
+    return this.db
+      .select()
+      .from(conciergeTasks)
+      .where(inArray(conciergeTasks.id, [...ids]));
   }
 
   async getWithChat(id: string): Promise<ConciergeTaskWithChat | null> {
@@ -660,15 +705,125 @@ export class ConciergeTasksRepository {
     return written;
   }
 
-  /** Concierge turn `turnId` took guardian message `target`: it works on it until it answers. */
+  /** Listens for a change of the facts a guardian message's status reads. */
+  onMessageChange(listener: (target: MessageTarget) => void): () => void {
+    this.messageListeners.add(listener);
+    return () => {
+      this.messageListeners.delete(listener);
+    };
+  }
+
+  private messageChanged(targets: Iterable<MessageTarget>): void {
+    const seen = new Set<string>();
+    for (const target of targets) {
+      const key = `${target.chatId}\u0000${target.messageKey}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      for (const listener of this.messageListeners) listener(target);
+    }
+  }
+
+  /**
+   * Concierge turn `turnId` took guardian message `target`: it works on it
+   * until it answers. A message handed on while it shows working keeps
+   * showing it, so 👀 does not blink between the two turns.
+   */
   async takeMessage(turnId: string, target: MessageTarget, now = new Date()): Promise<void> {
     await this.db
       .insert(conciergeMessageTurns)
       .values({ ...target, turnId, takenAt: now, answeredAt: null })
       .onConflictDoUpdate({
         target: [conciergeMessageTurns.chatId, conciergeMessageTurns.messageKey],
-        set: { turnId, takenAt: now, answeredAt: null },
+        set: {
+          turnId,
+          takenAt: now,
+          answeredAt: null,
+          turnFailed: false,
+          // The right side reads the row as it was: a message handed on keeps
+          // what its turn showed and whether it reacted to it.
+          workingAt: sql`CASE WHEN ${conciergeMessageTurns.answeredAt} IS NULL THEN ${conciergeMessageTurns.workingAt} END`,
+          reacted: sql`CASE WHEN ${conciergeMessageTurns.answeredAt} IS NULL THEN ${conciergeMessageTurns.reacted} ELSE 0 END`,
+        },
       });
+    this.messageChanged([target]);
+  }
+
+  /**
+   * The open messages of Concierge chat `chatId` show working from now: its
+   * turn called a working tool, or ran 5 seconds without answering them. A
+   * message the turn reacted to is left out. `messageKey` limits it to that
+   * one. Answers the ones that changed.
+   */
+  async markWorking(
+    chatId: string,
+    options: { messageKey?: string } = {},
+    now = new Date(),
+  ): Promise<MessageTarget[]> {
+    const changed = await this.db
+      .update(conciergeMessageTurns)
+      .set({ workingAt: now })
+      .where(
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          isNull(conciergeMessageTurns.answeredAt),
+          isNull(conciergeMessageTurns.workingAt),
+          eq(conciergeMessageTurns.reacted, false),
+          options.messageKey !== undefined
+            ? eq(conciergeMessageTurns.messageKey, options.messageKey)
+            : undefined,
+        ),
+      )
+      .returning({
+        chatId: conciergeMessageTurns.chatId,
+        messageKey: conciergeMessageTurns.messageKey,
+      });
+    this.messageChanged(changed);
+    return changed;
+  }
+
+  /**
+   * The open turn of guardian message `messageKey` of chat `chatId` reacted to
+   * it: that is how it handled it, so the turn shows it neither working nor,
+   * should it fail or be cut off, failed. A task made for it still shows.
+   * With `reacted` false the turn took its reaction back, so the message is
+   * its work again.
+   */
+  async markReacted(chatId: string, messageKey: string, reacted = true): Promise<void> {
+    const changed = await this.db
+      .update(conciergeMessageTurns)
+      .set(reacted ? { reacted: true, workingAt: null } : { reacted: false })
+      .where(
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          eq(conciergeMessageTurns.messageKey, messageKey),
+          isNull(conciergeMessageTurns.answeredAt),
+        ),
+      )
+      .returning({
+        chatId: conciergeMessageTurns.chatId,
+        messageKey: conciergeMessageTurns.messageKey,
+      });
+    this.messageChanged(changed);
+  }
+
+  /**
+   * Whether an open message of Concierge chat `chatId` showed working before
+   * the running turn took it: work an earlier turn handed on.
+   */
+  async anyInheritedWorking(chatId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ key: conciergeMessageTurns.messageKey })
+      .from(conciergeMessageTurns)
+      .where(
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          isNull(conciergeMessageTurns.answeredAt),
+          isNotNull(conciergeMessageTurns.workingAt),
+          sql`${conciergeMessageTurns.workingAt} < ${conciergeMessageTurns.takenAt}`,
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
   }
 
   /**
@@ -680,12 +835,17 @@ export class ConciergeTasksRepository {
     chatId: string,
     running: readonly string[],
     now = new Date(),
-    options: { stopped?: boolean } = {},
+    options: { stopped?: boolean; failed?: boolean } = {},
   ): Promise<number> {
     const changed = await this.db
       .update(conciergeMessageTurns)
       // A turn its owner stopped answered nothing: the next turn is told so.
-      .set({ answeredAt: now, ...(options.stopped ? { stoppedUntold: true } : {}) })
+      .set({
+        answeredAt: now,
+        // A message the turn reacted to was handled, so its failure is not the message's.
+        turnFailed: options.failed === true ? sql`NOT ${conciergeMessageTurns.reacted}` : false,
+        ...(options.stopped ? { stoppedUntold: true } : {}),
+      })
       .where(
         and(
           eq(conciergeMessageTurns.chatId, chatId),
@@ -697,6 +857,7 @@ export class ConciergeTasksRepository {
         chatId: conciergeMessageTurns.chatId,
         messageKey: conciergeMessageTurns.messageKey,
       });
+    this.messageChanged(changed);
     return changed.length;
   }
 
@@ -735,25 +896,37 @@ export class ConciergeTasksRepository {
         chatId: conciergeMessageTurns.chatId,
         messageKey: conciergeMessageTurns.messageKey,
       });
+    this.messageChanged(changed);
     return changed.length;
   }
 
   /**
    * Turn `turnId` of Concierge chat `chatId` runs again, as when a usage limit
-   * cleared: every message it holds, its own and the ones handed on to it,
-   * is open again until it ends.
+   * cleared: every message its failure left, its own and the ones handed on
+   * to it, is open again until it ends. A message it answered or reacted to
+   * before stays settled.
    */
   async reopenTurn(chatId: string, turnId: string): Promise<number> {
     const changed = await this.db
       .update(conciergeMessageTurns)
-      .set({ answeredAt: null })
+      // It runs again for the messages its failure left: they work from now.
+      .set({
+        answeredAt: null,
+        turnFailed: false,
+        workingAt: sql`COALESCE(${conciergeMessageTurns.workingAt}, ${Date.now()})`,
+      })
       .where(
-        and(eq(conciergeMessageTurns.chatId, chatId), eq(conciergeMessageTurns.turnId, turnId)),
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          eq(conciergeMessageTurns.turnId, turnId),
+          eq(conciergeMessageTurns.turnFailed, true),
+        ),
       )
       .returning({
         chatId: conciergeMessageTurns.chatId,
         messageKey: conciergeMessageTurns.messageKey,
       });
+    this.messageChanged(changed);
     return changed.length;
   }
 
@@ -761,8 +934,10 @@ export class ConciergeTasksRepository {
    * After a restart, before any turn runs: a stopped process ends no turn, so
    * every message still open is answered, except in `continuing`, the chats
    * whose interrupted turn startup continues, whose turn answers them when it
-   * ends, so no message stays open past the process that took it. Answers how
-   * many changed.
+   * ends, and which show working from now, unless the turn reacted to them.
+   * No message stays open past the process that took it. The process died
+   * under the turn: it failed, as a crash does, for every message it had not
+   * reacted to. Answers how many changed.
    */
   async answerInterrupted(continuing: ReadonlySet<string>, now = new Date()): Promise<number> {
     const open = await this.db
@@ -773,10 +948,14 @@ export class ConciergeTasksRepository {
       .from(conciergeMessageTurns)
       .where(isNull(conciergeMessageTurns.answeredAt));
     const ending = open.filter((row) => !continuing.has(row.chatId));
-    for (const row of ending) {
+    // A turn startup continues works from its start.
+    const going = open.filter((row) => continuing.has(row.chatId));
+    for (const row of going) {
       await this.db
         .update(conciergeMessageTurns)
-        .set({ answeredAt: now })
+        .set({
+          workingAt: sql`CASE WHEN ${conciergeMessageTurns.reacted} THEN ${conciergeMessageTurns.workingAt} ELSE COALESCE(${conciergeMessageTurns.workingAt}, ${now.getTime()}) END`,
+        })
         .where(
           and(
             eq(conciergeMessageTurns.chatId, row.chatId),
@@ -784,12 +963,225 @@ export class ConciergeTasksRepository {
           ),
         );
     }
+    this.messageChanged(going);
+    for (const row of ending) {
+      await this.db
+        .update(conciergeMessageTurns)
+        .set({ answeredAt: now, turnFailed: sql`NOT ${conciergeMessageTurns.reacted}` })
+        .where(
+          and(
+            eq(conciergeMessageTurns.chatId, row.chatId),
+            eq(conciergeMessageTurns.messageKey, row.messageKey),
+          ),
+        );
+    }
+    this.messageChanged(ending);
     return ending.length;
   }
 
-  /** Forgets the turns of Concierge chat `chatId`'s messages, once the chat is deleted. */
+  /**
+   * Task `taskId` was made for guardian message `target`: started for it, or
+   * given its words. A task has at most one live link, to the message it was
+   * made for last: the live link it had to another message settles as
+   * superseded, for good, so that message keeps no part in the task's later
+   * work or how it ends. Made for a message again, the link is live again.
+   * Answers what to put back for {@link unlinkMessage}.
+   */
+  async linkMessage(taskId: string, target: MessageTarget): Promise<LinkUndo> {
+    const own = and(
+      eq(conciergeMessageTasks.taskId, taskId),
+      eq(conciergeMessageTasks.chatId, target.chatId),
+      eq(conciergeMessageTasks.messageKey, target.messageKey),
+    );
+    // One step, so no other write lands between the read and the writes.
+    const undo = this.db.transaction((tx): LinkUndo => {
+      const before =
+        tx
+          .select({ seq: conciergeMessageTasks.seq, endedAs: conciergeMessageTasks.endedAs })
+          .from(conciergeMessageTasks)
+          .where(own)
+          .get() ?? null;
+      const superseded = tx
+        .update(conciergeMessageTasks)
+        .set({ endedAs: LINK_SUPERSEDED })
+        .where(
+          and(
+            eq(conciergeMessageTasks.taskId, taskId),
+            isNull(conciergeMessageTasks.endedAs),
+            or(
+              ne(conciergeMessageTasks.chatId, target.chatId),
+              ne(conciergeMessageTasks.messageKey, target.messageKey),
+            ),
+          ),
+        )
+        .returning({
+          chatId: conciergeMessageTasks.chatId,
+          messageKey: conciergeMessageTasks.messageKey,
+        })
+        .all();
+      const seq =
+        (tx
+          .select({ max: sql<number>`COALESCE(MAX(${conciergeMessageTasks.seq}), 0)` })
+          .from(conciergeMessageTasks)
+          .get()?.max ?? 0) + 1;
+      tx.insert(conciergeMessageTasks)
+        .values({ taskId, ...target, seq })
+        .onConflictDoUpdate({
+          target: [
+            conciergeMessageTasks.taskId,
+            conciergeMessageTasks.chatId,
+            conciergeMessageTasks.messageKey,
+          ],
+          set: { seq, endedAs: null },
+        })
+        .run();
+      return { before, superseded };
+    });
+    this.messageChanged([target, ...undo.superseded]);
+    return undo;
+  }
+
+  /**
+   * Takes back {@link linkMessage}, as when the task never heard the message:
+   * its link is as it was, a new one goes, and the link it superseded is
+   * live again.
+   */
+  async unlinkMessage(taskId: string, target: MessageTarget, undo: LinkUndo): Promise<void> {
+    this.db.transaction((tx) => {
+      const own = and(
+        eq(conciergeMessageTasks.taskId, taskId),
+        eq(conciergeMessageTasks.chatId, target.chatId),
+        eq(conciergeMessageTasks.messageKey, target.messageKey),
+      );
+      if (undo.before === null) tx.delete(conciergeMessageTasks).where(own).run();
+      else tx.update(conciergeMessageTasks).set(undo.before).where(own).run();
+      for (const other of undo.superseded) {
+        tx.update(conciergeMessageTasks)
+          .set({ endedAs: null })
+          .where(
+            and(
+              eq(conciergeMessageTasks.taskId, taskId),
+              eq(conciergeMessageTasks.chatId, other.chatId),
+              eq(conciergeMessageTasks.messageKey, other.messageKey),
+              eq(conciergeMessageTasks.endedAs, LINK_SUPERSEDED),
+            ),
+          )
+          .run();
+      }
+    });
+    this.messageChanged([target, ...undo.superseded]);
+  }
+
+  /** The order of task `taskId`'s live link, or null when it has none. */
+  liveLinkSeq(taskId: string): number | null {
+    return (
+      this.db
+        .select({ seq: conciergeMessageTasks.seq })
+        .from(conciergeMessageTasks)
+        .where(and(eq(conciergeMessageTasks.taskId, taskId), isNull(conciergeMessageTasks.endedAs)))
+        .get()?.seq ?? null
+    );
+  }
+
+  /**
+   * Task `taskId` ended, with its result told, `endedAs`: its live link, when
+   * its order is at most `upToSeq`, keeps that and follows the task no more,
+   * so the task's later work leaves the message alone. A link made after the
+   * caller read the task's state has a higher order and stays live.
+   */
+  async endLinks(taskId: string, endedAs: string, upToSeq: number): Promise<void> {
+    const changed = await this.db
+      .update(conciergeMessageTasks)
+      .set({ endedAs })
+      .where(
+        and(
+          eq(conciergeMessageTasks.taskId, taskId),
+          isNull(conciergeMessageTasks.endedAs),
+          lte(conciergeMessageTasks.seq, upToSeq),
+        ),
+      )
+      .returning({
+        chatId: conciergeMessageTasks.chatId,
+        messageKey: conciergeMessageTasks.messageKey,
+      });
+    this.messageChanged(changed);
+  }
+
+  /** The guardian messages task `taskId` was made for. */
+  async messagesOfTask(taskId: string): Promise<MessageTarget[]> {
+    return this.db
+      .select({
+        chatId: conciergeMessageTasks.chatId,
+        messageKey: conciergeMessageTasks.messageKey,
+      })
+      .from(conciergeMessageTasks)
+      .where(eq(conciergeMessageTasks.taskId, taskId));
+  }
+
+  /** Forgets the turns and tasks of Concierge chat `chatId`'s messages, once the chat is deleted. */
   async forgetMessages(chatId: string): Promise<void> {
     await this.db.delete(conciergeMessageTurns).where(eq(conciergeMessageTurns.chatId, chatId));
+    await this.db.delete(conciergeMessageTasks).where(eq(conciergeMessageTasks.chatId, chatId));
+  }
+
+  /** The stored status facts of each of `messageKeys` in Concierge chat `chatId` that has any. */
+  async messageMarks(
+    chatId: string,
+    messageKeys: readonly string[],
+  ): Promise<Map<string, MessageMarkRow>> {
+    const out = new Map<string, MessageMarkRow>();
+    if (messageKeys.length === 0) return out;
+    const keys = [...new Set(messageKeys)];
+    const of = (key: string) => {
+      const found = out.get(key) ?? {
+        answered: null,
+        working: false,
+        turnFailed: false,
+        taskIds: [],
+        earlierTaskIds: [],
+        endedAs: [],
+      };
+      out.set(key, found);
+      return found;
+    };
+    for (const row of await this.db
+      .select({
+        messageKey: conciergeMessageTurns.messageKey,
+        answeredAt: conciergeMessageTurns.answeredAt,
+        workingAt: conciergeMessageTurns.workingAt,
+        turnFailed: conciergeMessageTurns.turnFailed,
+      })
+      .from(conciergeMessageTurns)
+      .where(
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          inArray(conciergeMessageTurns.messageKey, keys),
+        ),
+      )) {
+      const mark = of(row.messageKey);
+      mark.answered = row.answeredAt !== null;
+      mark.working = row.workingAt !== null;
+      mark.turnFailed = row.turnFailed;
+    }
+    for (const row of await this.db
+      .select({
+        messageKey: conciergeMessageTasks.messageKey,
+        taskId: conciergeMessageTasks.taskId,
+        endedAs: conciergeMessageTasks.endedAs,
+      })
+      .from(conciergeMessageTasks)
+      .where(
+        and(
+          eq(conciergeMessageTasks.chatId, chatId),
+          inArray(conciergeMessageTasks.messageKey, keys),
+        ),
+      )) {
+      const mark = of(row.messageKey);
+      if (row.endedAs === null) mark.taskIds.push(row.taskId);
+      else if (row.endedAs === LINK_SUPERSEDED) mark.earlierTaskIds.push(row.taskId);
+      else mark.endedAs.push(row.endedAs);
+    }
+    return out;
   }
 
   /**

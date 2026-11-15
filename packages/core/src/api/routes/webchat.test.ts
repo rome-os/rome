@@ -21,6 +21,7 @@ import { Session } from "../../agent/index.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
+import { askingDeviceOf } from "../../connections/device/live-route.js";
 import { webchatChannel, webchatCaller } from "../../webchat/dashboard-account.js";
 import {
   buildAgent,
@@ -2838,6 +2839,95 @@ describe("Webchat API", () => {
     expect(sentTurn?.reasoningEffort).toBe("xhigh");
     expect(sentOptions).toMatchObject({ romeSessionId: session.id });
     expect(acquiredInit?.kind).toBe("conversation");
+  });
+
+  it("keeps the device the guardian sent from on the turn, so a live read asks it", async () => {
+    const sent: (SendTurnOptions | undefined)[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "idle",
+      startTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+        sent.push(options);
+        return testTurnHandle({
+          turnId: `turn-${sent.length}`,
+          events: (async function* () {
+            yield { type: "result", content: "" };
+          })(),
+          turnContext: otelContext.active(),
+        });
+      },
+      onStatusChange: () => () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+    }));
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const session = (await (
+      await runWithSessionActor(guardian, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Battery" }),
+        }),
+      )
+    ).json()) as { id: string };
+    const send = (headers: Record<string, string>, actor?: typeof guardian) => {
+      const request = () =>
+        app.request(`/chat/sessions/${session.id}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: JSON.stringify({ text: "battery?" }),
+        });
+      return actor ? runWithSessionActor(actor, request) : request();
+    };
+    expect((await send({ "x-rome-device": "dev-1" }, guardian)).status).toBe(200);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBe("dev-1");
+    // No header, a malformed one, or no guardian session: no asking device.
+    await send({}, guardian);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await send({ "x-rome-device": "dev 1" }, guardian);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await send({ "x-rome-device": "dev-1" });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    expect(sent).toHaveLength(4);
+  });
+
+  it("gives a task chat's turn from the Concierge the device the task was handed from", async () => {
+    const sent: (SendTurnOptions | undefined)[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:task" },
+      sessionId: "agent-session",
+      status: "idle",
+      startTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+        sent.push(options);
+        return testTurnHandle({
+          turnId: `turn-${sent.length}`,
+          events: (async function* () {
+            yield { type: "result", content: "" };
+          })(),
+          turnContext: otelContext.active(),
+        });
+      },
+      onStatusChange: () => () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+    }));
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      name === "core:concierge" ? buildAgent(name) : undefined,
+    );
+    const { runtime } = createWebchatRuntime(deps);
+    const concierge = { platform: "webchat", id: "core:concierge" };
+    const id = await runtime.startChat({}, "guardian");
+    expect(await runtime.post(id, { text: "Read my steps" }, concierge)).toMatchObject({
+      ok: true,
+    });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await deps.webchatRepo.setAskingDevice(id, "dev-asking");
+    expect(await deps.webchatRepo.askingDeviceOf(id)).toBe("dev-asking");
+    expect(await runtime.post(id, { text: "And sleep" }, concierge)).toMatchObject({ ok: true });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBe("dev-asking");
+    expect(sent).toHaveLength(2);
   });
 
   describe("device folder", () => {
@@ -7454,6 +7544,65 @@ describe("Webchat API", () => {
       // Only the message reacted to carries the field.
       expect(listed.find((m) => m.id === "g1")?.reaction).toBe("❤️");
       expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("reaction");
+    });
+
+    it("shows a guardian message's status beside its reaction, and streams its changes", async () => {
+      const repo = new ConciergeTasksRepository(testDb.db);
+      const tasks = new ConciergeTasks(repo);
+      deps.concierge = {
+        deps: { tasks },
+        onCardSettled: () => () => {},
+        // As the service fans out its one watch.
+        onMessageStatus: (listener: (event: unknown) => void) =>
+          tasks.onMessageStatus((target, status) =>
+            listener({ sessionId: target.chatId, messageId: target.messageKey, status }),
+          ),
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic",
+        "Topic",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      for (const [id, turn] of [
+        ["g1", "turn-1"],
+        ["g2", "turn-2"],
+      ] as const) {
+        await deps.webchatRepo.addMessage(
+          id,
+          "topic",
+          "user",
+          JSON.stringify([{ type: "text", content: id }]),
+          turn,
+        );
+      }
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "👍");
+      await repo.takeMessage("turn-1", { chatId: "topic", messageKey: "g1" });
+      const app = createWebchatRuntime(deps).routes;
+      const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
+      const working = readSseUntil(events, '"status":"working"');
+      await repo.markWorking("topic");
+      expect(await working).toContain(
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", status: "working" })}`,
+      );
+      const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
+        id: string;
+        reaction?: string;
+        status?: string;
+      }[];
+      // Both travel; the client shows the status over the reaction.
+      expect(listed.find((m) => m.id === "g1")).toMatchObject({
+        reaction: "👍",
+        status: "working",
+      });
+      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("status");
+      const failed = readSseUntil(events, '"status":"failed"');
+      await repo.answerTurns("topic", [], new Date(), { failed: true });
+      expect(await failed).toContain('"messageId":"g1"');
+      await events.cancel();
     });
 
     it("hands a task card out with its card, in one read per page, and streams a card that settles", async () => {

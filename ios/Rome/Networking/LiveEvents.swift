@@ -19,6 +19,9 @@ enum LiveEvent: Sendable {
     /// The Concierge's reaction on a guardian message changed (`message_reaction`).
     /// Nil: it has none now.
     case reaction(sessionId: String, messageId: String, reaction: String?)
+    /// Rome's status on a guardian message changed (`message_status`).
+    /// Nil: it has none now.
+    case status(sessionId: String, messageId: String, status: String?)
     /// A task's question or approval that a card in the chat shows ended
     /// (`chat_card_settled`): `card` replaces the card of every part that shows it.
     case cardSettled(sessionId: String, card: JSONValue)
@@ -30,11 +33,11 @@ enum LiveEvent: Sendable {
     case agentName(String?)
     /// A chat was renamed.
     case sessionName(sessionId: String, name: String)
-    /// The Concierge wrote a task row (`concierge.tasks`).
-    case taskUpsert(ConciergeTask)
     /// Something a Concierge chat's task list holds changed
     /// (`tasks_changed` on `chat.tasks:<chatId>`): read the list again.
-    case taskListChanged(chatId: String)
+    /// `follows`: a follow was among what changed, so its source's state is
+    /// read again too (`GET /concierge/connectors`).
+    case taskListChanged(chatId: String, follows: Bool = false)
     /// Events may have been missed: the app came back to the foreground, or
     /// the socket came back after a drop. Listeners refetch what they show.
     case reconnected
@@ -67,7 +70,6 @@ enum LiveTopic {
     static let chatStatus = "chat.status"
     /// What the Concierge is doing in each of the guardian's Concierge chats.
     static let conciergeActivity = "concierge.activity"
-    static let conciergeTasks = "concierge.tasks"
     static func chat(_ sessionId: String) -> String { "chat.session:\(sessionId)" }
     /// A Concierge chat's task list, by the chat's server id.
     static func chatTasks(_ chatId: String) -> String { "chat.tasks:\(chatId)" }
@@ -333,11 +335,10 @@ final class LiveEventsSocket: LiveEventSource {
         else { return nil }
         if frame["type"]?.string == "subscribed" { return .subscribed(topic: topic) }
         guard frame["type"]?.string == "event", let name = frame["event"]?.string else { return nil }
-        // A message or a task is decoded from the text itself, not encoded
+        // A message is decoded from the text itself, not encoded
         // from its JSON value and decoded again.
         let event: LiveEvent? = switch name {
         case "message_insert": (try? JSONDecoder().decode(Envelope<ChatMessage>.self, from: data)).map { .messageInsert($0.data) }
-        case "task_upsert": (try? JSONDecoder().decode(Envelope<TaskUpsertEvent>.self, from: data)).map { .taskUpsert($0.data.task) }
         default: decode(name: name, data: frame["data"])
         }
         return event.map { .event(topic: topic, $0) }
@@ -358,13 +359,16 @@ final class LiveEventsSocket: LiveEventSource {
             return .sessionName(sessionId: id, name: name)
         case "tasks_changed":
             guard let id = data["chatId"]?.string else { return nil }
-            return .taskListChanged(chatId: id)
+            return .taskListChanged(chatId: id, follows: data["follows"]?.bool == true)
         case "message_insert":
             guard let message = data.decoded(ChatMessage.self) else { return nil }
             return .messageInsert(message)
         case "message_reaction":
             guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
             return .reaction(sessionId: id, messageId: message, reaction: data["reaction"]?.string)
+        case "message_status":
+            guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
+            return .status(sessionId: id, messageId: message, status: data["status"]?.string)
         case "chat_card_settled":
             guard let id = data["sessionId"]?.string, let card = data["card"], card["kind"]?.string != nil, card["id"]?.string != nil else { return nil }
             return .cardSettled(sessionId: id, card: card)
@@ -379,9 +383,6 @@ final class LiveEventsSocket: LiveEventSource {
         case "chat_thread_retired":
             guard let id = data["sessionId"]?.string, let root = data["chatThreadId"]?.string else { return nil }
             return .threadRetired(sessionId: id, chatThreadId: root)
-        case "task_upsert":
-            guard let event = data.decoded(TaskUpsertEvent.self) else { return nil }
-            return .taskUpsert(event.task)
         default:
             return nil
         }

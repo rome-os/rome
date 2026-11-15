@@ -27,7 +27,8 @@ import {
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
 import { connectAccountTools } from "./connect-account-tool.js";
-import type { DeviceKind } from "../connections/connect-card.js";
+import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js";
+import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
 import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 import { withTaskInputActor } from "../webchat/task-input-actor.js";
@@ -52,6 +53,8 @@ export interface RomeToolPortsDeps {
   taskOwner?: (taskId: string) => Promise<string | null>;
   /** The device kinds `connect_account` connects. When absent, none. */
   deviceKinds?: () => readonly DeviceKind[];
+  /** How a device kind stands for a turn, on its asking device alone when it has one. */
+  deviceState?: (kind: string, turn: LiveTurn) => DeviceKindState | undefined;
   /** Whether a turn is read by the guardian alone. When absent, none is. */
   privateTurn?: PrivateTurn;
 }
@@ -275,7 +278,8 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           widgets: turn.widgets,
           hasSpeaker,
           devices: deps.deviceKinds?.(),
-          deviceStates: deps.deviceKinds,
+          deviceState: (kind) =>
+            deps.deviceState?.(kind, { askingDeviceId: askingDeviceOf(turn.threadContext()) }),
           devicesOnly: provided.some((tool) => tool.name === "connect_card"),
         }),
         ...shareLocationTools({

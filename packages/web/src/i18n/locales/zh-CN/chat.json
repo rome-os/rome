@@ -108,6 +108,10 @@
       }
     },
     "reaction": "表情回应",
+    "status": {
+      "working": "正在处理",
+      "failed": "未完成"
+    },
     "taskList": {
       "title": "任务",
       "close": "关闭任务",

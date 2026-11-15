@@ -10,6 +10,7 @@ import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/ap
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { ChatThreadPlacement } from "../webchat/repository.js";
+import { askingDeviceOf } from "../connections/device/live-route.js";
 import type { SendResult } from "../chats/send.js";
 import type {
   ConciergeTaskWithChat,
@@ -307,8 +308,11 @@ export async function buildConciergeTools(
   };
 
   // Said as Concierge's account, so the task event reads who asked off the
-  // message.
+  // message. The device the guardian asks from goes with the work, so the
+  // task chat's live reads ask that device too, not another install.
   const sendInput = async (chatId: string, text: string, skillName?: string) => {
+    const asking = askingDeviceOf(context.getThreadContext());
+    if (asking) await webchatRepo.setAskingDevice(chatId, asking);
     const body = { text, ...(skillName ? { skillName } : {}) };
     const send = () => service.dashboard.send(taskChatPlace(chatId), body, CONCIERGE_ACCOUNT);
     const sent = context.withTaskInput
@@ -398,6 +402,46 @@ export async function buildConciergeTools(
     const only = prompts[0];
     if (only && (await webchatRepo.getReplyTarget(chatId, only))?.role === "user") return only;
     throw new Error(NO_ROW_MESSAGE);
+  };
+
+  // Rome's status on the guardian message a task works for
+  // (docs/domains/chats.md#status). It only shows how the work stands, so
+  // failing to write it never fails the tool.
+  const writeStatus = async <T>(label: string, write: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await write();
+    } catch (error) {
+      log.warn(`failed to ${label} a message's task`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  };
+
+  // Sends `send` on to task `taskId` with guardian message `messageKey`
+  // linked to it, so the message shows working while the task does: linked
+  // first, so a task that ends at once still settles it. When the task never
+  // hears it the link is taken back to what it was, unless `keepOnFailure`:
+  // a task whose start failed stays, failed, and its message shows it.
+  const sendLinked = async (
+    taskId: string,
+    messageKey: string | undefined,
+    send: () => Promise<void>,
+    { keepOnFailure = false }: { keepOnFailure?: boolean } = {},
+  ) => {
+    if (!messageKey) return send();
+    const target = { chatId: currentTurn().chatId, messageKey };
+    const before = await writeStatus("link", () => tasks.repo.linkMessage(taskId, target));
+    try {
+      await send();
+    } catch (error) {
+      if (!keepOnFailure) {
+        if (before) {
+          await writeStatus("unlink", () => tasks.repo.unlinkMessage(taskId, target, before));
+        }
+      }
+      throw error;
+    }
   };
 
   // What the Concierge writes on a row: what Rome cannot know. Rome derives
@@ -809,16 +853,23 @@ export async function buildConciergeTools(
     if (taskId) service.noteSaid(taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
-    const answered = answers ?? (await certainlyAnswered(taskId));
-    if (answered) {
-      await tasks.repo.answerMessage(chatId, answered).catch((error: unknown) =>
-        log.warn("failed to settle an answered message", {
-          chatId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
+    await settleAnswered(answers, taskId);
     return id;
+  };
+
+  // A message, said or forwarded, answers the guardian message it names, or
+  // the one it certainly answers: that message is settled.
+  const settleAnswered = async (answers: string | undefined, taskId: string | undefined) => {
+    const { chatId } = currentTurn();
+    const answered = answers ?? (await certainlyAnswered(taskId));
+    if (!answered) return;
+    service.messageStatus.answered(chatId, answered);
+    await tasks.repo.answerMessage(chatId, answered).catch((error: unknown) =>
+      log.warn("failed to settle an answered message", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   };
 
   // The guardian message a `say` naming no `answers` answers, when that is
@@ -881,6 +932,7 @@ export async function buildConciergeTools(
     // Only a result the guardian was shown counts as said.
     if (task) service.noteSaid(task.id);
     noteAnswers(id, answers);
+    await settleAnswered(answers, task?.id);
     // The push shows the message: the Concierge's lead-in, or else the
     // task's title and a preview of what it brought back (the guardian's
     // call, 2026-11-14). A secret is kept off the lock screen only by
@@ -1019,6 +1071,11 @@ export async function buildConciergeTools(
           if (!(await webchatRepo.setMessageReaction(chatId, messageId, emoji as string | null))) {
             throw new Error(`No guardian message ${messageId} in this chat.`);
           }
+          // A reaction is how the turn handles the message, so its turn shows
+          // it working no more (docs/domains/chats.md#status).
+          if (emoji !== null) await service.messageStatus.reactedTo(chatId, messageId);
+          // Taken back, the message is the turn's work again.
+          else await service.messageStatus.reactionCleared(chatId, messageId);
           return emoji === null ? "Reaction cleared." : `Reacted ${emoji}.`;
         }),
     },
@@ -1247,7 +1304,7 @@ export async function buildConciergeTools(
           card: {
             type: "boolean",
             description:
-              "Also show the guardian a card that opens the task chat. The task runs either way. For long work with many details, work that will likely need several rounds with the guardian, or when they ask to see or watch it. The card tells them you are on it, so do not also react 👀. Otherwise leave it off, since its result, question or approval reaches them anyway.",
+              "Also show the guardian a card that opens the task chat. The task runs either way. For long work with many details, work that will likely need several rounds with the guardian, or when they ask to see or watch it. The card tells them you are on it. Otherwise leave it off, since its result, question or approval reaches them anyway.",
           },
         },
       },
@@ -1352,7 +1409,12 @@ export async function buildConciergeTools(
                 schedule,
               );
             } else {
-              await sendInput(chatId, brief, skill?.name);
+              await sendLinked(
+                started,
+                start?.answered,
+                () => sendInput(chatId, brief, skill?.name),
+                { keepOnFailure: true },
+              );
             }
             // A planned row that was stopped is taken up again by its start.
             if (taskId) await tasks.repo.resume(taskId);
@@ -1429,7 +1491,13 @@ export async function buildConciergeTools(
           const text = requireString(args, "text");
           // New work for a task the guardian or you stopped takes it up again.
           if (task) await tasks.repo.resume(task.id);
-          await sendInput(chatId, text);
+          // The guardian message whose words go on: the one named, or the
+          // turn's only one. It shows working while the task works for it.
+          // A scheduled task's runs are no work for one message: it links none.
+          const relayed = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
+          const scheduled = task ? await service.deps.schedules?.of(task.id) : null;
+          if (task && !scheduled) await sendLinked(task.id, relayed, () => sendInput(chatId, text));
+          else await sendInput(chatId, text);
           await relayToTaskThread(chatId, answers);
           return "Sent; the task chat takes it as input.";
         }),

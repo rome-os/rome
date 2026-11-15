@@ -102,15 +102,26 @@ extension DeviceStatus {
         let registry = NodeCapabilityRegistry.testing(HealthFixtures.actions(health), health: NodeFlag(true), device: NodeFlag(false))
         let list = await registry.connections()
         #expect(list.map(\.capability) == ["apple_health", "device"])
+        let healthActions = registry.capability(id: "apple_health")!.actions
+        let deviceActions = registry.capability(id: "device")!.actions
         #expect(list[0] == .init(
             capability: "apple_health", title: "Apple Health", prefix: "health", personal: true,
-            operations: [.init(name: "health.stats", access: "read"), .init(name: "health.samples", access: "read")],
+            operations: healthActions.map(\.reportedOperation),
             feeds: "apple_health", permission: "unknown", live: true
         ), "HealthKit hides read access: always unknown")
+        #expect(list[0].operations.map(\.name) == ["health.stats", "health.samples"])
         #expect(list[1] == .init(
             capability: "device", title: "Device", prefix: "device", personal: false,
-            operations: [.init(name: "device.status", access: "read")], permission: "not_needed", live: false
+            operations: deviceActions.map(\.reportedOperation), permission: "not_needed", live: false
         ))
+        #expect(list[1].operations.map(\.name) == ["device.status"])
+        // Each operation carries its usage and examples, so the Rome lists it from the report alone.
+        for operation in list.flatMap(\.operations) {
+            #expect(operation.access == "read")
+            #expect(operation.description?.isEmpty == false, "\(operation.name) carries its usage")
+            #expect(operation.examples?.isEmpty == false, "\(operation.name) carries an example")
+        }
+        #expect(list[1].operations[0].input?["additionalProperties"] == .bool(false), "device.status takes no arguments")
         #expect(registry.capability(id: "apple_health")?.needsPermission == true)
         #expect(registry.capability(id: "device")?.needsPermission == false)
         #expect(registry.capability(id: "apple_health")?.syncSource == "apple_health")
@@ -136,6 +147,12 @@ extension DeviceStatus {
         #expect(json["connections"]?.array?.first?["permission"]?.string == "not_needed")
         #expect(json["connections"]?.array?.first?["operations"]?.array?.first?["access"]?.string == "read")
         #expect(json["connections"]?.array?.first?["feeds"] == nil, "omitted for one that syncs nothing")
+        #expect(json["device"]?["originId"] == nil, "omitted for an install that names none")
+        let named = DeviceConnectionReport(device: .init(id: "dev-1", name: "iPhone", platform: "ios", originId: "origin-1"), connections: [])
+        let namedJSON = parseJSON(String(decoding: try JSONEncoder().encode(named), as: UTF8.self))
+        #expect(namedJSON["device"]?["originId"]?.string == "origin-1")
+        #expect(namedJSON["connections"]?.array?.isEmpty == true, "a sign-out's report lists none")
+        #expect(json["connections"]?.array?.first?["operations"]?.array?.first?["description"] == nil, "omitted when the registry declares none")
         #expect(DeviceConnections.connectionId(device: "DEV-1", capability: "apple_health") == "dev-1:apple_health")
         #expect(DeviceConnections.connectionId(device: nil, capability: "apple_health") == nil)
     }
@@ -219,6 +236,29 @@ extension NodeHostTests {
         #expect(attempts == 2)
     }
 
+    @Test func signOutsEmptyReportGoesFirstAndWaitsNoLongerThanItsLimit() async {
+        let rig = HostRig(deviceOn: false)
+        let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)
+        connections.device = { ("dev-1", "iPhone") }
+        var reports: [DeviceConnectionReport] = []
+        // An unreachable Rome: the send hangs well past the limit.
+        connections.send = { report in
+            reports.append(report)
+            try? await Task.sleep(for: .seconds(30))
+            return false
+        }
+        let started = ContinuousClock.now
+        await connections.reportNone(limit: .milliseconds(200))
+        #expect(ContinuousClock.now - started < .seconds(5), "the limit releases sign-out")
+        #expect(reports.count == 1 && reports[0].connections.isEmpty, "an empty report was sent")
+    }
+
+    @Test func aWaitEndsWithItsWorkWhenTheWorkIsFirst() async {
+        let started = ContinuousClock.now
+        await DeviceConnections.wait(atMost: .seconds(30)) {}
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
     @Test func connectingMarksItTurnsLiveOnAndReports() async {
         let rig = HostRig(deviceOn: false)
         let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)
@@ -287,3 +327,46 @@ extension NodeHostTests {
         #expect(sent.last == true, "connect returns only once its own report, with Live access on, is sent")
     }
 }
+
+/// Records the device header of each request and answers a created turn.
+final class DeviceHeaderProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var headers: [String?] = []
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.headers.append(request.value(forHTTPHeaderField: APIClient.deviceHeader))
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"turnId":"t1"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+@Suite(.serialized) struct AskingDeviceHeaderTests {
+    private func backend(cookie: String) -> LiveBackend {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DeviceHeaderProtocol.self]
+        DeviceHeaderProtocol.headers = []
+        return LiveBackend(client: APIClient(origin: URL(string: "https://me.romeos.cc")!, token: { "t" }, cookieName: { cookie }, configuration: configuration, deviceId: "dev-1"))
+    }
+
+    @Test func everyGuardianRequestThatCanStartATurnNamesThisPhone() async throws {
+        let backend = backend(cookie: InstanceSession.guardianCookie)
+        _ = try await backend.send(sessionId: "s1", text: "battery?", files: [], inputId: "i1", priority: .now)
+        // Answering a card starts the turn that reads after connecting.
+        _ = try? await backend.answerWidget(widgetId: "w1", name: "check", context: .object([:]))
+        try? await backend.resolveApproval(id: "a1", approve: true)
+        _ = try? await backend.sessions()
+        #expect(DeviceHeaderProtocol.headers == ["dev-1", "dev-1", "dev-1", nil], "a GET names none")
+    }
+
+    @Test func aVisitorsRomeIsNeverTold() async throws {
+        let backend = backend(cookie: InstanceSession.visitorCookie)
+        _ = try await backend.send(sessionId: "s1", text: "hi", files: [], inputId: "i1", priority: .now)
+        #expect(DeviceHeaderProtocol.headers == [nil])
+    }
+}
+

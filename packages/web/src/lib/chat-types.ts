@@ -185,6 +185,9 @@ export interface ChatMessage {
   /** The emoji the Concierge reacted to a guardian message of its chat with.
    *  Absent when it has none, and from servers before it. */
   reaction?: string | null;
+  /** Rome's status on a guardian message of a Concierge chat, shown over its
+   *  reaction. Absent when it has none, and from servers before it. */
+  status?: import("@rome/api-types/concierge").ConciergeMessageStatus | null;
 }
 
 export interface ProjectOption {

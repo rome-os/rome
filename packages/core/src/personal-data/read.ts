@@ -23,6 +23,7 @@ import {
   withNextStep,
   NO_CONNECTIONS,
 } from "./connection-pointer.js";
+import type { LiveTurn } from "../connections/device/live-route.js";
 
 export interface Freshness {
   syncedThrough?: string;
@@ -67,6 +68,7 @@ export function queryPersonalData(
   input: QueryInput,
   defaults: { tz: string; now: number },
   connections: ConnectionLookup = NO_CONNECTIONS,
+  turn: LiveTurn = {},
 ): QueryAnswer | { error: string } {
   const plan = planQuery(source, input, defaults);
   if ("error" in plan) return plan;
@@ -132,11 +134,7 @@ export function queryPersonalData(
     ...(gapOrigin !== undefined
       ? {
           connection: withNextStep(
-            connectionPointer(
-              source.source,
-              repo.connectionIdOf(source.source, gapOrigin ?? undefined),
-              connections,
-            ),
+            connectionPointer(source.source, turn, connections, gapOrigin),
             gapMs,
           ),
         }

@@ -46,7 +46,7 @@ struct ChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: { workspace.mainChatActivity }, onClose: { store.closeThread() })
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.taskChats, name: workspace.agentDisplayName, activity: { workspace.mainChatActivity }, onClose: { store.closeThread() })
             }
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
@@ -156,7 +156,7 @@ struct ChatScreen: View {
                 .onTapGesture { composerFocused = false }
             } else {
                 TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
+                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                         .equatable()
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
@@ -260,7 +260,7 @@ struct ConciergeRow: View, Equatable {
     /// What the row draws from its message (`TranscriptStore.info(for:)`).
     let info: RowInfo
     let store: TranscriptStore
-    let tasks: TasksStore
+    let tasks: TaskChatsStore
     /// Drawn in an open thread view: no thread labels, no share mode, and a
     /// tap on a message never closes the view.
     var inThread = false
@@ -331,25 +331,20 @@ struct ConciergeRow: View, Equatable {
         case .taskCard(_, let chatId, let title, let latest, let ask):
             let name = tasks.title(forChat: chatId, fallback: title)
             VStack(alignment: .leading, spacing: 8) {
-                let state = tasks.cardState(forChat: chatId)
-                TaskCard(
-                    title: name,
-                    state: state,
-                    stopping: state.taskId.map { tasks.stopping.contains($0) } ?? false,
-                    onStop: state.taskId.map { id in { tasks.stopTask(id: id) { store.stopTaskFailed() } } }
-                ) {
+                TaskCard(title: name, state: tasks.cardState(forChat: chatId)) {
                     openChat(chatId, name)
                 }
-                // The newest card from before `show` of a task that waits on
-                // the guardian shows what it asks, answered right here.
-                if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId), tasksListed: tasks.listed) != .settled {
-                    TaskAskView(chatId: chatId, card: ask, latest: true, tasks: tasks, store: store) { openChat(chatId, name) }
+                // The newest card from before `show`, while it waits on the
+                // guardian and its chat is not running, shows what it asks,
+                // answered right here.
+                if latest, !inThread, let ask, ask.waits, !tasks.isRunning(chat: chatId) {
+                    TaskAskView(chatId: chatId, card: ask, latest: true, store: store) { openChat(chatId, name) }
                 }
             }
         case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             EmptyView()
         case .taskAsk(_, let chatId, let title, let card, let latest):
-            TaskAskView(chatId: chatId, card: card, latest: latest, tasks: tasks, store: store) {
+            TaskAskView(chatId: chatId, card: card, latest: latest, store: store) {
                 openChat(chatId, tasks.title(forChat: chatId, fallback: title))
             }
             .keepsTaps(inThread)

@@ -48,6 +48,10 @@ struct NodeActionSpec: Sendable, Equatable {
     /// English, for the Agent: what `system.info` gives in `usage`.
     let usage: String
     var access: NodeAccess = .read
+    /// The JSON schema of its arguments, for the connection report.
+    var input: JSONValue? = nil
+    /// Argument objects that work as they are, for the connection report.
+    var examples: [JSONValue] = []
 }
 
 /// One short chat on a connection's page: something the Rome can do with it.

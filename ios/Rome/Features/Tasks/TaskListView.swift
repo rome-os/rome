@@ -179,7 +179,8 @@ struct TaskListView: View {
             )
         case .check(let check):
             TaskListPlainRow(title: check.check.name, line: TaskListWords.check(check, now: now), created: item.createdAt, last: last)
-        case .follow(let follow):
+        case .follow(let listed):
+            let follow = store.shown(listed)
             TaskListPlainRow(title: follow.target, line: TaskListWords.follow(follow), created: item.createdAt, dimmed: follow.state != "active", last: last)
         case .routine(let routine):
             TaskListPlainRow(

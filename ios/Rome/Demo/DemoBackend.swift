@@ -380,11 +380,6 @@ final class DemoBackend: RomeBackend {
         }
     }
 
-    func tasks() async throws -> [ConciergeTask] {
-        try await pause(0.2)
-        return tasks
-    }
-
     /// The demo's task list: its tasks in the groups their status gives
     /// them, with a schedule, a lone check, a follow and a routine.
     func taskList(chatId: String) async throws -> TaskListResponse {
@@ -395,7 +390,7 @@ final class DemoBackend: RomeBackend {
         for task in tasks where task.archivedAt == nil && task.conciergeChat?.id == chat {
             let status = TaskListWords.status(task)
             // Where Respond goes: the message of this chat with the card it waits on.
-            let card = task.waitId.flatMap { wait in
+            let card = task.openWait?["id"]?.string.flatMap { wait in
                 messages[chatId]?.first { message in
                     message.parts.contains { if case .taskChat(_, _, _, let card) = $0 { return card?.id == wait } else { return false } }
                 }?.id
@@ -468,9 +463,15 @@ final class DemoBackend: RomeBackend {
                 approvals[id]?.executionState = "succeeded"
                 if let index = tasks.firstIndex(where: { $0.chat?.id == "chat-price" }) {
                     tasks[index].state = .done
+                    tasks[index].status = "ended"
+                    tasks[index].endReason = "done"
+                    tasks[index].openWait = nil
                     tasks[index].updatedAt = Date.now.timeIntervalSince1970 * 1000
                     tasks[index].completedAt = tasks[index].updatedAt
-                    bus.emit(LiveTopic.conciergeTasks, .taskUpsert(tasks[index]))
+                    // The task ended: its chat waits on no one, as the chat list says.
+                    chats["chat-price"]?.awaitingGuardian = false
+                    bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "chat-price", running: false))
+                    bus.emit(LiveTopic.chatTasks(conciergeChatID), .taskListChanged(chatId: conciergeChatID))
                 }
             }
         }
@@ -779,7 +780,8 @@ final class DemoBackend: RomeBackend {
             "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
                 .object(["id": .string("q"), "question": .string(question), "type": .string("single"), "options": .array(options.map { .string($0) })]),
             ])])]),
-            "since": .number(since.timeIntervalSince1970 * 1000), "expired": .bool(expired),
+            // An expired question closes too, as the instance fills it in.
+            "since": .number(since.timeIntervalSince1970 * 1000), "expired": .bool(expired), "closed": .bool(expired),
         ]
         if let answered {
             card["outcome"] = .object(["kind": .string("answered"), "answer": .object(["text": .string(answered), "output": .object(["answers": .array([.object(["questionId": .string("q"), "value": .string(answered)])])])])])
@@ -853,7 +855,7 @@ final class DemoBackend: RomeBackend {
 
         chats = [
             "chat-price": ChatSession(id: "chat-price", name: "价格追踪：发提醒邮件", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: true),
-            "chat-research": ChatSession(id: "chat-research", name: "竞品定价调研", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: true),
+            "chat-research": ChatSession(id: "chat-research", name: "竞品定价调研", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: false),
             "chat-site": ChatSession(id: "chat-site", name: "官网首页双语文案", triggerKind: "concierge", running: true, lastTurnFailed: false, awaitingGuardian: false),
             "chat-notes": ChatSession(id: "chat-notes", name: "整理本周会议纪要", triggerKind: "concierge", running: true, lastTurnFailed: false, awaitingGuardian: false),
             "chat-notion": ChatSession(id: "chat-notion", name: "同步 Notion 数据库：把客户、订单和每周报告三张表合到一起", triggerKind: "concierge", running: false, lastTurnFailed: true, awaitingGuardian: false),
@@ -1098,10 +1100,11 @@ final class DemoBackend: RomeBackend {
         ]
         // What goes wrong: a limit before a turn ran, a turn that failed midway, a
         // switch of model, and messages the instance could not hand over.
-        func marked(_ message: ChatMessage, _ reaction: String?, inputState: String? = nil, turn: String? = nil) -> ChatMessage {
+        func marked(_ message: ChatMessage, _ reaction: String?, status: String? = nil, inputState: String? = nil, turn: String? = nil) -> ChatMessage {
             var message = message
             message.turnId = turn
             message.reaction = reaction
+            message.status = status
             message.inputState = inputState
             return message
         }
@@ -1113,10 +1116,10 @@ final class DemoBackend: RomeBackend {
         messages["topic-errors"] = [
             marked(user("er1", "把今天的邮件整理一下。", at: at(13, 0), session: "topic-errors"), "👍"),
             parts([.object(["type": .string("error"), "error": .string("Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit"), "code": .string("model_provider_unavailable"), "provider": .string("openai"), "reason": .string("quota_exhausted")])], at: at(13, 0), session: "topic-errors"),
-            marked(user("er2", "那就现在发给我吧。", at: at(13, 5), session: "topic-errors"), "🤔", turn: "er-t2"),
+            marked(user("er2", "那就现在发给我吧。", at: at(13, 5), session: "topic-errors"), nil, status: "failed", turn: "er-t2"),
             failedTrace(turn: "er-t2", error: "You've hit your limit · resets 3pm", code: "usage_limit", provider: "openai", at: at(13, 6)),
             parts([.object(["type": .string("quota_switch"), "from": .string("openai"), "to": .string("anthropic"), "reason": .string("quota"), "fromModel": .string("gpt-6-luna"), "model": .string("claude-sonnet-5-5")])], at: at(13, 7), session: "topic-errors"),
-            marked(user("er3", "好，继续。", at: at(13, 8), session: "topic-errors"), "👀"),
+            marked(user("er3", "好，继续。", at: at(13, 8), session: "topic-errors"), "👍", status: "working"),
             marked(user("er4", "顺便查一下周五的航班。", at: at(13, 9), session: "topic-errors"), nil, inputState: "failed"),
             marked(user("er5", "再提醒我带护照。", at: at(13, 10), session: "topic-errors"), nil, inputState: "unknown"),
         ]

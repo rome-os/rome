@@ -113,7 +113,7 @@ final class Workspace {
     private(set) var accountLabel: String
     /// The Rome Cloud picture of who is signed in, when they have one.
     private(set) var avatarURL: URL?
-    let tasks: TasksStore
+    let taskChats: TaskChatsStore
     private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
@@ -203,7 +203,7 @@ final class Workspace {
         self.drafts = drafts ?? DraftStore(instance: host, account: backend.account)
         // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
         transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance, account: backend.account)
-        tasks = TasksStore(backend: backend)
+        taskChats = TaskChatsStore(backend: backend)
         // The main chat's id from last time, else the guardian's until the
         // server names this person's. Its kept rows show before any fetch.
         let mainId = transcripts.mainChat() ?? conciergeChatID
@@ -370,7 +370,7 @@ final class Workspace {
         guard (try? await backend.deleteChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
         // Its open tasks now belong to the main Chat, or have stopped.
-        tasks.resync()
+        taskChats.resync()
         return true
     }
 
@@ -415,7 +415,7 @@ final class Workspace {
     }
 
     private func dropTaskChat(_ chatId: String) {
-        tasks.forget(chat: chatId)
+        taskChats.forget(chat: chatId)
         taskStores.removeValue(forKey: chatId)?.close()
     }
 
@@ -428,7 +428,7 @@ final class Workspace {
     func start() async {
         drafts.discardBlankChats()
         watchAgentName()
-        tasks.start()
+        taskChats.start()
         topics.start()
         Task {
             if role == .unknown { await readRole() }
@@ -576,7 +576,7 @@ final class Workspace {
     func stop() {
         if let nameWatch { backend.events.unsubscribe(nameWatch) }
         nameWatch = nil
-        tasks.stop()
+        taskChats.stop()
         concierge.close()
         topics.stop()
         for store in topicStores.values { store.close() }
@@ -762,8 +762,6 @@ final class AppModel {
         // HealthKit can wake the app before any screen shows.
         let health = HealthSettings(
             instance: Self.rememberedInstance().map(Self.healthInstance),
-            // The Health connection of this phone, which reads the same data live.
-            connectionId: { await MainActor.run { DeviceConnections.connectionId(device: cloud.deviceCredential?.deviceSessionId, capability: HealthCapability.id) } },
             target: { await target.resolve($0) }
         )
         self.health = health
@@ -780,6 +778,7 @@ final class AppModel {
         node.onAnswered = { [weak health] action in
             if action.hasPrefix("health.") { health?.foreground() }
         }
+        connections.originId = { [weak health] in health?.originId() }
         connections.device = { [weak self] in
             guard let id = self?.cloud.deviceCredential?.deviceSessionId else { return nil }
             return (id.lowercased(), UIDevice.current.name)
@@ -1152,7 +1151,7 @@ final class AppModel {
             Task { @MainActor in self?.handleUnauthorized(box: box, instance: instance) }
         }, renew: { [weak self] in
             await self?.renewAfterUnauthorized(box: box, instance: instance) ?? false
-        })
+        }, deviceId: cloud.deviceCredential?.deviceSessionId.lowercased())
         return Workspace(
             backend: LiveBackend(client: client, account: account),
             instanceName: instance.name,
@@ -1255,6 +1254,9 @@ final class AppModel {
     var currentInstance: CloudInstance? { instances.first { $0.id == currentInstanceID } }
 
     func signOut() async {
+        // While the session still works: the Rome drops this device id's
+        // connections, which no later report would.
+        await connections.reportNone()
         // First, so nothing still running for this account writes again.
         cloud.endAccount()
         node.accountEnded()

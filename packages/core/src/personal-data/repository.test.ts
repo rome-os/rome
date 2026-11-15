@@ -157,12 +157,11 @@ describe("PersonalDataRepository", () => {
     const connected = { ...batch("b-1"), connectionId: "dev-1:apple_health" };
     ingest(connected);
     expect(repo.catalog()[0].connectionId).toBe("dev-1:apple_health");
-    expect(repo.connectionIdOf("apple_health", ORIGIN)).toBe("dev-1:apple_health");
     // An older build sends none: the connection stays.
     ingest(batch("b-2"));
-    expect(repo.connectionIdOf("apple_health")).toBe("dev-1:apple_health");
+    expect(repo.catalog()[0].connectionId).toBe("dev-1:apple_health");
     ingest({ ...batch("b-3"), connectionId: null });
-    expect(repo.connectionIdOf("apple_health")).toBeNull();
+    expect(repo.catalog()[0].connectionId).toBeUndefined();
   });
 
   it("never moves synced-through back, and ignores one ahead of Rome's clock", () => {
