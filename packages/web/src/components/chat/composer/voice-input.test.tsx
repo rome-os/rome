@@ -215,6 +215,26 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("gives the field back when the page comes back from the back/forward cache", async () => {
+    const { field } = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+
+    expect(microphone.closed).toBe(1);
+    expect(field().value).toBe("hello");
+    expect(field().readOnly).toBe(false);
+    expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(
+      "Listening stopped when you left this chat",
+    );
+  });
+
   it("has no voice control while Rome Cloud provides no voice input", async () => {
     renderComposer(kind, { available: false, place: null });
     await waitFor(() =>
