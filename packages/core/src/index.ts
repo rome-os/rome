@@ -229,7 +229,7 @@ import { DeviceConnectionsRepository } from "./connections/device/repository.js"
 import { registerDeviceActions } from "./connections/device/actions.js";
 import { createLiveRoutes } from "./connections/device/live-route.js";
 import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
-import { deviceKinds } from "./connections/connect-card.js";
+import { deviceKinds, deviceKindState } from "./connections/connect-card.js";
 import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
@@ -506,8 +506,8 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
-  // A device removed from the account, or gone from its full list, loses its
-  // connection rows; an origin a removal leaves with no install is turned off.
+  // A device removed from the account through this Rome loses its connection
+  // rows; an origin the removal leaves with no install is turned off.
   const nodeDevices = withDeviceLifecycle(createNodeDevicesService(), {
     connections: () => deviceConnectionsRepo,
     turnOriginOff: (originId) => {
@@ -617,6 +617,9 @@ async function main() {
   );
   const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
   const deviceConnectionsRepo = new DeviceConnectionsRepository(db);
+  // Which device connection answers a live read for a turn: one choice for
+  // device_run, the personal-data pointer and the connect card.
+  const deviceLiveRoutes = createLiveRoutes(deviceConnectionsRepo);
   const routineRunsRepo = new RoutineRunsRepository(db);
   // Runs before the action engine, routine engine, and ingress below exist, so
   // every `running` row it ends belongs to the stopped process.
@@ -1327,6 +1330,7 @@ async function main() {
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
         deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+        deviceState: (kind, turn) => deviceKindState(deviceLiveRoutes.forKind(kind, turn), turn),
         // The turn's audience, narrowed by the chat's as it stands now, so a
         // chat that opens to visitors after the turn started is no longer private.
         privateTurn: async (turn) =>
@@ -1442,7 +1446,7 @@ async function main() {
   registerPersonalDataActions(actionRegistry, {
     personalData: personalDataRepo,
     guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
-    connections: createLiveRoutes(deviceConnectionsRepo),
+    connections: deviceLiveRoutes,
   });
   registerDeviceActions(actionRegistry, {
     connections: deviceConnectionsRepo,

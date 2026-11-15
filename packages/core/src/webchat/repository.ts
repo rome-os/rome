@@ -1847,6 +1847,24 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id));
   }
 
+  /** The device the guardian asked from when this task chat was last handed work, or null. */
+  async askingDeviceOf(id: string): Promise<string | null> {
+    const row = await this.db
+      .select({ askingDeviceId: romeSessions.askingDeviceId })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, id))
+      .get();
+    return row?.askingDeviceId ?? null;
+  }
+
+  /** Keeps the device a task chat's live reads ask; null asks none in particular. */
+  async setAskingDevice(id: string, deviceId: string | null): Promise<void> {
+    await this.db
+      .update(romeSessions)
+      .set({ askingDeviceId: deviceId })
+      .where(eq(romeSessions.id, id));
+  }
+
   async updateSessionName(id: string, name: string) {
     if (await this.renameSession(id, name)) this.emitSessionNameChanged(id, name);
   }

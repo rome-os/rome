@@ -6,6 +6,7 @@ import {
   type OAuthProvider,
 } from "./oauth/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "./oauth/rome-cloud-oauth.js";
+import type { LivePointer, LiveTurn } from "./device/live-route.js";
 import type { DeviceConnection } from "./device/repository.js";
 
 /** A device connection kind the card connects: a capability a device reported. */
@@ -16,6 +17,29 @@ export interface DeviceKind {
   state?: DeviceConnection["state"];
   /** The device that reports it, by name, when one does. */
   device?: string;
+}
+
+/**
+ * How a device kind stands for one turn: the connection the live route
+ * chooses, on the asking device alone when there is one.
+ */
+export interface DeviceKindState {
+  state: DeviceConnection["state"] | "not_connected";
+  /** The device's name, when the connection has one. */
+  device?: string;
+  /** The device the guardian asks from, which the card then checks alone. */
+  askingDeviceId?: string;
+}
+
+/** A live route's pointer as `connect_account` reads it. */
+export function deviceKindState(pointer: LivePointer, turn: LiveTurn): DeviceKindState {
+  return {
+    state: pointer.state,
+    ...(pointer.state !== "not_connected" && pointer.device.name
+      ? { device: pointer.device.name }
+      : {}),
+    ...(turn.askingDeviceId ? { askingDeviceId: turn.askingDeviceId } : {}),
+  };
 }
 
 /** The path of the page that connects a device kind; the phone's app opens its own flow there. */
@@ -164,7 +188,12 @@ export function parseConnectAccountInput(
  * What `connect_account` hands back for a device kind. The card's Connect
  * opens the device's page, which the device's own app turns into its flow.
  */
-export function deviceConnectToolOutput(device: DeviceKind, widgetsShow: boolean): unknown {
+export function deviceConnectToolOutput(
+  device: DeviceKind,
+  widgetsShow: boolean,
+  /** The device the guardian asks from: the card's checks read its connection alone. */
+  askingDeviceId?: string,
+): unknown {
   if (!widgetsShow) {
     return (
       "This conversation cannot show the connect card. Ask the guardian, in a message, " +
@@ -177,7 +206,12 @@ export function deviceConnectToolOutput(device: DeviceKind, widgetsShow: boolean
     render: {
       kind: "inline",
       componentId: CONNECT_CARD_ID,
-      props: { kind: device.kind, label: device.label, device: true },
+      props: {
+        kind: device.kind,
+        label: device.label,
+        device: true,
+        ...(askingDeviceId ? { deviceId: askingDeviceId } : {}),
+      },
       builtin: true,
     },
     message:

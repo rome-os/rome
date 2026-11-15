@@ -1,4 +1,5 @@
 import Foundation
+import os
 import OSLog
 import Observation
 import SwiftUI
@@ -209,11 +210,25 @@ final class DeviceConnections {
             _ = await send(report)
         }
         reporting = task
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await task.value }
-            group.addTask { try? await Task.sleep(for: limit) }
-            await group.next()
-            group.cancelAll()
+        await Self.wait(atMost: limit) { await task.value }
+    }
+
+    /// Returns once `work` ends or `limit` passes, whichever is first. The
+    /// work goes on after a timeout; only the caller stops waiting for it.
+    /// A task group would wait for its slow child, so the first to finish
+    /// resumes a continuation instead.
+    nonisolated static func wait(atMost limit: Duration, for work: @escaping @Sendable () async -> Void) async {
+        let once = OSAllocatedUnfairLock(initialState: false)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let finish: @Sendable () -> Void = {
+                let first = once.withLock { done in
+                    defer { done = true }
+                    return !done
+                }
+                if first { continuation.resume() }
+            }
+            Task { await work(); finish() }
+            Task { try? await Task.sleep(for: limit); finish() }
         }
     }
 

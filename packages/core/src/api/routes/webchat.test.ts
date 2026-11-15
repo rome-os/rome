@@ -2893,6 +2893,43 @@ describe("Webchat API", () => {
     expect(sent).toHaveLength(4);
   });
 
+  it("gives a task chat's turn from the Concierge the device the task was handed from", async () => {
+    const sent: (SendTurnOptions | undefined)[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:task" },
+      sessionId: "agent-session",
+      status: "idle",
+      startTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+        sent.push(options);
+        return testTurnHandle({
+          turnId: `turn-${sent.length}`,
+          events: (async function* () {
+            yield { type: "result", content: "" };
+          })(),
+          turnContext: otelContext.active(),
+        });
+      },
+      onStatusChange: () => () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+    }));
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      name === "core:concierge" ? buildAgent(name) : undefined,
+    );
+    const { runtime } = createWebchatRuntime(deps);
+    const concierge = { platform: "webchat", id: "core:concierge" };
+    const id = await runtime.startChat({}, "guardian");
+    expect(await runtime.post(id, { text: "Read my steps" }, concierge)).toMatchObject({
+      ok: true,
+    });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await deps.webchatRepo.setAskingDevice(id, "dev-asking");
+    expect(await deps.webchatRepo.askingDeviceOf(id)).toBe("dev-asking");
+    expect(await runtime.post(id, { text: "And sleep" }, concierge)).toMatchObject({ ok: true });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBe("dev-asking");
+    expect(sent).toHaveLength(2);
+  });
+
   describe("device folder", () => {
     const folder = {
       path: "/Users/ray/code/foo",

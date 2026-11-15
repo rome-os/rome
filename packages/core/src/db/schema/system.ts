@@ -527,6 +527,10 @@ export const romeSessions = sqliteTable(
     // Folder on a rome-node device the chat works in, set only when the chat
     // is created. NULL for every chat without one and every other session type.
     deviceFolder: text("device_folder", { mode: "json" }).$type<DeviceFolder>(),
+    // The rome-node device the guardian asked from when the Concierge last
+    // handed this task chat work, so the task's live reads ask that device.
+    // NULL for every other chat, and for a task started with no device.
+    askingDeviceId: text("asking_device_id"),
     // Agent the session is bound to. NULL means the default "main" agent.
     // Locked on first turn so the session can't switch agents mid-thread.
     agentName: text("agent_name"),

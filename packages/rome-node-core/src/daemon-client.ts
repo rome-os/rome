@@ -72,8 +72,6 @@ export class DeviceActionError extends Error {
 
 export interface DeviceList {
   items: Array<{ id: string; [key: string]: unknown }>;
-  /** Paging markers Cloud sent, if any: the list is then one page of more. */
-  [paging: string]: unknown;
 }
 export interface NodeClientOptions {
   onListenerError?(error: unknown): void;

@@ -62,18 +62,6 @@ function fixture(waitMs = 1000) {
 }
 
 describe("CLI device connector", () => {
-  it("passes Cloud's paging markers through, so a page is not taken for the whole list", async () => {
-    const f = fixture();
-    f.fetch.mockImplementation(async () =>
-      Response.json({ items: [{ id: "target" }], next_cursor: "c2", total: 3, other: "x" }),
-    );
-    expect(await f.connector.list()).toEqual({
-      items: [{ id: "target" }],
-      next_cursor: "c2",
-      total: 3,
-    });
-  });
-
   it("lists devices without opening a Gateway connection or exchanging credentials", async () => {
     const f = fixture();
     expect(await f.connector.list()).toEqual({ items: [{ id: "target" }] });

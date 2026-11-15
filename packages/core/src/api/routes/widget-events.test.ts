@@ -673,6 +673,55 @@ describe("an event on the connect card for a device kind", () => {
     });
   });
 
+  it("reads only the asking device's connection for a card raised for it", async () => {
+    const forAsking = {
+      ...deviceCard,
+      render: {
+        ...deviceCard.render,
+        props: { ...deviceCard.render.props, deviceId: "dev-asking" },
+      },
+    };
+    // The guardian's own install has Health off; another install reports it working.
+    const rows = [
+      {
+        capability: "apple_health",
+        title: "Apple Health",
+        state: "off",
+        device: { id: "dev-asking" },
+      },
+      {
+        capability: "apple_health",
+        title: "Apple Health",
+        state: "working",
+        device: { id: "dev-other" },
+      },
+    ];
+    const off = setup(
+      { m: { chatId: "c1", content: [forAsking] } },
+      "guardian",
+      undefined,
+      [],
+      rows,
+    );
+    expect(await (await off.fire("m", { name: "connect", context })).json()).toEqual({
+      open: "http://localhost/connections/device/apple_health",
+    });
+    expect((await off.fire("m", { name: "check", context })).status).toBe(409);
+    expect(off.forwarded).toEqual([]);
+
+    const on = setup(
+      { m: { chatId: "c1", content: [forAsking] } },
+      "guardian",
+      undefined,
+      [],
+      [{ ...rows[0], state: "working" }, rows[1]],
+    );
+    await on.fire("m", { name: "check", context });
+    expect(on.forwarded[0]?.body).toMatchObject({
+      parts: [{ output: { kind: "apple_health", status: "connected" } }],
+    });
+  });
+
   it("takes check with no button for it only on core's own card", async () => {
     const appCard = { ...deviceCard, appId: "connector" };
     const { fire } = setup(

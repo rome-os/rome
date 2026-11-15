@@ -4340,7 +4340,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // the guardian.
         senderBondLevel: "guardian",
       },
-      actor?.kind === "guardian" && !saidBy ? said.askingDeviceId : undefined,
+      // The guardian's own message names its device; a task chat's message
+      // from the Concierge reads the device the task was handed from.
+      actor?.kind === "guardian" && !saidBy
+        ? said.askingDeviceId
+        : saidBy
+          ? ((await deps.webchatRepo.askingDeviceOf(sessionId)) ?? undefined)
+          : undefined,
     );
 
     const contextSuffix = buildWebchatContextSuffix();

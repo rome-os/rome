@@ -208,6 +208,7 @@ export interface ConciergeDeps {
     | "placeInChatThread"
     | "setMessageReaction"
     | "setSessionTrigger"
+    | "setAskingDevice"
     | "listProjects"
     | "onMessageInserted"
     | "awaitingGuardianSince"

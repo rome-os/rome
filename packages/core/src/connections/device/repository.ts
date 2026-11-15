@@ -110,19 +110,6 @@ export class DeviceConnectionsRepository {
     });
   }
 
-  /**
-   * Deletes the rows of every device not in `deviceIds`, the account's whole
-   * device list. Origins are left alone: a device that left the list may be
-   * an install that signed out, which reuses its origin at the next sign-in.
-   */
-  keepOnly(deviceIds: readonly string[]): number {
-    if (deviceIds.length === 0) return 0;
-    return this.db
-      .delete(deviceConnections)
-      .where(notInArray(deviceConnections.deviceId, [...deviceIds]))
-      .run().changes;
-  }
-
   /** Every device's connections, by device, then capability. */
   list(): DeviceConnection[] {
     return this.db

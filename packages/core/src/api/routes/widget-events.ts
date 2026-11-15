@@ -48,11 +48,19 @@ interface DeviceConnectionStatus {
   capability: string;
   title: string;
   state: "working" | "off" | "broken";
+  device?: { id: string };
 }
 
-/** Whether a device connection of `kind` works, and its title. */
+/**
+ * Whether a device connection of `kind` works, and its title. A card raised
+ * for the device the guardian asked from (`props.deviceId`) reads that
+ * device's connection alone, so another device that works does not answer it.
+ */
 async function deviceKindState(kind: string, io: CoreIo) {
-  const ofKind = (await io.deviceConnections()).filter((c) => c.capability === kind);
+  const deviceId = typeof io.props.deviceId === "string" ? io.props.deviceId : undefined;
+  const ofKind = (await io.deviceConnections()).filter(
+    (c) => c.capability === kind && (deviceId === undefined || c.device?.id === deviceId),
+  );
   return {
     working: ofKind.some((c) => c.state === "working"),
     label: ofKind[0]?.title ?? kind,

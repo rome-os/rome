@@ -236,6 +236,29 @@ extension NodeHostTests {
         #expect(attempts == 2)
     }
 
+    @Test func signOutsEmptyReportGoesFirstAndWaitsNoLongerThanItsLimit() async {
+        let rig = HostRig(deviceOn: false)
+        let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)
+        connections.device = { ("dev-1", "iPhone") }
+        var reports: [DeviceConnectionReport] = []
+        // An unreachable Rome: the send hangs well past the limit.
+        connections.send = { report in
+            reports.append(report)
+            try? await Task.sleep(for: .seconds(30))
+            return false
+        }
+        let started = ContinuousClock.now
+        await connections.reportNone(limit: .milliseconds(200))
+        #expect(ContinuousClock.now - started < .seconds(5), "the limit releases sign-out")
+        #expect(reports.count == 1 && reports[0].connections.isEmpty, "an empty report was sent")
+    }
+
+    @Test func aWaitEndsWithItsWorkWhenTheWorkIsFirst() async {
+        let started = ContinuousClock.now
+        await DeviceConnections.wait(atMost: .seconds(30)) {}
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
     @Test func connectingMarksItTurnsLiveOnAndReports() async {
         let rig = HostRig(deviceOn: false)
         let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)

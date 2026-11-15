@@ -81,6 +81,8 @@ export function createLiveRoutes(
   connections: Pick<DeviceConnectionsRepository, "list">,
   now: () => number = Date.now,
 ): LiveRoutes & {
+  /** The connection of one capability for this turn, as a connect card checks it. */
+  forKind(kind: string, turn: LiveTurn): LivePointer;
   /** The connection for one operation, as `core:device_run` runs it. */
   forOperation(
     operation: string,
@@ -92,6 +94,11 @@ export function createLiveRoutes(
       const all = connections.list().filter((c) => c.feeds === feeds);
       const chosen = choose(all, turn, now(), prefer?.originId ?? undefined);
       return chosen ? pointerOf(chosen, now()) : notConnected(all[0]?.capability, turn);
+    },
+    forKind(kind, turn) {
+      const all = connections.list().filter((c) => c.capability === kind);
+      const chosen = choose(all, turn, now());
+      return chosen ? pointerOf(chosen, now()) : notConnected(all[0] ? kind : undefined, turn);
     },
     forOperation(operation, turn) {
       const all = connections.list();

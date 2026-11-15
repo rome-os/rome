@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { and, eq } from "drizzle-orm";
 import { threadIdOf } from "../apps/repositories/approvals.js";
 import { approvalWaits } from "../test/open-waits.js";
+import { withAskingDevice } from "../connections/device/live-route.js";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
 import { POSTPONED_CHECKS } from "./service.js";
@@ -230,6 +231,7 @@ function setup(
     pushLevel: undefined as NotifyLevel | undefined,
     reportedTask: undefined as string | undefined,
     turnId: "concierge-turn-1",
+    askingDeviceId: undefined as string | undefined,
   };
   const messages = new Map<string, Row[]>();
   /** Every input posted to a task chat, by id, in order. */
@@ -300,6 +302,7 @@ function setup(
       },
     },
     webchatRepo: {
+      setAskingDevice: rs.fn(async () => {}),
       getSession: async (id: string) => sessions.get(id) ?? null,
       listSessions: async () => [...sessions.values()],
       updateSessionLargeModelSelection: rs.fn(async (id: string, largeModelSelection: string) => {
@@ -432,11 +435,11 @@ function setup(
     sessionId: "runtime-1",
     isSubagent: false,
     getTurnId: () => here.turnId,
-    getThreadContext: () => ({
-      channel: "webchat",
-      threadId: here.chat,
-      channelUserId: "guardian",
-    }),
+    getThreadContext: () =>
+      withAskingDevice(
+        { channel: "webchat", threadId: here.chat, channelUserId: "guardian" },
+        here.askingDeviceId,
+      ),
     getTurnPushLevel: () => here.pushLevel,
     getTurnReportedTask: () => here.reportedTask,
   });
@@ -553,6 +556,10 @@ function setup(
     settingsWrites,
     turnOptions,
     pushes,
+    /** Runs the tools' turn as one the guardian started from this device. */
+    askFrom: (deviceId: string | undefined) => {
+      here.askingDeviceId = deviceId;
+    },
     /** Runs the tools' turn as one the guardian did not start, pushed at this level. */
     pushLevel: (level: NotifyLevel | undefined) => {
       here.pushLevel = level;
@@ -768,6 +775,25 @@ describe("Concierge tools", () => {
 
       expect(threadOf(s, answer)).toBeUndefined();
       expect(threadOf(s, relayed)).toBe("tasks");
+    });
+
+    it("hands a task chat the device the guardian asks from, so its live reads ask it", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, { id: "g0", turnId: "start-turn" });
+      s.inTurn("start-turn");
+      await s.tool("say", { text: "On it" });
+      s.askFrom("dev-asking");
+      const { chatId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Steps", brief: "Read my steps" })).content[0].text,
+      );
+      expect(s.deps.webchatRepo.setAskingDevice).toHaveBeenCalledWith(chatId, "dev-asking");
+      s.askFrom("dev-other");
+      await s.tool("chat_send", { chatId, text: "And sleep" });
+      expect(s.deps.webchatRepo.setAskingDevice).toHaveBeenLastCalledWith(chatId, "dev-other");
+      // A turn no device started leaves the task chat's device as it is.
+      s.askFrom(undefined);
+      await s.tool("chat_send", { chatId, text: "And heart rate" });
+      expect(s.deps.webchatRepo.setAskingDevice).toHaveBeenCalledTimes(2);
     });
 
     it("sends on only the guardian message it names, or the turn's only one", async () => {

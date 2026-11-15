@@ -981,6 +981,13 @@
       "when": 1794717808735,
       "tag": "0141_device_connection_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "6",
+      "when": 1794723452355,
+      "tag": "0142_task_chat_asking_device",
+      "breakpoints": true
     }
   ]
 }

@@ -281,7 +281,6 @@ describe("personal-data actions", () => {
     healthOn("dev-1", true, ORIGIN);
     const lifecycle = withDeviceLifecycle(
       {
-        listDevices: async () => null,
         removeDevice: async (_deviceId: string) => ({ ok: true as const }),
       },
       {
