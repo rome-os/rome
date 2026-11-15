@@ -221,53 +221,41 @@ jobs:
         if: always() && steps.standin.outputs.present == 'true'
         run: |
           # On the simulator the recording stands in for the microphone and closes in
-          # microseconds, so leg B scores rule 9 by count: every kind of stop has a StopListening
-          # interval that begins and ends, read from the simulator's log by signpost ID. The
-          # second is scored by hand on a phone (leg C).
-          # xcodebuild shuts the simulator down after the tests; its log stays on disk.
-          udid=$(xcrun simctl list devices available -j | python3 -c 'import json, sys; name = sys.argv[1]; print(next(d["udid"] for _, ds in sorted(json.load(sys.stdin)["devices"].items(), reverse=True) for d in ds if d["name"] == name))' "${{ steps.sim.outputs.name }}")
-          xcrun simctl boot "$udid" 2>/dev/null || true
-          xcrun simctl spawn "$udid" log show --last 2h --signpost --style json \
-            --predicate 'subsystem == "cc.romeos.voice-input" AND category == "VoiceInput"' > "$RUNNER_TEMP/signposts.json"
-          python3 - "$RUNNER_TEMP/signposts.json" <<'PY'
-          import json, re, sys
-          from datetime import datetime
+          # microseconds, so leg B scores rule 9 by count: each measured stop of the rule 9 test
+          # (leaving the chat, the background, a transcriber error, losing the network, the
+          # guardian's) must hold a StopListening interval, which reads above 0 s. A window with
+          # none reads exactly 0. The second is scored by hand on a phone (leg C).
+          python3 - "$RUNNER_TEMP/metrics.json" <<'PY'
+          import json, sys
 
-          # The stops the rule 9 test makes, by the cause the app names; every other test's stops count too.
-          WANTED = {"guardian", "left-chat", "backgrounded"}
+          STOPS = ["leaving the chat", "the background", "a transcriber error", "losing the network", "the guardian's stop"]
+          found = []
 
-          def at(entry):
-              return datetime.strptime(entry["timestamp"][:26], "%Y-%m-%d %H:%M:%S.%f")
+          def walk(node, test=None):
+              if isinstance(node, dict):
+                  test = node.get("testIdentifier") or test
+                  name = str(node.get("displayName") or node.get("identifier") or "")
+                  if "StopListening" in name and isinstance(node.get("measurements"), list):
+                      found.append((test, node["measurements"]))
+                  for value in node.values():
+                      walk(value, test)
+              elif isinstance(node, list):
+                  for value in node:
+                      walk(value, test)
 
-          entries = [e for e in json.load(open(sys.argv[1])) if e.get("signpostName") == "StopListening"]
-          begins, ends = {}, {}
-          for e in entries:
-              kind = e.get("signpostType")
-              if kind in ("begin", "intervalBegin"):
-                  begins[(e.get("processID"), e["signpostID"])] = e
-              elif kind in ("end", "intervalEnd"):
-                  ends[(e.get("processID"), e["signpostID"])] = e
-          if not begins:
-              sys.exit("::error::No StopListening interval in the simulator's log, so rule 9 was not checked.")
-          causes, open_ = {}, []
-          # Signpost IDs are per process, and every test launches the app anew.
-          for sid, begin in begins.items():
-              cause = (re.search(r"cause=([\w-]+)", begin.get("eventMessage", "")) or [None, "unnamed"])[1]
-              causes[cause] = causes.get(cause, 0) + 1
-              end = ends.get(sid)
-              if end is None:
-                  open_.append(cause)
-                  continue
-              seconds = (at(end) - at(begin)).total_seconds()
-              print(f"StopListening {cause}: {seconds:.6f} s")
-          print(f"{len(begins)} stops: " + ", ".join(f"{c} {n}" for c, n in sorted(causes.items())))
+          walk(json.load(open(sys.argv[1])))
+          if not found:
+              sys.exit("::error::No StopListening measurement in the result bundle, so rule 9 was not checked.")
           failed = False
-          for cause in sorted(WANTED - causes.keys()):
-              print(f"::error::No StopListening interval with cause={cause}, though the rule 9 test makes that stop.")
-              failed = True
-          for cause in open_:
-              print(f"::error::A StopListening interval with cause={cause} never ended: the microphone was not seen to close.")
-              failed = True
+          for test, values in found:
+              print(f"{test}: " + ", ".join(f"{stop} {v:.6f} s" for stop, v in zip(STOPS, values)))
+              if len(values) != len(STOPS):
+                  print(f"::error::{test}: {len(values)} measured stops; the rule 9 test makes {len(STOPS)}.")
+                  failed = True
+              for stop, v in zip(STOPS, values):
+                  if v <= 0:
+                      print(f"::error::{test}: no StopListening interval for {stop}.")
+                      failed = True
           if failed:
               sys.exit(1)
           print("Rule 9 (leg B): interval present for every kind of stop; duration not meaningful with the recording stand-in.")
