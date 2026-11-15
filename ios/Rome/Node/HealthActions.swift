@@ -42,6 +42,18 @@ struct HealthType: Equatable, Sendable {
 }
 
 enum HealthTypes {
+    /// The types the app asks iOS to read, and syncs: a short list keeps the
+    /// system's access sheet short. A type outside it simply has no data;
+    /// the Rome's own list of types is unchanged.
+    static let requestedNames: Set<String> = [
+        "stepCount", "distanceWalkingRunning", "activeEnergyBurned", "appleExerciseTime",
+        "heartRate", "restingHeartRate", "heartRateVariabilitySDNN", "sleep", "workouts",
+        "bodyMass", "oxygenSaturation", "bloodGlucose",
+    ]
+
+    /// `all`, kept to the requested types, in the same order.
+    static var requested: [HealthType] { all.filter { requestedNames.contains($0.name) } }
+
     private static let count = [HealthUnit(name: "count", hk: "count")]
     private static let perMinute = [HealthUnit(name: "count/min", hk: "count/min")]
     private static let length = [("m", "m"), ("km", "km"), ("mi", "mi"), ("ft", "ft")].map { HealthUnit(name: $0.0, hk: $0.1) }

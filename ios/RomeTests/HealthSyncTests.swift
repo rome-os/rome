@@ -298,9 +298,9 @@ struct SyncRig {
         #expect(Set(rig.health.lookups) == Set(HealthSyncPlan.all.map(\.name)))
         #expect(rig.health.lookups.count == HealthSyncPlan.all.count)
         let skipped = await rig.progress.load().backfill?.skipped ?? []
-        #expect(skipped.contains("vo2Max") && !skipped.contains("stepCount"))
+        #expect(skipped.contains("oxygenSaturation") && !skipped.contains("stepCount"))
         let marks = await rig.backend.envelopes.last?.types.map(\.type) ?? []
-        #expect(marks.contains("vo2Max"), "an empty window is a complete one")
+        #expect(marks.contains("oxygenSaturation"), "an empty window is a complete one")
 
         let entry = try #require(await rig.lastEntry())
         #expect(entry.outcome == .ok)

@@ -61,8 +61,8 @@ final class LiveHealth: HealthReading, @unchecked Sendable {
         }
     }
 
-    /// Everything the actions read; the one access sheet asks for all of it.
-    static let readTypes: Set<HKObjectType> = Set(HealthTypes.all.compactMap { sampleType($0) })
+    /// The requested types; the one access sheet asks for these alone.
+    static let readTypes: Set<HKObjectType> = Set(HealthTypes.requested.compactMap { sampleType($0) })
 
     // MARK: Access
 
