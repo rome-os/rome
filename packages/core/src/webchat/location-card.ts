@@ -117,7 +117,12 @@ export const DECLINED_LOCATION: LocationAnswer = { status: "declined", dismissed
 export function storedLocationAnswer(output: unknown): Record<string, unknown> {
   const answer = output as Partial<Extract<LocationAnswer, { status: "shared" }>> | null;
   if (answer?.status !== "shared") return { ...DECLINED_LOCATION };
-  return { status: "shared", accuracyMeters: answer.accuracyMeters, fixedAt: answer.fixedAt };
+  return {
+    status: "shared",
+    accuracyMeters: answer.accuracyMeters,
+    fixedAt: answer.fixedAt,
+    ...(answer.auto === true ? { auto: true } : {}),
+  };
 }
 
 /** What the agent reads when the card is answered. */

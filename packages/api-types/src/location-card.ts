@@ -36,6 +36,9 @@ export type LocationAnswer =
       accuracyMeters: number;
       /** When the device took the fix, as an ISO time. */
       fixedAt: string;
+      /** The client shared it by itself, on a card core marked for that:
+       *  clients then show one line in place of the card. */
+      auto?: true;
     }
   | { status: "declined"; dismissed: true };
 

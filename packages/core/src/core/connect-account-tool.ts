@@ -32,8 +32,10 @@ export function connectAccountTools(input: {
       name: "connect_account",
       endsTurn: widgetsShow,
       description: input.devicesOnly
-        ? "Ask the guardian to connect a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it when they ask to connect one, or a personal-data reply says `not_connected` or a device connection is `off`. The card opens the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn."
-        : "Ask the guardian to connect an account of a kind Rome connects itself, such as GitHub, Slack or Shopify, or a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it when a task needs one of these and it is not connected, or a call reports it is not connected. The card opens the provider's authorization page, or the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. Where no card shows, ask the guardian to connect it in Settings › Connections.",
+        ? "Ask the guardian to connect a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it here, in this chat, before starting a task that needs it, when they ask to connect one, when the capability you need is `off` or `broken` below, or when a reply or a device says `not_connected` or `live_off`. Never ask whether a device is connected: read it below. Never show the card again for a kind whose card the guardian just answered. The card opens the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn." +
+          deviceStates(devices)
+        : "Ask the guardian to connect an account of a kind Rome connects itself, such as GitHub, Slack or Shopify, or a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it when a task needs one of these and it is not connected, or a call reports it is not connected. The card opens the provider's authorization page, or the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. Where no card shows, ask the guardian to connect it in Settings › Connections." +
+          deviceStates(devices),
       inputSchema: {
         type: "object",
         required: ["kind"],
@@ -67,4 +69,17 @@ export function connectAccountTools(input: {
       },
     },
   ];
+}
+
+/**
+ * The device kinds as they stand now, for the description: an agent reads
+ * whether a capability is working instead of asking the guardian.
+ */
+function deviceStates(devices: readonly DeviceKind[]): string {
+  const known = devices.filter((d) => d.state);
+  if (known.length === 0) return "";
+  const lines = known.map(
+    (d) => `\`${d.kind}\` (${d.label}${d.device ? ` on ${d.device}` : ""}): ${d.state}`,
+  );
+  return ` Device connections now: ${lines.join("; ")}.`;
 }

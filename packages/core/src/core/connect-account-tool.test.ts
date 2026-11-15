@@ -50,4 +50,19 @@ describe("connect_account", () => {
       render: { props: { kind: "apple_health", label: "Apple Health", device: true } },
     });
   });
+
+  it("says how each device kind stands, so the agent reads it instead of asking", () => {
+    const [tool] = connectAccountTools({
+      widgets: "card",
+      hasSpeaker: true,
+      devicesOnly: true,
+      devices: [
+        { kind: "device", label: "Device", state: "off", device: "iPhone" },
+        { kind: "apple_health", label: "Apple Health", state: "working", device: "iPhone" },
+      ],
+    });
+    expect(tool!.description).toContain("`device` (Device on iPhone): off");
+    expect(tool!.description).toContain("`apple_health` (Apple Health on iPhone): working");
+    expect(tool!.description).toContain("Never ask whether a device is connected");
+  });
 });

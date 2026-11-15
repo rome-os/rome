@@ -132,7 +132,7 @@ describe("the share-location card where the browser already decided", () => {
     await waitFor(() => expect(events).toHaveLength(1));
     expect(events[0]).toMatchObject({
       name: "share-location",
-      context: { latitude: 1, longitude: 2, accuracy: 9, timestamp: 5 },
+      context: { latitude: 1, longitude: 2, accuracy: 9, timestamp: 5, auto: true },
     });
     expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
   });
@@ -174,6 +174,22 @@ describe("the share-location card where the browser already decided", () => {
     expect(events[0]).toMatchObject({ name: "share-location" });
     expect(events[0]?.context).not.toHaveProperty("latitude");
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("shows a share it made by itself as one line, with no card", () => {
+    render(
+      <WidgetUiCard
+        widgetId="auto-4"
+        toolUseId="l1"
+        appId="core"
+        ui={autoUi}
+        text=""
+        waiting={{ result: { status: "shared", accuracyMeters: 9, auto: true } }}
+      />,
+    );
+    expect(screen.getByText("Location shared · ±9 m")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByText("Share your location?")).toBeNull();
   });
 
   it("says the browser refuses, and keeps Not now", async () => {

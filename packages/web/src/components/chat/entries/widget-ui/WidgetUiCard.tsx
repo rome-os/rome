@@ -337,7 +337,7 @@ export function WidgetUiCard({
         if (document.visibilityState !== "visible" || autoShared.has(widgetId)) return;
         autoShared.add(widgetId);
         stopWaiting();
-        void fire({ name: SHARE_LOCATION_EVENT }, true);
+        void fire({ name: SHARE_LOCATION_EVENT, context: { auto: true } }, true);
       };
       document.addEventListener("visibilitychange", share);
       stopWaiting = () => document.removeEventListener("visibilitychange", share);
@@ -355,6 +355,12 @@ export function WidgetUiCard({
       {t("appComponent.widgetUndrawable", { text })}
     </span>
   );
+  // A share the card made by itself is no question the guardian answered:
+  // while it runs nothing shows, and once core has it, one quiet line.
+  if (locationCard && autoSharing && sendFailed === false) return null;
+  if (locationCard && result?.auto === true) {
+    return <p className="text-aux text-muted-foreground">{locationOutcome(result, t)}</p>;
+  }
   return (
     <div
       tabIndex={waiting ? -1 : undefined}

@@ -115,12 +115,12 @@ extension NodeCapability {
         case .off:
             return .failed(
                 code: "live_off",
-                message: "Live access to \(name) is off on this \(device.name). Only the user can turn it on, in the Rome app on the \(device.name): Settings → Connections → \(name)."
+                message: "Live access to \(name) is off on this \(device.name). Offer the connect card now: connect_account with kind \"\(id)\", or where it does not list that kind, tell the user to turn it on in the Rome app on the \(device.name): Settings → Connections → \(name). Do not ask whether it is connected."
             )
         case .needsPermission:
             return .failed(
                 code: "not_connected",
-                message: "\(name) is not connected on this \(device.name): iOS has not given Rome access. The user must connect it in the Rome app on the \(device.name): Settings → Connections → \(name)."
+                message: "\(name) is not connected on this \(device.name): iOS has not given Rome access. Offer the connect card now: connect_account with kind \"\(id)\", or where it does not list that kind, tell the user to connect it in the Rome app on the \(device.name): Settings → Connections → \(name). Do not ask whether it is connected."
             )
         case .on:
             return .failed(code: "unsupported_action", message: "This \(device.name) does not support this action.")

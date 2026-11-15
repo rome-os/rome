@@ -43,7 +43,10 @@ struct PushPromptCard: View {
             }
         }
         .padding(14)
+        // The surface and edge every chat card has, so it stands off the
+        // page in light and dark alike.
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .hairline(radius: Metrics.cardRadius)
         .softElevation(radius: Metrics.cardRadius)
     }
 }

@@ -200,12 +200,31 @@ extension NodeHostTests {
         #expect(rig.host.liveSwitches["calendar"] == nil, "no such capability")
     }
 
+    @Test func aReportThatDidNotLandGoesAgainOnceAsked() async {
+        let rig = HostRig(deviceOn: false)
+        let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)
+        connections.device = { ("dev-1", "iPhone") }
+        var attempts = 0
+        var lands = false
+        connections.send = { _ in attempts += 1; return lands }
+        await connections.report().value
+        #expect(connections.unsent)
+        lands = true
+        connections.reportIfUnsent()
+        _ = await eventually { attempts == 2 }
+        #expect(attempts == 2 && !connections.unsent)
+        // Landed, it is not sent again.
+        connections.reportIfUnsent()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(attempts == 2)
+    }
+
     @Test func connectingMarksItTurnsLiveOnAndReports() async {
         let rig = HostRig(deviceOn: false)
         let connections = DeviceConnections(node: rig.host, defaults: rig.defaults)
         var reports: [DeviceConnectionReport] = []
         connections.device = { ("dev-1", "iPhone") }
-        connections.send = { reports.append($0) }
+        connections.send = { reports.append($0); return true }
         let health = rig.host.registry.capability(id: "apple_health")!
         let device = rig.host.registry.capability(id: "device")!
         #expect(!connections.isConnected(health) && !connections.isConnected(device))
@@ -253,6 +272,7 @@ extension NodeHostTests {
             // The first report is slow, as a PUT can be.
             if sent.isEmpty, held == nil { await withCheckedContinuation { held = $0 } }
             sent.append(report.connections.first { $0.capability == "device" }?.live ?? false)
+            return true
         }
         let first = connections.report()
         _ = await eventually { held != nil }

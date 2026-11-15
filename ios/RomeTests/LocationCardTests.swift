@@ -106,6 +106,7 @@ import Testing
         await surface.shareIfAllowed()
         #expect(sent.value.first?["name"]?.string == "share-location")
         #expect(sent.value.first?["context"]?["accuracy"]?.number == 9)
+        #expect(sent.value.first?["context"]?["auto"]?.bool == true, "core marks it as shared by itself")
         #expect(surface.sent)
         // Drawn again, it sends no second share.
         await surface.shareIfAllowed()

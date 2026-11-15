@@ -314,7 +314,7 @@ struct HealthActions: Sendable {
     }
 
     static func off(_ device: DeviceKind) -> NodeActionResult {
-        .failed(code: "live_off", message: "Live access to Apple Health is off on this \(device.name). Only the user can turn it on, in the Rome app on the \(device.name): Settings → Connections → Apple Health.")
+        .failed(code: "live_off", message: "Live access to Apple Health is off on this \(device.name). Offer the connect card now: connect_account with kind \"apple_health\", or where it does not list that kind, tell the user to turn it on in the Rome app on the \(device.name): Settings → Connections → Apple Health. Do not ask whether it is connected.")
     }
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {

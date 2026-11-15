@@ -640,7 +640,11 @@ final class AppModel {
         didSet {
             if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) }
             // Back on a Rome after the session ran out: Health sync goes on.
-            if phase == .ready, oldValue != .ready { health.instanceOpened() }
+            if phase == .ready, oldValue != .ready {
+                health.instanceOpened()
+                // A report the gate held back before the app was ready goes now.
+                connections.reportIfUnsent()
+            }
             if !phase.isSignedIn { stackGame = nil }
             // Signed out, however it came about: the widget offers to make an app.
             if phase == .signedOut, oldValue != .signedOut { WidgetShelf.shared.clear() }
@@ -784,9 +788,16 @@ final class AppModel {
         connections.send = { [weak self] report in
             // Only once the workspace started on a good session: a cached
             // launch shows ready before an expired session is renewed.
-            guard let self, self.phase == .ready, let workspace = self.workspace, workspace === self.reportsTo, !workspace.isVisitor else { return }
-            let backend = workspace.backend
-            try? await backend.reportDeviceConnections(report)
+            guard let self, self.phase == .ready, let workspace = self.workspace, workspace === self.reportsTo else { return false }
+            // A visitor's Rome is never told; that is not a failure.
+            if workspace.isVisitor { return true }
+            do {
+                try await workspace.backend.reportDeviceConnections(report)
+                return true
+            } catch {
+                deviceConnectionsLog.error("report failed: \(error.localizedDescription, privacy: .public)")
+                return false
+            }
         }
     }
 
@@ -1410,11 +1421,12 @@ final class AppModel {
     func connect(_ id: String) async {
         guard let capability = node.registry.capability(id: id) else { return }
         if capability.needsPermission { await capability.requestPermission() }
-        // Sync starts on its own; the card's check reads only the connection.
+        // The report first, so the card's check finds the connection at once;
+        // Sync's upload then runs on its own, behind it.
+        await connections.connect(id)
         if capability.syncSource == HealthSettings.sourceId, health.canSync, !health.isEnabled {
             health.setEnabled(true)
         }
-        await connections.connect(id)
     }
 
     /// Settings, at Apple Health's Sync history.

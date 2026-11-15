@@ -410,12 +410,13 @@ struct ConnectDeviceSheet: View {
                             request.finish(true)
                         }
                     }
+                    // Usable mid-connect too: the connect goes on, and the card
+                    // stays open to check later.
                     Button("Not now") { request.finish(false) }
                         .romeFont(17, .medium)
                         .foregroundStyle(Palette.primaryText)
                         .frame(minHeight: 44)
                         .buttonStyle(PressScaleStyle())
-                        .disabled(connecting)
                 }
                 .onGeometryChange(for: CGFloat.self, of: \.size.height) { buttonsHeight = $0 }
             }
@@ -423,8 +424,6 @@ struct ConnectDeviceSheet: View {
         .padding(Self.padding)
         .frame(height: standIn ? height : nil)
         .presentationDetents(height.map { [.height($0)] } ?? [.medium])
-        // Mid-connect it stays until the card can check.
-        .interactiveDismissDisabled(connecting)
         .onDisappear { if !standIn { request.finish(false) } }
     }
 }
