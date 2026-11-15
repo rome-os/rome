@@ -426,7 +426,7 @@ final class VoiceInputTests: XCTestCase {
 
     /// Rule 6 with text already in the field: the spoken words land at the cursor as typing them
     /// would, with the contract's leading space, and the sent message is the field's text. A
-    /// second dictation checks that one undo (the three-finger double tap) removes them.
+    /// second dictation checks that one undo (Command-Z) removes them.
     @MainActor
     func testRule6SpeakingIsTypingAfterText() throws {
         let app = try launch()
@@ -450,8 +450,9 @@ final class VoiceInputTests: XCTestCase {
             XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 10), "listening never finished")
             XCTAssertEqual(fieldText(field), whole, "the field is not what typing the words at the cursor gives")
             if undo {
-                // The keyboard covers the field's free area, so the gesture goes to the window.
-                app.windows.firstMatch.tap(withNumberOfTaps: 2, numberOfTouches: 3)
+                // XCUITest cannot synthesize the three-finger undo gesture on the runner, so undo
+                // comes from the simulator's hardware keyboard, as Command-Z.
+                field.typeKey("z", modifierFlags: .command)
                 let undone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", typed), object: field)
                 if XCTWaiter().wait(for: [undone], timeout: 5) != .completed {
                     printScreen(app, "rule 6: after one undo")
