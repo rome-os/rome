@@ -21,6 +21,7 @@ import { Session } from "../../agent/index.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
+import { askingDeviceOf } from "../../connections/device/live-route.js";
 import { webchatChannel, webchatCaller } from "../../webchat/dashboard-account.js";
 import {
   buildAgent,
@@ -2838,6 +2839,58 @@ describe("Webchat API", () => {
     expect(sentTurn?.reasoningEffort).toBe("xhigh");
     expect(sentOptions).toMatchObject({ romeSessionId: session.id });
     expect(acquiredInit?.kind).toBe("conversation");
+  });
+
+  it("keeps the device the guardian sent from on the turn, so a live read asks it", async () => {
+    const sent: (SendTurnOptions | undefined)[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "idle",
+      startTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+        sent.push(options);
+        return testTurnHandle({
+          turnId: `turn-${sent.length}`,
+          events: (async function* () {
+            yield { type: "result", content: "" };
+          })(),
+          turnContext: otelContext.active(),
+        });
+      },
+      onStatusChange: () => () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+    }));
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const session = (await (
+      await runWithSessionActor(guardian, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Battery" }),
+        }),
+      )
+    ).json()) as { id: string };
+    const send = (headers: Record<string, string>, actor?: typeof guardian) => {
+      const request = () =>
+        app.request(`/chat/sessions/${session.id}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: JSON.stringify({ text: "battery?" }),
+        });
+      return actor ? runWithSessionActor(actor, request) : request();
+    };
+    expect((await send({ "x-rome-device": "dev-1" }, guardian)).status).toBe(200);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBe("dev-1");
+    // No header, a malformed one, or no guardian session: no asking device.
+    await send({}, guardian);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await send({ "x-rome-device": "dev 1" }, guardian);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await send({ "x-rome-device": "dev-1" });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    expect(sent).toHaveLength(4);
   });
 
   describe("device folder", () => {

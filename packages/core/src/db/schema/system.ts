@@ -1603,6 +1603,10 @@ export const deviceConnections = sqliteTable(
     // `apple_health`: opaque here, so a reader of that data can find the
     // connection before the first sync. Null when it syncs nothing.
     feeds: text("feeds"),
+    // The personal-data origin of the app install that reports the row, which
+    // stays the same across its sign-ins while the device id does not. Null
+    // for an app that reports none.
+    originId: text("origin_id"),
     // When a report last listed the row.
     lastSeenAt: integer("last_seen_at").notNull(),
   },

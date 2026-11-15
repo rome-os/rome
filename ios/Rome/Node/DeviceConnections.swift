@@ -19,6 +19,9 @@ struct DeviceConnectionReport: Encodable, Sendable, Equatable {
         let id: String
         let name: String
         let platform: String
+        /// This install's personal-data origin, the same across sign-ins
+        /// while `id` is not.
+        var originId: String? = nil
     }
 
     struct Operation: Encodable, Sendable, Equatable {
@@ -120,6 +123,8 @@ final class DeviceConnections {
     @ObservationIgnored private(set) var unsent = false
     /// The rome-node device id and name, or nil while signed out.
     @ObservationIgnored var device: (@MainActor () -> (id: String, name: String)?)?
+    /// This install's personal-data origin id, for the report.
+    @ObservationIgnored var originId: (@MainActor () -> String?)?
     @ObservationIgnored private var reporting: Task<Void, Never>?
 
     init(node: NodeHost, defaults: UserDefaults = .standard) {
@@ -184,11 +189,36 @@ final class DeviceConnections {
             await previous?.value
             guard let self, let send = self.send, let device = self.device?() else { return }
             let connections = await self.node.registry.connections()
-            let sent = await send(DeviceConnectionReport(device: .init(id: device.id, name: device.name, platform: "ios"), connections: connections))
+            let sent = await send(DeviceConnectionReport(device: self.reportedDevice(device), connections: connections))
             self.unsent = !sent
         }
         reporting = task
         return task
+    }
+
+    /// Sign-out, before the account ends: reports no connections, so the Rome
+    /// keeps none for a device id that is over. Waits at most `limit`, so an
+    /// unreachable Rome does not hold the sign-out; the next full report or
+    /// the 7-day stale rule covers a report that did not land.
+    func reportNone(limit: Duration = .seconds(3)) async {
+        let previous = reporting
+        guard let send, let device = device?() else { return }
+        let report = DeviceConnectionReport(device: reportedDevice(device), connections: [])
+        let task = Task { @MainActor in
+            await previous?.value
+            _ = await send(report)
+        }
+        reporting = task
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await task.value }
+            group.addTask { try? await Task.sleep(for: limit) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
+    private func reportedDevice(_ device: (id: String, name: String)) -> DeviceConnectionReport.Device {
+        .init(id: device.id, name: device.name, platform: "ios", originId: originId?())
     }
 
     /// Sends the report again when the newest did not land.

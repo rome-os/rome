@@ -227,6 +227,8 @@ import { registerPersonalDataActions } from "./personal-data/actions.js";
 import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
 import { registerDeviceActions } from "./connections/device/actions.js";
+import { createLiveRoutes } from "./connections/device/live-route.js";
+import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
 import { deviceKinds } from "./connections/connect-card.js";
 import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
@@ -504,7 +506,15 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
-  const nodeDevices = createNodeDevicesService();
+  // A device removed from the account, or gone from its full list, loses its
+  // connection rows; an origin a removal leaves with no install is turned off.
+  const nodeDevices = withDeviceLifecycle(createNodeDevicesService(), {
+    connections: () => deviceConnectionsRepo,
+    turnOriginOff: (originId) => {
+      for (const spec of PERSONAL_DATA_SOURCES)
+        personalDataRepo.setState(spec.source, originId, "off");
+    },
+  });
   const provisionNodeCaller = createNodeCallerProvisioner();
 
   // App keys: guardian-entered values go live in process.env before any app
@@ -1432,7 +1442,7 @@ async function main() {
   registerPersonalDataActions(actionRegistry, {
     personalData: personalDataRepo,
     guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
-    connections: deviceConnectionsRepo,
+    connections: createLiveRoutes(deviceConnectionsRepo),
   });
   registerDeviceActions(actionRegistry, {
     connections: deviceConnectionsRepo,

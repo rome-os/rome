@@ -1,8 +1,8 @@
 // `core:device_describe` and `core:device_run`: how an Agent finds and calls
 // what the guardian's devices let it reach live. Both are built from what each
 // device reports of its own registry, so core names no capability and a new
-// one needs no prompt or core change. Concept:
-// docs/domains/connections.md#device-connection.
+// one needs no prompt or core change. Which device answers is the live
+// route's choice (live-route.ts). Concept: docs/domains/connections.md#device-connection.
 
 import { actionExecutionContext } from "../../apps/actions/context.js";
 import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
@@ -10,12 +10,19 @@ import type { ActionRegistry, ActionResult } from "../../apps/actions/types.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createLogger } from "../../logger.js";
 import { connectStep } from "./connect-step.js";
+import {
+  askingDeviceOf,
+  createLiveRoutes,
+  DEVICE_DESCRIBE_ACTION,
+  DEVICE_RUN_ACTION,
+  isStale,
+  type LiveTurn,
+} from "./live-route.js";
 import type { DeviceConnection, DeviceConnectionsRepository } from "./repository.js";
 
 const log = createLogger("device-actions");
 
-export const DEVICE_DESCRIBE_ACTION = "core:device_describe";
-export const DEVICE_RUN_ACTION = "core:device_run";
+export { DEVICE_DESCRIBE_ACTION, DEVICE_RUN_ACTION };
 
 export interface DeviceActionDeps {
   connections: Pick<DeviceConnectionsRepository, "list">;
@@ -25,12 +32,10 @@ export interface DeviceActionDeps {
     action: string,
     args: Record<string, unknown>,
   ) => Promise<DeviceRunResult>;
-  /** The running turn's audience. Default: the action's own run context. */
-  audience?: () => string | undefined;
+  /** The running turn's audience and asking device. Default: the action's own run context. */
+  turn?: () => LiveTurn & { audience?: string };
+  now?: () => number;
 }
-
-/** Working first, then the one heard from last: the phone in the guardian's hand reports on opening. */
-const RANK = { working: 0, off: 1, broken: 2 } as const;
 
 /** The error code for a connection that cannot answer, by its state. */
 const STATE_CODE = { off: "live_off", broken: "permission_denied" } as const;
@@ -39,7 +44,14 @@ export function registerDeviceActions(
   actions: Pick<ActionRegistry, "register">,
   deps: DeviceActionDeps,
 ): void {
-  const audience = deps.audience ?? (() => actionExecutionContext.getStore()?.audience);
+  const now = deps.now ?? Date.now;
+  const routes = createLiveRoutes(deps.connections, now);
+  const turn =
+    deps.turn ??
+    (() => {
+      const store = actionExecutionContext.getStore();
+      return { audience: store?.audience, askingDeviceId: askingDeviceOf(store?.channelContext) };
+    });
 
   actions.register({
     config: {
@@ -47,6 +59,7 @@ export function registerDeviceActions(
       type: "system",
       description:
         "List what the guardian's devices, such as their phone, let you read live: each device, " +
+        "whether the guardian is asking from it, whether it is stale (no report for 7 days), " +
         "each capability on it with its state (working, off, broken) and whether it is personal, " +
         "and each operation with what it does, its arguments and examples. Call it before " +
         `${DEVICE_RUN_ACTION}. It reads what the devices last reported and asks no device.`,
@@ -56,7 +69,10 @@ export function registerDeviceActions(
       sideEffects: "read-only",
     },
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    execute: async () => ({ status: "ok", data: describeDevices(deps.connections.list()) }),
+    execute: async () => ({
+      status: "ok",
+      data: describeDevices(deps.connections.list(), now(), turn().askingDeviceId),
+    }),
   });
 
   actions.register({
@@ -66,7 +82,8 @@ export function registerDeviceActions(
       description:
         "Run one operation on one of the guardian's devices now, such as reading its status, with " +
         `the operation and arguments ${DEVICE_DESCRIBE_ACTION} lists. With several devices it uses ` +
-        "the one whose connection works and that reported last, unless you name a device. When the " +
+        "the one the guardian is asking from, and never another; otherwise a working one that " +
+        "reported in the last 7 days, unless you name a device. When the " +
         "connection is off or broken, it asks no device and the error says what the guardian can " +
         "turn on. A device that is offline answers target_unavailable at once. A personal " +
         "capability runs only in a private chat with the guardian.",
@@ -113,7 +130,9 @@ export function registerDeviceActions(
       if (device !== undefined && typeof device !== "string") {
         return { status: "error", error: "Invalid input: device must be a device id." };
       }
-      return runOperation(deps, audience(), operation, args as Record<string, unknown>, device);
+      const { audience, askingDeviceId } = turn();
+      const route = routes.forOperation(operation, { askingDeviceId, deviceId: device });
+      return runOperation(deps, audience, operation, args as Record<string, unknown>, route);
     },
   });
 }
@@ -123,27 +142,23 @@ async function runOperation(
   audience: string | undefined,
   operation: string,
   args: Record<string, unknown>,
-  deviceId: string | undefined,
+  route: ReturnType<ReturnType<typeof createLiveRoutes>["forOperation"]>,
 ): Promise<ActionResult> {
-  const candidates = deps.connections
-    .list()
-    .filter(
-      (c) =>
-        c.operations.some((o) => o.name === operation) &&
-        (deviceId === undefined || c.device.id === deviceId),
-    )
-    .sort((a, b) => RANK[a.state] - RANK[b.state] || b.lastSeenAt.localeCompare(a.lastSeenAt));
-  const chosen = candidates[0];
-  if (!chosen) {
-    const where = deviceId ? ` on device ${deviceId}` : "";
+  if (!("connection" in route)) {
+    const pointer = route.pointer;
+    const where =
+      pointer.state === "not_connected" && pointer.device ? " on the asking device" : "";
     return {
       status: "error",
       error:
-        `not_connected: No device connection${where} offers ${operation}. Call ` +
-        `${DEVICE_DESCRIBE_ACTION} for what the guardian's devices offer; if none does, ask ` +
-        "the guardian to connect it in the Rome app on their device.",
+        `not_connected: No device connection${where} offers ${operation}. ` +
+        (pointer.state === "not_connected" && pointer.kind
+          ? connectStep(pointer)
+          : `Call ${DEVICE_DESCRIBE_ACTION} for what the guardian's devices offer; if none does, ` +
+            "ask the guardian to connect it in the Rome app on their device."),
     };
   }
+  const chosen = route.connection;
   // Today's rule, as for the personal-data actions and the rome-node CLI.
   if (chosen.personal && audience !== "private") {
     log.info("personal device operation refused outside a private turn", {
@@ -191,7 +206,11 @@ function target(connection: DeviceConnection) {
 }
 
 /** The listing: each device with its connections, as the devices last reported them. */
-export function describeDevices(connections: DeviceConnection[]) {
+export function describeDevices(
+  connections: DeviceConnection[],
+  now: number,
+  askingDeviceId?: string,
+) {
   const devices = new Map<
     string,
     {
@@ -199,6 +218,8 @@ export function describeDevices(connections: DeviceConnection[]) {
       name: string | null;
       platform: string | null;
       lastSeenAt: string;
+      asking?: true;
+      stale?: true;
       capabilities: unknown[];
     }
   >();
@@ -219,6 +240,10 @@ export function describeDevices(connections: DeviceConnection[]) {
       operations: connection.operations,
     });
     devices.set(connection.device.id, entry);
+  }
+  for (const entry of devices.values()) {
+    if (entry.id === askingDeviceId) entry.asking = true;
+    if (isStale(entry, now)) entry.stale = true;
   }
   return devices.size > 0
     ? { devices: [...devices.values()] }

@@ -1,0 +1,1 @@
+ALTER TABLE `device_connections` ADD `origin_id` text;

@@ -656,8 +656,10 @@ The phone reports its connections to the Rome open, if the guardian owns it, wit
 switch or permission change. The report names the device by its rome-node
 device id and lists each capability with its title, prefix, `personal`,
 operations, `permission` (Health is always `unknown`, since HealthKit hides it),
-`live`, and for Health the source it `feeds`, `apple_health`. Each Health batch
-names its connection, `<deviceId>:apple_health`.
+`live`, and for Health the source it `feeds`, `apple_health`. The device names
+the app install's personal-data origin as `originId`, and signing out reports an
+empty list first. Each message the guardian sends carries the phone's device id
+in `x-rome-device`, so a live read asks this phone.
 
 The system sheet's text (`NSHealthShareUsageDescription`) says the same: the
 Health data the user allows is kept up to date on the Rome, and the app never

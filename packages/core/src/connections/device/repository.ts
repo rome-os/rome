@@ -1,7 +1,7 @@
 // The device connections' one way into the database. Concept:
 // docs/domains/connections.md#device-connection.
 
-import { and, asc, eq, notInArray } from "drizzle-orm";
+import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import type { DrizzleDb } from "../../db/index.js";
 import { deviceConnections } from "../../db/schema/system.js";
 import {
@@ -17,6 +17,8 @@ import {
 export interface DeviceConnection {
   id: string;
   device: { id: string; name: string | null; platform: string | null };
+  /** The personal-data origin of the app install that reports it, or null. */
+  originId: string | null;
   capability: string;
   title: string;
   prefix: string;
@@ -66,6 +68,7 @@ export class DeviceConnectionsRepository {
           permission: connection.permission,
           live: connection.live,
           feeds: connection.feeds ?? null,
+          originId: report.device.originId ?? null,
           lastSeenAt: now,
         };
         tx.insert(deviceConnections)
@@ -80,6 +83,46 @@ export class DeviceConnectionsRepository {
     return this.list().filter((c) => c.device.id === deviceId);
   }
 
+  /**
+   * Deletes a removed device's rows. Answers the origins no other device's
+   * row still maps to: a sign-in again on the same app install reports
+   * another device id with the same origin, which keeps it.
+   */
+  removeDevice(deviceId: string): { orphanedOrigins: string[] } {
+    return this.db.transaction((tx) => {
+      const origins = tx
+        .selectDistinct({ originId: deviceConnections.originId })
+        .from(deviceConnections)
+        .where(eq(deviceConnections.deviceId, deviceId))
+        .all()
+        .flatMap((row) => (row.originId ? [row.originId] : []));
+      tx.delete(deviceConnections).where(eq(deviceConnections.deviceId, deviceId)).run();
+      if (origins.length === 0) return { orphanedOrigins: [] };
+      const kept = new Set(
+        tx
+          .selectDistinct({ originId: deviceConnections.originId })
+          .from(deviceConnections)
+          .where(inArray(deviceConnections.originId, origins))
+          .all()
+          .map((row) => row.originId),
+      );
+      return { orphanedOrigins: origins.filter((origin) => !kept.has(origin)) };
+    });
+  }
+
+  /**
+   * Deletes the rows of every device not in `deviceIds`, the account's whole
+   * device list. Origins are left alone: a device that left the list may be
+   * an install that signed out, which reuses its origin at the next sign-in.
+   */
+  keepOnly(deviceIds: readonly string[]): number {
+    if (deviceIds.length === 0) return 0;
+    return this.db
+      .delete(deviceConnections)
+      .where(notInArray(deviceConnections.deviceId, [...deviceIds]))
+      .run().changes;
+  }
+
   /** Every device's connections, by device, then capability. */
   list(): DeviceConnection[] {
     return this.db
@@ -88,21 +131,6 @@ export class DeviceConnectionsRepository {
       .orderBy(asc(deviceConnections.deviceId), asc(deviceConnections.capability))
       .all()
       .map(toConnection);
-  }
-
-  /**
-   * The connection whose device says its capability syncs to `feeds`: a
-   * working one first, then the one heard from last. Undefined when none does.
-   */
-  feeding(feeds: string): DeviceConnection | undefined {
-    const rank = { working: 0, off: 1, broken: 2 } as const;
-    return this.db
-      .select()
-      .from(deviceConnections)
-      .where(eq(deviceConnections.feeds, feeds))
-      .all()
-      .map(toConnection)
-      .sort((a, b) => rank[a.state] - rank[b.state] || b.lastSeenAt.localeCompare(a.lastSeenAt))[0];
   }
 
   /** The connection with id `<deviceId>:<capability>`, or undefined. */
@@ -128,6 +156,7 @@ function toConnection(row: Row): DeviceConnection {
   return {
     id: deviceConnectionId(row.deviceId, row.capability),
     device: { id: row.deviceId, name: row.deviceName, platform: row.platform },
+    originId: row.originId,
     capability: row.capability,
     title: row.title,
     prefix: row.prefix,

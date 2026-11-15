@@ -389,6 +389,10 @@ final class HealthSettings {
         return true
     }
 
+    /// This app install's origin id, the one its sync sends: the connection
+    /// report names it, so the Rome knows which install's data a device reads.
+    func originId() -> String? { originStore.id() }
+
     /// Sign-out: observers off, background delivery off, every Rome's
     /// anchors and history gone, every switch off. The origin id is kept,
     /// so Delete uploaded data still reaches what this phone sent.

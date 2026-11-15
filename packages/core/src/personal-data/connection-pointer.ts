@@ -1,66 +1,39 @@
 // Where an Agent can read what the store does not hold: the device connection
-// a source names. The store points; it never says how to run the device.
+// the connection layer chooses. The store points; it never says how to run the device.
 // Contract: docs/personal-data.md#live.
 
-import { DEVICE_DESCRIBE_ACTION, DEVICE_RUN_ACTION } from "../connections/device/actions.js";
 import { connectStep } from "../connections/device/connect-step.js";
-import type {
-  DeviceConnection,
-  DeviceConnectionsRepository,
-} from "../connections/device/repository.js";
+import {
+  DEVICE_DESCRIBE_ACTION,
+  DEVICE_RUN_ACTION,
+  type LivePointer,
+  type LiveRoutes,
+  type LiveTurn,
+  NO_LIVE_ROUTES,
+} from "../connections/device/live-route.js";
 
-/** How personal data finds a device connection. */
-export type ConnectionLookup = Pick<DeviceConnectionsRepository, "byId" | "feeding">;
+/** How personal data finds a device connection: it asks the connection layer, never its table. */
+export type ConnectionLookup = LiveRoutes;
 
 /** A gap up to this long is answered from the store; a wider one is read live. */
 export const LIVE_READ_GAP_MS = 60 * 60 * 1000;
 
 /** Finds none: a store read with no device connections. */
-export const NO_CONNECTIONS: ConnectionLookup = {
-  byId: () => undefined,
-  feeding: () => undefined,
-};
+export const NO_CONNECTIONS: ConnectionLookup = NO_LIVE_ROUTES;
 
-export type ConnectionPointer =
-  | {
-      id: string;
-      /** The connection's capability, the kind `connect_account` takes for it. */
-      kind: string;
-      title: string;
-      device: { id: string; name: string | null };
-      /** `working`, `off` (Live access is off) or `broken` (permission denied). */
-      state: DeviceConnection["state"];
-      lastSeenAt: string;
-    }
-  | { state: "not_connected"; connect: string };
-
-const NOT_CONNECTED: ConnectionPointer = {
-  state: "not_connected",
-  connect:
-    "No device connection reads this source live. Ask the guardian to connect it in the Rome app on their device.",
-};
+export type ConnectionPointer = LivePointer;
 
 /**
- * The pointer for a source, read when asked: the connection its sync named,
- * or, before a first sync or with sync off, the one whose device says it
- * syncs to the source.
+ * The pointer for a source, read when asked: the connection the connection
+ * layer chooses for this turn, the install that holds `originId`'s data first.
  */
 export function connectionPointer(
   source: string,
-  connectionId: string | null | undefined,
+  turn: LiveTurn,
   connections: ConnectionLookup,
+  originId?: string | null,
 ): ConnectionPointer {
-  const connection: DeviceConnection | undefined =
-    (connectionId ? connections.byId(connectionId) : undefined) ?? connections.feeding(source);
-  if (!connection) return NOT_CONNECTED;
-  return {
-    id: connection.id,
-    kind: connection.capability,
-    title: connection.title,
-    device: { id: connection.device.id, name: connection.device.name },
-    state: connection.state,
-    lastSeenAt: connection.lastSeenAt,
-  };
+  return connections.forSource(source, turn, { originId });
 }
 
 /**

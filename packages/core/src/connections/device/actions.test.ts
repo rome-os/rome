@@ -5,6 +5,7 @@ import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../../test/db.js";
 import { DEVICE_DESCRIBE_ACTION, DEVICE_RUN_ACTION, registerDeviceActions } from "./actions.js";
+import { STALE_AFTER_MS, withAskingDevice } from "./live-route.js";
 import { type DeviceReport, deviceReportSchema } from "./report.js";
 import { DeviceConnectionsRepository } from "./repository.js";
 
@@ -66,6 +67,7 @@ describe("device actions", () => {
     const registry = new ActionRegistryImpl();
     registerDeviceActions(registry, {
       connections: devices,
+      now: () => NOW,
       run: async (deviceId, action, args) => {
         calls.push({ deviceId, action, args });
         return answer;
@@ -268,6 +270,62 @@ describe("device actions", () => {
       { audience: "private" },
     );
     expect(calls.map((call) => call.deviceId)).toEqual(["dev-phone", "dev-ipad"]);
+  });
+
+  it("asked from a device whose Device is off, answers its connect card and calls no other", async () => {
+    devices.report(report("dev-asking", "iPhone", [deviceConnection(false)]), NOW);
+    devices.report(report("dev-other", "iPad", [deviceConnection(true)]), NOW);
+    const result = await engine.run(
+      DEVICE_RUN_ACTION,
+      { operation: "device.status" },
+      {
+        audience: "private",
+        channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, "dev-asking"),
+      },
+    );
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/^live_off: .*connect_account and kind "device"/),
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("asked from a device that has no such connection, offers the card and calls no other", async () => {
+    devices.report(report("dev-asking", "iPhone", []), NOW);
+    devices.report(report("dev-other", "iPad", [deviceConnection(true)]), NOW);
+    const result = await engine.run(
+      DEVICE_RUN_ACTION,
+      { operation: "device.status" },
+      {
+        audience: "private",
+        channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, "dev-asking"),
+      },
+    );
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/^not_connected: .*asking device.*kind "device"/),
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("never chooses a device that has not reported for 7 days, and lists it as stale", async () => {
+    devices.report(
+      report("dev-stale", "iPhone", [deviceConnection(true)]),
+      NOW - STALE_AFTER_MS - 1,
+    );
+    const result = await engine.run(
+      DEVICE_RUN_ACTION,
+      { operation: "device.status" },
+      { audience: "private" },
+    );
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/^not_connected: /),
+    });
+    expect(calls).toEqual([]);
+    expect(await engine.run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" })).toMatchObject({
+      data: { devices: [{ id: "dev-stale", stale: true }] },
+    });
   });
 
   it("answers target_unavailable at once for a device that is offline", async () => {

@@ -147,6 +147,11 @@ extension DeviceStatus {
         #expect(json["connections"]?.array?.first?["permission"]?.string == "not_needed")
         #expect(json["connections"]?.array?.first?["operations"]?.array?.first?["access"]?.string == "read")
         #expect(json["connections"]?.array?.first?["feeds"] == nil, "omitted for one that syncs nothing")
+        #expect(json["device"]?["originId"] == nil, "omitted for an install that names none")
+        let named = DeviceConnectionReport(device: .init(id: "dev-1", name: "iPhone", platform: "ios", originId: "origin-1"), connections: [])
+        let namedJSON = parseJSON(String(decoding: try JSONEncoder().encode(named), as: UTF8.self))
+        #expect(namedJSON["device"]?["originId"]?.string == "origin-1")
+        #expect(namedJSON["connections"]?.array?.isEmpty == true, "a sign-out's report lists none")
         #expect(json["connections"]?.array?.first?["operations"]?.array?.first?["description"] == nil, "omitted when the registry declares none")
         #expect(DeviceConnections.connectionId(device: "DEV-1", capability: "apple_health") == "dev-1:apple_health")
         #expect(DeviceConnections.connectionId(device: nil, capability: "apple_health") == nil)
@@ -299,3 +304,43 @@ extension NodeHostTests {
         #expect(sent.last == true, "connect returns only once its own report, with Live access on, is sent")
     }
 }
+
+/// Records the device header of each request and answers a created turn.
+final class DeviceHeaderProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var headers: [String?] = []
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.headers.append(request.value(forHTTPHeaderField: APIClient.deviceHeader))
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"turnId":"t1"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+@Suite(.serialized) struct AskingDeviceHeaderTests {
+    private func backend(cookie: String) -> LiveBackend {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DeviceHeaderProtocol.self]
+        DeviceHeaderProtocol.headers = []
+        return LiveBackend(client: APIClient(origin: URL(string: "https://me.romeos.cc")!, token: { "t" }, cookieName: { cookie }, configuration: configuration, deviceId: "dev-1"))
+    }
+
+    @Test func aGuardianMessageNamesThisPhone() async throws {
+        let backend = backend(cookie: InstanceSession.guardianCookie)
+        _ = try await backend.send(sessionId: "s1", text: "battery?", files: [], inputId: "i1", priority: .now)
+        await backend.markRead(sessionId: "s1")
+        #expect(DeviceHeaderProtocol.headers == ["dev-1", nil], "only the message names the phone")
+    }
+
+    @Test func aVisitorsRomeIsNeverTold() async throws {
+        let backend = backend(cookie: InstanceSession.visitorCookie)
+        _ = try await backend.send(sessionId: "s1", text: "hi", files: [], inputId: "i1", priority: .now)
+        #expect(DeviceHeaderProtocol.headers == [nil])
+    }
+}
+

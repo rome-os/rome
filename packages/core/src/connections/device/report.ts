@@ -33,6 +33,9 @@ export const deviceReportSchema = z.object({
     id: z.string().min(1).max(100),
     name: z.string().max(100).optional(),
     platform: z.string().max(40).optional(),
+    // The personal-data origin of the app install: the same across its
+    // sign-ins, while `id` changes at each. Optional: older apps send none.
+    originId: z.string().min(1).max(100).optional(),
   }),
   connections: z
     .array(

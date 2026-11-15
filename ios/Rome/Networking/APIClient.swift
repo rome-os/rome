@@ -39,10 +39,14 @@ final class APIClient: Sendable {
     /// Renews the session after a 401, and says whether it worked; the
     /// request then goes once more with the new session.
     private let renew: (@Sendable () async -> Bool)?
+    /// This phone's rome-node device id, sent with each message the guardian
+    /// sends, so a live read asks this phone. Nil without a Cloud sign-in.
+    private let deviceId: String?
 
     /// `configuration`: tests pass one with a stub protocol.
-    init(origin: URL, token: @escaping @Sendable () -> String?, cookieName: @escaping @Sendable () -> String = { InstanceSession.guardianCookie }, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}, renew: (@Sendable () async -> Bool)? = nil) {
+    init(origin: URL, token: @escaping @Sendable () -> String?, cookieName: @escaping @Sendable () -> String = { InstanceSession.guardianCookie }, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}, renew: (@Sendable () async -> Bool)? = nil, deviceId: String? = nil) {
         self.renew = renew
+        self.deviceId = deviceId
         self.origin = origin
         self.token = token
         self.cookieName = cookieName
@@ -128,9 +132,14 @@ final class APIClient: Sendable {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
+    /// `fromThisDevice`: the request starts a turn the guardian sends from
+    /// this phone, so it names the phone's device id. Never to a visitor's Rome.
     @discardableResult
-    func post(_ path: String, json: JSONValue? = nil) async throws -> Data {
+    func post(_ path: String, json: JSONValue? = nil, fromThisDevice: Bool = false) async throws -> Data {
         var request = request(path, method: "POST")
+        if fromThisDevice, let deviceId, cookieName() == InstanceSession.guardianCookie {
+            request.setValue(deviceId, forHTTPHeaderField: Self.deviceHeader)
+        }
         if let json {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(json)
@@ -138,8 +147,8 @@ final class APIClient: Sendable {
         return try await send(request)
     }
 
-    func post<T: Decodable>(_ path: String, json: JSONValue? = nil, as type: T.Type) async throws -> T {
-        try decode(try await post(path, json: json))
+    func post<T: Decodable>(_ path: String, json: JSONValue? = nil, fromThisDevice: Bool = false, as type: T.Type) async throws -> T {
+        try decode(try await post(path, json: json, fromThisDevice: fromThisDevice))
     }
 
     @discardableResult
@@ -298,6 +307,8 @@ final class APIClient: Sendable {
     /// The live-events upgrade header that marks the phone app's socket.
     static let clientHeader = "x-rome-client"
     static let phoneClient = "phone"
+    /// The header that names the phone a message was sent from.
+    static let deviceHeader = "x-rome-device"
 
     static func originString(_ url: URL) -> String {
         var text = "\(url.scheme ?? "https")://\(url.host() ?? "")"

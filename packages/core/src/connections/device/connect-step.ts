@@ -12,7 +12,7 @@ export type ConnectStepTarget =
       device: { name: string | null };
       state: DeviceConnectionState;
     }
-  | { state: "not_connected" };
+  | { state: "not_connected"; kind?: string; device?: { id: string } };
 
 /**
  * The step for a connection that is not working, or undefined for one that
@@ -22,7 +22,12 @@ export type ConnectStepTarget =
 export function connectStep(target: ConnectStepTarget, before?: string): string | undefined {
   const then = (verb: string) => (before ? `${before}, then ${verb}` : capitalize(verb));
   if (target.state === "not_connected") {
-    return `${then("ask")} the guardian to connect it in the Rome app on their device.`;
+    const there = target.device ? "the device they are asking from" : "their device";
+    return target.kind
+      ? `${then("offer")} to connect it: show the card with connect_account and kind ` +
+          `"${target.kind}" when connect_account lists it, otherwise ask the guardian to connect ` +
+          `it in the Rome app on ${there}.`
+      : `${then("ask")} the guardian to connect it in the Rome app on ${there}.`;
   }
   const on = target.device.name ? `${target.title} on ${target.device.name}` : target.title;
   if (target.state === "off") {
