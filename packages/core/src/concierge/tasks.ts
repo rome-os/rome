@@ -17,7 +17,6 @@ import {
   legacyTaskState,
   taskStatus,
 } from "@rome/api-types/concierge-task-status";
-import type { LiveEventEmit } from "../lib/live-event.js";
 import type { OpenWaitItem } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
 import { cardMessagesOf } from "./task-cards.js";
@@ -377,26 +376,6 @@ export class ConciergeTasks {
     return this.toDtos(
       rows.filter((row) => row.owner === owner && row.conciergeChat.id === chatId),
     );
-  }
-
-  /** Emits `task_upsert` for every change of one owner's rows. Returns the unsubscribe. */
-  subscribe(emit: LiveEventEmit, owner: ConciergeOwner = GUARDIAN_OWNER): () => void {
-    // Each change is told in the order it happened: reading a row's status
-    // takes a moment, and a later change must never overtake an earlier one.
-    let told: Promise<void> = Promise.resolve();
-    return this.repo.onChange((task) => {
-      if (task.owner !== owner) return;
-      const dto = this.toDtos([task]);
-      told = told
-        .then(() => dto)
-        .then(([read]) => emit("task_upsert", { task: read }))
-        .catch((error: unknown) =>
-          log.warn("failed to tell a task's change", {
-            taskId: task.row.id,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-    });
   }
 
   /**
