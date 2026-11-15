@@ -222,6 +222,15 @@ import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
 import { registerReadPersonAction } from "./people/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
+import { placeAudience } from "./core/place-audience.js";
+import { registerPersonalDataActions } from "./personal-data/actions.js";
+import { PersonalDataRepository } from "./personal-data/repository.js";
+import { DeviceConnectionsRepository } from "./connections/device/repository.js";
+import { registerDeviceActions } from "./connections/device/actions.js";
+import { createLiveRoutes } from "./connections/device/live-route.js";
+import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
+import { deviceKinds, deviceKindState } from "./connections/connect-card.js";
+import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -497,7 +506,15 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
-  const nodeDevices = createNodeDevicesService();
+  // A device removed from the account through this Rome loses its connection
+  // rows; an origin the removal leaves with no install is turned off.
+  const nodeDevices = withDeviceLifecycle(createNodeDevicesService(), {
+    connections: () => deviceConnectionsRepo,
+    turnOriginOff: (originId) => {
+      for (const spec of PERSONAL_DATA_SOURCES)
+        personalDataRepo.setState(spec.source, originId, "off");
+    },
+  });
   const provisionNodeCaller = createNodeCallerProvisioner();
 
   // App keys: guardian-entered values go live in process.env before any app
@@ -575,7 +592,34 @@ async function main() {
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
-  const routinesRepo = new RoutinesRepository(db);
+  // Made here so the Concierge can tell whether a visitor is still served,
+  // and who can read a dashboard chat; it is loaded with the other access
+  // settings further down.
+  const dashboardAccessState = new DashboardAccessState();
+  // Who can read a chat, for every audience check (docs/domains/participation.md#audience).
+  const chatAudience = placeAudience({
+    connectionKindOf: connectionKindOfChannel,
+    dashboardChat: (chatId) => webchatRepo.getSession(chatId),
+    visitorsAllowed: () => dashboardAccessState.hasCloudEmailAccess(),
+    // Main reads who sent a message itself, never the bond a caller names.
+    senderBondLevel: async (context) =>
+      context.channelUserId
+        ? (
+            await peopleRepo.byAccount({
+              platform: platformOfChannel(context.channel),
+              id: context.channelUserId,
+            })
+          )?.bondLevel
+        : undefined,
+  });
+  const routinesRepo = new RoutinesRepository(db, (chatId) =>
+    chatAudience({ channel: "webchat", threadId: chatId }),
+  );
+  const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
+  const deviceConnectionsRepo = new DeviceConnectionsRepository(db);
+  // Which device connection answers a live read for a turn: one choice for
+  // device_run, the personal-data pointer and the connect card.
+  const deviceLiveRoutes = createLiveRoutes(deviceConnectionsRepo);
   const routineRunsRepo = new RoutineRunsRepository(db);
   // Runs before the action engine, routine engine, and ingress below exist, so
   // every `running` row it ends belongs to the stopped process.
@@ -925,6 +969,7 @@ async function main() {
       // Coordination roots run in main only when the lockfile marks their app
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
+      placeAudience: chatAudience,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -1179,9 +1224,6 @@ async function main() {
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
-  // Made here so the Concierge can tell whether a visitor is still served;
-  // it is loaded with the other access settings further down.
-  const dashboardAccessState = new DashboardAccessState();
   // The chats the guardian's phone app holds open, from the live-events socket;
   // the Concierge does not push what it says in one of them.
   const phoneWatching = new PhoneWatching();
@@ -1244,7 +1286,11 @@ async function main() {
       .talker;
     return talker ? talkerChannelSurface(talker) : null;
   };
-  const openingFor = sessionOpeningFor({ channelSurface, connectionKindOfChannel });
+  const openingFor = sessionOpeningFor({
+    channelSurface,
+    connectionKindOfChannel,
+    placeAudience: chatAudience,
+  });
   const agentSessionManager = createSessions(
     {
       agentLoader,
@@ -1278,10 +1324,17 @@ async function main() {
         actionRegistry,
         actionEngine,
         webchatRepo,
+        placeAudience: chatAudience,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
+        deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+        deviceState: (kind, turn) => deviceKindState(deviceLiveRoutes.forKind(kind, turn), turn),
+        // The turn's audience, narrowed by the chat's as it stands now, so a
+        // chat that opens to visitors after the turn started is no longer private.
+        privateTurn: async (turn) =>
+          turn.audience() === "private" && (await chatAudience(turn.threadContext())) === "private",
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
@@ -1390,6 +1443,15 @@ async function main() {
   });
 
   registerShowFileAction(actionRegistry);
+  registerPersonalDataActions(actionRegistry, {
+    personalData: personalDataRepo,
+    guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
+    connections: deviceLiveRoutes,
+  });
+  registerDeviceActions(actionRegistry, {
+    connections: deviceConnectionsRepo,
+    run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
+  });
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {
     people: peopleRepo,
@@ -1399,15 +1461,15 @@ async function main() {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  // The marks the stopped process left working settle before any turn runs.
+  // The messages the stopped process left open settle before any turn runs.
   const settledMarks = await settleMarksAfterRestart(
     concierge.deps.tasks.repo,
     webchatRepo,
     endedTurns,
   );
   if (settledMarks > 0) {
-    log.warn("Settled status reactions a stopped Rome process left working", {
-      reactions: settledMarks,
+    log.warn("Settled the messages a stopped Rome process left open", {
+      messages: settledMarks,
     });
   }
   startConciergeEvents(concierge, turnListeners);
@@ -2250,6 +2312,9 @@ async function main() {
   try {
     const apiDeps: ApiDeps = {
       agentNameEvents,
+      personalData: personalDataRepo,
+      deviceConnections: deviceConnectionsRepo,
+      placeAudience: chatAudience,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,

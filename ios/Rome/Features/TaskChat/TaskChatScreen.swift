@@ -16,7 +16,7 @@ struct TaskChatScreen: View {
     @State private var attachments = ComposerAttachments()
     @State private var confirmDelete = false
 
-    private var title: String { workspace.tasks.title(forChat: chatId, fallback: initialTitle) }
+    private var title: String { workspace.taskChats.title(forChat: chatId, fallback: initialTitle) }
 
     /// The header shows a spinner only while this chat runs a turn. The
     /// task's own state is left out: it is not reported accurately enough.
@@ -198,7 +198,7 @@ private struct TaskChatRow: View, Equatable {
     static func draws(_ row: TranscriptRow, briefID: String?) -> Bool {
         switch row {
         case .separator(let id, _): briefID.map { id != "sep-\($0)" } ?? true
-        case .taskAsk, .threadLabel, .sourceLabel, .sessionRenewal: false
+        case .taskAsk, .threadLabel, .sourceLabel, .sessionRenewal, .unreadDivider: false
         default: true
         }
     }
@@ -238,7 +238,7 @@ private struct TaskChatRow: View, Equatable {
             EmptyView()
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .sessionRenewal:
+        case .sessionRenewal, .unreadDivider:
             // Only a Concierge chat draws its faint lines.
             EmptyView()
         }

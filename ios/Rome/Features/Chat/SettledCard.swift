@@ -2,8 +2,8 @@ import SwiftUI
 
 /// A question or approval that no longer waits, folded to two lines: what it
 /// asked, muted, then how it ended. A tap opens the whole card below it, read
-/// only; with `onOpen` the tap is handed on instead, as an expired question
-/// opens its form and an app's card opens its task chat.
+/// only; with `onOpen` the tap is handed on instead, as an app's card opens
+/// its task chat.
 struct SettledCard<Full: View>: View {
     let title: String?
     let outcome: String
@@ -86,21 +86,18 @@ extension SettledCard where Full == EmptyView {
 
 /// A task's question or approval shown on its own in a Concierge chat
 /// (`show: "ask"`), with no task card around it: the label under it names
-/// the task. It is drawn from the `card` its message carries, and the task
-/// chat is never read. The newest one of a task that waits takes its answer
-/// here. An expired one folds to one line that opens to the form, and counts
-/// as waiting nowhere until then. Once answered, decided or turned down, or
-/// superseded by a newer copy, it folds to what it asked and how it ended,
-/// opening read only.
+/// the task. It is drawn from the `card` its message carries, and neither the
+/// task chat nor the task list is read: whether it waits is the card's own
+/// (`TaskAskCard.waits`). The newest one that waits takes its answer here.
+/// Any other folds to what it asked and how it ended (answered, expired,
+/// closed, or waiting on a newer copy), opening read only.
 struct TaskAskView: View {
     let chatId: String
     let card: TaskAskCard?
     let latest: Bool
-    let tasks: TasksStore
     let store: TranscriptStore
     let onOpenChat: () -> Void
 
-    @State private var openedExpired = false
     @Environment(\.isVisitor) private var isVisitor
 
     var body: some View {
@@ -119,44 +116,16 @@ struct TaskAskView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The newest card of its task stopped waiting with no outcome held:
-        // `chat_card_settled` may have been missed, so read the page again,
-        // once for each change of the task.
-        .task(id: recovery) {
-            if let recovery { store.recoverCard(recovery) }
-        }
     }
 
-    private var task: ConciergeTask? { tasks.task(forChat: chatId) }
-
-    private var mode: TaskAskMode {
-        TaskAskMode.of(card: card, latest: latest, task: task, tasksListed: tasks.listed)
-    }
-
-    /// The card and the task state it stopped waiting under, while a re-read may help.
-    private var recovery: String? {
-        guard mode == .open, latest, let id = card?.id else { return nil }
-        return [id, task?.status ?? "-", task?.waitId ?? "-"].joined(separator: "|")
-    }
+    private var mode: TaskAskMode { TaskAskMode.of(card: card, latest: latest) }
 
     @ViewBuilder
     private func questionCard(_ question: TaskAskCard.Question) -> some View {
         let part = card?.questionPart
         let title = part.map(SettledOutcome.title)
         switch mode {
-        case .settled:
-            if let outcome = question.outcome, let part {
-                SettledCard(title: title, outcome: SettledOutcome.answer(outcome.output)) {
-                    QuestionCardView(part: part, answered: outcome.output) { _, _ in WidgetEventReply() }
-                }
-            } else {
-                SettledCard(title: title, outcome: question.outcome.map { SettledOutcome.answer($0.output) } ?? String(localized: "Answered"))
-            }
-        case .expired where !openedExpired:
-            SettledCard(title: title, outcome: String(localized: "Expired · answer to continue"), chevron: true) {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { openedExpired = true }
-            }
-        case .waiting, .expired:
+        case .waiting:
             if let part {
                 QuestionCardView(part: part, answered: nil) { name, context in
                     try await store.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
@@ -167,9 +136,23 @@ struct TaskAskView: View {
                 // An app's own card, such as a sign-in, is answered in its task chat.
                 SettledCard(title: nil, outcome: String(localized: "Open the task chat to answer"), chevron: true, onOpen: onOpenChat)
             }
-        case .open:
-            // Its newer copy below takes the answer, or the task no longer waits.
-            SettledCard(title: title, outcome: latest ? String(localized: "No longer waiting") : String(localized: "Waiting: answer the card below"))
+        case .settled:
+            if let outcome = question.outcome, let part {
+                SettledCard(title: title, outcome: SettledOutcome.answer(outcome.output)) {
+                    QuestionCardView(part: part, answered: outcome.output) { _, _ in WidgetEventReply() }
+                }
+            } else {
+                SettledCard(title: title, outcome: question.outcome.map { SettledOutcome.answer($0.output) } ?? String(localized: "Answered"))
+            }
+        case .expired, .closed, .open:
+            // Read only: what it asked, and why it takes no answer here.
+            if let part {
+                SettledCard(title: title, outcome: mode.foldLine) {
+                    QuestionCardView(part: part, answered: nil) { _, _ in WidgetEventReply() }
+                }
+            } else {
+                SettledCard(title: title, outcome: mode.foldLine)
+            }
         }
     }
 
@@ -177,12 +160,7 @@ struct TaskAskView: View {
     private func approvalCard(_ approval: TaskAskCard.Approval) -> some View {
         if let part = card?.approvalPart {
             switch mode {
-            case .settled:
-                let line = approval.outcome.map(TaskAskCard.outcomeLine) ?? ""
-                SettledCard(title: SettledOutcome.title(part), outcome: line) {
-                    ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true, settledLabel: line) { _ in }
-                }
-            case .waiting, .expired:
+            case .waiting:
                 ApprovalCardView(
                     part: part,
                     status: .pending,
@@ -195,39 +173,45 @@ struct TaskAskView: View {
                 }
                 .id(approval.id)
                 .bubbleWidth()
-            case .open:
-                SettledCard(title: SettledOutcome.title(part), outcome: latest ? String(localized: "No longer waiting") : String(localized: "Waiting: answer the card below"))
+            case .settled, .expired, .closed, .open:
+                let line = approval.outcome.map(TaskAskCard.outcomeLine) ?? mode.foldLine
+                SettledCard(title: SettledOutcome.title(part), outcome: line) {
+                    ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true, settledLabel: line) { _ in }
+                }
             }
         }
     }
 }
 
-/// What a task's question or approval card draws.
+/// What a task's question or approval card draws. Read from the card alone,
+/// as Rome filled it in and `chat_card_settled` replaced it since.
 enum TaskAskMode: Equatable {
-    /// The task waits on this card: it takes an answer.
+    /// It waits on its owner and is the newest card of its task: it takes an answer.
     case waiting
-    /// A question nobody answered in time: one folded line until it is
-    /// opened, then the form. It waits on no one.
-    case expired
     /// Answered, dismissed, decided or turned down.
     case settled
-    /// Not answered, yet not waiting: not the newest card of its task, or its task moved on.
+    /// A question nobody answered in time. Read only.
+    case expired
+    /// Its task ended while it had no outcome. Read only.
+    case closed
+    /// It waits, yet a newer copy of its task takes the answer.
     case open
 
-    /// The newest card of its task chat, with no outcome, whose task needs the
-    /// guardian and whose open wait is this card, takes the answer. Until the
-    /// task list has arrived, the newest card goes by what it says itself, so
-    /// nothing reads "No longer waiting" only because the tasks are not in yet.
-    static func of(card: TaskAskCard?, latest: Bool, task: ConciergeTask?, tasksListed: Bool = true) -> TaskAskMode {
-        guard let card, let id = card.id else { return .settled }
+    static func of(card: TaskAskCard?, latest: Bool) -> TaskAskMode {
+        guard let card, card.id != nil else { return .settled }
         if card.settled { return .settled }
-        // An older copy is never answerable, expired or not.
-        guard latest else { return .open }
-        guard tasksListed else { return card.expired ? .expired : .waiting }
-        // An expired card reopens only as its task's current wait.
-        if card.expired { return task?.waitId == id ? .expired : .open }
-        guard task?.status == "needs_you", task?.waitId == id else { return .open }
-        return .waiting
+        if card.expired { return .expired }
+        if card.closed { return .closed }
+        return latest ? .waiting : .open
+    }
+
+    /// The folded line of a card with no outcome.
+    var foldLine: String {
+        switch self {
+        case .expired: return String(localized: "Expired: no answer within a day")
+        case .closed: return String(localized: "Closed: the task ended")
+        default: return String(localized: "Waiting: answer the card below")
+        }
     }
 }
 

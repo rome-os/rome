@@ -4,6 +4,8 @@ import {
   LayoutGrid,
   ListChecks,
   ListTree,
+  MessageSquare,
+  MessagesSquare,
   PanelRightClose,
   Plus,
   X,
@@ -17,6 +19,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   DropdownMenu,
@@ -40,6 +43,7 @@ import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { TaskList } from "@/components/concierge/TaskList";
 import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
+import { ToolThreadContext, type ToolThreadHost, type ToolThreadTab } from "./tool-thread";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import {
   COMPACT_WIDTH,
@@ -58,6 +62,10 @@ const SEPARATOR_WIDTH = 1;
 const TRACE_TAB_ID = "__trace__";
 // Tab value of the Tasks tab, likewise.
 const TASKS_TAB_ID = "__tasks__";
+// Tab value of the Chat thread tab, likewise.
+const THREAD_TAB_ID = "__thread__";
+
+type BuiltinTab = "trace" | "tasks" | "thread";
 
 function readRatio() {
   try {
@@ -161,6 +169,7 @@ export function ToolWorkspace({
 }: ToolWorkspaceProps) {
   const { t } = useTranslation("common");
   const { t: tActivity } = useTranslation("activity");
+  const { t: tChat } = useTranslation("chat");
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [ratio, setRatio] = useState(readRatio);
@@ -173,7 +182,7 @@ export function ToolWorkspace({
   // `use-free-cells`, and so is not saved with the session. Selecting it leaves
   // the store's `activeId` alone, so the app tab that was active before is
   // still the one the store holds, and closing the Trace tab restores it by
-  // clearing `traceSelected`.
+  // clearing `selected`.
   //
   // The pane's expansion is view state too. The store's `collapsed` is saved per
   // session and written through the module-global active session, so a trace
@@ -189,25 +198,29 @@ export function ToolWorkspace({
   //   the store, because the user has moved on to the pane. The flag is then
   //   redundant and clears, so the app stays visible after the trace closes.
   //
-  // The Tasks tab is the same kind of tab: view state, never saved, at most one.
-  // Selecting one built-in tab deselects the other. A built-in tab opened over
-  // a collapsed pane holds it open with the same flag.
+  // The Tasks and Chat thread tabs are the same kind of tab: view state, never
+  // saved, at most one each. At most one built-in tab is selected, and a
+  // built-in tab opened over a collapsed pane holds it open with the same
+  // flag, until the last of them closes.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
-  const [traceSelected, setTraceSelected] = useState(false);
+  const [selected, setSelected] = useState<BuiltinTab | null>(null);
   // The Concierge chat whose task list the tab shows; null while it is not open.
   const [tasksChatId, setTasksChatId] = useState<string | null>(null);
   const tasksOpen = tasksChatId !== null;
-  const [tasksSelected, setTasksSelected] = useState(false);
+  const [thread, setThread] = useState<Pick<ToolThreadTab, "title" | "taskChatId"> | null>(null);
+  const threadOpen = thread !== null;
+  const [threadOutlet, setThreadOutlet] = useState<HTMLDivElement | null>(null);
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
+  const threadOwnerRef = useRef<string | null>(null);
+  const threadCloseRef = useRef<(() => void) | null>(null);
   const latest = useRef({ view, setCollapsed });
   latest.current = { view, setCollapsed };
 
   const reveal = useCallback(() => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
-    setTraceSelected(true);
-    setTasksSelected(false);
+    setSelected("trace");
   }, []);
 
   const setTraceTab = useCallback(
@@ -216,8 +229,7 @@ export function ToolWorkspace({
         if (traceOwnerRef.current !== owner) return;
         traceOwnerRef.current = null;
         traceCloseRef.current = null;
-        setTraceSelected(false);
-        setHoldsOpen(false);
+        setSelected((current) => (current === "trace" ? null : current));
         setTrace(null);
         return;
       }
@@ -242,15 +254,11 @@ export function ToolWorkspace({
   // app under a new id or a background app closing, move `view.activeId`
   // without the user asking to leave the trace, so they never touch it.
   useEffect(() => {
-    if (activations !== undefined) {
-      setTraceSelected(false);
-      setTasksSelected(false);
-    }
+    if (activations !== undefined) setSelected(null);
   }, [activations]);
 
   function addAndShow(type: WidgetType, targetId?: string) {
-    setTraceSelected(false);
-    setTasksSelected(false);
+    setSelected(null);
     addWidget(type, targetId);
   }
 
@@ -259,36 +267,73 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const open = !view.collapsed || ((trace !== null || tasksOpen) && holdsOpen);
+  const builtinOpen = trace !== null || tasksOpen || threadOpen;
+  // The hold ends with the last built-in tab: the pane falls back to the
+  // session's stored state.
+  useEffect(() => {
+    if (!builtinOpen) setHoldsOpen(false);
+  }, [builtinOpen]);
+  const open = !view.collapsed || (builtinOpen && holdsOpen);
   const setPaneCollapsed = useCallback((collapsed: boolean) => {
     setHoldsOpen(false);
     latest.current.setCollapsed(collapsed);
   }, []);
 
-  const traceActive = trace !== null && traceSelected;
-  const tasksActive = tasksOpen && tasksSelected;
-  const builtinActive = traceActive || tasksActive;
+  const traceActive = trace !== null && selected === "trace";
+  const tasksActive = tasksOpen && selected === "tasks";
+  const threadActive = threadOpen && selected === "thread";
+  const builtinActive = traceActive || tasksActive || threadActive;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
     [outlet, open, setPaneCollapsed, reveal, setTraceTab],
   );
   const sorted = [...placements].sort((a, b) => a.order - b.order);
-  const hasTabs = sorted.length > 0 || trace !== null || tasksOpen;
+  const hasTabs = sorted.length > 0 || builtinOpen;
   const compact = width < COMPACT_WIDTH;
   const showTasks = useCallback((chatId: string) => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
     setTasksChatId(chatId);
-    setTasksSelected(true);
-    setTraceSelected(false);
+    setSelected("tasks");
   }, []);
   const hideTasks = useCallback(() => {
     setTasksChatId(null);
-    setTasksSelected(false);
-    if (traceOwnerRef.current === null) setHoldsOpen(false);
+    setSelected((current) => (current === "tasks" ? null : current));
   }, []);
   const tasksHost = useMemo<ToolTasksHost>(
     () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
     [tasksActive, open, compact, showTasks, hideTasks],
+  );
+  const revealThread = useCallback(() => {
+    if (latest.current.view.collapsed) setHoldsOpen(true);
+    setSelected("thread");
+  }, []);
+  const setThreadTab = useCallback(
+    (owner: string, tab: ToolThreadTab | null) => {
+      if (tab === null) {
+        if (threadOwnerRef.current !== owner) return;
+        threadOwnerRef.current = null;
+        threadCloseRef.current = null;
+        setSelected((current) => (current === "thread" ? null : current));
+        setThread(null);
+        return;
+      }
+      const previousOwner = threadOwnerRef.current;
+      const previousClose = threadCloseRef.current;
+      threadOwnerRef.current = owner;
+      threadCloseRef.current = tab.onClose;
+      if (previousOwner !== null && previousOwner !== owner) previousClose?.();
+      setThread((prev) =>
+        prev && prev.title === tab.title && prev.taskChatId === tab.taskChatId
+          ? prev
+          : { title: tab.title, taskChatId: tab.taskChatId },
+      );
+      if (previousOwner === null) revealThread();
+    },
+    [revealThread],
+  );
+  const threadHost = useMemo<ToolThreadHost>(
+    () => ({ outlet: threadOutlet, set: setThreadTab, reveal: revealThread }),
+    [threadOutlet, setThreadTab, revealThread],
   );
   const activeWidget = builtinActive
     ? undefined
@@ -330,13 +375,18 @@ export function ToolWorkspace({
   const tabIds = [
     ...(trace ? [TRACE_TAB_ID] : []),
     ...(tasksOpen ? [TASKS_TAB_ID] : []),
+    ...(threadOpen ? [THREAD_TAB_ID] : []),
     ...sorted.map((widget) => widget.id),
   ];
-  const activeTabId = traceActive
+  const threadLabel = thread?.title || t("chat.threadTab");
+  const builtinTabId = traceActive
     ? TRACE_TAB_ID
     : tasksActive
       ? TASKS_TAB_ID
-      : (view.activeId ?? null);
+      : threadActive
+        ? THREAD_TAB_ID
+        : null;
+  const activeTabId = builtinTabId ?? view.activeId ?? null;
   const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
   const hiddenCount = tabIds.length - shownIds.size;
   const allToolsLabel =
@@ -366,6 +416,15 @@ export function ToolWorkspace({
               icon={<ListChecks className="size-3.5" />}
               active={tasksActive}
               onClose={hideTasks}
+            />
+          )}
+          {threadOpen && shownIds.has(THREAD_TAB_ID) && (
+            <ToolTab
+              id={THREAD_TAB_ID}
+              label={threadLabel}
+              icon={<MessagesSquare className="size-3.5" />}
+              active={threadActive}
+              onClose={() => threadCloseRef.current?.()}
             />
           )}
           {sorted
@@ -404,6 +463,18 @@ export function ToolWorkspace({
           </a>
         </Button>
       )}
+      {threadActive && thread?.taskChatId && (
+        // A real link, like an app's, so middle-click and copy-link work.
+        <Button asChild variant="ghost" size="icon-sm">
+          <Link
+            to={`/chat/${thread.taskChatId}`}
+            aria-label={tChat("thread.openTaskChat")}
+            title={tChat("thread.openTaskChat")}
+          >
+            <MessageSquare />
+          </Link>
+        </Button>
+      )}
       {hasTabs && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -433,6 +504,12 @@ export function ToolWorkspace({
               <DropdownMenuItem onSelect={() => pickTab(TASKS_TAB_ID)}>
                 <ListChecks className="size-3.5" />
                 {t("chat.tasksTab")}
+              </DropdownMenuItem>
+            )}
+            {threadOpen && (
+              <DropdownMenuItem onSelect={() => pickTab(THREAD_TAB_ID)}>
+                <MessagesSquare className="size-3.5" />
+                {threadLabel}
               </DropdownMenuItem>
             )}
             {sorted.map((widget) => (
@@ -466,18 +543,10 @@ export function ToolWorkspace({
   );
 
   function pickTab(id: string) {
-    if (id === TRACE_TAB_ID) {
-      setTraceSelected(true);
-      setTasksSelected(false);
-      return;
-    }
-    if (id === TASKS_TAB_ID) {
-      setTasksSelected(true);
-      setTraceSelected(false);
-      return;
-    }
-    setTraceSelected(false);
-    setTasksSelected(false);
+    if (id === TRACE_TAB_ID) return setSelected("trace");
+    if (id === TASKS_TAB_ID) return setSelected("tasks");
+    if (id === THREAD_TAB_ID) return setSelected("thread");
+    setSelected(null);
     selectTool(id);
   }
 
@@ -522,7 +591,9 @@ export function ToolWorkspace({
             flexShrink: 0,
           }}
         >
-          <ToolTasksContext.Provider value={tasksHost}>{children}</ToolTasksContext.Provider>
+          <ToolTasksContext.Provider value={tasksHost}>
+            <ToolThreadContext.Provider value={threadHost}>{children}</ToolThreadContext.Provider>
+          </ToolTasksContext.Provider>
         </div>
         {open && !compact && (
           <div
@@ -570,7 +641,7 @@ export function ToolWorkspace({
           />
         )}
         <Tabs
-          value={traceActive ? TRACE_TAB_ID : tasksActive ? TASKS_TAB_ID : (view.activeId ?? "")}
+          value={builtinTabId ?? view.activeId ?? ""}
           onValueChange={pickTab}
           activationMode="automatic"
           className="min-h-0 min-w-0 flex-1 gap-0 bg-background"
@@ -645,6 +716,21 @@ export function ToolWorkspace({
                 className="absolute inset-0 overflow-hidden"
               >
                 <div ref={setOutlet} className="flex h-full min-h-0 flex-col" />
+              </TabsContent>
+            )}
+            {/* Kept mounted like the trace, so the thread's scroll position and
+            the reply being typed survive a visit to another tab. The chat
+            beside the pane portals the thread into the outlet. */}
+            {threadOpen && (
+              <TabsContent
+                value={THREAD_TAB_ID}
+                forceMount
+                inert={!threadActive}
+                aria-hidden={!threadActive}
+                style={{ visibility: threadActive ? undefined : "hidden" }}
+                className="absolute inset-0 overflow-hidden"
+              >
+                <div ref={setThreadOutlet} className="flex h-full min-h-0 flex-col" />
               </TabsContent>
             )}
             {tasksOpen && (

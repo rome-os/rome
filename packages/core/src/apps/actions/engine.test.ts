@@ -1626,6 +1626,32 @@ describe("ActionEngine", () => {
       });
     });
 
+    it("keeps the asking device in an approval, so the turn its resume starts asks that device", async () => {
+      await setup({ actions: [buildAction("risky", { requiresApproval: true })] });
+      const result = await rome.actionEngine.run(
+        "risky",
+        {},
+        {
+          // A turn the guardian sent from a phone carries its device id
+          // (connections/device/live-route.ts); the engine passes the field on as it is.
+          channelContext: {
+            channel: "webchat",
+            threadId: "t-1",
+            channelUserId: "u-1",
+            askingDeviceId: "dev-asking",
+          } as ActionRunContext["channelContext"],
+          sessionId: "sess-1",
+          agentName: "main",
+        },
+      );
+      if (result.status !== "pending_approval") {
+        throw new Error(`expected pending_approval, got ${result.status}`);
+      }
+      // The approval handler resumes with this payload's channelContext as the turn's.
+      const row = await rome.repos.approvals.findById(result.approval.approvalId);
+      expect(row!.payload).toMatchObject({ channelContext: { askingDeviceId: "dev-asking" } });
+    });
+
     it("fires onApprovalCreated with the approval id, action args, and channel context", async () => {
       const created: ApprovalCreatedEvent[] = [];
       await setup({

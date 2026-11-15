@@ -1,5 +1,7 @@
 import { widgetEventRoutes } from "./routes/widget-events.js";
 import { devicesRoutes } from "./routes/devices.js";
+import { personalDataRoutes } from "../personal-data/routes.js";
+import { deviceConnectionRoutes } from "./routes/device-connections.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -199,6 +201,8 @@ export function buildApp(
   api.route("/", conciergeRoutes(deps));
   api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
+  api.route("/", personalDataRoutes(deps));
+  api.route("/", deviceConnectionRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
@@ -247,6 +251,7 @@ export function buildApp(
     widgetEventRoutes({
       webchatRepo: deps.webchatRepo,
       forward: (request, env) => app.fetch(request, env),
+      chatAudience: (chatId) => deps.placeAudience({ channel: "webchat", threadId: chatId }),
     }),
   );
   // The backend-turn orchestrator is the single holder of the webchat runtime
