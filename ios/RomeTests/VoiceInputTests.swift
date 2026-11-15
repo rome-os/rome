@@ -97,6 +97,17 @@ import Testing
         #expect(VoiceInputService(backend: DemoBackend(), instance: "b", defaults: defaults).takeNotice(for: "chat") == nil)
     }
 
+    @Test func everyWordShownSurvivesTheAppBeingKilled() {
+        let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
+        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        service.listening(in: "chat")
+        service.heard("Remind me to call the", in: "chat")
+        service.heard("Remind me to call the dentist tomorrow", in: "chat")
+        let relaunched = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        #expect(relaunched.takeKeptWords(for: "chat") == "Remind me to call the dentist tomorrow")
+        #expect(relaunched.takeNotice(for: "chat") == VoiceInputStop(reason: .appClosed))
+    }
+
     @Test func aNoticeOutlivesTheAppUntilAnEditOrSend() {
         let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
         let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
