@@ -114,7 +114,11 @@ final class VoiceInputTests: XCTestCase {
             XCTAssertEqual(control.label, item.start, "\(item.language): the control is not named in this language")
             control.tap()
             let notice = app.descendants(matching: .any)["voice-input-notice"]
-            XCTAssertTrue(notice.waitForExistence(timeout: 5), "\(item.language): no notice within 5 s")
+            if !notice.waitForExistence(timeout: 5) {
+                printScreen(app, "\(item.language): no notice within 5 s")
+                XCTFail("\(item.language): no notice within 5 s")
+                return
+            }
             XCTAssertTrue(item.says(notice.label), "\(item.language): the notice says \"\(notice.label)\"; wanted \(item.wanted)")
             let typed = "typed after refusing \(item.language) \(Int(Date().timeIntervalSince1970))"
             let field = onScreen(app.textViews, "message-field")
