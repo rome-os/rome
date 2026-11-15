@@ -2299,6 +2299,14 @@ export function Chat({
   // refused rather than filed into a draft no one sees.
   const sharingRef = useRef(false);
   sharingRef.current = shareMode && Boolean(mainSessionId);
+  // A narrow workspace shows the open tool pane in place of the chat.
+  const toolTasksHost = useToolTasks();
+  const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
+  // Either one stops listening: no one could see it listen.
+  const composerHidden = sharingRef.current || paneCoversChat;
+  useEffect(() => {
+    if (composerHidden) composerRef.current?.stopVoiceInput();
+  }, [composerHidden, composerRef]);
   const refuseDrop = (event: React.DragEvent<HTMLDivElement>): boolean => {
     if (!sharingRef.current) return false;
     event.preventDefault();
@@ -2481,6 +2489,10 @@ export function Chat({
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
   // The agent's logo in the header opens the chat's task list: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
+  // On a narrow screen the task list's sheet covers the composer.
+  useEffect(() => {
+    if (taskList.sheetOpen) composerRef.current?.stopVoiceInput();
+  }, [taskList.sheetOpen, composerRef]);
   // A Concierge chat's header buttons sit on round badges like its pill, except
   // in the Mac app's title bar, where they are any chat's.
   const floating = concierge && !navbarSlot;
@@ -2599,10 +2611,8 @@ export function Chat({
   // mascot's badge with the name pill under it in the middle, and round
   // buttons either side, centred on the badge. The equal side columns keep the
   // middle centred over the chat. Only its pieces take the pointer, so the
-  // messages under the gaps stay reachable.
-  // A narrow workspace shows the open tool pane in place of the chat.
-  const toolTasksHost = useToolTasks();
-  const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
+  // messages under the gaps stay reachable. The thread view floats the same
+  // header with its close button on the right.
   const floatingHeader = (trailing: ReactNode) => (
     <div
       data-concierge-header

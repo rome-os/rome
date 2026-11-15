@@ -47,6 +47,8 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu } from "./composer/SlashSkillMenu";
 import { useSlashSkill } from "./composer/use-slash-skill";
+import { useVoiceInput } from "./composer/use-voice-input";
+import { VoiceInputButton, VoiceInputNotice } from "./composer/VoiceInputControl";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { ReplyBar } from "./reply/ReplyBar";
 import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
@@ -130,6 +132,11 @@ export interface ChatComposerHandle {
     personaId?: string;
     reasoningEffort: ReasoningEffort;
   };
+  /**
+   * Stops listening, as the voice control's stop does, and keeps the heard
+   * text in the field. For a host about to hide the composer.
+   */
+  stopVoiceInput: () => void;
 }
 
 export interface ChatComposerProps {
@@ -373,6 +380,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const voice = useVoiceInput({ textareaRef, value: inputText, setValue: setInputText });
+  const voiceActiveRef = useRef(false);
+  voiceActiveRef.current = voice.active;
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
   const [textareaMaxHeight, setTextareaMaxHeight] = useState(TEXTAREA_MAX_HEIGHT);
 
@@ -430,6 +440,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // A hidden box measures zero, so a locked composer waits and resizes again
   // once the lock lifts.
   const locked = lockedReason !== null && lockedReason !== undefined;
+  // A lock hides the field and its voice control, so listening ends with it.
+  const stopVoice = voice.stop;
+  useEffect(() => {
+    if (locked) stopVoice();
+  }, [locked, stopVoice]);
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el || locked) return;
@@ -623,7 +638,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     () => ({
       focus: () => textareaRef.current?.focus(),
       insertText: (text: string, options?: { focus?: boolean }) => {
-        if (uploadInFlightRef.current) return;
+        // The field is the dictation's while it listens.
+        if (uploadInFlightRef.current || voiceActiveRef.current) return;
         setInputText(text);
         requestAnimationFrame(() => {
           const el = textareaRef.current;
@@ -670,8 +686,10 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         personaId,
         reasoningEffort,
       }),
+      stopVoiceInput: voice.stop,
     }),
     [
+      voice.stop,
       addPendingFiles,
       textareaMaxHeight,
       personaId,
@@ -709,7 +727,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   );
 
   const runSend = useCallback(async () => {
-    if (locked || uploadInFlight || uploadInFlightRef.current) return;
+    if (locked || uploadInFlight || uploadInFlightRef.current || voice.active) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
@@ -819,6 +837,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     hints,
     locked,
     replyDraft,
+    voice.active,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -1046,10 +1065,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           <span className="min-w-0 flex-1">{lockedReason}</span>
         </div>
       ) : null}
-      <div
+      <form
         data-chat-composer-box
         hidden={locked}
         className={cn("@container/composer relative z-10", boxClassName)}
+        onSubmit={(event) => event.preventDefault()}
       >
         {composerError && (
           <Alert variant="destructive" className="mb-3 px-3 py-2">
@@ -1064,6 +1084,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           onChange={handleFileSelection}
         />
         <ReplyBar />
+        <VoiceInputNotice notice={voice.notice} />
         {/* flow-root keeps the tray's bottom margin inside this box, so the
             measured height is the full space the tray takes from the input. */}
         <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
@@ -1131,6 +1152,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                           clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
                         }
                         disabled={uploadInFlight}
+                        readOnly={voice.active}
                       />
                     }
                   />
@@ -1263,6 +1285,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           </div>
           {/* Stop sits just left of Send. */}
           <div className="flex items-center gap-2 self-end [grid-area:send]">
+            {voice.available && (voice.active || !uploadInFlight) ? (
+              <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
+            ) : null}
             {isStreaming && onStop && (
               <Button
                 type="button"
@@ -1320,6 +1345,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                 }}
                 disabled={
                   uploadInFlight ||
+                  voice.active ||
                   (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
                 }
                 title={sendActionLabel}
@@ -1331,7 +1357,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
             )}
           </div>
         </div>
-      </div>
+      </form>
     </>
   );
 });

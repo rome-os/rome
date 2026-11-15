@@ -57,6 +57,7 @@ const conciergeFocus = rs.hoisted(() => rs.fn());
 const touch = rs.hoisted(() => ({ coarse: false }));
 rs.mock("@/hooks/use-coarse-pointer", () => ({ useCoarsePointer: () => touch.coarse }));
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
+const conciergeStopVoiceInput = rs.hoisted(() => rs.fn());
 const toast = rs.hoisted(() => ({
   loading: rs.fn(() => "finding"),
   error: rs.fn(),
@@ -108,8 +109,9 @@ rs.mock("@/components/concierge/use-concierge-activity", () => ({
   useConciergeActivity: mockConciergeActivity,
 }));
 const mockOpenTaskList = rs.hoisted(() => rs.fn());
+const taskSheet = rs.hoisted(() => ({ open: false }));
 rs.mock("@/components/concierge/TaskListPane", () => ({
-  useTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
+  useTaskList: () => ({ open: mockOpenTaskList, sheet: null, sheetOpen: taskSheet.open }),
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -444,6 +446,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
       focus: () => conciergeFocus(threadRef.current ?? ""),
+      stopVoiceInput: conciergeStopVoiceInput,
     }));
     return (
       <div
@@ -3221,6 +3224,80 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
     drop();
     expect(conciergeAddFiles).toHaveBeenCalledOnce();
+  });
+
+  it("stops listening when share mode hides the composer", async () => {
+    const user = userEvent.setup();
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    await screen.findByTestId("share-bar");
+    expect(conciergeStopVoiceInput).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId("share-exit"));
+    await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
+    expect(conciergeStopVoiceInput).toHaveBeenCalledOnce();
+  });
+
+  it("stops listening when the tool pane covers a narrow chat", async () => {
+    const tasksHost = (compact: boolean): ToolTasksHost => ({
+      active: false,
+      compact,
+      show: rs.fn(),
+      hide: rs.fn(),
+    });
+    const at = (compact: boolean, paneOpen: boolean) => (
+      <MemoryRouter>
+        <ToolTasksContext.Provider value={tasksHost(compact)}>
+          <ToolTraceContext.Provider
+            value={{
+              outlet: null,
+              paneOpen,
+              setPaneCollapsed: rs.fn(),
+              reveal: rs.fn(),
+              set: rs.fn(),
+            }}
+          >
+            <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
+          </ToolTraceContext.Provider>
+        </ToolTasksContext.Provider>
+      </MemoryRouter>
+    );
+    twoTurns();
+    const view = render(at(true, false), { wrapper: withQueries() });
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+
+    // Beside the chat on a wide screen, the pane hides nothing.
+    view.rerender(at(false, true));
+    expect(conciergeStopVoiceInput).not.toHaveBeenCalled();
+
+    // On a narrow screen the pane shows in place of the chat.
+    view.rerender(at(true, true));
+    await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
+  });
+
+  it("stops listening when the task list's sheet covers the composer", async () => {
+    const at = () => (
+      <MemoryRouter>
+        {pane(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />)}
+      </MemoryRouter>
+    );
+    twoTurns();
+    taskSheet.open = false;
+    const view = render(at(), { wrapper: withQueries() });
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+
+    try {
+      taskSheet.open = true;
+      view.rerender(at());
+      await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
+    } finally {
+      taskSheet.open = false;
+    }
   });
 
   it("keeps the composer, and its draft, through share mode", async () => {

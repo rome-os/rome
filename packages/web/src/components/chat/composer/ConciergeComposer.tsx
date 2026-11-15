@@ -62,6 +62,8 @@ import { useFittedPlaceholder } from "./use-fitted-placeholder";
 import { useSlashSkill } from "./use-slash-skill";
 import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
+import { useVoiceInput } from "./use-voice-input";
+import { VoiceInputButton, VoiceInputNotice } from "./VoiceInputControl";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -156,6 +158,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       skill: SkillSelection | null;
     } | null>(null);
 
+    const voice = useVoiceInput({ textareaRef, value: inputText, setValue: setInputText });
+    const voiceActiveRef = useRef(false);
+    voiceActiveRef.current = voice.active;
+
     // Programmatic clears fire no `input` event, so resize on every change.
     useLayoutEffect(() => {
       if (textareaRef.current) clampTextareaHeight(textareaRef.current);
@@ -220,7 +226,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     );
 
     const runSend = useCallback(async () => {
-      if (uploadInFlightRef.current) return;
+      if (uploadInFlightRef.current || voice.active) return;
       const text = inputText.trim();
       const rawText = inputText;
       const uploads = pendingUploads;
@@ -274,14 +280,24 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           if (replyTo) replyDraft?.restore(replyTo, clearedAt);
         }
       }
-    }, [inputText, pendingUploads, folder, draftSkill, invokeOnSend, snapshotOf, replyDraft]);
+    }, [
+      inputText,
+      pendingUploads,
+      folder,
+      draftSkill,
+      invokeOnSend,
+      snapshotOf,
+      replyDraft,
+      voice.active,
+    ]);
 
     useImperativeHandle(
       ref,
       () => ({
         focus: () => textareaRef.current?.focus(),
         insertText: (text, options) => {
-          if (uploadInFlightRef.current) return;
+          // The field is the dictation's while it listens.
+          if (uploadInFlightRef.current || voiceActiveRef.current) return;
           setInputText(text);
           requestAnimationFrame(() => {
             const el = textareaRef.current;
@@ -313,8 +329,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             });
         },
         getMetadataSnapshot: () => ({ reasoningEffort }),
+        stopVoiceInput: voice.stop,
       }),
       [
+        voice.stop,
         addPendingFiles,
         pendingUploads,
         invokeOnSend,
@@ -358,7 +376,11 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             reason={typeof streamError === "string" ? undefined : streamError.reason}
           />
         )}
-        <div data-chat-composer-box className={cn("relative z-10", boxClassName)}>
+        <form
+          data-chat-composer-box
+          className={cn("relative z-10", boxClassName)}
+          onSubmit={(event) => event.preventDefault()}
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -370,6 +392,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             }}
           />
           <ReplyBar />
+          <VoiceInputNotice notice={voice.notice} />
           {draftSkill && (
             <div className="mb-2 flex min-w-0">
               <SkillCommandChip
@@ -605,10 +628,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                       maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
                     }}
                     disabled={uploadInFlight}
+                    readOnly={voice.active}
                   />
                 }
               />
             </div>
+            {voice.available && (voice.active || !uploadInFlight) ? (
+              <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
+            ) : null}
             {isStreaming && onStop && (
               <Button
                 type="button"
@@ -656,7 +683,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                   textareaFocusedAtPressRef.current = false;
                   void runSend();
                 }}
-                disabled={empty}
+                disabled={empty || voice.active}
                 title={sendLabel}
                 aria-label={sendLabel}
                 className="touch-target"
@@ -665,7 +692,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               </Button>
             )}
           </div>
-        </div>
+        </form>
       </>
     );
   },
