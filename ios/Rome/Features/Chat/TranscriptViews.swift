@@ -602,6 +602,8 @@ struct Composer: View {
     /// The chat this field writes in, so voice input stopped by leaving it
     /// says why on return; nil keeps no such notice.
     var voiceKey: String? = nil
+    /// Which field this is, for the voice input start's signpost.
+    var voiceField: VoiceInputField = .chat
     /// False while the field's chat is covered or hidden but still mounted
     /// (Chat under another section, a sheet, the drawer): listening stops.
     var onScreen = true
@@ -662,7 +664,7 @@ struct Composer: View {
                 )
                 if let voiceInput, voiceInput.available {
                     VoiceInputButton(state: voice.state) {
-                        voice.toggle(service: voiceInput, text: $text, handle: textHandle)
+                        voice.toggle(service: voiceInput, field: voiceField, text: $text, handle: textHandle)
                     }
                     .padding(.bottom, controlPadding)
                 }
@@ -711,6 +713,7 @@ struct Composer: View {
         .task { await voiceInput?.refresh() }
         .onAppear { voice.arrive(service: voiceInput, chat: voiceKey, text: text) }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
+        .onChange(of: voice.state) { voice.stateShown() }
         .onChange(of: onScreen) { _, now in
             if now {
                 voice.arrive(service: voiceInput, chat: voiceKey, text: text)

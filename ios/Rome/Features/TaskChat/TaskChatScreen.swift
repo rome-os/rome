@@ -52,6 +52,7 @@ struct TaskChatScreen: View {
                 attachments: attachments,
                 voiceInput: workspace.voiceInput,
                 voiceKey: chatId,
+                voiceField: .taskChat,
                 onScreen: visibleChat == chatId,
                 onSend: {
                     guard !attachments.isPreparing else { return }
