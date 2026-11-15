@@ -661,10 +661,8 @@
     }
   },
   "thread": {
-    "title": "对话串",
-    "openTaskChat": "打开任务对话",
-    "loadFailed": "无法加载这个对话串。",
-    "replyPlaceholder": "回复"
+    "back": "返回对话：{{title}}",
+    "replyPlaceholder": "回复：{{title}}"
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
