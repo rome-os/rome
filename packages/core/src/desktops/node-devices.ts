@@ -43,6 +43,17 @@ function filesErrorCode(code: string): DeviceFilesErrorCode {
   return pathErrors.has(code) ? (code as DeviceFilesErrorCode) : "unavailable";
 }
 
+/** Whether Cloud's list says it is one page of more, so it is not the whole account. */
+export function isPartial(answer: { items: unknown[] } & object): boolean {
+  const list = answer as { items: unknown[] } & Record<string, unknown>;
+  const marked = (key: string) =>
+    list[key] !== undefined && list[key] !== null && list[key] !== false;
+  return (
+    ["cursor", "next_cursor", "nextCursor", "next", "has_more", "hasMore"].some(marked) ||
+    (typeof list.total === "number" && list.total > list.items.length)
+  );
+}
+
 export function createNodeDevicesService(
   createClient: () => Pick<
     ReturnType<typeof createNodeClient>,
@@ -102,11 +113,12 @@ export function createNodeDevicesService(
      * Authorized, unrevoked devices from Cloud's list. Unlike getStatus it sends
      * no probe to any device. Null when the caller cannot reach the list.
      */
-    async listDevices(): Promise<DeviceList | null> {
+    async listDevices(): Promise<(DeviceList & { partial?: true }) | null> {
       try {
         client ??= createClient();
         const list = await client.listDevices();
         return {
+          ...(isPartial(list) ? { partial: true as const } : {}),
           devices: list.items
             .filter((item) => !item.revoked_at)
             .map((item) => ({

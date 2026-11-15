@@ -33,6 +33,9 @@ export interface DeviceConnectorOptions {
   onStatus?(status: ConnectionStatus): void;
 }
 
+/** Keys by which a list says it is one page of more. */
+const PAGING_KEYS = ["cursor", "next_cursor", "nextCursor", "next", "has_more", "hasMore", "total"];
+
 export class DeviceConnector {
   private connection?: ReturnType<typeof connectGateway>;
   private initializing?: Promise<void>;
@@ -111,7 +114,14 @@ export class DeviceConnector {
       callerToken(this.options.credential),
     );
     if (!isRecord(body) || !Array.isArray(body.items)) throw new CloudError("invalid_response");
-    return { items: body.items };
+    // Paging markers pass through, so a caller can tell a partial list from a whole one.
+    const paging = Object.fromEntries(
+      PAGING_KEYS.filter((key) => body[key] !== undefined && body[key] !== null).map((key) => [
+        key,
+        body[key],
+      ]),
+    );
+    return { items: body.items, ...paging };
   }
 
   /** Renames a device of the account. Cloud validates the name. */

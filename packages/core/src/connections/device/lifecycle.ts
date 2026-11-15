@@ -12,7 +12,8 @@ import type { DeviceConnectionsRepository } from "./repository.js";
 const log = createLogger("device-lifecycle");
 
 interface DeviceService {
-  listDevices(): Promise<DeviceList | null>;
+  /** `partial` when Cloud's answer says it is one page of more. */
+  listDevices(): Promise<(DeviceList & { partial?: true }) | null>;
   removeDevice(deviceId: string): Promise<DeviceManageResult>;
 }
 
@@ -30,14 +31,21 @@ export function withDeviceLifecycle<S extends DeviceService>(
   return {
     ...service,
     async listDevices() {
-      const list = await service.listDevices();
-      // Only a whole list prunes: null is a failure, and an empty list is
-      // more likely a fault than an account with no devices.
-      if (list && list.devices.length > 0) {
+      const answer = await service.listDevices();
+      if (!answer) return answer;
+      const { partial, ...list } = answer;
+      // Only a whole list prunes: null is a failure, an empty list is more
+      // likely a fault than an account with no devices, and a page is not
+      // the whole account.
+      if (partial) {
+        log.warn("device list is one page of more; connections not pruned", {
+          listed: list.devices.length,
+        });
+      } else if (list.devices.length > 0) {
         const pruned = deps.connections().keepOnly(list.devices.map((device) => device.id));
         if (pruned > 0) log.info("pruned connections of devices no longer listed", { pruned });
       }
-      return list;
+      return list as typeof answer;
     },
     async removeDevice(deviceId: string) {
       const result = await service.removeDevice(deviceId);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { DeviceList } from "@rome/api-types/devices";
-import type { DeviceManageResult } from "../../desktops/node-devices.js";
+import { type DeviceManageResult, isPartial } from "../../desktops/node-devices.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { withDeviceLifecycle } from "./lifecycle.js";
 import type { DeviceReport } from "./report.js";
@@ -22,7 +22,7 @@ describe("the device lifecycle", () => {
   let testDb: TestDb;
   let devices: DeviceConnectionsRepository;
   let turnedOff: string[];
-  let list: DeviceList | null;
+  let list: (DeviceList & { partial?: true }) | null;
   let removal: DeviceManageResult;
 
   const report = (id: string, originId?: string) =>
@@ -78,7 +78,7 @@ describe("the device lifecycle", () => {
     report("dev-1", "origin-1");
     report("dev-2", "origin-2");
     list = { devices: [{ id: "dev-2", name: "iPhone", platform: "ios" }] };
-    expect(await service().listDevices()).toBe(list);
+    expect(await service().listDevices()).toEqual(list);
     expect(ids()).toEqual(["dev-2"]);
     expect(turnedOff).toEqual([]);
   });
@@ -90,5 +90,39 @@ describe("the device lifecycle", () => {
     list = { devices: [] };
     await service().listDevices();
     expect(ids()).toEqual(["dev-1"]);
+  });
+
+  it("never prunes on one page of a paged list, and hides the mark from callers", async () => {
+    report("dev-1");
+    report("dev-2");
+    list = { devices: [{ id: "dev-2", name: "iPhone", platform: "ios" }], partial: true };
+    expect(await service().listDevices()).toEqual({
+      devices: [{ id: "dev-2", name: "iPhone", platform: "ios" }],
+    });
+    expect(ids()).toEqual(["dev-1", "dev-2"]);
+  });
+});
+
+describe("a paged device list", () => {
+  it("is partial when Cloud's answer carries any paging marker", () => {
+    const items = [{ id: "dev-1" }];
+    expect(isPartial({ items })).toBe(false);
+    const page = (extra: Record<string, unknown>) => ({ items, ...extra });
+    expect(isPartial(page({ total: 1 }))).toBe(false);
+    expect(isPartial(page({ hasMore: false }))).toBe(false);
+    for (const marker of [
+      { next_cursor: "c2" },
+      { nextCursor: "c2" },
+      { cursor: "c2" },
+      { next: "/api/account/devices?page=2" },
+      { has_more: true },
+      { hasMore: true },
+      { total: 3 },
+    ]) {
+      expect({ marker, partial: isPartial({ items, ...marker }) }).toEqual({
+        marker,
+        partial: true,
+      });
+    }
   });
 });
