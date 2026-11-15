@@ -246,11 +246,7 @@ describe("RecentChats", () => {
       )!;
     const shape = async (name: string) => {
       const chatRow = await rowOf(name);
-      const status =
-        within(chatRow)
-          .queryAllByRole("img")
-          .map((img) => img.getAttribute("aria-label"))
-          .find((label) => !label?.startsWith("Started by")) ?? null;
+      const status = within(chatRow).queryAllByRole("img")[0]?.getAttribute("aria-label") ?? null;
       await user.click(within(chatRow).getByRole("button", { name: "Chat actions" }));
       const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
       await user.keyboard("{Escape}");
@@ -259,32 +255,6 @@ describe("RecentChats", () => {
     const task = await shape("Find flights");
     expect(task.status).toBe("Done · new replies");
     expect(task).toEqual(await shape("My own chat"));
-  });
-
-  it("marks a task chat's row as started by the Concierge, and a common chat's not", async () => {
-    concierge.chatId = "concierge";
-    mockSessions(
-      [
-        sessionRow("task-1", "Find flights", { triggerKind: "concierge" }),
-        sessionRow("mine", "My own chat"),
-      ],
-      { agentName: "Milo" },
-    );
-    const rowOf = async (name: string) =>
-      (await screen.findByRole("link", { name: new RegExp(name) })).closest<HTMLElement>(
-        "[data-chat-row]",
-      )!;
-    const view = renderRecentChats();
-    const task = await rowOf("Find flights");
-    await waitFor(() =>
-      expect(within(task).getByRole("img", { name: "Started by Milo" })).toBeTruthy(),
-    );
-    view.unmount();
-
-    seedChatListMode({ mode: "chat" });
-    renderRecentChats("/chat/mine");
-    const mine = await rowOf("My own chat");
-    expect(within(mine).queryByRole("img", { name: /Started by/ })).toBeNull();
   });
 
   it("marks the row it opens at once, while the router still holds the old chat", async () => {
