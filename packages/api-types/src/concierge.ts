@@ -22,9 +22,10 @@ export type ConciergeTaskState = (typeof CONCIERGE_TASK_STATES)[number];
 /**
  * The reactions the Concierge may put on a guardian message of its chat with
  * `react` (docs/domains/chats.md#reaction). Clients draw whatever string the
- * server sends, so the set grows here only.
+ * server sends, so the set grows here only. 👀 is not one: it is the
+ * `working` status, which Rome derives.
  */
-export const CONCIERGE_REACTIONS = ["👀", "👍", "✅", "❤️", "🙏", "😂", "🎉", "🤔"] as const;
+export const CONCIERGE_REACTIONS = ["👍", "✅", "❤️", "🙏", "😂", "🎉", "🤔"] as const;
 export type ConciergeReaction = (typeof CONCIERGE_REACTIONS)[number];
 
 /** A message's reaction changed (`message_reaction`). Null: it has none. */
@@ -35,7 +36,23 @@ export interface MessageReactionEvent {
 }
 
 /**
- * How a turn shows the typing dots (docs/domains/chats.md#status-reaction):
+ * How the work on a guardian message of a Concierge chat stands, as Rome
+ * derives it (docs/domains/chats.md#status): `working` (👀) while the
+ * Concierge works on it, `failed` (⚠️) once that work failed. A message with
+ * neither has none. It shows over the message's reaction.
+ */
+export const CONCIERGE_MESSAGE_STATUSES = ["working", "failed"] as const;
+export type ConciergeMessageStatus = (typeof CONCIERGE_MESSAGE_STATUSES)[number];
+
+/** A message's status changed (`message_status`). Null: it has none now. */
+export interface MessageStatusEvent {
+  sessionId: string;
+  messageId: string;
+  status: ConciergeMessageStatus | null;
+}
+
+/**
+ * How a turn shows the typing dots (docs/domains/chats.md#reaction):
  * `exact` where the provider says when it writes a message, so the dots show
  * while `writing`; `simulated` where it cannot, so each message of the turn
  * lands behind the dots for a moment, by its length, 0.5 to 1 s.

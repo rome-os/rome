@@ -11,7 +11,14 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 import { type AgentIdentity, buildRows } from "./chat-view";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import type { BlockActions, LivePreview } from "./MessageList";
-import { type LiveReactions, LiveReactionsProvider, messageReactionSchema } from "./reaction";
+import {
+  type LiveMessageStatuses,
+  LiveMessageStatusesProvider,
+  type LiveReactions,
+  LiveReactionsProvider,
+  messageReactionSchema,
+  messageStatusSchema,
+} from "./reaction";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
@@ -75,7 +82,11 @@ const messages: ChatMessage[] = [
   message("you're welcome", "assistant", 1),
 ];
 
-function transcript(reactions: LiveReactions = new Map(), shown = messages) {
+function transcript(
+  reactions: LiveReactions = new Map(),
+  shown = messages,
+  statuses: LiveMessageStatuses = new Map(),
+) {
   const rows = buildRows(shown, new Map(), IDENTITY, {
     runningTurnId: null,
     isStreaming: false,
@@ -83,7 +94,9 @@ function transcript(reactions: LiveReactions = new Map(), shown = messages) {
   return (
     <ThemeProvider>
       <LiveReactionsProvider value={reactions}>
-        <ConciergeTranscript rows={rows} live={live} actions={actions} contentRef={() => {}} />
+        <LiveMessageStatusesProvider value={statuses}>
+          <ConciergeTranscript rows={rows} live={live} actions={actions} contentRef={() => {}} />
+        </LiveMessageStatusesProvider>
       </LiveReactionsProvider>
     </ThemeProvider>
   );
@@ -239,5 +252,67 @@ describe("Concierge reaction", () => {
     });
     expect(messageReactionSchema.parse({ ...event, reaction: "🦄" }).reaction).toBe("🦄");
     expect(messageReactionSchema.safeParse({ ...event, reaction: 7 }).success).toBe(false);
+  });
+});
+
+describe("Concierge message status (docs/domains/chats.md#status)", () => {
+  const run = [
+    message("book", "user", 0, { reaction: "👍", status: "working" }),
+    message("plan", "user", 1, { status: "failed" }),
+    message("thanks", "user", 2, { reaction: "❤️" }),
+  ];
+  const label = (container: HTMLElement, id: string) =>
+    container
+      .querySelector<HTMLElement>(`[data-timeline-anchor="${id}"] [data-reaction]`)
+      ?.getAttribute("aria-label");
+
+  it("shows the status over the reaction, in the same badge, and the reaction once the status clears", async () => {
+    const { container, rerender } = render(transcript(new Map(), run));
+    expect(badges(container)).toEqual([
+      ["book", "👀"],
+      ["plan", "⚠️"],
+      ["thanks", "❤️"],
+    ]);
+    expect(label(container, "book")).toBe("Working on it");
+    expect(label(container, "plan")).toBe("Did not finish");
+    expect(label(container, "thanks")).toBe("Reaction");
+    const badge = container.querySelector('[data-timeline-anchor="book"] [data-reaction]');
+    // The status clears live: the same badge now shows the reaction.
+    rerender(transcript(new Map(), run, new Map([["book", null]])));
+    expect(badges(container)[0]).toEqual(["book", "👍"]);
+    expect(container.querySelector('[data-timeline-anchor="book"] [data-reaction]')).toBe(badge);
+    expect(label(container, "book")).toBe("Reaction");
+    // A status that comes live covers a reaction, and one with no reaction under it fades out.
+    rerender(
+      transcript(
+        new Map(),
+        run,
+        new Map([
+          ["book", null],
+          ["thanks", "working"],
+          ["plan", null],
+        ]),
+      ),
+    );
+    expect(badges(container).find(([id]) => id === "thanks")).toEqual(["thanks", "👀"]);
+    await waitFor(() =>
+      expect(badges(container)).toEqual([
+        ["book", "👍"],
+        ["thanks", "👀"],
+      ]),
+    );
+  });
+
+  it("reads the live event the server sends, and shows none for a status it does not know", () => {
+    const event = { sessionId: "concierge", messageId: "book", status: "working" };
+    expect(messageStatusSchema.parse(event)).toEqual(event);
+    expect(messageStatusSchema.parse({ ...event, status: null }).status).toBeNull();
+    expect(messageStatusSchema.parse({ ...event, status: "thinking" }).status).toBeNull();
+    const { container } = render(
+      transcript(new Map(), [
+        message("odd", "user", 0, { status: "thinking" as never, reaction: "👍" }),
+      ]),
+    );
+    expect(badges(container)).toEqual([["odd", "👍"]]);
   });
 });

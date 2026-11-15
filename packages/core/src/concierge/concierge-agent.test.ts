@@ -58,20 +58,24 @@ describe("the Concierge agent", () => {
     expect(prompt).not.toContain("Do what it asks as the guardian's standing request");
   });
 
-  it("handles each guardian message in one way: a reply, a 👀 with a task, a card, or only a reaction", () => {
+  it("handles each guardian message in one way: a reply, a task, a card, or only a reaction", () => {
     const prompt = concierge.systemPromptPrefix;
     expect(prompt).toContain("# Handling a guardian message");
     expect(prompt).toContain("Handle each guardian message in exactly one of these ways:");
     expect(prompt).toContain("Start a task with `card: true`, with no text and no reaction");
-    expect(prompt).toContain("never 👀 together with a card");
     expect(prompt).toContain("A turn that only reacts is silent.");
     expect(prompt).toContain("👍 for a plain yes or an instruction you only need to note");
+    // A thanks or an OK never starts a task.
+    expect(prompt).toContain(
+      "Answer a thanks or an OK with ❤️ or 👍, or one short sentence, and never start a task for it.",
+    );
     // The memory-note example is gone: the Concierge may say what it noted.
     expect(prompt).not.toContain("such as noting something in memory");
-    // A result clears the 👀, and a stop clears it too; Rome no longer marks a message itself.
-    expect(prompt).toContain("`react` with `emoji: null` and that message's id");
-    expect(prompt).toContain("clear the 👀 on the message the task was for, and react 👍");
-    expect(prompt).not.toContain("Rome marks the message");
+    // Rome derives 👀 (docs/domains/chats.md#status): the Concierge neither sets nor clears it.
+    expect(prompt).toContain("Rome marks the message as being worked on");
+    expect(prompt).not.toContain("👀");
+    expect(prompt).not.toContain("`react` with `emoji: null`");
+    expect(prompt).toContain("Then call `chat_stop` and react 👍 to their call-off, with no text");
     expect(prompt).not.toContain("confirm in one bubble");
     expect(prompt).not.toContain("Set `card: true` only when the guardian asks");
   });

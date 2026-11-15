@@ -123,9 +123,12 @@ import {
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ChatThreadView, useThreadTaskChat } from "@/components/chat/ChatThreadView";
 import {
+  type LiveMessageStatuses,
+  LiveMessageStatusesProvider,
   type LiveReactions,
   LiveReactionsProvider,
   messageReactionSchema,
+  messageStatusSchema,
 } from "@/components/chat/reaction";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
@@ -308,6 +311,8 @@ interface ChatSessionEventsProps {
   onChatThreadRetired?: (event: z.infer<typeof chatThreadRetiredSchema>) => void;
   /** The Concierge changed the reaction on a guardian message of its chat. */
   onMessageReaction?: (event: z.infer<typeof messageReactionSchema>) => void;
+  /** Rome changed the status on a guardian message of a Concierge chat. */
+  onMessageStatus?: (event: z.infer<typeof messageStatusSchema>) => void;
   /** A question or approval a task card shows settled. */
   onChatCardSettled?: (event: z.infer<typeof chatCardSettledSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
@@ -323,6 +328,7 @@ function ChatSessionEvents({
   onMessageChatThread,
   onChatThreadRetired,
   onMessageReaction,
+  onMessageStatus,
   onChatCardSettled,
   onSessionName,
   onSessionRunning,
@@ -356,6 +362,12 @@ function ChatSessionEvents({
         schema: messageReactionSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onMessageReaction?.(event);
+        },
+      },
+      message_status: {
+        schema: messageStatusSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageStatus?.(event);
         },
       },
       chat_card_settled: {
@@ -630,6 +642,13 @@ export function Chat({
   const handleMessageReaction = useCallback(
     ({ messageId, reaction }: z.infer<typeof messageReactionSchema>) =>
       setLiveReactions((prev) => new Map(prev).set(messageId, reaction)),
+    [],
+  );
+  // Statuses live events changed since the messages loaded, likewise.
+  const [liveStatuses, setLiveStatuses] = useState<LiveMessageStatuses>(new Map());
+  const handleMessageStatus = useCallback(
+    ({ messageId, status }: z.infer<typeof messageStatusSchema>) =>
+      setLiveStatuses((prev) => new Map(prev).set(messageId, status)),
     [],
   );
   // How each chat's running turn shows the typing dots, its latest word.
@@ -1810,6 +1829,7 @@ export function Chat({
   const handleSessionEventsReconnect = useCallback(
     (sid: string) => {
       setLiveReactions(new Map());
+      setLiveStatuses(new Map());
       setLiveCards(new Map());
       // The word before the drop may be stale; the server replays the latest
       // to the new subscription.
@@ -2673,6 +2693,7 @@ export function Chat({
             onMessageChatThread={handleMessageChatThread}
             onChatThreadRetired={handleChatThreadRetired}
             onMessageReaction={handleMessageReaction}
+            onMessageStatus={handleMessageStatus}
             onChatCardSettled={handleChatCardSettled}
             onSessionName={handleSessionName}
             onSessionRunning={handleSessionRunning}
@@ -3086,7 +3107,9 @@ export function Chat({
     <ReplyDraftProvider value={replyDraft}>
       <MessageSharingContext.Provider value={shareMessageTurn}>
         <LiveReactionsProvider value={liveReactions}>
-          <LiveTaskCardsProvider value={liveCards}>{page}</LiveTaskCardsProvider>
+          <LiveMessageStatusesProvider value={liveStatuses}>
+            <LiveTaskCardsProvider value={liveCards}>{page}</LiveTaskCardsProvider>
+          </LiveMessageStatusesProvider>
         </LiveReactionsProvider>
       </MessageSharingContext.Provider>
     </ReplyDraftProvider>

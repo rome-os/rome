@@ -1,1 +1,0 @@
-ALTER TABLE `rome_sessions` ADD `asking_device_id` text;

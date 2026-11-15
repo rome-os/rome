@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dc4c8b37-044e-41d8-b705-3b0c9c686d60",
-  "prevId": "e75d1188-12ff-4b47-8c16-65a1fa00cba5",
+  "id": "bddbbe59-4fb8-4300-a7fa-47a25594eb73",
+  "prevId": "906f9929-0957-4c57-bd26-badf0e2fb59e",
   "tables": {
     "account_profiles": {
       "name": "account_profiles",
@@ -1252,6 +1252,84 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "concierge_message_tasks": {
+      "name": "concierge_message_tasks",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "message_key": {
+          "name": "message_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "ended_as": {
+          "name": "ended_as",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_concierge_message_tasks_message": {
+          "name": "idx_concierge_message_tasks_message",
+          "columns": [
+            "chat_id",
+            "message_key"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "concierge_message_tasks_task_id_concierge_tasks_id_fk": {
+          "name": "concierge_message_tasks_task_id_concierge_tasks_id_fk",
+          "tableFrom": "concierge_message_tasks",
+          "tableTo": "concierge_tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "concierge_message_tasks_task_id_chat_id_message_key_pk": {
+          "columns": [
+            "task_id",
+            "chat_id",
+            "message_key"
+          ],
+          "name": "concierge_message_tasks_task_id_chat_id_message_key_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "concierge_message_turns": {
       "name": "concierge_message_turns",
       "columns": {
@@ -1292,6 +1370,29 @@
         },
         "stopped_untold": {
           "name": "stopped_untold",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "working_at": {
+          "name": "working_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "turn_failed": {
+          "name": "turn_failed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "reacted": {
+          "name": "reacted",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -1862,13 +1963,6 @@
         },
         "feeds": {
           "name": "feeds",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "origin_id": {
-          "name": "origin_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -3674,13 +3768,6 @@
         },
         "device_folder": {
           "name": "device_folder",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "asking_device_id": {
-          "name": "asking_device_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

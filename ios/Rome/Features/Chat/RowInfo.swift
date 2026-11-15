@@ -14,8 +14,8 @@ struct RowInfo: Hashable {
     var quote: MessagePart.ReplyQuote?
     /// The quote leads somewhere: the task's thread view, or the original.
     var quoteLeads = false
-    /// The Concierge's reaction on a guardian message.
-    var mark: String?
+    /// The badge on a guardian message: Rome's status, else the Concierge's reaction.
+    var mark: MessageMark?
     /// The row is a send the app still holds, which only it can drop.
     var isPending = false
     /// A task chat's message the Concierge wrote on the guardian's side.
@@ -44,7 +44,7 @@ struct RowInfo: Hashable {
             case .userText(_, _, _, let state):
                 info.isPending = pendingIDs.contains(row.id)
                 if kind == .concierge, state == nil, let id = row.messageId {
-                    info.mark = byID[id]?.reaction
+                    info.mark = byID[id].flatMap { MessageMark(status: $0.status, reaction: $0.reaction) }
                 }
             case .agentText:
                 break
