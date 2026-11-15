@@ -48,13 +48,8 @@ import {
   romeSessions,
   webchatProjects,
 } from "../../db/schema.js";
-import { Hono } from "hono";
-import { COOKIE_NAME, createSession as signGuardianSession } from "../../access/auth.js";
-import { sessionActorMiddleware } from "../../access/session-actor.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
 import { TASK_CHAT_TRIGGER_KIND } from "../../concierge/service.js";
-import type { ApiDeps } from "../deps.js";
-import { conciergeRoutes } from "./concierge.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
@@ -7619,9 +7614,6 @@ describe("Webchat API", () => {
     });
 
     describe("a task chat's row", () => {
-      const guardianCookie = {
-        headers: { Cookie: `${COOKIE_NAME}=${signGuardianSession("guardian-1")}` },
-      };
       let repo: ConciergeTasksRepository;
       let deleted: string[];
       let upserts: Array<{ id: string; archivedAt: number | null }>;
@@ -7658,20 +7650,8 @@ describe("Webchat API", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ archived }),
         });
-      const panel = async () => {
-        const tasksApp = new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
-          "/",
-          conciergeRoutes({
-            concierge: deps.concierge,
-            webchatRepo: deps.webchatRepo,
-          } as unknown as ApiDeps),
-        );
-        const response = await tasksApp.request("/concierge/tasks", guardianCookie);
-        expect(response.status).toBe(200);
-        return ((await response.json()) as { tasks: Array<{ title: string }> }).tasks
-          .map((task) => task.title)
-          .sort();
-      };
+      const panel = async () =>
+        (await deps.concierge!.deps.tasks.listForPanel()).map((task) => task.title).sort();
 
       beforeEach(() => {
         rs.useFakeTimers({ toFake: ["Date"] });
