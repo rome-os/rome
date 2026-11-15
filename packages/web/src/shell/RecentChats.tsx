@@ -2,6 +2,7 @@ import {
   Archive,
   ArchiveRestore,
   Check,
+  ChevronUp,
   Ellipsis,
   Folder,
   Cloud,
@@ -283,12 +284,6 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
     </Tooltip>
   );
 }
-
-/** How many task chats show before the More row. */
-const TASK_CHATS_VISIBLE = 5;
-
-const MORE_ROW_CLASS =
-  "rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 /** A dot on a segment's corner that says the other mode needs a look. */
 function ModeDot({ label, className }: { label: string; className: string }) {
@@ -626,7 +621,13 @@ export function RecentChats({
       hasConcierge ? sortedSessions.filter((s) => chatKind(s, conciergeChatId) === "task") : [],
     [hasConcierge, sortedSessions, conciergeChatId],
   );
+  // The Tasks panel starts folded, and opens when the open chat is a task
+  // chat, so its row is in view. Folding it again holds until another one opens.
   const [tasksExpanded, setTasksExpanded] = useState(false);
+  const activeTaskId = taskSessions.some((s) => s.id === activeSessionId) ? activeSessionId : null;
+  useEffect(() => {
+    if (activeTaskId) setTasksExpanded(true);
+  }, [activeTaskId]);
 
   const projectGroups = useMemo<SessionGroup[]>(() => {
     const buckets = new Map<
@@ -1077,34 +1078,50 @@ export function RecentChats({
     );
   };
 
+  // A panel pinned under the scrolling list: folded it is just its heading,
+  // open it takes half the column and scrolls on its own.
   const renderTasks = () => {
     if (taskSessions.length === 0) return null;
-    // The open task chat stays in view, even when it is past the first few.
-    const activeIndex = taskSessions.findIndex((s) => s.id === activeSessionId);
-    const showAll = tasksExpanded || activeIndex >= TASK_CHATS_VISIBLE;
-    const visible = showAll ? taskSessions : taskSessions.slice(0, TASK_CHATS_VISIBLE);
-    const hidden = taskSessions.length - visible.length;
     const running = taskSessions.filter((s) => s.running).length;
+    const waiting = taskSessions.some(
+      (s) => chatRowStatus(s, s.id === activeSessionId) === "waiting",
+    );
     return (
-      <section aria-labelledby="recent-chats-tasks-heading" data-tasks-section>
-        <hr className="mx-2 my-4 border-0 border-t border-border" aria-hidden />
-        <h2
-          id="recent-chats-tasks-heading"
-          className="flex h-8 min-h-[var(--control-min-h)] items-center justify-between px-2 text-aux text-subtle-foreground"
-        >
-          <span>{t("recentChats.sectionTasks")}</span>
-          {running > 0 ? <span>{t("recentChats.tasksRunning", { count: running })}</span> : null}
-        </h2>
-        {visible.map((session) => renderChatRow(session))}
-        {hidden > 0 ? (
+      <section
+        aria-labelledby="recent-chats-tasks-heading"
+        data-tasks-section
+        data-expanded={tasksExpanded}
+        className={`flex min-h-0 flex-col border-t border-border px-3 ${tasksExpanded ? "flex-1" : "shrink-0"}`}
+      >
+        <h2 id="recent-chats-tasks-heading" className="shrink-0 py-1">
           <button
             type="button"
-            onClick={() => setTasksExpanded(true)}
-            data-tasks-more
-            className={`ml-2 ${MORE_ROW_CLASS}`}
+            aria-expanded={tasksExpanded}
+            aria-controls="recent-chats-tasks-list"
+            onClick={() => setTasksExpanded((open) => !open)}
+            className="flex h-8 w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 border border-transparent px-2 text-left text-aux text-subtle-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50 dark:hover:bg-surface"
           >
-            {t("recentChats.moreTasks", { count: hidden })}
+            <span className="flex-1 truncate">{t("recentChats.sectionTasks")}</span>
+            {waiting ? (
+              <span role="img" aria-label={t("recentChats.rowStatus.waiting")} className="flex">
+                <ChatStatusGlyph status="waiting" />
+              </span>
+            ) : null}
+            {running > 0 ? <span>{t("recentChats.tasksRunning", { count: running })}</span> : null}
+            <ChevronUp
+              className={`h-3.5 w-3.5 shrink-0 transition-transform ${tasksExpanded ? "rotate-180" : ""}`}
+              aria-hidden
+            />
           </button>
+        </h2>
+        {tasksExpanded ? (
+          <div
+            id="recent-chats-tasks-list"
+            className="min-h-0 flex-1 overflow-y-auto pb-3 scrollbar-idle-hidden"
+            onClickCapture={markOpening}
+          >
+            {taskSessions.map((session) => renderChatRow(session))}
+          </div>
         ) : null}
       </section>
     );
@@ -1200,15 +1217,12 @@ export function RecentChats({
             shortcut={wideWindow && !coarsePointer ? newChatShortcutForPlatform() : null}
           />
           {mode === "concierge" && conciergeChatId ? (
-            <>
-              <ConciergeChats
-                mainChatId={conciergeChatId}
-                activeSessionId={activeSessionId}
-                statusFilter={statusFilter}
-                topicSessions={conciergeTopicSessions}
-              />
-              {renderTasks()}
-            </>
+            <ConciergeChats
+              mainChatId={conciergeChatId}
+              activeSessionId={activeSessionId}
+              statusFilter={statusFilter}
+              topicSessions={conciergeTopicSessions}
+            />
           ) : (
             <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
               <h2
@@ -1249,6 +1263,7 @@ export function RecentChats({
             </section>
           )}
         </div>
+        {mode === "concierge" && conciergeChatId ? renderTasks() : null}
         <RomeConfirmDialog
           open={pendingDeleteId !== null}
           destructive
