@@ -261,7 +261,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
                   : undefined;
               return async (chatId, body, send) =>
                 turn.inTurn(() => {
-                  if (!sameSource() || turn.live?.() === false) {
+                  if (source && (!sameSource() || turn.live?.() === false)) {
                     throw new Error("Task input source changed before delivery; it was not sent");
                   }
                   return withoutSessionActor(() => withTaskInputActor(source, chatId, body, send));

@@ -512,11 +512,21 @@ describe("task input source capture precedes asynchronous setup", () => {
       await Promise.resolve();
       actor = { kind: "guardian", userId: "synthetic-seat" };
       turnId = "new-turn";
-      const send = rs.fn(async () => ({}));
-      await expect(sender("target", { text: "old callback" }, send)).rejects.toThrow(
-        "source changed",
-      );
-      expect(send).not.toHaveBeenCalled();
+      const body = { text: "old callback" };
+      const send = rs.fn(async () => {
+        expect(await currentSessionActor()).toBeUndefined();
+        expect(
+          claimTaskInputActor("target", body, { platform: "webchat", id: "core:concierge" }),
+        ).toBeUndefined();
+        return {};
+      });
+      if (initial) {
+        await expect(sender("target", body, send)).rejects.toThrow("source changed");
+        expect(send).not.toHaveBeenCalled();
+      } else {
+        await runWithSessionActor(actor as never, () => sender("target", body, send));
+        expect(send).toHaveBeenCalledTimes(1);
+      }
     });
   }
 
