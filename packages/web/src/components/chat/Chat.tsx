@@ -775,8 +775,16 @@ export function Chat({
     [noteOlder],
   );
 
+  // The chat thread in focus, which is view state: nothing keeps it across a
+  // reload. The back control, the thread's labels and Esc end it.
+  const threadFocus = useThreadFocus({
+    scroller: scrollerEl,
+    content: contentEl,
+    resetKey: mainSessionId,
+  });
   // The main session loads its newest turns first and pages older ones in as
-  // the transcript scrolls toward the top.
+  // the transcript scrolls toward the top. With a thread in focus, the pages
+  // would add no height, so one loads only for each push against the top.
   const {
     setCursor: setOlderCursor,
     hasOlder,
@@ -788,6 +796,7 @@ export function Chat({
     pinned: isAtBottom,
     setMessages,
     onOlderPage,
+    onDemand: threadFocus.shown !== null,
   });
 
   // The view derivation lives in the pure `buildChatView`; here we just memoize
@@ -1004,13 +1013,6 @@ export function Chat({
     return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
-  // The chat thread in focus, which is view state: nothing keeps it across a
-  // reload. The back control, the thread's labels and Esc end it.
-  const threadFocus = useThreadFocus({
-    scroller: scrollerEl,
-    content: contentEl,
-    resetKey: mainSessionId,
-  });
   loadedThreads.current = new Map(
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
@@ -1069,11 +1071,14 @@ export function Chat({
   });
 
   // Share chat picks every turn in a common chat. A Concierge chat holds its
-  // owner's private history, so there it starts with none picked.
+  // owner's private history, so there it starts with none picked. A share is
+  // of whole turns, which can hold messages of other threads, so a thread in
+  // focus closes first and the picker shows every message a turn holds.
   const enterShareMode = useCallback(() => {
+    void closeFocus(true);
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
     setShareMode(true);
-  }, [concierge, mainTurnIds]);
+  }, [concierge, mainTurnIds, closeFocus]);
 
   // Share on a message: the same share mode, with only that message's turn
   // selected. A message outside the chat's own turns selects nothing. Read
@@ -1086,10 +1091,11 @@ export function Chat({
         ? (messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId ??
           (turn?.sessionId === mainSessionId ? turn.turnId : undefined))
         : undefined;
+      void closeFocus(true);
       setSelectedShareTurns(new Set(turnId ? [turnId] : []));
       setShareMode(true);
     },
-    [mainSessionId],
+    [mainSessionId, closeFocus],
   );
 
   const exitShareMode = useCallback(() => {
@@ -2907,6 +2913,7 @@ export function Chat({
                             currentReplyMessageIds={currentReplyMessageIds}
                             messages={view.displayMessages}
                             liveCards={liveCards}
+                            whenShown={whenShown}
                           />
                         ) : (
                           <ChatPendingCardJump

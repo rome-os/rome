@@ -3199,7 +3199,7 @@ describe("Chat Concierge empty state", () => {
       });
     });
 
-    it("leaves the thread in focus when Share opens share mode in the chat", async () => {
+    it("closes the focus before share mode opens from a message's Share, so the picker shows whole turns", async () => {
       threaded();
       renderChat(concierge());
       await screen.findAllByTestId("user-row");
@@ -3213,7 +3213,22 @@ describe("Chat Concierge empty state", () => {
       );
 
       expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
-      expect(back()).toBeTruthy();
+      await waitFor(() => expect(back()).toBeNull());
+      expect(composer().dataset.thread).toBe("");
+    });
+
+    it("closes the focus before share mode opens from the header menu", async () => {
+      threaded();
+      renderChat(concierge());
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-thread"));
+      await waitFor(() => expect(back()).toBeTruthy());
+
+      await userEvent.click(screen.getByRole("button", { name: "navbar.more" }));
+      await userEvent.click(screen.getByRole("menuitem", { name: "share.title" }));
+
+      expect(await screen.findByTestId("share-bar")).toBeTruthy();
+      await waitFor(() => expect(back()).toBeNull());
     });
 
     it("keeps no chat threads outside a Concierge chat", async () => {

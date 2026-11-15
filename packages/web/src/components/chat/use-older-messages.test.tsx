@@ -1,5 +1,13 @@
 // @rstest-environment jsdom
-import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
@@ -62,12 +70,15 @@ function Harness({
   initial,
   initialStuck,
   seen,
+  focused,
 }: {
   initial: ChatMessage[];
   initialStuck: boolean;
   seen: Seen;
+  focused: boolean;
 }) {
   const [messages, setMessages] = useState(new Map([["s1", initial]]));
+  const [onDemand, setOnDemand] = useState(focused);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const stick = useStickToBottom({ initialStuck });
   const older = useOlderMessages("s1", {
@@ -75,6 +86,7 @@ function Harness({
     scroller,
     pinned: stick.isAtBottom,
     setMessages,
+    onDemand,
   });
   const { setCursor } = older;
   useEffect(() => setCursor("s1", "cursor-1"), [setCursor]);
@@ -107,6 +119,7 @@ function Harness({
         stick.scrollRef(node);
       }}
     >
+      <button type="button" data-testid="end-focus" onClick={() => setOnDemand(false)} />
       {older.hasOlder("s1") ? <div ref={older.sentinelRef} data-testid="sentinel" /> : null}
       <div ref={stick.contentRef}>
         {rows.map((row) => (
@@ -117,9 +130,9 @@ function Harness({
   );
 }
 
-function renderHarness(initial: ChatMessage[], initialStuck = false) {
+function renderHarness(initial: ChatMessage[], initialStuck = false, focused = false) {
   const seen: Seen = { scrollTop: () => 0, isAtBottom: () => initialStuck };
-  render(<Harness initial={initial} initialStuck={initialStuck} seen={seen} />);
+  render(<Harness initial={initial} initialStuck={initialStuck} seen={seen} focused={focused} />);
   return seen;
 }
 
@@ -315,5 +328,145 @@ describe("useOlderMessages onOlderPage", () => {
     expect(onOlderPage).not.toHaveBeenCalled();
     await act(() => result.current.loadOlder("s1"));
     expect(onOlderPage).toHaveBeenCalledExactlyOnceWith("s1", page);
+  });
+});
+
+describe("useOlderMessages on demand", () => {
+  const scroller = () => screen.getByTestId("scroller");
+  const wheelUp = () => fireEvent.wheel(scroller(), { deltaY: -40 });
+  const pages = () => rs.mocked(listSessionMessagePage).mock.calls.length;
+  // Long enough for one gesture to end.
+  const idle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    });
+  const twoPages = () =>
+    rs
+      .mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [message("m2", 2)], nextCursor: "cursor-2" })
+      .mockResolvedValueOnce({ messages: [message("m1", 1)], nextCursor: null });
+
+  it("loads nothing by itself: the sentinel stays quiet however near the view it is", async () => {
+    renderHarness([message("m3", 3)], false, true);
+    await act(async () => {});
+    expect(FakeIntersectionObserver.live()).toHaveLength(0);
+    expect(pages()).toBe(0);
+  });
+
+  it("loads one page for a push up against the top, however many events the gesture has", async () => {
+    twoPages();
+    renderHarness([message("m3", 3)], false, true);
+
+    await act(async () => {
+      wheelUp();
+      wheelUp();
+      wheelUp();
+    });
+    await waitFor(() => expect(shownIds()).toEqual(["m2", "m3"]));
+    // Momentum after the page landed is the same gesture.
+    await act(async () => wheelUp());
+
+    expect(pages()).toBe(1);
+  });
+
+  it("needs a new gesture for the next page, and then loads exactly that one", async () => {
+    twoPages();
+    renderHarness([message("m3", 3)], false, true);
+    await act(async () => wheelUp());
+    await waitFor(() => expect(shownIds()).toEqual(["m2", "m3"]));
+
+    await idle();
+    expect(pages()).toBe(1);
+    // The page pushed the reader down by its height: back up to the top.
+    expect(scroller().scrollTop).toBeGreaterThan(0);
+    scroller().scrollTop = 0;
+    await act(async () => wheelUp());
+
+    await waitFor(() => expect(shownIds()).toEqual(["m1", "m2", "m3"]));
+    expect(pages()).toBe(2);
+    expect(rs.mocked(listSessionMessagePage).mock.calls.map((call) => call[1].before)).toEqual([
+      "cursor-1",
+      "cursor-2",
+    ]);
+  });
+
+  it("judges a gesture by when its events happened, not when a busy page handled them", async () => {
+    twoPages();
+    renderHarness([message("m3", 3)], false, true);
+    // A wheel event as the browser stamped it, handled late.
+    const wheelAt = (stamp: number) => {
+      const event = new WheelEvent("wheel", { deltaY: -40, bubbles: true });
+      Object.defineProperty(event, "timeStamp", { value: stamp });
+      scroller().dispatchEvent(event);
+    };
+
+    await act(async () => wheelAt(1000));
+    await waitFor(() => expect(shownIds()).toEqual(["m2", "m3"]));
+    scroller().scrollTop = 0;
+    // Handled 400 ms later, but it happened 100 ms after the first: the same gesture.
+    await idle();
+    await act(async () => wheelAt(1100));
+    expect(pages()).toBe(1);
+
+    // Happened 400 ms after the last one: a new gesture.
+    await act(async () => wheelAt(1500));
+    await waitFor(() => expect(shownIds()).toEqual(["m1", "m2", "m3"]));
+    expect(pages()).toBe(2);
+  });
+
+  it("asks nothing of a push away from the top, or a scroll down", async () => {
+    renderHarness([message("m3", 3)], false, true);
+    scroller().scrollTop = 300;
+    await act(async () => wheelUp());
+    scroller().scrollTop = 0;
+    await act(async () => fireEvent.wheel(scroller(), { deltaY: 40 }));
+    expect(pages()).toBe(0);
+  });
+
+  it("loads on a pull down on a touch screen, once for the touch", async () => {
+    twoPages();
+    renderHarness([message("m3", 3)], false, true);
+
+    await act(async () => {
+      fireEvent.touchStart(scroller(), { touches: [{ clientY: 100 }] });
+      fireEvent.touchMove(scroller(), { touches: [{ clientY: 140 }] });
+      fireEvent.touchMove(scroller(), { touches: [{ clientY: 190 }] });
+    });
+    await waitFor(() => expect(shownIds()).toEqual(["m2", "m3"]));
+    // A swipe up is no pull.
+    await act(async () => {
+      fireEvent.touchStart(scroller(), { touches: [{ clientY: 300 }] });
+      fireEvent.touchMove(scroller(), { touches: [{ clientY: 200 }] });
+    });
+
+    expect(pages()).toBe(1);
+  });
+
+  it("loads on PageUp, Home and the up arrow, but not in a field or on a held key", async () => {
+    twoPages();
+    renderHarness([message("m3", 3)], false, true);
+    const field = document.body.appendChild(document.createElement("textarea"));
+
+    await act(async () => fireEvent.keyDown(field, { key: "ArrowUp" }));
+    await act(async () => fireEvent.keyDown(document.body, { key: "PageUp", repeat: true }));
+    await act(async () => fireEvent.keyDown(document.body, { key: "End" }));
+    expect(pages()).toBe(0);
+
+    await act(async () => fireEvent.keyDown(document.body, { key: "Home" }));
+    await waitFor(() => expect(shownIds()).toEqual(["m2", "m3"]));
+    expect(pages()).toBe(1);
+    field.remove();
+  });
+
+  it("hands the paging back to the sentinel when the focus ends", async () => {
+    renderHarness([message("m3", 3)], false, true);
+    expect(FakeIntersectionObserver.live()).toHaveLength(0);
+
+    await act(async () => screen.getByTestId("end-focus").click());
+
+    expect(FakeIntersectionObserver.live()).toHaveLength(1);
+    // And a wheel is no longer a request.
+    await act(async () => wheelUp());
+    expect(pages()).toBe(0);
   });
 });
