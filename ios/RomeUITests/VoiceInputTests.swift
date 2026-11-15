@@ -48,6 +48,7 @@ final class VoiceInputTests: XCTestCase {
         let app = try launch()
         let card = app.buttons["task-card"].firstMatch
         guard card.waitForExistence(timeout: 10) else {
+            printScreen(app, "no task card")
             throw XCTSkip("the instance has no task, so no task chat to open")
         }
         card.tap()
@@ -60,6 +61,7 @@ final class VoiceInputTests: XCTestCase {
         let app = try launch()
         let thread = app.buttons["thread-label"].firstMatch
         guard thread.waitForExistence(timeout: 10) else {
+            printScreen(app, "no thread label")
             throw XCTSkip("the instance has no task's thread to open")
         }
         thread.tap()
@@ -75,7 +77,7 @@ final class VoiceInputTests: XCTestCase {
         let app = try launch(recording: "speech")
         let control = app.buttons["voice-input"]
         let field = app.textViews["message-field"]
-        XCTAssertTrue(control.waitForExistence(timeout: 15), "the Chat has no voice control")
+        try requireControl(app, control, "the Chat has no voice control")
         control.tap()
         let words = NSPredicate(format: "value != nil AND value != ''")
         let shown = expectation(for: words, evaluatedWith: field)
@@ -100,7 +102,7 @@ final class VoiceInputTests: XCTestCase {
         for item in cases {
             let app = try launch(microphone: "denied", language: item.language)
             let control = app.buttons["voice-input"]
-            XCTAssertTrue(control.waitForExistence(timeout: 15), "\(item.language): no voice control when refused")
+            try requireControl(app, control, "\(item.language): no voice control when refused")
             XCTAssertEqual(control.label, item.start, "\(item.language): the control is not named in this language")
             control.tap()
             let notice = app.descendants(matching: .any)["voice-input-notice"]
@@ -124,7 +126,7 @@ final class VoiceInputTests: XCTestCase {
     @MainActor
     private func checkStartsAndStops(_ app: XCUIApplication, field: String) throws {
         let control = app.buttons["voice-input"]
-        XCTAssertTrue(control.waitForExistence(timeout: 15), "\(field) has no voice control")
+        try requireControl(app, control, "\(field) has no voice control")
         let messageField = app.textViews["message-field"]
         XCTAssertTrue(messageField.exists, "\(field) has no message field")
         let overhead = tapOverhead(messageField)
@@ -175,6 +177,21 @@ final class VoiceInputTests: XCTestCase {
         }.min() ?? 0
     }
 
+    /// Fails the test with `message` when `control` does not show within 15 s, printing what the
+    /// screen held instead so the CI log says why.
+    @MainActor
+    private func requireControl(_ app: XCUIApplication, _ control: XCUIElement, _ message: String) throws {
+        if control.waitForExistence(timeout: 15) { return }
+        printScreen(app, message)
+        XCTFail(message)
+        throw ControlMissing()
+    }
+
+    @MainActor
+    private func printScreen(_ app: XCUIApplication, _ why: String) {
+        print("--- \(why); the screen holds:\n\(app.debugDescription)\n---")
+    }
+
     /// Fails the test, rather than letting every check after it fail for another reason, when
     /// the instance the CI job named does not answer.
     @MainActor
@@ -213,3 +230,4 @@ final class VoiceInputTests: XCTestCase {
 }
 
 private struct InstanceUnreachable: Error {}
+private struct ControlMissing: Error {}
