@@ -326,6 +326,19 @@ describe("voice input socket", () => {
     expect(messages).toEqual([{ type: "error", reason: "bad-request" }]);
   });
 
+  it("takes the audio a client recorded while its socket connected", async () => {
+    const fake = await fakeSoniox();
+    const { client, messages } = await dictation(fake);
+
+    // Eight seconds recorded during a slow connect, sent at once after `start`.
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000, bufferedMs: 8_000 }));
+    client.send(Buffer.alloc(256_000, 1));
+    await until(() => fake.received.some((frame) => frame.kind === "audio"));
+
+    expect(messages).toEqual([]);
+    expect(client.readyState).toBe(WebSocket.OPEN);
+  });
+
   it("sends the provider no audio that arrives after the stop", async () => {
     const fake = await fakeSoniox();
     fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
