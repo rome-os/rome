@@ -122,16 +122,14 @@ final class VoiceInputTests: XCTestCase {
             XCTAssertTrue(item.says(notice.label), "\(item.language): the notice says \"\(notice.label)\"; wanted \(item.wanted)")
             let typed = "typed after refusing \(item.language) \(Int(Date().timeIntervalSince1970))"
             let field = onScreen(app.textViews, "message-field")
+            // A draft an earlier test left in this chat is kept across launches, as it should be,
+            // and the tap may put the cursor anywhere in it: check the typed words, not the whole field.
             field.tap()
-            // A draft an earlier test left in this chat is kept across launches, as it should be.
-            let kept = field.value as? String ?? ""
-            if !kept.isEmpty {
-                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: kept.count))
-            }
             field.typeText(typed)
-            XCTAssertEqual(field.value as? String, typed, "\(item.language): a key was lost after the notice")
+            XCTAssertTrue((field.value as? String ?? "").contains(typed), "\(item.language): a key was lost after the notice")
             onScreen(app.buttons, "send").tap()
-            XCTAssertTrue(app.staticTexts[typed].waitForExistence(timeout: 10), "\(item.language): the typed message was not sent")
+            let sent = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", typed)).firstMatch
+            XCTAssertTrue(sent.waitForExistence(timeout: 10), "\(item.language): the typed message was not sent")
             app.terminate()
         }
     }
