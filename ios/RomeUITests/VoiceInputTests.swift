@@ -4,8 +4,8 @@ import XCTest
 /// stand-in instance, through the accessibility contract: the control is "Start voice input"
 /// when idle, "Stop voice input" with the selected trait while listening, and "Finishing voice
 /// input" while the last words arrive. The notice is its own element. Each test names the rule
-/// it scores, so the verifier's report can say which leg scored which rule. Rule 1's tests play
-/// silence, so listening lasts until the test stops it.
+/// it scores, so the verifier's report can say which leg scored which rule. Unless a test says
+/// otherwise it plays a two-minute hum, so only the test's own stop ends listening.
 ///
 /// Rule 1's 0.5 s is timed inside the app, since XCUITest waits for the app to go idle around
 /// every tap (1 to 13 s on a CI runner). The app marks each start with a `StartListening`
@@ -379,11 +379,10 @@ final class VoiceInputTests: XCTestCase {
         return index.map { matches.element(boundBy: $0) } ?? matches.firstMatch
     }
 
-    /// A generated two-minute recording, 16 kHz mono 16-bit: silence, or a hum the stand-in
-    /// instance hears as speech. Silence lets listening last through XCUITest's slow steps until
-    /// the test stops it; the hum also keeps the stand-in's no-speech end away.
-    private func generated(_ name: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(name).wav")
+    /// A generated two-minute hum, 16 kHz mono 16-bit. The stand-in instance hears it as speech,
+    /// so its 30 s no-speech end never comes during XCUITest's slow steps.
+    private func humFile() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(Self.hum).wav")
         if FileManager.default.fileExists(atPath: url.path) { return url }
         let rate: UInt32 = 16000
         let count = Int(rate) * 120
@@ -394,21 +393,17 @@ final class VoiceInputTests: XCTestCase {
         text("RIFF"); u32(36 + UInt32(count * 2)); text("WAVE")
         text("fmt "); u32(16); u16(1); u16(1); u32(rate); u32(rate * 2); u16(2); u16(16)
         text("data"); u32(UInt32(count * 2))
-        if name == Self.hum {
-            var samples = [Int16](repeating: 0, count: count)
-            for i in 0..<count { samples[i] = Int16(2000 * sin(2 * Double.pi * 200 * Double(i) / Double(rate))) }
-            samples.withUnsafeBytes { data.append(contentsOf: $0) }
-        } else {
-            data.append(Data(count: count * 2))
-        }
+        var samples = [Int16](repeating: 0, count: count)
+        for i in 0..<count { samples[i] = Int16(2000 * sin(2 * Double.pi * 200 * Double(i) / Double(rate))) }
+        samples.withUnsafeBytes { data.append(contentsOf: $0) }
         try data.write(to: url)
         return url
     }
 
     /// Launches the app signed in to the stand-in instance, playing `recording` (a WAV in this
-    /// bundle, `hum`, or silence when nil) as the microphone, or with the microphone as `microphone` says.
+    /// bundle, or the hum) as the microphone, or with the microphone as `microphone` says.
     @MainActor
-    private func launch(recording: String? = nil, microphone: String? = nil, language: String = "en") throws -> XCUIApplication {
+    private func launch(recording: String = VoiceInputTests.hum, microphone: String? = nil, language: String = "en") throws -> XCUIApplication {
         let env = ProcessInfo.processInfo.environment
         guard let origin = env["ROME_LOCAL_ORIGIN"], let user = env["ROME_LOCAL_USER"],
               let password = env["ROME_LOCAL_PASSWORD"] else {
@@ -425,12 +420,12 @@ final class VoiceInputTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(\(language))"]
         if let microphone {
             app.launchArguments += ["-RomeVoiceInputMicrophone", microphone]
-        } else if let recording, recording != Self.hum {
+        } else if recording != Self.hum {
             let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: recording, withExtension: "wav"),
                                     "\(recording).wav is missing from the test bundle")
             app.launchArguments += ["-RomeVoiceInputRecording", url.path]
         } else {
-            app.launchArguments += ["-RomeVoiceInputRecording", try generated(recording ?? "silence").path]
+            app.launchArguments += ["-RomeVoiceInputRecording", try humFile().path]
         }
         app.launch()
         return app
