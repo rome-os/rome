@@ -162,16 +162,19 @@ const task = await until("the task", async () =>
   ).find((t) => t.chat?.id),
 );
 await idle(chatSession);
-const threadRoot = await until("the thread", async () =>
-  (
-    (
-      await call("GET", `/chat/sessions/${chatSession}/messages`, {
-        query: { limit: "50" },
-        keep: false,
-      })
-    ).json.messages ?? []
-  ).find((m) => m.chatThreadId),
-);
+// The main Chat shows the task's card, and Concierge messages in its thread
+// carry the task's title, as the app needs to draw both.
+const threadRoot = await until("the task card and its thread", async () => {
+  const { messages = [] } = (
+    await call("GET", `/chat/sessions/${chatSession}/messages`, {
+      query: { limit: "50" },
+      keep: false,
+    })
+  ).json;
+  const card = messages.some((m) => m.role === "assistant" && m.content.includes('"task_chat"'));
+  const said = messages.some((m) => m.role === "assistant" && m.chatThreadId && m.chatThreadTitle);
+  return card && said && messages.find((m) => m.role === "user" && m.chatThreadId);
+});
 
 // The fields after the task, as the app loads them on opening each.
 await call("GET", "/concierge/tasks", { query: { doneDays: "30" } });

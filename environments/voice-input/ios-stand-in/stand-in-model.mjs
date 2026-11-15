@@ -2,10 +2,11 @@
 // environment's real Rome can run a turn without a model login while
 // record.mjs records. It reads nothing it is sent beyond what it needs:
 //
-// - A turn whose newest guardian text holds MARKER, with a tool named
-//   *chat_start on offer, answers with that tool call, so Rome's own tool
-//   writes a task, its task chat, its card and its thread.
-// - A request that carries a tool result answers "Started.".
+// - A turn whose newest guardian text holds MARKER plays the Concierge's
+//   part through Rome's own tools, one call per request: say an answer,
+//   chat_start the task with its card, then say the task's news with its
+//   task id, so Rome writes the task, its task chat, the card and a thread
+//   with Concierge messages in it. Then it ends the turn.
 // - Anything else answers "Done.".
 //
 //   node stand-in-model.mjs [--port 8793]
@@ -19,37 +20,58 @@ export const MARKER = "[stand-in: start a task]";
 const PORT = Number(args.port ?? 8793);
 const requests = [];
 
-function lastUserContent(body) {
-  const last = [...(body.messages ?? [])].reverse().find((m) => m.role === "user");
-  if (!last) return [];
-  return typeof last.content === "string" ? [{ type: "text", text: last.content }] : last.content;
-}
+const asText = (content) =>
+  typeof content === "string"
+    ? content
+    : (content ?? []).map((c) => (c.type === "text" ? c.text : asText(c.content))).join("\n");
+const toolNamed = (body, name) =>
+  (body.tools ?? []).find((t) => new RegExp(`(^|__)${name}$`).test(t.name))?.name;
 
 function answer(body) {
-  const content = lastUserContent(body);
-  if (content.some((c) => c.type === "tool_result")) return { text: "Started." };
-  const text = content
-    .filter((c) => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
-  const tool = (body.tools ?? []).find((t) => /(^|__)chat_start$/.test(t.name));
-  if (tool && text.includes(MARKER))
-    return {
-      tool: {
-        name: tool.name,
-        input: {
-          title: "Stand-in task",
-          brief: "Reply with the word done. The stand-in instance records this task.",
-        },
+  const messages = body.messages ?? [];
+  // The guardian's newest message: the last user message with text of its own.
+  let asked = -1;
+  for (let i = messages.length - 1; i >= 0 && asked < 0; i--) {
+    const m = messages[i];
+    const own = typeof m.content === "string" || m.content.some((c) => c.type === "text");
+    if (m.role === "user" && own) asked = i;
+  }
+  if (asked < 0 || !asText(messages[asked].content).includes(MARKER)) return { text: "Done." };
+  const since = messages.slice(asked + 1);
+  const results = since
+    .filter((m) => m.role === "user" && typeof m.content !== "string")
+    .flatMap((m) => m.content.filter((c) => c.type === "tool_result"))
+    .map((c) => asText(c.content));
+  const say = toolNamed(body, "say");
+  const start = toolNamed(body, "chat_start");
+  if (!say || !start) return { text: "Done." };
+  const steps = [
+    () => ({ name: say, input: { text: "I'll look into the dentist appointment." } }),
+    () => ({
+      name: start,
+      input: {
+        title: "Stand-in task",
+        brief: "Reply with the word done. The stand-in instance records this task.",
+        card: true,
       },
-    };
-  return { text: "Done." };
+    }),
+    () => {
+      const taskId = /"taskId"\s*:\s*"([^"]+)"/.exec(results.join("\n"))?.[1];
+      return (
+        taskId && { name: say, input: { text: "The stand-in task has started.", task: taskId } }
+      );
+    },
+  ];
+  const tool = steps[results.length]?.();
+  return tool ? { tool } : { text: "" };
 }
 
 function message(model, reply) {
   const content = reply.tool
     ? [{ type: "tool_use", id: `toolu_${randomUUID().replaceAll("-", "")}`, ...reply.tool }]
-    : [{ type: "text", text: reply.text }];
+    : reply.text
+      ? [{ type: "text", text: reply.text }]
+      : [];
   return {
     id: `msg_${randomUUID().replaceAll("-", "")}`,
     type: "message",

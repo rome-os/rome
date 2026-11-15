@@ -11,22 +11,22 @@
     "sessionId": "concierge",
     "text": "The stand-in instance records this message.",
     "turn": {
-      "inputId": "c22156fc-8285-4a5e-ab14-f377461f8aec",
-      "turnId": "01a1db92-b5b4-777b-94af-9bbc5cbb3160",
+      "inputId": "d07b12eb-c682-4612-841e-f6c08031f6ac",
+      "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
       "disposition": "started",
       "sessionId": "concierge",
-      "startedAt": "2026-11-14T19:39:47.509Z"
+      "startedAt": "2026-11-15T02:51:02.814Z"
     },
     "messages": [
       {
-        "id": "c22156fc-8285-4a5e-ab14-f377461f8aec",
+        "id": "d07b12eb-c682-4612-841e-f6c08031f6ac",
         "sessionId": "concierge",
-        "turnId": "01a1db92-b5b4-777b-94af-9bbc5cbb3160",
+        "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
         "inputState": "consumed",
         "role": "user",
         "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
         "chatThreadId": null,
-        "createdAt": "2026-11-14T19:39:47.000Z",
+        "createdAt": "2026-11-15T02:51:02.000Z",
         "sender": {
           "kind": "guardian",
           "name": "guardian",
@@ -59,7 +59,7 @@
         "event": "message_writing",
         "data": {
           "sessionId": "concierge",
-          "turnId": "01a1db92-b5b4-777b-94af-9bbc5cbb3160",
+          "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
           "mode": "exact",
           "writing": false
         }
@@ -70,7 +70,7 @@
         "event": "message_status_reaction",
         "data": {
           "sessionId": "concierge",
-          "messageId": "c22156fc-8285-4a5e-ab14-f377461f8aec",
+          "messageId": "d07b12eb-c682-4612-841e-f6c08031f6ac",
           "statusReaction": "working"
         }
       },
@@ -80,9 +80,7 @@
         "event": "inputs_settled",
         "data": {
           "sessionId": "concierge",
-          "inputIds": [
-            "c22156fc-8285-4a5e-ab14-f377461f8aec"
-          ]
+          "inputIds": ["d07b12eb-c682-4612-841e-f6c08031f6ac"]
         }
       },
       {
@@ -91,7 +89,7 @@
         "event": "message_writing",
         "data": {
           "sessionId": "concierge",
-          "turnId": "01a1db92-b5b4-777b-94af-9bbc5cbb3160",
+          "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
           "mode": "exact",
           "writing": false
         }
@@ -120,90 +118,8 @@
         "event": "message_status_reaction",
         "data": {
           "sessionId": "concierge",
-          "messageId": "c22156fc-8285-4a5e-ab14-f377461f8aec",
+          "messageId": "d07b12eb-c682-4612-841e-f6c08031f6ac",
           "statusReaction": null
-        }
-      },
-      {
-        "type": "event",
-        "topic": "concierge.tasks",
-        "event": "task_upsert",
-        "data": {
-          "task": {
-            "id": "2cea228d-3626-43e8-9458-e1578eaf0132",
-            "title": "Stand-in task",
-            "state": "doing",
-            "status": "active",
-            "endReason": null,
-            "waitingSince": null,
-            "openWait": null,
-            "laterAt": null,
-            "summary": null,
-            "waitingOn": null,
-            "dueAt": null,
-            "rank": null,
-            "chat": {
-              "id": "01a1db92-b40e-7218-98af-88fb6a66390e",
-              "name": "Stand-in task"
-            },
-            "threadRoot": "91f41e61-7c37-4924-92af-a5c02a84f971",
-            "conciergeChat": {
-              "id": "concierge",
-              "name": "Main chat",
-              "main": true
-            },
-            "sourceMessageId": "91f41e61-7c37-4924-92af-a5c02a84f971",
-            "createdAt": 1794685187087,
-            "updatedAt": 1794685187545,
-            "completedAt": null,
-            "archivedAt": null,
-            "notSynced": false
-          }
-        }
-      },
-      {
-        "type": "event",
-        "topic": "concierge.tasks",
-        "event": "task_upsert",
-        "data": {
-          "task": {
-            "id": "2cea228d-3626-43e8-9458-e1578eaf0132",
-            "title": "Stand-in task",
-            "state": "doing",
-            "status": "active",
-            "endReason": null,
-            "waitingSince": null,
-            "openWait": null,
-            "laterAt": null,
-            "summary": "Done.",
-            "waitingOn": null,
-            "dueAt": null,
-            "rank": null,
-            "chat": {
-              "id": "01a1db92-b40e-7218-98af-88fb6a66390e",
-              "name": "Stand-in task"
-            },
-            "threadRoot": "91f41e61-7c37-4924-92af-a5c02a84f971",
-            "conciergeChat": {
-              "id": "concierge",
-              "name": "Main chat",
-              "main": true
-            },
-            "sourceMessageId": "91f41e61-7c37-4924-92af-a5c02a84f971",
-            "createdAt": 1794685187087,
-            "updatedAt": 1794685187551,
-            "completedAt": null,
-            "archivedAt": null,
-            "notSynced": false
-          }
-        }
-      },
-      {
-        "type": "event",
-        "topic": "chat.tasks:concierge",
-        "event": "tasks_changed",
-        "data": {
-          "chatId": "concierge"
         }
       },
       {
@@ -215,7 +131,7 @@
           "activity": {
             "kind": "working"
           },
-          "at": 1794685188583
+          "at": 1794711063569
         }
       }
     ]

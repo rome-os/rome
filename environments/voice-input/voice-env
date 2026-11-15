@@ -177,6 +177,16 @@ cmd_desktop() {
 # Rome's model is a scripted stand-in on the environment's network; its
 # provider setting comes out again afterwards. The tier mapping is the one
 # `env.sh up` sets, so it stays.
+# The fixtures in the repo's own format, with the repo's pinned Biome. Its npm
+# binary runs on NixOS only through the Nix loader.
+format_fixtures() {
+  local version biome
+  version="$(node -p "require('$REPO_ROOT/package.json').devDependencies['@biomejs/biome']")"
+  biome="$REPO_ROOT/node_modules/.pnpm/@biomejs+cli-linux-x64@$version/node_modules/@biomejs/cli-linux-x64/biome"
+  [ -e /etc/NIXOS ] && biome="$(nix eval --raw nixpkgs#glibc)/lib/ld-linux-x86-64.so.2 $biome"
+  (cd "$REPO_ROOT" && $biome format --write "$ENV_DIR/ios-stand-in/fixtures" >/dev/null)
+}
+
 cmd_ios_record() {
   require_up
   local model="rome-env-${NAME}-model" status=0
@@ -191,6 +201,7 @@ cmd_ios_record() {
   docker exec "$ROME" curl -sS --fail-with-body -X DELETE -H 'Sec-Fetch-Site: same-origin' \
     "$API/ai-tools/anthropic-compatible-credentials" >/dev/null
   docker rm -f "$model" >/dev/null 2>&1 || true
+  [ "$status" = 0 ] && format_fixtures
   return "$status"
 }
 
