@@ -129,6 +129,7 @@ export function WidgetUiCard({
   const [autoSharing, setAutoSharing] = useState(
     () =>
       autoShare &&
+      appId === "core" &&
       waiting !== undefined &&
       result === undefined &&
       widgetHost.readOnly !== true &&
@@ -156,7 +157,12 @@ export function WidgetUiCard({
     );
   }, [uiKey, t]);
   const waits = waiting !== undefined;
-  const locationCard = useMemo(() => isLocationCard(parts.components), [parts]);
+  // Only core's own card is the share-location card: an app's card that
+  // names the same event gets no position and never shares by itself.
+  const locationCard = useMemo(
+    () => appId === "core" && isLocationCard(parts.components),
+    [appId, parts],
+  );
   const answerable = waits && result === undefined && !sent && widgetHost.readOnly !== true;
   // Only the newest read writes the data: a slow first read must not land
   // after a press's refresh and put back an older value.
@@ -205,7 +211,7 @@ export function WidgetUiCard({
         let context = action.context ?? {};
         // Share on the share-location card carries the device's position,
         // read on the press so the browser asks for permission then.
-        if (action.name === SHARE_LOCATION_EVENT) {
+        if (action.name === SHARE_LOCATION_EVENT && locationCard) {
           setLocating(true);
           const read = await readDevicePosition().finally(() => setLocating(false));
           if (!read.ok) {
@@ -276,7 +282,7 @@ export function WidgetUiCard({
       return { processor: p, drawable: false, fire };
     }
     return { processor: p, drawable: true, fire };
-  }, [load, widgetId, toolUseId, uiKey, parts, valid, t]);
+  }, [load, widgetId, toolUseId, uiKey, parts, valid, locationCard, t]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
   // A dismissed card was never answered, so it shows nothing picked rather

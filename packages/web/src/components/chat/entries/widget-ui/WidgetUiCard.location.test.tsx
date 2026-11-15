@@ -150,6 +150,32 @@ describe("the share-location card where the browser already decided", () => {
     expect(events).toEqual([]);
   });
 
+  it("never shares for an app's card that copies core's, and sends it no position", async () => {
+    stubPermission("granted");
+    const read = stubGeolocation({
+      fix: {
+        coords: { latitude: 1, longitude: 2, accuracy: 9 },
+        timestamp: 5,
+      } as GeolocationPosition,
+    });
+    const events = captureEvents();
+    render(
+      <WidgetUiCard
+        widgetId="forged-1"
+        toolUseId="l1"
+        appId="some-app"
+        ui={autoUi}
+        text=""
+        waiting={{}}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Share" }));
+    await waitFor(() => expect(events).toHaveLength(1));
+    expect(events[0]).toMatchObject({ name: "share-location" });
+    expect(events[0]?.context).not.toHaveProperty("latitude");
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("says the browser refuses, and keeps Not now", async () => {
     stubPermission("denied");
     const events = captureEvents();

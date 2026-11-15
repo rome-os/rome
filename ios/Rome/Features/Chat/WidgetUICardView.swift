@@ -350,7 +350,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         var body = body
         // Share on the share-location card carries the phone's position, read
         // on the press so iOS asks for permission then.
-        if name == LocationCard.shareEvent {
+        if name == LocationCard.shareEvent, let part, LocationCard.isLocationCard(part) {
             locating = true
             let read = await locator.currentPosition()
             locating = false

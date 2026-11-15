@@ -4,6 +4,7 @@ import {
   locationAnswerPrompt,
   locationCardUiFromProps,
   sharedLocationAnswer,
+  shareLocationToolOutput,
 } from "./location-card.js";
 
 describe("the share-location answer", () => {
@@ -53,10 +54,16 @@ describe("the share-location answer", () => {
 });
 
 describe("the card a stored share-location card draws", () => {
-  it("marks it to share by itself only when its props say so", () => {
+  it("marks it to share by itself only with a token core's own tool issued", () => {
+    const issued = shareLocationToolOutput("r", true) as { render: { props: unknown } };
+    expect(mayAutoShare(locationCardUiFromProps(issued.render.props) ?? undefined)).toBe(true);
+    // Another tool named `*__share_location` can return any props, but not a token core issued.
     expect(
       mayAutoShare(locationCardUiFromProps({ reason: "r", autoShare: true }) ?? undefined),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      mayAutoShare(locationCardUiFromProps({ reason: "r", autoShareToken: "guess" }) ?? undefined),
+    ).toBe(false);
     // An older card, or one a turn the guardian did not start showed, waits for Share.
     expect(mayAutoShare(locationCardUiFromProps({ reason: "r" }) ?? undefined)).toBe(false);
   });

@@ -2,6 +2,7 @@
 // position once, for one turn. Nothing it carries is stored beyond the chat's
 // own messages, and it is not a connection. Domain: docs/domains/chats.md#widget.
 
+import { randomUUID } from "node:crypto";
 import type { WidgetUi } from "@rome-os/app-runtime";
 import {
   LOCATION_CARD_ID,
@@ -38,7 +39,7 @@ export function shareLocationToolOutput(reason: string, autoShare = false): unkn
     render: {
       kind: "inline",
       componentId: LOCATION_CARD_ID,
-      props: autoShare ? { reason, autoShare: true } : { reason },
+      props: autoShare ? { reason, autoShareToken: issueAutoShareToken() } : { reason },
       builtin: true,
     },
     message:
@@ -48,11 +49,36 @@ export function shareLocationToolOutput(reason: string, autoShare = false): unkn
   };
 }
 
+// Tokens core's own share_location issued for a card that may share by
+// itself, with when each lapses. Any tool can name itself `*__share_location`
+// and return a card, so a flag in the output proves nothing; a token only
+// this process issued does. A token outlives no restart, which only costs the
+// card its auto-share.
+const autoShareTokens = new Map<string, number>();
+const AUTO_SHARE_TOKEN_MS = 30 * 60 * 1000;
+
+function issueAutoShareToken(now = Date.now()): string {
+  for (const [token, lapses] of autoShareTokens) if (lapses <= now) autoShareTokens.delete(token);
+  const token = randomUUID();
+  autoShareTokens.set(token, now + AUTO_SHARE_TOKEN_MS);
+  return token;
+}
+
+function issuedAutoShareToken(token: unknown, now = Date.now()): boolean {
+  return typeof token === "string" && (autoShareTokens.get(token) ?? 0) > now;
+}
+
 /** The card described as data, for the reason a stored card's props give, or
- *  null when they give none. */
+ *  null when they give none. It shares by itself only when its props carry a
+ *  token core's own share_location issued. */
 export function locationCardUiFromProps(props: unknown): WidgetUi | null {
-  const { reason, autoShare } = (props ?? {}) as { reason?: unknown; autoShare?: unknown };
-  return typeof reason === "string" ? locationCardUi(reason, autoShare === true) : null;
+  const { reason, autoShareToken } = (props ?? {}) as {
+    reason?: unknown;
+    autoShareToken?: unknown;
+  };
+  return typeof reason === "string"
+    ? locationCardUi(reason, issuedAutoShareToken(autoShareToken))
+    : null;
 }
 
 /**
@@ -113,7 +139,7 @@ export function locationAnswerPrompt(output: unknown): string {
     "Use your own tools to turn it into a place if you need one. " +
     (coarse
       ? "The fix is coarse (it may come from the network or a VPN), so name only the area, " +
-        'such as "around <city>", and say it is approximate.'
+        'such as "around <city>", and say it is approximate. '
       : "") +
     "Don't keep the position: it is for this turn only."
   );

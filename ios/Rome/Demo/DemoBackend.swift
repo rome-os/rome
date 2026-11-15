@@ -607,14 +607,14 @@ final class DemoBackend: RomeBackend {
     /// A share-location card as core stores it (`locationCardUi`).
     /// `autoShare` marks the card as core does for a turn the guardian's own
     /// message started, so the app may answer it by itself.
-    static func locationCard(_ toolUseId: String, reason: String, autoShare: Bool = false) -> JSONValue {
+    static func locationCard(_ toolUseId: String, reason: String, autoShare: Bool = false, appId: String = "core") -> JSONValue {
         func c(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
             .object(props.merging(["id": .string(id), "component": .string(kind)]) { a, _ in a })
         }
         let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
         let event = { (name: String) in JSONValue.object(["event": .object(["name": .string(name)])]) }
         return .object([
-            "type": .string("pending_interaction"), "toolUseId": .string(toolUseId), "appId": .string("core"),
+            "type": .string("pending_interaction"), "toolUseId": .string(toolUseId), "appId": .string(appId),
             "render": .object([
                 "kind": .string("inline"), "componentId": .string("location-card"), "builtin": .bool(true),
                 "props": .object(autoShare ? ["reason": .string(reason), "autoShare": .bool(true)] : ["reason": .string(reason)]),

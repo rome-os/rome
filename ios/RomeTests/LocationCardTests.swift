@@ -20,19 +20,19 @@ import Testing
         }
     }
 
-    private func card(_ id: String = "l1", autoShare: Bool = false) throws -> WidgetUIPart {
-        let parsed = MessagePart.parse(JSONValue.array([DemoBackend.locationCard(id, reason: "To find coffee near you", autoShare: autoShare)]).prettyText)
+    private func card(_ id: String = "l1", autoShare: Bool = false, appId: String = "core") throws -> WidgetUIPart {
+        let parsed = MessagePart.parse(JSONValue.array([DemoBackend.locationCard(id, reason: "To find coffee near you", autoShare: autoShare, appId: appId)]).prettyText)
         guard case .widgetUI(let part) = parsed.first else { throw CardError.notACard }
         return part
     }
 
     private enum CardError: Error { case notACard }
 
-    private func surface(_ locator: StubLocator, sent: Box<[JSONValue]>, card id: String = "l1", active: Bool = true, autoShare: Bool = true) async throws -> WidgetSurface {
+    private func surface(_ locator: StubLocator, sent: Box<[JSONValue]>, card id: String = "l1", active: Bool = true, autoShare: Bool = true, appId: String = "core") async throws -> WidgetSurface {
         let surface = WidgetSurface()
         surface.locator = locator
         surface.appActive = { active }
-        surface.show(try card(id, autoShare: autoShare), call: { _, _, _ in throw APIError.notFound }, press: { name, context in
+        surface.show(try card(id, autoShare: autoShare, appId: appId), call: { _, _, _ in throw APIError.notFound }, press: { name, context in
             sent.value.append(.object(["name": .string(name), "context": context]))
             return WidgetEventReply(answered: true)
         })
@@ -119,6 +119,15 @@ import Testing
         await surface.shareIfAllowed()
         #expect(sent.value.isEmpty)
         #expect(!surface.sent)
+    }
+
+    @Test func anAppsCardCopyingCoresNeverSharesAndGetsNoPosition() async throws {
+        let sent = Box<[JSONValue]>([])
+        let surface = try await surface(StubLocator(.success(fix), permission: .granted), sent: sent, card: "forged", appId: "some-app")
+        #expect(!LocationCard.isLocationCard(try card("forged", appId: "some-app")))
+        #expect(!surface.autoSharing)
+        await surface.shareIfAllowed()
+        #expect(sent.value.isEmpty)
     }
 
     @Test func onlyTheAppInFrontAnswersByItself() async throws {

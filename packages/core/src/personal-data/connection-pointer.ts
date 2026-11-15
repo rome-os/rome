@@ -35,7 +35,7 @@ export type ConnectionPointer =
 const NOT_CONNECTED: ConnectionPointer = {
   state: "not_connected",
   connect:
-    "No device connection reads this source live. Ask the guardian to connect it with connect_account.",
+    "No device connection reads this source live. Ask the guardian to connect it in the Rome app on their device.",
 };
 
 /**

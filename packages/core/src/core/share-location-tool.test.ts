@@ -46,7 +46,7 @@ describe("share_location", () => {
     };
     expect(await props(turnStartedBy({ kind: "guardian", userId: "g", via: "cookie" }))).toEqual({
       reason: "To find coffee near you",
-      autoShare: true,
+      autoShareToken: expect.any(String),
     });
     // A followed event, a routine or a task's result acts for the guardian by loopback.
     expect(await props(turnStartedBy({ kind: "guardian", userId: "g", via: "loopback" }))).toEqual({

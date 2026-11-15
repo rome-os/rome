@@ -11,9 +11,12 @@ enum LocationCard {
     /// The event Share fires: the one event the app fills in itself.
     nonisolated static let shareEvent = "share-location"
 
-    /// Whether a card is the share-location card: it holds the Share event.
+    /// Whether a card is the share-location card: core's own, holding the
+    /// Share event. An app's card that names the same event is not, so it
+    /// gets no position and never shares by itself.
     nonisolated static func isLocationCard(_ part: WidgetUIPart) -> Bool {
-        part.components.contains { $0["action"]?["event"]?["name"]?.string == shareEvent }
+        part.appId == "core"
+            && part.components.contains { $0["action"]?["event"]?["name"]?.string == shareEvent }
     }
 
     /// Whether core marked the card as one the app may answer by itself where
