@@ -51,7 +51,8 @@ struct ComposerTextView: UIViewRepresentable {
         if view.textContainerInset.top != inset {
             view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
         }
-        if view.text != text { view.text = text }
+        // While voice input listens, the view shows the words before the binding has them.
+        if editable, view.text != text { view.text = text }
         view.named = named
         if view.placeholder != placeholder { view.placeholder = placeholder }
         view.accessibilityLabel = placeholder

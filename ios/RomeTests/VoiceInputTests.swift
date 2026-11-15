@@ -60,8 +60,7 @@ import Testing
             request: URLRequest(url: URL(string: "ws://127.0.0.1:1/ws/voice-input")!),
             source: source, stopTiming: LoggingTiming(log: log),
             handlers: .init(onText: { _ in }, onDone: { _, _ in }))
-        // Stops as soon as capture runs: the socket to nowhere fails a moment later,
-        // and that would end the dictation first.
+        // Stops as soon as capture runs, before the socket to nowhere fails.
         await withCheckedContinuation { stopped in
             source.onStart = {
                 dictation.stop()
@@ -69,7 +68,9 @@ import Testing
             }
             dictation.start()
         }
-        #expect(log.events == ["begin guardian", "finish", "end"])
+        // The unreachable socket may close the dictation after, which releases nothing new.
+        #expect(Array(log.events.prefix(3)) == ["begin guardian", "finish", "end"])
+        #expect(log.events.filter { $0.hasPrefix("begin") }.count == 1)
     }
 
     @Test func everyOtherStopIsTimedTheSameWay() {
@@ -122,6 +123,14 @@ import Testing
         #expect(handle.cursor(in: "Typed 17") == NSRange(location: 3, length: 2))
         // The text got shorter since (a send): the end again.
         #expect(handle.cursor(in: "Ty") == NSRange(location: 2, length: 0))
+    }
+
+    @Test func settingsNamesTheProviderAndItsHost() {
+        let json = #"{"available":true,"place":{"provider":"Soniox","host":"stt-rt.soniox.com"}}"#
+        let info = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(json.utf8))
+        #expect(info?.placeText == "Soniox · stt-rt.soniox.com")
+        let older = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true}"#.utf8))
+        #expect(older?.available == true)
     }
 
     @Test func standInsOfferNoVoiceInput() async throws {

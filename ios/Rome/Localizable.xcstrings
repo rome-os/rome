@@ -2611,6 +2611,16 @@
         }
       }
     },
+    "Not set up in Rome Cloud" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome Cloud 尚未设置"
+          }
+        }
+      }
+    },
     "Not signed in" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3345,6 +3355,16 @@
         }
       }
     },
+    "Rome Cloud can't be reached" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接 Rome Cloud"
+          }
+        }
+      }
+    },
     "Rome Cloud could not be reached. Listening stopped" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3781,6 +3801,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录后打开你的 Rome"
+          }
+        }
+      }
+    },
+    "Sign in to Rome Cloud again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请重新登录 Rome Cloud"
           }
         }
       }
@@ -4739,6 +4769,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用法"
+          }
+        }
+      }
+    },
+    "Voice input" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音输入"
           }
         }
       }
