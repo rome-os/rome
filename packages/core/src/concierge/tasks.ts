@@ -43,6 +43,8 @@ export interface TaskFactSources {
   reportPending(): readonly string[];
   /** When each task's soonest pending check is due, epoch milliseconds. */
   laterOf?(taskIds: readonly string[]): Promise<Map<string, number>>;
+  /** The tasks whose pending check is a repeating schedule's next run, not a one-off check. */
+  recurringOf?(taskIds: readonly string[]): Promise<Set<string>>;
 }
 
 /**
@@ -469,8 +471,17 @@ export class ConciergeTasks {
     // has a higher order, so this ending never reaches it.
     const upTo = this.repo.liveLinkSeq(row.id);
     if (upTo === null) return;
-    const of = (await this.statusOf([row])).get(row.id);
-    if (of?.status !== "ended") return;
+    const facts = (await this.factsOf([row])).get(row.id);
+    if (!facts) return;
+    let of = taskStatus(facts, this.now(), this.waitExpiryMs);
+    // A task waiting for its repeating schedule's next run, as one made
+    // scheduled after it started, has told its result: it ends for the
+    // message as it would with no run to come. One waiting on a one-off
+    // check is still working for it.
+    if (of.status === "later" && (await this.facts?.recurringOf?.([row.id]))?.has(row.id)) {
+      of = taskStatus({ ...facts, laterAt: null }, this.now(), this.waitExpiryMs);
+    }
+    if (of.status !== "ended") return;
     const lost = row.reportGivenUp && of.endReason !== "stopped" && of.endReason !== "no_response";
     await this.repo.endLinks(row.id, lost ? "failed" : (of.endReason ?? "done"), upTo);
   }
