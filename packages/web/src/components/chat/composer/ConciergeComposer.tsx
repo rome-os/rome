@@ -249,7 +249,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       if (uploadInFlightRef.current || voice.active) return;
       const text = inputText.trim();
       const rawText = inputText;
-      const sentFrom = chatId;
       const uploads = pendingUploads;
       const pickedFolder = folder;
       const skill = draftSkill;
@@ -289,7 +288,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           const sentIds = new Set(uploads.map((upload) => upload.id));
           setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
           setInputText((current) => (current === rawText ? "" : current));
-          sendEnded(sentFrom, rawText, true);
+          sendEnded(rawText, true);
           setFolder((current) => (current === pickedFolder ? null : current));
           setDraftSkill((current) => (current === skill ? null : current));
         }
@@ -297,7 +296,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
           setInputText(text);
-          sendEnded(sentFrom, text, false);
+          sendEnded(text, false);
           setPendingUploads(uploads);
           setFolder(pickedFolder);
           setDraftSkill(skill);
@@ -305,7 +304,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         }
       }
     }, [
-      chatId,
       sendEnded,
       inputText,
       pendingUploads,
