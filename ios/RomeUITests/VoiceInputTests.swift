@@ -54,12 +54,15 @@ final class VoiceInputTests: XCTestCase {
     @MainActor
     func testRule1ATaskChat() throws {
         let app = try launch()
-        let card = app.buttons["task-card"].firstMatch
-        guard card.waitForExistence(timeout: 10) else {
+        let cards = app.buttons.matching(identifier: "task-card")
+        guard cards.firstMatch.waitForExistence(timeout: 10) else {
             printScreen(app, "no task card")
             throw XCTSkip("the instance has no task, so no task chat to open")
         }
-        card.tap()
+        // The card holds a smaller button under the same identifier that stops the task, so
+        // open the card by its left side, away from that button.
+        let card = cards.allElementsBoundByIndex.max(by: { $0.frame.width < $1.frame.width }) ?? cards.firstMatch
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
         try checkStartsAndStops(app, field: "a task chat")
     }
 
