@@ -11,7 +11,7 @@ const agentMessages = (rows: readonly ChatRow[]): ChatMessage[] =>
 
 /**
  * The typing dots of a turn the server marks `simulated`, whose provider
- * cannot say when it writes a message (docs/domains/chats.md#status-reaction):
+ * cannot say when it writes a message (docs/domains/chats.md#reaction):
  * each of the turn's messages that arrives while the chat is open waits
  * behind the dots for a moment, by its length, then shows. Several wait their
  * turn, one after the other. History, and a quiet turn's first message, never

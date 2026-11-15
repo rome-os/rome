@@ -4,6 +4,15 @@ import { currentChatOwner } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
+import { deviceConnectPath } from "../../connections/connect-card.js";
+import { ASKING_DEVICE_HEADER, createLiveRoutes } from "../../connections/device/live-route.js";
+import type { DeviceConnection } from "../../connections/device/repository.js";
+import { DECLINED_LOCATION, sharedLocationAnswer } from "../../webchat/location-card.js";
+import {
+  DECLINE_LOCATION_EVENT,
+  LOCATION_CARD_ID,
+  SHARE_LOCATION_EVENT,
+} from "@rome/api-types/location-card";
 
 /** What core's own widget makes of one of its events: an answer for the agent
  *  waiting on it, a link for the client to open, or neither, which leaves the
@@ -14,8 +23,14 @@ type CoreReply = { answer: unknown } | { open: string } | { ok: true } | Respons
 interface CoreIo {
   /** The connections, as `GET /api/connections` lists them to the caller. */
   connections(): Promise<ConnectionStatus[]>;
+  /** The device connections, as `GET /api/device-connections` lists them to the caller. */
+  deviceConnections(): Promise<DeviceConnection[]>;
   /** The origin the caller reached Rome at, for turning a path into a link. */
   origin: string;
+  /** The props core stored with the widget, which a client cannot change. */
+  props: Record<string, unknown>;
+  /** Who can read the widget's chat now, read when the event arrives. */
+  chatAudience(): Promise<"private" | "shared">;
 }
 
 type CoreHandler = (context: Record<string, unknown>, io: CoreIo) => Promise<CoreReply>;
@@ -30,11 +45,36 @@ interface ConnectionStatus {
 }
 
 /**
+ * Whether a device connection of `kind` works, and its title, by the live
+ * route's own choice (connections/device/live-route.ts) over the connections
+ * `GET /api/device-connections` lists to the caller: a card raised for the
+ * device the guardian asked from (`props.deviceId`) reads that device alone,
+ * and one raised for no device skips devices silent for 7 days. So the card
+ * and the read after it agree.
+ */
+async function deviceKindState(kind: string, io: CoreIo) {
+  const deviceId = typeof io.props.deviceId === "string" ? io.props.deviceId : undefined;
+  const rows = await io.deviceConnections();
+  const pointer = createLiveRoutes({ list: () => rows }).forKind(kind, {
+    askingDeviceId: deviceId,
+  });
+  return {
+    working: pointer.state === "working",
+    label:
+      (pointer.state !== "not_connected" ? pointer.title : undefined) ??
+      rows.find((c) => c.capability === kind)?.title ??
+      kind,
+  };
+}
+
+/**
  * The widgets core owns, by kind, and how each handles its events. The question
  * card's Send answers the agent with what was picked and typed, and its Dismiss
  * declines. The connect card's Connect opens the connection kind's
  * authorization page, or answers at once when the connection is working; its
- * Check answers once the connection is working; its Dismiss declines. Core
+ * Check answers once the connection is working; its Dismiss declines. For a
+ * device kind, Connect opens the device's page, which the device's own app
+ * turns into its flow, and Check reads the device connections. Core
  * turns the answer into what the agent reads when the turn starts.
  */
 const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
@@ -44,7 +84,12 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
   },
   "connect-card": {
     connect: async (context, io) => {
-      const kind = String(context.kind ?? "");
+      const kind = String(io.props.kind ?? context.kind ?? "");
+      if (io.props.device === true) {
+        const device = await deviceKindState(kind, io);
+        if (device.working) return { answer: { kind, status: "connected" } };
+        return { open: deviceConnectPath(kind) };
+      }
       const ofKind = (await io.connections()).filter((c) => c.connectionKind === kind);
       if (ofKind.some((c) => c.state === "working")) {
         return { answer: { kind, status: "connected" } };
@@ -60,7 +105,17 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
       return { open: connect.url };
     },
     check: async (context, io) => {
-      const kind = String(context.kind ?? "");
+      const kind = String(io.props.kind ?? context.kind ?? "");
+      if (io.props.device === true) {
+        const device = await deviceKindState(kind, io);
+        if (device.working) return { answer: { kind, status: "connected" } };
+        return Response.json(
+          {
+            error: `${device.label} isn't connected yet. Connect it on your device, then try again.`,
+          },
+          { status: 409 },
+        );
+      }
       const connections = (await io.connections()).filter((c) => c.connectionKind === kind);
       if (connections.some((c) => c.state === "working")) {
         return { answer: { kind, status: "connected" } };
@@ -73,6 +128,22 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
       );
     },
     dismiss: async (context) => ({ answer: { kind: context.kind, dismissed: true } }),
+  },
+  // Share carries the position the client read from the device; Not now declines.
+  [LOCATION_CARD_ID]: {
+    [SHARE_LOCATION_EVENT]: async (context, io) => {
+      const shared = sharedLocationAnswer(context);
+      if (!shared) return Response.json({ error: "No location was sent." }, { status: 400 });
+      // The chat may have become shared since the card was shown, as when
+      // visitors were let in: then the position reaches nobody, and the card
+      // is answered as declined.
+      if ((await io.chatAudience()) !== "private") return { answer: DECLINED_LOCATION };
+      // A share the client sent by itself is marked so only on a card core
+      // marked for it; a client cannot mark any other.
+      const auto = context.auto === true && typeof io.props.autoShareToken === "string";
+      return { answer: auto ? { ...shared, auto: true } : shared };
+    },
+    [DECLINE_LOCATION_EVENT]: async () => ({ answer: DECLINED_LOCATION }),
   },
 };
 
@@ -97,6 +168,14 @@ function vetLink(link: unknown, origin: string): string | undefined {
 }
 
 /** The names a question card stored before its events were its own. */
+/**
+ * Events a core card takes with no button for them: a device's connect card
+ * gets `check` from the device's app once its flow ends.
+ */
+const CORE_UNSHOWN_EVENTS: Record<string, readonly string[]> = {
+  "connect-card": ["check"],
+};
+
 const STORED_EVENT_NAMES: Record<string, string> = {
   "rome:answer": "send",
   "rome:dismiss": "dismiss",
@@ -109,17 +188,25 @@ interface StoredWidget {
   appId: string;
   /** The kind of a widget core owns, such as `question-card`. */
   componentId?: string;
+  /** The props core stored with a widget it owns. */
+  props: Record<string, unknown>;
   components: unknown[];
   waits: boolean;
 }
 
 export interface WidgetEventDeps {
-  webchatRepo: Pick<WebChatRepository, "widgetMessage" | "getSession" | "getMessages">;
+  webchatRepo: Pick<
+    WebChatRepository,
+    "widgetMessage" | "getSession" | "getMessages" | "askingDeviceOf"
+  >;
   /** Hands a request to Rome's own API, as if the caller had sent it there.
    *  `env` is the incoming request's, so the caller resolves the same way. */
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
   /** Whose chats the caller may open. */
   callerOwner?: () => Promise<string | null>;
+  /** Who can read a dashboard chat now. Absent, every chat reads as shared,
+   *  so no location is accepted. */
+  chatAudience?: (chatId: string) => Promise<"private" | "shared">;
 }
 
 /**
@@ -134,6 +221,8 @@ export interface WidgetEventDeps {
 export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
   const app = new Hono();
   const callerOwner = deps.callerOwner ?? currentChatOwner;
+  /** The cards whose answer is on its way to their chat. */
+  const answering = new Set<string>();
 
   app.post("/chat/widgets/:id/events", async (c) => {
     const widgetId = c.req.param("id");
@@ -159,7 +248,9 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     }
     const widget = readWidget(message.chatId, message.content);
     if (!widget) return c.json({ error: "No widget with this id" }, 404);
-    if (!eventNames(widget.components).has(name)) {
+    const unshown =
+      widget.appId === "core" && CORE_UNSHOWN_EVENTS[widget.componentId ?? ""]?.includes(name);
+    if (!eventNames(widget.components).has(name) && !unshown) {
       return c.json({ error: "This widget declares no such event" }, 400);
     }
 
@@ -172,6 +263,16 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     const headers = new Headers(c.req.raw.headers);
     headers.set("content-type", "application/json");
     headers.delete("content-length");
+    // The turn an answer starts asks the device the guardian pressed it on,
+    // else the device a core card was raised for, else the one the chat was
+    // last handed work from, so the read after connecting goes to that device.
+    if (!headers.has(ASKING_DEVICE_HEADER)) {
+      const deviceId =
+        (widget.appId === "core" && typeof widget.props.deviceId === "string"
+          ? widget.props.deviceId
+          : null) ?? (await deps.webchatRepo.askingDeviceOf(message.chatId));
+      if (deviceId) headers.set(ASKING_DEVICE_HEADER, deviceId);
+    }
     const to = (path: string, json: unknown) =>
       deps.forward(
         new Request(new URL(path, c.req.url), {
@@ -191,6 +292,8 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
       const origin = getExternalRequestOrigin(c.req.raw).origin;
       const reply = await handle(context, {
         origin,
+        props: widget.props,
+        chatAudience: async () => (await deps.chatAudience?.(message.chatId)) ?? "shared",
         connections: async () => {
           const res = await deps.forward(
             new Request(new URL("/api/connections", c.req.url), { headers }),
@@ -198,6 +301,16 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
           );
           const listed = (await res.json().catch(() => null)) as {
             connections?: ConnectionStatus[];
+          } | null;
+          return res.ok ? (listed?.connections ?? []) : [];
+        },
+        deviceConnections: async () => {
+          const res = await deps.forward(
+            new Request(new URL("/api/device-connections", c.req.url), { headers }),
+            c.env,
+          );
+          const listed = (await res.json().catch(() => null)) as {
+            connections?: DeviceConnection[];
           } | null;
           return res.ok ? (listed?.connections ?? []) : [];
         },
@@ -280,15 +393,26 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     output: unknown,
     turnFields: unknown,
   ) {
+    // Two clients can press the same card at once: the first answer wins,
+    // and the other is refused until the chat has stored the first.
+    if (answering.has(widgetId)) {
+      return Response.json({ error: "This card was already answered" }, { status: 400 });
+    }
+    answering.add(widgetId);
     const turn = isObject(turnFields) ? turnFields : {};
-    const res = await to(`/api/chat/sessions/${encodeURIComponent(widget.chatId)}/turns`, {
-      ...turn,
-      // The message names the card pressed: a later card in the chat can
-      // reuse its tool-use id.
-      parts: [
-        { type: "interaction_result", toolUseId: widget.toolUseId, messageId: widgetId, output },
-      ],
-    });
+    let res: Response;
+    try {
+      res = await to(`/api/chat/sessions/${encodeURIComponent(widget.chatId)}/turns`, {
+        ...turn,
+        // The message names the card pressed: a later card in the chat can
+        // reuse its tool-use id.
+        parts: [
+          { type: "interaction_result", toolUseId: widget.toolUseId, messageId: widgetId, output },
+        ],
+      });
+    } finally {
+      answering.delete(widgetId);
+    }
     if (!res.ok) return res;
     const turnReply = await res.json().catch(() => ({}));
     return Response.json(
@@ -328,6 +452,7 @@ function readWidget(chatId: string, content: string | null): StoredWidget | null
       isObject(part.render) && typeof part.render.componentId === "string"
         ? part.render.componentId
         : undefined,
+    props: isObject(part.render) && isObject(part.render.props) ? part.render.props : {},
     components: ui.components,
     waits: part.type === "pending_interaction",
   };

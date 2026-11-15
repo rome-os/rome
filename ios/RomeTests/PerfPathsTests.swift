@@ -74,26 +74,24 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(store.messages.map(\.id) == ["u1", "a2", "a3", "a1", "u2"])
     }
 
-    @Test func aTaskWriteThatChangesNothingWritesNothing() {
-        let tasks = TasksStore(backend: FakeBackend())
-        var task = ConciergeTask(id: "k1", title: "Book", state: .doing, createdAt: 1, updatedAt: 1, status: "active")
-        task.chat = .init(id: "chat-1", name: "Book")
-        tasks.apply(task)
-        #expect(tasks.task(forChat: "chat-1")?.id == "k1")
+    @Test func aChatListThatChangesNothingWritesNothing() async {
+        let backend = FakeBackend()
+        backend.sessionRows = [ChatSession(id: "chat-1", name: "Book")]
+        let tasks = TaskChatsStore(backend: backend)
+        await tasks.refresh()
+        #expect(tasks.title(forChat: "chat-1", fallback: "x") == "Book")
         final class Flag: @unchecked Sendable { var on = false }
         let written = Flag()
-        withObservationTracking { _ = tasks.tasks } onChange: { written.on = true }
-        tasks.apply(task)
+        withObservationTracking { _ = tasks.chats } onChange: { written.on = true }
+        await tasks.refresh()
         #expect(!written.on)
-        // A newer copy is written, and the index follows it.
-        task.title = "Book a table"
-        task.updatedAt = 2
-        tasks.apply(task)
+        backend.sessionRows = [ChatSession(id: "chat-1", name: "Book a table")]
+        await tasks.refresh()
         #expect(written.on)
         #expect(tasks.title(forChat: "chat-2", fallback: "x") == "x")
-        #expect(tasks.task(forChat: "chat-1")?.title == "Book a table")
+        #expect(tasks.title(forChat: "chat-1", fallback: "x") == "Book a table")
         tasks.forget(chat: "chat-1")
-        #expect(tasks.task(forChat: "chat-1") == nil)
+        #expect(tasks.isGone(chat: "chat-1"))
     }
 
     @Test func aFrameIsReadIntoItsEvent() throws {

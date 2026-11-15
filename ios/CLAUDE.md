@@ -25,9 +25,9 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 **The server never announces the guardian's own message on `chat.session:<id>`.** A pending bubble waits for a fetch, not an event. `TranscriptStore` marks it sent when the POST returns and reloads the newest page.
 
-**A turn that fails in the middle leaves no reply, only its trace.** The instance stores a model error as a reply (an `error` part) only when the model could not be resolved before the turn ran. A failure after that (a provider limit, a crash) is in the trace message's `turnStatus: "error"` and `terminalError`, and in the guardian message's `statusReaction`. `TranscriptBuilder` draws a line from the trace unless a stored error part has the same turn, so a failure never shows twice and never shows nothing.
+**A turn that fails in the middle leaves no reply, only its trace.** The instance stores a model error as a reply (an `error` part) only when the model could not be resolved before the turn ran. A failure after that (a provider limit, a crash) is in the trace message's `turnStatus: "error"` and `terminalError`. `TranscriptBuilder` draws a line from the trace unless a stored error part has the same turn, so a failure never shows twice and never shows nothing.
 
-**A task's question or approval in the Chat is drawn from its part's `card`, never from the task chat.** The instance fills `card` into every `task_chat` part that shows one, each time it hands the message out, and `chat_card_settled` replaces it live (`TaskAskCard`). A part with no `card` (an older instance) draws as one quiet "no longer available" line; there is no paging fallback. A card takes an answer only when it is the task's newest, has no outcome, and `ConciergeTask.waitId` names it with the task `needs_you` (`TaskAskMode`).
+**A task's question or approval in the Chat is drawn from its part's `card`, never from the task chat.** The instance fills `card` into every `task_chat` part that shows one, each time it hands the message out, and `chat_card_settled` replaces it live (`TaskAskCard`). A part with no `card` (an older instance) draws as one quiet "no longer available" line; there is no paging fallback. Whether a card waits is read from the card alone: no `outcome`, not `expired`, not `closed` (`TaskAskCard.waits`); only the task's newest such card takes an answer (`TaskAskMode`). No task list is read for it. A task card's line says only Working or Needs you, from the chat list (`TaskChatsStore`).
 
 **A stored `approval_card` part always says `pending`.** Only `GET /approvals/:id` knows whether it was answered, so a card shows its buttons only after that record arrives.
 
@@ -35,11 +35,13 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 **A literal reaches the catalog only where Swift types it as `LocalizedStringKey` or `String(localized:)`.** `Text("Done")` is looked up; `Text(flag ? "Running" : tone.label)` is a `String` and shows as written, and so does a literal passed to a `String` parameter. Give a view's text parameters the type `LocalizedStringKey`, and wrap literals headed for a `String` in `String(localized:)`.
 
-**A view at the end of a `LazyVStack` is not proof that the bottom is on screen.** The stack keeps it alive while it is off screen, so its `onAppear` and `onDisappear` lag behind the scroll, and a list that trusts them pulls the guardian back to the bottom. `TranscriptList` reads the scroll phase and `onScrollVisibilityChange` instead, and before iOS 18 the marker's frame against the visible area.
+**A SwiftUI view in a `UIHostingConfiguration` cell does not inherit the SwiftUI environment around the collection view.** The transcript's rows read many environment values (`openTaskChat`, `assetLoader`, `shareTurns`), and they arrive empty in a cell. `TranscriptList` hands `context.environment` to every cell. For the same reason a row cannot read a coordinate space named outside the list; the list reports positions itself, as it does for the unread line.
+
+**A hosted cell's default self-sizing came out a line short for wrapped text.** Rows overlapped the ones below them. `TranscriptCell` measures its content at the list's width itself.
 
 **Message times are whole seconds.** Rows written in the same second tie, so sorting by time alone gives a random order that can change on each load. `TranscriptStore` orders rows the way the server does: by turn, then time, then the order they arrived.
 
-**Two `onGeometryChange` readings of the same type on one view do not both fire.** The second never ran in `TranscriptList`. Read both values in one closure.
+**Two `onGeometryChange` readings of the same type on one view do not both fire.** The second never runs. Read both values in one closure.
 
 **Mac Catalyst runs the app but cannot capture a system sheet.** Snapshot runs draw the Tasks sheet in a stand-in frame; the sheet on a phone is the system one.
 
@@ -51,7 +53,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 **The swipe home starts on the transcript and reads as a drag away from the bottom.** So does Notification Center pulled down over the app. Rows refetched on return then land below the screen, which looks like a stale chat. `TranscriptList` goes by whether the bottom was on screen when the app resigned active, and a tapped push always shows the newest rows.
 
-**A fling's glide wins over `ScrollViewReader.scrollTo`.** The tap reaches the button and `scrollTo` runs, but the list keeps decelerating the other way, so a tap mid-glide seems to do nothing. A Simulator tap after a slow drag does not show it; a real fling does. `ScrollHandle` stops the `UIScrollView`'s deceleration before scrolling, and older pages wait until the jump lands, because content that grows under the scroll animation moves its target.
+**A fling's glide wins over a programmatic scroll.** The tap reaches the button and the scroll starts, but the list keeps decelerating the other way, so a tap mid-glide seems to do nothing. A Simulator tap after a slow drag does not show it; a real fling does. `TranscriptList` stops the deceleration before it scrolls to the bottom or to a quoted message.
 
 **A page that stays mounted keeps its animations running.** Chat stays in the tree, faded out, under the other sections, and a `TimelineView(.animation)` draws every frame there for no one. Pass `paused: offScreen`; see [`PERFORMANCE.md`](PERFORMANCE.md).
 

@@ -26,6 +26,21 @@ final class TokenBox: Sendable {
     }
 }
 
+/// Reaches the model from Health sync's threads without keeping it alive.
+private final class TargetBox: @unchecked Sendable {
+    @MainActor weak var model: AppModel?
+
+    func resolve(_ instanceId: String) async -> PersonalDataTarget? {
+        await MainActor.run { model?.personalDataTarget(instanceId) }
+    }
+}
+
+/// Settings opened at some pages from outside the sheet.
+struct SettingsRequest: Equatable {
+    let serial: Int
+    let routes: [SettingsRoute]
+}
+
 /// The role, name and picture an instance's session had last time, kept on
 /// this phone per instance so a cached launch shows them before `/auth/me`.
 struct KeptIdentity: Codable, Equatable, Sendable {
@@ -98,7 +113,7 @@ final class Workspace {
     private(set) var accountLabel: String
     /// The Rome Cloud picture of who is signed in, when they have one.
     private(set) var avatarURL: URL?
-    let tasks: TasksStore
+    let taskChats: TaskChatsStore
     private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
@@ -191,7 +206,7 @@ final class Workspace {
         voiceInput = VoiceInputService(backend: backend, instance: self.drafts.instance)
         // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
         transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance, account: backend.account)
-        tasks = TasksStore(backend: backend)
+        taskChats = TaskChatsStore(backend: backend)
         // The main chat's id from last time, else the guardian's until the
         // server names this person's. Its kept rows show before any fetch.
         let mainId = transcripts.mainChat() ?? conciergeChatID
@@ -351,14 +366,32 @@ final class Workspace {
     }
 
     /// Deletes a topic chat and drops it from the drawer. Returns whether the
-    /// server took it.
+    /// server took it. `stoppingWork` ends its follows and open tasks instead
+    /// of moving them to the main Chat.
     @discardableResult
-    func deleteTopic(_ chatId: String) async -> Bool {
-        guard (try? await backend.deleteChat(chatId)) != nil else { return false }
+    func deleteTopic(_ chatId: String, stoppingWork: Bool = false) async -> Bool {
+        guard (try? await backend.deleteChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
-        // Its open tasks now belong to the main Chat.
-        tasks.resync()
+        // Its open tasks now belong to the main Chat, or have stopped.
+        taskChats.resync()
         return true
+    }
+
+    /// The follows and open tasks that deleting topic chat `chatId` would
+    /// move, or nil when they cannot be read within `wait`: an older
+    /// instance, or a slow network. The delete then moves them, as before.
+    func topicWork(_ chatId: String, wait: Duration = .seconds(3)) async -> ConciergeChatWork? {
+        let backend = backend
+        return await withTaskGroup(of: ConciergeChatWork?.self) { group in
+            group.addTask { try? await backend.chatWork(chatId: chatId) }
+            group.addTask {
+                try? await Task.sleep(for: wait)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     private func dropTopic(_ chatId: String) {
@@ -385,7 +418,7 @@ final class Workspace {
     }
 
     private func dropTaskChat(_ chatId: String) {
-        tasks.forget(chat: chatId)
+        taskChats.forget(chat: chatId)
         taskStores.removeValue(forKey: chatId)?.close()
     }
 
@@ -398,7 +431,7 @@ final class Workspace {
     func start() async {
         drafts.discardBlankChats()
         watchAgentName()
-        tasks.start()
+        taskChats.start()
         topics.start()
         Task {
             if role == .unknown { await readRole() }
@@ -481,6 +514,13 @@ final class Workspace {
         if isMainChat(chat) { concierge.chatShown() } else { topicStores[chat]?.chatShown() }
     }
 
+    /// The app went to the background: each Concierge chat opens again when
+    /// it comes back in front, so what arrived meanwhile gets its unread line.
+    func leftForBackground() {
+        concierge.leftForBackground()
+        for store in topicStores.values { store.leftForBackground() }
+    }
+
     /// The id this person's main chat goes by, here and on the server.
     func isMainChat(_ id: String) -> Bool {
         id == conciergeChatID || id == mainChatServerID || id == concierge.sessionId
@@ -539,7 +579,7 @@ final class Workspace {
     func stop() {
         if let nameWatch { backend.events.unsubscribe(nameWatch) }
         nameWatch = nil
-        tasks.stop()
+        taskChats.stop()
         concierge.close()
         topics.stop()
         for store in topicStores.values { store.close() }
@@ -602,6 +642,12 @@ final class AppModel {
         // the sign-in screen.
         didSet {
             if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) }
+            // Back on a Rome after the session ran out: Health sync goes on.
+            if phase == .ready, oldValue != .ready {
+                health.instanceOpened()
+                // A report the gate held back before the app was ready goes now.
+                connections.reportIfUnsent()
+            }
             if !phase.isSignedIn { stackGame = nil }
             // Signed out, however it came about: the widget offers to make an app.
             if phase == .signedOut, oldValue != .signedOut { WidgetShelf.shared.clear() }
@@ -622,7 +668,13 @@ final class AppModel {
         }
     }
     private(set) var instances: [CloudInstance] = []
-    private(set) var currentInstanceID: String?
+    private(set) var currentInstanceID: String? {
+        // Each Rome has its own Health sync: the one open now syncs.
+        didSet {
+            guard currentInstanceID != oldValue else { return }
+            health.select(currentInstanceID.flatMap { id in (instances.first { $0.id == id } ?? Self.rememberedInstance().flatMap { $0.id == id ? $0 : nil }).map(Self.healthInstance) })
+        }
+    }
     private(set) var signInError: String?
     /// The instance to sign in to once from a browser before the phone can,
     /// set with its error.
@@ -662,8 +714,23 @@ final class AppModel {
 
     let cloud: CloudAuth
     let push: PushCenter
-    /// This iPhone as a rome-node device: Apple Health for the instance's agent.
+    /// This iPhone as a rome-node device: what the instance's Agent may use live.
     let node: NodeHost
+    /// Apple Health's Sync with Rome.
+    let health: HealthSettings
+    /// This phone's device connections, reported to the open Rome.
+    let connections: DeviceConnections
+    /// A connect card's link into the authorization, for the shell to hand its cards.
+    @ObservationIgnored private(set) lazy var deviceConnectAction = DeviceConnectAction { @MainActor [weak self] url in
+        // A device connection's link is this app's own authorization, not a page.
+        // A visitor's Rome cannot reach this phone: the link stays a page.
+        guard let self, self.workspace?.isVisitor != true, let id = DeviceConnectLink.capability(in: url, origin: self.webURL) else { return nil }
+        return await self.connections.ask(id)
+    }
+    /// The workspace whose start has run on a good session: reports go only to it.
+    @ObservationIgnored private weak var reportsTo: Workspace?
+    /// Settings opened at these pages, as a tapped "sign in again" notice asks.
+    private(set) var settingsRequest = SettingsRequest(serial: 0, routes: [])
     /// Light, dark or automatic, for the whole app; kept across sign-out.
     let appearance = AppearanceSetting()
     /// Keeps the open instance on its latest release.
@@ -693,8 +760,47 @@ final class AppModel {
         self.images = images
         self.instanceConfiguration = instanceConfiguration
         push = PushCenter(registry: cloud)
-        node = NodeHost(credentials: cloud)
+        let target = TargetBox()
+        // The Rome the app opens is the one Health syncs to, from launch on:
+        // HealthKit can wake the app before any screen shows.
+        let health = HealthSettings(
+            instance: Self.rememberedInstance().map(Self.healthInstance),
+            target: { await target.resolve($0) }
+        )
+        self.health = health
+        let device = DeviceKind.current
+        node = NodeHost(credentials: cloud, registry: NodeCapabilityRegistry(capabilities: [
+            HealthCapability(health: HealthActions(reader: health.reader, device: device), live: NodeFlag()),
+            DeviceCapability(live: NodeFlag(), device: device),
+        ]), device: device)
+        connections = DeviceConnections(node: node)
+        target.model = self
         node.onCredentialRejected = { [weak self] in self?.nodeCredentialRejected() }
+        // A live Health answer leaves the app in front: the sync catches up,
+        // at most every 15 minutes. Live results themselves are never stored.
+        node.onAnswered = { [weak health] action in
+            if action.hasPrefix("health.") { health?.foreground() }
+        }
+        connections.originId = { [weak health] in health?.originId() }
+        connections.device = { [weak self] in
+            guard let id = self?.cloud.deviceCredential?.deviceSessionId else { return nil }
+            return (id.lowercased(), UIDevice.current.name)
+        }
+        // Only to a Rome the guardian owns: a visitor's Rome cannot reach this phone.
+        connections.send = { [weak self] report in
+            // Only once the workspace started on a good session: a cached
+            // launch shows ready before an expired session is renewed.
+            guard let self, self.phase == .ready, let workspace = self.workspace, workspace === self.reportsTo else { return false }
+            // A visitor's Rome is never told; that is not a failure.
+            if workspace.isVisitor { return true }
+            do {
+                try await workspace.backend.reportDeviceConnections(report)
+                return true
+            } catch {
+                deviceConnectionsLog.error("report failed: \(error.localizedDescription, privacy: .public)")
+                return false
+            }
+        }
     }
 
     // MARK: Launch
@@ -805,6 +911,9 @@ final class AppModel {
             // The link was for another instance, now open in its place.
             guard self.workspace === workspace else { return }
         }
+        // On a good session, as the workspace's own start is: this Rome learns the phone's connections.
+        reportsTo = workspace
+        connections.report()
         await workspace.start()
     }
 
@@ -1045,7 +1154,7 @@ final class AppModel {
             Task { @MainActor in self?.handleUnauthorized(box: box, instance: instance) }
         }, renew: { [weak self] in
             await self?.renewAfterUnauthorized(box: box, instance: instance) ?? false
-        })
+        }, deviceId: cloud.deviceCredential?.deviceSessionId.lowercased())
         return Workspace(
             backend: LiveBackend(client: client, account: account),
             instanceName: instance.name,
@@ -1148,6 +1257,9 @@ final class AppModel {
     var currentInstance: CloudInstance? { instances.first { $0.id == currentInstanceID } }
 
     func signOut() async {
+        // While the session still works: the Rome drops this device id's
+        // connections, which no later report would.
+        await connections.reportNone()
         // First, so nothing still running for this account writes again.
         cloud.endAccount()
         node.accountEnded()
@@ -1196,6 +1308,9 @@ final class AppModel {
         KeptIdentity.removeAll()
         // The device's switches and its Recent activity.
         node.forgetAccount()
+        connections.forgetAccount()
+        // Health sync's switch, anchors, history and origin; the Rome keeps what it has.
+        health.forgetAccount()
     }
 
     // MARK: Session expiry
@@ -1260,6 +1375,83 @@ final class AppModel {
         return result
     }
 
+    // MARK: Personal data
+
+    /// Where Health sync sends: the Rome open now, else the one opened last,
+    /// with this phone's guardian session. A visitor has no personal data to send.
+    static func healthInstance(_ instance: CloudInstance) -> HealthInstance {
+        HealthInstance(id: instance.id, name: instance.name, isVisitor: instance.isVisitor)
+    }
+
+    /// Where `instanceId`'s Health sync sends: that Rome, with this phone's
+    /// guardian session, and only while it is the one open (or, before any
+    /// opens, the one the app opens next). Any other Rome gets nothing.
+    fileprivate func personalDataTarget(_ instanceId: String) -> PersonalDataTarget? {
+        #if DEBUG
+        // A local Rome signed in with ROME_LOCAL_*: its own session, no Rome Cloud.
+        if instanceId == "local", currentInstanceID == "local", let box = tokenBox, let origin = currentInstance.flatMap({ URL(string: $0.origin) }) {
+            return PersonalDataTarget(instanceId: "local", backend: PersonalDataClient(client: APIClient(origin: origin, token: { box.token })))
+        }
+        #endif
+        guard cloud.hasCredential else { return nil }
+        guard let instance = currentInstanceID == nil ? Self.rememberedInstance() : currentInstance, instance.id == instanceId, !instance.isVisitor,
+              let origin = URL(string: instance.origin), let session = cloud.storedSession(for: instance),
+              session.cookie == InstanceSession.guardianCookie
+        else { return nil }
+        let box = TokenBox()
+        box.use(session)
+        let cloud = cloud
+        let renewal = RenewalNote()
+        let client = APIClient(origin: origin, token: { box.token }, cookieName: { box.cookieName }, configuration: instanceConfiguration(), renew: {
+            // A background wake can renew a session past its time, as long
+            // as Rome Cloud still knows this phone. Cloud or the network
+            // being down is not the end of the sign-in.
+            do {
+                let renewed = try await cloud.session(for: instance, forceRefresh: true)
+                box.use(renewed)
+                renewal.note(transient: false)
+                return true
+            } catch {
+                let ended: [AuthError] = [.cloudUnauthorized, .accessDenied, .accessRevoked, .notOwner, .sessionRejected]
+                renewal.note(transient: !((error as? AuthError).map(ended.contains) ?? false))
+                return false
+            }
+        })
+        return PersonalDataTarget(instanceId: instance.id, backend: PersonalDataClient(client: client, renewal: renewal))
+    }
+
+    /// One authorization, from Settings or a card: iOS's permission where
+    /// one is needed, then Live access on, and for Health its Sync for the
+    /// open Rome, then the report.
+    func connect(_ id: String) async {
+        guard let capability = node.registry.capability(id: id) else { return }
+        // The Rome this connect was for: Sync turns on only there, never on
+        // one opened while the report was out.
+        let instance = currentInstanceID
+        if capability.needsPermission { await capability.requestPermission() }
+        // The report first, so the card's check finds the connection at once;
+        // Sync's upload then runs on its own, behind it.
+        await connections.connect(id)
+        guard currentInstanceID == instance else { return }
+        if capability.syncSource == HealthSettings.sourceId, health.canSync, !health.isEnabled {
+            health.setEnabled(true)
+        }
+    }
+
+    /// Settings, at Apple Health's Sync history.
+    func openHealthHistory() {
+        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.connections, .connection(HealthCapability.id), .syncHistory])
+    }
+
+    /// The pages to open, once: the shell takes them when it shows.
+    func takeSettingsRequest() -> [SettingsRoute]? {
+        guard settingsRequest.serial > settingsTaken else { return nil }
+        settingsTaken = settingsRequest.serial
+        return settingsRequest.routes
+    }
+
+    @ObservationIgnored private var settingsTaken = 0
+
     func reauthenticate() async {
         sessionExpired = false
         workspace?.stop()
@@ -1305,6 +1497,9 @@ final class AppModel {
             // The link was for another instance, now open in its place.
             guard self.workspace === workspace else { return }
         }
+        // On a good session, as the workspace's own start is: this Rome learns the phone's connections.
+        reportsTo = workspace
+        connections.report()
         await workspace.start()
     }
 
@@ -1321,6 +1516,7 @@ final class AppModel {
         // Drafts are written before the app may be killed.
         if let drafts = workspace?.drafts { Task { await drafts.flush() } }
         workspace?.transcripts.flush()
+        workspace?.leftForBackground()
         sayGoodbye()
     }
 
@@ -1401,6 +1597,10 @@ final class AppModel {
     func appDidBecomeActive() {
         appearance.apply()
         node.setActive(true)
+        health.foreground()
+        // iOS Settings may have changed a permission meanwhile.
+        node.permissionsChanged()
+        connections.report()
         // Back in front on a chat counts as opening it: its delivered pushes go.
         if let visibleChat {
             clearDelivered(for: visibleChat)
@@ -1561,7 +1761,7 @@ final class AppModel {
     var debugCommand: DebugCommand?
     /// Text size the snapshot runner forces, to check large Dynamic Type.
     var dynamicTypeOverride: DynamicTypeSize?
-    /// The part of the Apple Health page the snapshot runner scrolls to: "where", "end", or the top.
+    /// The part of the Apple Health page the snapshot runner scrolls to: "end", or the top.
     var debugHealthScroll: String?
 
     func debugSetPhase(_ phase: Phase) {

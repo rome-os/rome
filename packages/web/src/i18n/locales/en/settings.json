@@ -49,6 +49,12 @@
     "remove": "Remove",
     "cancel": "Cancel"
   },
+  "deviceConnect": {
+    "title": "Connect {{title}}",
+    "onDevice": "Connect {{title}} on {{device}}: open the Rome app there and turn it on under Settings › Connections. Then go back to the chat and say it's done.",
+    "connected": "{{title}} is connected on {{device}}. Go back to the chat and say it's done.",
+    "yourDevice": "your device"
+  },
   "connections": {
     "loading": "Loading connections",
     "errorTitle": "Connections couldn't be loaded",
