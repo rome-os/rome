@@ -234,7 +234,7 @@ export class AgentRunner {
       ? await this.webchatRepo?.continuityKeyOfSession(explicitSessionId)
       : requestedChannelThreadKey;
     const opening = {
-      ...this.openingFor(openedKey ?? "", threadContext),
+      ...(await this.openingFor(openedKey ?? "", threadContext)),
       kind: threadContext ? ("conversation" as const) : ("action" as const),
       workingDir: params.workingDir,
       threadContext,

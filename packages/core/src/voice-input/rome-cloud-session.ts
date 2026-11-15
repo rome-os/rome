@@ -26,7 +26,12 @@ export type RomeCloudSessionOutcome =
 
 export interface RomeCloudCaller {
   origin: string;
-  /** A bearer for one Rome Cloud request, or null when none is available. */
+  /** The instance credential's stable name. Signer bearers change every minute; this does not. */
+  credentialId: string;
+  /**
+   * A bearer for one Rome Cloud request, or null when none is available. The
+   * instance is still signed in then: the signer is restarting, say.
+   */
   bearer: () => Promise<string | null>;
 }
 
@@ -52,7 +57,8 @@ export async function requestRomeCloudSession(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<RomeCloudSessionOutcome> {
   const token = await caller.bearer();
-  if (!token) return { kind: "signed-out" };
+  // Signed in, but no bearer for now: a passing gap, not a lost sign-in.
+  if (!token) return { kind: "unavailable", detail: "no bearer" };
   let response: Response;
   try {
     response = await fetchImpl(new URL("/v1/transcription/sessions", caller.origin), {
@@ -116,7 +122,8 @@ export async function readRomeCloudProvider(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<RomeCloudProviderOutcome> {
   const token = await caller.bearer();
-  if (!token) return { kind: "signed-out" };
+  // Signed in, but no bearer for now: a passing gap, not a lost sign-in.
+  if (!token) return { kind: "unavailable", detail: "no bearer" };
   let response: Response;
   try {
     const url = new URL("/v1/transcription/provider", caller.origin);
