@@ -21,6 +21,8 @@ export function connectAccountTools(input: {
   hasSpeaker: boolean;
   /** The device kinds devices reported, read when the session's tools are built. */
   devices?: readonly DeviceKind[];
+  /** The device kinds as they stand when the tool is called. */
+  deviceStates?: () => readonly DeviceKind[];
   devicesOnly?: boolean;
 }): RomeTool[] {
   const widgetsShow = input.widgets === "card";
@@ -32,10 +34,8 @@ export function connectAccountTools(input: {
       name: "connect_account",
       endsTurn: widgetsShow,
       description: input.devicesOnly
-        ? "Ask the guardian to connect a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it here, in this chat, before starting a task that needs it, when they ask to connect one, when the capability you need is `off` or `broken` below, or when a reply or a device says `not_connected` or `live_off`. Never ask whether a device is connected: read it below. Never show the card again for a kind whose card the guardian just answered. The card opens the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn." +
-          deviceStates(devices)
-        : "Ask the guardian to connect an account of a kind Rome connects itself, such as GitHub, Slack or Shopify, or a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it when a task needs one of these and it is not connected, or a call reports it is not connected. The card opens the provider's authorization page, or the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. Where no card shows, ask the guardian to connect it in Settings › Connections." +
-          deviceStates(devices),
+        ? "Ask the guardian to connect a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it here, in this chat, before starting a task that reads a device, when they ask to connect one, or when a reply or a device says `not_connected` or `live_off`. It answers at once that a kind already works, with no card, so call it instead of asking whether a device is connected. Never show the card again for a kind whose card the guardian just answered. The card opens the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn."
+        : "Ask the guardian to connect an account of a kind Rome connects itself, such as GitHub, Slack or Shopify, or a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it when a task needs one of these and it is not connected, or a call reports it is not connected. The card opens the provider's authorization page, or the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. Where no card shows, ask the guardian to connect it in Settings › Connections.",
       inputSchema: {
         type: "object",
         required: ["kind"],
@@ -58,6 +58,20 @@ export function connectAccountTools(input: {
           devicesOnly: input.devicesOnly,
         });
         if (!parsed.ok) return { content: [{ type: "text", text: parsed.error }], isError: true };
+        // A device kind that already works needs no card: read as it stands now.
+        if (parsed.device) {
+          const now = input.deviceStates?.().find((d) => d.kind === parsed.kind);
+          if (now?.state === "working") {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `${parsed.device.label} is already connected${now.device ? ` on ${now.device}` : ""}. Go ahead; no card shown.`,
+                },
+              ],
+            };
+          }
+        }
         const output = parsed.device
           ? deviceConnectToolOutput(parsed.device, widgetsShow)
           : connectAccountToolOutput(parsed.kind, widgetsShow);
@@ -69,17 +83,4 @@ export function connectAccountTools(input: {
       },
     },
   ];
-}
-
-/**
- * The device kinds as they stand now, for the description: an agent reads
- * whether a capability is working instead of asking the guardian.
- */
-function deviceStates(devices: readonly DeviceKind[]): string {
-  const known = devices.filter((d) => d.state);
-  if (known.length === 0) return "";
-  const lines = known.map(
-    (d) => `\`${d.kind}\` (${d.label}${d.device ? ` on ${d.device}` : ""}): ${d.state}`,
-  );
-  return ` Device connections now: ${lines.join("; ")}.`;
 }

@@ -51,18 +51,25 @@ describe("connect_account", () => {
     });
   });
 
-  it("says how each device kind stands, so the agent reads it instead of asking", () => {
+  it("answers that a device kind already works, read when called, with no card", async () => {
+    let state: "working" | "off" = "off";
     const [tool] = connectAccountTools({
       widgets: "card",
       hasSpeaker: true,
       devicesOnly: true,
-      devices: [
-        { kind: "device", label: "Device", state: "off", device: "iPhone" },
-        { kind: "apple_health", label: "Apple Health", state: "working", device: "iPhone" },
+      devices: [{ kind: "apple_health", label: "Apple Health" }],
+      deviceStates: () => [
+        { kind: "apple_health", label: "Apple Health", state, device: "iPhone" },
       ],
     });
-    expect(tool!.description).toContain("`device` (Device on iPhone): off");
-    expect(tool!.description).toContain("`apple_health` (Apple Health on iPhone): working");
-    expect(tool!.description).toContain("Never ask whether a device is connected");
+    // The description holds no state, so the session's tools stay the same.
+    expect(tool!.description).not.toContain("working");
+    const off = await tool!.handler({ kind: "apple_health" });
+    expect(JSON.parse(off.content[0]!.text)).toMatchObject({ pendingInteraction: true });
+    state = "working";
+    const working = await tool!.handler({ kind: "apple_health" });
+    expect(working.content[0]!.text).toBe(
+      "Apple Health is already connected on iPhone. Go ahead; no card shown.",
+    );
   });
 });
