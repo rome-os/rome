@@ -3,7 +3,9 @@ import { currentAuthEpoch } from "./new-chat-draft-storage";
 
 // One draft per open chat, kept in local storage so it survives a reload and
 // a switch to another chat. It holds text only: an attachment or a pick does
-// not survive. Logging out removes every draft.
+// not survive. Logging out removes every draft, and deleting a chat removes
+// its own. Local, not session, storage on purpose: a draft outlives its tab,
+// unlike the new chat's draft in `new-chat-draft-storage.ts`.
 const PREFIX = "rome:chat-draft:";
 const recordSchema = z.object({
   version: z.literal(1),
@@ -36,12 +38,12 @@ export function loadChatDraft(chatId: string): ChatDraft | null {
  * nothing.
  */
 export function saveChatDraft(chatId: string, draft: ChatDraft, authEpoch: string | null) {
-  if (!draft.text) {
-    clearChatDraft(chatId);
-    return;
-  }
   try {
     if (authEpoch === null || authEpoch !== currentAuthEpoch()) return;
+    if (!draft.text) {
+      clearChatDraft(chatId);
+      return;
+    }
     localStorage.setItem(
       PREFIX + chatId,
       JSON.stringify({ version: 1, text: draft.text, authEpoch }),
@@ -49,6 +51,22 @@ export function saveChatDraft(chatId: string, draft: ChatDraft, authEpoch: strin
   } catch {
     // Full or disabled storage must not break typing.
   }
+}
+
+/**
+ * After a send the server accepted: removes the draft only while it is still
+ * the text that went out, so anything typed since stays.
+ */
+export function clearSentChatDraft(chatId: string, sent: string) {
+  if (loadChatDraft(chatId)?.text === sent) clearChatDraft(chatId);
+}
+
+/**
+ * After a send that failed: puts the text back as the draft, unless the chat
+ * has a newer one or a logout came in between.
+ */
+export function restoreUnsentChatDraft(chatId: string, text: string, authEpoch: string | null) {
+  if (!loadChatDraft(chatId)) saveChatDraft(chatId, { text }, authEpoch);
 }
 
 export function clearChatDraft(chatId: string) {
