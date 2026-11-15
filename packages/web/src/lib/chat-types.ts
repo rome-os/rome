@@ -159,6 +159,8 @@ export interface CreateTurnResponse {
   inputState?: import("@rome/api-types/trace-segments").AgentInputState | null;
   sessionId: string;
   startedAt: string;
+  /** The user message as the server stored it (a JSON array of parts). */
+  content?: string;
 }
 
 export interface ChatMessage {
