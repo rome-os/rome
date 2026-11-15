@@ -25,6 +25,8 @@ enum VoiceInputStopReason: String, Sendable, Equatable {
     case leftChat = "left-chat"
     case backgrounded = "backgrounded"
     case interrupted = "interrupted"
+    /// The app closed while listening; told on the next launch.
+    case appClosed = "app-closed"
 
     /// The notice the field shows, in the dashboard's words.
     var notice: String {
@@ -43,6 +45,7 @@ enum VoiceInputStopReason: String, Sendable, Equatable {
         case .leftChat: String(localized: "Listening stopped when you left this chat")
         case .backgrounded: String(localized: "Listening stopped when Rome went to the background")
         case .interrupted: String(localized: "Listening stopped when another app used the microphone")
+        case .appClosed: String(localized: "Listening stopped when Rome closed")
         }
     }
 }

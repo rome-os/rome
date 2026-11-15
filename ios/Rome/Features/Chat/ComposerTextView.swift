@@ -18,6 +18,9 @@ struct ComposerTextView: UIViewRepresentable {
     var handle: ComposerTextHandle? = nil
     /// False while voice input listens: the field shows the words as they come.
     var editable = true
+    /// Called on each change the guardian makes, typed, pasted or deleted. Text
+    /// the app sets (a restored draft, a send clearing the field) is not one.
+    var onEdit: () -> Void = {}
 
     static let maxLines = 6
 
@@ -118,6 +121,7 @@ struct ComposerTextView: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             parent.committedText?.wrappedValue = Self.committed(in: textView)
+            parent.onEdit()
             (textView as? PastingTextView)?.setNeedsDisplay()
             // Past six lines it scrolls: keep the caret in view.
             if textView.isScrollEnabled { textView.scrollRangeToVisible(textView.selectedRange) }

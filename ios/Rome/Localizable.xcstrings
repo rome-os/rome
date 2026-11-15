@@ -2051,6 +2051,16 @@
         }
       }
     },
+    "Listening stopped when Rome closed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 关闭时已停止收听"
+          }
+        }
+      }
+    },
     "Listening stopped when Rome went to the background" : {
       "localizations" : {
         "zh-Hans" : {

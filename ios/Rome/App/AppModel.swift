@@ -183,12 +183,12 @@ final class Workspace {
 
     init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String, drafts: DraftStore? = nil) {
         self.backend = backend
-        voiceInput = VoiceInputService(backend: backend)
         self.instanceName = instanceName
         self.host = host
         self.accountLabel = accountLabel
         // Kept on this phone only while the connection's account is signed in.
         self.drafts = drafts ?? DraftStore(instance: host, account: backend.account)
+        voiceInput = VoiceInputService(backend: backend, instance: self.drafts.instance)
         // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
         transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance, account: backend.account)
         tasks = TasksStore(backend: backend)
