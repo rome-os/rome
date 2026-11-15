@@ -16,9 +16,15 @@ final class VoiceInputService {
     private var checkedAt: Date?
     /// Why listening stopped in a chat the guardian left, shown on return.
     private var leftNotices: [String: VoiceInputStop] = [:]
+    /// Each chat listening now, or whose notice still shows, kept on this phone
+    /// so that a closed app tells why on its next launch.
+    private let marks: VoiceInputMarks
 
-    init(backend: RomeBackend) {
+    init(backend: RomeBackend, instance: String, defaults: UserDefaults = .standard) {
         self.backend = backend
+        marks = VoiceInputMarks(instance: instance, defaults: defaults)
+        // The app closed while these chats listened, or before their notice went.
+        for (chat, stop) in marks.takeLaunchNotices() { leftNotices[chat] = stop }
     }
 
     /// Asks the instance again, at most once a minute.
@@ -32,6 +38,64 @@ final class VoiceInputService {
 
     func keep(_ stop: VoiceInputStop, for chat: String) { leftNotices[chat] = stop }
     func takeNotice(for chat: String) -> VoiceInputStop? { leftNotices.removeValue(forKey: chat) }
+
+    /// Listening started in `chat`.
+    func listening(in chat: String) { marks.set(chat, .listening) }
+    /// Listening in `chat` stopped; a stop's notice is kept until an edit or a send.
+    func stopped(in chat: String, _ stop: VoiceInputStop?) { marks.set(chat, stop.map(VoiceInputMarks.Mark.notice)) }
+    /// The guardian edited or sent in `chat`: its notice is gone.
+    func noticeSeen(in chat: String) {
+        leftNotices[chat] = nil
+        marks.set(chat, nil)
+    }
+}
+
+/// Which chats of an instance listen now, or still show a notice, in the
+/// phone's defaults: the only voice input state that outlives the app.
+@MainActor
+struct VoiceInputMarks {
+    enum Mark: Equatable {
+        case listening
+        case notice(VoiceInputStop)
+    }
+
+    private let key: String
+    private let defaults: UserDefaults
+
+    init(instance: String, defaults: UserDefaults) {
+        key = "voiceInput.marks.\(instance)"
+        self.defaults = defaults
+    }
+
+    func set(_ chat: String, _ mark: Mark?) {
+        var all = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        switch mark {
+        case .listening: all[chat] = Self.listening
+        case .notice(let stop): all[chat] = [stop.reason.rawValue, stop.detail].compactMap(\.self).joined(separator: " ")
+        case nil: all[chat] = nil
+        }
+        if all.isEmpty { defaults.removeObject(forKey: key) } else { defaults.set(all, forKey: key) }
+    }
+
+    /// On launch: a chat still listening says the app closed; a chat with a
+    /// notice says it again. Marks stay until the notice is seen.
+    func takeLaunchNotices() -> [String: VoiceInputStop] {
+        let all = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        var notices: [String: VoiceInputStop] = [:]
+        for (chat, value) in all {
+            if value == Self.listening {
+                notices[chat] = VoiceInputStop(reason: .appClosed)
+                set(chat, .notice(VoiceInputStop(reason: .appClosed)))
+            } else {
+                let parts = value.split(separator: " ", maxSplits: 1).map(String.init)
+                guard let reason = parts.first.flatMap(VoiceInputStopReason.init(rawValue:)) else { set(chat, nil); continue }
+                notices[chat] = VoiceInputStop(reason: reason, detail: parts.count > 1 ? parts[1] : nil)
+            }
+        }
+        return notices
+    }
+
+    private static let listening = "listening"
 }
 
 /// The message field's UIKit view, so spoken text can go in the way typing does.
@@ -61,8 +125,6 @@ final class VoiceInputController {
     private(set) var state: State = .idle
     /// Why listening last stopped on its own; it goes away on the next edit or send.
     private(set) var notice: VoiceInputStop?
-    /// The field's text when the notice went up: any other text is an edit.
-    @ObservationIgnored private var noticeText: String?
     @ObservationIgnored private var dictation: VoiceDictation?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var anchor: (original: String, range: NSRange)?
@@ -71,15 +133,15 @@ final class VoiceInputController {
 
     var active: Bool { state != .idle }
 
-    func toggle(service: VoiceInputService, field: VoiceInputField, text: Binding<String>, handle: ComposerTextHandle) {
+    func toggle(service: VoiceInputService, chat: String?, field: VoiceInputField, text: Binding<String>, handle: ComposerTextHandle) {
         switch state {
-        case .idle: start(service: service, field: field, text: text, handle: handle)
+        case .idle: start(service: service, chat: chat, field: field, text: text, handle: handle)
         case .listening: stop()
         case .finishing: break
         }
     }
 
-    func start(service: VoiceInputService, field: VoiceInputField, text: Binding<String>, handle: ComposerTextHandle) {
+    func start(service: VoiceInputService, chat: String?, field: VoiceInputField, text: Binding<String>, handle: ComposerTextHandle) {
         guard dictation == nil, let request = service.socketRequest() else { return }
         startInterval = VoiceInputSignpost.begin(field)
         let original = text.wrappedValue
@@ -88,7 +150,7 @@ final class VoiceInputController {
         let range = NSIntersectionRange(selected, NSRange(location: 0, length: length))
         anchor = (original, range)
         notice = nil
-        noticeText = nil
+        if let chat { service.listening(in: chat) }
         state = .listening
         let before = (original as NSString).substring(to: range.location)
         let after = (original as NSString).substring(from: NSMaxRange(range))
@@ -101,6 +163,7 @@ final class VoiceInputController {
                 },
                 onDone: { [weak self] heard, stop in
                     self?.done(heard: heard, stop: stop, text: text, handle: handle)
+                    if let chat { service.stopped(in: chat, stop) }
                 }
             )
         )
@@ -130,20 +193,24 @@ final class VoiceInputController {
         dictation.cancel()
         finishListening()
         anchor = nil
-        if let service, let chat { service.keep(VoiceInputStop(reason: .leftChat), for: chat) }
+        guard let service, let chat else { return }
+        let stop = VoiceInputStop(reason: .leftChat)
+        service.keep(stop, for: chat)
+        service.stopped(in: chat, stop)
     }
 
     /// The field opened: a chat left while listening says why.
-    func arrive(service: VoiceInputService?, chat: String?, text: String) {
+    func arrive(service: VoiceInputService?, chat: String?) {
         guard let service, let chat, let stop = service.takeNotice(for: chat) else { return }
-        show(stop, text: text)
+        show(stop)
     }
 
-    /// Call when the field's text changes: an edit or a send clears the notice.
-    func textChanged(_ text: String) {
-        guard notice != nil, !active, text != noticeText else { return }
+    /// Call on the guardian's own edit in the field, or a send: the notice goes.
+    /// Not on text the app puts there, such as a draft coming back.
+    func edited(service: VoiceInputService?, chat: String?) {
+        guard notice != nil, !active else { return }
         notice = nil
-        noticeText = nil
+        if let service, let chat { service.noticeSeen(in: chat) }
     }
 
     private func done(heard: String, stop: VoiceInputStop?, text: Binding<String>, handle: ComposerTextHandle) {
@@ -159,12 +226,11 @@ final class VoiceInputController {
         } else if !handle.type(insertion, replacing: anchor.range, in: anchor.original) {
             text.wrappedValue = before + insertion + after
         }
-        if let stop { show(stop, text: handle.view?.text ?? text.wrappedValue) }
+        if let stop { show(stop) }
     }
 
-    private func show(_ stop: VoiceInputStop, text: String) {
+    private func show(_ stop: VoiceInputStop) {
         notice = stop
-        noticeText = text
         UIAccessibility.post(notification: .announcement, argument: stop.notice)
     }
 

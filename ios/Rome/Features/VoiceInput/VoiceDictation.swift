@@ -18,6 +18,9 @@ final class VoiceDictation {
     private let handlers: Handlers
     private let session: URLSession
     private let sender = AudioSender()
+    private let stopTiming: VoiceStopTiming
+    /// The stop's interval has run: the microphone is already released.
+    private var stopTimed = false
     private var task: URLSessionWebSocketTask?
     private var settled = ""
     private var pending = ""
@@ -27,10 +30,11 @@ final class VoiceDictation {
     private var stopTimer: Task<Void, Never>?
     private var path: NWPathMonitor?
 
-    init(request: URLRequest, source: VoiceAudioSource, session: URLSession = .shared, handlers: Handlers) {
+    init(request: URLRequest, source: VoiceAudioSource, session: URLSession = .shared, stopTiming: VoiceStopTiming = SignpostStopTiming(), handlers: Handlers) {
         self.request = request
         self.source = source
         self.session = session
+        self.stopTiming = stopTiming
         self.handlers = handlers
     }
 
@@ -66,7 +70,7 @@ final class VoiceDictation {
         stopping = true
         // Nothing went out yet: nothing more can come back.
         guard task != nil else { return }
-        source.finish()
+        releaseMicrophone(cause: "guardian") { source.finish() }
         sender.send(text: VoiceInputWire.stop)
         sender.endAudio()
         stopTimer = Task { [weak self] in
@@ -85,18 +89,28 @@ final class VoiceDictation {
     func cancel() {
         guard !done else { return }
         done = true
-        teardown()
+        teardown(cause: VoiceInputStopReason.leftChat.rawValue)
     }
 
     private func finish(_ stop: VoiceInputStop?) {
         guard !done else { return }
         done = true
-        teardown()
+        teardown(cause: stop?.reason.rawValue ?? "ended")
         handlers.onDone(heard, stop)
     }
 
-    private func teardown() {
-        source.close()
+    /// Times the stop from here until `release` has returned, which stops the
+    /// capture and deactivates the audio session. Once per dictation.
+    private func releaseMicrophone(cause: String, _ release: () -> Void) {
+        guard !stopTimed else { return release() }
+        stopTimed = true
+        stopTiming.begin(cause: cause)
+        release()
+        stopTiming.end()
+    }
+
+    private func teardown(cause: String) {
+        releaseMicrophone(cause: cause) { source.close() }
         sender.endAudio()
         quiet?.cancel()
         stopTimer?.cancel()
