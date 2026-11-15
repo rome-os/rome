@@ -3603,16 +3603,6 @@
         }
       }
     },
-    "Respond" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "去处理"
-          }
-        }
-      }
-    },
     "Restarting your Rome…" : {
       "localizations" : {
         "zh-Hans" : {

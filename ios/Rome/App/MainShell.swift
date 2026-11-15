@@ -176,13 +176,6 @@ struct MainShell: View {
                     workspace.composerPrefills[route.composerKey] = prompt
                 }, onOpenTask: { chat in
                     agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
-                }, onRespond: { messageId in
-                    // The page closes onto the chat it was opened from, at the card.
-                    agentPage = nil
-                    let chat = route.tasksChatId
-                    if workspace.isMainChat(chat) { show(.chat) } else if !chat.isEmpty { show(.topic(chat)) }
-                    let store = workspace.transcript(forChat: chat)
-                    Task { await store.revealCard(messageId) }
                 }, onClose: { agentPage = nil })
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in
