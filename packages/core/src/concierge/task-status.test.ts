@@ -146,9 +146,8 @@ describe("ConciergeTasks status", () => {
       reportPending: () => [],
     });
     told = [];
-    // What the task list and the push hear: each announced row, read with its status.
-    repo.onChange((task) => {
-      void tasks.toDtos([task]).then(([read]) => told.push(read!));
+    tasks.subscribe((event, payload) => {
+      if (event === "task_upsert") told.push((payload as { task: ConciergeTaskDto }).task);
     });
     await new ChatsWebChatRepository(testDb.db).createSession("task-chat", "Flights");
   });
@@ -222,6 +221,14 @@ describe("ConciergeTasks status", () => {
     // Someone writing to it ends the no-response, note and all.
     await repo.clearWaitExpired(row!.id);
     expect((await repo.get(row!.id))?.noResponseUnlisted).toBe(false);
+  });
+
+  it("tells a task's changes in the order they happened", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await repo.upsertMany([{ id: row.id, summary: "one" }]);
+    await repo.upsertMany([{ id: row.id, summary: "two" }]);
+    await flush();
+    expect(told.map((task) => task.summary)).toEqual([null, "one", "two"]);
   });
 
   it("tells a task's new status even when a read saw it first", async () => {
