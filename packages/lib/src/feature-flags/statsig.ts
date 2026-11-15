@@ -1,5 +1,5 @@
 import { Statsig } from "@statsig/statsig-node-core";
-import { setFeatureGates, type FeatureGates, type GateAttributes } from "./index.js";
+import { setFeatureGates, type FeatureGates } from "./index.js";
 import { statsigUser } from "./user.js";
 
 /**
@@ -23,7 +23,7 @@ const INIT_TIMEOUT_MS = 3000;
 /**
  * Statsig-backed {@link FeatureGates}. The unit id maps to the Statsig user's
  * `userID`, so allowlists and percentage ramps target specific units, and
- * `attributes.email` to its `email`, so a rule can match on email. The client
+ * `email` to its `email`, so a rule can match on email. The client
  * downloads its config spec once (bounded by {@link INIT_TIMEOUT_MS}) and then
  * background-polls its rule set, so `checkGate` is a local evaluation that
  * reflects a flipped gate without a restart. Held for the process lifetime so
@@ -39,7 +39,7 @@ class StatsigFeatureGates implements FeatureGates {
     this.log = log;
   }
 
-  async checkGate(gateName: string, unitId: string, attributes?: GateAttributes): Promise<boolean> {
+  async checkGate(gateName: string, unitId: string, email?: string): Promise<boolean> {
     try {
       if (!this.ready) {
         // `initialize()` RESOLVES a StatsigResult on auth/network failure rather
@@ -72,7 +72,7 @@ class StatsigFeatureGates implements FeatureGates {
     try {
       // No per-evaluation log: gates sit on request hot paths, and `unitId` is a
       // stable rollout key we don't want in default logs. Only failures log.
-      return this.statsig.checkGate(statsigUser(unitId, attributes), gateName);
+      return this.statsig.checkGate(statsigUser(unitId, email), gateName);
     } catch (err) {
       this.log.warn("feature gate evaluation failed; failing closed", {
         gate: gateName,

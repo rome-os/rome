@@ -29,22 +29,22 @@ describe("feature-flags registry", () => {
     expect(seen).toEqual([["my_gate", "tenant-9"]]);
   });
 
-  it("passes attributes through to the backend", async () => {
+  it("passes the email through to the backend", async () => {
     const seen: unknown[] = [];
     setFeatureGates({
-      checkGate: async (_gate, _unit, attributes) => {
-        seen.push(attributes);
+      checkGate: async (_gate, _unit, email) => {
+        seen.push(email);
         return true;
       },
     });
-    await checkGate("my_gate", "tenant-9", { email: "a@example.com" });
-    expect(seen).toEqual([{ email: "a@example.com" }]);
+    await checkGate("my_gate", "tenant-9", "a@example.com");
+    expect(seen).toEqual(["a@example.com"]);
   });
 });
 
 describe("statsigUser", () => {
   it("evaluates as the unit id, with the email a rule can match on", () => {
-    const user = statsigUser("account-1", { email: "a@example.com" });
+    const user = statsigUser("account-1", "a@example.com");
     expect(user.userID).toBe("account-1");
     expect(user.email).toBe("a@example.com");
   });

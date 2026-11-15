@@ -40,10 +40,10 @@ export function useFakeFeatureGates(): FakeFeatureGates {
   let broken = false;
 
   setFeatureGates({
-    async checkGate(gateName, unitId, attributes) {
+    async checkGate(gateName, unitId, email) {
       if (broken) return false;
       await ready;
-      return statsig.checkGate(statsigUser(unitId, attributes), gateName);
+      return statsig.checkGate(statsigUser(unitId, email), gateName);
     },
   });
 
