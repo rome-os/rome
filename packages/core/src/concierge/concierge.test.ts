@@ -6461,17 +6461,24 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(await statusOf(s, "g1")).toBeNull();
     });
 
+    /** Task `taskId` waits for a check a day off: its repeating schedule's next run, or a one-off defer. */
+    const waitsFor = (s: ReturnType<typeof setup>, taskId: string, kind: "schedule" | "defer") => {
+      s.deps.checks = {
+        cancelFor: async () => 0,
+        laterOf: async (ids: readonly string[]) =>
+          new Map(ids.filter((id) => id === taskId).map((id) => [id, Date.now() + 86_400_000])),
+        recurringOf: async (ids: readonly string[]) =>
+          new Set(kind === "schedule" ? ids.filter((id) => id === taskId) : []),
+      } as never;
+    };
+
     it("leaves a message alone once its task, made scheduled before its result was told, waits for its next run", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
       expect(await statusOf(s, "g1")).toBe("working");
       // The Concierge makes it a recurring task while its first run still works.
-      s.deps.checks = {
-        cancelFor: async () => 0,
-        laterOf: async (ids: readonly string[]) =>
-          new Map(ids.filter((id) => id === taskId).map((id) => [id, Date.now() + 86_400_000])),
-      } as never;
+      waitsFor(s, taskId, "schedule");
       await finishTask(s, chatId);
       await s.settle();
       expect(await statusOf(s, "g1")).toBeNull();
@@ -6483,6 +6490,26 @@ describe("Concierge tasks started for a guardian message", () => {
       await finishTask(s, chatId, "error");
       await s.settle();
       expect(await statusOf(s, "g1")).toBeNull();
+    });
+
+    it("keeps a message on its task while the task waits on a one-off check, until it ends", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      // Its first run tells an interim result and defers a check to tomorrow.
+      waitsFor(s, taskId, "defer");
+      await finishTask(s, chatId);
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBeNull();
+      // The check wakes it: the message works again, and fails with it.
+      s.deps.checks = { cancelFor: async () => 0, laterOf: async () => new Map() } as never;
+      s.chats.activeTurns = (id: string) => (id === chatId ? ["task-turn-2"] : []);
+      await s.tasks.chatChanged(chatId);
+      expect(await statusOf(s, "g1")).toBe("working");
+      s.chats.activeTurns = () => [];
+      await finishTask(s, chatId, "error");
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe("failed");
     });
 
     it("keeps how a task ended for its message once the result is told", async () => {

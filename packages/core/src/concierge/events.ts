@@ -992,6 +992,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     openWaits: (chatIds) => webchatRepo.openWaitsOf(chatIds),
     reportPending: () => coalescer.awaitingReport,
     laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
+    recurringOf: async (taskIds) =>
+      (await service.deps.checks?.recurringOf?.(taskIds)) ?? new Set<string>(),
   });
   // What a restart lost from memory, such as a running turn, may have ended a task.
   void guard(tasks.keepEndedAll());
