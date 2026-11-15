@@ -23,7 +23,6 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { RomeLogo } from "@/components/logo";
@@ -65,7 +64,6 @@ import {
   CONCIERGE_CHATS_QUERY_KEY,
   useConciergeChatId,
   useConciergeChats,
-  useConciergeName,
   useRefreshTopicChats,
 } from "@/hooks/use-concierge";
 import { useDesktop } from "@/hooks/use-desktop";
@@ -244,18 +242,7 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({
-  id,
-  name,
-  nested,
-  marker,
-}: {
-  id: string;
-  name: string;
-  nested: boolean;
-  /** Names who started the chat, shown as a small mark after the name. */
-  marker?: string;
-}) {
+function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -288,13 +275,6 @@ function ChatRowLink({
           <span ref={nameRef} className="truncate">
             {name}
           </span>
-          {marker ? (
-            <ChatBubbleIcon
-              role="img"
-              aria-label={marker}
-              className="ml-2 h-3 w-3 shrink-0 text-subtle-foreground"
-            />
-          ) : null}
         </Link>
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
@@ -467,7 +447,6 @@ export function RecentChats({
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
-  const conciergeName = useConciergeName();
   const conciergeChats = useConciergeChats();
   // Without a Concierge there is nothing to switch to: the list is the
   // ordinary chats alone.
@@ -876,16 +855,7 @@ export function RecentChats({
             }`}
           />
         ) : (
-          <ChatRowLink
-            id={session.id}
-            name={session.name}
-            nested={nested}
-            marker={
-              chatKind(session) === "task"
-                ? t("recentChats.startedByConcierge", { name: conciergeName })
-                : undefined
-            }
-          />
+          <ChatRowLink id={session.id} name={session.name} nested={nested} />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
