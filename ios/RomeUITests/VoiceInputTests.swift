@@ -426,7 +426,8 @@ final class VoiceInputTests: XCTestCase {
             XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 10), "listening never finished")
             XCTAssertEqual(fieldText(field), whole, "the field is not what typing the words at the cursor gives")
             if undo {
-                field.tap(withNumberOfTaps: 2, numberOfTouches: 3)
+                // The keyboard covers the field's free area, so the gesture goes to the window.
+                app.windows.firstMatch.tap(withNumberOfTaps: 2, numberOfTouches: 3)
                 let undone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", typed), object: field)
                 if XCTWaiter().wait(for: [undone], timeout: 5) != .completed {
                     printScreen(app, "rule 6: after one undo")
@@ -556,6 +557,8 @@ final class VoiceInputTests: XCTestCase {
         let control = onScreen(app.buttons, "voice-input")
         try requireControl(app, control, "\(field) has no voice control")
         XCTAssertTrue(onScreen(app.textViews, "message-field").exists, "\(field) has no message field")
+        // Each start adds words, so start from an empty field rather than one earlier runs grew.
+        emptyTheField(app, field)
         let options = XCTMeasureOptions()
         options.iterationCount = Self.repeats
         options.invocationOptions = [.manuallyStop]

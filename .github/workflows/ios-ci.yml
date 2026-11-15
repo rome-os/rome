@@ -198,14 +198,20 @@ jobs:
                   failed = True
                   continue
               over = []
+              blank = False
               for test, name, unit, values in found[interval]:
                   seconds = [v / 1000 if unit == "ms" else v for v in values]
                   print(f"{test}: {name}: " + ", ".join(f"{v:.3f} s" for v in seconds))
                   over += [(test, v) for v in seconds if v > bar]
+                  # A measured window with no interval in it reads 0; that is no evidence, not a pass.
+                  empty = [v for v in seconds if v == 0]
+                  if empty:
+                      print(f"::error::{test}: {len(empty)} of {len(seconds)} measurements held no {interval} interval, so {rule} was not checked there.")
+                      blank = True
               for test, v in over:
                   print(f"::error::{test}: " + says.format(v=v) + f"; the bar is {bar} s")
-              failed = failed or bool(over)
-              if not over:
+              failed = failed or bool(over) or blank
+              if not over and not blank:
                   print(f"Every {interval} interval was within {bar} s ({rule}).")
           if not all(found.values()):
               print(open(sys.argv[1]).read()[:4000])
