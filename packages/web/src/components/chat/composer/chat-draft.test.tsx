@@ -1,12 +1,14 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { createRef, type Ref } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
-import { clearAllChatDrafts } from "@/lib/chat-draft-storage";
-import { invalidateNewChatDrafts } from "@/lib/new-chat-draft-storage";
-import { ChatComposer } from "../ChatComposer";
+import { deleteSession } from "@/lib/chat-api";
+import { clearAllChatDrafts, loadChatDraft, saveChatDraft } from "@/lib/chat-draft-storage";
+import { currentAuthEpoch, invalidateNewChatDrafts } from "@/lib/new-chat-draft-storage";
+import { ChatComposer, type ChatComposerHandle } from "../ChatComposer";
 import { ConciergeComposer } from "./ConciergeComposer";
 import { ReplyDraftHarness } from "../reply/reply-draft-harness";
 
@@ -25,27 +27,44 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
+type OnSend = () => Promise<void>;
 const composers = {
-  chat: (chatId: string, onSend: () => void) => <ChatComposer chatId={chatId} onSend={onSend} />,
-  concierge: (chatId: string, onSend: () => void) => (
+  chat: (chatId: string, onSend: OnSend, ref: Ref<ChatComposerHandle>) => (
+    <ChatComposer ref={ref} chatId={chatId} onSend={onSend} />
+  ),
+  concierge: (chatId: string, onSend: OnSend, ref: Ref<ChatComposerHandle>) => (
     <ReplyDraftHarness>
-      <ConciergeComposer chatId={chatId} onSend={onSend} />
+      <ConciergeComposer ref={ref} chatId={chatId} onSend={onSend} />
     </ReplyDraftHarness>
   ),
 };
 
 /** Opens the chat's message field, as navigating to the chat or reloading does. */
-function openChat(kind: keyof typeof composers, chatId: string) {
-  const onSend = rs.fn(async () => {});
+function openChat(kind: keyof typeof composers, chatId: string, onSend = rs.fn(async () => {})) {
+  const handle = createRef<ChatComposerHandle>();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <MemoryRouter>
-      <QueryClientProvider client={client}>{composers[kind](chatId, onSend)}</QueryClientProvider>
+      <QueryClientProvider client={client}>
+        {composers[kind](chatId, onSend, handle)}
+      </QueryClientProvider>
     </MemoryRouter>,
   );
   const field = () => view.container.querySelector("form textarea") as HTMLTextAreaElement;
   const type = (text: string) => fireEvent.change(field(), { target: { value: text } });
-  return { onSend, field, type, leave: view.unmount };
+  return { onSend, field, type, handle, leave: view.unmount };
+}
+
+/** A send the test settles by hand, after the field may be gone. */
+function heldSend() {
+  let settle: (accepted: boolean) => void = () => {};
+  const onSend = rs.fn(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        settle = (accepted) => (accepted ? resolve() : reject(new Error("refused")));
+      }),
+  );
+  return { onSend, settle: (accepted: boolean) => act(async () => settle(accepted)) };
 }
 
 describe.each(["chat", "concierge"] as const)("the %s message field's draft", (kind) => {
@@ -75,6 +94,43 @@ describe.each(["chat", "concierge"] as const)("the %s message field's draft", (k
     expect(openChat(kind, "chat-a").field().value).toBe("");
   });
 
+  it("is gone once a send with a file is accepted after the guardian left", async () => {
+    const send = heldSend();
+    const first = openChat(kind, "chat-a", send.onSend);
+    act(() => first.handle.current?.addFiles([new File(["x"], "plan.txt")]));
+    first.type("with a file");
+    fireEvent.keyDown(first.field(), { key: "Enter" });
+    await waitFor(() => expect(send.onSend).toHaveBeenCalled());
+    first.leave();
+    await send.settle(true);
+
+    expect(openChat(kind, "chat-a").field().value).toBe("");
+  });
+
+  it("comes back when a send fails after the guardian left", async () => {
+    const send = heldSend();
+    const first = openChat(kind, "chat-a", send.onSend);
+    first.type("send me");
+    fireEvent.keyDown(first.field(), { key: "Enter" });
+    await waitFor(() => expect(send.onSend).toHaveBeenCalled());
+    first.leave();
+    await send.settle(false);
+
+    expect(openChat(kind, "chat-a").field().value).toBe("send me");
+  });
+
+  it("is gone once the chat is deleted", async () => {
+    const first = openChat(kind, "chat-a");
+    first.type("about to go");
+    first.leave();
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      (async () => new Response(null, { status: 204 })) as typeof fetch,
+    );
+    await deleteSession("chat-a");
+
+    expect(openChat(kind, "chat-a").field().value).toBe("");
+  });
+
   it("is gone after logging out", () => {
     const first = openChat(kind, "chat-a");
     first.type("private");
@@ -83,5 +139,18 @@ describe.each(["chat", "concierge"] as const)("the %s message field's draft", (k
     clearAllChatDrafts();
 
     expect(openChat(kind, "chat-a").field().value).toBe("");
+  });
+});
+
+describe("the stored chat draft", () => {
+  it("is not cleared by a tab still open from before a logout", () => {
+    const before = currentAuthEpoch();
+    invalidateNewChatDrafts();
+    clearAllChatDrafts();
+    saveChatDraft("chat-a", { text: "after logging in again", stop: null }, currentAuthEpoch());
+
+    saveChatDraft("chat-a", { text: "", stop: null }, before);
+
+    expect(loadChatDraft("chat-a")?.text).toBe("after logging in again");
   });
 });
