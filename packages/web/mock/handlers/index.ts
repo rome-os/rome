@@ -353,6 +353,46 @@ const turn = (
   return rows;
 };
 
+// The Concierge's afternoon: messages of three tasks' chat threads, said in
+// the order they came, with the Concierge's own messages between them, so a
+// thread label has other threads and no thread around it to fold away.
+// A thread is named by its first message.
+const TABLE_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-1`, title: "Book a table for Friday" };
+const FLIGHT_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-3`, title: "Compare flights to Berlin" };
+const NAS_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-8`, title: "Fix the NAS backup" };
+const NAS_CLEANUP_SCRIPT = `Yes. Give the backup disk a limit, and delete the oldest snapshot when it goes over:
+
+\`\`\`bash
+# Every day at 03:00: over 85% full, delete the oldest snapshot
+used=$(df --output=pcent /Volumes/Backup | tail -1 | tr -dc '0-9')
+if [ "$used" -gt 85 ]; then
+  tmutil delete "$(tmutil listbackups | head -1)"
+fi
+\`\`\`
+
+Want me to set it up as a daily routine?`;
+const guardianSender: NonNullable<ChatMessage["sender"]> = {
+  kind: "guardian",
+  name: identity.displayName,
+  avatarUrl: identity.avatarUrl,
+};
+const afternoon = (
+  n: number,
+  at: string,
+  from: "guardian" | "agent",
+  content: string,
+  thread?: { id: string; title: string },
+): ChatMessage => ({
+  id: `${CONCIERGE_CHAT_ID}-pm-${n}`,
+  sessionId: CONCIERGE_CHAT_ID,
+  turnId: `${CONCIERGE_CHAT_ID}-pm-turn-${n}`,
+  role: from === "guardian" ? "user" : "assistant",
+  content: JSON.stringify([text(content)]),
+  createdAt: `2026-08-07T${at}:00.000Z`,
+  ...(from === "guardian" ? { sender: guardianSender } : {}),
+  ...(thread ? { chatThreadId: thread.id, chatThreadTitle: thread.title } : {}),
+});
+
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
 // ChatEntries exactly as the real API stores it, so what renders here goes
@@ -421,17 +461,43 @@ const transcripts: Record<string, ChatMessage[]> = {
         forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
       } as TranscriptPart,
     ]),
-    // A task's thread: the Concierge's reply in it carries the task's label.
-    {
-      id: `${CONCIERGE_CHAT_ID}-thread-1`,
-      sessionId: CONCIERGE_CHAT_ID,
-      turnId: `${CONCIERGE_CHAT_ID}-thread-turn`,
-      role: "assistant",
-      content: JSON.stringify([text("I found three tables for Friday at 7.")]),
-      createdAt: "2026-08-07T13:01:00.000Z",
-      chatThreadId: "mock-thread-table",
-      chatThreadTitle: "Book a table for Friday",
-    },
+    afternoon(
+      1,
+      "13:10",
+      "guardian",
+      "Can you book a table for 4 on Friday evening, somewhere close to the office?",
+      TABLE_THREAD,
+    ),
+    afternoon(2, "13:11", "agent", "I found three tables for Friday at 7.", TABLE_THREAD),
+    afternoon(
+      3,
+      "13:12",
+      "guardian",
+      "Also check flights to Berlin next Tuesday, back on Thursday.",
+      FLIGHT_THREAD,
+    ),
+    afternoon(
+      4,
+      "13:12",
+      "agent",
+      "On it. I'll compare fares and tell you what I find.",
+      FLIGHT_THREAD,
+    ),
+    afternoon(
+      5,
+      "13:20",
+      "agent",
+      "All three take a booking for 4. Osteria 23 has a quiet back room, and it is the closest at 9 minutes on foot. Shall I take that one?",
+      TABLE_THREAD,
+    ),
+    afternoon(6, "13:22", "guardian", "Does the back room have a minimum spend?", TABLE_THREAD),
+    afternoon(
+      7,
+      "13:30",
+      "agent",
+      "Round trip, Tuesday 11/17 to Thursday 11/19, economy:\n\n1. **Lufthansa LH1135** · 08:40 out, 18:30 back · €210\n2. **Eurowings EW9021** · 07:15 out, 20:50 back · €148, no bag\n3. **Ryanair FR1832** · 06:10 out, 21:40 back · €96, no bag",
+      FLIGHT_THREAD,
+    ),
     // A routine made the Concierge speak: its reply carries the routine's name.
     {
       id: `${CONCIERGE_CHAT_ID}-routine-trace`,
@@ -439,7 +505,7 @@ const transcripts: Record<string, ChatMessage[]> = {
       turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
       role: "trace",
       content: "[]",
-      createdAt: "2026-08-07T13:02:00.000Z",
+      createdAt: "2026-08-07T13:32:00.000Z",
       traceSummary: {
         distinctApps: [],
         invocationCounts: {},
@@ -453,12 +519,57 @@ const transcripts: Record<string, ChatMessage[]> = {
       turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
       role: "assistant",
       content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
-      createdAt: "2026-08-07T13:02:01.000Z",
+      createdAt: "2026-08-07T13:32:01.000Z",
     },
+    afternoon(
+      8,
+      "13:40",
+      "agent",
+      "Last night's NAS backup failed. I'm looking into why.",
+      NAS_THREAD,
+    ),
+    afternoon(
+      9,
+      "13:41",
+      "agent",
+      "Yes, there is a €200 minimum for the back room, which fits a table of 4.",
+      TABLE_THREAD,
+    ),
+    afternoon(
+      10,
+      "13:50",
+      "guardian",
+      "Anything that gets me back on Thursday afternoon?",
+      FLIGHT_THREAD,
+    ),
+    afternoon(
+      11,
+      "13:51",
+      "agent",
+      "Lufthansa has a 14:30 back on Thursday. With the Tuesday morning flight it is €190 round trip.",
+      FLIGHT_THREAD,
+    ),
+    afternoon(
+      12,
+      "14:00",
+      "agent",
+      "The backup disk is full: Time Machine kept 14 months of snapshots and never cleared the old ones. I deleted the ones before 2025, which freed 820 GB, and last night's backup has run again.",
+      NAS_THREAD,
+    ),
+    afternoon(13, "14:02", "guardian", "Can it clean up by itself from now on?", NAS_THREAD),
+    afternoon(14, "14:03", "agent", NAS_CLEANUP_SCRIPT, NAS_THREAD),
+    afternoon(15, "14:15", "guardian", "Book the back room.", TABLE_THREAD),
+    afternoon(
+      16,
+      "14:16",
+      "agent",
+      "Booked: Friday 19:00, Osteria 23 back room, 4 people, under your name. A confirmation text is on its way to your phone.",
+      TABLE_THREAD,
+    ),
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status, which Rome derives.
     {
-      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T13:05:00.000Z", "Book the 9:40 one", [])[0]!,
+      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T14:40:00.000Z", "Book the 9:40 one", [])[0]!,
       status: "working",
     },
   ],
@@ -1415,6 +1526,37 @@ export const handlers = [
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.
   http.get("/api/chat/sessions/:sessionId/turns", () => HttpResponse.json([] as TurnInfo[])),
+  // A sent message is only recorded: no turn starts, so nothing answers it. One
+  // sent into a chat thread lands in that thread, as the server places it.
+  http.post("/api/chat/sessions/:sessionId/turns", async ({ params, request }) => {
+    const sessionId = String(params.sessionId);
+    const messages = transcripts[sessionId];
+    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const form = await request.formData();
+    const inThread = messages.find((message) => message.id === form.get("chatThread"));
+    const sentAt = new Date().toISOString();
+    const content = JSON.stringify([text(String(form.get("text") ?? ""))]);
+    messages.push({
+      id: String(form.get("inputId")),
+      sessionId,
+      turnId: null,
+      role: "user",
+      content,
+      createdAt: sentAt,
+      sender: guardianSender,
+      ...(inThread?.chatThreadId
+        ? { chatThreadId: inThread.chatThreadId, chatThreadTitle: inThread.chatThreadTitle }
+        : {}),
+    });
+    return HttpResponse.json({
+      turnId: null,
+      inputId: String(form.get("inputId")),
+      inputState: "consumed",
+      sessionId,
+      startedAt: sentAt,
+      content,
+    });
+  }),
   http.post("/api/chat/sessions/:sessionId/read", ({ params }) => {
     const found = chatSessions.find((s) => s.id === params.sessionId);
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });

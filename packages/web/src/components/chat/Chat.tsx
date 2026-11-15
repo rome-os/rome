@@ -8,7 +8,7 @@ import {
   LiveTaskCardsProvider,
 } from "./entries/live-task-cards";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
-import { createPortal, flushSync } from "react-dom";
+import { flushSync } from "react-dom";
 import {
   useCallback,
   useEffect,
@@ -26,11 +26,11 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
+  ChevronLeft,
   MoreHorizontal,
   PanelRightOpen,
   Share2,
   Trash2,
-  X,
 } from "lucide-react";
 import { z } from "zod";
 import type { MessageWritingEvent } from "@rome/api-types/concierge";
@@ -64,7 +64,6 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
-  threadInteractionResults,
   currentReplyMessages,
   isAwaitingGuardian,
   isLockedByCard,
@@ -78,7 +77,6 @@ import {
 } from "@/components/chat/ShareMessageButton";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
-import { useToolThread } from "@/pages/free/tool-thread";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { useToolTrace } from "@/pages/free/tool-trace";
 import type {
@@ -104,6 +102,7 @@ import {
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
 import { LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
+import { useThreadFocus } from "@/components/chat/reply/use-thread-focus";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
@@ -121,7 +120,6 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
-import { ChatThreadView, useThreadTaskChat } from "@/components/chat/ChatThreadView";
 import {
   type LiveMessageStatuses,
   LiveMessageStatusesProvider,
@@ -130,7 +128,6 @@ import {
   messageReactionSchema,
   messageStatusSchema,
 } from "@/components/chat/reaction";
-import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
 import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-unread";
 import {
@@ -293,8 +290,6 @@ const messageChatThreadSchema = z.object({
   chatThreadId: z.string(),
   /** The task's title, when the thread is a task's. */
   chatThreadTitle: z.string().optional(),
-  /** The task's own chat, when it has one. */
-  chatThreadTaskChatId: z.string().optional(),
 });
 
 /** A task left the chat, and its chat thread with it. */
@@ -598,10 +593,6 @@ export function Chat({
   const [liveThreadTitles, setLiveThreadTitles] = useState<ReadonlyMap<string, string | null>>(
     new Map(),
   );
-  // Each task thread's task chat live placements told, by the thread.
-  const [liveThreadTaskChats, setLiveThreadTaskChats] = useState<ReadonlyMap<string, string>>(
-    new Map(),
-  );
   const handleChatThreadRetired = useCallback(
     ({ chatThreadId }: z.infer<typeof chatThreadRetiredSchema>) =>
       setLiveThreadTitles((prev) =>
@@ -610,22 +601,10 @@ export function Chat({
     [],
   );
   const handleMessageChatThread = useCallback(
-    ({
-      messageId,
-      chatThreadId,
-      chatThreadTitle,
-      chatThreadTaskChatId,
-    }: z.infer<typeof messageChatThreadSchema>) => {
+    ({ messageId, chatThreadId, chatThreadTitle }: z.infer<typeof messageChatThreadSchema>) => {
       setRethreaded((prev) =>
         placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
       );
-      if (chatThreadTaskChatId) {
-        setLiveThreadTaskChats((prev) =>
-          prev.get(chatThreadId) === chatThreadTaskChatId
-            ? prev
-            : new Map(prev).set(chatThreadId, chatThreadTaskChatId),
-        );
-      }
       if (chatThreadTitle) {
         setLiveThreadTitles((prev) =>
           prev.get(chatThreadId) === chatThreadTitle
@@ -796,8 +775,23 @@ export function Chat({
     [noteOlder],
   );
 
+  // The chat thread in focus, which is view state: nothing keeps it across a
+  // reload. The back control, the thread's labels and Esc end it.
+  const threadFocus = useThreadFocus({
+    scroller: scrollerEl,
+    content: contentEl,
+    resetKey: mainSessionId,
+  });
+  const focusRoot = threadFocus.focus?.root;
+  const rootLoaded = useMemo(
+    () =>
+      focusRoot !== undefined &&
+      (messages.get(mainSessionId ?? "") ?? []).some((message) => message.id === focusRoot),
+    [focusRoot, messages, mainSessionId],
+  );
   // The main session loads its newest turns first and pages older ones in as
-  // the transcript scrolls toward the top.
+  // the transcript scrolls toward the top. With a thread in focus, the pages
+  // would add no height, so one loads only for each push against the top.
   const {
     setCursor: setOlderCursor,
     hasOlder,
@@ -809,6 +803,9 @@ export function Chat({
     pinned: isAtBottom,
     setMessages,
     onOlderPage,
+    onDemand: threadFocus.shown !== null,
+    // The thread starts at its root, so with the root loaded nothing older can be in it.
+    satisfied: rootLoaded,
   });
 
   // The view derivation lives in the pure `buildChatView`; here we just memoize
@@ -902,21 +899,40 @@ export function Chat({
     });
   }, []);
 
+  // Hands `then` the element `find` gives once the thread in focus, if any,
+  // is not hiding it: a hidden element brings the whole chat back first.
+  const closeFocusRef = useRef<(instant?: boolean) => Promise<void>>(async () => {});
+  const whenShown = useCallback(
+    (find: () => HTMLElement | null, then: (el: HTMLElement) => void) => {
+      const el = find();
+      if (!el) return;
+      if (!el.closest("[data-thread-out]")) return then(el);
+      void closeFocusRef.current(true).then(() => {
+        const shown = find();
+        if (shown) then(shown);
+      });
+    },
+    [],
+  );
+
   // Scrolls to a message and tints it. An anchor names one message id, or
   // every id of an agent turn separated by spaces.
   const jumpToMessage = useCallback(
     (messageId: string) => {
       const scroller = scrollerEl;
       if (!scroller) return;
-      const anchor = findMessageAnchor(scroller, messageId);
-      if (!anchor) return;
-      scrollToAnchor(scroller, anchor);
+      whenShown(
+        () => findMessageAnchor(scroller, messageId),
+        (anchor) => {
+          scrollToAnchor(scroller, anchor);
 
-      // Every user bubble is the same tint, so without this you cannot tell
-      // whether the jump landed on the question you picked.
-      landOn(scroller, anchor);
+          // Every user bubble is the same tint, so without this you cannot tell
+          // whether the jump landed on the question you picked.
+          landOn(scroller, anchor);
+        },
+      );
     },
-    [scrollerEl, landOn, scrollToAnchor],
+    [scrollerEl, landOn, scrollToAnchor, whenShown],
   );
 
   // Respond in the Tasks panel points to a Concierge message that may sit
@@ -997,72 +1013,83 @@ export function Chat({
     const find = () => scroller.querySelector<HTMLElement>("[data-concierge-unread-divider]");
     void revealWhenLoaded(
       find,
-      () => {
-        const divider = find();
-        if (divider) scrollToAnchor(scroller, divider);
-      },
+      () => whenShown(find, (divider) => scrollToAnchor(scroller, divider)),
       t("concierge.newMessagesMissing"),
     );
-  }, [scrollerEl, revealWhenLoaded, scrollToAnchor, t]);
+  }, [scrollerEl, revealWhenLoaded, scrollToAnchor, whenShown, t]);
   useEffect(() => {
     if (!concierge) return;
     return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
-  const displayedMessageIds = useMemo(
-    () => new Set(displayMessages.map((message) => message.id)),
-    [displayMessages],
+  loadedThreads.current = new Map(
+    displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
-  // The chat thread open in the tool pane's Chat thread tab, which is view
-  // state: nothing keeps it across a reload. The tab holds the thread while
-  // the pane is open; its X and Delete key, and Esc inside the thread, end it
-  // through `closeThread`.
-  const toolThread = useToolThread();
-  const setToolThread = toolThread?.set;
-  const revealToolThread = toolThread?.reveal;
-  const threadOwner = useId();
-  const [thread, setThread] = useState<ReplyThread | null>(null);
-  // Counts the guardian's opens, which put the caret in the thread's composer
-  // once it is on screen. A touch device keeps its keyboard down.
+  const chatThreads = useChatThreadsValue(
+    displayMessages,
+    rethreaded,
+    liveThreadTitles,
+    threadFocus.shown,
+  );
+  // A focused thread whose task left the chat ends at once.
+  const { focus, open: openFocus, close: closeFocus, reset: resetFocus } = threadFocus;
+  closeFocusRef.current = closeFocus;
+  useEffect(() => {
+    if (focus && !chatThreads.titles.has(focus.root)) resetFocus();
+  }, [focus, chatThreads.titles, resetFocus]);
+  // With a thread in focus, a quote can only go to what is shown.
+  const displayedMessageIds = useMemo(
+    () =>
+      new Set(
+        displayMessages
+          .filter((message) => !focus || chatThreads.taskThreads.get(message.id) === focus.root)
+          .map((message) => message.id),
+      ),
+    [displayMessages, focus, chatThreads.taskThreads],
+  );
+  // Read through a ref by the send, so its identity does not follow the messages.
+  const taskThreadsRef = useRef(chatThreads.taskThreads);
+  taskThreadsRef.current = chatThreads.taskThreads;
+  // A touch device keeps its keyboard down when a thread comes into focus.
   const coarsePointer = useCoarsePointer();
-  const [threadOpens, setThreadOpens] = useState(0);
-  const closeThread = useCallback(() => setThread(null), []);
   const openThread = useCallback(
     (next: ReplyThread) => {
-      setThread(next);
-      setThreadOpens((count) => count + 1);
-      revealToolThread?.();
+      // A share picks whole turns, so no thread comes into focus meanwhile.
+      if (shareMode) return;
+      if (focus) {
+        void closeFocus();
+        return;
+      }
+      const root = chatThreads.taskThreads.get(next.thread);
+      if (!root) return;
+      const title = chatThreads.titles.get(root) ?? next.title;
+      void openFocus({ ...next, title, root }).then(() => {
+        if (!coarsePointer) composerRef.current?.focus();
+      });
     },
-    [revealToolThread],
+    [shareMode, focus, closeFocus, openFocus, chatThreads, coarsePointer],
   );
-  useEffect(() => () => setToolThread?.(threadOwner, null), [setToolThread, threadOwner]);
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
     sessionId: mainSessionId ?? null,
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
-    // A Concierge chat beside a tool pane keeps chat threads: a thread label
-    // opens the thread tab, and Reply opens the reply bar alone.
-    onOpenThread: concierge && revealToolThread ? openThread : undefined,
-  });
-  // The thread tab's own draft: what it sends goes into its thread.
-  const threadComposerRef = useRef<ChatComposerHandle>(null);
-  const threadDraft = useReplyDraftState({
-    chatId: thread?.thread,
-    sessionId: mainSessionId ?? null,
-    messageIds: displayedMessageIds,
-    jump: jumpToMessage,
-    focusComposer: () => threadComposerRef.current?.focus(),
-    thread: thread?.thread ?? null,
+    // A Concierge chat keeps chat threads: a thread label focuses the chat on
+    // its thread, and Reply opens the reply bar alone.
+    onOpenThread: concierge ? openThread : undefined,
+    thread: focus,
   });
 
   // Share chat picks every turn in a common chat. A Concierge chat holds its
-  // owner's private history, so there it starts with none picked.
+  // owner's private history, so there it starts with none picked. A share is
+  // of whole turns, which can hold messages of other threads, so a thread in
+  // focus closes first and the picker shows every message a turn holds.
   const enterShareMode = useCallback(() => {
+    void closeFocus(true);
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
     setShareMode(true);
-  }, [concierge, mainTurnIds]);
+  }, [concierge, mainTurnIds, closeFocus]);
 
   // Share on a message: the same share mode, with only that message's turn
   // selected. A message outside the chat's own turns selects nothing. Read
@@ -1070,15 +1097,16 @@ export function Chat({
   const shareMessageTurn = useCallback(
     (messageId: string, turn?: SharedMessageTurn) => {
       // The loaded timeline first; else the turn the message's own view knows,
-      // for an older thread message the timeline has not loaded.
+      // for a message the timeline has not loaded.
       const turnId = mainSessionId
         ? (messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId ??
           (turn?.sessionId === mainSessionId ? turn.turnId : undefined))
         : undefined;
+      void closeFocus(true);
       setSelectedShareTurns(new Set(turnId ? [turnId] : []));
       setShareMode(true);
     },
-    [mainSessionId],
+    [mainSessionId, closeFocus],
   );
 
   const exitShareMode = useCallback(() => {
@@ -1864,6 +1892,8 @@ export function Chat({
       // settles. The server keeps it as the message id, so the accepted row
       // replaces this one in place instead of mounting a second bubble.
       immediateInputId?: string,
+      // The thread the message is sent into, so its row is in it at once.
+      chatThreadId?: string,
     ): Promise<void> => {
       setStreamError(null);
       // Sending re-engages stickiness so the user follows their own message and
@@ -1909,6 +1939,7 @@ export function Chat({
           content: optimisticUserContent,
           createdAt: sentAt,
           sender: viewerSenderRef.current,
+          ...(chatThreadId ? { chatThreadId } : {}),
         });
       }
 
@@ -1964,6 +1995,7 @@ export function Chat({
         content: createResp.content ?? optimisticUserContent,
         createdAt: sentAt,
         sender: viewerSenderRef.current,
+        ...(chatThreadId ? { chatThreadId } : {}),
       };
       putUserMessage(userMsg, immediateInputId);
 
@@ -2134,6 +2166,7 @@ export function Chat({
         // A text-only send shows its bubble at once. An upload keeps its text
         // in the composer until the server accepts it, so its bubble waits too.
         snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
+        snapshot.chatThread ? taskThreadsRef.current.get(snapshot.chatThread) : undefined,
       );
     },
     [
@@ -2607,6 +2640,24 @@ export function Chat({
     </>
   );
 
+  // While a chat thread is in focus, the header's left corner shows the way
+  // back to the whole chat, named for the task.
+  const threadBack = focus ? (
+    <button
+      type="button"
+      data-thread-back
+      aria-label={t("thread.back", { title: focus.title })}
+      onClick={() => void closeFocus()}
+      className={cn(
+        "pointer-events-auto col-start-1 row-start-1 flex h-[var(--control-h-md)] max-w-full min-w-0 cursor-pointer items-center gap-1 justify-self-start rounded-full pr-3 pl-2 text-ui text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50",
+        floating ? FLOATING_SURFACE : "hover:bg-muted",
+      )}
+    >
+      <ChevronLeft aria-hidden className="size-4 shrink-0" />
+      <span className="truncate">{focus.title}</span>
+    </button>
+  ) : null;
+
   // A Concierge chat's header floats over its messages: no bar, just the
   // mascot's badge with the name pill under it in the middle, and round
   // buttons either side, centred on the badge. The equal side columns keep the
@@ -2620,11 +2671,17 @@ export function Chat({
     >
       {/* The phone shell's back and menu buttons move in here, and its bar
           steps aside. Not while the tool pane covers the chat: the shell's
-          bar is then the only way back from the pane. */}
+          bar is then the only way back from the pane. A thread in focus takes
+          their corner, so the outlet stays mounted, which keeps the bar away,
+          and goes unseen. */}
+      {threadBack}
       {paneCoversChat ? null : (
         <SlotOutlet
           name={CONCIERGE_LEADING_SLOT}
-          className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
+          className={cn(
+            "pointer-events-auto col-start-1 row-start-1 items-center gap-1 justify-self-start",
+            threadBack ? "hidden" : "flex md:hidden",
+          )}
         />
       )}
       {conciergeStatus}
@@ -2640,6 +2697,7 @@ export function Chat({
     ? (trailing: ReactNode) => (
         <>
           <SlotContent name={navbarSlot}>
+            {threadBack}
             <div className="min-w-0 flex-1" />
             {trailing}
           </SlotContent>
@@ -2649,37 +2707,6 @@ export function Chat({
         </>
       )
     : floatingHeader;
-  // The thread tab's transcript feeds none of the chat's scroll measures.
-  const ignoreThreadContent = useCallback(() => {}, []);
-  loadedThreads.current = new Map(
-    displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
-  );
-  const chatThreads = useChatThreadsValue(displayMessages, rethreaded, liveThreadTitles);
-  const threadRoot = thread ? (chatThreads.taskThreads.get(thread.thread) ?? thread.thread) : null;
-  const threadTaskChat = useThreadTaskChat(
-    thread && threadRoot && mainSessionId
-      ? { sessionId: mainSessionId, messageId: thread.thread, threadRoot }
-      : null,
-    {
-      messages: displayMessages,
-      liveTaskChat: threadRoot ? (liveThreadTaskChats.get(threadRoot) ?? null) : null,
-    },
-  );
-  // The pane names the tab for the task and opens its chat from its header.
-  const threadTitle = (threadRoot && chatThreads.titles.get(threadRoot)) || thread?.title || "";
-  const showThread = Boolean(thread && mainSessionId);
-  useEffect(() => {
-    setToolThread?.(
-      threadOwner,
-      showThread ? { title: threadTitle, taskChatId: threadTaskChat, onClose: closeThread } : null,
-    );
-  }, [setToolThread, threadOwner, showThread, threadTitle, threadTaskChat, closeThread]);
-  const threadOutlet = toolThread?.outlet ?? null;
-  useEffect(() => {
-    if (threadOpens === 0 || coarsePointer || !threadOutlet || !thread) return;
-    threadComposerRef.current?.focus();
-  }, [threadOpens, coarsePointer, threadOutlet, thread]);
-
   const conciergeHeader = concierge ? (
     <>
       {conciergeHeaderWith(navbarActions)}
@@ -2785,6 +2812,9 @@ export function Chat({
                     {hasOlder(mainSessionId) ? (
                       <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                     ) : null}
+                    {/* The blank a thread in focus keeps around the messages, to
+                      hold the clicked one still (use-thread-focus.ts). */}
+                    <div ref={threadFocus.topSpace} aria-hidden className="shrink-0" />
                     <ChatThreadsProvider value={chatThreads}>
                       <TaskChatContext.Provider value={isTaskChat}>
                         <MessageList
@@ -2823,6 +2853,7 @@ export function Chat({
                         />
                       </TaskChatContext.Provider>
                     </ChatThreadsProvider>
+                    <div ref={threadFocus.bottomSpace} aria-hidden className="shrink-0" />
                   </>
                 ) : (
                   emptyState
@@ -2903,6 +2934,7 @@ export function Chat({
                             currentReplyMessageIds={currentReplyMessageIds}
                             messages={view.displayMessages}
                             liveCards={liveCards}
+                            whenShown={whenShown}
                           />
                         ) : (
                           <ChatPendingCardJump
@@ -3016,58 +3048,6 @@ export function Chat({
                   onJump={jumpToMessage}
                 />
               )}
-              {thread && mainSessionId && threadOutlet
-                ? createPortal(
-                    <ReplyDraftProvider value={threadDraft}>
-                      <ChatThreadView
-                        key={thread.thread}
-                        sessionId={mainSessionId}
-                        messageId={thread.thread}
-                        onClose={closeThread}
-                        renderMessages={(threadMessages) => (
-                          // The thread tab offers Copy and Reply, not Share: a share
-                          // is made from the chat's own timeline.
-                          <MessageSharingContext.Provider value={null}>
-                            <ConciergeTranscript
-                              rows={buildRows(threadMessages, identityBySession, mainIdentity, {
-                                runningTurnId: null,
-                                isStreaming: false,
-                              })}
-                              live={{
-                                isStreaming: false,
-                                runningTurnId: null,
-                                snapshot: null,
-                                textStore: liveTextStore,
-                                identity: mainIdentity,
-                              }}
-                              actions={{
-                                ...blockActions,
-                                interactionResults: threadInteractionResults(threadMessages, {
-                                  messages: displayMessages,
-                                  results: blockActions.interactionResults,
-                                }),
-                              }}
-                              contentRef={ignoreThreadContent}
-                            />
-                          </MessageSharingContext.Provider>
-                        )}
-                        composer={
-                          isArchived ? null : (
-                            <ConciergeComposer
-                              ref={threadComposerRef}
-                              boxClassName="rounded-16 border border-border bg-surface p-2"
-                              onSend={handleComposerSend}
-                              isStreaming={displayedStreaming}
-                              onStop={stopComposerTurn}
-                              streamError={streamError}
-                            />
-                          )
-                        }
-                      />
-                    </ReplyDraftProvider>,
-                    threadOutlet,
-                  )
-                : null}
             </div>
           </div>
           <TraceDrawer

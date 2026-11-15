@@ -661,10 +661,8 @@
     }
   },
   "thread": {
-    "title": "Chat thread",
-    "openTaskChat": "Open task chat",
-    "loadFailed": "Couldn't load this chat thread.",
-    "replyPlaceholder": "Reply"
+    "back": "Back to the chat: {{title}}",
+    "replyPlaceholder": "Reply: {{title}}"
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
