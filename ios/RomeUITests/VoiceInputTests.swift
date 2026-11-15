@@ -221,15 +221,18 @@ final class VoiceInputTests: XCTestCase {
     }
 
     /// Rule 7 when the network to Rome is lost: the stand-in instance drops the voice socket
-    /// and the events socket partway, and refuses new ones for 15 s.
+    /// and the events socket partway, and refuses new ones for 5 s.
     @MainActor
     func testRule7LosingTheNetworkKeepsTheWords() throws {
         let app = try launch()
-        try standIn(["drop": ["afterMs": 10000, "refuseMs": 15000]])
+        try standIn(["drop": ["afterMs": 10000, "refuseMs": 5000]])
         try checkWordsKept(app, stop: "losing the network", notice: "Connection to Rome lost. Listening stopped") {
             _ = waitForLabel(onScreen(app.buttons, "voice-input"), "Start voice input", timeout: 20)
             return app
         }
+        // The stand-in refuses connections for 5 s after the drop; the next test must not start
+        // inside that.
+        Thread.sleep(forTimeInterval: 6)
     }
 
     // MARK: Rule 11
