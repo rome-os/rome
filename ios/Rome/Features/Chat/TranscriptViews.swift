@@ -518,6 +518,9 @@ struct TaskCard: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
+        // On the card's own button: on the whole view they would name Stop too.
+        .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
+        .accessibilityIdentifier("task-card")
         .overlay(alignment: .trailing) {
             // On the right of the card, beside its own tap, so a press on Stop
             // never opens the chat. A quiet button, not a row of its own.
@@ -532,12 +535,11 @@ struct TaskCard: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(stopping)
+                .accessibilityIdentifier("task-stop")
                 .padding(.trailing, 12)
             }
         }
         .bubbleWidth()
-        .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
-        .accessibilityIdentifier("task-card")
     }
 }
 
