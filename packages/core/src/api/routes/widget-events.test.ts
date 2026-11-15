@@ -49,9 +49,11 @@ function setup(
   appReply: unknown = { ok: true },
   connections: unknown[] = [],
   deviceConnections: unknown[] = [],
+  audience: "private" | "shared" = "private",
 ) {
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
+    chatAudience: async () => audience,
     webchatRepo: {
       widgetMessage: async (id) =>
         rows[id] ? { chatId: rows[id].chatId, content: JSON.stringify(rows[id].content) } : null,
@@ -772,6 +774,23 @@ describe("an event on the share-location card core owns", () => {
     expect(forwarded).toEqual([]);
   });
 
+  it("answers as declined, with no position, once the chat is no longer private", async () => {
+    // Visitors were let in while the card waited, so the chat is now shared.
+    const { fire, forwarded } = setup(
+      { m: { chatId: "c1", content: [locationCard] } },
+      "guardian",
+      undefined,
+      [],
+      [],
+      "shared",
+    );
+    const res = await fire("m", { name: "share-location", context: position });
+    expect(await res.json()).toMatchObject({ answered: true });
+    const output = (forwarded[0]?.body as { parts: { output: unknown }[] }).parts[0]?.output;
+    expect(output).toMatchObject({ status: "declined", dismissed: true });
+    expect(JSON.stringify(forwarded)).not.toContain(String(position.latitude));
+  });
+
   it("lets the first of two clients answer, and refuses the other", async () => {
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => {
@@ -787,6 +806,7 @@ describe("an event on the share-location card core owns", () => {
         getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
       },
       callerOwner: async () => "guardian",
+      chatAudience: async () => "private",
       forward: async (request) => {
         turns.push(await request.json());
         await held;

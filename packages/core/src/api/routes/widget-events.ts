@@ -27,6 +27,8 @@ interface CoreIo {
   origin: string;
   /** The props core stored with the widget, which a client cannot change. */
   props: Record<string, unknown>;
+  /** Who can read the widget's chat now, read when the event arrives. */
+  chatAudience(): Promise<"private" | "shared">;
 }
 
 type CoreHandler = (context: Record<string, unknown>, io: CoreIo) => Promise<CoreReply>;
@@ -121,9 +123,13 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
   },
   // Share carries the position the client read from the device; Not now declines.
   [LOCATION_CARD_ID]: {
-    [SHARE_LOCATION_EVENT]: async (context) => {
+    [SHARE_LOCATION_EVENT]: async (context, io) => {
       const shared = sharedLocationAnswer(context);
       if (!shared) return Response.json({ error: "No location was sent." }, { status: 400 });
+      // The chat may have become shared since the card was shown, as when
+      // visitors were let in: then the position reaches nobody, and the card
+      // is answered as declined.
+      if ((await io.chatAudience()) !== "private") return { answer: DECLINED_LOCATION };
       return { answer: shared };
     },
     [DECLINE_LOCATION_EVENT]: async () => ({ answer: DECLINED_LOCATION }),
@@ -184,6 +190,9 @@ export interface WidgetEventDeps {
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
   /** Whose chats the caller may open. */
   callerOwner?: () => Promise<string | null>;
+  /** Who can read a dashboard chat now. Absent, every chat reads as shared,
+   *  so no location is accepted. */
+  chatAudience?: (chatId: string) => Promise<"private" | "shared">;
 }
 
 /**
@@ -260,6 +269,7 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
       const reply = await handle(context, {
         origin,
         props: widget.props,
+        chatAudience: async () => (await deps.chatAudience?.(message.chatId)) ?? "shared",
         connections: async () => {
           const res = await deps.forward(
             new Request(new URL("/api/connections", c.req.url), { headers }),

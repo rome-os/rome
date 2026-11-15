@@ -1,6 +1,7 @@
 import type { AgentNameEvents } from "../people/agent-name.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
 import type { DeviceConnectionsRepository } from "../connections/device/repository.js";
+import type { PlaceAudience } from "../core/place-audience.js";
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
@@ -159,6 +160,8 @@ export interface ApiDeps {
   personalData: PersonalDataRepository;
   /** What each of the guardian's devices lets Agents reach live. */
   deviceConnections: DeviceConnectionsRepository;
+  /** Who can read a place now, for checks made when an answer arrives. */
+  placeAudience: PlaceAudience;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
   /** The agents under every name they have had, for reading names stored before ids were canonical. */

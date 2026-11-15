@@ -2295,6 +2295,7 @@ async function main() {
       agentNameEvents,
       personalData: personalDataRepo,
       deviceConnections: deviceConnectionsRepo,
+      placeAudience: chatAudience,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
