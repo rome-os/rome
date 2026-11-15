@@ -2,6 +2,8 @@
 
 The personal-data store: what the guardian's devices push, what Rome keeps, and how an agent reads it, only in a private turn ([audience](domains/participation.md#audience)). The terms are in [personal data](concepts/data.md#personal-data), and the code is in [`packages/core/src/personal-data/`](../packages/core/src/personal-data/README.md).
 
+How stored data and live reads fit together: [Device connection](domains/connections.md#device-connection).
+
 ## Scope
 
 A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Health readings fit, and so would location samples or screen time. Calendar events, reminders, contacts and notes do not: they have titles and people, change in place, and are searched by text. A document source gets its own design, with the same personal-data mark, audience rule, origin and ingest log, and never goes into a reading's `fields`.
