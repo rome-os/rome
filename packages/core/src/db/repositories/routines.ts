@@ -9,6 +9,7 @@ import {
   type SessionActor,
 } from "../../access/session-actor.js";
 import { actionExecutionContext } from "../../apps/actions/context.js";
+import { isPersonalDataAction } from "../../apps/actions/personal-data.js";
 import {
   ACTIVE_ROUTINE_RUN_STATUSES,
   type DeleteRoutineResult,
@@ -101,8 +102,46 @@ export function routineChatOf(
   return context?.channel === "webchat" && context.threadId ? context.threadId : null;
 }
 
+/** Who can read a chat a routine works for. Domain: docs/domains/participation.md#audience. */
+export type RoutinePlaceAudience = (chatId: string) => Promise<"private" | "shared">;
+
+/** Why a routine that reads personal data is not created. */
+export const PERSONAL_DATA_ROUTINE_REFUSED =
+  "personal_data_private_only: A routine that reads personal data (Apple Health and other synced " +
+  "data) must work for a private chat, such as one of the guardian's own dashboard chats.";
+
+/** Whether a routine bound to `actionName` reads personal data, by its
+ *  canonical name or the local name an agent may write. */
+function readsPersonalData(actionName: string): boolean {
+  return isPersonalDataAction(actionName) || isPersonalDataAction(`core:${actionName}`);
+}
+
 export class RoutinesRepository {
-  constructor(private db: DrizzleDb) {}
+  /**
+   * @param placeAudience Who can read a routine's chat. Absent, every chat is
+   *   shared, so no routine reads personal data.
+   */
+  constructor(
+    private db: DrizzleDb,
+    private placeAudience?: RoutinePlaceAudience,
+  ) {}
+
+  /**
+   * Who can read what a routine's fires say: its chat's audience, and shared
+   * for a routine of no chat or one that no longer exists.
+   */
+  async audienceOf(id: string): Promise<"private" | "shared"> {
+    const [row] = await this.db
+      .select({ chatId: routines.chatId })
+      .from(routines)
+      .where(eq(routines.id, id));
+    return this.chatAudience(row?.chatId ?? null);
+  }
+
+  private async chatAudience(chatId: string | null): Promise<"private" | "shared"> {
+    if (!chatId || !this.placeAudience) return "shared";
+    return this.placeAudience(chatId);
+  }
 
   async findAll() {
     const rows = await this.db.select().from(routines);
@@ -239,6 +278,14 @@ export class RoutinesRepository {
   }): Promise<string> {
     const id = uuid();
     const now = new Date();
+    const chatId =
+      data.chatId === undefined
+        ? routineChatOf(data.actionName, data.args, data.madeIn)
+        : data.chatId;
+    // Refused when it is made, not on every fire.
+    if (readsPersonalData(data.actionName) && (await this.chatAudience(chatId)) !== "private") {
+      throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);
+    }
     const createdBy = await routineCreator(this.db, data);
     await this.db.insert(routines).values({
       id,
@@ -251,10 +298,7 @@ export class RoutinesRepository {
       args: data.args as unknown,
       keepTriggerPayload: data.keepTriggerPayload ?? true,
       createdBy,
-      chatId:
-        data.chatId === undefined
-          ? routineChatOf(data.actionName, data.args, data.madeIn)
-          : data.chatId,
+      chatId,
       createdAt: now,
       lastFiredAt: null,
       nextRunAt: data.nextRunAt ?? null,
@@ -274,6 +318,13 @@ export class RoutinesRepository {
       keepTriggerPayload: boolean;
     }>,
   ) {
+    if (
+      data.actionName !== undefined &&
+      readsPersonalData(data.actionName) &&
+      (await this.audienceOf(id)) !== "private"
+    ) {
+      throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);
+    }
     const values: Record<string, unknown> = {};
     if (data.name !== undefined) values.name = data.name;
     if (data.enabled !== undefined) values.enabled = data.enabled;

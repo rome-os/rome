@@ -23,7 +23,6 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { RomeLogo } from "@/components/logo";
@@ -65,15 +64,11 @@ import {
   CONCIERGE_CHATS_QUERY_KEY,
   useConciergeChatId,
   useConciergeChats,
-  useConciergeName,
   useRefreshTopicChats,
 } from "@/hooks/use-concierge";
 import { useDesktop } from "@/hooks/use-desktop";
 import { chatSessionTopic, chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
-import { useMediaQuery } from "@/hooks/use-media-query";
 import { ConciergeChats } from "./ConciergeEntry";
-import { isElectronShell } from "@/lib/electron-shell";
-import { STANDALONE_DISPLAY_QUERY } from "@/lib/media-query";
 import { emitSessionsChanged, useArchiveSession, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 
@@ -238,15 +233,6 @@ function projectPathForSession(session: ChatSession): string {
   return isDefaultProjectChat(session) ? DEFAULT_PROJECT_NAME : session.projectPath || "";
 }
 
-/** A project row's plus: hidden until the row is hovered, shown at once on touch. */
-const PROJECT_PLUS_CLASS =
-  "touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100";
-
-/** The new chat page with the project chosen, as an address a new tab can open. */
-function newChatInProjectHref(projectPath: string): string {
-  return `/chat?project=${encodeURIComponent(projectPath)}`;
-}
-
 const PROJECT_DEFAULT_VISIBLE = 4;
 const PROJECT_LOAD_MORE_COUNT = 10;
 // Keep in sync with the server-side cap in webchat.ts (PATCH /chat/sessions/:id/name).
@@ -256,18 +242,7 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({
-  id,
-  name,
-  nested,
-  marker,
-}: {
-  id: string;
-  name: string;
-  nested: boolean;
-  /** Names who started the chat, shown as a small mark after the name. */
-  marker?: string;
-}) {
+function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -300,13 +275,6 @@ function ChatRowLink({
           <span ref={nameRef} className="truncate">
             {name}
           </span>
-          {marker ? (
-            <ChatBubbleIcon
-              role="img"
-              aria-label={marker}
-              className="ml-2 h-3 w-3 shrink-0 text-subtle-foreground"
-            />
-          ) : null}
         </Link>
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
@@ -358,7 +326,7 @@ function ChatModeSwitch({
       aria-label={t("recentChats.modeSwitch")}
       value={mode}
       onValueChange={onChange}
-      className="ml-1 shrink-0"
+      className="shrink-0"
       options={[
         {
           value: "chat",
@@ -436,16 +404,9 @@ export function RecentChats({
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
-  // A project's plus opens its chat in a new tab, so the chat on screen stays
-  // open, wherever there are tabs to open: a wide window of a normal browser.
-  // A phone, the installed home-screen app, the Mac app and the mobile app's
-  // WebView have none, and a new tab there would take the user out of Rome.
-  // The touch signal is the one AppGrid uses for the WebView, which sets no
-  // marker of its own.
+  // The New chat row shows its keyboard shortcut only where there is a keyboard.
   const wideWindow = useDesktop();
-  const installedApp = useMediaQuery(STANDALONE_DISPLAY_QUERY);
   const coarsePointer = useCoarsePointer();
-  const plusOpensNewTab = wideWindow && !installedApp && !coarsePointer && !isElectronShell();
   const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
@@ -486,7 +447,6 @@ export function RecentChats({
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
-  const conciergeName = useConciergeName();
   const conciergeChats = useConciergeChats();
   // Without a Concierge there is nothing to switch to: the list is the
   // ordinary chats alone.
@@ -895,16 +855,7 @@ export function RecentChats({
             }`}
           />
         ) : (
-          <ChatRowLink
-            id={session.id}
-            name={session.name}
-            nested={nested}
-            marker={
-              chatKind(session) === "task"
-                ? t("recentChats.startedByConcierge", { name: conciergeName })
-                : undefined
-            }
-          />
+          <ChatRowLink id={session.id} name={session.name} nested={nested} />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -1093,31 +1044,19 @@ export function RecentChats({
             </button>
           ) : null}
           {projectPath ? (
-            // A real link either way, so "open in new tab" works from the
-            // keyboard and the context menu. The project rides the URL because
-            // a new tab does not inherit router state.
-            plusOpensNewTab ? (
-              <a
-                href={newChatInProjectHref(projectPath)}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={t("recentChats.newChatInProject")}
-                title={t("recentChats.newChatInProject")}
-                className={PROJECT_PLUS_CLASS}
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            ) : (
-              <Link
-                to={newChatInProjectHref(projectPath)}
-                state={{ projectPath }}
-                aria-label={t("recentChats.newChatInProject")}
-                title={t("recentChats.newChatInProject")}
-                className={PROJECT_PLUS_CLASS}
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-              </Link>
-            )
+            <button
+              type="button"
+              onClick={() =>
+                navigate("/chat", {
+                  state: { projectPath },
+                })
+              }
+              aria-label={t("recentChats.newChatInProject")}
+              title={t("recentChats.newChatInProject")}
+              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+            </button>
           ) : null}
         </div>
         {collapsed ? null : (
@@ -1185,6 +1124,8 @@ export function RecentChats({
             <span className="truncate text-section text-foreground">
               {t(mode === "concierge" ? "recentChats.modeConcierge" : "recentChats.title")}
             </span>
+          </div>
+          <div className="flex items-center gap-1">
             {hasConcierge ? (
               <ChatModeSwitch
                 mode={mode}
@@ -1193,8 +1134,6 @@ export function RecentChats({
                 chatReplying={chatReplying}
               />
             ) : null}
-          </div>
-          <div className="flex items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton

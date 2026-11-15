@@ -394,6 +394,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     setNotice: draft.setNotice,
     keepNotice: draft.keepNotice,
   });
+  const voiceActiveRef = useRef(false);
+  voiceActiveRef.current = voice.active;
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
   const [textareaMaxHeight, setTextareaMaxHeight] = useState(TEXTAREA_MAX_HEIGHT);
 
@@ -649,7 +651,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     () => ({
       focus: () => textareaRef.current?.focus(),
       insertText: (text: string, options?: { focus?: boolean }) => {
-        if (uploadInFlightRef.current) return;
+        // The field is the dictation's while it listens.
+        if (uploadInFlightRef.current || voiceActiveRef.current) return;
         setInputText(text);
         requestAnimationFrame(() => {
           const el = textareaRef.current;
@@ -826,7 +829,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         setInputText(persistNewChatDraft ? rawText : text);
         setPendingUploads(uploads);
         setDraftSkill(skill);
-        if (snapshot.replyTo) replyDraft?.restore({ target: snapshot.replyTo });
+        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
       }
       // Nothing to restore otherwise — a cancelled or failed upload never
       // cleared the text or the attachment tray in the first place.
