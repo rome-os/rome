@@ -136,6 +136,7 @@ import {
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import { ASKING_DEVICE_HEADER, withAskingDevice } from "../../connections/device/live-route.js";
 import {
   locationAnswerPrompt,
   locationCardUiFromProps,
@@ -3970,7 +3971,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
-    said: { saidBy?: Account; fromWidgetEvent?: boolean } = {},
+    said: { saidBy?: Account; fromWidgetEvent?: boolean; askingDeviceId?: string } = {},
   ): Promise<RouteAnswer> => {
     const actor = await currentSessionActor();
     const sourceId =
@@ -4354,21 +4355,32 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
-    // WebChat owns input admission and one output drain per actual run.
-    const threadContext = {
-      channel: "webchat",
-      threadId: sessionId,
-      romeSessionId: sessionId,
-      threadPath: join(workingDir, ".threads", sessionId),
-      channelUserId,
-      threadType: "private" as const,
-      projectName: sessionProjectName,
-      projectPath: sessionProjectPath,
-      ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
-      // The web dashboard is guardian-only, so a webchat turn is always from
-      // the guardian.
-      senderBondLevel: "guardian",
-    };
+    // WebChat owns input admission and one output drain per actual run. The
+    // device the guardian sent from is the one a live read asks, so it is
+    // kept only for the guardian's own message.
+    const threadContext = withAskingDevice(
+      {
+        channel: "webchat",
+        threadId: sessionId,
+        romeSessionId: sessionId,
+        threadPath: join(workingDir, ".threads", sessionId),
+        channelUserId,
+        threadType: "private" as const,
+        projectName: sessionProjectName,
+        projectPath: sessionProjectPath,
+        ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
+        // The web dashboard is guardian-only, so a webchat turn is always from
+        // the guardian.
+        senderBondLevel: "guardian",
+      },
+      // The guardian's own message names its device; a task chat's message
+      // from the Concierge reads the device the task was handed from.
+      actor?.kind === "guardian" && !saidBy
+        ? said.askingDeviceId
+        : saidBy
+          ? ((await deps.webchatRepo.askingDeviceOf(sessionId)) ?? undefined)
+          : undefined,
+    );
 
     const contextSuffix = buildWebchatContextSuffix();
     let largeModelSelection = session.largeModelSelection;
@@ -5102,6 +5114,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const body = await parseChatSendBody(c);
     const sent = await handleChatSend(c.req.param("id"), body, {
       fromWidgetEvent: cameThroughWidgetEvent(c.env),
+      askingDeviceId: c.req.header(ASKING_DEVICE_HEADER),
     });
     return c.json(sent.body, sent.status);
   });

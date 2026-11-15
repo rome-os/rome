@@ -421,25 +421,6 @@ export class PersonalDataRepository {
     }));
   }
 
-  /**
-   * The device connection an origin's sync names. Without an origin, the
-   * connection of the source's most recently synced origin that is not off.
-   */
-  connectionIdOf(source: string, origin?: string): string | null {
-    const row = this.db
-      .select({ connectionId: personalDataSources.connectionId })
-      .from(personalDataSources)
-      .where(
-        origin !== undefined
-          ? sourceRow(source, origin)
-          : and(eq(personalDataSources.source, source), ne(personalDataSources.state, "off")),
-      )
-      .orderBy(desc(personalDataSources.lastSyncAt))
-      .limit(1)
-      .get();
-    return row?.connectionId ?? null;
-  }
-
   /** Sets an origin's state. False when the origin never sent this source. */
   setState(source: string, origin: string, state: OriginState): boolean {
     const changed = this.db

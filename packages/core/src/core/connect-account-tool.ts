@@ -3,6 +3,7 @@ import {
   connectableKinds,
   connectAccountToolOutput,
   type DeviceKind,
+  type DeviceKindState,
   deviceConnectToolOutput,
   parseConnectAccountInput,
 } from "../connections/connect-card.js";
@@ -21,8 +22,11 @@ export function connectAccountTools(input: {
   hasSpeaker: boolean;
   /** The device kinds devices reported, read when the session's tools are built. */
   devices?: readonly DeviceKind[];
-  /** The device kinds as they stand when the tool is called. */
-  deviceStates?: () => readonly DeviceKind[];
+  /**
+   * How a device kind stands for this turn when the tool is called: on the
+   * device the guardian asks from, when the turn has one, never on another.
+   */
+  deviceState?: (kind: string) => DeviceKindState | undefined;
   devicesOnly?: boolean;
 }): RomeTool[] {
   const widgetsShow = input.widgets === "card";
@@ -59,8 +63,8 @@ export function connectAccountTools(input: {
         });
         if (!parsed.ok) return { content: [{ type: "text", text: parsed.error }], isError: true };
         // A device kind that already works needs no card: read as it stands now.
+        const now = parsed.device ? input.deviceState?.(parsed.kind) : undefined;
         if (parsed.device) {
-          const now = input.deviceStates?.().find((d) => d.kind === parsed.kind);
           if (now?.state === "working") {
             return {
               content: [
@@ -73,7 +77,7 @@ export function connectAccountTools(input: {
           }
         }
         const output = parsed.device
-          ? deviceConnectToolOutput(parsed.device, widgetsShow)
+          ? deviceConnectToolOutput(parsed.device, widgetsShow, now?.askingDeviceId)
           : connectAccountToolOutput(parsed.kind, widgetsShow);
         return {
           content: [

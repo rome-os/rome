@@ -5,6 +5,8 @@ import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 import { deviceConnectPath } from "../../connections/connect-card.js";
+import { ASKING_DEVICE_HEADER, createLiveRoutes } from "../../connections/device/live-route.js";
+import type { DeviceConnection } from "../../connections/device/repository.js";
 import { DECLINED_LOCATION, sharedLocationAnswer } from "../../webchat/location-card.js";
 import {
   DECLINE_LOCATION_EVENT,
@@ -22,7 +24,7 @@ interface CoreIo {
   /** The connections, as `GET /api/connections` lists them to the caller. */
   connections(): Promise<ConnectionStatus[]>;
   /** The device connections, as `GET /api/device-connections` lists them to the caller. */
-  deviceConnections(): Promise<DeviceConnectionStatus[]>;
+  deviceConnections(): Promise<DeviceConnection[]>;
   /** The origin the caller reached Rome at, for turning a path into a link. */
   origin: string;
   /** The props core stored with the widget, which a client cannot change. */
@@ -42,20 +44,26 @@ interface ConnectionStatus {
   connect: { url: string | null; available: boolean; unavailableReason: string | null } | null;
 }
 
-/** A device connection as `GET /api/device-connections` lists it, in the
- *  fields the connect card reads. */
-interface DeviceConnectionStatus {
-  capability: string;
-  title: string;
-  state: "working" | "off" | "broken";
-}
-
-/** Whether a device connection of `kind` works, and its title. */
+/**
+ * Whether a device connection of `kind` works, and its title, by the live
+ * route's own choice (connections/device/live-route.ts) over the connections
+ * `GET /api/device-connections` lists to the caller: a card raised for the
+ * device the guardian asked from (`props.deviceId`) reads that device alone,
+ * and one raised for no device skips devices silent for 7 days. So the card
+ * and the read after it agree.
+ */
 async function deviceKindState(kind: string, io: CoreIo) {
-  const ofKind = (await io.deviceConnections()).filter((c) => c.capability === kind);
+  const deviceId = typeof io.props.deviceId === "string" ? io.props.deviceId : undefined;
+  const rows = await io.deviceConnections();
+  const pointer = createLiveRoutes({ list: () => rows }).forKind(kind, {
+    askingDeviceId: deviceId,
+  });
   return {
-    working: ofKind.some((c) => c.state === "working"),
-    label: ofKind[0]?.title ?? kind,
+    working: pointer.state === "working",
+    label:
+      (pointer.state !== "not_connected" ? pointer.title : undefined) ??
+      rows.find((c) => c.capability === kind)?.title ??
+      kind,
   };
 }
 
@@ -187,7 +195,10 @@ interface StoredWidget {
 }
 
 export interface WidgetEventDeps {
-  webchatRepo: Pick<WebChatRepository, "widgetMessage" | "getSession" | "getMessages">;
+  webchatRepo: Pick<
+    WebChatRepository,
+    "widgetMessage" | "getSession" | "getMessages" | "askingDeviceOf"
+  >;
   /** Hands a request to Rome's own API, as if the caller had sent it there.
    *  `env` is the incoming request's, so the caller resolves the same way. */
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
@@ -252,6 +263,16 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     const headers = new Headers(c.req.raw.headers);
     headers.set("content-type", "application/json");
     headers.delete("content-length");
+    // The turn an answer starts asks the device the guardian pressed it on,
+    // else the device a core card was raised for, else the one the chat was
+    // last handed work from, so the read after connecting goes to that device.
+    if (!headers.has(ASKING_DEVICE_HEADER)) {
+      const deviceId =
+        (widget.appId === "core" && typeof widget.props.deviceId === "string"
+          ? widget.props.deviceId
+          : null) ?? (await deps.webchatRepo.askingDeviceOf(message.chatId));
+      if (deviceId) headers.set(ASKING_DEVICE_HEADER, deviceId);
+    }
     const to = (path: string, json: unknown) =>
       deps.forward(
         new Request(new URL(path, c.req.url), {
@@ -289,7 +310,7 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
             c.env,
           );
           const listed = (await res.json().catch(() => null)) as {
-            connections?: DeviceConnectionStatus[];
+            connections?: DeviceConnection[];
           } | null;
           return res.ok ? (listed?.connections ?? []) : [];
         },

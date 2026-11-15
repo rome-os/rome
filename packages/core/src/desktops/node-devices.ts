@@ -29,6 +29,11 @@ export type DeviceFilesResult =
   | { ok: true; folder: DeviceFilesResponse }
   | { ok: false; code: DeviceFilesErrorCode };
 
+/** A device action's answer, or the device's or the gateway's error code. */
+export type DeviceRunResult =
+  | { ok: true; result: unknown }
+  | { ok: false; code: string; message: string };
+
 const pathErrors = new Set<string>(["not_found", "not_a_directory", "permission_denied"]);
 
 /** Maps an fs.list failure to what the folder picker can tell the guardian. */
@@ -134,6 +139,30 @@ export function createNodeDevicesService(
           client = undefined;
         }
         return { ok: false, code: "unavailable" };
+      }
+    },
+    /**
+     * Runs one action on a device and passes its answer on as the device gave
+     * it. A device that is offline answers `target_unavailable` at once: no
+     * queue, no wake.
+     */
+    async runAction(deviceId: string, action: string, args: unknown): Promise<DeviceRunResult> {
+      try {
+        client ??= createClient();
+        const response = await client.run(deviceId, action, args);
+        return response.ok
+          ? { ok: true, result: response.result }
+          : { ok: false, code: response.error.code, message: response.error.message };
+      } catch (error) {
+        if (error instanceof DaemonVersionError) {
+          client?.disconnect();
+          client = undefined;
+        }
+        return {
+          ok: false,
+          code: "gateway_unavailable",
+          message: "Rome could not reach its device connection service.",
+        };
       }
     },
     /** Renames a device in the account through Cloud. */

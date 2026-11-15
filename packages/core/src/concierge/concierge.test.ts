@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { and, eq } from "drizzle-orm";
 import { threadIdOf } from "../apps/repositories/approvals.js";
 import { approvalWaits } from "../test/open-waits.js";
+import { withAskingDevice } from "../connections/device/live-route.js";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
 import { POSTPONED_CHECKS } from "./service.js";
@@ -230,6 +231,7 @@ function setup(
     pushLevel: undefined as NotifyLevel | undefined,
     reportedTask: undefined as string | undefined,
     turnId: "concierge-turn-1",
+    askingDeviceId: undefined as string | undefined,
   };
   const messages = new Map<string, Row[]>();
   /** Every input posted to a task chat, by id, in order. */
@@ -300,6 +302,7 @@ function setup(
       },
     },
     webchatRepo: {
+      setAskingDevice: rs.fn(async () => {}),
       getSession: async (id: string) => sessions.get(id) ?? null,
       listSessions: async () => [...sessions.values()],
       updateSessionLargeModelSelection: rs.fn(async (id: string, largeModelSelection: string) => {
@@ -432,11 +435,11 @@ function setup(
     sessionId: "runtime-1",
     isSubagent: false,
     getTurnId: () => here.turnId,
-    getThreadContext: () => ({
-      channel: "webchat",
-      threadId: here.chat,
-      channelUserId: "guardian",
-    }),
+    getThreadContext: () =>
+      withAskingDevice(
+        { channel: "webchat", threadId: here.chat, channelUserId: "guardian" },
+        here.askingDeviceId,
+      ),
     getTurnPushLevel: () => here.pushLevel,
     getTurnReportedTask: () => here.reportedTask,
   });
@@ -553,6 +556,10 @@ function setup(
     settingsWrites,
     turnOptions,
     pushes,
+    /** Runs the tools' turn as one the guardian started from this device. */
+    askFrom: (deviceId: string | undefined) => {
+      here.askingDeviceId = deviceId;
+    },
     /** Runs the tools' turn as one the guardian did not start, pushed at this level. */
     pushLevel: (level: NotifyLevel | undefined) => {
       here.pushLevel = level;
@@ -768,6 +775,25 @@ describe("Concierge tools", () => {
 
       expect(threadOf(s, answer)).toBeUndefined();
       expect(threadOf(s, relayed)).toBe("tasks");
+    });
+
+    it("hands a task chat the device the guardian asks from, so its live reads ask it", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, { id: "g0", turnId: "start-turn" });
+      s.inTurn("start-turn");
+      await s.tool("say", { text: "On it" });
+      s.askFrom("dev-asking");
+      const { chatId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Steps", brief: "Read my steps" })).content[0].text,
+      );
+      expect(s.deps.webchatRepo.setAskingDevice).toHaveBeenCalledWith(chatId, "dev-asking");
+      s.askFrom("dev-other");
+      await s.tool("chat_send", { chatId, text: "And sleep" });
+      expect(s.deps.webchatRepo.setAskingDevice).toHaveBeenLastCalledWith(chatId, "dev-other");
+      // A turn no device started leaves the task chat's device as it is.
+      s.askFrom(undefined);
+      await s.tool("chat_send", { chatId, text: "And heart rate" });
+      expect(s.deps.webchatRepo.setAskingDevice).toHaveBeenCalledTimes(2);
     });
 
     it("sends on only the guardian message it names, or the turn's only one", async () => {
@@ -6732,6 +6758,30 @@ describe("scheduled tasks", () => {
       { at: "12:25", report: "every_run", brief: "Sum up my last day" },
     );
     expect(started.scheduled).toContain("2026-11-13T04:25:00.000Z");
+  });
+
+  it("runs a scheduled brief with no asking device, so a device saved by a handoff cannot pin it", async () => {
+    const s = setup();
+    withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    // A follow-up from the phone saved its device id on the task chat.
+    s.askFrom("dev-signed-out");
+    await s.tool("chat_send", { chatId, text: "Add my sleep too" });
+    expect(s.deps.webchatRepo.setAskingDevice).toHaveBeenLastCalledWith(chatId, "dev-signed-out");
+    s.fakeTimers();
+    const order: string[] = [];
+    rs.mocked(s.deps.webchatRepo.setAskingDevice).mockImplementation(async (_id, deviceId) => {
+      order.push(`device:${deviceId}`);
+    });
+    const realSend = s.send.getMockImplementation()!;
+    s.send.mockImplementationOnce(async (...args) => {
+      order.push("send");
+      return realSend(...args);
+    });
+
+    expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("sent");
+    // Cleared before the brief goes in, so the run's turn takes a working device.
+    expect(order).toEqual(["device:null", "send"]);
   });
 
   it("sends each run's brief into the task's own chat as the Concierge's words, reported as its own", async () => {

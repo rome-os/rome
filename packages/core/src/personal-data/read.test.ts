@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/db.js";
 import type { QueryInput } from "./domain/query.js";
 import { type QueryAnswer, queryPersonalData } from "./read.js";
-import type { DeviceConnection } from "../connections/device/repository.js";
+import type { ConnectionLookup } from "./connection-pointer.js";
 import { PersonalDataRepository } from "./repository.js";
 import { APPLE_HEALTH } from "./sources/apple-health.js";
 import { PERSONAL_DATA_SOURCES } from "./sources/index.js";
@@ -302,15 +302,16 @@ describe("queryPersonalData", () => {
   });
 
   it("reads a short window over a stale store live, and a fresh store from itself", () => {
-    const working = {
-      id: "dev-1:apple_health",
-      capability: "apple_health",
-      title: "Apple Health",
-      device: { id: "dev-1", name: "iPhone", platform: "ios" },
-      state: "working",
-      lastSeenAt: new Date(NOW).toISOString(),
-    } as unknown as DeviceConnection;
-    const connections = { byId: () => working, feeding: () => working };
+    const connections: ConnectionLookup = {
+      forSource: () => ({
+        id: "dev-1:apple_health",
+        kind: "apple_health",
+        title: "Apple Health",
+        device: { id: "dev-1", name: "iPhone" },
+        state: "working",
+        lastSeenAt: new Date(NOW).toISOString(),
+      }),
+    };
     const lastHalfHour = () => {
       const answer = queryPersonalData(
         repo,
@@ -328,7 +329,7 @@ describe("queryPersonalData", () => {
       return answer.connection?.next ?? "";
     };
     // Synced three days ago: the window is short, the store is not current.
-    expect(lastHalfHour()).toContain("rome-node device run dev-1");
+    expect(lastHalfHour()).toContain('core:device_run and device "dev-1"');
     repo.ingest(
       APPLE_HEALTH,
       batch("fresh", {

@@ -47,7 +47,9 @@ struct HealthCapability: NodeCapability {
 
     var actions: [NodeActionSpec] {
         let usage = HealthActions.usage(health.device)
-        return ["health.stats", "health.samples"].map { NodeActionSpec(name: $0, usage: usage[$0] ?? "") }
+        return ["health.stats", "health.samples"].map {
+            NodeActionSpec(name: $0, usage: usage[$0] ?? "", examples: HealthActions.examples[$0] ?? [])
+        }
     }
 
     /// HealthKit hides whether read access was granted: a refusal looks the

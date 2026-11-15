@@ -527,6 +527,10 @@ export const romeSessions = sqliteTable(
     // Folder on a rome-node device the chat works in, set only when the chat
     // is created. NULL for every chat without one and every other session type.
     deviceFolder: text("device_folder", { mode: "json" }).$type<DeviceFolder>(),
+    // The rome-node device the guardian asked from when the Concierge last
+    // handed this task chat work, so the task's live reads ask that device.
+    // NULL for every other chat, and for a task started with no device.
+    askingDeviceId: text("asking_device_id"),
     // Agent the session is bound to. NULL means the default "main" agent.
     // Locked on first turn so the session can't switch agents mid-thread.
     agentName: text("agent_name"),
@@ -1624,8 +1628,18 @@ export const deviceConnections = sqliteTable(
     // The command prefix, without the dot, such as `health`.
     prefix: text("prefix").notNull(),
     personal: integer("personal", { mode: "boolean" }).notNull(),
+    // Each operation as the device reports it: name, access, and the optional
+    // description, input schema and examples.
     operations: text("operations", { mode: "json" })
-      .$type<{ name: string; access: "read" | "write" }[]>()
+      .$type<
+        {
+          name: string;
+          access: "read" | "write";
+          description?: string;
+          input?: Record<string, unknown>;
+          examples?: Record<string, unknown>[];
+        }[]
+      >()
       .notNull(),
     permission: text("permission").notNull(), // granted | denied | not_needed | unknown
     // The device's Live access switch.
@@ -1634,6 +1648,10 @@ export const deviceConnections = sqliteTable(
     // `apple_health`: opaque here, so a reader of that data can find the
     // connection before the first sync. Null when it syncs nothing.
     feeds: text("feeds"),
+    // The personal-data origin of the app install that reports the row, which
+    // stays the same across its sign-ins while the device id does not. Null
+    // for an app that reports none.
+    originId: text("origin_id"),
     // When a report last listed the row.
     lastSeenAt: integer("last_seen_at").notNull(),
   },

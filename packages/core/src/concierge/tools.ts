@@ -10,6 +10,7 @@ import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/ap
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { ChatThreadPlacement } from "../webchat/repository.js";
+import { askingDeviceOf } from "../connections/device/live-route.js";
 import type { SendResult } from "../chats/send.js";
 import type {
   ConciergeTaskWithChat,
@@ -307,8 +308,11 @@ export async function buildConciergeTools(
   };
 
   // Said as Concierge's account, so the task event reads who asked off the
-  // message.
+  // message. The device the guardian asks from goes with the work, so the
+  // task chat's live reads ask that device too, not another install.
   const sendInput = async (chatId: string, text: string, skillName?: string) => {
+    const asking = askingDeviceOf(context.getThreadContext());
+    if (asking) await webchatRepo.setAskingDevice(chatId, asking);
     const sent = await service.dashboard.send(
       taskChatPlace(chatId),
       { text, ...(skillName ? { skillName } : {}) },
