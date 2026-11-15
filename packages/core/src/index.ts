@@ -2322,10 +2322,7 @@ async function main() {
       permissions,
       dashboardAccessState,
       voiceInput: createVoiceInputSource({
-        romeCloud: () => {
-          const access = romeCloudAccess();
-          return access ? { origin: access.origin, bearer: access.bearer } : null;
-        },
+        romeCloud: romeCloudAccess,
       }),
       transcriptionUsage: usageRecorder,
       dashboardAccessStore,

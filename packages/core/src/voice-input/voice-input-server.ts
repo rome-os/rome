@@ -151,6 +151,9 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     reply(last);
     ws.close(1000);
     settle(last.type === "error" ? last.reason : last.type);
+    // At once, not on the client's side of the close: a client that never
+    // answers would hold the provider open for ws's 30 s close timeout.
+    stream?.abort();
   };
 
   // Every listening session is a Rome Cloud session, so each one reports.
@@ -162,8 +165,8 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       sessionId,
       provider: transcriber.providerId,
       model: transcriber.model,
-      // PCM s16le mono: two bytes a sample.
-      seconds: Math.round((bytes / 2 / listening.sampleRate) * 10) / 10,
+      // PCM s16le mono: two bytes a sample. Only what reached the provider.
+      seconds: Math.round(((stream?.sentBytes ?? 0) / 2 / listening.sampleRate) * 10) / 10,
       status,
       durationMs: Date.now() - listening.startedAt,
     });
