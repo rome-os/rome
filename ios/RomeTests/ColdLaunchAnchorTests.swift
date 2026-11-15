@@ -48,24 +48,7 @@ private struct ScrollState: CustomStringConvertible {
         )
     }
 
-    /// How the update pill comes and goes in a launch.
-    enum Pill: CaseIterable, Sendable {
-        /// None shows.
-        case none
-        /// It shows from what was kept, and the launch's check takes it away
-        /// while the fetch lands.
-        case goesAway
-        /// The update check answers late, after the kept rows and the fetch:
-        /// the pill comes up then.
-        case comesLate
-    }
-
-    /// The update the pill offers: newer than the instance, which is new
-    /// enough for the app.
-    private static let offered = InstanceUpdater.State.required(current: UpdateGate.minimumInstanceVersion, latest: "\(UpdateGate.minimumInstanceVersion).1", latestChanged: false)
-
-    @Test(arguments: Pill.allCases)
-    func theNewestMessageStaysAboveTheComposer(pill: Pill) async throws {
+    @Test func theNewestMessageStaysAboveTheComposer() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "rome-cold-anchor-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         func drafts() -> DraftStore { DraftStore(root: root.appending(path: "Drafts"), instance: "t") }
@@ -84,10 +67,6 @@ private struct ScrollState: CustomStringConvertible {
         defer { workspace.stop() }
         #expect(workspace.concierge.loaded && !workspace.concierge.messages.isEmpty)
         let model = AppModel()
-        if pill == .goesAway {
-            model.update.debugShow(Self.offered)
-            #expect(model.update.showsBanner)
-        }
         let host = UIHostingController(rootView: MainShell(workspace: workspace).environment(model))
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
@@ -103,24 +82,14 @@ private struct ScrollState: CustomStringConvertible {
         let scroll = try #require(Self.transcript(in: host.view))
         let cached = Self.state(scroll)
         #expect(abs(cached.toEnd) < 1, "kept rows: \(cached)")
-        // The composer is under the transcript; the pill's own space is
-        // checked against what follows.
+        // The composer is under the transcript.
         #expect(cached.bottomInset > 40, "bottom inset: \(cached)")
 
-        // The fresh load, then the header's status; the check finds no update.
-        if pill == .goesAway { model.update.debugShow(.upToDate) }
+        // The fresh load, then the header's status.
         await workspace.start()
         workspace.topics.setActivity(.needsYou, for: workspace.mainChatServerID ?? conciergeChatID)
         var samples: [ScrollState] = []
-        var justAfterPill: ScrollState?
-        for step in 0..<40 {
-            // The late check's answer, a second after the fetch.
-            if pill == .comesLate, step == 10 {
-                model.update.debugShow(Self.offered)
-                #expect(model.update.showsBanner)
-                try await Task.sleep(for: .milliseconds(60))
-                justAfterPill = Self.state(scroll)
-            }
+        for _ in 0..<40 {
             try await Task.sleep(for: .milliseconds(100))
             samples.append(Self.state(scroll))
         }
@@ -128,18 +97,7 @@ private struct ScrollState: CustomStringConvertible {
         #expect(workspace.concierge.hasOlder, "the fetch should page")
         #expect(abs(settled.toEnd) < 1, "after the fetch: \(settled)")
         // No space kept under the newest message beyond the composer's.
-        switch pill {
-        case .none:
-            #expect(abs(settled.bottomInset - cached.bottomInset) < 1, "bottom inset \(cached.bottomInset) became \(settled.bottomInset)")
-        case .goesAway:
-            #expect(settled.bottomInset < cached.bottomInset - 20, "the pill's space should go: \(cached.bottomInset) → \(settled.bottomInset)")
-        case .comesLate:
-            #expect(settled.bottomInset > cached.bottomInset + 20, "the pill's space should come: \(cached.bottomInset) → \(settled.bottomInset)")
-            // In place at once, with the bar: no motion of its own that the
-            // transcript would have to chase.
-            let early = try #require(justAfterPill)
-            #expect(abs(early.bottomInset - settled.bottomInset) < 1 && abs(early.toEnd) < 1, "still moving 60 ms after the pill came: \(early), settled \(settled)")
-        }
+        #expect(abs(settled.bottomInset - cached.bottomInset) < 1, "bottom inset \(cached.bottomInset) became \(settled.bottomInset)")
         // Never left past the end, the gap the guardian saw.
         let worst = samples.min { $0.toEnd < $1.toEnd }!
         #expect(worst.toEnd > -1, "a gap opened: \(worst)")

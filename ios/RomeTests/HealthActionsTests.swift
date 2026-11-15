@@ -172,7 +172,7 @@ enum HealthFixtures {
     }
 
     @Test func everyReadTypeIsAskedForOnce() {
-        #expect(LiveHealth.readTypes.count == 28)
+        #expect(LiveHealth.readTypes.count == HealthTypes.requestedNames.count)
     }
 
     @Test func everyActivityNameHasHealthKitsType() {
