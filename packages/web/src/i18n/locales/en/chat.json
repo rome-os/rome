@@ -383,6 +383,12 @@
       "rejected": "Rejected",
       "failed": "Execution failed"
     },
+    "secretAccess": {
+      "allow": "Allow {{minutes}} min",
+      "duration": "{{minutes}} min",
+      "allowed": "Allowed {{name}} · {{minutes}} min",
+      "rejected": "Rejected {{name}}"
+    },
     "actions": {
       "approve": "Approve",
       "approving": "Approving…",

@@ -52,6 +52,7 @@ import type { ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
+import { vaultHandlers } from "./vault";
 import { connectorHandlers } from "./connector";
 import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
 import { liveEventsHandlers } from "./live-events";
@@ -1893,6 +1894,7 @@ export const handlers = [
   ...mealPlannerHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
+  ...vaultHandlers,
   ...liveEventsHandlers,
   ...nodeConsoleHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects
