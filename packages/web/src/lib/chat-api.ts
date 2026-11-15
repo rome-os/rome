@@ -1,3 +1,4 @@
+import { clearChatDraft } from "./chat-draft-storage";
 import type { DeviceFilesResponse } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
@@ -446,6 +447,7 @@ export async function deleteSession(
   });
   // A chat that was already gone is gone too, for every list that still shows it.
   if (res.ok || res.status === 404) {
+    clearChatDraft(sessionId);
     window.dispatchEvent(new CustomEvent(CHAT_SESSION_DELETED_EVENT, { detail: sessionId }));
   }
 }

@@ -100,15 +100,24 @@ export function useVoiceInput({
 
   const keepNoticeRef = useRef(keepNotice);
   keepNoticeRef.current = keepNotice;
+  const setNoticeRef = useRef(setNotice);
+  setNoticeRef.current = setNotice;
   useEffect(() => {
-    // The heard words are in the field, so the draft already holds them.
+    // The heard words are in the field, so the draft already holds them. A
+    // page the browser keeps for Back stays mounted, so the field is given
+    // back here too; on unmount these updates do nothing.
     const leave = (reason: "left-chat" | "page-reloaded") => {
       if (!dictationRef.current) return;
       dictationRef.current.cancel();
       dictationRef.current = null;
+      anchorRef.current = null;
       keepNoticeRef.current({ reason });
+      setState("idle");
+      setNoticeRef.current({ reason });
     };
-    const onPageHide = () => leave("page-reloaded");
+    // `persisted`: the page went into the back/forward cache, not away.
+    const onPageHide = (event: PageTransitionEvent) =>
+      leave(event.persisted ? "left-chat" : "page-reloaded");
     window.addEventListener("pagehide", onPageHide);
     return () => {
       window.removeEventListener("pagehide", onPageHide);

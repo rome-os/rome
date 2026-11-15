@@ -254,7 +254,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     return { authEpoch, storedDraft: persistNewChatDraft ? loadNewChatDraft() : null };
   });
   const draft = useChatDraft(chatId, storedDraft?.text);
-  const { text: inputText, setText: setInputText } = draft;
+  const { text: inputText, setText: setInputText, sendEnded } = draft;
   const sessionCreatedRef = useRef(false);
   // The send-time clear must not re-save the unchanged context in its effect.
   const skipNextDraftSaveRef = useRef(false);
@@ -749,6 +749,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     // The textarea holds the untrimmed value; compare against that when
     // deciding whether the user edited the box during an upload.
     const rawText = inputText;
+    const sentFrom = chatId;
     const uploads = pendingUploads;
     const skill = draftSkill;
     const failed = failedSendRef.current;
@@ -802,6 +803,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         // Anything typed during the upload is newer than what was sent, so it
         // survives; only the exact text that went out is cleared.
         setInputText((current) => (current === rawText ? "" : current));
+        sendEnded(sentFrom, rawText, true);
       }
     } catch {
       failedSendRef.current = { inputId, text, uploads, skill };
@@ -827,6 +829,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       }
       if (clearsOptimistically) {
         setInputText(persistNewChatDraft ? rawText : text);
+        sendEnded(sentFrom, text, false);
         setPendingUploads(uploads);
         setDraftSkill(skill);
         if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
@@ -835,6 +838,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       // cleared the text or the attachment tray in the first place.
     }
   }, [
+    chatId,
+    sendEnded,
     persistNewChatDraft,
     authEpoch,
     inputText,
