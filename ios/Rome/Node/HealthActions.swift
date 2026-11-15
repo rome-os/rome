@@ -316,7 +316,7 @@ struct HealthActions: Sendable {
                 workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
                 sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
                 A type the user has not allowed, or that has no data, has no value. \
-                Fails with live_off while Live access to Apple Health is off on the \(name), and with not_connected before the user connects it; either says how to get it connected. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+                Fails with live_off while Live access to Apple Health is off on the \(name), and with not_connected before the user connects it; the user turns it on in the Rome app on the \(name): Settings → Connections → Apple Health, and the error says how to offer that. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
                 """,
             "health.samples": """
                 Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
