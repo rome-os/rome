@@ -342,6 +342,20 @@ install_fake_service() {
   done
 }
 
+# Starts each Rome a reboot stopped, as Rome Cloud's Docker provider does: the
+# Rome's own Docker daemon comes from its first boot, not from the container's
+# init, so starting the container alone leaves the Rome down.
+start_romes() {
+  local id
+  for id in $(docker ps -aq --filter "name=^rome-vm-" --filter "network=$NETWORK" --filter status=exited); do
+    log "starting $(docker inspect -f '{{.Name}}' "$id" | sed 's|^/rome-vm-||') again ..."
+    docker start "$id" >/dev/null
+    docker exec -d "$id" dockerd
+    until docker exec "$id" docker info >/dev/null 2>&1; do sleep 2; done
+    docker exec "$id" sh -c 'cd /opt/rome && docker compose up -d' >/dev/null 2>&1
+  done
+}
+
 # Removes every Rome this environment's Rome Cloud created: the rome-vm-* containers
 # on its network, and their volumes. Rome Cloud must be stopped first, so that it
 # creates nothing while they go.
@@ -374,6 +388,7 @@ cmd_up() {
   start_oauth_server
   start_cloud
   start_router
+  start_romes
   wait_for_cloud
   log "ready: open $CLOUD_ORIGIN"
 }
