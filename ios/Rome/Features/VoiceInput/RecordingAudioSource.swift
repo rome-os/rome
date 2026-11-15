@@ -5,7 +5,8 @@ import Foundation
 /// builds only: this whole file compiles to nothing in Release.
 ///
 /// Launch with `-RomeVoiceInputRecording <path to a 16 kHz mono 16-bit WAV>`.
-/// `-RomeVoiceInputMicrophone denied` plays the refused microphone instead.
+/// `-RomeVoiceInputMicrophone denied` plays the refused microphone instead, with or without a
+/// recording, whatever the simulator's own permission says.
 @MainActor
 final class RecordingAudioSource: VoiceAudioSource {
     static let recordingArgument = "RomeVoiceInputRecording"
@@ -19,9 +20,11 @@ final class RecordingAudioSource: VoiceAudioSource {
 
     static func fromLaunchArguments() -> RecordingAudioSource? {
         let defaults = UserDefaults.standard
-        guard let path = defaults.string(forKey: recordingArgument) else { return nil }
-        let samples = (try? Data(contentsOf: URL(filePath: path))).map(pcm) ?? Data()
-        return RecordingAudioSource(samples: samples, allowed: defaults.string(forKey: microphoneArgument) != "denied")
+        let path = defaults.string(forKey: recordingArgument)
+        let denied = defaults.string(forKey: microphoneArgument) == "denied"
+        guard path != nil || denied else { return nil }
+        let samples = path.flatMap { try? Data(contentsOf: URL(filePath: $0)) }.map(pcm) ?? Data()
+        return RecordingAudioSource(samples: samples, allowed: !denied)
     }
 
     init(samples: Data, allowed: Bool = true) {

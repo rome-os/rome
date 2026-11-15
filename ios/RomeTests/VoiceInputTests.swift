@@ -43,6 +43,14 @@ import Testing
         #expect(RecordingAudioSource.pcm(wav) == Data([1, 2, 3, 4]))
     }
 
+    @Test func aRefusedMicrophoneNeedsNoRecording() async throws {
+        let defaults = UserDefaults.standard
+        defaults.set("denied", forKey: RecordingAudioSource.microphoneArgument)
+        defer { defaults.removeObject(forKey: RecordingAudioSource.microphoneArgument) }
+        let source = try #require(RecordingAudioSource.fromLaunchArguments())
+        #expect(await source.requestAccess() == false)
+    }
+
     @Test func standInsOfferNoVoiceInput() async throws {
         let backend = DemoBackend()
         #expect(try await backend.voiceInputInfo() == nil)
