@@ -70,6 +70,7 @@ it("chat_send uses the host's turn-bound handoff, with no actor field in its mod
           chatId: "source",
           turnId: "source-turn",
           actor: guardian,
+          audience: "private",
           isCurrent: () => true,
         },
         target,

@@ -265,13 +265,21 @@ private struct WidgetRow: View {
         case "end": .bottom
         default: .center
         }
-        HStack(alignment: align, spacing: 12) {
-            if lead { Spacer(minLength: 0) }
-            ForEach(Array(kids.enumerated()), id: \.element.id) { index, kid in
-                if between && index > 0 { Spacer(minLength: 8) }
-                ComponentNodeView(node: kid)
+        // A row too narrow for its children (buttons keep their labels on
+        // one line) stacks them instead, on the side it was justified to.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: align, spacing: 12) {
+                if lead { Spacer(minLength: 0) }
+                ForEach(Array(kids.enumerated()), id: \.element.id) { index, kid in
+                    if between && index > 0 { Spacer(minLength: 8) }
+                    ComponentNodeView(node: kid)
+                }
+                if trail { Spacer(minLength: 0) }
             }
-            if trail { Spacer(minLength: 0) }
+            VStack(alignment: lead && !trail ? .trailing : .leading, spacing: 8) {
+                ForEach(kids) { kid in ComponentNodeView(node: kid) }
+            }
+            .frame(maxWidth: .infinity, alignment: lead && !trail ? .trailing : .leading)
         }
     }
 }
@@ -323,6 +331,9 @@ private struct WidgetButton: View {
                     ComponentNodeView(node: child).environment(\.widgetInButton, true)
                 }
             }
+            // A label never breaks mid-word: the row stacks instead.
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(primary ? Color.white : borderless ? Palette.sub : Palette.primaryText)
             .padding(.horizontal, 14)
             .frame(minHeight: CardScale.actionHeight)

@@ -2,6 +2,7 @@
 // it and where. Agent model: docs/domains/agents.md#rome-tools.
 
 import type { ThreadContext } from "@rome-os/app-runtime";
+import type { Audience } from "./turn-audience.js";
 import type { WidgetDrawing } from "./widget-drawing.js";
 
 /** The level at which a turn pushes the messages it says to the person the chat serves. */
@@ -51,6 +52,9 @@ export interface TurnFacts {
   pushLevel(): PushLevel | undefined;
   /** Who the running turn acts for, or undefined for a turn no person started. */
   actor(): TurnActor | undefined;
+  /** Who can read what the running turn says, fixed when it started; shared
+   *  between turns. Domain: docs/domains/participation.md#audience. */
+  audience(): Audience;
   /** The id of the one Concierge task the running turn reports on, or
    *  undefined when it reports on none or on several. */
   reportedTask(): string | undefined;

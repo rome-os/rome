@@ -34,4 +34,42 @@ describe("connect_account", () => {
     const { result } = await call("card", { kind: "notion" });
     expect(result.isError).toBe(true);
   });
+
+  it("offers the device kinds devices reported, and shows their card", async () => {
+    const [tool] = connectAccountTools({
+      widgets: "card",
+      hasSpeaker: true,
+      devices: [{ kind: "apple_health", label: "Apple Health" }],
+    });
+    const kinds = (tool!.inputSchema as { properties: { kind: { enum: string[] } } }).properties
+      .kind.enum;
+    expect(kinds).toContain("apple_health");
+    expect(kinds).toContain("github");
+    const result = await tool!.handler({ kind: "apple_health" });
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+      render: { props: { kind: "apple_health", label: "Apple Health", device: true } },
+    });
+  });
+
+  it("answers that a device kind already works, read when called, with no card", async () => {
+    let state: "working" | "off" = "off";
+    const [tool] = connectAccountTools({
+      widgets: "card",
+      hasSpeaker: true,
+      devicesOnly: true,
+      devices: [{ kind: "apple_health", label: "Apple Health" }],
+      deviceStates: () => [
+        { kind: "apple_health", label: "Apple Health", state, device: "iPhone" },
+      ],
+    });
+    // The description holds no state, so the session's tools stay the same.
+    expect(tool!.description).not.toContain("working");
+    const off = await tool!.handler({ kind: "apple_health" });
+    expect(JSON.parse(off.content[0]!.text)).toMatchObject({ pendingInteraction: true });
+    state = "working";
+    const working = await tool!.handler({ kind: "apple_health" });
+    expect(working.content[0]!.text).toBe(
+      "Apple Health is already connected on iPhone. Go ahead; no card shown.",
+    );
+  });
 });

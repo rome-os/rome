@@ -17,6 +17,7 @@ const source = (overrides: Partial<TaskInputSource> = {}): TaskInputSource => ({
   chatId: "source",
   turnId: "turn",
   actor: guardian,
+  audience: "private",
   isCurrent: () => true,
   ...overrides,
 });
@@ -49,6 +50,12 @@ describe("task input attribution", () => {
     expect(actor).toEqual(guardian);
     expect(actor).not.toBe(guardian);
     expect(Object.isFrozen(actor)).toBe(true);
+  });
+
+  it("refuses an unknown source audience", async () => {
+    await withTaskInputActor(source({ audience: undefined as never }), "target", body, async () => {
+      expect(() => claimTaskInputActor("target", body, speaker)).toThrow();
+    });
   });
 
   it("preserves a visitor, never promotes them to guardian", async () => {

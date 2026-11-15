@@ -141,6 +141,16 @@
         }
       }
     },
+    "%@ · to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 同步到 %@"
+          }
+        }
+      }
+    },
     "%@, %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -279,6 +289,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条新消息"
+          }
+        }
+      }
+    },
+    "%lld readings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条读数"
           }
         }
       }
@@ -431,6 +451,16 @@
         }
       }
     },
+    "Accounts and services" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账户与服务"
+          }
+        }
+      }
+    },
     "Active" : {
       "localizations" : {
         "zh-Hans" : {
@@ -491,16 +521,6 @@
         }
       }
     },
-    "Allow Rome to read Health" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许 Rome 读取健康数据"
-          }
-        }
-      }
-    },
     "Almost done…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -527,16 +547,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "一个能……的应用"
-          }
-        }
-      }
-    },
-    "and %lld more" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "另有 %lld 项"
           }
         }
       }
@@ -791,6 +801,26 @@
         }
       }
     },
+    "Background" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台"
+          }
+        }
+      }
+    },
+    "Battery and network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电池和网络"
+          }
+        }
+      }
+    },
     "Best %lld" : {
       "localizations" : {
         "zh-Hans" : {
@@ -861,36 +891,6 @@
         }
       }
     },
-    "Can Rome use this iPad" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许 Rome 使用这台 iPad"
-          }
-        }
-      }
-    },
-    "Can Rome use this iPhone" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许 Rome 使用这台 iPhone"
-          }
-        }
-      }
-    },
-    "Can't check for updates" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法检查更新"
-          }
-        }
-      }
-    },
     "Can't find where the new messages start" : {
       "localizations" : {
         "zh-Hans" : {
@@ -917,6 +917,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂时无法分享，请重试。"
+          }
+        }
+      }
+    },
+    "Can't sync while %@ is locked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 锁定时无法同步"
           }
         }
       }
@@ -961,6 +971,16 @@
         }
       }
     },
+    "Charge before you leave" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出门前提醒充电"
+          }
+        }
+      }
+    },
     "Chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -997,6 +1017,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "找不到该聊天"
+          }
+        }
+      }
+    },
+    "Check if it runs hot" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看看手机是否过热"
           }
         }
       }
@@ -1161,6 +1191,16 @@
         }
       }
     },
+    "Connections" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接"
+          }
+        }
+      }
+    },
     "Context tidied up · %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1311,6 +1351,26 @@
         }
       }
     },
+    "Couldn't delete. Check your connection and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法删除。请检查网络连接后重试。"
+          }
+        }
+      }
+    },
+    "Couldn't find your location. Try again, or tap Not now." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法获取你的位置。请重试，或轻点“暂不”。"
+          }
+        }
+      }
+    },
     "Couldn't load the links." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1327,6 +1387,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法加载此聊天"
+          }
+        }
+      }
+    },
+    "Couldn't reach your Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接你的 Rome"
           }
         }
       }
@@ -1531,12 +1601,32 @@
         }
       }
     },
+    "Delete all Apple Health data this %@ sent to your Rome?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除此 %@ 发送到你的 Rome 的所有 Apple 健康数据？"
+          }
+        }
+      }
+    },
     "Delete this chat?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除这个聊天？"
+          }
+        }
+      }
+    },
+    "Delete uploaded data" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除上传的数据"
           }
         }
       }
@@ -1557,6 +1647,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "描述你自己的想法"
+          }
+        }
+      }
+    },
+    "Device" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备"
+          }
+        }
+      }
+    },
+    "Device status is off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备状态已关闭"
           }
         }
       }
@@ -1741,6 +1851,16 @@
         }
       }
     },
+    "Finding your location…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在获取你的位置…"
+          }
+        }
+      }
+    },
     "Flights climbed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1757,26 +1877,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关注 %@ · %@"
-          }
-        }
-      }
-    },
-    "For everyday wellness, not medical advice." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅用于日常健康管理，不构成医疗建议。"
-          }
-        }
-      }
-    },
-    "Get notified when Rome has something for you" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 有消息给你时通知你"
           }
         }
       }
@@ -1811,6 +1911,16 @@
         }
       }
     },
+    "Health app → your picture → Apps → Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“健康”App → 你的头像 → App → Rome"
+          }
+        }
+      }
+    },
     "Health isn't available" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1827,6 +1937,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "健康数据请求"
+          }
+        }
+      }
+    },
+    "Health stopped syncing to your Rome. Open Rome to sign in again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "健康数据已停止同步到你的 Rome。打开 Rome 重新登录。"
           }
         }
       }
@@ -1867,6 +1987,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "身高"
+          }
+        }
+      }
+    },
+    "History" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "历史数据"
           }
         }
       }
@@ -1999,12 +2129,32 @@
         }
       }
     },
+    "Is my phone running hot?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的手机是不是太热了？"
+          }
+        }
+      }
+    },
     "It's 4 bpm higher than last month, mostly on days you slept under 6 hours." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "比上个月高了 4 次/分钟，主要出现在睡眠不足 6 小时的日子。"
+          }
+        }
+      }
+    },
+    "It's warm, not hot: it's charging on cellular, which heats it a little." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有点温，不算烫：它在充电，又在用蜂窝网络，所以会热一些。"
           }
         }
       }
@@ -2039,6 +2189,16 @@
         }
       }
     },
+    "Last sync failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次同步失败"
+          }
+        }
+      }
+    },
     "Later" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2065,6 +2225,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在这个对话中创建的链接会显示在这里。"
+          }
+        }
+      }
+    },
+    "Live access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时访问"
+          }
+        }
+      }
+    },
+    "Live access is off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时访问已关闭"
+          }
+        }
+      }
+    },
+    "Live reads" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时读取"
           }
         }
       }
@@ -2105,6 +2295,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本地 Rome"
+          }
+        }
+      }
+    },
+    "Location access is off for Rome. Turn it on in Settings, or tap Not now." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 的位置权限已关闭。请在设置中开启，或轻点“暂不”。"
+          }
+        }
+      }
+    },
+    "Location shared · ±%@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已共享位置 · ±%@"
           }
         }
       }
@@ -2289,6 +2499,16 @@
         }
       }
     },
+    "Needs sign-in" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要登录"
+          }
+        }
+      }
+    },
     "Needs you" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2389,6 +2609,26 @@
         }
       }
     },
+    "No access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无权访问"
+          }
+        }
+      }
+    },
+    "No access to Health" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无权访问健康数据"
+          }
+        }
+      }
+    },
     "No access to this Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2399,12 +2639,12 @@
         }
       }
     },
-    "No activity yet" : {
+    "No live reads yet" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "还没有活动"
+            "value" : "还没有实时读取"
           }
         }
       }
@@ -2449,6 +2689,16 @@
         }
       }
     },
+    "No new Health data for 3 days. Health access may be off: Health app → your picture → Apps → Rome." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已有 3 天没有新的健康数据，健康访问可能已关闭：“健康”App → 你的头像 → App → Rome。"
+          }
+        }
+      }
+    },
     "No response" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2465,6 +2715,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "还没有分享的链接"
+          }
+        }
+      }
+    },
+    "No syncs yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚无同步"
           }
         }
       }
@@ -2515,6 +2775,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不可用"
+          }
+        }
+      }
+    },
+    "Not connected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未连接"
           }
         }
       }
@@ -2589,6 +2859,16 @@
         }
       }
     },
+    "Not shared" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未共享"
+          }
+        }
+      }
+    },
     "Not signed in" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2629,6 +2909,16 @@
         }
       }
     },
+    "Not synced yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未同步"
+          }
+        }
+      }
+    },
     "Notice heart trends" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2649,12 +2939,32 @@
         }
       }
     },
+    "OK" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
+          }
+        }
+      }
+    },
     "Off" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已关闭"
+          }
+        }
+      }
+    },
+    "Offline" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离线"
           }
         }
       }
@@ -2819,12 +3129,32 @@
         }
       }
     },
+    "Opened Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Rome 时"
+          }
+        }
+      }
+    },
     "Opening your Rome" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在打开你的 Rome"
+          }
+        }
+      }
+    },
+    "Opens Connections on the web" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在网页上打开连接"
           }
         }
       }
@@ -2959,16 +3289,6 @@
         }
       }
     },
-    "Privacy Policy" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "隐私政策"
-          }
-        }
-      }
-    },
     "Puts it in the message box." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2979,12 +3299,22 @@
         }
       }
     },
-    "Read only when your Rome asks. Never changed." : {
+    "Read" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只在你的 Rome 请求时读取，从不修改。"
+            "value" : "已读取"
+          }
+        }
+      }
+    },
+    "Read only when you ask · [Privacy Policy](https://romeos.cc/privacy)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅在你提问时读取 · [隐私政策](https://romeos.cc/privacy)"
           }
         }
       }
@@ -3029,12 +3359,12 @@
         }
       }
     },
-    "Recent activity" : {
+    "Recent reads" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最近活动"
+            "value" : "最近读取"
           }
         }
       }
@@ -3065,6 +3395,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新加载"
+          }
+        }
+      }
+    },
+    "Remind me to charge before I leave." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出门前提醒我充电。"
           }
         }
       }
@@ -3253,16 +3593,6 @@
         }
       }
     },
-    "Respond" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "去处理"
-          }
-        }
-      }
-    },
     "Restarting your Rome…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3293,12 +3623,12 @@
         }
       }
     },
-    "Results can stay in your Rome's chats and memory." : {
+    "Results, questions and reminders" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "结果可能保留在你的 Rome 的聊天和记忆中。"
+            "value" : "结果、提问和提醒"
           }
         }
       }
@@ -3349,16 +3679,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome Cloud 登录已过期"
-          }
-        }
-      }
-    },
-    "Rome never sells it, uses it for ads, or uses it to train AI models. Your AI provider's terms apply to what it receives." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 绝不出售这些数据，也不会将其用于广告或训练 AI 模型。你的 AI 服务商收到的数据适用其自身条款。"
           }
         }
       }
@@ -3563,6 +3883,26 @@
         }
       }
     },
+    "Sent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已发送"
+          }
+        }
+      }
+    },
+    "Sent to your Rome and your AI model, whose terms apply · Never sold or used for ads · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送到你的 Rome 和你的 AI 模型，适用其条款 · 绝不出售，也不用于广告 · 随时可删除 · [隐私政策](https://romeos.cc/privacy)"
+          }
+        }
+      }
+    },
     "Sent. Thank you." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3693,12 +4033,32 @@
         }
       }
     },
+    "Sign in" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录"
+          }
+        }
+      }
+    },
     "Sign in again" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新登录"
+          }
+        }
+      }
+    },
+    "Sign in again to keep Health syncing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新登录以继续同步健康数据"
           }
         }
       }
@@ -3813,12 +4173,52 @@
         }
       }
     },
+    "Signed out of your Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已退出你的 Rome"
+          }
+        }
+      }
+    },
     "Signing in" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在登录"
+          }
+        }
+      }
+    },
+    "Skipped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过"
+          }
+        }
+      }
+    },
+    "Skipped · %@ locked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过 · %@ 已锁定"
+          }
+        }
+      }
+    },
+    "Skipped · no access to Health" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过 · 无权访问健康数据"
           }
         }
       }
@@ -3879,16 +4279,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在开启话题对话"
-          }
-        }
-      }
-    },
-    "Status" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "状态"
           }
         }
       }
@@ -4019,6 +4409,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换实例"
+          }
+        }
+      }
+    },
+    "Sync history" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步记录"
+          }
+        }
+      }
+    },
+    "Sync now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即同步"
+          }
+        }
+      }
+    },
+    "Sync with Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与 Rome 同步"
+          }
+        }
+      }
+    },
+    "Synced %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@同步"
+          }
+        }
+      }
+    },
+    "Syncing history · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在同步历史数据 · %@"
+          }
+        }
+      }
+    },
+    "Syncing…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在同步…"
           }
         }
       }
@@ -4183,36 +4633,6 @@
         }
       }
     },
-    "This chat is deleted permanently." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个对话会被永久删除。"
-          }
-        }
-      }
-    },
-    "This chat is deleted permanently. It has:" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个对话会被永久删除。其中有："
-          }
-        }
-      }
-    },
-    "This chat is deleted permanently. Its follows and open tasks move to Chat." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个对话会被永久删除。它的关注和未完成的任务会转到 Chat。"
-          }
-        }
-      }
-    },
     "This Rome is a development build and cannot be updated." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4263,6 +4683,36 @@
         }
       }
     },
+    "This chat is deleted permanently." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被永久删除。"
+          }
+        }
+      }
+    },
+    "This chat is deleted permanently. It has:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被永久删除。其中有："
+          }
+        }
+      }
+    },
+    "This chat is deleted permanently. Its follows and open tasks move to Chat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被永久删除。它的关注和未完成的任务会转到 Chat。"
+          }
+        }
+      }
+    },
     "This connection cannot start here" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4283,12 +4733,12 @@
         }
       }
     },
-    "This iPad, your Rome, your AI model provider" : {
+    "This iPad, then your Rome, then your AI model" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这台 iPad、你的 Rome、你的 AI 模型服务商"
+            "value" : "这台 iPad，然后是你的 Rome，再到你的 AI 模型"
           }
         }
       }
@@ -4303,12 +4753,12 @@
         }
       }
     },
-    "This iPhone, your Rome, your AI model provider" : {
+    "This iPhone, then your Rome, then your AI model" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这台 iPhone、你的 Rome、你的 AI 模型服务商"
+            "value" : "这台 iPhone，然后是你的 Rome，再到你的 AI 模型"
           }
         }
       }
@@ -4413,6 +4863,16 @@
         }
       }
     },
+    "Too many syncs, trying later" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步过于频繁，稍后重试"
+          }
+        }
+      }
+    },
     "Topic chats" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4493,6 +4953,16 @@
         }
       }
     },
+    "Turn on notifications" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开通知"
+          }
+        }
+      }
+    },
     "Turn on notifications in Settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4519,6 +4989,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已自动拒绝：任务已停止"
+          }
+        }
+      }
+    },
+    "Turned off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已关闭"
           }
         }
       }
@@ -4563,6 +5043,16 @@
         }
       }
     },
+    "Up to date" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已是最新"
+          }
+        }
+      }
+    },
     "Update" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4599,6 +5089,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在更新任务"
+          }
+        }
+      }
+    },
+    "Uploaded data deleted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已删除上传的数据"
           }
         }
       }
@@ -4916,7 +5416,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你的数据去向"
+            "value" : "数据去向"
           }
         }
       }
@@ -5001,12 +5501,22 @@
         }
       }
     },
-    "Your AI model provider" : {
+    "Your AI model" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你的 AI 模型服务商"
+            "value" : "你的 AI 模型"
+          }
+        }
+      }
+    },
+    "Your Agents can no longer read it. Things they already wrote in chats or memory stay. Sync turns off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Agent 将无法再读取这些数据。它们已写入聊天或记忆中的内容会保留。同步将关闭。"
           }
         }
       }
@@ -5021,12 +5531,12 @@
         }
       }
     },
-    "Your Rome can use your health data to plan and explain things for you." : {
+    "Your Rome couldn't take it" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你的 Rome 可以借助健康数据，为你规划和解释各种事情。"
+            "value" : "你的 Rome 未能接收"
           }
         }
       }
@@ -5081,6 +5591,36 @@
         }
       }
     },
+    "Your Rome reads the Health data you allow." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 读取你允许的健康数据。"
+          }
+        }
+      }
+    },
+    "Your Rome reads this phone's battery and network." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 读取这台手机的电量和网络。"
+          }
+        }
+      }
+    },
+    "Your battery is at 18%. I'll remind you at 5:30, before your 6 pm train." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电量还剩 18%。我会在 5:30 提醒你，赶在 6 点的火车之前。"
+          }
+        }
+      }
+    },
     "Your deep sleep dropped over the last two weeks, and your HRV fell with it." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5107,6 +5647,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "闲置后"
+          }
+        }
+      }
+    },
+    "and %lld more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另有 %lld 项"
           }
         }
       }
@@ -5171,22 +5721,12 @@
         }
       }
     },
-    "iPad use" : {
+    "just now" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "iPad 使用"
-          }
-        }
-      }
-    },
-    "iPhone use" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iPhone 使用"
+            "value" : "刚刚"
           }
         }
       }
@@ -5253,16 +5793,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "「%@」已停止。在 Rome Cloud 启动后再打开。"
-          }
-        }
-      }
-    },
-    "Sent" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已发送"
           }
         }
       }

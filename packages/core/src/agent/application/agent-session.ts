@@ -41,6 +41,7 @@ import {
 } from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
 import { type TurnFacts, type PushLevel, type TurnActor } from "../domain/turn-facts.js";
+import { type Audience, turnAudience } from "../domain/turn-audience.js";
 import {
   NO_ROME_TOOLS,
   type RomeTool,
@@ -190,6 +191,11 @@ export interface SessionOpening {
   toolEnv?: Record<string, string | undefined>;
   /** Attributes stamped on the spans of every turn. The session passes them through. */
   spanAttributes?: Attributes;
+  /**
+   * Who can read the session's chat, as its opener read it (turnAudience's
+   * `place`). Absent, a turn reads its place off its thread context alone.
+   */
+  audience?: Audience;
 }
 
 /** What a resume states. It carries no reset policy, since a session named by
@@ -267,6 +273,11 @@ export interface SendTurnOptions {
    * arrives. Absent, the turn acts for no one.
    */
   actor?: TurnActor;
+  /**
+   * The audience of the turn that started this one, such as a subagent's
+   * caller. The turn is never more private than it.
+   */
+  parentAudience?: Audience;
   /** The Concierge task the turn reports on, which no message of the owner started (TurnFacts.reportedTask). */
   reportedTask?: string;
 }
@@ -370,7 +381,7 @@ interface ManagerDeps {
   subagentSessions?: (
     manager: Sessions,
     parentLink: string,
-    inherited: Pick<SessionOpening, "toolEnv" | "spanAttributes">,
+    inherited: Pick<SessionOpening, "toolEnv" | "spanAttributes" | "audience">,
   ) => SubagentSessions;
   /** The middleware apps put around a turn's reply. Absent, the model replies directly. */
   turnMiddleware?: TurnMiddleware;
@@ -814,6 +825,8 @@ interface TurnExecRefs {
   bindTurnCtx: <T>(fn: () => T) => T;
   /** Who the running turn acts for; its subagents' turns act for the same person. */
   getActor: () => TurnActor | undefined;
+  /** Who can read the running turn; its subagents' turns are never more private. */
+  getAudience: () => Audience;
 }
 
 /** Per-fork identity handed to `buildForkOpenParams` by `fork`. */
@@ -1040,6 +1053,7 @@ function sessionSetupOf(
         sharedContext: () => opening.sharedContext,
         pushLevel: () => undefined,
         actor: () => undefined,
+        audience: () => "shared",
         reportedTask: () => undefined,
         inTurn: (fn) => fn(),
       };
@@ -1421,6 +1435,7 @@ async function openSession(
     attachSubagentCall: (toolUseId, call) => impl.addSubagentCall(toolUseId, call),
     bindTurnCtx: inCurrentTurnCtx,
     getActor: () => impl.currentTurnActorRef,
+    getAudience: () => impl.currentTurnAudienceRef,
   };
 
   // The facts the ports behind the Rome tools read, for the turns the refs run.
@@ -1448,6 +1463,7 @@ async function openSession(
     sharedContext: refs.getSharedContext,
     pushLevel,
     actor: refs.getActor,
+    audience: refs.getAudience,
     reportedTask,
     inTurn: refs.bindTurnCtx,
   });
@@ -1480,6 +1496,9 @@ async function openSession(
           sessions: deps.subagentSessions(refs.getChildManager(), refs.childChannelThreadKey, {
             toolEnv: init.toolEnv,
             spanAttributes: init.spanAttributes,
+            // The subagent reads its starter's place; each of its turns is
+            // narrowed again by the starter's turn (parentAudience).
+            audience: init.audience,
           }),
           at: {
             workingDir,
@@ -1487,6 +1506,7 @@ async function openSession(
             sharedContext: refs.getSharedContext(),
           },
           actor: refs.getActor(),
+          audience: refs.getAudience(),
         });
         try {
           refs.attachSubagentCall(toolContext.toolUseId, call);
@@ -1675,6 +1695,10 @@ async function openSession(
         ...(use.startedAt ? { startedAt: use.startedAt } : {}),
       });
     };
+    const forkAudience = turnAudience(opening.threadContext, {
+      actor: fork.actor,
+      place: init.audience,
+    });
     const refs: TurnExecRefs = {
       sessionId: fork.forkSessionId,
       getRomeSessionId: () => fork.forkSessionId,
@@ -1703,6 +1727,9 @@ async function openSession(
       // OTel context instead of re-binding into a source turn's span.
       bindTurnCtx: (fn) => fn(),
       getActor: () => fork.actor,
+      // A fork answers for the turn it was forked from, so it reads the
+      // source's place and person.
+      getAudience: () => forkAudience,
     };
     const liveOpenParams = lastOpenParams;
     return {
@@ -1847,6 +1874,7 @@ async function openSession(
     owningAppId,
     threadContext: init.threadContext,
     sharedContext: init.sharedContext,
+    placeAudience: init.audience,
     spanAttributes: init.spanAttributes,
     isNewSession,
     isSubagent: opts.isSubagent,
@@ -1921,6 +1949,7 @@ interface ImplArgs {
   /** The app that owns the agent, when an app does. */
   owningAppId?: string;
   threadContext?: ThreadContext;
+  placeAudience?: Audience;
   sharedContext?: Record<string, unknown>;
   /** Whether the underlying SDK session was freshly minted (vs resumed). */
   isNewSession: boolean;
@@ -2014,6 +2043,8 @@ interface TurnSink {
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
   actor?: TurnActor;
+  /** Who can read the turn, read once when it starts. */
+  audience: Audience;
   reportedTask?: string;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
@@ -2175,6 +2206,8 @@ class AgentSessionImpl implements AgentSession {
   private readonly turns: TurnsById;
   private attribution: TurnAttribution;
   private threadContext?: ThreadContext;
+  /** Who can read the session's chat, as its opener read it. */
+  private readonly placeAudience?: Audience;
   private sharedContext?: Record<string, unknown>;
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
@@ -2275,6 +2308,7 @@ class AgentSessionImpl implements AgentSession {
     this.turns = args.turns;
     this.attribution = { agentName: args.key.agentName, owningAppId: args.owningAppId };
     this.threadContext = args.threadContext;
+    this.placeAudience = args.placeAudience;
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
     this.isSubagent = args.isSubagent;
@@ -2353,6 +2387,13 @@ class AgentSessionImpl implements AgentSession {
     return this.currentSink?.lifecycleInterrupted || this.closing
       ? undefined
       : this.currentSink?.actor;
+  }
+
+  /** The running turn's audience; between turns, the session's place read alone. */
+  get currentTurnAudienceRef(): Audience {
+    return (
+      this.currentSink?.audience ?? turnAudience(this.threadContext, { place: this.placeAudience })
+    );
   }
 
   /** The next turn resumes what an earlier session of the chat started, so
@@ -3555,6 +3596,11 @@ class AgentSessionImpl implements AgentSession {
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
       actor: options?.actor,
+      audience: turnAudience(options?.threadContext ?? this.threadContext, {
+        actor: options?.actor,
+        parent: options?.parentAudience,
+        place: this.placeAudience,
+      }),
       reportedTask: options?.reportedTask,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,

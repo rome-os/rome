@@ -43,6 +43,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     sharedContext: () => undefined,
     pushLevel: () => undefined,
     actor: () => undefined,
+    audience: () => "shared",
     reportedTask: () => undefined,
     inTurn: (fn) => fn(),
     ...overrides,
@@ -52,6 +53,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
 function ports(
   sessionTools = rs.fn(async () => []),
   taskOwner?: (taskId: string) => Promise<string | null>,
+  deviceKinds?: () => { kind: string; label: string }[],
 ) {
   const run = rs.fn(async () => ({ status: "ok" as const, data: { routineId: "r1" } }));
   const engine = { run } as unknown as ActionEngine;
@@ -60,8 +62,10 @@ function ports(
     actionRegistry: registry,
     actionEngine: engine,
     webchatRepo: { getSession } as never,
+    placeAudience: async (context) => (context?.threadId === "shared-chat" ? "shared" : "private"),
     ...(taskOwner ? { taskOwner } : {}),
     sessionTools,
+    ...(deviceKinds ? { deviceKinds } : {}),
   });
   return { ...built, run, getSession, provided: sessionTools };
 }
@@ -199,7 +203,37 @@ describe("romeToolPorts sessionTools", () => {
     };
     const { sessionTools } = ports(rs.fn(async () => [connectCard]));
     const tools = await sessionTools.forTurn(turn(), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["connect_card", "propose_routine"]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "connect_card",
+      "propose_routine",
+      "share_location",
+    ]);
+  });
+
+  it("serves connect_account for device kinds alone beside the session's own connect card", async () => {
+    const connectCard = {
+      name: "connect_card",
+      description: "",
+      inputSchema: {},
+      handler: async () => ({ content: [] }),
+    };
+    const { sessionTools } = ports(
+      rs.fn(async () => [connectCard]),
+      undefined,
+      () => [{ kind: "apple_health", label: "Apple Health" }],
+    );
+    const tools = await sessionTools.forTurn(turn(), true);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "connect_card",
+      "propose_routine",
+      "connect_account",
+      "share_location",
+    ]);
+    const connect = tools.find((tool) => tool.name === "connect_account")!;
+    const schema = connect.inputSchema as { properties: { kind: { enum: string[] } } };
+    expect(schema.properties.kind.enum).toEqual(["apple_health"]);
+    const refused = await connect.handler({ kind: "github" });
+    expect(refused.isError).toBe(true);
   });
 
   it("serves the tools Rome adds, then propose_routine and connect_account, to a turn with a speaker", async () => {
@@ -211,7 +245,12 @@ describe("romeToolPorts sessionTools", () => {
     };
     const { sessionTools, provided } = ports(rs.fn(async () => [extra]));
     const tools = await sessionTools.forTurn(turn(), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["extra", "propose_routine", "connect_account"]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "extra",
+      "propose_routine",
+      "connect_account",
+      "share_location",
+    ]);
     expect(provided).toHaveBeenCalledWith(
       expect.objectContaining({
         agentName: "core:main",
@@ -221,17 +260,51 @@ describe("romeToolPorts sessionTools", () => {
     );
   });
 
-  it("serves only propose_routine and connect_account to a turn with no speaker", async () => {
+  it("serves only propose_routine, connect_account and share_location to a turn with no speaker", async () => {
     const { sessionTools, provided } = ports();
     const tools = await sessionTools.forTurn(turn(), false);
-    expect(tools.map((tool) => tool.name)).toEqual(["propose_routine", "connect_account"]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "propose_routine",
+      "connect_account",
+      "share_location",
+    ]);
     expect(provided).not.toHaveBeenCalled();
   });
 
-  it("serves only connect_account where cards draw as plain text", async () => {
+  it("serves only connect_account and share_location where cards draw as plain text", async () => {
     const { sessionTools } = ports();
     const tools = await sessionTools.forTurn(turn({ widgets: "plain_text" }), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["connect_account"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["connect_account", "share_location"]);
+  });
+});
+
+describe("romeToolPorts actions carry the turn's audience", () => {
+  const audienceOfRun = (run: ReturnType<typeof ports>["run"]) =>
+    (run.mock.calls.at(-1) as unknown as [string, unknown, { audience?: string }])[2].audience;
+
+  it("hands a private turn in a private chat on as private", async () => {
+    const { actions, run } = ports();
+    await actions.run(turn({ audience: () => "private" }), "send_message", {});
+    expect(audienceOfRun(run)).toBe("private");
+  });
+
+  it("reads the chat again on each call, so a chat that became shared narrows the turn", async () => {
+    const { actions, run } = ports();
+    await actions.run(
+      turn({
+        audience: () => "private",
+        threadContext: () => ({ channel: "webchat", threadId: "shared-chat" }),
+      }),
+      "send_message",
+      {},
+    );
+    expect(audienceOfRun(run)).toBe("shared");
+  });
+
+  it("never widens a shared turn", async () => {
+    const { actions, run } = ports();
+    await actions.run(turn({ audience: () => "shared" }), "send_message", {});
+    expect(audienceOfRun(run)).toBe("shared");
   });
 });
 
@@ -271,12 +344,34 @@ describe("task input actor through the session tool port", () => {
         agentName: "core:concierge",
         actor: () => guardian,
         threadContext: () => thread,
+        audience: () => "private",
         ...overrides,
       }),
       true,
     );
     return { ...built, context };
   }
+
+  for (const audience of ["private", "shared"] as const) {
+    it(`captures the ${audience} source audience in the host handoff`, async () => {
+      const { context } = await provided({
+        audience: () => audience,
+        actor: () => (audience === "shared" ? visitor : guardian),
+      });
+      await context.withTaskInput!("target", body, async () => {
+        expect(claimTaskInputActor("target", body, speaker)?.source.audience).toBe(audience);
+      });
+    });
+  }
+
+  it("revokes a handoff when the live audience changes", async () => {
+    let audience: "private" | "shared" = "private";
+    const { context } = await provided({ audience: () => audience });
+    await context.withTaskInput!("target", body, async () => {
+      audience = "shared";
+      expect(() => claimTaskInputActor("target", body, speaker)).toThrow();
+    });
+  });
 
   it("carries the visitor turn, not the unrelated ambient guardian, into the task action", async () => {
     const built = await provided({ actor: () => visitor });
@@ -310,6 +405,7 @@ describe("task input actor through the session tool port", () => {
 
   for (const [name, overrides] of [
     ["unknown actor", { actor: () => undefined }],
+    ["shared guardian audience", { audience: () => "shared" as const }],
     ["anonymous actor", { actor: () => ({ kind: "anonymous" as const }) }],
     ["group", { threadContext: () => ({ ...thread, threadType: "group" as const }) }],
     ["missing privacy", { threadContext: () => ({ channel: "webchat", threadId: "source" }) }],
@@ -361,7 +457,12 @@ it("snapshots the source identity rather than following mutation of its objects"
     }),
   );
   await sessionTools.forTurn(
-    turn({ agentName: "core:concierge", actor: () => actor, threadContext: () => thread }),
+    turn({
+      agentName: "core:concierge",
+      actor: () => actor,
+      threadContext: () => thread,
+      audience: () => "private",
+    }),
     true,
   );
   const body = { text: "synthetic" };

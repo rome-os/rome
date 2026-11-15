@@ -3,6 +3,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Account } from "@rome-os/app-runtime";
+import type { Audience } from "../agent/index.js";
 import { sessionOwnerKey, type SessionActor } from "../access/session-actor.js";
 import type { Body } from "../chats/send.js";
 import { isConciergeChat, privateOwnerOf, TASK_CHAT_TRIGGER_KIND } from "./privacy.js";
@@ -13,6 +14,7 @@ export interface TaskInputSource {
   chatId: string;
   turnId: string;
   actor: SessionActor;
+  audience: Audience;
   /** False after cancellation, a different turn, or mixed-actor input. */
   isCurrent(): boolean;
 }
@@ -61,7 +63,11 @@ export function withoutTaskInputActor<T>(receive: () => T): T {
 
 function current(claim: TaskInputClaim): boolean {
   return (
-    states.get(claim)?.active === true && Date.now() < claim.expires && claim.source.isCurrent()
+    states.get(claim)?.active === true &&
+    (claim.source.audience === "private" || claim.source.audience === "shared") &&
+    (claim.source.actor.kind !== "guardian" || claim.source.audience === "private") &&
+    Date.now() < claim.expires &&
+    claim.source.isCurrent()
   );
 }
 

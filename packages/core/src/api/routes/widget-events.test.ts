@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { widgetEventRoutes } from "./widget-events.js";
+import { connectCardUi } from "../../connections/connect-card.js";
 
 const button = (id: string, name: string, context?: unknown) => ({
   id,
@@ -47,9 +48,12 @@ function setup(
   caller: string | null = "guardian",
   appReply: unknown = { ok: true },
   connections: unknown[] = [],
+  deviceConnections: unknown[] = [],
+  audience: "private" | "shared" = "private",
 ) {
   const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
   const app = widgetEventRoutes({
+    chatAudience: async () => audience,
     webchatRepo: {
       widgetMessage: async (id) =>
         rows[id] ? { chatId: rows[id].chatId, content: JSON.stringify(rows[id].content) } : null,
@@ -74,6 +78,9 @@ function setup(
     forward: async (request) => {
       if (request.method === "GET" && new URL(request.url).pathname === "/api/connections") {
         return Response.json({ connections });
+      }
+      if (request.method === "GET" && new URL(request.url).pathname === "/api/device-connections") {
+        return Response.json({ connections: deviceConnections });
       }
       forwarded.push({
         url: new URL(request.url).pathname,
@@ -611,5 +618,235 @@ describe("an event on the connect card core owns", () => {
     expect(forwarded[0]?.body).toMatchObject({
       parts: [{ output: { kind: "github", dismissed: true } }],
     });
+  });
+});
+
+describe("an event on the connect card for a device kind", () => {
+  const context = { kind: "apple_health", device: true };
+  const deviceCard = {
+    type: "pending_interaction",
+    toolUseId: "k2",
+    appId: "core",
+    render: {
+      kind: "inline",
+      componentId: "connect-card",
+      props: { kind: "apple_health", label: "Apple Health", device: true },
+      // The card core draws, which has no button for check: the device's app
+      // sends it once its flow ends.
+      ui: connectCardUi("apple_health", "Apple Health", true),
+    },
+  };
+  const health = (state: string) => [{ capability: "apple_health", title: "Apple Health", state }];
+  const card = (rows: unknown[]) =>
+    setup({ m: { chatId: "c1", content: [deviceCard] } }, "guardian", undefined, [], rows);
+
+  it("opens the device's page on Connect, on the caller's origin", async () => {
+    const { fire, forwarded } = card(health("off"));
+    const res = await fire("m", { name: "connect", context });
+    expect(await res.json()).toEqual({ open: "http://localhost/connections/device/apple_health" });
+    expect(forwarded).toEqual([]);
+  });
+
+  it("answers at once on Connect when a device's connection already works", async () => {
+    const { fire, forwarded } = card(health("working"));
+    await fire("m", { name: "connect", context });
+    expect(forwarded[0]?.body).toMatchObject({
+      parts: [{ toolUseId: "k2", output: { kind: "apple_health", status: "connected" } }],
+    });
+  });
+
+  it("answers the agent on Check only once the device reports it working", async () => {
+    const notYet = card(health("off"));
+    const refused = await notYet.fire("m", { name: "check", context });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({
+      error: "Apple Health isn't connected yet. Connect it on your device, then try again.",
+    });
+    expect(notYet.forwarded).toEqual([]);
+
+    const working = card(health("working"));
+    expect(await (await working.fire("m", { name: "check", context })).json()).toMatchObject({
+      answered: true,
+    });
+    expect(working.forwarded[0]?.body).toMatchObject({
+      parts: [{ output: { kind: "apple_health", status: "connected" } }],
+    });
+  });
+
+  it("takes check with no button for it only on core's own card", async () => {
+    const appCard = { ...deviceCard, appId: "connector" };
+    const { fire } = setup(
+      { m: { chatId: "c1", content: [appCard] } },
+      "guardian",
+      undefined,
+      [],
+      health("working"),
+    );
+    expect((await fire("m", { name: "check", context })).status).toBe(400);
+  });
+
+  it("reads the card as a device's from what core stored, whatever context the client sends", async () => {
+    const working = card(health("working"));
+    await working.fire("m", { name: "check", context: { kind: "apple_health" } });
+    expect(working.forwarded[0]?.body).toMatchObject({
+      parts: [{ output: { kind: "apple_health", status: "connected" } }],
+    });
+    const off = card(health("off"));
+    const res = await off.fire("m", { name: "connect", context: {} });
+    expect(await res.json()).toEqual({ open: "http://localhost/connections/device/apple_health" });
+  });
+});
+
+describe("an event on the share-location card core owns", () => {
+  const locationCard = {
+    type: "pending_interaction",
+    toolUseId: "l1",
+    appId: "core",
+    render: {
+      kind: "inline",
+      componentId: "location-card",
+      builtin: true,
+      ui: {
+        components: [
+          { id: "root", component: "Column", children: ["decline", "share"] },
+          button("decline", "decline"),
+          button("share", "share-location"),
+        ],
+      },
+    },
+  };
+  const position = {
+    latitude: 31.23,
+    longitude: 121.47,
+    accuracy: 18.4,
+    timestamp: 1_800_000_000_000,
+  };
+
+  it("answers the agent with the position the client read on Share", async () => {
+    const { fire, forwarded } = setup({ m: { chatId: "c1", content: [locationCard] } });
+    const res = await fire("m", { name: "share-location", context: position });
+    expect(await res.json()).toMatchObject({ answered: true });
+    expect(forwarded[0]?.body).toMatchObject({
+      parts: [
+        {
+          toolUseId: "l1",
+          messageId: "m",
+          output: {
+            status: "shared",
+            latitude: 31.23,
+            longitude: 121.47,
+            accuracyMeters: 18,
+            fixedAt: new Date(1_800_000_000_000).toISOString(),
+          },
+        },
+      ],
+    });
+  });
+
+  it("refuses a Share that carries no position, and leaves the card waiting", async () => {
+    const { fire, forwarded } = setup({ m: { chatId: "c1", content: [locationCard] } });
+    const res = await fire("m", {
+      name: "share-location",
+      context: { latitude: 91, longitude: 0 },
+    });
+    expect(res.status).toBe(400);
+    expect(forwarded).toEqual([]);
+  });
+
+  it("answers that the guardian declined on Not now", async () => {
+    const { fire, forwarded } = setup({ m: { chatId: "c1", content: [locationCard] } });
+    await fire("m", { name: "decline" });
+    expect(forwarded[0]?.body).toMatchObject({
+      parts: [{ output: { status: "declined", dismissed: true } }],
+    });
+  });
+
+  it("takes no answer once the card was answered or skipped by a message", async () => {
+    const { fire, forwarded } = setup({
+      m: { chatId: "c1", content: [locationCard] },
+      n: {
+        chatId: "c1",
+        content: [{ type: "interaction_result", toolUseId: "l1", output: { dismissed: true } }],
+      },
+    });
+    const res = await fire("m", { name: "share-location", context: position });
+    expect(res.status).toBe(400);
+    expect(forwarded).toEqual([]);
+  });
+
+  it("marks a share the client sent by itself only on a card core marked for it", async () => {
+    const marked = {
+      ...locationCard,
+      render: { ...locationCard.render, props: { reason: "r", autoShareToken: "t" } },
+    };
+    const auto = setup({ m: { chatId: "c1", content: [marked] } });
+    await auto.fire("m", { name: "share-location", context: { ...position, auto: true } });
+    expect(
+      (auto.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
+        ?.output,
+    ).toMatchObject({ status: "shared", auto: true });
+    // An unmarked card's share says nothing of how it was sent, whatever the client claims.
+    const plain = setup({ m: { chatId: "c1", content: [locationCard] } });
+    await plain.fire("m", { name: "share-location", context: { ...position, auto: true } });
+    expect(
+      (plain.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
+        ?.output,
+    ).not.toHaveProperty("auto");
+  });
+
+  it("answers as declined, with no position, once the chat is no longer private", async () => {
+    // Visitors were let in while the card waited, so the chat is now shared.
+    const { fire, forwarded } = setup(
+      { m: { chatId: "c1", content: [locationCard] } },
+      "guardian",
+      undefined,
+      [],
+      [],
+      "shared",
+    );
+    const res = await fire("m", { name: "share-location", context: position });
+    expect(await res.json()).toMatchObject({ answered: true });
+    const output = (forwarded[0]?.body as { parts: { output: unknown }[] }).parts[0]?.output;
+    expect(output).toMatchObject({ status: "declined", dismissed: true });
+    expect(JSON.stringify(forwarded)).not.toContain(String(position.latitude));
+  });
+
+  it("lets the first of two clients answer, and refuses the other", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const turns: unknown[] = [];
+    const app = widgetEventRoutes({
+      webchatRepo: {
+        widgetMessage: async () => ({ chatId: "c1", content: JSON.stringify([locationCard]) }),
+        getMessages: (async () => [
+          { id: "m", role: "assistant", content: JSON.stringify([locationCard]) },
+        ]) as never,
+        getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
+      },
+      callerOwner: async () => "guardian",
+      chatAudience: async () => "private",
+      forward: async (request) => {
+        turns.push(await request.json());
+        await held;
+        return Response.json({ ok: true });
+      },
+    });
+    const fire = (body: unknown) =>
+      app.request("/chat/widgets/m/events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const first = fire({ name: "share-location", context: position });
+    // The second press lands while the first answer is on its way to the chat.
+    while (turns.length === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+    const second = await fire({ name: "decline" });
+    release();
+    expect((await first).status).toBe(200);
+    expect(second.status).toBe(400);
+    expect(await second.json()).toEqual({ error: "This card was already answered" });
+    expect(turns).toHaveLength(1);
   });
 });

@@ -226,6 +226,12 @@ export {
 } from "./application/agent-input-queue.js";
 export type { PushLevel, TurnActor, TurnFacts } from "./domain/turn-facts.js";
 export { sameActor } from "./domain/turn-facts.js";
+export {
+  type Audience,
+  messagingAudience,
+  narrowerAudience,
+  turnAudience,
+} from "./domain/turn-audience.js";
 export type { DeferTool } from "./application/ask-user-tools.js";
 export {
   parentTurnSession,

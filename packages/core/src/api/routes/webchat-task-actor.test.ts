@@ -9,7 +9,7 @@ const visitor: SessionActor = { kind: "visitor", accountId: "v", email: "v@examp
 const speaker = { platform: "webchat", id: "core:concierge" };
 const body = { text: "inspect metadata, not a data request" };
 
-function harness(owner = "guardian") {
+function harness(owner = "guardian", audience: "private" | "shared" = "private") {
   let active = true;
   const inputs = new Map<string, unknown>();
   const rows = new Map([
@@ -127,6 +127,7 @@ function harness(owner = "guardian") {
           chatId: "source",
           turnId: "source-turn",
           actor,
+          audience,
           isCurrent: () => active,
         },
         "target",
@@ -152,6 +153,26 @@ describe("webchat task actor admission without a database or provider", () => {
       speaker,
       undefined,
     );
+  });
+
+  for (const [audience, actor, owner] of [
+    ["private", guardian, "guardian"],
+    ["shared", visitor, "visitor:v"],
+  ] as const) {
+    it(`keeps the ${audience} ${actor.kind} source audience as the task's parent boundary`, async () => {
+      const s = harness(owner, audience);
+      expect(await s.send(actor)).toMatchObject({ ok: true });
+      expect(s.submit).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ actor, parentAudience: audience }),
+      );
+    });
+  }
+
+  it("refuses a guardian handoff from a shared source audience", async () => {
+    const s = harness("guardian", "shared");
+    await expect(s.send()).rejects.toThrow("Task input attribution is unavailable");
+    expect(s.submit).not.toHaveBeenCalled();
   });
 
   it("preserves a visitor through the route, even with an unrelated guardian ambient scope", async () => {
