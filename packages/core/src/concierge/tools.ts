@@ -3,6 +3,7 @@
 // starts a topic chat, `react` puts an emoji on a guardian message, and
 // `connect_card` shows a card that connects a service.
 
+import { settledCard } from "./task-cards.js";
 import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
@@ -466,8 +467,8 @@ export async function buildConciergeTools(
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
   // Every message of a turn with a push level may also reach the phone. Its
-  // lock-screen line is only ever words the Concierge wrote in this message,
-  // and null when it wrote none or marked them private, which pushes a fixed line.
+  // lock-screen line is what the message shows: the Concierge's words, a
+  // forward's preview, or what a card asks; one marked private pushes a fixed line.
   const said = (chatId: string, turnId: string, ownWords: string | null, isPrivate = false) =>
     service.said({
       turnId,
@@ -879,10 +880,11 @@ export async function buildConciergeTools(
     // Only a result the guardian was shown counts as said.
     if (task) service.noteSaid(task.id);
     noteAnswers(id, answers);
-    // Forwarded text is the task's, not the Concierge's, and so are a task's
-    // title and chat name, which can come from its output: none becomes the
-    // push's line, which could carry a code or password onto the lock screen.
-    said(chatId, turnId, intro ?? null);
+    // The push shows the message: the Concierge's lead-in, or else the
+    // task's title and a preview of what it brought back (the guardian's
+    // call, 2026-11-14). A secret is kept off the lock screen only by
+    // `say … private`.
+    said(chatId, turnId, intro ?? (task?.title ? `${task.title}: ${text}` : text));
     return id;
   };
 
@@ -923,8 +925,21 @@ export async function buildConciergeTools(
       [{ type: "task_chat", chatId, title, show, ...(waitedOn ? { waitedOn } : {}) }],
       await placementFor(undefined, { taskId: task?.id ?? null }),
     );
-    said(conciergeChatId, turnId, null);
+    // The push shows what the card asks: its question or approval, else the
+    // task's title.
+    said(conciergeChatId, turnId, (await cardLine(chatId, waitedOn)) ?? title);
     return id;
+  };
+
+  /** What a task's question or approval card asks, in one line, or null. */
+  const cardLine = async (chatId: string, waitedOn: TaskChatWaitedOn | undefined) => {
+    if (!waitedOn) return null;
+    const card = await settledCard(service.taskCardSources(), chatId, waitedOn).catch(() => null);
+    if (!card) return null;
+    if (card.kind === "approval") return card.title || null;
+    const props = (card.render?.props ?? {}) as { questions?: { question?: unknown }[] };
+    const question = props.questions?.[0]?.question;
+    return typeof question === "string" && question.trim() ? question : null;
   };
 
   return [
@@ -1706,7 +1721,7 @@ export async function buildConciergeTools(
               chatThread ? { chatThread } : {},
             ),
           );
-          said(chatId, turnId, null);
+          said(chatId, turnId, `Connect ${connector.label}`);
           return { sent: "Shown; the guardian sees the card.", messageId: id };
         }),
     },

@@ -1,6 +1,6 @@
 # Proactive Concierge messages push without per-message consent
 
-- **Status**: Accepted, amended 2026-11-07 (replies push, but not in a chat the phone shows) and 2026-11-09 (every message pushes to the person the chat serves, unless their dashboard is active)
+- **Status**: Accepted, amended 2026-11-07 (replies push, but not in a chat the phone shows) 2026-11-09 (every message pushes to the person the chat serves, unless their dashboard is active) and 2026-11-14 (a push shows what the message shows)
 - **Date**: 2026-11-06
 - **Architecture**: [Notification delivery](../architecture/notification-delivery.md)
 - **Amends**: [The notification body is sender-supplied](sender-supplied-notification-body-over-contentless-push.md)
@@ -36,6 +36,14 @@ No turn pushes while the guardian's phone app shows its chat. The phone marks it
 **Holds, per person.** A person's push is held back while their phone app shows the chat, while one of their web dashboards on this instance is active, or in their own quiet hours. A hold is checked when the message is said and again when its push goes out: a message held when said is dropped, even if the hold ends before its merge window does. The phone's watch counts for the person signed in on the phone, the guardian or a visitor. A dashboard sends an `active` signal on its live-events socket on keyboard, pointer or touch input while its tab is visible and its window focused, at most once every 30 seconds, and counts as active for 1 minute after the last one. It sends `away` as the tab is hidden, the window loses focus or the page closes, and then counts as away at once. A socket that closes stops counting at once. An open tab alone counts for nothing, since it can stay open long after the person left. Input inside a same-origin app frame on the dashboard counts. A dashboard page inside the phone app's web view never counts as a dashboard: it sends no signals, since closing that view may not fire `pagehide`, and the next push would be held back while the phone is locked. The guardian's activity holds back only the guardian's pushes, and a visitor's only that visitor's. While a dashboard is active, all of that person's pushes from the instance are held back, in every chat, digest included: the dashboard shows every chat's unread state. `send_notification` is never held back.
 
 This replaces the 2026-11-07 rule that a guardian reading on a computer still gets the push: the dashboard's watch still never counts, and its activity does. A held-back message is dropped. Nothing queues it, and nothing pushes when the dashboard goes idle or the phone leaves the chat, but the chat's next message pushes. A person who walks away without the tab losing focus is still counted as present for up to 1 minute, and a message in that window does not push. That gap is accepted, as is the one for a phone cut off without its goodbye.
+
+## Amendment: a push shows what the message shows
+
+*2026-11-14.* The guardian found the fixed line useless on the lock screen: a finished task said only that a task had an update, and they had to open the app to learn anything. Their call was to show the message's content and to stop guarding against what it might hold.
+
+A forward with no lead-in pushes the task's title and a preview of what it brought back. A card pushes what it asks: a task's question, an approval's title, "Connect <service>" for a connect card, or the task's title when it asks nothing. The Concierge's own words push as before.
+
+This reverses the earlier rule that a forward, a task's title and a card push the fixed line because their words were not the Concierge's and could hold a secret. A secret now stays off the lock screen only when the Concierge says it with `say … private`, which still pushes the fixed line, and the Concierge is told to put a secret there and never in a forward. The merge window and ring rules are unchanged.
 
 ## Alternatives
 
