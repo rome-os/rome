@@ -196,11 +196,6 @@ export interface ChatPendingChecksResponse {
   checks: ChatPendingCheckDto[];
 }
 
-/** Payload of the `task_upsert` event on the `concierge.tasks` topic. */
-export interface ConciergeTaskUpsertEvent {
-  task: ConciergeTaskDto;
-}
-
 /** A daily window in the guardian's timezone, `HH:mm` to `HH:mm`; it may wrap midnight. */
 export interface ConciergeQuietHours {
   start: string;

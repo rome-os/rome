@@ -140,21 +140,6 @@ export function conciergeRoutes(
     return c.json({ ...chat, unread: 0 }, 201);
   });
 
-  // Cancels a task's pending checks, as from its row in the task panel. The
-  // task stays, its status is read again without them, and the Concierge
-  // hears of it. A failure answers as one.
-  app.delete("/concierge/tasks/:taskId/checks", async (c) => {
-    const owner = await callerOwner();
-    if (!owner) return c.json({ error: "Not authenticated" }, 401);
-    const concierge = deps.concierge;
-    if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
-    const taskId = c.req.param("taskId");
-    const found = await concierge.deps.tasks.repo.getWithChat(taskId);
-    if (!found || found.owner !== owner) return c.json({ error: "No such task" }, 404);
-    await concierge.cancelChecksByOwner(taskId);
-    return c.json({ ok: true });
-  });
-
   // The same `concierge_activity` events as the `concierge.activity` topic
   // of the live events socket, for a tab that cannot open the socket: the
   // caller's chats only, and the gate runs before the stream opens.

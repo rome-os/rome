@@ -1536,20 +1536,6 @@ export class ConciergeService {
   }
 
   /**
-   * Task `taskId`'s owner called its checks off from its row: a wake-up is
-   * removed, and its schedule skips only its next run. A failure reaches the
-   * caller; once they are cancelled, the Concierge hears of it
-   * quietly, so it expects no wake-up from them.
-   */
-  async cancelChecksByOwner(taskId: string): Promise<void> {
-    const row = await this.deps.tasks.repo.get(taskId);
-    if (!row) return;
-    await this.deps.checks?.cancelFor(taskId, ownerOf(row), { keepSchedule: true });
-    this.taskEvents?.mark({ taskId, kind: "checks_cancelled_by_owner", urgent: false });
-    await this.deps.tasks.taskChanged(taskId);
-  }
-
-  /**
    * New words reached task chat `chatId` from its owner, typed in the chat:
    * a task its owner or the Concierge stopped is taken up again. One stopped
    * by archiving or deleting its chat stays stopped.

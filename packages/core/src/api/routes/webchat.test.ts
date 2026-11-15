@@ -7640,7 +7640,7 @@ describe("Webchat API", () => {
         const [row] = await repo.upsertMany([
           { title: `Task of ${id}`, state: "doing", sessionId: id },
         ]);
-        // Its own task_upsert is told once its status is read: let it land.
+        // Let the row's own change notice land before the test starts listening.
         await new Promise((resolve) => setTimeout(resolve, 0));
         return row;
       };
@@ -7674,10 +7674,8 @@ describe("Webchat API", () => {
         service.chatDeleted = (taskId: string) => void deleted.push(taskId);
         deps.concierge = service;
         upserts = [];
-        tasks.subscribe((event, payload) => {
-          if (event !== "task_upsert") return;
-          const { task } = payload as { task: { id: string; archivedAt: number | null } };
-          upserts.push({ id: task.id, archivedAt: task.archivedAt });
+        repo.onChange(({ row }) => {
+          upserts.push({ id: row.id, archivedAt: row.archivedAt?.getTime() ?? null });
         });
         app = createWebchatRuntime(deps).routes;
       });
