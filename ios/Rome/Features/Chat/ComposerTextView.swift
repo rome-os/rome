@@ -137,6 +137,12 @@ struct ComposerTextView: UIViewRepresentable {
             return text.replacingCharacters(in: NSRange(location: start, length: length), with: "")
         }
 
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            // Only the guardian's own: text the app sets moves the selection too.
+            guard textView.isFirstResponder else { return }
+            parent.handle?.caret = textView.selectedRange
+        }
+
         func textViewDidBeginEditing(_ textView: UITextView) {
             if !parent.focused { parent.focused = true }
         }

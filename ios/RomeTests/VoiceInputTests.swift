@@ -114,6 +114,16 @@ import Testing
         #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == nil)
     }
 
+    @Test func spokenWordsGoWhereTheGuardianLeftTheCursorElseAtTheEnd() {
+        let handle = ComposerTextHandle()
+        // Typed into a field the app never saw a cursor in, such as one that lost focus.
+        #expect(handle.cursor(in: "Typed 17") == NSRange(location: 8, length: 0))
+        handle.caret = NSRange(location: 3, length: 2)
+        #expect(handle.cursor(in: "Typed 17") == NSRange(location: 3, length: 2))
+        // The text got shorter since (a send): the end again.
+        #expect(handle.cursor(in: "Ty") == NSRange(location: 2, length: 0))
+    }
+
     @Test func standInsOfferNoVoiceInput() async throws {
         let backend = DemoBackend()
         #expect(try await backend.voiceInputInfo() == nil)
