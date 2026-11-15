@@ -189,6 +189,23 @@ final class VoiceInputTests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed, "the notice stayed after the next edit")
     }
 
+    /// Rule 7's notices in Chinese, for the stops whose Chinese the contract gives: the
+    /// background, then a relaunch.
+    @MainActor
+    func testRule7NoticesInChinese() throws {
+        let first = try launch(recording: Self.hum, language: "zh-Hans")
+        try checkWordsKept(first, stop: "zh-Hans: the background", notice: "Rome 进入后台时已停止收听", language: "zh-Hans") {
+            XCUIDevice.shared.press(.home)
+            Thread.sleep(forTimeInterval: 3)
+            first.activate()
+            return first
+        }
+        try checkWordsKept(first, stop: "zh-Hans: a relaunch", notice: "Rome 关闭时已停止收听", language: "zh-Hans") {
+            first.terminate()
+            return try launch(recording: Self.hum, language: "zh-Hans")
+        }
+    }
+
     /// Rule 7 when the transcriber fails partway: the stand-in instance ends the session with
     /// an error, and listening stops by itself.
     @MainActor
@@ -215,14 +232,16 @@ final class VoiceInputTests: XCTestCase {
     @MainActor
     @discardableResult
     private func checkWordsKept(_ app: XCUIApplication, stop: String, notice expected: String,
+                                language: String = "en",
                                 _ makeStop: () throws -> XCUIApplication) throws -> XCUIApplication {
+        let (start, stopLabel) = language == "en" ? ("Start voice input", "Stop voice input") : ("开始语音输入", "停止语音输入")
         try standIn(["transcript": Self.longTranscript])
         defer { try? standIn(["transcript": Self.transcript]) }
         let control = onScreen(app.buttons, "voice-input")
         try requireControl(app, control, "\(stop): the Chat has no voice control")
         let field = onScreen(app.textViews, "message-field")
         let empty = fieldText(field)
-        guard tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")) else {
+        guard tapUntil(control, NSPredicate(format: "label == %@", stopLabel)) else {
             printScreen(app, "\(stop): listening never started")
             XCTFail("\(stop): listening never started")
             return app
@@ -230,7 +249,7 @@ final class VoiceInputTests: XCTestCase {
         // Read the field until it holds some words, and keep the last reading before the stop.
         var before = empty
         let deadline = Date().addingTimeInterval(20)
-        while Date() < deadline, control.label == "Stop voice input" {
+        while Date() < deadline, control.label == stopLabel {
             before = fieldText(field)
             if words(before).count >= words(empty).count + 3 { break }
             Thread.sleep(forTimeInterval: 0.5)
@@ -252,7 +271,7 @@ final class VoiceInputTests: XCTestCase {
         } else {
             XCTAssertEqual(notice.label, expected, "\(stop): the notice says something else")
         }
-        if onScreen(back.buttons, "voice-input").label != "Start voice input" {
+        if onScreen(back.buttons, "voice-input").label != start {
             XCTFail("\(stop): listening was still shown after the stop")
         }
         return back
