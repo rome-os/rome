@@ -178,8 +178,13 @@ async function bootstrap() {
       device,
     });
 
-    // Read at each request: the Rome the window opens can change.
-    installMicrophonePermission(session.defaultSession, () => runtime.getDashboardUrl());
+    // The same Rome the device bridge trusts; a dev window trusts its own URL.
+    installMicrophonePermission(
+      session.defaultSession,
+      () =>
+        controller.activeTarget().instance?.origin ??
+        (devDashboardUrl ? new URL(devDashboardUrl).origin : null),
+    );
     mainWindow = await createMainWindow(runtime);
     log.info("Main window created");
 
