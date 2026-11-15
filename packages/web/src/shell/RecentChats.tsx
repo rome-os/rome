@@ -639,19 +639,20 @@ export function RecentChats({
   const [tasksScrolled, setTasksScrolled] = useState(false);
   const tasksListRef = useRef<HTMLDivElement | null>(null);
   const activeTaskId = taskSessions.some((s) => s.id === activeSessionId) ? activeSessionId : null;
+  const showTasks = mode === "concierge" && conciergeChatId !== null && taskSessions.length > 0;
   useEffect(() => {
     if (activeTaskId) setTasksExpanded(true);
   }, [activeTaskId]);
   // The card scrolls on its own, so an open task chat far down its list is
-  // brought into view once the card is open.
+  // brought into view once the card is open and on screen (the list can be in
+  // Chat mode when the task chat opens).
   useEffect(() => {
-    if (!tasksExpanded || !activeTaskId) return;
+    if (!showTasks || !tasksExpanded || !activeTaskId) return;
     const link = Array.from(tasksListRef.current?.querySelectorAll("a[href]") ?? []).find(
       (a) => a.getAttribute("href") === `/chat/${activeTaskId}`,
     );
     link?.closest("[data-chat-row]")?.scrollIntoView?.({ block: "nearest" });
-  }, [tasksExpanded, activeTaskId]);
-  const showTasks = mode === "concierge" && conciergeChatId !== null && taskSessions.length > 0;
+  }, [tasksExpanded, activeTaskId, showTasks]);
 
   const projectGroups = useMemo<SessionGroup[]>(() => {
     const buckets = new Map<

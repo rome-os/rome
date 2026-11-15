@@ -508,6 +508,26 @@ describe("Concierge mode", () => {
       );
     });
 
+    it("scrolls the open task chat's row into view when the list switches to Agent", async () => {
+      seedChatListMode({ mode: "chat" });
+      concierge.chats = topics;
+      const scrolled: Element[] = [];
+      rs.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+        scrolled.push(this);
+      });
+      serve([mainChat(), task("t1", "Find flights"), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/t1");
+      await screen.findByRole("link", { name: "My chat" });
+      expect(scrolled).toEqual([]);
+      await user.click(radio("Agent"));
+      await waitFor(() =>
+        expect(scrolled.map((row) => row.querySelector("a")?.getAttribute("href"))).toContain(
+          "/chat/t1",
+        ),
+      );
+    });
+
     it("shows only the running count on the folded heading, never a waiting mark", async () => {
       seedChatListMode({ mode: "concierge" });
       concierge.chats = topics;
