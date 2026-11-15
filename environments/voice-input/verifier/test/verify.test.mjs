@@ -147,14 +147,15 @@ describe("verify against the stand-in product", { concurrency: 3, timeout: 60000
     });
   }
 
-  // Leg A scores rules 2, 3, 4, 10 and 11 over the iOS app's audio path; each variant that
+  // Leg A scores rules 2, 3, 4, 9, 10 and 11 over the iOS app's audio path; each variant that
   // breaks one of them through the socket must fail it there too.
-  const LEG_A = ["2", "3", "4", "10", "11"];
+  const LEG_A = ["2", "3", "4", "9", "10", "11"];
   for (const variant of [
     "good",
     "fail-2",
     "fail-3",
     "fail-4",
+    "fail-9",
     "fail-10",
     "fail-11",
     "fail-11g",

@@ -11,6 +11,10 @@ import {
   waitForListening,
 } from "../lib/product.mjs";
 import { setMessages, useTranscriber } from "../lib/runs.mjs";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { phoneDictateMessage } from "../lib/phone.mjs";
 import { check, required, ruleResult } from "../lib/scenario.mjs";
 import { browserLanguage } from "../lib/script.mjs";
 import { runStops } from "../lib/stops.mjs";
@@ -27,8 +31,12 @@ export default {
   rule: "9",
   title: "The microphone is open only while you can see it listening",
   phase: 2,
+  legA: true,
   async run(ctx) {
     await useTranscriber(ctx);
+    // Over the iOS app's audio path only Rome's own stop can be seen; the app's microphone is
+    // leg B's, through its StopListening signpost.
+    if (ctx.place === "phone") return ruleResult([required(await phoneSilence(ctx))]);
     const message = setMessages(ctx.script, "B").find((m) => m.language === "en");
     const checks = [required(await guardianStop(ctx, message))];
     const { outcomes } = await runStops(ctx);
@@ -125,4 +133,46 @@ async function silence(ctx, message) {
   } finally {
     await opened.close();
   }
+}
+
+/**
+ * Leg A: 10 s more silence than the limit, played over the voice input socket. Rome must end
+ * the session by itself, at the limit within the slack, before the socket's stop is sent.
+ */
+async function phoneSilence(ctx) {
+  const name = "Rome stops after 30 s without speech";
+  const limit = silenceSeconds();
+  const path = join(tmpdir(), "voice-verify-silence.wav");
+  writeFileSync(path, silentWav(0.1));
+  const listenMs = (limit + 10) * 1000;
+  const result = await phoneDictateMessage(ctx.env, { path }, { listenMs });
+  const end = result.events.find(([, type]) => type === "error" || type === "ended");
+  const at = end ? end[0] / 1000 : null;
+  if (at === null || at * 1000 >= listenMs)
+    return check(name, "fail", `the session was still open after ${limit + 10} s of silence`);
+  const inTime = Math.abs(at - limit) <= SILENCE_SLACK_S;
+  return check(
+    name,
+    inTime ? "pass" : "fail",
+    `Rome ended the session ${at.toFixed(1)} s into the silence with ${result.error ? `error "${result.error}"` : "ended"}; the bar is ${limit} s ± ${SILENCE_SLACK_S} s`,
+  );
+}
+
+function silentWav(seconds) {
+  const bytes = Math.round(seconds * 16000) * 2;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + bytes, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(16000, 24);
+  header.writeUInt32LE(32000, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(bytes, 40);
+  return Buffer.concat([header, Buffer.alloc(bytes)]);
 }

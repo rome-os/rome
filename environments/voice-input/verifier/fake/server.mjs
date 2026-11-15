@@ -295,9 +295,20 @@ function voiceSocket(ws, statePath, script) {
     out({ type: "text", settled: pieces.slice(sent, upTo).join(""), pending: "" });
     sent = upTo;
   };
+  // Rome ends a session after this long without speech, as real Rome does with `no-speech`.
+  const quietLimitMs = (state.silenceSeconds ?? 30) * 1000;
+  let quietMs = 0;
   ws.on("message", (data, isBinary) => {
     if (isBinary) {
       bytes += data.length;
+      let sum = 0;
+      for (let i = 0; i + 1 < data.length; i += 2) sum += data.readInt16LE(i) ** 2;
+      const silent = Math.sqrt(sum / Math.max(1, data.length / 2)) < 300;
+      quietMs = silent ? quietMs + (data.length / 32000) * 1000 : 0;
+      if (quietMs >= quietLimitMs && state.variant !== "fail-9") {
+        out({ type: "error", reason: "no-speech" });
+        ws.close();
+      }
       return;
     }
     const m = JSON.parse(String(data));
