@@ -48,24 +48,7 @@ private struct ScrollState: CustomStringConvertible {
         )
     }
 
-    /// How the update pill comes and goes in a launch.
-    enum Pill: CaseIterable, Sendable {
-        /// None shows.
-        case none
-        /// It shows from what was kept, and the launch's check takes it away
-        /// while the fetch lands.
-        case goesAway
-        /// The update check answers late, after the kept rows and the fetch:
-        /// the pill comes up then.
-        case comesLate
-    }
-
-    /// The update the pill offers: newer than the instance, which is new
-    /// enough for the app.
-    private static let offered = InstanceUpdater.State.required(current: UpdateGate.minimumInstanceVersion, latest: "\(UpdateGate.minimumInstanceVersion).1", latestChanged: false)
-
-    @Test(arguments: Pill.allCases)
-    func theNewestMessageStaysAboveTheComposer(pill: Pill) async throws {
+    @Test func theNewestMessageStaysAboveTheComposer() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "rome-cold-anchor-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         func drafts() -> DraftStore { DraftStore(root: root.appending(path: "Drafts"), instance: "t") }
@@ -84,10 +67,6 @@ private struct ScrollState: CustomStringConvertible {
         defer { workspace.stop() }
         #expect(workspace.concierge.loaded && !workspace.concierge.messages.isEmpty)
         let model = AppModel()
-        if pill == .goesAway {
-            model.update.debugShow(Self.offered)
-            #expect(model.update.showsBanner)
-        }
         let host = UIHostingController(rootView: MainShell(workspace: workspace).environment(model))
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
@@ -103,24 +82,14 @@ private struct ScrollState: CustomStringConvertible {
         let scroll = try #require(Self.transcript(in: host.view))
         let cached = Self.state(scroll)
         #expect(abs(cached.toEnd) < 1, "kept rows: \(cached)")
-        // The composer is under the transcript; the pill's own space is
-        // checked against what follows.
+        // The composer is under the transcript.
         #expect(cached.bottomInset > 40, "bottom inset: \(cached)")
 
-        // The fresh load, then the header's status; the check finds no update.
-        if pill == .goesAway { model.update.debugShow(.upToDate) }
+        // The fresh load, then the header's status.
         await workspace.start()
         workspace.topics.setActivity(.needsYou, for: workspace.mainChatServerID ?? conciergeChatID)
         var samples: [ScrollState] = []
-        var justAfterPill: ScrollState?
-        for step in 0..<40 {
-            // The late check's answer, a second after the fetch.
-            if pill == .comesLate, step == 10 {
-                model.update.debugShow(Self.offered)
-                #expect(model.update.showsBanner)
-                try await Task.sleep(for: .milliseconds(60))
-                justAfterPill = Self.state(scroll)
-            }
+        for _ in 0..<40 {
             try await Task.sleep(for: .milliseconds(100))
             samples.append(Self.state(scroll))
         }
@@ -128,18 +97,7 @@ private struct ScrollState: CustomStringConvertible {
         #expect(workspace.concierge.hasOlder, "the fetch should page")
         #expect(abs(settled.toEnd) < 1, "after the fetch: \(settled)")
         // No space kept under the newest message beyond the composer's.
-        switch pill {
-        case .none:
-            #expect(abs(settled.bottomInset - cached.bottomInset) < 1, "bottom inset \(cached.bottomInset) became \(settled.bottomInset)")
-        case .goesAway:
-            #expect(settled.bottomInset < cached.bottomInset - 20, "the pill's space should go: \(cached.bottomInset) → \(settled.bottomInset)")
-        case .comesLate:
-            #expect(settled.bottomInset > cached.bottomInset + 20, "the pill's space should come: \(cached.bottomInset) → \(settled.bottomInset)")
-            // In place at once, with the bar: no motion of its own that the
-            // transcript would have to chase.
-            let early = try #require(justAfterPill)
-            #expect(abs(early.bottomInset - settled.bottomInset) < 1 && abs(early.toEnd) < 1, "still moving 60 ms after the pill came: \(early), settled \(settled)")
-        }
+        #expect(abs(settled.bottomInset - cached.bottomInset) < 1, "bottom inset \(cached.bottomInset) became \(settled.bottomInset)")
         // Never left past the end, the gap the guardian saw.
         let worst = samples.min { $0.toEnd < $1.toEnd }!
         #expect(worst.toEnd > -1, "a gap opened: \(worst)")
@@ -343,23 +301,75 @@ private struct AppearHost: View {
             store.stop()
         }
         try await Task.sleep(for: .milliseconds(800))
-        // On the bottom with older pages behind: nothing fetched yet.
-        let held = store.messages.count
-        #expect(store.hasOlder && held == TranscriptStore.pageSize)
+        #expect(store.hasOlder)
 
-        // Up to the top of what is held.
+        // Up to the top of what is held. The next older page waits in its
+        // fetch until the row in view is noted, then goes in above it.
+        let anchor = Anchor()
+        backend.duringOlderFetch = {
+            try? await Task.sleep(for: .milliseconds(300))
+            await MainActor.run {
+                anchor.id = seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key
+                anchor.y = anchor.id.flatMap { seen.frames[$0]?.minY }
+            }
+        }
         let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        let held = store.messages.count
+        // As a drag would: the list stops keeping the newest row in view.
+        scroll.delegate?.scrollViewWillBeginDragging?(scroll)
         scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
-        try await Task.sleep(for: .milliseconds(100))
-        let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
-        let before = try #require(seen.frames[anchorId]).minY
+        scroll.delegate?.scrollViewDidEndDragging?(scroll, willDecelerate: false)
 
         for _ in 0..<200 where store.messages.count == held { try await Task.sleep(for: .milliseconds(10)) }
         #expect(store.messages.count > held, "no older page came")
         try await Task.sleep(for: .milliseconds(600))
+        let anchorId = try #require(anchor.id)
+        let before = try #require(anchor.y)
         let after = try #require(seen.frames[anchorId]).minY
         #expect(abs(after - before) < 1, "\(anchorId) moved from \(before) to \(after)")
     }
+
+    /// A drag that stops a status-bar scroll short of the top: UIKit never
+    /// reports the top reached, and older pages still load after it.
+    @Test func aDragAfterAStatusBarTapStillLoadsOlderPages() async throws {
+        let backend = FakeBackend()
+        backend.stored = (0..<160).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index / 2)", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index), long enough to fill a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        let host = UIHostingController(rootView: AppearHost(store: store, seen: Appearances()))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+            store.stop()
+        }
+        try await Task.sleep(for: .milliseconds(800))
+        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        let held = store.messages.count
+
+        // The tap starts the scroll; a drag stops it before the top.
+        #expect(scroll.delegate?.scrollViewShouldScrollToTop?(scroll) == true)
+        scroll.delegate?.scrollViewWillBeginDragging?(scroll)
+        scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
+        scroll.delegate?.scrollViewDidEndDragging?(scroll, willDecelerate: false)
+
+        for _ in 0..<200 where store.messages.count == held { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.count > held, "no older page came after the drag")
+    }
+}
+
+@MainActor
+private final class Anchor {
+    var id: String?
+    var y: CGFloat?
 }
 
 /// A newest page that fits on one screen, with older pages behind it: no
@@ -370,12 +380,13 @@ private struct AppearHost: View {
         func message(_ index: Int, role: String) -> ChatMessage {
             ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index)", role: role, content: role == "trace" ? "[]" : "Message \(index), a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
         }
-        // Thirty older messages, then a newest page of traces (no rows in a
-        // Concierge chat) ending in two bubbles.
+        // Thirty older messages, a page of only traces (no rows in a
+        // Concierge chat), then a newest page of traces ending in two bubbles.
         let older = (0..<30).map { message($0, role: $0.isMultiple(of: 2) ? "user" : "assistant") }
-        let newest = (30..<68).map { message($0, role: "trace") } + [message(68, role: "user"), message(69, role: "assistant")]
+        let hidden = (30..<70).map { message($0, role: "trace") }
+        let newest = (70..<108).map { message($0, role: "trace") } + [message(108, role: "user"), message(109, role: "assistant")]
         let backend = FakeBackend()
-        backend.stored = older + newest
+        backend.stored = older + hidden + newest
         let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
         store.start()
         for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
@@ -394,17 +405,8 @@ private struct AppearHost: View {
             window.windowScene = nil
             store.stop()
         }
-        for _ in 0..<200 where store.messages.count == TranscriptStore.pageSize { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(store.messages.count > TranscriptStore.pageSize, "no older page loaded under a short screen")
-    }
-
-    @Test func onlyAShortScreenWithOlderPagesAsks() {
-        typealias List = TranscriptList<EmptyView>
-        #expect(List.needsOlderToFill(hasOlder: true, rowsHeight: 300, visibleHeight: 640))
-        #expect(!List.needsOlderToFill(hasOlder: false, rowsHeight: 300, visibleHeight: 640))
-        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 2000, visibleHeight: 640))
-        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 300, visibleHeight: 0))
-        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 0, visibleHeight: 640))
+        for _ in 0..<300 where store.messages.count < 110 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.count == 110, "paging stopped at \(store.messages.count) messages under a short screen")
     }
 }
 

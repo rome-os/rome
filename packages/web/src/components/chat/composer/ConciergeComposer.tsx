@@ -171,6 +171,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     } | null>(null);
 
     const voice = useVoiceInput({ textareaRef, value: inputText, setValue: setInputText });
+    const voiceActiveRef = useRef(false);
+    voiceActiveRef.current = voice.active;
 
     // Programmatic clears fire no `input` event, so resize on every change.
     useLayoutEffect(() => {
@@ -257,7 +259,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       const clearsOptimistically = uploads.length === 0;
       const replyTo = replyDraft?.target ?? undefined;
       const chatThread = replyDraft?.thread ?? undefined;
-      const chatThreadTitle = replyDraft?.threadTitle ?? "";
       // The draft's change count once this send cleared it: a failed send
       // puts its reply back only if the guardian changed nothing since.
       let clearedAt: number | undefined;
@@ -266,8 +267,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         setPendingUploads([]);
         setFolder(null);
         setDraftSkill(null);
-        // A send closes the reply bar and, with it, the thread view; the
-        // message keeps the thread it was sent into.
         clearedAt = replyDraft?.clear();
       }
       try {
@@ -290,13 +289,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           setPendingUploads(uploads);
           setFolder(pickedFolder);
           setDraftSkill(skill);
-          replyDraft?.restore(
-            {
-              ...(replyTo ? { target: replyTo } : {}),
-              ...(chatThread ? { thread: { thread: chatThread, title: chatThreadTitle } } : {}),
-            },
-            clearedAt,
-          );
+          if (replyTo) replyDraft?.restore(replyTo, clearedAt);
         }
       }
     }, [
@@ -315,7 +308,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       () => ({
         focus: () => textareaRef.current?.focus(),
         insertText: (text, options) => {
-          if (uploadInFlightRef.current) return;
+          // The field is the dictation's while it listens.
+          if (uploadInFlightRef.current || voiceActiveRef.current) return;
           setInputText(text);
           requestAnimationFrame(() => {
             const el = textareaRef.current;
@@ -616,10 +610,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     onInput={(event) => clampTextareaHeight(event.currentTarget)}
                     onKeyDown={(event) => {
                       if (handleSlashKeyDown(event)) return;
-                      if (
-                        event.key === "Escape" &&
-                        (replyDraft?.target || replyDraft?.thread != null)
-                      ) {
+                      if (event.key === "Escape" && replyDraft?.target) {
                         event.preventDefault();
                         replyDraft.clear();
                         return;

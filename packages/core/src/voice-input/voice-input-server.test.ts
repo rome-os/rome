@@ -347,6 +347,19 @@ describe("voice input socket", () => {
     expect(messages).toEqual([{ type: "error", reason: "bad-request" }]);
   });
 
+  it("takes the audio a client recorded while its socket connected", async () => {
+    const fake = await fakeSoniox();
+    const { client, messages } = await dictation(fake);
+
+    // Eight seconds recorded during a slow connect, sent at once after `start`.
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000, bufferedMs: 8_000 }));
+    client.send(Buffer.alloc(256_000, 1));
+    await until(() => fake.received.some((frame) => frame.kind === "audio"));
+
+    expect(messages).toEqual([]);
+    expect(client.readyState).toBe(WebSocket.OPEN);
+  });
+
   it("sends the provider no audio that arrives after the stop", async () => {
     const fake = await fakeSoniox();
     fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
@@ -452,7 +465,11 @@ describe("voice input on Rome Cloud", () => {
       30,
     );
     const source = createVoiceInputSource({
-      romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
+      romeCloud: () => ({
+        origin: "https://cloud.example",
+        credentialId: "credential-1",
+        bearer: async () => "instance-1",
+      }),
       fetch: cloud.fetch,
     });
     const usage = usageSink();
@@ -503,7 +520,11 @@ describe("voice input on Rome Cloud", () => {
       }),
     );
     const source = createVoiceInputSource({
-      romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
+      romeCloud: () => ({
+        origin: "https://cloud.example",
+        credentialId: "credential-1",
+        bearer: async () => "instance-1",
+      }),
       fetch: cloud.fetch,
     });
     const usage = usageSink();
@@ -524,6 +545,46 @@ describe("voice input on Rome Cloud", () => {
     ]);
   });
 
+  it("reports no seconds when the provider never received the audio", async () => {
+    const fake = await fakeSoniox();
+    const unreachable = createSonioxTranscriber({ apiKey: "key-1", url: "ws://127.0.0.1:1" });
+    const usage = usageSink();
+    const { client, closed } = await dictation(fake, undefined, undefined, {
+      source: {
+        open: async () => ({
+          ok: true,
+          source: { transcriber: unreachable, romeCloudSessionId: "session-1" },
+        }),
+      },
+      usage,
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(Buffer.alloc(32_000, 1));
+    await closed;
+
+    expect(usage.recorded).toEqual([
+      expect.objectContaining({
+        sessionId: "session-1",
+        seconds: 0,
+        status: "provider-unavailable",
+      }),
+    ]);
+  });
+
+  it("closes the provider at once when it ends a dictation, whether or not the client answers", async () => {
+    const fake = await fakeSoniox();
+    const { client } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await until(() => fake.received.length === 1);
+    // A second start is a bad request; the paused client never answers the close.
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.pause();
+
+    await until(() => fake.closed());
+  });
+
   it("stops with Rome Cloud's reason when it refuses a session", async () => {
     const fake = await fakeSoniox();
     const cloud = romeCloud(() =>
@@ -533,7 +594,11 @@ describe("voice input on Rome Cloud", () => {
       ),
     );
     const source = createVoiceInputSource({
-      romeCloud: () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" }),
+      romeCloud: () => ({
+        origin: "https://cloud.example",
+        credentialId: "credential-1",
+        bearer: async () => "instance-1",
+      }),
       fetch: cloud.fetch,
     });
     const usage = usageSink();

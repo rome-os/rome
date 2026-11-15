@@ -35,6 +35,11 @@ protocol RomeBackend: AnyObject, Sendable {
     func archiveChat(_ id: String) async throws
     /// Deletes a chat for good; a Concierge topic chat retires with it.
     func deleteChat(_ id: String) async throws
+    /// Deletes a topic chat for good. `stoppingWork` ends its follows and open
+    /// tasks instead of moving them to the main chat.
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws
+    /// The follows and open tasks that deleting topic chat `chatId` would move.
+    func chatWork(chatId: String) async throws -> ConciergeChatWork
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     /// The newest page, reaching down to `through` and two turns past it.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
@@ -59,12 +64,12 @@ protocol RomeBackend: AnyObject, Sendable {
     /// and the question card by answering the agent.
     func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply
     func markRead(sessionId: String) async
+    /// The chat's read mark, `lastSeenActivityAt`: an ISO time, or nil when
+    /// the chat has none or it cannot be read.
+    func readMark(sessionId: String) async -> String?
     func sessions() async throws -> [ChatSession]
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
     func interrupt(turnId: String) async throws
-    func tasks() async throws -> [ConciergeTask]
-    /// Stops a task now, as its owner asked from its card.
-    func stopTask(id: String) async throws
     /// `GET /chats/:chatId/tasks`: the Concierge chat's task list, by the
     /// chat's server id.
     func taskList(chatId: String) async throws -> TaskListResponse
@@ -111,6 +116,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func routines() async throws -> [RoutineRef]
     /// Tells Chat in `chatId` that `service` is connected, so it goes on.
     func notifyServiceConnected(chatId: String, service: String) async
+    /// `PUT /api/device-connections`: this phone's connections, in full.
+    func reportDeviceConnections(_ report: DeviceConnectionReport) async throws
     /// Makes a public link to these turns of the chat, showing the Agent as
     /// `agentName` (nil: the page says Rome). No title: the instance names
     /// the share after the first turn.
@@ -158,6 +165,18 @@ final class LiveBackend: RomeBackend {
 
     func deleteChat(_ id: String) async throws {
         try await client.delete("/chat/sessions/\(escape(id))")
+    }
+
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws {
+        // Without the option, the server moves them, as it always has.
+        let query = stoppingWork ? [URLQueryItem(name: "followsAndTasks", value: "stop")] : []
+        try await client.delete("/chat/sessions/\(escape(id))", query: query)
+    }
+
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        // Optional, and bounded by the delete's wait: a 401 fails at once
+        // instead of waiting on a session renewal that a cancel cannot end.
+        try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks", reportsUnauthorized: false)
     }
 
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
@@ -220,6 +239,11 @@ final class LiveBackend: RomeBackend {
         _ = try? await client.post("/chat/sessions/\(escape(sessionId))/read")
     }
 
+    func readMark(sessionId: String) async -> String? {
+        let session: SessionReadMark? = try? await client.get("/chat/sessions/\(escape(sessionId))")
+        return session?.lastSeenActivityAt
+    }
+
     func sessions() async throws -> [ChatSession] {
         try await client.get("/chat/sessions")
     }
@@ -232,10 +256,6 @@ final class LiveBackend: RomeBackend {
         try await client.post("/chat/turns/\(escape(turnId))/interrupt")
     }
 
-    func stopTask(id: String) async throws {
-        try await client.post("/concierge/tasks/\(escape(id))/stop")
-    }
-
     func taskList(chatId: String) async throws -> TaskListResponse {
         try await client.get("/chats/\(escape(chatId))/tasks")
     }
@@ -246,14 +266,6 @@ final class LiveBackend: RomeBackend {
 
     func stopListedTask(chatId: String, taskId: String) async throws {
         try await client.post("/chats/\(escape(chatId))/tasks/\(escape(taskId))/stop")
-    }
-
-    func tasks() async throws -> [ConciergeTask] {
-        let response: ConciergeTasksResponse = try await client.get(
-            "/concierge/tasks",
-            query: [URLQueryItem(name: "doneDays", value: "30")]
-        )
-        return response.tasks
     }
 
     func pendingApprovals() async throws -> [PendingApproval] {
@@ -317,6 +329,12 @@ final class LiveBackend: RomeBackend {
 
     func notifyServiceConnected(chatId: String, service: String) async {
         _ = try? await client.post("/concierge/chats/\(escape(chatId))/service-connected", json: .object(["service": .string(service)]))
+    }
+
+    func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {
+        let body = try JSONEncoder().encode(report)
+        let reply = try await client.raw("PUT", "/device-connections", json: body)
+        guard (200..<300).contains(reply.status) else { throw APIError.server(status: reply.status, message: reply.errorCode) }
     }
 
     func isGuardian() async -> Bool {
@@ -427,8 +445,9 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
-    /// Demo data and test doubles stop nothing.
-    func stopTask(id: String) async throws { throw APIError.notFound }
+    /// Demo data and test doubles move a chat's work, as an older instance does.
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
+    func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
     /// Demo data and test doubles hold every message in the newest page.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
         try await messages(sessionId: sessionId, before: nil, limit: limit)
@@ -452,6 +471,9 @@ extension RomeBackend {
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] { throw APIError.notFound }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
+    func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {}
+    /// Demo data and test doubles have no read mark: no unread line.
+    func readMark(sessionId: String) async -> String? { nil }
     /// Stand-ins (demo, tests) are no guardian of a real instance.
     func isGuardian() async -> Bool { false }
     func setGuardianLanguage(_ code: String) async throws {}

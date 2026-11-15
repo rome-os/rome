@@ -7,7 +7,12 @@ import { automatedInputLabel } from "./automated-input.js";
 
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { DashboardActivity } from "../lib/dashboard-activity.js";
-import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
+import { MessageStatusTracker } from "./message-status.js";
+import {
+  CONCIERGE_CHAT_ID,
+  type ConciergeChatRef,
+  type MessageStatusEvent,
+} from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
@@ -206,7 +211,9 @@ export interface ConciergeDeps {
     | "getReplyTarget"
     | "addBackendMessage"
     | "placeInChatThread"
+    | "setMessageReaction"
     | "setSessionTrigger"
+    | "setAskingDevice"
     | "listProjects"
     | "onMessageInserted"
     | "awaitingGuardianSince"
@@ -311,6 +318,9 @@ export class ConciergeService {
   private stoppedRunWrites: Promise<void> = Promise.resolve();
   private taskEvents: TaskEventCoalescer | null = null;
   private readonly cardListeners = new Set<(event: ChatCardSettledEvent) => void>();
+  private readonly statusListeners = new Set<(event: MessageStatusEvent) => void>();
+  /** The one watch on message statuses while anyone listens, and its stop. */
+  private stopStatusWatch: (() => void) | null = null;
   private readonly inputListeners = new Set<(event: InputsSettledEvent) => void>();
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
@@ -321,8 +331,11 @@ export class ConciergeService {
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
+  /** When each open guardian message starts to show its turn working (docs/domains/chats.md#status). */
+  readonly messageStatus: MessageStatusTracker;
 
   constructor(readonly deps: ConciergeDeps) {
+    this.messageStatus = new MessageStatusTracker(() => this.deps.tasks.repo);
     this.push = deps.notify
       ? new ConciergePush({
           notify: deps.notify,
@@ -697,14 +710,14 @@ export class ConciergeService {
 
   /**
    * A retired Concierge chat is archived or deleted now, and its tasks are
-   * `mainChatId`'s. A deleted one's status reactions go with it. Finished rows stay on the retired chat, so no row write
+   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
    * tells the activity that their task chats now move the main chat.
    */
   async chatGone(chatId: string, mainChatId: string, deleted = false): Promise<void> {
-    // A deleted chat's messages are gone, and their marks with them.
+    // A deleted chat's messages are gone, and the turns that took them with them.
     if (deleted) {
       await this.deps.tasks.repo.forgetMessages(chatId).catch((error: unknown) =>
-        log.warn("failed to forget a deleted chat's status reactions", {
+        log.warn("failed to forget a deleted chat's turns", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -952,7 +965,7 @@ export class ConciergeService {
     }
     // The tasks it reported on settle with the flush that carried them: the
     // coalescer settles exactly the news a completed turn carried
-    // (docs/domains/chats.md#status-reaction).
+    // (docs/domains/chats.md#reaction).
     return outcome;
   }
 
@@ -1037,6 +1050,25 @@ export class ConciergeService {
     if (inputIds.length === 0) return;
     for (const listener of this.inputListeners)
       listener({ sessionId: chatId, inputIds: [...inputIds] });
+  }
+
+  /**
+   * Calls `listener` whenever a guardian message's status changes
+   * (docs/domains/chats.md#status), in any Concierge chat. Each change is
+   * worked out once, however many listen. Returns the unsubscribe.
+   */
+  onMessageStatus(listener: (event: MessageStatusEvent) => void): () => void {
+    this.statusListeners.add(listener);
+    this.stopStatusWatch ??= this.deps.tasks.onMessageStatus((target, status) => {
+      const event = { sessionId: target.chatId, messageId: target.messageKey, status };
+      for (const each of this.statusListeners) each(event);
+    });
+    return () => {
+      this.statusListeners.delete(listener);
+      if (this.statusListeners.size > 0) return;
+      this.stopStatusWatch?.();
+      this.stopStatusWatch = null;
+    };
   }
 
   /** Calls `listener` whenever a card a task card shows settles. Returns the unsubscribe. */
@@ -1493,6 +1525,10 @@ export class ConciergeService {
     }
     const chatId = row.sessionId;
     if (schedule.report === "when_it_matters") this.quietRuns.add(chatId);
+    // No one is asking from a device in a scheduled run, and a device id saved
+    // by an earlier handoff ends at the next sign-in: the run's live reads
+    // take a working device instead. A later handoff from a device sets it again.
+    await this.deps.webchatRepo.setAskingDevice(chatId, null);
     const sent = await this.dashboard.send(
       taskChatPlace(chatId),
       { text: schedule.brief, ...(schedule.skill ? { skillName: schedule.skill } : {}) },

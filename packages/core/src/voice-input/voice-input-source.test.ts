@@ -1,7 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import { createVoiceInputSource } from "./voice-input-source.js";
 
-const signedIn = () => ({ origin: "https://cloud.example", bearer: async () => "instance-1" });
+const signedIn = () => ({
+  origin: "https://cloud.example",
+  credentialId: "credential-1",
+  bearer: async () => "instance-1",
+});
 
 /** Rome Cloud answering each request by its path; `calls` lists the paths asked. */
 function answering(response: (path: string) => Response) {
@@ -162,13 +166,17 @@ describe("voice input source", () => {
   });
 
   it("asks Rome Cloud again for another account rather than reusing the last answer", async () => {
-    let bearer = "instance-1";
+    let credentialId = "credential-1";
     const cloud = answering(() =>
-      bearer === "instance-1"
+      credentialId === "credential-1"
         ? provider()
         : Response.json({ error: "voice_input_not_allowed" }, { status: 403 }),
     );
-    const caller = () => ({ origin: "https://cloud.example", bearer: async () => bearer });
+    const caller = () => ({
+      origin: "https://cloud.example",
+      credentialId,
+      bearer: async () => `bearer-for-${credentialId}`,
+    });
     let signed = true;
     const source = createVoiceInputSource({
       romeCloud: () => (signed ? caller() : null),
@@ -178,9 +186,40 @@ describe("voice input source", () => {
     signed = false;
     await source.info();
     signed = true;
-    bearer = "instance-2";
+    credentialId = "credential-2";
 
     expect(await source.info()).toEqual({ available: false, place: null });
     expect(cloud.calls()).toEqual(["/v1/transcription/provider", "/v1/transcription/provider"]);
+  });
+
+  it("keeps Rome Cloud's answer while the same credential's bearer rotates", async () => {
+    const cloud = answering(() => provider());
+    let minted = 0;
+    const source = createVoiceInputSource({
+      romeCloud: () => ({
+        origin: "https://cloud.example",
+        credentialId: "credential-1",
+        bearer: async () => `signer-token-${++minted}`,
+      }),
+      fetch: cloud.fetch,
+    });
+    await source.info();
+    await source.info();
+    expect(cloud.calls()).toEqual(["/v1/transcription/provider"]);
+  });
+
+  it("calls a missing bearer a passing outage, not a lost sign-in", async () => {
+    const cloud = answering(() => provider());
+    const source = createVoiceInputSource({
+      romeCloud: () => ({ ...signedIn(), bearer: async () => null }),
+      fetch: cloud.fetch,
+    });
+    expect(await source.info()).toEqual({
+      available: true,
+      place: null,
+      placeUnknown: "rome-cloud-unreachable",
+    });
+    expect(await source.open()).toEqual({ ok: false, reason: "service-unavailable" });
+    expect(cloud.calls()).toEqual([]);
   });
 });
