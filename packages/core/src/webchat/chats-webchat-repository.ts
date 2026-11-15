@@ -692,6 +692,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
       : undefined;
   }
 
+  override async failQueuedUserInput(sessionId: string, inputId: string): Promise<void> {
+    const line = this.lineIn(sessionId, inputId);
+    if (line === undefined) return super.failQueuedUserInput(sessionId, inputId);
+    if (line !== null) this.links.failQueuedPrompt(sessionId, line);
+  }
+
   override async updateUserInput(sessionId: string, status: InputStatusEvent): Promise<void> {
     const line = this.lineIn(sessionId, status.inputId);
     if (line === undefined) return super.updateUserInput(sessionId, status);

@@ -40,7 +40,7 @@ import {
   forkSessionTools,
 } from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
-import { type TurnFacts, type PushLevel, type TurnActor } from "../domain/turn-facts.js";
+import { type TurnFacts, type PushLevel, type TurnActor, sameActor } from "../domain/turn-facts.js";
 import { type Audience, turnAudience } from "../domain/turn-audience.js";
 import {
   NO_ROME_TOOLS,
@@ -825,6 +825,8 @@ interface TurnExecRefs {
   bindTurnCtx: <T>(fn: () => T) => T;
   /** Who the running turn acts for; its subagents' turns act for the same person. */
   getActor: () => TurnActor | undefined;
+  isLive?: () => boolean;
+  captureTaskInputLiveness?: () => () => boolean;
   /** Who can read the running turn; its subagents' turns are never more private. */
   getAudience: () => Audience;
 }
@@ -1435,6 +1437,8 @@ async function openSession(
     attachSubagentCall: (toolUseId, call) => impl.addSubagentCall(toolUseId, call),
     bindTurnCtx: inCurrentTurnCtx,
     getActor: () => impl.currentTurnActorRef,
+    isLive: () => impl.currentTurnLiveRef,
+    captureTaskInputLiveness: () => impl.captureTaskInputLiveness(),
     getAudience: () => impl.currentTurnAudienceRef,
   };
 
@@ -1463,6 +1467,8 @@ async function openSession(
     sharedContext: refs.getSharedContext,
     pushLevel,
     actor: refs.getActor,
+    live: () => refs.isLive?.() === true,
+    captureTaskInputLiveness: refs.captureTaskInputLiveness,
     audience: refs.getAudience,
     reportedTask,
     inTurn: refs.bindTurnCtx,
@@ -2051,6 +2057,7 @@ interface TurnSink {
   /** The guardian stopped the turn, not a `now` input superseding it. Its
    *  read inputs are then done with: the next turn hands none of them on. */
   stoppedByGuardian: boolean;
+  taskInputContinues: boolean;
   subagentCallsByToolUse: Map<string, { key: SubagentCallKey; call: SubagentCall }>;
   pendingSubagentToolUses: Map<string, Extract<AgentEvent, { type: "tool_use" }>>;
   emittedSubagentStarts: Set<string>;
@@ -2211,6 +2218,8 @@ class AgentSessionImpl implements AgentSession {
   private sharedContext?: Record<string, unknown>;
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
+  private taskInputEpoch = 0;
+  private taskInputScope?: Pick<TurnSink, "actor" | "audience" | "threadContext">;
   // Spans for the current turn. Both are opened in runOneTurn and closed in
   // runEventsLoop when the terminal `result`/`error` message lands, so the
   // trace contract is complete by the time the sink closes (i.e. before
@@ -2283,7 +2292,10 @@ class AgentSessionImpl implements AgentSession {
         error: error instanceof Error ? error.message : String(error),
       }),
     (turnId) => {
-      if (this.currentSink?.turnId === turnId) this.currentSink.actor = undefined;
+      if (this.currentSink?.turnId === turnId) {
+        this.taskInputEpoch++;
+        this.currentSink.actor = undefined;
+      }
     },
   );
   private keepAlive: boolean;
@@ -2385,6 +2397,50 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnActorRef(): TurnActor | undefined {
     return this.currentSink?.actor;
+  }
+
+  get currentTurnLiveRef(): boolean {
+    return (
+      !!this.currentSink &&
+      !this.currentSink.done &&
+      !this.currentSink.lifecycleInterrupted &&
+      !this.closing
+    );
+  }
+
+  captureTaskInputLiveness(): () => boolean {
+    const sink = this.currentSink;
+    const epoch = this.taskInputEpoch;
+    if (!sink || !this.currentTurnLiveRef) return () => false;
+    return () =>
+      this.taskInputEpoch === epoch &&
+      !this.closing &&
+      !sink.stoppedByGuardian &&
+      (sink.taskInputContinues || (!sink.done && !sink.lifecycleInterrupted));
+  }
+
+  private observeTaskInputScope(options?: SendTurnOptions): boolean {
+    const thread = options?.threadContext ?? this.threadContext;
+    const audience = turnAudience(thread, {
+      actor: options?.actor,
+      parent: options?.parentAudience,
+      place: this.placeAudience,
+    });
+    const previous = this.taskInputScope;
+    const same =
+      !!previous &&
+      sameActor(previous.actor, options?.actor) &&
+      previous.audience === audience &&
+      previous.threadContext?.channel === thread?.channel &&
+      previous.threadContext?.threadId === thread?.threadId &&
+      previous.threadContext?.threadType === thread?.threadType;
+    if (!same) this.taskInputEpoch++;
+    this.taskInputScope = {
+      actor: options?.actor ? { ...options.actor } : undefined,
+      audience,
+      threadContext: thread ? { ...thread } : undefined,
+    };
+    return same;
   }
 
   /** The running turn's audience; between turns, the session's place read alone. */
@@ -3521,6 +3577,17 @@ class AgentSessionImpl implements AgentSession {
   submit(input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt {
     if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
     const { priority = "next", onInputStatus, ...turnOptions } = options;
+    // Observe before the queue synchronously stops a superseded turn. A changed
+    // scope revokes old callbacks even if another input restores it before delivery.
+    const sameScope = this.observeTaskInputScope(turnOptions);
+    if (
+      priority === "now" &&
+      sameScope &&
+      this.currentSink &&
+      !this.currentSink.stoppedByGuardian
+    ) {
+      this.currentSink.taskInputContinues = true;
+    }
     if (!isQueueInput(priority)) {
       const landed = afterLanding(this.turnMutex.isLocked());
       const handle = this.startTurn(input, turnOptions);
@@ -3564,6 +3631,7 @@ class AgentSessionImpl implements AgentSession {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
     }
+    this.observeTaskInputScope(options);
     // turnId is allocated here, at the bottom of the agent
     // stack, and threaded back to every consumer (route, tracing, IPC stream
     // channel name). No upper layer ever invents one — eliminates duplicate
@@ -3571,6 +3639,7 @@ class AgentSessionImpl implements AgentSession {
     const turnId = uuidv7();
     const { turn, writer } = createTurn(turnId, async (reason) => {
       if (sink.done) return;
+      if (reason !== SUPERSEDED_INTERRUPT_REASON) this.taskInputEpoch++;
       sink.lifecycleInterrupted = true;
       if (this.currentSink === sink) await this.stopRunning(reason);
     });
@@ -3603,6 +3672,7 @@ class AgentSessionImpl implements AgentSession {
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
       stoppedByGuardian: false,
+      taskInputContinues: false,
       subagentCallsByToolUse: new Map(),
       pendingSubagentToolUses: new Map(),
       emittedSubagentStarts: new Set(),
@@ -3717,6 +3787,11 @@ class AgentSessionImpl implements AgentSession {
       span.end();
       return;
     }
+    this.observeTaskInputScope({
+      actor: sink.actor,
+      threadContext: sink.threadContext,
+      parentAudience: sink.audience,
+    });
     this.currentSink = sink;
     this.currentTurnId = turnId;
     this.status = "running";
@@ -4128,6 +4203,8 @@ class AgentSessionImpl implements AgentSession {
   }
 
   async stop(reason?: string): Promise<void> {
+    // Stop also revokes a pending handoff between two superseded turns.
+    this.taskInputEpoch++;
     await this.stopRunning(reason);
   }
 
@@ -4136,7 +4213,10 @@ class AgentSessionImpl implements AgentSession {
     const sink = this.currentSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;
-    if (reason !== SUPERSEDED_INTERRUPT_REASON) sink.stoppedByGuardian = true;
+    if (reason !== SUPERSEDED_INTERRUPT_REASON) {
+      this.taskInputEpoch++;
+      sink.stoppedByGuardian = true;
+    }
     // Cancel the provider before awaiting child cleanup. A slow child must
     // not keep its parent generating after the user presses Stop.
     await Promise.all([
@@ -4160,6 +4240,7 @@ class AgentSessionImpl implements AgentSession {
   async close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void> {
     if (this.closingPromise) return await this.closingPromise;
     if (this.status === "closed") return;
+    this.taskInputEpoch++;
     this.inputs.close();
     this.closingPromise = (async () => {
       this.log.info("agent session closing", {

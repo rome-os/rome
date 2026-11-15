@@ -2110,6 +2110,21 @@ export class WebChatRepository {
       .get();
   }
 
+  /** Only a queued input may fail before admission. Never changes a submitted or consumed input. */
+  async failQueuedUserInput(sessionId: string, inputId: string): Promise<void> {
+    await this.db
+      .update(romeAgentMessages)
+      .set({ inputState: "failed" })
+      .where(
+        and(
+          eq(romeAgentMessages.id, inputId),
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "user"),
+          eq(romeAgentMessages.inputState, "queued"),
+        ),
+      );
+  }
+
   async updateUserInput(
     sessionId: string,
     status: import("@rome-os/app-runtime").InputStatusEvent,

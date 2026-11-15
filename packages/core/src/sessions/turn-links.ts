@@ -142,6 +142,15 @@ export class TurnLinks {
     `);
   }
 
+  /** Fails only a queued prompt, preserving any later dispatch or consumption state. */
+  failQueuedPrompt(sessionId: string, messageId: number): void {
+    this.db.run(sql`
+      UPDATE agent_turn_messages SET input_state = 'failed'
+      WHERE session_id = ${sessionId} AND message_id = ${messageId}
+        AND role = 'prompt' AND input_state = 'queued'
+    `);
+  }
+
   /** Every queued or running prompt's input, across sessions, marked as
    *  unknown: a stopped process can no longer say how it stands. */
   forgetInputsInFlight(): void {

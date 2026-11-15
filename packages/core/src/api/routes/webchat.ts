@@ -103,6 +103,15 @@ import {
 } from "../../access/session-actor.js";
 import type { DashboardInbox } from "../../webchat/send.js";
 import {
+  admitTaskInput,
+  withoutTaskInputActor,
+  assertTaskInputCurrent,
+  claimTaskInputActor,
+  taskInputActor,
+  refreshTaskInputActor,
+  type TaskInputClaim,
+} from "../../webchat/task-input-actor.js";
+import {
   resolveChatSenders,
   resolveAutomatedSender,
   automatedMessageNotice,
@@ -3968,12 +3977,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return await c.req.json<SendBody>().catch(() => ({}) as SendBody);
   };
 
+  const taskSourceChat = async (target: string): Promise<string | null> => {
+    const tasks = deps.concierge?.deps.tasks.repo;
+    const row = await tasks?.findBySession(target);
+    return row ? ((await tasks?.getWithChat(row.id))?.conciergeChat.id ?? null) : null;
+  };
+
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
-    said: { saidBy?: Account; fromWidgetEvent?: boolean; askingDeviceId?: string } = {},
+    said: {
+      saidBy?: Account;
+      fromWidgetEvent?: boolean;
+      askingDeviceId?: string;
+      taskActor?: SessionActor;
+      taskInput?: TaskInputClaim;
+    } = {},
   ): Promise<RouteAnswer> => {
-    const actor = await currentSessionActor();
+    const actor = said.taskActor ?? (await currentSessionActor());
     const sourceId =
       actor?.kind === "guardian" &&
       actor.via === "loopback" &&
@@ -4475,6 +4496,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : null;
     const chatThread: ChatThreadPlacement | undefined =
       targetRoot && threadTask ? { in: targetRoot, settle: true } : undefined;
+    if (said.taskInput) assertTaskInputCurrent(said.taskInput);
     if (
       !(await deps.webchatRepo.recordUserInput(
         inputId,
@@ -5051,11 +5073,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return stream;
     };
 
+    const actingActor = said.taskActor ?? turnActor(actor, saidBy);
     const options = {
       ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
       // Who the turn acts for, captured now: its tool calls run as this
       // person however late the model's callback arrives.
-      ...(turnActor(actor, saidBy) ? { actor: turnActor(actor, saidBy) } : {}),
+      ...(actingActor ? { actor: actingActor } : {}),
+      ...(said.taskInput ? { parentAudience: said.taskInput.source.audience } : {}),
       links: turnLinks,
       priority: priority.data,
       threadContext,
@@ -5082,7 +5106,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       },
     };
     const input = { inputId, prompt: promptText, reasoningEffort };
-    const receipt = agentSess.submit(input, options);
+    // Opening a model session can outlive Stop or the handoff's deadline.
+    // Refuse the recorded input rather than replaying it as autonomous work.
+    if (said.taskInput) {
+      try {
+        await refreshTaskInputActor(said.taskInput, deps.webchatRepo, taskSourceChat);
+        assertTaskInputCurrent(said.taskInput);
+      } catch {
+        agentSess.release();
+        await deps.webchatRepo.updateUserInput(sessionId, {
+          type: "input_status",
+          inputId,
+          state: "failed",
+        });
+        return answer({ error: "Task input attribution is unavailable" }, 409);
+      }
+    }
+    const receipt = said.taskInput
+      ? admitTaskInput(said.taskInput, () => agentSess.submit(input, options))
+      : agentSess.submit(input, options);
     // The turn this input started gets its stream here, and so does one a
     // queued input starts later. A turn it was folded or steered into has one.
     const attached = receipt.turn.then((handle) => {
@@ -5356,12 +5398,31 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return { ok: false, error: `No agent ${as.id} to say it as` };
       }
       const inputId = randomUUID();
-      const sent = await handleChatSend(
-        chatId,
-        { inputId, text: body.text, skillName: body.skillName },
-        { saidBy: as },
+      const claim = claimTaskInputActor(chatId, body, as);
+      const taskActor = claim
+        ? await taskInputActor(claim, deps.webchatRepo, taskSourceChat)
+        : undefined;
+      if (claim)
+        log.info("task input attributed", {
+          sourceChatId: claim.source.chatId,
+          sourceTurnId: claim.source.turnId,
+          chatId,
+          inputId,
+          actorKind: taskActor?.kind,
+        });
+      const sent = await withoutTaskInputActor(() =>
+        handleChatSend(
+          chatId,
+          { inputId, text: body.text, skillName: body.skillName },
+          { saidBy: as, taskActor, taskInput: claim },
+        ),
       );
       if (sent.status >= 400) {
+        // A refused attributed input never reached submit, even if recorded.
+        if (claim) {
+          await deps.webchatRepo.failQueuedUserInput(chatId, inputId);
+          return { ok: false, error: `${routeError(sent)}; task input was not admitted` };
+        }
         // Once the input is recorded it is said, even when the agent could not
         // be woken on it: answering failed would invite a second message.
         if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {

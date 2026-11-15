@@ -44,6 +44,8 @@ The tools a session carries beyond the ones every session of its agent has, such
 
 - A fork's session tools are its source's: the model is offered the same tools in the fork as in the source. The fork runs the ones it can run on its own, and refuses the others as unavailable in a forked turn. Until a session's tools are stored, the open session carries the tools its source last opened with. The rule is `forkSessionTools` in [`packages/core/src/agent/domain/session-tools.ts`](../../packages/core/src/agent/domain/session-tools.ts).
 
+- Concierge's session tools may hand an attributed input to a private task through the host's turn-bound input path. The [actor contract](../concepts/actions.md#actor) defines its scope and cancellation. This path grants neither an action outside the receiving agent's catalog nor an approval.
+
 ## Turn middleware
 
 What an installed app puts around producing a turn's reply. A middleware may rewrite the turn's prompt, answer the turn itself, or let the model answer. The model's reply is innermost and runs only when every middleware continues. Apps declare it as a `turn-middleware` hook, and an agent whose turns always come from one is code-backed.
