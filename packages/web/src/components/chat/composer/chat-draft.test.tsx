@@ -6,7 +6,12 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { deleteSession } from "@/lib/chat-api";
-import { clearAllChatDrafts, loadChatDraft, saveChatDraft } from "@/lib/chat-draft-storage";
+import {
+  clearAllChatDrafts,
+  loadChatDraft,
+  restoreUnsentChatDraft,
+  saveChatDraft,
+} from "@/lib/chat-draft-storage";
 import { currentAuthEpoch, invalidateNewChatDrafts } from "@/lib/new-chat-draft-storage";
 import { ChatComposer, type ChatComposerHandle } from "../ChatComposer";
 import { ConciergeComposer } from "./ConciergeComposer";
@@ -167,6 +172,15 @@ describe.each(["chat", "concierge"] as const)("the %s message field's draft", (k
 });
 
 describe("the stored chat draft", () => {
+  it("takes back a failed send's text beside a saved reason", () => {
+    const stop = { reason: "left-chat" } as const;
+    saveChatDraft("chat-a", { text: "", stop }, currentAuthEpoch());
+
+    restoreUnsentChatDraft("chat-a", "send me", currentAuthEpoch());
+
+    expect(loadChatDraft("chat-a")).toEqual({ text: "send me", stop });
+  });
+
   it("is not cleared by a tab still open from before a logout", () => {
     const before = currentAuthEpoch();
     invalidateNewChatDrafts();
