@@ -6344,6 +6344,77 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(await statusOf(s, "g1")).toBe("failed");
     });
 
+    it("keeps a message the turn reacted to free of 👀 when it is handed on with newer work", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "thanks", "turn-a");
+      await taken(s, "thanks", "turn-a");
+      s.inTurn("turn-a");
+      await s.tool("react", { emoji: "❤️" });
+      // "Also do X" cuts the turn short; both go on to the next one.
+      s.chats.activeTurns = () => ["turn-b"];
+      await conciergeEnds(s, "interrupted", "turn-a");
+      guardianSays(s, "x", "turn-b");
+      await taken(s, "thanks", "turn-b");
+      await taken(s, "x", "turn-b");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      expect([await statusOf(s, "thanks"), await statusOf(s, "x")]).toEqual([null, "working"]);
+    });
+
+    it("shows no ⚠️ on a message the turn reacted to before it failed", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "a");
+      guardianSays(s, "b");
+      await taken(s, "a");
+      await taken(s, "b");
+      await s.tool("react", { emoji: "👍", message_id: "a" });
+      await conciergeEnds(s, "error");
+      await s.settle();
+      expect([await statusOf(s, "a"), await statusOf(s, "b")]).toEqual([null, "failed"]);
+    });
+
+    it("continues a turn as working only for the messages its failure left", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "a");
+      guardianSays(s, "b");
+      await taken(s, "a");
+      await taken(s, "b");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      await s.tool("say", { text: "Sunny", answers: "a" });
+      await conciergeEnds(s, "error");
+      await s.settle();
+      expect([await statusOf(s, "a"), await statusOf(s, "b")]).toEqual([null, "failed"]);
+      await s.taskRepo.reopenTurn(CONCIERGE_CHAT, "concierge-turn-1");
+      expect([await statusOf(s, "a"), await statusOf(s, "b")]).toEqual([null, "working"]);
+    });
+
+    it("keeps no ⚠️ on a message whose task got done once the task follows a newer message", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const { chatId } = await started(s);
+      await conciergeEnds(s, "error");
+      await s.settle();
+      await finishTask(s, chatId);
+      s.inTurn("follow-up");
+      guardianSays(s, "g2", "follow-up");
+      await s.tool("chat_send", { chatId, text: "And tomorrow?" });
+      expect([await statusOf(s, "g1"), await statusOf(s, "g2")]).toEqual([null, "working"]);
+    });
+
+    it("moves a task back to an older message made for it again", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g0");
+      const { taskId } = await started(s);
+      const task = { id: taskId };
+      const link = (key: string) =>
+        s.taskRepo.linkMessage(taskId, { chatId: CONCIERGE_CHAT, messageKey: key });
+      await link("g1");
+      await link("g2");
+      await link("g1");
+      const marks = await s.taskRepo.messageMarks(CONCIERGE_CHAT, ["g1", "g2"]);
+      expect([marks.get("g1")?.taskIds, marks.get("g2")?.taskIds]).toEqual([[task.id], []]);
+    });
+
     it("never pushes a status to the phone", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");

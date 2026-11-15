@@ -56,10 +56,12 @@ describe("the concierge message status migration", () => {
     expect(
       sqlite
         .prepare(
-          "SELECT message_key, answered_at, working_at, turn_failed FROM concierge_message_turns",
+          "SELECT message_key, answered_at, working_at, turn_failed, reacted FROM concierge_message_turns",
         )
         .all(),
-    ).toEqual([{ message_key: "m1", answered_at: 2, working_at: null, turn_failed: 0 }]);
+    ).toEqual([
+      { message_key: "m1", answered_at: 2, working_at: null, turn_failed: 0, reacted: 0 },
+    ]);
     // A task links to the message it was made for, and goes with its task.
     sqlite.pragma("foreign_keys = ON");
     sqlite
@@ -67,6 +69,7 @@ describe("the concierge message status migration", () => {
         "INSERT INTO concierge_message_tasks (task_id, chat_id, message_key) VALUES ('task', 'concierge', 'm1')",
       )
       .run();
+    expect(sqlite.prepare("SELECT seq FROM concierge_message_tasks").get()).toEqual({ seq: 0 });
     sqlite.prepare("DELETE FROM concierge_tasks WHERE id = 'task'").run();
     expect(sqlite.prepare("SELECT * FROM concierge_message_tasks").all()).toEqual([]);
   });

@@ -434,6 +434,7 @@ export class ConciergeTasks {
         answered: mark.answered,
         working: mark.working,
         turnFailed: mark.turnFailed,
+        handedToNewer: mark.earlierTaskIds.length > 0,
         tasks: mark.taskIds.flatMap((id) => {
           const of = status.get(id);
           const row = rows.find((candidate) => candidate.id === id);
@@ -479,7 +480,11 @@ export class ConciergeTasks {
     // Any change of a task, its row or a fact its status reads, reads again
     // the messages it was made for.
     const offTask = this.repo.onChange(({ row }) => {
-      void this.repo.messagesOfTask(row.id).then(check);
+      void this.repo.messagesOfTask(row.id).then(check, (error: unknown) =>
+        log.warn("failed to read a task's messages", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     });
     return () => {
       offMessage();

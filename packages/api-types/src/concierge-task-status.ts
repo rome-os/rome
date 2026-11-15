@@ -158,6 +158,11 @@ export interface MessageStatusFacts {
   /** Whether that turn failed, by an error or a crash, before it answered. A stop or a newer input is no failure. */
   turnFailed: boolean;
   /**
+   * Whether a task made for it follows a newer message now: the work went on
+   * from it, so its turn's failure no longer stands.
+   */
+  handedToNewer?: boolean;
+  /**
    * The status of each task made for the message, and whether Rome gave up
    * telling the Concierge its result, so its owner was never told.
    */
@@ -184,7 +189,9 @@ export function messageStatus(facts: MessageStatusFacts): ConciergeMessageStatus
   if (facts.tasks.some((task) => task.status !== "ended")) return null;
   // A task made for the message that got done answers it, though its turn failed.
   const failed =
-    (facts.turnFailed && !facts.tasks.some((task) => task.endReason === "done")) ||
+    (facts.turnFailed &&
+      facts.handedToNewer !== true &&
+      !facts.tasks.some((task) => task.endReason === "done")) ||
     facts.tasks.some(
       (task) =>
         task.endReason === "failed" ||

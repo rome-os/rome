@@ -21,6 +21,7 @@ import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
 import { MAIN_CHAT_NAME, mainChatIdOf } from "../../concierge/main-chat.js";
 import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
+import { createLogger } from "../../logger.js";
 import {
   conciergeMessageTasks,
   conciergeMessageTurns,
@@ -28,6 +29,7 @@ import {
   romeSessions,
 } from "../schema.js";
 
+const log = createLogger("concierge-tasks");
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
 type ConciergeTaskState = ConciergeTaskRow["state"];
 
@@ -90,8 +92,10 @@ export interface MessageMarkRow {
   working: boolean;
   /** Whether that turn failed, by an error or a crash, before it answered it. */
   turnFailed: boolean;
-  /** The tasks made for it. */
+  /** The tasks that follow it: the ones made for it last. */
   taskIds: string[];
+  /** The tasks made for it that follow a newer message now. */
+  earlierTaskIds: string[];
 }
 
 /** A task's chat thread in Concierge chat `chatId`, rooted at `root`, ended: its task left the chat. */
@@ -721,8 +725,10 @@ export class ConciergeTasksRepository {
           takenAt: now,
           answeredAt: null,
           turnFailed: false,
-          // The right side reads the row as it was.
+          // The right side reads the row as it was: a message handed on keeps
+          // what its turn showed and whether it reacted to it.
           workingAt: sql`CASE WHEN ${conciergeMessageTurns.answeredAt} IS NULL THEN ${conciergeMessageTurns.workingAt} END`,
+          reacted: sql`CASE WHEN ${conciergeMessageTurns.answeredAt} IS NULL THEN ${conciergeMessageTurns.reacted} ELSE 0 END`,
         },
       });
     this.messageChanged([target]);
@@ -730,16 +736,15 @@ export class ConciergeTasksRepository {
 
   /**
    * The open messages of Concierge chat `chatId` show working from now: its
-   * turn called a working tool, or ran 5 seconds without answering them.
-   * `messageKey` limits it to that one; `except` leaves those out. Answers
-   * the ones that changed.
+   * turn called a working tool, or ran 5 seconds without answering them. A
+   * message the turn reacted to is left out. `messageKey` limits it to that
+   * one. Answers the ones that changed.
    */
   async markWorking(
     chatId: string,
-    options: { messageKey?: string; except?: readonly string[] } = {},
+    options: { messageKey?: string } = {},
     now = new Date(),
   ): Promise<MessageTarget[]> {
-    const except = options.except ?? [];
     const changed = await this.db
       .update(conciergeMessageTurns)
       .set({ workingAt: now })
@@ -748,10 +753,10 @@ export class ConciergeTasksRepository {
           eq(conciergeMessageTurns.chatId, chatId),
           isNull(conciergeMessageTurns.answeredAt),
           isNull(conciergeMessageTurns.workingAt),
+          eq(conciergeMessageTurns.reacted, false),
           options.messageKey !== undefined
             ? eq(conciergeMessageTurns.messageKey, options.messageKey)
             : undefined,
-          except.length > 0 ? notInArray(conciergeMessageTurns.messageKey, [...except]) : undefined,
         ),
       )
       .returning({
@@ -763,20 +768,19 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * Guardian message `messageKey` of chat `chatId` no longer shows its turn
-   * working, as when the Concierge only reacted to it. A task made for it
-   * still does.
+   * The open turn of guardian message `messageKey` of chat `chatId` reacted to
+   * it: that is how it handled it, so the turn shows it neither working nor,
+   * should it fail or be cut off, failed. A task made for it still shows.
    */
-  async clearWorking(chatId: string, messageKey: string): Promise<void> {
+  async markReacted(chatId: string, messageKey: string): Promise<void> {
     const changed = await this.db
       .update(conciergeMessageTurns)
-      .set({ workingAt: null })
+      .set({ reacted: true, workingAt: null })
       .where(
         and(
           eq(conciergeMessageTurns.chatId, chatId),
           eq(conciergeMessageTurns.messageKey, messageKey),
           isNull(conciergeMessageTurns.answeredAt),
-          isNotNull(conciergeMessageTurns.workingAt),
         ),
       )
       .returning({
@@ -818,7 +822,8 @@ export class ConciergeTasksRepository {
       // A turn its owner stopped answered nothing: the next turn is told so.
       .set({
         answeredAt: now,
-        turnFailed: options.failed === true,
+        // A message the turn reacted to was handled, so its failure is not the message's.
+        turnFailed: options.failed === true ? sql`NOT ${conciergeMessageTurns.reacted}` : false,
         ...(options.stopped ? { stoppedUntold: true } : {}),
       })
       .where(
@@ -883,11 +888,12 @@ export class ConciergeTasksRepository {
   async reopenTurn(chatId: string, turnId: string): Promise<number> {
     const changed = await this.db
       .update(conciergeMessageTurns)
-      // It runs again, so it works from now, whatever triggered it before.
+      // It runs again for the messages its failure left: they work from now.
+      // The ones it answered or reacted to before show nothing.
       .set({
         answeredAt: null,
         turnFailed: false,
-        workingAt: sql`COALESCE(${conciergeMessageTurns.workingAt}, ${Date.now()})`,
+        workingAt: sql`CASE WHEN ${conciergeMessageTurns.turnFailed} THEN COALESCE(${conciergeMessageTurns.workingAt}, ${Date.now()}) END`,
       })
       .where(
         and(eq(conciergeMessageTurns.chatId, chatId), eq(conciergeMessageTurns.turnId, turnId)),
@@ -904,9 +910,10 @@ export class ConciergeTasksRepository {
    * After a restart, before any turn runs: a stopped process ends no turn, so
    * every message still open is answered, except in `continuing`, the chats
    * whose interrupted turn startup continues, whose turn answers them when it
-   * ends, so no message stays open past the process that took it, and none
-   * shows working. The process died under the turn: it failed, as a crash
-   * does. Answers how many changed.
+   * ends, and which show working from now, unless the turn reacted to them.
+   * No message stays open past the process that took it. The process died
+   * under the turn: it failed, as a crash does, for every message it had not
+   * reacted to. Answers how many changed.
    */
   async answerInterrupted(continuing: ReadonlySet<string>, now = new Date()): Promise<number> {
     const open = await this.db
@@ -922,7 +929,9 @@ export class ConciergeTasksRepository {
     for (const row of going) {
       await this.db
         .update(conciergeMessageTurns)
-        .set({ workingAt: sql`COALESCE(${conciergeMessageTurns.workingAt}, ${now.getTime()})` })
+        .set({
+          workingAt: sql`CASE WHEN ${conciergeMessageTurns.reacted} THEN ${conciergeMessageTurns.workingAt} ELSE COALESCE(${conciergeMessageTurns.workingAt}, ${now.getTime()}) END`,
+        })
         .where(
           and(
             eq(conciergeMessageTurns.chatId, row.chatId),
@@ -934,7 +943,7 @@ export class ConciergeTasksRepository {
     for (const row of ending) {
       await this.db
         .update(conciergeMessageTurns)
-        .set({ answeredAt: now, turnFailed: true })
+        .set({ answeredAt: now, turnFailed: sql`NOT ${conciergeMessageTurns.reacted}` })
         .where(
           and(
             eq(conciergeMessageTurns.chatId, row.chatId),
@@ -948,14 +957,23 @@ export class ConciergeTasksRepository {
 
   /**
    * Task `taskId` was made for guardian message `target`: started for it, or
-   * given its words. The task's newest message follows it from now on, so the
-   * ones before it settle.
+   * given its words. The message it was made for last follows it from now
+   * on, so the ones before settle; making it for an older one again moves it
+   * back there.
    */
   async linkMessage(taskId: string, target: MessageTarget): Promise<void> {
+    const next = sql`(SELECT COALESCE(MAX(${conciergeMessageTasks.seq}), 0) + 1 FROM ${conciergeMessageTasks})`;
     await this.db
       .insert(conciergeMessageTasks)
-      .values({ taskId, ...target })
-      .onConflictDoNothing();
+      .values({ taskId, ...target, seq: next })
+      .onConflictDoUpdate({
+        target: [
+          conciergeMessageTasks.taskId,
+          conciergeMessageTasks.chatId,
+          conciergeMessageTasks.messageKey,
+        ],
+        set: { seq: next },
+      });
     this.messageChanged([target]);
     // The messages before it settle; told after, so the send is not held up.
     void this.messagesOfTask(taskId)
@@ -964,7 +982,11 @@ export class ConciergeTasksRepository {
           all.filter((one) => one.messageKey !== target.messageKey || one.chatId !== target.chatId),
         ),
       )
-      .catch(() => {});
+      .catch((error: unknown) =>
+        log.warn("failed to tell the messages a task was made for before", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
   }
 
   /** Takes back {@link linkMessage}, as when the task never heard the message. */
@@ -1012,6 +1034,7 @@ export class ConciergeTasksRepository {
         working: false,
         turnFailed: false,
         taskIds: [],
+        earlierTaskIds: [],
       };
       out.set(key, found);
       return found;
@@ -1039,7 +1062,7 @@ export class ConciergeTasksRepository {
       .select({
         messageKey: conciergeMessageTasks.messageKey,
         taskId: conciergeMessageTasks.taskId,
-        at: sql<number>`${conciergeMessageTasks}.rowid`,
+        at: conciergeMessageTasks.seq,
       })
       .from(conciergeMessageTasks)
       .where(
@@ -1057,7 +1080,7 @@ export class ConciergeTasksRepository {
             await this.db
               .select({
                 taskId: conciergeMessageTasks.taskId,
-                at: sql<number>`max(${conciergeMessageTasks}.rowid)`,
+                at: sql<number>`max(${conciergeMessageTasks.seq})`,
               })
               .from(conciergeMessageTasks)
               .where(
@@ -1067,7 +1090,9 @@ export class ConciergeTasksRepository {
           ).map((row) => [row.taskId, row.at]),
     );
     for (const row of links) {
-      if (newest.get(row.taskId) === row.at) of(row.messageKey).taskIds.push(row.taskId);
+      const mark = of(row.messageKey);
+      if (newest.get(row.taskId) === row.at) mark.taskIds.push(row.taskId);
+      else mark.earlierTaskIds.push(row.taskId);
     }
     return out;
   }

@@ -868,6 +868,11 @@ export const conciergeMessageTurns = sqliteTable(
     workingAt: integer("working_at", { mode: "timestamp_ms" }),
     /** Set when the turn that took it failed, by an error or a crash, before it answered it. */
     turnFailed: integer("turn_failed", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Set when its turn reacted to it: the turn handled it so, and shows it
+     * neither working nor failed. It is the turn's, so it goes with it.
+     */
+    reacted: integer("reacted", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.chatId, table.messageKey] }),
@@ -887,6 +892,8 @@ export const conciergeMessageTasks = sqliteTable(
       .references(() => conciergeTasks.id, { onDelete: "cascade" }),
     chatId: text("chat_id").notNull(),
     messageKey: text("message_key").notNull(),
+    /** The order it was made in, raised each time it is made again: a task follows its highest. */
+    seq: integer("seq").notNull().default(0),
   },
   (table) => [
     primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "515649a6-322f-4bdc-85e3-d8a3f7ab6169",
+  "id": "283b1267-ec7b-49b8-a56e-a74b9676d277",
   "prevId": "906f9929-0957-4c57-bd26-badf0e2fb59e",
   "tables": {
     "account_profiles": {
@@ -1275,6 +1275,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         }
       },
       "indexes": {
@@ -1370,6 +1378,14 @@
         },
         "turn_failed": {
           "name": "turn_failed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "reacted": {
+          "name": "reacted",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

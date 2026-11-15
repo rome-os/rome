@@ -3,7 +3,7 @@
 // without an answer. A turn that only answers, with `react` or a short `say`,
 // and calls no working tool, never shows it. The stored facts and the status
 // derived from them live in ConciergeTasksRepository and ConciergeTasks; this
-// keeps only the timers and what the running turn reacted to.
+// keeps only the timers and which chats run a turn that took a message.
 
 import { bareTool } from "../lib/tool-name.js";
 import type { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
@@ -33,7 +33,7 @@ export function isWorkingTool(tool: string): boolean {
   return !ANSWER_TOOLS.has(bareTool(tool));
 }
 
-type StatusRepo = Pick<ConciergeTasksRepository, "markWorking" | "clearWorking" | "anyWorking">;
+type StatusRepo = Pick<ConciergeTasksRepository, "markWorking" | "markReacted" | "anyWorking">;
 
 /**
  * The running turns' working triggers, one tracker per process. A message
@@ -44,8 +44,6 @@ type StatusRepo = Pick<ConciergeTasksRepository, "markWorking" | "clearWorking" 
 export class MessageStatusTracker {
   /** A 5-second timer per open message, by chat and key. */
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** The open messages each chat's running turn reacted to, which it handled so. */
-  private readonly reacted = new Map<string, Set<string>>();
   /** The chats with a message a running turn took. */
   private readonly open = new Set<string>();
 
@@ -62,7 +60,6 @@ export class MessageStatusTracker {
   /** A turn of Concierge chat `chatId` took guardian message `messageKey`. */
   taken(chatId: string, messageKey: string): void {
     this.open.add(chatId);
-    this.reacted.get(chatId)?.delete(messageKey);
     const key = timerKey(chatId, messageKey);
     const before = this.timers.get(key);
     if (before) clearTimeout(before);
@@ -80,7 +77,7 @@ export class MessageStatusTracker {
     await this.guard(
       (async () => {
         if (await this.repo.anyWorking(chatId)) return;
-        await this.repo.markWorking(chatId, { except: [...(this.reacted.get(chatId) ?? [])] });
+        await this.repo.markWorking(chatId);
       })(),
     );
   }
@@ -91,19 +88,15 @@ export class MessageStatusTracker {
    * more. A task made for it still does.
    */
   async reactedTo(chatId: string, messageKey: string): Promise<void> {
-    const reacted = this.reacted.get(chatId) ?? new Set<string>();
-    reacted.add(messageKey);
-    this.reacted.set(chatId, reacted);
     const timer = this.timers.get(timerKey(chatId, messageKey));
     if (timer) clearTimeout(timer);
     this.timers.delete(timerKey(chatId, messageKey));
-    await this.guard(this.repo.clearWorking(chatId, messageKey));
+    await this.guard(this.repo.markReacted(chatId, messageKey));
   }
 
   /** Chat `chatId` runs no turn that carries its messages on: its turn's end settled them. */
   turnSettled(chatId: string): void {
     this.open.delete(chatId);
-    this.reacted.delete(chatId);
     const prefix = timerKey(chatId, "");
     for (const [key, timer] of this.timers) {
       if (!key.startsWith(prefix)) continue;
@@ -119,7 +112,6 @@ export class MessageStatusTracker {
   }
 
   private async ranLong(chatId: string, messageKey: string): Promise<void> {
-    if (this.reacted.get(chatId)?.has(messageKey)) return;
     if (await this.repo.anyWorking(chatId)) return;
     await this.repo.markWorking(chatId, { messageKey });
   }

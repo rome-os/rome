@@ -109,6 +109,17 @@ describe("messages after a restart", () => {
     expect(await status("topic", "topic-input")).toBe("failed");
   });
 
+  it("leaves a message the cut-off turn reacted to with no status", async () => {
+    await running("concierge");
+    await tasks.takeMessage("concierge-turn", {
+      chatId: "concierge",
+      messageKey: "concierge-input",
+    });
+    await tasks.markReacted("concierge", "concierge-input");
+    await boot(Date.now() + 2 * DAY);
+    expect(await status("concierge", "concierge-input")).toBeNull();
+  });
+
   it("shows a turn startup continues working", async () => {
     await running("concierge");
     await tasks.takeMessage("concierge-turn", {
