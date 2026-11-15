@@ -5,11 +5,11 @@
   "fields": {
     "chat": "concierge",
     "topic": "01a1dd1d-8035-71e2-bbf4-961f694a91cc",
-    "task": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+    "task": "01a1dda9-d904-7050-8334-8eaf24214832",
     "thread": {
       "sessionId": "concierge",
-      "root": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-      "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288"
+      "root": "db3c4287-7329-4241-920e-e1dc6de86da0",
+      "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0"
     }
   },
   "entries": [
@@ -215,8 +215,8 @@
         },
         "backfill.questionCardsDescribed": true,
         "usageReporting.actionRunCursor": {
-          "finishedAt": "2026-11-15T02:00:00.000Z",
-          "id": "7a865b27-1627-43d7-bb29-83ef29e72619",
+          "finishedAt": "2026-11-15T02:51:02.000Z",
+          "id": "0a1cb714-009e-47c3-88cd-cfe66d43ee5a",
           "credential": "016fce9969e6cee2d278b3f6be64d7705184fa5c505032edf7d5a97e8d1039d4"
         },
         "instanceKeyId": "Rw6MQJ7e2cZ2-NPkUJZAT6YvtYF9N9rH4JRZ16DWssw",
@@ -235,16 +235,21 @@
             "cli": "opencli",
             "status": "connected",
             "version": "1.0.27",
-            "lastSeenAt": "2026-11-15T02:48:05.332Z"
+            "lastSeenAt": "2026-11-15T05:18:08.331Z"
           }
         ],
         "guardianLanguage": "en",
         "guardianTimezone": "Europe/Berlin",
+        "coding.taglineBackfill": {
+          "version": 1,
+          "startedAt": "2026-11-15T02:51:02.192Z",
+          "finishedAt": "2026-11-15T02:51:02.196Z"
+        },
         "aiTools.anthropicCompatibleCredentials": {
           "provider": "custom",
           "providerName": "Custom",
           "hasApiKey": true,
-          "updatedAt": "2026-11-15T02:50:59.843Z"
+          "updatedAt": "2026-11-15T05:24:16.912Z"
         }
       }
     },
@@ -271,6 +276,15 @@
             "id": "concierge",
             "name": "Main chat",
             "main": true,
+            "unread": 0,
+            "activity": {
+              "kind": "idle"
+            }
+          },
+          {
+            "id": "01a1dd1d-8035-71e2-bbf4-961f694a91cc",
+            "name": "",
+            "main": false,
             "unread": 0,
             "activity": {
               "kind": "idle"
@@ -1572,6 +1586,28 @@
       "contentType": "application/json",
       "body": [
         {
+          "id": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+          "name": "Stand-in task",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": null,
+          "parentSessionId": null,
+          "triggerKind": "concierge",
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-15T05:23:54.000Z",
+          "activityAt": "2026-11-15T05:23:55.000Z",
+          "lastSeenActivityAt": "2026-11-15T05:23:54.000Z",
+          "unread": true,
+          "messageCount": 3,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        },
+        {
           "id": "concierge",
           "name": "Main chat",
           "personaId": null,
@@ -1585,8 +1621,52 @@
           "archivedAt": null,
           "pinnedAt": null,
           "createdAt": "2026-11-14T19:48:46.000Z",
-          "activityAt": "2026-11-14T19:48:46.000Z",
-          "lastSeenActivityAt": "2026-11-14T19:48:46.000Z",
+          "activityAt": "2026-11-15T05:23:55.000Z",
+          "lastSeenActivityAt": "2026-11-15T05:23:54.000Z",
+          "unread": true,
+          "messageCount": 16,
+          "running": false,
+          "lastTurnFailed": true,
+          "awaitingGuardian": false
+        },
+        {
+          "id": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+          "name": "Stand-in task",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": null,
+          "parentSessionId": null,
+          "triggerKind": "concierge",
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-15T02:51:02.000Z",
+          "activityAt": "2026-11-15T02:51:02.000Z",
+          "lastSeenActivityAt": "2026-11-15T02:51:02.000Z",
+          "unread": false,
+          "messageCount": 3,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        },
+        {
+          "id": "01a1dd1d-8035-71e2-bbf4-961f694a91cc",
+          "name": "",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": "core:concierge",
+          "parentSessionId": null,
+          "triggerKind": null,
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-15T02:51:00.000Z",
+          "activityAt": "2026-11-15T02:51:00.000Z",
+          "lastSeenActivityAt": "2026-11-15T02:51:00.000Z",
           "unread": false,
           "messageCount": 0,
           "running": false,
@@ -2432,7 +2512,7 @@
             "provider": "custom",
             "providerName": "Custom",
             "hasApiKey": true,
-            "updatedAt": "2026-11-15T02:50:59.843Z"
+            "updatedAt": "2026-11-15T05:24:16.912Z"
           }
         },
         "codex": {
@@ -2440,7 +2520,7 @@
           "authMode": null,
           "quotaExhausted": false,
           "usage": {
-            "checkedAt": "2026-11-15T02:07:52.584Z",
+            "checkedAt": "2026-11-15T05:07:52.581Z",
             "source": "codex app-server",
             "error": "codex account authentication required to read rate limits"
           },
@@ -2462,7 +2542,7 @@
           "provider": "custom",
           "providerName": "Custom",
           "hasApiKey": true,
-          "updatedAt": "2026-11-15T02:50:59.843Z"
+          "updatedAt": "2026-11-15T05:24:16.912Z"
         }
       }
     },
@@ -2487,7 +2567,68 @@
       "status": 200,
       "contentType": "application/json",
       "body": {
-        "tasks": []
+        "tasks": [
+          {
+            "id": "5248e9d0-8a6b-424e-b35b-80cff974762e",
+            "title": "Stand-in task",
+            "state": "dropped",
+            "status": "ended",
+            "endReason": "stopped",
+            "waitingSince": null,
+            "openWait": null,
+            "laterAt": null,
+            "summary": "Done.",
+            "waitingOn": null,
+            "dueAt": null,
+            "rank": null,
+            "chat": {
+              "id": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+              "name": "Stand-in task"
+            },
+            "threadRoot": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "conciergeChat": {
+              "id": "concierge",
+              "name": "Main chat",
+              "main": true
+            },
+            "sourceMessageId": "b147a874-425e-4041-b465-e51b6f349795",
+            "createdAt": 1794711062069,
+            "updatedAt": 1794720236655,
+            "completedAt": 1794720236658,
+            "archivedAt": null,
+            "notSynced": false
+          },
+          {
+            "id": "f1e0ee34-4525-454d-8980-50324eaae47d",
+            "title": "Stand-in task",
+            "state": "doing",
+            "status": "active",
+            "endReason": null,
+            "waitingSince": null,
+            "openWait": null,
+            "laterAt": null,
+            "summary": "Done.",
+            "waitingOn": null,
+            "dueAt": null,
+            "rank": null,
+            "chat": {
+              "id": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+              "name": "Stand-in task"
+            },
+            "threadRoot": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "conciergeChat": {
+              "id": "concierge",
+              "name": "Main chat",
+              "main": true
+            },
+            "sourceMessageId": "597e32a5-8ae8-4dd4-b85e-39f7c6816cbf",
+            "createdAt": 1794720234798,
+            "updatedAt": 1794720235267,
+            "completedAt": null,
+            "archivedAt": null,
+            "notSynced": false
+          }
+        ]
       }
     },
     {
@@ -2499,55 +2640,281 @@
       "body": []
     },
     {
-      "method": "POST",
-      "path": "/api/concierge/chats",
-      "query": "",
-      "status": 201,
-      "contentType": "application/json",
-      "body": {
-        "id": "01a1dd1d-8035-71e2-bbf4-961f694a91cc",
-        "name": "",
-        "main": false,
-        "unread": 0
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/concierge/chats",
-      "query": "",
-      "status": 200,
-      "contentType": "application/json",
-      "body": {
-        "chats": [
-          {
-            "id": "concierge",
-            "name": "Main chat",
-            "main": true,
-            "unread": 0,
-            "activity": {
-              "kind": "idle"
-            }
-          },
-          {
-            "id": "01a1dd1d-8035-71e2-bbf4-961f694a91cc",
-            "name": "",
-            "main": false,
-            "unread": 0,
-            "activity": {
-              "kind": "idle"
-            }
-          }
-        ]
-      }
-    },
-    {
       "method": "GET",
       "path": "/api/chat/sessions/concierge/messages",
       "query": "limit=20",
       "status": 200,
       "contentType": "application/json",
       "body": {
-        "messages": [],
+        "messages": [
+          {
+            "id": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "createdAt": "2026-11-15T02:51:01.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "1bff6e87-0903-4834-81c9-6514161fa610",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:01.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 3,
+              "totalDurationMs": 523,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 3
+              },
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "b147a874-425e-4041-b465-e51b6f349795",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
+            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+          },
+          {
+            "id": "bde41270-7338-4294-8d38-0788b8eaff60",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dd1d-8634-73c2-9ba7-7fea8cb24973\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+          },
+          {
+            "id": "794515e2-87e2-4cac-8d76-7f9761569049",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
+            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+          },
+          {
+            "id": "d07b12eb-c682-4612-841e-f6c08031f6ac",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "9a8438ca-0016-4271-bfd1-17bb0078a2e7",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 43,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1dd1d-9001-707f-a19d-d4ad36415897",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-9001-707f-a19d-d4ad36415897",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:04.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 0,
+              "turnStatus": "error",
+              "invocationCounts": {},
+              "terminalError": "Selected model provider is unavailable: Claude is not signed in",
+              "terminalErrorCode": "model_provider_unavailable",
+              "terminalErrorProvider": "anthropic",
+              "terminalErrorReason": "not_logged_in"
+            }
+          },
+          {
+            "id": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "19fefec4-607a-4aff-bebf-cc988fd05d1e",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 3,
+              "totalDurationMs": 356,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 3
+              },
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "597e32a5-8ae8-4dd4-b85e-39f7c6816cbf",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "4319a3ae-d2c6-48a4-979d-5308ea5c313f",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dda9-7d2c-74a5-900f-6161f9bed554\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "ef645597-9105-4c3c-93a6-7dcae7756f42",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "e21e62ab-c97a-407d-a840-01351c16740e",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7e6d-74cb-8b5e-162e8bc822c9",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:55.000Z",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "f3f37865-e9ca-4652-b6e0-a30846e5d196",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7e6d-74cb-8b5e-162e8bc822c9",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:55.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 20,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1dda9-86d8-7063-ba6f-7501535a929b",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-86d8-7063-ba6f-7501535a929b",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:57.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 0,
+              "turnStatus": "error",
+              "invocationCounts": {},
+              "terminalError": "Selected model provider is unavailable: Claude is not signed in",
+              "terminalErrorCode": "model_provider_unavailable",
+              "terminalErrorProvider": "anthropic",
+              "terminalErrorReason": "not_logged_in"
+            }
+          }
+        ],
         "nextCursor": null,
         "layout": null
       }
@@ -2559,7 +2926,275 @@
       "status": 200,
       "contentType": "application/json",
       "body": {
-        "messages": [],
+        "messages": [
+          {
+            "id": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "createdAt": "2026-11-15T02:51:01.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "1bff6e87-0903-4834-81c9-6514161fa610",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:01.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 3,
+              "totalDurationMs": 523,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 3
+              },
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "b147a874-425e-4041-b465-e51b6f349795",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
+            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+          },
+          {
+            "id": "bde41270-7338-4294-8d38-0788b8eaff60",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dd1d-8634-73c2-9ba7-7fea8cb24973\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+          },
+          {
+            "id": "794515e2-87e2-4cac-8d76-7f9761569049",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
+            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+          },
+          {
+            "id": "d07b12eb-c682-4612-841e-f6c08031f6ac",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "9a8438ca-0016-4271-bfd1-17bb0078a2e7",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 43,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1dd1d-9001-707f-a19d-d4ad36415897",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-9001-707f-a19d-d4ad36415897",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:04.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 0,
+              "turnStatus": "error",
+              "invocationCounts": {},
+              "terminalError": "Selected model provider is unavailable: Claude is not signed in",
+              "terminalErrorCode": "model_provider_unavailable",
+              "terminalErrorProvider": "anthropic",
+              "terminalErrorReason": "not_logged_in"
+            }
+          },
+          {
+            "id": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "19fefec4-607a-4aff-bebf-cc988fd05d1e",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 3,
+              "totalDurationMs": 356,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 3
+              },
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "597e32a5-8ae8-4dd4-b85e-39f7c6816cbf",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "4319a3ae-d2c6-48a4-979d-5308ea5c313f",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dda9-7d2c-74a5-900f-6161f9bed554\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "ef645597-9105-4c3c-93a6-7dcae7756f42",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "e21e62ab-c97a-407d-a840-01351c16740e",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7e6d-74cb-8b5e-162e8bc822c9",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:55.000Z",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "f3f37865-e9ca-4652-b6e0-a30846e5d196",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7e6d-74cb-8b5e-162e8bc822c9",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:55.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 20,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1dda9-86d8-7063-ba6f-7501535a929b",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-86d8-7063-ba6f-7501535a929b",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:57.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 0,
+              "turnStatus": "error",
+              "invocationCounts": {},
+              "terminalError": "Selected model provider is unavailable: Claude is not signed in",
+              "terminalErrorCode": "model_provider_unavailable",
+              "terminalErrorProvider": "anthropic",
+              "terminalErrorReason": "not_logged_in"
+            }
+          }
+        ],
         "nextCursor": null,
         "layout": null
       }
@@ -2588,7 +3223,7 @@
       "contentType": "application/json",
       "body": {
         "sessionId": "concierge",
-        "lastSeenActivityAt": "2026-11-14T19:48:46.000Z",
+        "lastSeenActivityAt": "2026-11-15T05:23:55.000Z",
         "unread": false
       }
     },
@@ -2600,7 +3235,92 @@
       "contentType": "application/json",
       "body": {
         "chatId": "concierge",
-        "groups": []
+        "groups": [
+          {
+            "key": "active",
+            "items": [
+              {
+                "kind": "task",
+                "task": {
+                  "id": "f1e0ee34-4525-454d-8980-50324eaae47d",
+                  "title": "Stand-in task",
+                  "state": "doing",
+                  "status": "active",
+                  "endReason": null,
+                  "waitingSince": null,
+                  "openWait": null,
+                  "laterAt": null,
+                  "summary": "Done.",
+                  "waitingOn": null,
+                  "dueAt": null,
+                  "rank": null,
+                  "chat": {
+                    "id": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+                    "name": "Stand-in task"
+                  },
+                  "threadRoot": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+                  "conciergeChat": {
+                    "id": "concierge",
+                    "name": "Main chat",
+                    "main": true
+                  },
+                  "sourceMessageId": "597e32a5-8ae8-4dd4-b85e-39f7c6816cbf",
+                  "createdAt": 1794720234798,
+                  "updatedAt": 1794720235267,
+                  "completedAt": null,
+                  "archivedAt": null,
+                  "notSynced": false
+                },
+                "schedule": null,
+                "check": null,
+                "cardMessageId": null
+              }
+            ]
+          },
+          {
+            "key": "ended",
+            "items": [
+              {
+                "kind": "task",
+                "task": {
+                  "id": "5248e9d0-8a6b-424e-b35b-80cff974762e",
+                  "title": "Stand-in task",
+                  "state": "dropped",
+                  "status": "ended",
+                  "endReason": "stopped",
+                  "waitingSince": null,
+                  "openWait": null,
+                  "laterAt": null,
+                  "summary": "Done.",
+                  "waitingOn": null,
+                  "dueAt": null,
+                  "rank": null,
+                  "chat": {
+                    "id": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+                    "name": "Stand-in task"
+                  },
+                  "threadRoot": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+                  "conciergeChat": {
+                    "id": "concierge",
+                    "name": "Main chat",
+                    "main": true
+                  },
+                  "sourceMessageId": "b147a874-425e-4041-b465-e51b6f349795",
+                  "createdAt": 1794711062069,
+                  "updatedAt": 1794720236655,
+                  "completedAt": 1794720236658,
+                  "archivedAt": null,
+                  "notSynced": false
+                },
+                "schedule": null,
+                "check": null,
+                "cardMessageId": null
+              }
+            ],
+            "total": 1,
+            "nextCursor": null
+          }
+        ]
       }
     },
     {
@@ -2677,9 +3397,9 @@
           {
             "id": "5248e9d0-8a6b-424e-b35b-80cff974762e",
             "title": "Stand-in task",
-            "state": "doing",
-            "status": "active",
-            "endReason": null,
+            "state": "dropped",
+            "status": "ended",
+            "endReason": "stopped",
             "waitingSince": null,
             "openWait": null,
             "laterAt": null,
@@ -2699,7 +3419,67 @@
             },
             "sourceMessageId": "b147a874-425e-4041-b465-e51b6f349795",
             "createdAt": 1794711062069,
-            "updatedAt": 1794711062576,
+            "updatedAt": 1794720236655,
+            "completedAt": 1794720236658,
+            "archivedAt": null,
+            "notSynced": false
+          },
+          {
+            "id": "f1e0ee34-4525-454d-8980-50324eaae47d",
+            "title": "Stand-in task",
+            "state": "doing",
+            "status": "active",
+            "endReason": null,
+            "waitingSince": null,
+            "openWait": null,
+            "laterAt": null,
+            "summary": "Done.",
+            "waitingOn": null,
+            "dueAt": null,
+            "rank": null,
+            "chat": {
+              "id": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+              "name": "Stand-in task"
+            },
+            "threadRoot": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "conciergeChat": {
+              "id": "concierge",
+              "name": "Main chat",
+              "main": true
+            },
+            "sourceMessageId": "597e32a5-8ae8-4dd4-b85e-39f7c6816cbf",
+            "createdAt": 1794720234798,
+            "updatedAt": 1794720235267,
+            "completedAt": null,
+            "archivedAt": null,
+            "notSynced": false
+          },
+          {
+            "id": "3f7fb433-96c1-40f6-a1a0-6b4ac5d8f691",
+            "title": "Stand-in task",
+            "state": "doing",
+            "status": "active",
+            "endReason": null,
+            "waitingSince": null,
+            "openWait": null,
+            "laterAt": null,
+            "summary": "Done.",
+            "waitingOn": null,
+            "dueAt": null,
+            "rank": null,
+            "chat": {
+              "id": "01a1dda9-d904-7050-8334-8eaf24214832",
+              "name": "Stand-in task"
+            },
+            "threadRoot": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "conciergeChat": {
+              "id": "concierge",
+              "name": "Main chat",
+              "main": true
+            },
+            "sourceMessageId": "bd792b23-ca97-4290-aeec-186dbbecb9bf",
+            "createdAt": 1794720258310,
+            "updatedAt": 1794720258775,
             "completedAt": null,
             "archivedAt": null,
             "notSynced": false
@@ -2745,7 +3525,7 @@
       "contentType": "application/json",
       "body": [
         {
-          "id": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+          "id": "01a1dda9-d904-7050-8334-8eaf24214832",
           "name": "Stand-in task",
           "personaId": null,
           "largeModelSelection": null,
@@ -2757,9 +3537,9 @@
           "triggerKind": "concierge",
           "archivedAt": null,
           "pinnedAt": null,
-          "createdAt": "2026-11-15T02:51:02.000Z",
-          "activityAt": "2026-11-15T02:51:02.000Z",
-          "lastSeenActivityAt": "2026-11-15T02:51:02.000Z",
+          "createdAt": "2026-11-15T05:24:18.000Z",
+          "activityAt": "2026-11-15T05:24:18.000Z",
+          "lastSeenActivityAt": "2026-11-15T05:24:18.000Z",
           "unread": false,
           "messageCount": 3,
           "running": false,
@@ -2780,10 +3560,54 @@
           "archivedAt": null,
           "pinnedAt": null,
           "createdAt": "2026-11-14T19:48:46.000Z",
-          "activityAt": "2026-11-15T02:51:02.000Z",
-          "lastSeenActivityAt": "2026-11-14T19:48:46.000Z",
+          "activityAt": "2026-11-15T05:24:18.000Z",
+          "lastSeenActivityAt": "2026-11-15T05:23:55.000Z",
           "unread": true,
-          "messageCount": 5,
+          "messageCount": 21,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        },
+        {
+          "id": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+          "name": "Stand-in task",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": null,
+          "parentSessionId": null,
+          "triggerKind": "concierge",
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-15T05:23:54.000Z",
+          "activityAt": "2026-11-15T05:23:55.000Z",
+          "lastSeenActivityAt": "2026-11-15T05:23:54.000Z",
+          "unread": true,
+          "messageCount": 3,
+          "running": false,
+          "lastTurnFailed": false,
+          "awaitingGuardian": false
+        },
+        {
+          "id": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+          "name": "Stand-in task",
+          "personaId": null,
+          "largeModelSelection": null,
+          "projectName": "default",
+          "projectPath": "default",
+          "deviceFolder": null,
+          "agentName": null,
+          "parentSessionId": null,
+          "triggerKind": "concierge",
+          "archivedAt": null,
+          "pinnedAt": null,
+          "createdAt": "2026-11-15T02:51:02.000Z",
+          "activityAt": "2026-11-15T02:51:02.000Z",
+          "lastSeenActivityAt": "2026-11-15T02:51:02.000Z",
+          "unread": false,
+          "messageCount": 3,
           "running": false,
           "lastTurnFailed": false,
           "awaitingGuardian": false
@@ -2829,7 +3653,6 @@
             "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
             "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
             "createdAt": "2026-11-15T02:51:01.000Z",
-            "statusReaction": "working",
             "chatThreadTitle": "Stand-in task",
             "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
             "sender": {
@@ -2899,6 +3722,274 @@
             "createdAt": "2026-11-15T02:51:02.000Z",
             "chatThreadTitle": "Stand-in task",
             "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+          },
+          {
+            "id": "d07b12eb-c682-4612-841e-f6c08031f6ac",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "9a8438ca-0016-4271-bfd1-17bb0078a2e7",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 43,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1dd1d-9001-707f-a19d-d4ad36415897",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-9001-707f-a19d-d4ad36415897",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:04.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 0,
+              "turnStatus": "error",
+              "invocationCounts": {},
+              "terminalError": "Selected model provider is unavailable: Claude is not signed in",
+              "terminalErrorCode": "model_provider_unavailable",
+              "terminalErrorProvider": "anthropic",
+              "terminalErrorReason": "not_logged_in"
+            }
+          },
+          {
+            "id": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "19fefec4-607a-4aff-bebf-cc988fd05d1e",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 3,
+              "totalDurationMs": 356,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 3
+              },
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "597e32a5-8ae8-4dd4-b85e-39f7c6816cbf",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "4319a3ae-d2c6-48a4-979d-5308ea5c313f",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dda9-7d2c-74a5-900f-6161f9bed554\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "ef645597-9105-4c3c-93a6-7dcae7756f42",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "e21e62ab-c97a-407d-a840-01351c16740e",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7e6d-74cb-8b5e-162e8bc822c9",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:55.000Z",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "f3f37865-e9ca-4652-b6e0-a30846e5d196",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7e6d-74cb-8b5e-162e8bc822c9",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:55.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 20,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1dda9-86d8-7063-ba6f-7501535a929b",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-86d8-7063-ba6f-7501535a929b",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:57.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 0,
+              "turnStatus": "error",
+              "invocationCounts": {},
+              "terminalError": "Selected model provider is unavailable: Claude is not signed in",
+              "terminalErrorCode": "model_provider_unavailable",
+              "terminalErrorProvider": "anthropic",
+              "terminalErrorReason": "not_logged_in"
+            }
+          },
+          {
+            "id": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "6b763c3c-6fd8-4ca4-93aa-a8e788fc290c",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 3,
+              "totalDurationMs": 141,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 3
+              },
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "bd792b23-ca97-4290-aeec-186dbbecb9bf",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
+          },
+          {
+            "id": "a26abc9f-e5ce-41d6-91cf-e597d4ec4e47",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dda9-d904-7050-8334-8eaf24214832\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
+          },
+          {
+            "id": "327b4cca-2b1e-47f9-a47e-9f835bb2d5b4",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
           }
         ],
         "nextCursor": null,
@@ -2922,7 +4013,6 @@
             "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
             "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
             "createdAt": "2026-11-15T02:51:01.000Z",
-            "statusReaction": "working",
             "chatThreadTitle": "Stand-in task",
             "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
             "sender": {
@@ -2992,6 +4082,274 @@
             "createdAt": "2026-11-15T02:51:02.000Z",
             "chatThreadTitle": "Stand-in task",
             "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+          },
+          {
+            "id": "d07b12eb-c682-4612-841e-f6c08031f6ac",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "9a8438ca-0016-4271-bfd1-17bb0078a2e7",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:02.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 43,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1dd1d-9001-707f-a19d-d4ad36415897",
+            "sessionId": "concierge",
+            "turnId": "01a1dd1d-9001-707f-a19d-d4ad36415897",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T02:51:04.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 0,
+              "turnStatus": "error",
+              "invocationCounts": {},
+              "terminalError": "Selected model provider is unavailable: Claude is not signed in",
+              "terminalErrorCode": "model_provider_unavailable",
+              "terminalErrorProvider": "anthropic",
+              "terminalErrorReason": "not_logged_in"
+            }
+          },
+          {
+            "id": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "19fefec4-607a-4aff-bebf-cc988fd05d1e",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 3,
+              "totalDurationMs": 356,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 3
+              },
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "597e32a5-8ae8-4dd4-b85e-39f7c6816cbf",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "4319a3ae-d2c6-48a4-979d-5308ea5c313f",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dda9-7d2c-74a5-900f-6161f9bed554\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "ef645597-9105-4c3c-93a6-7dcae7756f42",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7c3b-73c2-83d5-8ff72db55828",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
+            "chatThreadId": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+            "createdAt": "2026-11-15T05:23:54.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-7d2c-74a5-900f-6161f9bed554"
+          },
+          {
+            "id": "e21e62ab-c97a-407d-a840-01351c16740e",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7e6d-74cb-8b5e-162e8bc822c9",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:55.000Z",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "f3f37865-e9ca-4652-b6e0-a30846e5d196",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-7e6d-74cb-8b5e-162e8bc822c9",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:55.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 20,
+              "turnStatus": "completed",
+              "invocationCounts": {},
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "trace-message:concierge:01a1dda9-86d8-7063-ba6f-7501535a929b",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-86d8-7063-ba6f-7501535a929b",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:23:57.000Z",
+            "traceSummary": {
+              "distinctApps": [],
+              "totalSteps": 0,
+              "totalDurationMs": 0,
+              "turnStatus": "error",
+              "invocationCounts": {},
+              "terminalError": "Selected model provider is unavailable: Claude is not signed in",
+              "terminalErrorCode": "model_provider_unavailable",
+              "terminalErrorProvider": "anthropic",
+              "terminalErrorReason": "not_logged_in"
+            }
+          },
+          {
+            "id": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": "consumed",
+            "role": "user",
+            "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "statusReaction": "working",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832",
+            "sender": {
+              "kind": "guardian",
+              "name": "guardian",
+              "avatarUrl": null
+            }
+          },
+          {
+            "id": "6b763c3c-6fd8-4ca4-93aa-a8e788fc290c",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": null,
+            "role": "trace",
+            "content": "[]",
+            "chatThreadId": null,
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "traceSummary": {
+              "distinctApps": [
+                {
+                  "id": "rome",
+                  "name": "Rome",
+                  "iconUrl": "/icon.svg"
+                }
+              ],
+              "totalSteps": 3,
+              "totalDurationMs": 141,
+              "turnStatus": "completed",
+              "invocationCounts": {
+                "rome": 3
+              },
+              "model": "claude-sonnet-5-5"
+            }
+          },
+          {
+            "id": "bd792b23-ca97-4290-aeec-186dbbecb9bf",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
+          },
+          {
+            "id": "a26abc9f-e5ce-41d6-91cf-e597d4ec4e47",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dda9-d904-7050-8334-8eaf24214832\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
+          },
+          {
+            "id": "327b4cca-2b1e-47f9-a47e-9f835bb2d5b4",
+            "sessionId": "concierge",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
+            "inputState": null,
+            "role": "assistant",
+            "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
+            "chatThreadTitle": "Stand-in task",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
           }
         ],
         "nextCursor": null,
@@ -3022,7 +4380,7 @@
       "contentType": "application/json",
       "body": {
         "sessionId": "concierge",
-        "lastSeenActivityAt": "2026-11-15T02:51:02.000Z",
+        "lastSeenActivityAt": "2026-11-15T05:24:18.000Z",
         "unread": false
       }
     },
@@ -3041,11 +4399,88 @@
               {
                 "kind": "task",
                 "task": {
-                  "id": "5248e9d0-8a6b-424e-b35b-80cff974762e",
+                  "id": "3f7fb433-96c1-40f6-a1a0-6b4ac5d8f691",
                   "title": "Stand-in task",
                   "state": "doing",
                   "status": "active",
                   "endReason": null,
+                  "waitingSince": null,
+                  "openWait": null,
+                  "laterAt": null,
+                  "summary": "Done.",
+                  "waitingOn": null,
+                  "dueAt": null,
+                  "rank": null,
+                  "chat": {
+                    "id": "01a1dda9-d904-7050-8334-8eaf24214832",
+                    "name": "Stand-in task"
+                  },
+                  "threadRoot": "db3c4287-7329-4241-920e-e1dc6de86da0",
+                  "conciergeChat": {
+                    "id": "concierge",
+                    "name": "Main chat",
+                    "main": true
+                  },
+                  "sourceMessageId": "bd792b23-ca97-4290-aeec-186dbbecb9bf",
+                  "createdAt": 1794720258310,
+                  "updatedAt": 1794720258775,
+                  "completedAt": null,
+                  "archivedAt": null,
+                  "notSynced": false
+                },
+                "schedule": null,
+                "check": null,
+                "cardMessageId": null
+              },
+              {
+                "kind": "task",
+                "task": {
+                  "id": "f1e0ee34-4525-454d-8980-50324eaae47d",
+                  "title": "Stand-in task",
+                  "state": "doing",
+                  "status": "active",
+                  "endReason": null,
+                  "waitingSince": null,
+                  "openWait": null,
+                  "laterAt": null,
+                  "summary": "Done.",
+                  "waitingOn": null,
+                  "dueAt": null,
+                  "rank": null,
+                  "chat": {
+                    "id": "01a1dda9-7d2c-74a5-900f-6161f9bed554",
+                    "name": "Stand-in task"
+                  },
+                  "threadRoot": "1d3c845e-0427-4723-9ac1-a0b8422d85cb",
+                  "conciergeChat": {
+                    "id": "concierge",
+                    "name": "Main chat",
+                    "main": true
+                  },
+                  "sourceMessageId": "597e32a5-8ae8-4dd4-b85e-39f7c6816cbf",
+                  "createdAt": 1794720234798,
+                  "updatedAt": 1794720235267,
+                  "completedAt": null,
+                  "archivedAt": null,
+                  "notSynced": false
+                },
+                "schedule": null,
+                "check": null,
+                "cardMessageId": null
+              }
+            ]
+          },
+          {
+            "key": "ended",
+            "items": [
+              {
+                "kind": "task",
+                "task": {
+                  "id": "5248e9d0-8a6b-424e-b35b-80cff974762e",
+                  "title": "Stand-in task",
+                  "state": "dropped",
+                  "status": "ended",
+                  "endReason": "stopped",
                   "waitingSince": null,
                   "openWait": null,
                   "laterAt": null,
@@ -3065,8 +4500,8 @@
                   },
                   "sourceMessageId": "b147a874-425e-4041-b465-e51b6f349795",
                   "createdAt": 1794711062069,
-                  "updatedAt": 1794711062576,
-                  "completedAt": null,
+                  "updatedAt": 1794720236655,
+                  "completedAt": 1794720236658,
                   "archivedAt": null,
                   "notSynced": false
                 },
@@ -3074,7 +4509,9 @@
                 "check": null,
                 "cardMessageId": null
               }
-            ]
+            ],
+            "total": 1,
+            "nextCursor": null
           }
         ]
       }
@@ -3082,23 +4519,23 @@
     {
       "method": "GET",
       "path": "/api/chat/sessions/concierge/messages",
-      "query": "thread=8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+      "query": "thread=db3c4287-7329-4241-920e-e1dc6de86da0",
       "status": 200,
       "contentType": "application/json",
       "body": {
         "messages": [
           {
-            "id": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "id": "db3c4287-7329-4241-920e-e1dc6de86da0",
             "sessionId": "concierge",
-            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
             "inputState": "consumed",
             "role": "user",
             "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
-            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-            "createdAt": "2026-11-15T02:51:01.000Z",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "statusReaction": "working",
             "chatThreadTitle": "Stand-in task",
-            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832",
             "sender": {
               "kind": "guardian",
               "name": "guardian",
@@ -3106,40 +4543,40 @@
             }
           },
           {
-            "id": "b147a874-425e-4041-b465-e51b6f349795",
+            "id": "bd792b23-ca97-4290-aeec-186dbbecb9bf",
             "sessionId": "concierge",
-            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
             "inputState": null,
             "role": "assistant",
             "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
-            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "chatThreadTitle": "Stand-in task",
-            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
           },
           {
-            "id": "bde41270-7338-4294-8d38-0788b8eaff60",
+            "id": "a26abc9f-e5ce-41d6-91cf-e597d4ec4e47",
             "sessionId": "concierge",
-            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
             "inputState": null,
             "role": "assistant",
-            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dd1d-8634-73c2-9ba7-7fea8cb24973\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
-            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dda9-d904-7050-8334-8eaf24214832\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "chatThreadTitle": "Stand-in task",
-            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
           },
           {
-            "id": "794515e2-87e2-4cac-8d76-7f9761569049",
+            "id": "327b4cca-2b1e-47f9-a47e-9f835bb2d5b4",
             "sessionId": "concierge",
-            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
             "inputState": null,
             "role": "assistant",
             "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
-            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "chatThreadTitle": "Stand-in task",
-            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
           }
         ],
         "nextCursor": null
@@ -3148,23 +4585,23 @@
     {
       "method": "GET",
       "path": "/api/chat/sessions/concierge/messages",
-      "query": "thread=8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+      "query": "thread=db3c4287-7329-4241-920e-e1dc6de86da0",
       "status": 200,
       "contentType": "application/json",
       "body": {
         "messages": [
           {
-            "id": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
+            "id": "db3c4287-7329-4241-920e-e1dc6de86da0",
             "sessionId": "concierge",
-            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
             "inputState": "consumed",
             "role": "user",
             "content": "[{\"type\":\"text\",\"content\":\"[stand-in: start a task] Look into the dentist appointment.\"}]",
-            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-            "createdAt": "2026-11-15T02:51:01.000Z",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "statusReaction": "working",
             "chatThreadTitle": "Stand-in task",
-            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832",
             "sender": {
               "kind": "guardian",
               "name": "guardian",
@@ -3172,40 +4609,40 @@
             }
           },
           {
-            "id": "b147a874-425e-4041-b465-e51b6f349795",
+            "id": "bd792b23-ca97-4290-aeec-186dbbecb9bf",
             "sessionId": "concierge",
-            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
             "inputState": null,
             "role": "assistant",
             "content": "[{\"type\":\"text\",\"content\":\"I'll look into the dentist appointment.\"}]",
-            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "chatThreadTitle": "Stand-in task",
-            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
           },
           {
-            "id": "bde41270-7338-4294-8d38-0788b8eaff60",
+            "id": "a26abc9f-e5ce-41d6-91cf-e597d4ec4e47",
             "sessionId": "concierge",
-            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
             "inputState": null,
             "role": "assistant",
-            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dd1d-8634-73c2-9ba7-7fea8cb24973\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
-            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "content": "[{\"type\":\"task_chat\",\"chatId\":\"01a1dda9-d904-7050-8334-8eaf24214832\",\"title\":\"Stand-in task\",\"show\":\"task\"}]",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "chatThreadTitle": "Stand-in task",
-            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
           },
           {
-            "id": "794515e2-87e2-4cac-8d76-7f9761569049",
+            "id": "327b4cca-2b1e-47f9-a47e-9f835bb2d5b4",
             "sessionId": "concierge",
-            "turnId": "01a1dd1d-849f-7301-b1a9-29d8370b1414",
+            "turnId": "01a1dda9-d8d7-7142-969f-3143898b292a",
             "inputState": null,
             "role": "assistant",
             "content": "[{\"type\":\"text\",\"content\":\"The stand-in task has started.\"}]",
-            "chatThreadId": "8037f61d-94d0-4fe8-bf2c-620a41b2d288",
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "chatThreadId": "db3c4287-7329-4241-920e-e1dc6de86da0",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "chatThreadTitle": "Stand-in task",
-            "chatThreadTaskChatId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973"
+            "chatThreadTaskChatId": "01a1dda9-d904-7050-8334-8eaf24214832"
           }
         ],
         "nextCursor": null
@@ -3213,21 +4650,21 @@
     },
     {
       "method": "GET",
-      "path": "/api/chat/sessions/01a1dd1d-8634-73c2-9ba7-7fea8cb24973/messages",
+      "path": "/api/chat/sessions/01a1dda9-d904-7050-8334-8eaf24214832/messages",
       "query": "limit=20",
       "status": 200,
       "contentType": "application/json",
       "body": {
         "messages": [
           {
-            "id": "0b28f08f-08fb-465c-8cac-fdf5a2dd92a0",
-            "sessionId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
-            "turnId": "01a1dd1d-8655-75ad-a42f-d83a9e485e92",
+            "id": "b4492de4-61af-4b51-a332-1b556c4367b9",
+            "sessionId": "01a1dda9-d904-7050-8334-8eaf24214832",
+            "turnId": "01a1dda9-d91e-7393-ae04-da122fcfcbaa",
             "inputState": "consumed",
             "role": "user",
             "content": "[{\"type\":\"text\",\"content\":\"Reply with the word done. The stand-in instance records this task.\"}]",
             "chatThreadId": null,
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "sender": {
               "kind": "automated",
               "sourceType": "agent",
@@ -3241,32 +4678,32 @@
             }
           },
           {
-            "id": "d575172e-417a-44ab-9db4-5e69e7f96caa",
-            "sessionId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
-            "turnId": "01a1dd1d-8655-75ad-a42f-d83a9e485e92",
+            "id": "d40c2128-5da2-4c90-8b37-51606ceb3c67",
+            "sessionId": "01a1dda9-d904-7050-8334-8eaf24214832",
+            "turnId": "01a1dda9-d91e-7393-ae04-da122fcfcbaa",
             "inputState": null,
             "role": "trace",
             "content": "[]",
             "chatThreadId": null,
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "traceSummary": {
               "distinctApps": [],
               "totalSteps": 0,
-              "totalDurationMs": 253,
+              "totalDurationMs": 222,
               "turnStatus": "completed",
               "invocationCounts": {},
               "model": "claude-opus-5-5[1m]"
             }
           },
           {
-            "id": "5c3a32c3-0f6d-472b-921e-2a8b76a31894",
-            "sessionId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
-            "turnId": "01a1dd1d-8655-75ad-a42f-d83a9e485e92",
+            "id": "8b62fac7-ce71-4c5c-82c3-3f64de3d29ae",
+            "sessionId": "01a1dda9-d904-7050-8334-8eaf24214832",
+            "turnId": "01a1dda9-d91e-7393-ae04-da122fcfcbaa",
             "inputState": null,
             "role": "assistant",
-            "content": "[{\"type\":\"text\",\"content\":\"Done.\",\"turnPhase\":\"final\",\"blockId\":\"msg_0fa1a4d54e0b4e6fa364bff0b1cd1607:0\",\"blockIx\":0}]",
+            "content": "[{\"type\":\"text\",\"content\":\"Done.\",\"turnPhase\":\"final\",\"blockId\":\"msg_500955daf7e24532b62ff8b110f1fda4:0\",\"blockIx\":0}]",
             "chatThreadId": null,
-            "createdAt": "2026-11-15T02:51:02.000Z"
+            "createdAt": "2026-11-15T05:24:18.000Z"
           }
         ],
         "nextCursor": null,
@@ -3275,21 +4712,21 @@
     },
     {
       "method": "GET",
-      "path": "/api/chat/sessions/01a1dd1d-8634-73c2-9ba7-7fea8cb24973/messages",
+      "path": "/api/chat/sessions/01a1dda9-d904-7050-8334-8eaf24214832/messages",
       "query": "limit=50",
       "status": 200,
       "contentType": "application/json",
       "body": {
         "messages": [
           {
-            "id": "0b28f08f-08fb-465c-8cac-fdf5a2dd92a0",
-            "sessionId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
-            "turnId": "01a1dd1d-8655-75ad-a42f-d83a9e485e92",
+            "id": "b4492de4-61af-4b51-a332-1b556c4367b9",
+            "sessionId": "01a1dda9-d904-7050-8334-8eaf24214832",
+            "turnId": "01a1dda9-d91e-7393-ae04-da122fcfcbaa",
             "inputState": "consumed",
             "role": "user",
             "content": "[{\"type\":\"text\",\"content\":\"Reply with the word done. The stand-in instance records this task.\"}]",
             "chatThreadId": null,
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "sender": {
               "kind": "automated",
               "sourceType": "agent",
@@ -3303,32 +4740,32 @@
             }
           },
           {
-            "id": "d575172e-417a-44ab-9db4-5e69e7f96caa",
-            "sessionId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
-            "turnId": "01a1dd1d-8655-75ad-a42f-d83a9e485e92",
+            "id": "d40c2128-5da2-4c90-8b37-51606ceb3c67",
+            "sessionId": "01a1dda9-d904-7050-8334-8eaf24214832",
+            "turnId": "01a1dda9-d91e-7393-ae04-da122fcfcbaa",
             "inputState": null,
             "role": "trace",
             "content": "[]",
             "chatThreadId": null,
-            "createdAt": "2026-11-15T02:51:02.000Z",
+            "createdAt": "2026-11-15T05:24:18.000Z",
             "traceSummary": {
               "distinctApps": [],
               "totalSteps": 0,
-              "totalDurationMs": 253,
+              "totalDurationMs": 222,
               "turnStatus": "completed",
               "invocationCounts": {},
               "model": "claude-opus-5-5[1m]"
             }
           },
           {
-            "id": "5c3a32c3-0f6d-472b-921e-2a8b76a31894",
-            "sessionId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
-            "turnId": "01a1dd1d-8655-75ad-a42f-d83a9e485e92",
+            "id": "8b62fac7-ce71-4c5c-82c3-3f64de3d29ae",
+            "sessionId": "01a1dda9-d904-7050-8334-8eaf24214832",
+            "turnId": "01a1dda9-d91e-7393-ae04-da122fcfcbaa",
             "inputState": null,
             "role": "assistant",
-            "content": "[{\"type\":\"text\",\"content\":\"Done.\",\"turnPhase\":\"final\",\"blockId\":\"msg_0fa1a4d54e0b4e6fa364bff0b1cd1607:0\",\"blockIx\":0}]",
+            "content": "[{\"type\":\"text\",\"content\":\"Done.\",\"turnPhase\":\"final\",\"blockId\":\"msg_500955daf7e24532b62ff8b110f1fda4:0\",\"blockIx\":0}]",
             "chatThreadId": null,
-            "createdAt": "2026-11-15T02:51:02.000Z"
+            "createdAt": "2026-11-15T05:24:18.000Z"
           }
         ],
         "nextCursor": null,
@@ -3337,7 +4774,7 @@
     },
     {
       "method": "GET",
-      "path": "/api/chat/sessions/01a1dd1d-8634-73c2-9ba7-7fea8cb24973/turns",
+      "path": "/api/chat/sessions/01a1dda9-d904-7050-8334-8eaf24214832/turns",
       "query": "",
       "status": 200,
       "contentType": "application/json",
@@ -3345,7 +4782,7 @@
     },
     {
       "method": "GET",
-      "path": "/api/chat/sessions/01a1dd1d-8634-73c2-9ba7-7fea8cb24973/shares",
+      "path": "/api/chat/sessions/01a1dda9-d904-7050-8334-8eaf24214832/shares",
       "query": "",
       "status": 200,
       "contentType": "application/json",
@@ -3353,24 +4790,34 @@
     },
     {
       "method": "POST",
-      "path": "/api/chat/sessions/01a1dd1d-8634-73c2-9ba7-7fea8cb24973/read",
+      "path": "/api/chat/sessions/01a1dda9-d904-7050-8334-8eaf24214832/read",
       "query": "",
       "status": 200,
       "contentType": "application/json",
       "body": {
-        "sessionId": "01a1dd1d-8634-73c2-9ba7-7fea8cb24973",
-        "lastSeenActivityAt": "2026-11-15T02:51:02.000Z",
+        "sessionId": "01a1dda9-d904-7050-8334-8eaf24214832",
+        "lastSeenActivityAt": "2026-11-15T05:24:18.000Z",
         "unread": false
       }
     },
     {
       "method": "GET",
-      "path": "/api/chats/01a1dd1d-8634-73c2-9ba7-7fea8cb24973/tasks",
+      "path": "/api/chats/01a1dda9-d904-7050-8334-8eaf24214832/tasks",
       "query": "",
       "status": 404,
       "contentType": "application/json",
       "body": {
         "error": "No such Concierge chat"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/concierge/tasks/3f7fb433-96c1-40f6-a1a0-6b4ac5d8f691/stop",
+      "query": "",
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "ok": true
       }
     }
   ]

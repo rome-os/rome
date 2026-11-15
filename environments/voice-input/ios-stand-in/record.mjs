@@ -152,6 +152,14 @@ const send = (text) =>
     keep: false,
   });
 
+// Rome may hold tasks and sends from earlier recordings: these fixtures
+// follow only this run's.
+const tasksBefore = new Set(
+  (
+    (await call("GET", "/concierge/tasks", { query: { doneDays: "30" }, keep: false })).json
+      .tasks ?? []
+  ).map((t) => t.id),
+);
 const asked = await send(`${TASK_MARKER} Look into the dentist appointment.`);
 if (asked.status >= 300)
   throw new Error(`the task request failed: ${asked.status} ${JSON.stringify(asked.json)}`);
@@ -159,7 +167,7 @@ const task = await until("the task", async () =>
   (
     (await call("GET", "/concierge/tasks", { query: { doneDays: "30" }, keep: false })).json
       .tasks ?? []
-  ).find((t) => t.chat?.id),
+  ).find((t) => t.chat?.id && !tasksBefore.has(t.id)),
 );
 await idle(chatSession);
 // The main Chat shows the task's card, and Concierge messages in its thread
@@ -171,9 +179,15 @@ const threadRoot = await until("the task card and its thread", async () => {
       keep: false,
     })
   ).json;
-  const card = messages.some((m) => m.role === "assistant" && m.content.includes('"task_chat"'));
-  const said = messages.some((m) => m.role === "assistant" && m.chatThreadId && m.chatThreadTitle);
-  return card && said && messages.find((m) => m.role === "user" && m.chatThreadId);
+  const card = messages.some(
+    (m) => m.role === "assistant" && m.content.includes(`"chatId":"${task.chat.id}"`),
+  );
+  const root = messages.findLast((m) => m.role === "user" && m.content.includes(TASK_MARKER));
+  const said = messages.some(
+    (m) =>
+      m.role === "assistant" && root && m.chatThreadId === root.chatThreadId && m.chatThreadTitle,
+  );
+  return card && said && root.chatThreadId && root;
 });
 
 // The fields after the task, as the app loads them on opening each.
@@ -200,11 +214,15 @@ const after = await call("GET", `/chat/sessions/${chatSession}/messages`, {
   query: { limit: "20" },
   keep: false,
 });
-const sentMessages = (after.json.messages ?? []).filter(
-  (m) =>
-    !(threadRoot && m.id === threadRoot.id) &&
-    JSON.stringify(m).includes("stand-in instance records"),
-);
+const sentMessages = [
+  (after.json.messages ?? []).findLast(
+    (m) => m.id !== threadRoot.id && JSON.stringify(m).includes("stand-in instance records"),
+  ),
+].filter(Boolean);
+
+// Last, as it changes what the task's rows say: the task stopped from its
+// card or the task list.
+await call("POST", `/concierge/tasks/${task.id}/stop`);
 
 const out = resolve(here, "fixtures");
 mkdirSync(out, { recursive: true });

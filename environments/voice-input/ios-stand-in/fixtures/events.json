@@ -11,22 +11,22 @@
     "sessionId": "concierge",
     "text": "The stand-in instance records this message.",
     "turn": {
-      "inputId": "d07b12eb-c682-4612-841e-f6c08031f6ac",
-      "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+      "inputId": "81b3001d-8dee-43ec-aaa5-1c6641d75d57",
+      "turnId": "01a1dda9-db0e-7488-b0b4-b66d237a947a",
       "disposition": "started",
       "sessionId": "concierge",
-      "startedAt": "2026-11-15T02:51:02.814Z"
+      "startedAt": "2026-11-15T05:24:18.831Z"
     },
     "messages": [
       {
-        "id": "d07b12eb-c682-4612-841e-f6c08031f6ac",
+        "id": "81b3001d-8dee-43ec-aaa5-1c6641d75d57",
         "sessionId": "concierge",
-        "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+        "turnId": "01a1dda9-db0e-7488-b0b4-b66d237a947a",
         "inputState": "consumed",
         "role": "user",
         "content": "[{\"type\":\"text\",\"content\":\"The stand-in instance records this message.\"}]",
         "chatThreadId": null,
-        "createdAt": "2026-11-15T02:51:02.000Z",
+        "createdAt": "2026-11-15T05:24:18.000Z",
         "sender": {
           "kind": "guardian",
           "name": "guardian",
@@ -59,7 +59,7 @@
         "event": "message_writing",
         "data": {
           "sessionId": "concierge",
-          "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+          "turnId": "01a1dda9-db0e-7488-b0b4-b66d237a947a",
           "mode": "exact",
           "writing": false
         }
@@ -70,7 +70,7 @@
         "event": "message_status_reaction",
         "data": {
           "sessionId": "concierge",
-          "messageId": "d07b12eb-c682-4612-841e-f6c08031f6ac",
+          "messageId": "81b3001d-8dee-43ec-aaa5-1c6641d75d57",
           "statusReaction": "working"
         }
       },
@@ -80,7 +80,7 @@
         "event": "inputs_settled",
         "data": {
           "sessionId": "concierge",
-          "inputIds": ["d07b12eb-c682-4612-841e-f6c08031f6ac"]
+          "inputIds": ["81b3001d-8dee-43ec-aaa5-1c6641d75d57"]
         }
       },
       {
@@ -89,7 +89,7 @@
         "event": "message_writing",
         "data": {
           "sessionId": "concierge",
-          "turnId": "01a1dd1d-891e-7519-bd6f-0eefa627a944",
+          "turnId": "01a1dda9-db0e-7488-b0b4-b66d237a947a",
           "mode": "exact",
           "writing": false
         }
@@ -118,8 +118,16 @@
         "event": "message_status_reaction",
         "data": {
           "sessionId": "concierge",
-          "messageId": "d07b12eb-c682-4612-841e-f6c08031f6ac",
+          "messageId": "81b3001d-8dee-43ec-aaa5-1c6641d75d57",
           "statusReaction": null
+        }
+      },
+      {
+        "type": "event",
+        "topic": "chat.tasks:concierge",
+        "event": "tasks_changed",
+        "data": {
+          "chatId": "concierge"
         }
       },
       {
@@ -131,7 +139,7 @@
           "activity": {
             "kind": "working"
           },
-          "at": 1794711063569
+          "at": 1794720259813
         }
       }
     ]
