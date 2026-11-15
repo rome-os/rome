@@ -466,7 +466,10 @@ export class ConciergeTasks {
               ) ?? null;
             const key = `${target.chatId}\u0000${target.messageKey}`;
             if (told.has(key) && told.get(key) === status) continue;
-            told.set(key, status);
+            // A message with none is forgotten, so the map holds only the
+            // ones showing a status; one may then be told none twice.
+            if (status === null) told.delete(key);
+            else told.set(key, status);
             listener(target, status);
           }
         })

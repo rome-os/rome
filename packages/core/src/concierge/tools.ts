@@ -403,21 +403,22 @@ export async function buildConciergeTools(
   // Rome's status on the guardian message a task works for
   // (docs/domains/chats.md#status). It only shows how the work stands, so
   // failing to write it never fails the tool.
-  const writeStatus = async (label: string, write: () => Promise<void>) => {
+  const writeStatus = async <T>(label: string, write: () => Promise<T>): Promise<T | null> => {
     try {
-      await write();
+      return await write();
     } catch (error) {
       log.warn(`failed to ${label} a message's task`, {
         error: error instanceof Error ? error.message : String(error),
       });
+      return null;
     }
   };
 
   // Sends `send` on to task `taskId` with guardian message `messageKey`
   // linked to it, so the message shows working while the task does: linked
   // first, so a task that ends at once still settles it. When the task never
-  // hears it the link is taken back, unless `keepOnFailure`: a task whose
-  // start failed stays, failed, and its message shows it.
+  // hears it the link is taken back to what it was, unless `keepOnFailure`:
+  // a task whose start failed stays, failed, and its message shows it.
   const sendLinked = async (
     taskId: string,
     messageKey: string | undefined,
@@ -426,12 +427,12 @@ export async function buildConciergeTools(
   ) => {
     if (!messageKey) return send();
     const target = { chatId: currentTurn().chatId, messageKey };
-    await writeStatus("link", () => tasks.repo.linkMessage(taskId, target));
+    const before = await writeStatus("link", () => tasks.repo.linkMessage(taskId, target));
     try {
       await send();
     } catch (error) {
       if (!keepOnFailure) {
-        await writeStatus("unlink", () => tasks.repo.unlinkMessage(taskId, target));
+        await writeStatus("unlink", () => tasks.repo.unlinkMessage(taskId, target, before));
       }
       throw error;
     }
@@ -1059,6 +1060,8 @@ export async function buildConciergeTools(
           // A reaction is how the turn handles the message, so its turn shows
           // it working no more (docs/domains/chats.md#status).
           if (emoji !== null) await service.messageStatus.reactedTo(chatId, messageId);
+          // Taken back, the message is the turn's work again.
+          else await service.messageStatus.reactionCleared(chatId, messageId);
           return emoji === null ? "Reaction cleared." : `Reacted ${emoji}.`;
         }),
     },

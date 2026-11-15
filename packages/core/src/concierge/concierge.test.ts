@@ -6385,6 +6385,35 @@ describe("Concierge tasks started for a guardian message", () => {
       expect([await statusOf(s, "a"), await statusOf(s, "b")]).toEqual([null, "failed"]);
       await s.taskRepo.reopenTurn(CONCIERGE_CHAT, "concierge-turn-1");
       expect([await statusOf(s, "a"), await statusOf(s, "b")]).toEqual([null, "working"]);
+      // The continuation fails too: the answered message stays settled.
+      await conciergeEnds(s, "error");
+      await s.settle();
+      expect([await statusOf(s, "a"), await statusOf(s, "b")]).toEqual([null, "failed"]);
+    });
+
+    it("makes a message the turn's work again once its reaction is taken back", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await s.tool("react", { emoji: "👍" });
+      await s.tool("react", { emoji: null });
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      expect(await statusOf(s, "g1")).toBe("working");
+      await conciergeEnds(s, "error");
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe("failed");
+    });
+
+    it("keeps a message on its task when a later send of its words is refused", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      expect(await statusOf(s, "g1")).toBe("working");
+      s.refuseSends({ ok: false, invalid: "busy" });
+      expect((await s.tool("chat_send", { chatId, text: "Faster", answers: "g1" })).isError).toBe(
+        true,
+      );
+      expect(await statusOf(s, "g1")).toBe("working");
     });
 
     it("keeps no ⚠️ on a message whose task got done once the task follows a newer message", async () => {

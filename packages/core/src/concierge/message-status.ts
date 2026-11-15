@@ -94,6 +94,11 @@ export class MessageStatusTracker {
     await this.guard(this.repo.markReacted(chatId, messageKey));
   }
 
+  /** The running turn of chat `chatId` took its reaction to `messageKey` back. */
+  async reactionCleared(chatId: string, messageKey: string): Promise<void> {
+    await this.guard(this.repo.markReacted(chatId, messageKey, false));
+  }
+
   /** Chat `chatId` runs no turn that carries its messages on: its turn's end settled them. */
   turnSettled(chatId: string): void {
     this.open.delete(chatId);

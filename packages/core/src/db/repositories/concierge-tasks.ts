@@ -771,11 +771,13 @@ export class ConciergeTasksRepository {
    * The open turn of guardian message `messageKey` of chat `chatId` reacted to
    * it: that is how it handled it, so the turn shows it neither working nor,
    * should it fail or be cut off, failed. A task made for it still shows.
+   * With `reacted` false the turn took its reaction back, so the message is
+   * its work again.
    */
-  async markReacted(chatId: string, messageKey: string): Promise<void> {
+  async markReacted(chatId: string, messageKey: string, reacted = true): Promise<void> {
     const changed = await this.db
       .update(conciergeMessageTurns)
-      .set({ reacted: true, workingAt: null })
+      .set(reacted ? { reacted: true, workingAt: null } : { reacted: false })
       .where(
         and(
           eq(conciergeMessageTurns.chatId, chatId),
@@ -882,21 +884,25 @@ export class ConciergeTasksRepository {
 
   /**
    * Turn `turnId` of Concierge chat `chatId` runs again, as when a usage limit
-   * cleared: every message it holds, its own and the ones handed on to it,
-   * is open again until it ends.
+   * cleared: every message its failure left, its own and the ones handed on
+   * to it, is open again until it ends. A message it answered or reacted to
+   * before stays settled.
    */
   async reopenTurn(chatId: string, turnId: string): Promise<number> {
     const changed = await this.db
       .update(conciergeMessageTurns)
       // It runs again for the messages its failure left: they work from now.
-      // The ones it answered or reacted to before show nothing.
       .set({
         answeredAt: null,
         turnFailed: false,
-        workingAt: sql`CASE WHEN ${conciergeMessageTurns.turnFailed} THEN COALESCE(${conciergeMessageTurns.workingAt}, ${Date.now()}) END`,
+        workingAt: sql`COALESCE(${conciergeMessageTurns.workingAt}, ${Date.now()})`,
       })
       .where(
-        and(eq(conciergeMessageTurns.chatId, chatId), eq(conciergeMessageTurns.turnId, turnId)),
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          eq(conciergeMessageTurns.turnId, turnId),
+          eq(conciergeMessageTurns.turnFailed, true),
+        ),
       )
       .returning({
         chatId: conciergeMessageTurns.chatId,
@@ -959,9 +965,22 @@ export class ConciergeTasksRepository {
    * Task `taskId` was made for guardian message `target`: started for it, or
    * given its words. The message it was made for last follows it from now
    * on, so the ones before settle; making it for an older one again moves it
-   * back there.
+   * back there. Answers the order it had before, or null when it is new,
+   * for {@link unlinkMessage}.
    */
-  async linkMessage(taskId: string, target: MessageTarget): Promise<void> {
+  async linkMessage(taskId: string, target: MessageTarget): Promise<number | null> {
+    // Read at once, in the same step as the write that follows.
+    const before = this.db
+      .select({ seq: conciergeMessageTasks.seq })
+      .from(conciergeMessageTasks)
+      .where(
+        and(
+          eq(conciergeMessageTasks.taskId, taskId),
+          eq(conciergeMessageTasks.chatId, target.chatId),
+          eq(conciergeMessageTasks.messageKey, target.messageKey),
+        ),
+      )
+      .get();
     const next = sql`(SELECT COALESCE(MAX(${conciergeMessageTasks.seq}), 0) + 1 FROM ${conciergeMessageTasks})`;
     await this.db
       .insert(conciergeMessageTasks)
@@ -987,20 +1006,23 @@ export class ConciergeTasksRepository {
           error: error instanceof Error ? error.message : String(error),
         }),
       );
+    return before?.seq ?? null;
   }
 
-  /** Takes back {@link linkMessage}, as when the task never heard the message. */
-  async unlinkMessage(taskId: string, target: MessageTarget): Promise<void> {
-    await this.db
-      .delete(conciergeMessageTasks)
-      .where(
-        and(
-          eq(conciergeMessageTasks.taskId, taskId),
-          eq(conciergeMessageTasks.chatId, target.chatId),
-          eq(conciergeMessageTasks.messageKey, target.messageKey),
-        ),
-      );
+  /**
+   * Takes back {@link linkMessage}, as when the task never heard the message:
+   * a link that stood before keeps its old order, and a new one goes.
+   */
+  async unlinkMessage(taskId: string, target: MessageTarget, before: number | null): Promise<void> {
+    const which = and(
+      eq(conciergeMessageTasks.taskId, taskId),
+      eq(conciergeMessageTasks.chatId, target.chatId),
+      eq(conciergeMessageTasks.messageKey, target.messageKey),
+    );
+    if (before === null) await this.db.delete(conciergeMessageTasks).where(which);
+    else await this.db.update(conciergeMessageTasks).set({ seq: before }).where(which);
     this.messageChanged([target]);
+    for (const other of await this.messagesOfTask(taskId)) this.messageChanged([other]);
   }
 
   /** The guardian messages task `taskId` was made for. */
