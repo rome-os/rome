@@ -55,6 +55,24 @@ What a connection lets Rome hear from the external system without being asked: a
 
 What one of the guardian's devices lets Agents reach on it live, over rome-node: one capability of one device, such as Apple Health on the guardian's iPhone. Each capability of each device is its own connection, so turning one off leaves the others working.
 
+**Two paths, one meeting point.** A capability on a device, such as Apple Health on an iPhone, reaches Rome in two ways:
+
+```
+          device capability (declared once, in the device's report)
+           ├── sync ──► personal data   stored readings, per Rome and origin
+           │                             read with core:personal_data_*, works while the device is away
+           └── live ──► device connection  ask the device now
+                                         read with core:device_describe / core:device_run
+
+  personal data ──(stale?)──► connection layer: which device, its state, the next step
+```
+
+- **Sync** is personal data's. The device pushes readings, Rome stores them, and Agents read them with no device online. Its switch is per Rome.
+- **Live** is the device connection's. An Agent asks the device now, and it answers only while it is online and its Live access is on. Its switch is per device.
+- **They meet in one place.** When the stored data does not cover a question, personal data asks the connection layer how to read it live: which device, its state, and the next step (a live read or a connect card). The dependency runs one way: personal data uses connections, and connections never read personal data. Neither stores the other's state.
+- **The asking device answers.** A live read goes to the device the guardian asks from, and never to another device they did not name.
+- **What a capability can do comes from the device's report**, never from a prompt.
+
 - The device declares its capabilities: each one's title, command prefix, operations with read or write, and whether it is personal. Core stores what the device reports and names no capability itself, so a new capability needs no core change.
 - Its grant is the device's own permission, such as the iOS permission for Health, and the device's Live access switch for that capability. A capability that needs no permission says so.
 - A device connection is **working**, **off** (Live access is off) or **broken** (the device's permission is denied). Rome reads the state from the device's last report when asked, and stores none of its own.
@@ -65,6 +83,7 @@ What one of the guardian's devices lets Agents reach on it live, over rome-node:
 - **The asking device answers.** The Rome app names its device with each message the guardian sends, and a live read asks that device alone. When its connection is off, broken or missing, the Agent offers that device's connect card and never reads another device, since another row may be a different app install that is not running. A task chat the Concierge hands work to keeps the device the guardian asked from, so its live reads ask that device too. The connect card raised for the asking device checks that device's connection alone. The turn a card's answer starts asks the device it was pressed on, else the device the card was raised for, else the device the chat was last handed work from, and an approval's resume keeps the device its turn had. Only a turn no device started, such as one from the web, a routine or a scheduled task's run, takes a working connection, from a device that reported in the last 7 days. The Agent may name a device itself. Personal data and `core:device_run` both get this choice from the connection layer, and personal data never reads the device table.
 - **A device id is one sign-in of one app install.** Its report names the install's personal-data origin, which stays the same across sign-ins, so Rome knows which install's data a device reads. Signing out reports no connections. Removing a device from the account through this Rome deletes its rows and turns its origin off when no other device id of that install still reports it, and its data stays. Rows leave no other way. A device whose last report is more than 7 days old is stale: it shows as stale and is never chosen, and its rows stay.
 
+## Decided against
 
 - **The next connection of the same kind takes over the disconnected account's name, chats and history.** For an account that takes an agent, a new account is a new participant, and inheriting another account's history misattributes what was said.
 - **Deleting a disconnected account's record, with the chats it alone was in.** The rule until 2026-11-04. The agent link is the guardian's decision about the account and outlives Rome's access to it, and a chat's history belongs to the chat whatever reaches it, so a disconnect removes Rome's reach and nothing else.
@@ -79,3 +98,8 @@ What one of the guardian's devices lets Agents reach on it live, over rome-node:
 - **The connection deciding whether an event concerns the guardian.** It dropped bulk mail, cc mail, bots and the guardian's own actions in code, which hid them from the one who decides, and every new service needed its own rules. Facts on the event let the follower decide.
 - **Sync state on a device connection.** The first sketch kept sync on and off, and its state, in the connection's record. Sync belongs to personal data, whose source row already records it, and two records of one switch drift apart.
 - **Each user of watching defining what can be watched.** The Concierge first listed GitHub event types and filtered mail itself. A second user would have repeated that, and the guardian would have met two names for one event and two answers to "can Rome watch this?".
+- **How to use a device capability, written in prompt prose.** Each new capability, wording change or platform meant editing two prompts, and the Concierge, which has no shell, could not read a device at all. Capabilities come from the device's report, through actions (#2211).
+- **Reading another device when the asking one cannot answer.** Another row may be a second app install that is not running: a live read went there, came back "device unreachable", and showed no connect card. The asking device answers, or its card shows.
+- **Personal data reading the device table.** It worked out the state and picked the device itself, so every change to live reads changed personal data too. It asks the connection layer instead.
+- **Deleting the rows a fetched device list leaves out.** Whether the list was whole was a guess, and a wrong guess deleted rows. Rows leave only by a removal through this Rome or a sign-out report.
+- **The device id as the personal-data origin.** A device id changes at every sign-in, so each sign-in would start a new origin, with Health's history stored again beside the old copy and the earlier data left out of Delete. The report names the install's stable origin instead.
