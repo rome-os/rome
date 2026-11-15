@@ -185,7 +185,7 @@ describe("personal-data actions", () => {
     });
     // A working connection is read live now, never by a check scheduled for later.
     const working = (await query()) as { data: { connection: { next?: string } } };
-    expect(working.data.connection.next).toContain("rome-node device run dev-1 <action>");
+    expect(working.data.connection.next).toContain('core:device_run and device "dev-1"');
     expect(working.data.connection.next).toContain("Do not schedule a later check");
     reportHealth("unknown", false);
     const off = (await query()) as { data: { connection: { next?: string } } };

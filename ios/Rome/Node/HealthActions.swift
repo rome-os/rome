@@ -299,6 +299,17 @@ struct HealthActions: Sendable {
     var device = DeviceKind.iPhone
 
     /// What `system.info` tells the agent about each action's arguments.
+    /// Each action's examples for the connection report: the ones its usage ends with.
+    static let examples: [String: [JSONValue]] = [
+        "health.stats": [
+            .object(["types": .array(["stepCount", "sleep", "restingHeartRate", "workouts"].map(JSONValue.string))]),
+            .object(["type": .string("stepCount"), "start": .string("2026-11-03"), "end": .string("2026-11-09"), "interval": .string("day")]),
+        ],
+        "health.samples": [
+            .object(["type": .string("heartRate"), "limit": .number(50)]),
+        ],
+    ]
+
     static func usage(_ device: DeviceKind = .iPhone) -> [String: String] {
         let name = device.name
         return [

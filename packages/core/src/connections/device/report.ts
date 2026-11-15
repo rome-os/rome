@@ -8,6 +8,24 @@ export const MAX_REPORT_BYTES = 64 * 1024;
 
 const identifier = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
 
+/**
+ * One operation as the device's registry declares it. `description`, `input`
+ * and `examples` came later and stay optional, so an older app's report still
+ * validates.
+ */
+export const deviceOperationSchema = z.object({
+  name: z.string().min(1).max(100),
+  access: z.enum(["read", "write"]),
+  /** What it does and how to call it, in English, for the Agent. */
+  description: z.string().max(4000).optional(),
+  /** The JSON schema of its arguments. */
+  input: z.record(z.string(), z.unknown()).optional(),
+  /** Argument objects that work as they are. */
+  examples: z.array(z.record(z.string(), z.unknown())).max(10).optional(),
+});
+
+export type DeviceOperation = z.infer<typeof deviceOperationSchema>;
+
 /** One device's full list of connections, as `PUT /api/device-connections` takes it. */
 export const deviceReportSchema = z.object({
   version: z.literal(1),
@@ -23,9 +41,7 @@ export const deviceReportSchema = z.object({
         title: z.string().min(1).max(100),
         prefix: identifier,
         personal: z.boolean(),
-        operations: z
-          .array(z.object({ name: z.string().min(1).max(100), access: z.enum(["read", "write"]) }))
-          .max(100),
+        operations: z.array(deviceOperationSchema).max(100),
         permission: z.enum(["granted", "denied", "not_needed", "unknown"]),
         live: z.boolean(),
         // What the capability also syncs to, such as `apple_health`. Opaque

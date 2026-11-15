@@ -6,6 +6,7 @@ import type { DrizzleDb } from "../../db/index.js";
 import { deviceConnections } from "../../db/schema/system.js";
 import {
   type DeviceConnectionState,
+  type DeviceOperation,
   type DeviceReport,
   deviceConnectionId,
   deviceConnectionState,
@@ -20,7 +21,7 @@ export interface DeviceConnection {
   title: string;
   prefix: string;
   personal: boolean;
-  operations: { name: string; access: "read" | "write" }[];
+  operations: DeviceOperation[];
   permission: Permission;
   live: boolean;
   /** What the capability also syncs to, as the device names it, or null. */

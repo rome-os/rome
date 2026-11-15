@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
+import { parse as parseYaml } from "yaml";
 import {
   buildPromptPrefix,
   buildSystemPrompt,
@@ -196,5 +200,38 @@ describe("projectSummary", () => {
 
   it("is null when the file has only headings", () => {
     expect(projectSummary("# Alpha\n\n## Notes")).toBeNull();
+  });
+});
+
+describe("the prompts and device connections", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const definition = (name: string) =>
+    parseYaml(readFileSync(resolve(here, `../../../agents/${name}.yaml`), "utf8")) as {
+      systemPromptPrefix: string;
+      actions?: string[];
+      policy?: PromptAgent["policy"];
+    };
+
+  // How a device capability is used comes from the device's report, through
+  // core:device_describe and core:device_run, so a new capability changes no prompt.
+  it("hold no device- or Health-specific text", () => {
+    for (const name of ["main", "concierge"]) {
+      const { systemPromptPrefix, actions, policy } = definition(name);
+      const prompt = buildPromptPrefix(
+        { name, owner: "core", systemPromptPrefix, actions, policy },
+        { ...material, charter: "", identity: "" },
+      );
+      for (const word of [
+        /health/i,
+        /battery/i,
+        /iphone/i,
+        /device\.status/,
+        /rome-node device run <device id>/,
+        /live read to a task chat/,
+        /reads a device live/,
+      ]) {
+        expect({ name, found: word.test(prompt) }).toEqual({ name, found: false });
+      }
+    }
   });
 });

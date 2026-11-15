@@ -61,6 +61,7 @@ What one of the guardian's devices lets Agents reach on it live, over rome-node:
 - Offline is not broken. Rome keeps when the device last reported and never claims it is online: whether it answers shows only when an Agent asks it.
 - A device connection holds only what live access needs, and the name of what its capability also syncs to, which it does not read. [Personal data](../personal-data.md) may name the device connection that reads the same data live, and never the reverse: a connection knows nothing of sync, and neither stores the other's state. Screens that show both read both.
 - The guardian connects a device connection on the device itself. A connect card in a chat leads there.
+- Agents find device connections with `core:device_describe`, which lists each device's capabilities, operations, argument schemas and state from the device's last report and asks no device, and call one with `core:device_run`. A connection that is `off` or `broken` refuses before Rome calls the device and says what the guardian can turn on, and an offline device answers `target_unavailable` at once. With several devices, Rome picks the working one that reported last, unless the Agent names one. How a capability is used lives in the device's own report, never in a prompt.
 
 
 - **The next connection of the same kind takes over the disconnected account's name, chats and history.** For an account that takes an agent, a new account is a new participant, and inheriting another account's history misattributes what was said.

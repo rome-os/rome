@@ -2,6 +2,8 @@
 // a source names. The store points; it never says how to run the device.
 // Contract: docs/personal-data.md#live.
 
+import { DEVICE_DESCRIBE_ACTION, DEVICE_RUN_ACTION } from "../connections/device/actions.js";
+import { connectStep } from "../connections/device/connect-step.js";
 import type {
   DeviceConnection,
   DeviceConnectionsRepository,
@@ -71,32 +73,12 @@ export function withNextStep(
   gapMs = Number.POSITIVE_INFINITY,
 ): ConnectionPointer & { next?: string } {
   const fresh = "In this same reply, answer from the stored data and say how fresh it is";
-  if (pointer.state === "not_connected") {
-    return {
-      ...pointer,
-      next: `${fresh}, then ask the guardian to connect it in the Rome app on their device.`,
-    };
-  }
+  const step = connectStep(pointer, fresh);
+  if (step) return { ...pointer, next: step };
+  if (pointer.state === "not_connected") return pointer;
   const on = pointer.device.name ? `${pointer.title} on ${pointer.device.name}` : pointer.title;
-  if (pointer.state === "off") {
-    return {
-      ...pointer,
-      next:
-        `Live access to ${on} is off. ${fresh}, then offer to turn it on: show the card with ` +
-        `connect_account and kind "${pointer.kind}" when connect_account lists it, otherwise ` +
-        "ask the guardian to turn on Live access in the Rome app on their device.",
-    };
-  }
-  if (pointer.state === "broken") {
-    return {
-      ...pointer,
-      next:
-        `The device's permission for ${on} is denied. ${fresh}, then ask the guardian to ` +
-        "allow it in the device's settings.",
-    };
-  }
   // Working, and the store lags by minutes: a live read would cost more than
-  // it adds (in the Concierge, a task chat per question).
+  // it adds.
   if (gapMs <= LIVE_READ_GAP_MS) {
     return {
       ...pointer,
@@ -111,9 +93,9 @@ export function withNextStep(
   return {
     ...pointer,
     next:
-      `Read the rest from ${on} live now: rome-node device run ${pointer.device.id} <action>, ` +
-      `arguments from rome-node device describe ${pointer.device.id}. Do not schedule a later ` +
-      "check for this. If the device does not answer, answer from the stored data and say how " +
-      "fresh it is.",
+      `Read the rest from ${on} live now with ${DEVICE_RUN_ACTION} and device ` +
+      `"${pointer.device.id}", the operation and arguments from ${DEVICE_DESCRIBE_ACTION}. Do not ` +
+      "schedule a later check for this. If the " +
+      "device does not answer, answer from the stored data and say how fresh it is.",
   };
 }

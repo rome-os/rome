@@ -226,6 +226,7 @@ import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
 import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
+import { registerDeviceActions } from "./connections/device/actions.js";
 import { deviceKinds } from "./connections/connect-card.js";
 import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
@@ -1432,6 +1433,10 @@ async function main() {
     personalData: personalDataRepo,
     guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
     connections: deviceConnectionsRepo,
+  });
+  registerDeviceActions(actionRegistry, {
+    connections: deviceConnectionsRepo,
+    run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
   });
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {

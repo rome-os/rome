@@ -1583,8 +1583,18 @@ export const deviceConnections = sqliteTable(
     // The command prefix, without the dot, such as `health`.
     prefix: text("prefix").notNull(),
     personal: integer("personal", { mode: "boolean" }).notNull(),
+    // Each operation as the device reports it: name, access, and the optional
+    // description, input schema and examples.
     operations: text("operations", { mode: "json" })
-      .$type<{ name: string; access: "read" | "write" }[]>()
+      .$type<
+        {
+          name: string;
+          access: "read" | "write";
+          description?: string;
+          input?: Record<string, unknown>;
+          examples?: Record<string, unknown>[];
+        }[]
+      >()
       .notNull(),
     permission: text("permission").notNull(), // granted | denied | not_needed | unknown
     // The device's Live access switch.

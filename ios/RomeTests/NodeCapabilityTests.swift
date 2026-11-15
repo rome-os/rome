@@ -102,15 +102,26 @@ extension DeviceStatus {
         let registry = NodeCapabilityRegistry.testing(HealthFixtures.actions(health), health: NodeFlag(true), device: NodeFlag(false))
         let list = await registry.connections()
         #expect(list.map(\.capability) == ["apple_health", "device"])
+        let healthActions = registry.capability(id: "apple_health")!.actions
+        let deviceActions = registry.capability(id: "device")!.actions
         #expect(list[0] == .init(
             capability: "apple_health", title: "Apple Health", prefix: "health", personal: true,
-            operations: [.init(name: "health.stats", access: "read"), .init(name: "health.samples", access: "read")],
+            operations: healthActions.map(\.reportedOperation),
             feeds: "apple_health", permission: "unknown", live: true
         ), "HealthKit hides read access: always unknown")
+        #expect(list[0].operations.map(\.name) == ["health.stats", "health.samples"])
         #expect(list[1] == .init(
             capability: "device", title: "Device", prefix: "device", personal: false,
-            operations: [.init(name: "device.status", access: "read")], permission: "not_needed", live: false
+            operations: deviceActions.map(\.reportedOperation), permission: "not_needed", live: false
         ))
+        #expect(list[1].operations.map(\.name) == ["device.status"])
+        // Each operation carries its usage and examples, so the Rome lists it from the report alone.
+        for operation in list.flatMap(\.operations) {
+            #expect(operation.access == "read")
+            #expect(operation.description?.isEmpty == false, "\(operation.name) carries its usage")
+            #expect(operation.examples?.isEmpty == false, "\(operation.name) carries an example")
+        }
+        #expect(list[1].operations[0].input?["additionalProperties"] == .bool(false), "device.status takes no arguments")
         #expect(registry.capability(id: "apple_health")?.needsPermission == true)
         #expect(registry.capability(id: "device")?.needsPermission == false)
         #expect(registry.capability(id: "apple_health")?.syncSource == "apple_health")
@@ -136,6 +147,7 @@ extension DeviceStatus {
         #expect(json["connections"]?.array?.first?["permission"]?.string == "not_needed")
         #expect(json["connections"]?.array?.first?["operations"]?.array?.first?["access"]?.string == "read")
         #expect(json["connections"]?.array?.first?["feeds"] == nil, "omitted for one that syncs nothing")
+        #expect(json["connections"]?.array?.first?["operations"]?.array?.first?["description"] == nil, "omitted when the registry declares none")
         #expect(DeviceConnections.connectionId(device: "DEV-1", capability: "apple_health") == "dev-1:apple_health")
         #expect(DeviceConnections.connectionId(device: nil, capability: "apple_health") == nil)
     }

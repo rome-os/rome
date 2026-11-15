@@ -61,7 +61,7 @@ struct NodeCapabilityRegistry: Sendable {
                 title: capability.name,
                 prefix: capability.prefix,
                 personal: capability.personal,
-                operations: capability.actions.map { .init(name: $0.name, access: $0.access.rawValue) },
+                operations: capability.actions.map(\.reportedOperation),
                 feeds: capability.syncSource,
                 permission: await capability.permission().rawValue,
                 // Live as the phone would answer now: Health whose iOS
@@ -77,5 +77,19 @@ struct NodeCapabilityRegistry: Sendable {
         var rows: [(capability: any NodeCapability, state: NodeCapabilityState)] = []
         for capability in capabilities { rows.append((capability, await capability.state())) }
         return rows
+    }
+}
+
+extension NodeActionSpec {
+    /// The operation as the connection report carries it, so the Rome lists
+    /// and runs it from the registry alone.
+    var reportedOperation: DeviceConnectionReport.Operation {
+        .init(
+            name: name,
+            access: access.rawValue,
+            description: usage.isEmpty ? nil : usage,
+            input: input,
+            examples: examples.isEmpty ? nil : examples
+        )
     }
 }

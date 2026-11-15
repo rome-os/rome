@@ -21,6 +21,16 @@ const actionName = (action: string) =>
   ).name;
 
 describe("the Concierge agent", () => {
+  it("reads a device itself through the device actions, with no task chat", () => {
+    expect(concierge.actions).toEqual(
+      expect.arrayContaining(["core:device_describe", "core:device_run"]),
+    );
+    expect(concierge.systemPromptPrefix).toContain(
+      "Call the actions listed for you yourself, with `execute_action`: they are not tasks.",
+    );
+    expect(concierge.systemPromptPrefix).not.toContain("hand a live read to a task chat");
+  });
+
   it("renames through the core action instead of editing the setting-owned identity line", () => {
     expect(concierge.actions).toContain("core:set_agent_name");
     for (const prompt of [

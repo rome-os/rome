@@ -25,6 +25,12 @@ struct DeviceConnectionReport: Encodable, Sendable, Equatable {
         let name: String
         /// `read` or `write`.
         let access: String
+        /// The action's usage, in English, for the Agent. Added after the
+        /// first report, so every field below is optional on the Rome.
+        var description: String? = nil
+        /// The JSON schema of its arguments.
+        var input: JSONValue? = nil
+        var examples: [JSONValue]? = nil
     }
 
     struct Connection: Encodable, Sendable, Equatable {
