@@ -242,12 +242,18 @@ private struct TopicComposer: View {
     @Binding var focused: Bool
     let attachments: ComposerAttachments
     let onSend: () -> Void
+    @Environment(\.visibleChat) private var visibleChat
+    @Environment(\.offScreen) private var offScreen
+
+    /// A blank chat is never the visible chat, as it has no id yet: it goes
+    /// by whether a page or a sheet covers it.
+    private var onScreen: Bool { chatId.map { visibleChat == $0 } ?? !offScreen }
 
     var body: some View {
         let chat = chatId.flatMap(workspace.topics.chat)
         // Only "Message in <name>" is fitted; a reply keeps "Reply".
         let name = replying ? nil : TopicChatsStore.composerName(chat)
-        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceKey: chatId, onSend: onSend)
+        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: replying ? .thread : .topicChat, onScreen: onScreen, onSend: onSend)
     }
 }
 

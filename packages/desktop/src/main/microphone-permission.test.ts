@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
-import { allowsMedia } from "./microphone-permission";
+import { allowsMedia, installMicrophonePermission } from "./microphone-permission";
 
-const DASHBOARD = "https://rome.example.com/chat";
+const ROME = "https://rome.example.com";
 const ask = (overrides: Partial<Parameters<typeof allowsMedia>[0]> = {}) =>
   allowsMedia(
     {
@@ -10,7 +10,7 @@ const ask = (overrides: Partial<Parameters<typeof allowsMedia>[0]> = {}) =>
       mediaTypes: ["audio"],
       ...overrides,
     },
-    DASHBOARD,
+    ROME,
   );
 
 describe("allowsMedia", () => {
@@ -33,9 +33,91 @@ describe("allowsMedia", () => {
     expect(ask({ mediaTypes: [] })).toBe(false);
   });
 
-  it("refuses everything before a dashboard is known", () => {
+  it("refuses everything before a Rome is open, Rome Cloud included", () => {
     expect(
-      allowsMedia({ url: "file:///onboarding.html", isMainFrame: true, mediaTypes: ["audio"] }, ""),
+      allowsMedia(
+        { url: "https://romeos.cc/login", isMainFrame: true, mediaTypes: ["audio"] },
+        null,
+      ),
+    ).toBe(false);
+  });
+});
+
+/** The two handlers a session was given, called the way Electron calls them. */
+function installed(origin: string | null = ROME) {
+  let request: ((...args: never[]) => void) | undefined;
+  let check: ((...args: never[]) => boolean) | undefined;
+  installMicrophonePermission(
+    {
+      setPermissionRequestHandler: (handler) => {
+        request = handler as never;
+      },
+      setPermissionCheckHandler: (handler) => {
+        check = handler as never;
+      },
+    },
+    () => origin,
+  );
+  const requested = (permission: string, details: Record<string, unknown> = {}) => {
+    let answer: boolean | undefined;
+    (request as (...args: unknown[]) => void)(
+      {},
+      permission,
+      (granted: boolean) => {
+        answer = granted;
+      },
+      details,
+    );
+    return answer;
+  };
+  const checked = (permission: string, details: Record<string, unknown> = {}) =>
+    (check as (...args: unknown[]) => boolean)({}, permission, ROME, details);
+  return { requested, checked };
+}
+
+describe("installMicrophonePermission", () => {
+  it("gives the open Rome's main frame the microphone", () => {
+    const { requested, checked } = installed();
+    expect(
+      requested("media", {
+        requestingUrl: `${ROME}/chat`,
+        isMainFrame: true,
+        mediaTypes: ["audio"],
+      }),
+    ).toBe(true);
+    expect(checked("media", { securityOrigin: ROME, isMainFrame: true, mediaType: "audio" })).toBe(
+      true,
+    );
+  });
+
+  it("refuses screen capture to every page, the open Rome included", () => {
+    const { requested, checked } = installed();
+    expect(requested("display-capture", { requestingUrl: `${ROME}/chat`, isMainFrame: true })).toBe(
+      false,
+    );
+    expect(checked("display-capture", { securityOrigin: ROME, isMainFrame: true })).toBe(false);
+  });
+
+  it("keeps Electron's refusal of synchronous clipboard reads", () => {
+    const { requested, checked } = installed();
+    expect(requested("deprecated-sync-clipboard-read")).toBe(false);
+    expect(checked("deprecated-sync-clipboard-read")).toBe(false);
+  });
+
+  it("keeps Electron's grant for other permissions", () => {
+    const { requested, checked } = installed();
+    expect(requested("notifications")).toBe(true);
+    expect(checked("fullscreen")).toBe(true);
+  });
+
+  it("refuses the microphone while no Rome is open", () => {
+    const { requested } = installed(null);
+    expect(
+      requested("media", {
+        requestingUrl: `${ROME}/chat`,
+        isMainFrame: true,
+        mediaTypes: ["audio"],
+      }),
     ).toBe(false);
   });
 });

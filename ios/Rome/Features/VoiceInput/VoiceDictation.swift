@@ -151,7 +151,6 @@ final class VoiceDictation {
         case .alive:
             break
         case .ended:
-            pending = ""
             finish(nil)
         case .error(let stop):
             finish(stop)

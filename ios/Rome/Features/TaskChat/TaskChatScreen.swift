@@ -8,6 +8,7 @@ struct TaskChatScreen: View {
     let initialTitle: String
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.visibleChat) private var visibleChat
     /// Kept on the workspace, so a failed send's bubble and Retry are still
     /// there when the guardian comes back, and the draft waits for it to load.
     private var store: TranscriptStore { workspace.taskStore(chatId) }
@@ -49,7 +50,10 @@ struct TaskChatScreen: View {
                 stopping: store.stopping,
                 focused: $composerFocused,
                 attachments: attachments,
+                voiceInput: workspace.voiceInput,
                 voiceKey: chatId,
+                voiceField: .taskChat,
+                onScreen: visibleChat == chatId,
                 onSend: {
                     guard !attachments.isPreparing else { return }
                     if store.send(draft, images: attachments.images, fromComposer: true) {

@@ -1,3 +1,4 @@
+import os
 import AVFoundation
 import SwiftUI
 import UIKit
@@ -33,11 +34,6 @@ final class VoiceInputService {
     func takeNotice(for chat: String) -> VoiceInputStop? { leftNotices.removeValue(forKey: chat) }
 }
 
-extension EnvironmentValues {
-    /// The instance's voice input; nil (demo data, previews) shows no control.
-    @Entry var voiceInput: VoiceInputService? = nil
-}
-
 /// The message field's UIKit view, so spoken text can go in the way typing does.
 @MainActor
 final class ComposerTextHandle {
@@ -70,19 +66,22 @@ final class VoiceInputController {
     @ObservationIgnored private var dictation: VoiceDictation?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var anchor: (original: String, range: NSRange)?
+    /// From the tap until the field shows it listens.
+    @ObservationIgnored private var startInterval: OSSignpostIntervalState?
 
     var active: Bool { state != .idle }
 
-    func toggle(service: VoiceInputService, text: Binding<String>, handle: ComposerTextHandle) {
+    func toggle(service: VoiceInputService, field: VoiceInputField, text: Binding<String>, handle: ComposerTextHandle) {
         switch state {
-        case .idle: start(service: service, text: text, handle: handle)
+        case .idle: start(service: service, field: field, text: text, handle: handle)
         case .listening: stop()
         case .finishing: break
         }
     }
 
-    func start(service: VoiceInputService, text: Binding<String>, handle: ComposerTextHandle) {
+    func start(service: VoiceInputService, field: VoiceInputField, text: Binding<String>, handle: ComposerTextHandle) {
         guard dictation == nil, let request = service.socketRequest() else { return }
+        startInterval = VoiceInputSignpost.begin(field)
         let original = text.wrappedValue
         let length = (original as NSString).length
         let selected = handle.view?.selectedRange ?? NSRange(location: length, length: 0)
@@ -108,6 +107,14 @@ final class VoiceInputController {
         self.dictation = dictation
         observe()
         dictation.start()
+    }
+
+    /// Call when the field has drawn `state`: a start's interval ends once
+    /// the field shows that it listens.
+    func stateShown() {
+        guard let interval = startInterval, state != .idle else { return }
+        startInterval = nil
+        VoiceInputSignpost.end(interval)
     }
 
     func stop() {
