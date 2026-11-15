@@ -441,18 +441,26 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
   });
 
   it("gives the field back when Rome never answers a stop", async () => {
-    FakeSocket.opens = false;
     const { field } = renderComposer(kind);
-    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
-    await waitFor(() => expect(FakeSocket.last).not.toBeNull());
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    // Every dictation timer is fake, so only the stop's own bound can run out.
     rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    const socket = FakeSocket.last!;
+    expect(socket.textSent).toEqual([{ type: "start", sampleRate: 16000, bufferedMs: 0 }]);
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
-    expect(field().readOnly).toBe(true);
+    await act(async () => {});
+    expect(socket.textSent.at(-1)).toEqual({ type: "stop" });
 
-    // Rome's own bound on a stop runs out first, so its reason would arrive.
-    act(() => rs.advanceTimersByTime(17_000));
+    // Rome is still there, so the connection is not lost, but the rest of the
+    // text never comes. Rome's own bound on a stop would run out first.
+    for (let elapsed = 0; elapsed < 18_000; elapsed += 2_000) {
+      act(() => rs.advanceTimersByTime(2_000));
+      socket.say({ type: "alive" });
+    }
     expect(field().readOnly).toBe(true);
-    act(() => rs.advanceTimersByTime(3_000));
+    act(() => rs.advanceTimersByTime(2_000));
     rs.useRealTimers();
 
     expect(field().readOnly).toBe(false);
