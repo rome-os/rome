@@ -85,7 +85,7 @@ export function createVoiceInputSource(deps: VoiceInputSourceDeps): VoiceInputSo
   // The place Rome Cloud serves from, read without minting a credential.
   const romeCloudInfo = async (caller: RomeCloudCaller): Promise<VoiceInputInfo> => {
     const now = Date.now();
-    const asker = `${caller.origin} ${(await caller.bearer()) ?? ""}`;
+    const asker = `${caller.origin} ${caller.credentialId}`;
     if (named && named.asker === asker && now - named.at < PROVIDER_TTL_MS) {
       return { available: true, place: named.place };
     }
