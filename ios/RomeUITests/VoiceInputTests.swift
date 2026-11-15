@@ -138,7 +138,157 @@ final class VoiceInputTests: XCTestCase {
         }
     }
 
+    // MARK: Rule 7
+
+    /// Rule 7 when the guardian opens another chat and comes back.
+    @MainActor
+    func testRule7LeavingTheChatKeepsTheWords() throws {
+        let app = try launch(recording: Self.hum)
+        try checkWordsKept(app, stop: "leaving the chat", notice: "Listening stopped when you left this chat") {
+            app.buttons["Open navigation"].tap()
+            let other = app.buttons.matching(identifier: "topic-chat").firstMatch
+            if other.waitForExistence(timeout: 3) { other.tap() } else { app.buttons["New topic chat"].tap() }
+            _ = onScreen(app.textViews, "message-field").waitForExistence(timeout: 10)
+            app.buttons["Open navigation"].tap()
+            app.buttons["Chat"].firstMatch.tap()
+            return app
+        }
+    }
+
+    /// Rule 7 when the app goes to the background and the guardian comes back.
+    @MainActor
+    func testRule7TheBackgroundKeepsTheWords() throws {
+        let app = try launch(recording: Self.hum)
+        try checkWordsKept(app, stop: "the background", notice: "Listening stopped when Rome went to the background") {
+            XCUIDevice.shared.press(.home)
+            Thread.sleep(forTimeInterval: 3)
+            app.activate()
+            return app
+        }
+    }
+
+    /// Rule 7 when the app is ended and opened again, iOS's nearest thing to a reload: the words
+    /// come back from the kept draft, and the notice goes away on the next edit without taking
+    /// the typed character with it.
+    @MainActor
+    func testRule7RelaunchingKeepsTheWords() throws {
+        let first = try launch(recording: Self.hum)
+        let app = try checkWordsKept(first, stop: "a relaunch", notice: "Listening stopped when Rome closed") {
+            first.terminate()
+            return try launch(recording: Self.hum)
+        }
+        let field = onScreen(app.textViews, "message-field")
+        let before = fieldText(field)
+        field.tap()
+        field.typeText("Z")
+        let after = fieldText(field)
+        XCTAssertEqual(after.count, before.count + 1, "the edit after the notice changed \(after.count - before.count) characters; wanted 1")
+        XCTAssertTrue(after.contains("Z"), "the typed character was lost after the notice")
+        let notice = app.descendants(matching: .any)["voice-input-notice"]
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: notice)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed, "the notice stayed after the next edit")
+    }
+
+    /// Rule 7 when the transcriber fails partway: the stand-in instance ends the session with
+    /// an error, and listening stops by itself.
+    @MainActor
+    func testRule7ATranscriberErrorKeepsTheWords() throws {
+        let app = try launch(recording: Self.hum)
+        // The reason Rome sends when its route to the transcriber drops mid-message.
+        try standIn(["error": ["reason": "provider-unavailable", "afterMs": 10000]])
+        try checkWordsKept(app, stop: "a transcriber error", notice: "Transcription service unavailable. Listening stopped") {
+            let control = onScreen(app.buttons, "voice-input")
+            _ = waitForLabel(control, "Start voice input", timeout: 20)
+            return app
+        }
+    }
+
     // MARK: Helpers
+
+    /// A recording the stand-in instance hears as speech for its whole two minutes, so only the
+    /// stop under test ends listening.
+    static let hum = "hum"
+
+    /// Starts listening in the Chat, waits for some words, makes `stop` happen, and checks that
+    /// the words shown before the stop are in the field afterwards and that the field says why
+    /// within 5 s. `stop` returns the app to read from, which is a new one after a relaunch.
+    @MainActor
+    @discardableResult
+    private func checkWordsKept(_ app: XCUIApplication, stop: String, notice expected: String,
+                                _ makeStop: () throws -> XCUIApplication) throws -> XCUIApplication {
+        try standIn(["transcript": Self.longTranscript])
+        defer { try? standIn(["transcript": Self.transcript]) }
+        let control = onScreen(app.buttons, "voice-input")
+        try requireControl(app, control, "\(stop): the Chat has no voice control")
+        let field = onScreen(app.textViews, "message-field")
+        let empty = fieldText(field)
+        guard tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")) else {
+            printScreen(app, "\(stop): listening never started")
+            XCTFail("\(stop): listening never started")
+            return app
+        }
+        // Read the field until it holds some words, and keep the last reading before the stop.
+        var before = empty
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline, control.label == "Stop voice input" {
+            before = fieldText(field)
+            if words(before).count >= words(empty).count + 3 { break }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCTAssertGreaterThan(words(before).count, words(empty).count, "\(stop): no words showed before the stop")
+        let back = try makeStop()
+        let notice = back.descendants(matching: .any)["voice-input-notice"]
+        let noticeShown = notice.waitForExistence(timeout: 5)
+        let after = fieldText(onScreen(back.textViews, "message-field"))
+        // The word arriving at the stop may be cut, so all but the last word must be kept.
+        let kept = words(before).dropLast().joined(separator: " ")
+        if !words(after).joined(separator: " ").contains(kept) {
+            printScreen(back, "\(stop): words lost")
+            XCTFail("\(stop): the field holds \"\(after)\"; before the stop it held \"\(before)\"")
+        }
+        if !noticeShown {
+            printScreen(back, "\(stop): no notice")
+            XCTFail("\(stop): the field did not say why listening stopped within 5 s")
+        } else {
+            XCTAssertEqual(notice.label, expected, "\(stop): the notice says something else")
+        }
+        if onScreen(back.buttons, "voice-input").label != "Start voice input" {
+            XCTFail("\(stop): listening was still shown after the stop")
+        }
+        return back
+    }
+
+    /// What the stand-in instance transcribes by default, and a transcript long enough that
+    /// words keep arriving until any stop: one word every 300 ms for about a minute.
+    static let transcript = "Remind me to call the dentist tomorrow at 9 in the morning."
+    static let longTranscript = Array(repeating: transcript, count: 16).joined(separator: " ")
+
+    @MainActor
+    private func fieldText(_ field: XCUIElement) -> String {
+        field.value as? String ?? ""
+    }
+
+    private func words(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    }
+
+    /// Sets how the stand-in instance's next voice session goes, through its control route.
+    @MainActor
+    private func standIn(_ body: [String: Any]) throws {
+        let origin = try XCTUnwrap(ProcessInfo.processInfo.environment["ROME_LOCAL_ORIGIN"])
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(origin)/__stand-in/voice")))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        var status = 0
+        let done = expectation(description: "the stand-in instance takes \(body.keys.sorted())")
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        XCTAssertEqual(status, 200, "the stand-in instance refused \(body.keys.sorted())")
+    }
 
     /// Starts and stops `repeats` times in the open field: one tap shows listening, with the
     /// selected trait, and one tap shows finishing or idle. Each start's `StartListening`
@@ -197,27 +347,34 @@ final class VoiceInputTests: XCTestCase {
         return index.map { matches.element(boundBy: $0) } ?? matches.firstMatch
     }
 
-    /// A two-minute silent recording, 16 kHz mono 16-bit, so listening lasts through XCUITest's
-    /// slow steps until the test stops it.
-    private func silence() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("silence.wav")
+    /// A generated two-minute recording, 16 kHz mono 16-bit: silence, or a hum the stand-in
+    /// instance hears as speech. Silence lets listening last through XCUITest's slow steps until
+    /// the test stops it; the hum also keeps the stand-in's no-speech end away.
+    private func generated(_ name: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(name).wav")
         if FileManager.default.fileExists(atPath: url.path) { return url }
         let rate: UInt32 = 16000
-        let bytes = rate * 2 * 120
+        let count = Int(rate) * 120
         var data = Data()
         func text(_ s: String) { data.append(contentsOf: Array(s.utf8)) }
         func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
         func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-        text("RIFF"); u32(36 + bytes); text("WAVE")
+        text("RIFF"); u32(36 + UInt32(count * 2)); text("WAVE")
         text("fmt "); u32(16); u16(1); u16(1); u32(rate); u32(rate * 2); u16(2); u16(16)
-        text("data"); u32(bytes)
-        data.append(Data(count: Int(bytes)))
+        text("data"); u32(UInt32(count * 2))
+        if name == Self.hum {
+            var samples = [Int16](repeating: 0, count: count)
+            for i in 0..<count { samples[i] = Int16(2000 * sin(2 * Double.pi * 200 * Double(i) / Double(rate))) }
+            samples.withUnsafeBytes { data.append(contentsOf: $0) }
+        } else {
+            data.append(Data(count: count * 2))
+        }
         try data.write(to: url)
         return url
     }
 
     /// Launches the app signed in to the stand-in instance, playing `recording` (a WAV in this
-    /// bundle, or silence when nil) as the microphone, or with the microphone as `microphone` says.
+    /// bundle, `hum`, or silence when nil) as the microphone, or with the microphone as `microphone` says.
     @MainActor
     private func launch(recording: String? = nil, microphone: String? = nil, language: String = "en") throws -> XCUIApplication {
         let env = ProcessInfo.processInfo.environment
@@ -236,12 +393,12 @@ final class VoiceInputTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(\(language))"]
         if let microphone {
             app.launchArguments += ["-RomeVoiceInputMicrophone", microphone]
-        } else if let recording {
+        } else if let recording, recording != Self.hum {
             let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: recording, withExtension: "wav"),
                                     "\(recording).wav is missing from the test bundle")
             app.launchArguments += ["-RomeVoiceInputRecording", url.path]
         } else {
-            app.launchArguments += ["-RomeVoiceInputRecording", try silence().path]
+            app.launchArguments += ["-RomeVoiceInputRecording", try generated(recording ?? "silence").path]
         }
         app.launch()
         return app
