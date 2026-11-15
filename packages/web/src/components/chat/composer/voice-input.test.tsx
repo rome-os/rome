@@ -427,6 +427,24 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     );
   });
 
+  it("notices a connection that never opens within 5 seconds", async () => {
+    FakeSocket.opens = false;
+    renderComposer(kind);
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    expect(FakeSocket.last).toBeTruthy();
+
+    act(() => rs.advanceTimersByTime(3_100));
+    rs.useRealTimers();
+
+    expect(microphone.closed).toBe(1);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+  });
+
   it("keeps the words heard and says the connection was lost when it drops after a stop", async () => {
     const { field } = renderComposer(kind);
     const socket = await startListening();
