@@ -1,18 +1,13 @@
 // The live sign that the agent is writing a message, the chat's typing dots
-// (docs/domains/chats.md#status-reaction). A provider that streams a tool
+// (docs/domains/chats.md#reaction). A provider that streams a tool
 // call's input says exactly when a message tool's call starts; for any other
 // the clients show the dots briefly before each message lands.
 
 import type { MessageWritingMode } from "@rome/api-types/concierge";
+import { bareTool } from "../../lib/tool-name.js";
 
 /** The tools whose call is itself a message the chat shows. */
 const MESSAGE_TOOLS = new Set(["say", "chat_forward"]);
-
-/** A tool's name without its provider or group prefix (`mcp__rome__say`, `core:say`). */
-function bareTool(tool: string): string {
-  const afterMcp = tool.includes("__") ? tool.slice(tool.lastIndexOf("__") + 2) : tool;
-  return afterMcp.slice(afterMcp.lastIndexOf(":") + 1).toLowerCase();
-}
 
 /**
  * How a provider's turns show the typing dots: exactly where it streams a

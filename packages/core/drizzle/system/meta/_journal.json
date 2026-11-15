@@ -974,6 +974,13 @@
       "when": 1794683344348,
       "tag": "0139_device_connection_feeds",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "6",
+      "when": 1794716535965,
+      "tag": "0140_concierge_message_status",
+      "breakpoints": true
     }
   ]
 }

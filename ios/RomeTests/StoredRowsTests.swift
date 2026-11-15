@@ -153,9 +153,9 @@ private func message(
         #expect(!info("u3:1").quoteLeads)
         // The reaction follows the event.
         #expect(info("u1:0").mark == nil)
-        let mark = LiveEvent.reaction(sessionId: "concierge", messageId: "u1", reaction: "👀")
+        let mark = LiveEvent.reaction(sessionId: "concierge", messageId: "u1", reaction: "👍")
         backend.bus.emit(LiveTopic.chat("concierge"), mark)
-        #expect(info("u1:0").mark == "👀")
+        #expect(info("u1:0").mark?.emoji == "👍")
         store.stop()
     }
 

@@ -7,8 +7,10 @@ import {
   type ConciergeOpenWait,
   type ConciergeTaskDto,
 } from "@rome/api-types/concierge";
+import type { ConciergeMessageStatus } from "@rome/api-types/concierge";
 import {
   CONCIERGE_TASK_WAIT_EXPIRY_MS,
+  messageStatus,
   type ConciergeTaskFacts,
   type ConciergeTaskStatusResult,
   legacyTaskState,
@@ -22,6 +24,7 @@ import type {
   ConciergeTaskRow,
   ConciergeTasksRepository,
   ConciergeTaskWithChat,
+  MessageTarget,
 } from "../db/repositories/concierge-tasks.js";
 
 const log = createLogger("concierge-tasks");
@@ -410,6 +413,78 @@ export class ConciergeTasks {
     if (this.told.get(row.id) === keyOf(of)) return;
     this.told.set(row.id, keyOf(of));
     await this.repo.reannounce(row.id);
+  }
+
+  /**
+   * The status of each of `messageKeys` in Concierge chat `chatId` that has
+   * one, derived from its turn and the status of the tasks made for it
+   * (`messageStatus`).
+   */
+  async messageStatusesOf(
+    chatId: string,
+    messageKeys: readonly string[],
+  ): Promise<Map<string, ConciergeMessageStatus>> {
+    const marks = await this.repo.messageMarks(chatId, messageKeys);
+    const taskIds = [...new Set([...marks.values()].flatMap((mark) => mark.taskIds))];
+    const rows = await this.repo.getMany(taskIds);
+    const status = await this.statusOf(rows);
+    const out = new Map<string, ConciergeMessageStatus>();
+    for (const [key, mark] of marks) {
+      const found = messageStatus({
+        answered: mark.answered,
+        working: mark.working,
+        turnFailed: mark.turnFailed,
+        tasks: mark.taskIds.flatMap((id) => {
+          const of = status.get(id);
+          const row = rows.find((candidate) => candidate.id === id);
+          return of ? [{ ...of, reportLost: row?.reportGivenUp === true }] : [];
+        }),
+      });
+      if (found) out.set(key, found);
+    }
+    return out;
+  }
+
+  /**
+   * Calls `listener` whenever a guardian message's status changes, with null
+   * once it has none: a fact of its turn changed, or a task made for it
+   * changed status. Returns the unsubscribe.
+   */
+  onMessageStatus(
+    listener: (target: MessageTarget, status: ConciergeMessageStatus | null) => void,
+  ): () => void {
+    const told = new Map<string, ConciergeMessageStatus | null>();
+    let telling: Promise<void> = Promise.resolve();
+    const check = (targets: readonly MessageTarget[]) => {
+      telling = telling
+        .then(async () => {
+          for (const target of targets) {
+            const status =
+              (await this.messageStatusesOf(target.chatId, [target.messageKey])).get(
+                target.messageKey,
+              ) ?? null;
+            const key = `${target.chatId}\u0000${target.messageKey}`;
+            if (told.has(key) && told.get(key) === status) continue;
+            told.set(key, status);
+            listener(target, status);
+          }
+        })
+        .catch((error: unknown) =>
+          log.warn("failed to tell a message status", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    };
+    const offMessage = this.repo.onMessageChange((target) => check([target]));
+    // Any change of a task, its row or a fact its status reads, reads again
+    // the messages it was made for.
+    const offTask = this.repo.onChange(({ row }) => {
+      void this.repo.messagesOfTask(row.id).then(check);
+    });
+    return () => {
+      offMessage();
+      offTask();
+    };
   }
 
   /** Marks a row the Concierge did not pick up events for. A write clears the mark. */

@@ -188,7 +188,7 @@ final class TranscriptStore {
     @ObservationIgnored private var holdWork: Task<Void, Never>?
 
     /// Whether the Chat shows its typing dots: the Concierge is writing a
-    /// message (docs/domains/chats.md#status-reaction). The server alone says
+    /// message (docs/domains/chats.md#reaction). The server alone says
     /// so: while an `exact` turn writes, or while a `simulated` turn's new
     /// message waits behind them. 👀 on the guardian's message says it started.
     var showsTyping: Bool {
@@ -642,6 +642,7 @@ final class TranscriptStore {
             let isNew = held == nil
             // A live insert leaves the mark out: keep the one already known.
             if message.reaction == nil { message.reaction = held?.reaction }
+            if message.status == nil { message.status = held?.status }
             let newest = messages.map(\.date).max()
             // Only a message that arrives live may wait behind the dots: never
             // history, a catch-up read on return, or an older page.
@@ -662,6 +663,10 @@ final class TranscriptStore {
         case .reaction(let id, let messageId, let reaction) where id == sessionId:
             if let index = messages.firstIndex(where: { $0.id == messageId }) {
                 messages[index].reaction = reaction
+            }
+        case .status(let id, let messageId, let status) where id == sessionId:
+            if let index = messages.firstIndex(where: { $0.id == messageId }) {
+                messages[index].status = status
             }
         case .messageThread(let id, let messageId, let root, let title) where id == sessionId:
             if messages.contains(where: { $0.id == messageId }) {

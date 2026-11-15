@@ -14,11 +14,13 @@ private func message(
     at seconds: TimeInterval,
     trace: TraceSummary? = nil,
     inputState: String? = nil,
-    reaction: String? = nil
+    reaction: String? = nil,
+    status: String? = nil
 ) -> ChatMessage {
     var message = ChatMessage(id: id, sessionId: "concierge", turnId: turn, role: role, content: json(parts), createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)), traceSummary: trace)
     message.inputState = inputState
     message.reaction = reaction
+    message.status = status
     return message
 }
 
@@ -213,40 +215,67 @@ private func message(
 @Suite struct ReactionTests {
     @Test func aGuardianMessageShowsTheReactionTheServerSends() async {
         let backend = FakeBackend()
-        backend.stored = [message("u", role: "user", [["type": "text", "content": "hi"]], at: 0, reaction: "👀")]
+        backend.stored = [message("u", role: "user", [["type": "text", "content": "hi"]], at: 0, reaction: "👍")]
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
         await store.reload()
         let row = store.rows.first { $0.messageId == "u" }!
-        #expect(store.info(for: row).mark == "👀")
+        #expect(store.info(for: row).mark?.emoji == "👍")
 
         store.start()
         // A new reaction replaces it, and any string the server sends is drawn.
         backend.bus.emit(LiveTopic.chat(conciergeChatID), .reaction(sessionId: conciergeChatID, messageId: "u", reaction: "✅"))
-        #expect(store.info(for: row).mark == "✅")
+        #expect(store.info(for: row).mark?.emoji == "✅")
         backend.bus.emit(LiveTopic.chat(conciergeChatID), .reaction(sessionId: conciergeChatID, messageId: "u", reaction: "🦄"))
-        #expect(store.info(for: row).mark == "🦄")
+        #expect(store.info(for: row).mark?.emoji == "🦄")
         backend.bus.emit(LiveTopic.chat(conciergeChatID), .reaction(sessionId: conciergeChatID, messageId: "u", reaction: nil))
         #expect(store.info(for: row).mark == nil)
         store.stop()
     }
 
+    @Test func theStatusShowsOverTheReactionAndTheReactionOnceItClears() async {
+        let backend = FakeBackend()
+        backend.stored = [message("u", role: "user", [["type": "text", "content": "book it"]], at: 0, reaction: "👍", status: "working")]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        let row = store.rows.first { $0.messageId == "u" }!
+        #expect(store.info(for: row).mark == MessageMark(status: "working", reaction: nil))
+        #expect(store.info(for: row).mark?.emoji == "👀")
+        #expect(store.info(for: row).mark?.label == "Working on it")
+
+        store.start()
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .status(sessionId: conciergeChatID, messageId: "u", status: nil))
+        #expect(store.info(for: row).mark?.emoji == "👍")
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .status(sessionId: conciergeChatID, messageId: "u", status: "failed"))
+        #expect(store.info(for: row).mark?.emoji == "⚠️")
+        // A status this app does not know shows none, so the reaction shows.
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .status(sessionId: conciergeChatID, messageId: "u", status: "thinking"))
+        #expect(store.info(for: row).mark?.emoji == "👍")
+        store.stop()
+    }
+
     @Test func aTaskChatHasNoReactions() async {
         let backend = FakeBackend()
-        backend.stored = [message("u", role: "user", [["type": "text", "content": "hi"]], at: 0, reaction: "👀")]
+        backend.stored = [message("u", role: "user", [["type": "text", "content": "hi"]], at: 0, reaction: "👍", status: "working")]
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
         #expect(store.info(for: store.rows.first { $0.messageId == "u" }!).mark == nil)
     }
 
-    @Test func decodesTheReactionAndTheInputStateAndTheEvent() {
-        let data = #"{"id":"m","sessionId":"s","role":"user","content":"[]","createdAt":"2026-11-12T10:00:00Z","inputState":"failed","reaction":"👀"}"#.data(using: .utf8)!
+    @Test func decodesTheReactionTheStatusAndTheInputStateAndTheEvents() {
+        let data = #"{"id":"m","sessionId":"s","role":"user","content":"[]","createdAt":"2026-11-12T10:00:00Z","inputState":"failed","reaction":"👍","status":"working"}"#.data(using: .utf8)!
         let decoded = try! JSONDecoder().decode(ChatMessage.self, from: data)
-        #expect(decoded.inputState == "failed" && decoded.reaction == "👀")
+        #expect(decoded.inputState == "failed" && decoded.reaction == "👍" && decoded.status == "working")
         let event = LiveEventsSocket.decode(name: "message_reaction", data: .object(["sessionId": .string("s"), "messageId": .string("m"), "reaction": .null]))
         if case .reaction(let session, let id, let reaction)? = event {
             #expect(session == "s" && id == "m" && reaction == nil)
         } else {
             Issue.record("event not read")
+        }
+        let status = LiveEventsSocket.decode(name: "message_status", data: .object(["sessionId": .string("s"), "messageId": .string("m"), "status": .string("failed")]))
+        if case .status(let session, let id, let value)? = status {
+            #expect(session == "s" && id == "m" && value == "failed")
+        } else {
+            Issue.record("status event not read")
         }
     }
 }

@@ -2,7 +2,12 @@ import { withTaskCards } from "../../concierge/task-cards.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
-import type { ChatPendingChecksResponse, MessageWritingEvent } from "@rome/api-types/concierge";
+import type {
+  ChatPendingChecksResponse,
+  ConciergeMessageStatus,
+  MessageStatusEvent,
+  MessageWritingEvent,
+} from "@rome/api-types/concierge";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { existsSync, readFileSync } from "node:fs";
@@ -1115,6 +1120,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     stream: ActiveWebchatStream,
     msg: Parameters<MessageWriting["on"]>[0],
   ): void => {
+    // A working tool shows the turn's open message working
+    // (docs/domains/chats.md#status). Only a Concierge chat has open ones.
+    if (msg.type === "tool_use" && msg.tool) {
+      void deps.concierge?.messageStatus?.toolCalled(stream.sessionId, msg.tool);
+    }
     if (!stream.writing) {
       const owner = stream.channelThreadKey
         ? deps.agentSessionManager.find({
@@ -1254,6 +1264,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const unsubscribeReaction = deps.webchatRepo.onMessageReaction((event) => {
       if (event.sessionId === sessionId) emit("message_reaction", event);
     });
+    // Nor is a status: it never pushes either (docs/domains/chats.md#status).
+    const unsubscribeStatus = deps.concierge?.deps.tasks.onMessageStatus?.((target, status) => {
+      if (target.chatId !== sessionId) return;
+      const event: MessageStatusEvent = { sessionId, messageId: target.messageKey, status };
+      emit("message_status", event);
+    });
     return () => {
       runningListeners.delete(runningListener);
       writingListeners.delete(writingListener);
@@ -1262,6 +1278,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       unsubscribeSessionName();
       unsubscribeChatThread();
       unsubscribeReaction();
+      unsubscribeStatus?.();
       unsubscribeCards?.();
     };
   };
@@ -1679,6 +1696,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       };
     });
   };
+  // The status on each guardian message that has one, which only a Concierge
+  // chat's can (docs/domains/chats.md#status).
+  const attachMessageStatuses = async <T extends StoredMessages[number]>(
+    sessionId: string,
+    messages: T[],
+  ): Promise<(T & { status?: ConciergeMessageStatus })[]> => {
+    const tasks = deps.concierge?.deps.tasks;
+    const asked = messages.filter((message) => message.role === "user").map((m) => m.id);
+    if (!tasks?.messageStatusesOf || asked.length === 0) return messages;
+    const statuses = await tasks.messageStatusesOf(sessionId, asked);
+    if (statuses.size === 0) return messages;
+    return messages.map((message) => {
+      const status = statuses.get(message.id);
+      return status ? { ...message, status } : message;
+    });
+  };
   // A task card's question or approval and how it ended, read for the whole
   // page at once (concierge/task-cards.ts). Only a Concierge chat has them.
   const fillTaskCards = async <
@@ -1701,7 +1734,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachChatThreadTitles(
       sessionId,
-      await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
+      await attachMessageStatuses(
+        sessionId,
+        await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
+      ),
     );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
@@ -5019,10 +5055,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         await deps.webchatRepo.updateUserInput(sessionId, status);
         // A Concierge turn that takes its owner's message records it, so a
         // turn its owner stops before it answers can be told to the next one
-        // (docs/domains/chats.md#task).
+        // (docs/domains/chats.md#task), and its status can show the turn
+        // working on it (docs/domains/chats.md#status).
         if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
           await deps.concierge?.deps.tasks.repo
             .takeMessage(status.turnId, { chatId: sessionId, messageKey: status.inputId })
+            .then(() => deps.concierge?.messageStatus?.taken(sessionId, status.inputId))
             .catch((error: unknown) =>
               log.warn("failed to record the message a turn took", {
                 sessionId,

@@ -50,6 +50,9 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// The emoji the Concierge reacted to a guardian message of its chat with.
     /// Nil when it has none, and from older instances.
     var reaction: String? = nil
+    /// Rome's status on a guardian message of its Chat: `working` or `failed`.
+    /// It shows over the reaction. Nil when it has none, and from older instances.
+    var status: String? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -65,7 +68,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction, status
     }
 }
 
@@ -102,6 +105,7 @@ extension ChatMessage {
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
         reaction = (try? container.decodeIfPresent(String.self, forKey: .reaction)) ?? nil
+        status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? nil
     }
 
     /// Writes `chatThreadId` as null when the instance sent it as null, so a
@@ -120,6 +124,7 @@ extension ChatMessage {
         try container.encodeIfPresent(sender, forKey: .sender)
         try container.encodeIfPresent(inputState, forKey: .inputState)
         try container.encodeIfPresent(reaction, forKey: .reaction)
+        try container.encodeIfPresent(status, forKey: .status)
     }
 
     /// The chat thread it is in, by its first message: its own id when alone.

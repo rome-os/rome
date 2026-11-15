@@ -383,10 +383,14 @@ export function startConciergeEvents(
     // ends, so the session says whether a newer input took it over.
     if (status === "interrupted" && (handedOn || running.length > 0)) return;
     service.turnSettled(chatId);
+    service.messageStatus.turnSettled(chatId);
     // A turn cut short with nothing carrying it on was stopped by its owner:
     // the messages it took stay stopped, and the next turn is told so.
     await tasks.repo
-      .answerTurns(chatId, running, new Date(), { stopped: status === "interrupted" })
+      .answerTurns(chatId, running, new Date(), {
+        stopped: status === "interrupted",
+        failed: status === "error",
+      })
       .catch((error: unknown) =>
         log.warn("failed to settle the messages a turn took", {
           chatId,

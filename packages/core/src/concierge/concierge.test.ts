@@ -5786,7 +5786,7 @@ describe("Concierge tasks started for a guardian message", () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       await taken(s, "g1");
-      await s.tool("react", { emoji: "👀" });
+      await s.tool("react", { emoji: "👍" });
       expect(s.answered("g1")).toBe(false);
       await conciergeEnds(s, "interrupted");
       expect(await s.service.stoppedRequestLines(CONCIERGE_CHAT)).toBe(
@@ -6081,6 +6081,201 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(s.backendTurns[1]?.prompt).toContain(traffic.taskId);
     });
   });
+
+  describe("its status (docs/domains/chats.md#status)", () => {
+    const statusOf = async (s: ReturnType<typeof setup>, key: string) =>
+      (await s.tasks.messageStatusesOf(CONCIERGE_CHAT, [key])).get(key) ?? null;
+    /** The send route records the message a Concierge turn took, and starts its timer. */
+    const taken = async (s: ReturnType<typeof setup>, key: string, turnId = "concierge-turn-1") => {
+      await s.taskRepo.takeMessage(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
+      s.service.messageStatus.taken(CONCIERGE_CHAT, key);
+    };
+    const conciergeEnds = (
+      s: ReturnType<typeof setup>,
+      status?: AgentTurnFinishedEvent["status"],
+      turnId = "concierge-turn-1",
+    ) =>
+      s.finish({ turnId, agentName: "core:concierge", chatId: CONCIERGE_CHAT, status, text: "ok" });
+    /** Every status change a watching client is told of, in order. */
+    const watch = (s: ReturnType<typeof setup>) => {
+      const seen: [string, string | null][] = [];
+      s.tasks.onMessageStatus((target, status) => seen.push([target.messageKey, status]));
+      return seen;
+    };
+    afterEach(() => {
+      rs.useRealTimers();
+    });
+
+    it("works from the turn's first working tool call, and clears when the turn ends with no task", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const seen = watch(s);
+      // Sending a message or a reaction is no work.
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "mcp__rome__say");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "react");
+      expect(await statusOf(s, "g1")).toBeNull();
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "mcp__rome__execute_action");
+      expect(await statusOf(s, "g1")).toBe("working");
+      await conciergeEnds(s);
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBeNull();
+      expect(seen).toEqual([
+        ["g1", "working"],
+        ["g1", null],
+      ]);
+    });
+
+    it.each([
+      ["a reaction", async (s: ReturnType<typeof setup>) => s.tool("react", { emoji: "❤️" })],
+      [
+        "a short message",
+        async (s: ReturnType<typeof setup>) => s.tool("say", { text: "Anytime." }),
+      ],
+    ])("never works on a thanks answered with %s and no working tool", async (_, answer) => {
+      const s = setup({ said: false });
+      s.fakeTimers();
+      guardianSays(s, "g1");
+      const seen = watch(s);
+      await taken(s, "g1");
+      await rs.advanceTimersByTimeAsync(1_000);
+      expect((await answer(s)).isError).toBeFalsy();
+      await rs.advanceTimersByTimeAsync(10_000);
+      expect(await statusOf(s, "g1")).toBeNull();
+      await conciergeEnds(s);
+      await rs.advanceTimersByTimeAsync(100);
+      expect(seen.filter(([, status]) => status !== null)).toEqual([]);
+    });
+
+    it("works once the turn runs 5 seconds without answering", async () => {
+      const s = setup({ said: false });
+      s.fakeTimers();
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await rs.advanceTimersByTimeAsync(4_900);
+      expect(await statusOf(s, "g1")).toBeNull();
+      await rs.advanceTimersByTimeAsync(200);
+      expect(await statusOf(s, "g1")).toBe("working");
+      // The answer clears it.
+      await s.tool("say", { text: "Sunny, 24°" });
+      expect(await statusOf(s, "g1")).toBeNull();
+    });
+
+    it.each([
+      ["error", "failed"],
+      ["interrupted", null],
+      ["completed", null],
+    ] as const)("a turn that ends %s before answering leaves the message %s", async (status, expected) => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      await conciergeEnds(s, status);
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe(expected);
+    });
+
+    it("keeps a failed message failed after the turn", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await conciergeEnds(s, "error");
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe("failed");
+      // A later turn of the chat leaves it as it is.
+      s.inTurn("concierge-turn-2");
+      guardianSays(s, "g2", "concierge-turn-2");
+      await taken(s, "g2", "concierge-turn-2");
+      await conciergeEnds(s, "completed", "concierge-turn-2");
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe("failed");
+    });
+
+    it("keeps a task's message working until the task ends and is reported, and clears it while the task waits on the guardian", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const { chatId } = await started(s);
+      await conciergeEnds(s);
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe("working");
+      // The task asks the guardian: its card shows Needs you, so the message shows none.
+      const repo = s.deps.webchatRepo as unknown as {
+        openWaitsOf: (ids: readonly string[]) => Promise<Map<string, unknown>>;
+      };
+      repo.openWaitsOf = async (ids) =>
+        approvalWaits(new Map(ids.filter((id) => id === chatId).map((id) => [id, Date.now()])));
+      expect(await statusOf(s, "g1")).toBeNull();
+      // Answered, it works again, through its end until its result is reported.
+      repo.openWaitsOf = async () => new Map();
+      expect(await statusOf(s, "g1")).toBe("working");
+      await finishTask(s, chatId, "completed", { reported: false });
+      expect(await statusOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await statusOf(s, "g1")).toBeNull();
+    });
+
+    it("works while a task made for it runs, and fails when the task ends failed", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      expect(await statusOf(s, "g1")).toBe("working");
+      await finishTask(s, chatId, "error");
+      expect(await statusOf(s, "g1")).toBe("failed");
+    });
+
+    it("gives a thanks sent beside handed-on work no working mark of its own", async () => {
+      const s = setup({ said: false });
+      s.fakeTimers();
+      guardianSays(s, "ask", "turn-a");
+      await taken(s, "ask", "turn-a");
+      s.inTurn("turn-a");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      expect(await statusOf(s, "ask")).toBe("working");
+      // The thanks cut the turn short, which hands its work on to the next one.
+      s.chats.activeTurns = () => ["turn-b"];
+      await conciergeEnds(s, "interrupted", "turn-a");
+      s.inTurn("turn-b");
+      guardianSays(s, "thanks", "turn-b");
+      await taken(s, "ask", "turn-b");
+      await taken(s, "thanks", "turn-b");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      await rs.advanceTimersByTimeAsync(6_000);
+      expect([await statusOf(s, "ask"), await statusOf(s, "thanks")]).toEqual(["working", null]);
+    });
+
+    it("takes the working mark off a message the turn reacts to; a task made for it still shows", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      expect(await statusOf(s, "g1")).toBe("working");
+      await s.tool("react", { emoji: "👍" });
+      expect(await statusOf(s, "g1")).toBeNull();
+      await started(s);
+      expect(await statusOf(s, "g1")).toBe("working");
+    });
+
+    it("hands each message out with its status and its reaction side by side", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await s.tool("react", { emoji: "👍" });
+      await started(s);
+      expect(await statusOf(s, "g1")).toBe("working");
+      expect(s.reactions.get(`${CONCIERGE_CHAT}:g1`)).toBe("👍");
+    });
+
+    it("never pushes a status to the phone", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      await conciergeEnds(s, "error");
+      await s.settle();
+      expect(s.pushes).toEqual([]);
+    });
+  });
 });
 
 describe("Concierge react", () => {
@@ -6106,16 +6301,16 @@ describe("Concierge react", () => {
     const emoji = (tool?.inputSchema as { properties: { emoji: { enum: unknown[] } } }).properties
       .emoji;
     expect(emoji.enum).toEqual([...CONCIERGE_REACTIONS, null]);
-    expect(CONCIERGE_REACTIONS).toEqual(["👀", "👍", "✅", "❤️", "🙏", "😂", "🎉", "🤔"]);
+    expect(CONCIERGE_REACTIONS).toEqual(["👍", "✅", "❤️", "🙏", "😂", "🎉", "🤔"]);
     expect((tool?.inputSchema as { required: string[] }).required).toEqual(["emoji"]);
   });
 
   it("reacts to the turn's only guardian message when none is named", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
-    const result = await react(s, { emoji: "👀" });
+    const result = await react(s, { emoji: "👍" });
     expect(result.isError).toBeFalsy();
-    expect([...s.reactions]).toEqual([[`${CONCIERGE_CHAT}:g1`, "👀"]]);
+    expect([...s.reactions]).toEqual([[`${CONCIERGE_CHAT}:g1`, "👍"]]);
   });
 
   it("reacts in a topic chat too", async () => {
@@ -6143,7 +6338,7 @@ describe("Concierge react", () => {
     const s = setup({ said: false });
     s.inTurn("t0");
     guardianSays(s, "g0", "t0");
-    await react(s, { emoji: "👀" });
+    await react(s, { emoji: "🤔" });
     s.inTurn("report-turn");
     expect((await react(s, { emoji: "✅", message_id: "g0" })).isError).toBeFalsy();
     expect([...s.reactions]).toEqual([[`${CONCIERGE_CHAT}:g0`, "✅"]]);
@@ -6155,7 +6350,7 @@ describe("Concierge react", () => {
   it("replaces a reaction with a new one, and clears it with null", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
-    await react(s, { emoji: "👀" });
+    await react(s, { emoji: "👍" });
     await react(s, { emoji: "✅" });
     expect([...s.reactions]).toEqual([[`${CONCIERGE_CHAT}:g1`, "✅"]]);
     expect((await react(s, { emoji: null })).isError).toBeFalsy();
@@ -6183,7 +6378,8 @@ describe("Concierge react", () => {
   it("refuses an emoji outside the set, and a call with no emoji", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
-    for (const input of [{ emoji: "🦄" }, { emoji: "" }, {}, { emoji: 7 }]) {
+    // 👀 is Rome's working status, never a reaction.
+    for (const input of [{ emoji: "👀" }, { emoji: "🦄" }, { emoji: "" }, {}, { emoji: 7 }]) {
       expect((await react(s, input)).isError).toBe(true);
     }
     expect(s.reactions.size).toBe(0);

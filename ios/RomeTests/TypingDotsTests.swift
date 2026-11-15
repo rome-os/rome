@@ -8,7 +8,7 @@ private func chatMessage(_ id: String, role: String, turn: String?, text: String
 }
 
 /// The Chat's typing dots come from the server's `message_writing` alone
-/// (docs/domains/chats.md#status-reaction): no trace, no guess.
+/// (docs/domains/chats.md#reaction): no trace, no guess.
 @MainActor
 @Suite struct TypingDotsTests {
     private func store(_ backend: FakeBackend) -> TranscriptStore {

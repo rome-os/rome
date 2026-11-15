@@ -108,6 +108,10 @@
       }
     },
     "reaction": "Reaction",
+    "status": {
+      "working": "Working on it",
+      "failed": "Did not finish"
+    },
     "taskList": {
       "title": "Tasks",
       "close": "Close tasks",

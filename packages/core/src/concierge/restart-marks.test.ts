@@ -6,6 +6,7 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { TASK_CHAT_TRIGGER_KIND } from "../webchat/privacy.js";
 import { settleMarksAfterRestart } from "./restart-marks.js";
+import { ConciergeTasks } from "./tasks.js";
 
 // The messages a killed Rome process leaves open, settled when the next one
 // boots. The state is written the way a running process writes it; the
@@ -66,6 +67,9 @@ describe("messages after a restart", () => {
     return row ? row.answeredAt !== null : null;
   };
 
+  const status = async (chatId: string, key: string) =>
+    (await new ConciergeTasks(tasks).messageStatusesOf(chatId, [key])).get(key) ?? null;
+
   /** A stopped process, then the next boot's first steps. */
   async function boot(now = Date.now()) {
     const ended = await chats.endInterruptedTurns(DAY);
@@ -92,6 +96,30 @@ describe("messages after a restart", () => {
     expect(await answered("concierge", "concierge-input")).toBe(true);
   });
 
+  it("settles every working status a turn the restart cut off left, as failed", async () => {
+    await running("concierge");
+    await running("topic", "core:concierge");
+    for (const chatId of ["concierge", "topic"]) {
+      await tasks.takeMessage(`${chatId}-turn`, { chatId, messageKey: `${chatId}-input` });
+      await tasks.markWorking(chatId);
+      expect(await status(chatId, `${chatId}-input`)).toBe("working");
+    }
+    await boot(Date.now() + 2 * DAY);
+    expect(await status("concierge", "concierge-input")).toBe("failed");
+    expect(await status("topic", "topic-input")).toBe("failed");
+  });
+
+  it("keeps the working status of a turn startup continues", async () => {
+    await running("concierge");
+    await tasks.takeMessage("concierge-turn", {
+      chatId: "concierge",
+      messageKey: "concierge-input",
+    });
+    await tasks.markWorking("concierge");
+    await boot();
+    expect(await status("concierge", "concierge-input")).toBe("working");
+  });
+
   it("ends failed a task whose chat the restart ended, and leaves an idle task as it was", async () => {
     await running("concierge");
     await running("task-chat", "core:main", TASK_CHAT_TRIGGER_KIND);
@@ -108,10 +136,15 @@ describe("messages after a restart", () => {
       { title: "Cut", sessionId: "task-chat", chatId: "concierge" },
       { title: "Asking", sessionId: "idle-chat", chatId: "concierge" },
     ]);
+    await tasks.linkMessage(cut!.id, { chatId: "concierge", messageKey: "cut-ask" });
     await boot();
     // A task chat is never continued after a restart, so its work failed. Its
-    // result is unsaid, so the Concierge is told on catch-up.
+    // result is unsaid, so the Concierge is told on catch-up, and the message
+    // works until it is.
     expect(await tasks.get(cut!.id)).toMatchObject({ lastOutcome: "failed", outcomeUnsaid: true });
+    expect(await status("concierge", "cut-ask")).toBe("working");
+    await tasks.markReported([cut!.id]);
+    expect(await status("concierge", "cut-ask")).toBe("failed");
     // A task with no turn running and no result was untouched.
     expect((await tasks.get(idle!.id))?.lastOutcome).toBeNull();
   });

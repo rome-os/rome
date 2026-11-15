@@ -1098,10 +1098,11 @@ final class DemoBackend: RomeBackend {
         ]
         // What goes wrong: a limit before a turn ran, a turn that failed midway, a
         // switch of model, and messages the instance could not hand over.
-        func marked(_ message: ChatMessage, _ reaction: String?, inputState: String? = nil, turn: String? = nil) -> ChatMessage {
+        func marked(_ message: ChatMessage, _ reaction: String?, status: String? = nil, inputState: String? = nil, turn: String? = nil) -> ChatMessage {
             var message = message
             message.turnId = turn
             message.reaction = reaction
+            message.status = status
             message.inputState = inputState
             return message
         }
@@ -1111,12 +1112,12 @@ final class DemoBackend: RomeBackend {
             return message
         }
         messages["topic-errors"] = [
-            marked(user("er1", "把今天的邮件整理一下。", at: at(13, 0), session: "topic-errors"), "👍"),
+            marked(user("er1", "把今天的邮件整理一下。", at: at(13, 0), session: "topic-errors"), nil, status: "failed"),
             parts([.object(["type": .string("error"), "error": .string("Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit"), "code": .string("model_provider_unavailable"), "provider": .string("openai"), "reason": .string("quota_exhausted")])], at: at(13, 0), session: "topic-errors"),
-            marked(user("er2", "那就现在发给我吧。", at: at(13, 5), session: "topic-errors"), "🤔", turn: "er-t2"),
+            marked(user("er2", "那就现在发给我吧。", at: at(13, 5), session: "topic-errors"), "👍", status: "failed", turn: "er-t2"),
             failedTrace(turn: "er-t2", error: "You've hit your limit · resets 3pm", code: "usage_limit", provider: "openai", at: at(13, 6)),
             parts([.object(["type": .string("quota_switch"), "from": .string("openai"), "to": .string("anthropic"), "reason": .string("quota"), "fromModel": .string("gpt-6-luna"), "model": .string("claude-sonnet-5-5")])], at: at(13, 7), session: "topic-errors"),
-            marked(user("er3", "好，继续。", at: at(13, 8), session: "topic-errors"), "👀"),
+            marked(user("er3", "好，继续。", at: at(13, 8), session: "topic-errors"), nil, status: "working"),
             marked(user("er4", "顺便查一下周五的航班。", at: at(13, 9), session: "topic-errors"), nil, inputState: "failed"),
             marked(user("er5", "再提醒我带护照。", at: at(13, 10), session: "topic-errors"), nil, inputState: "unknown"),
         ]

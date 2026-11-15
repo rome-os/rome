@@ -19,6 +19,9 @@ enum LiveEvent: Sendable {
     /// The Concierge's reaction on a guardian message changed (`message_reaction`).
     /// Nil: it has none now.
     case reaction(sessionId: String, messageId: String, reaction: String?)
+    /// Rome's status on a guardian message changed (`message_status`).
+    /// Nil: it has none now.
+    case status(sessionId: String, messageId: String, status: String?)
     /// A task's question or approval that a card in the chat shows ended
     /// (`chat_card_settled`): `card` replaces the card of every part that shows it.
     case cardSettled(sessionId: String, card: JSONValue)
@@ -365,6 +368,9 @@ final class LiveEventsSocket: LiveEventSource {
         case "message_reaction":
             guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
             return .reaction(sessionId: id, messageId: message, reaction: data["reaction"]?.string)
+        case "message_status":
+            guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
+            return .status(sessionId: id, messageId: message, status: data["status"]?.string)
         case "chat_card_settled":
             guard let id = data["sessionId"]?.string, let card = data["card"], card["kind"]?.string != nil, card["id"]?.string != nil else { return nil }
             return .cardSettled(sessionId: id, card: card)

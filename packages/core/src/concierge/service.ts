@@ -7,6 +7,7 @@ import { automatedInputLabel } from "./automated-input.js";
 
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { DashboardActivity } from "../lib/dashboard-activity.js";
+import { MessageStatusTracker } from "./message-status.js";
 import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
@@ -322,8 +323,11 @@ export class ConciergeService {
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
+  /** When each open guardian message starts to show its turn working (docs/domains/chats.md#status). */
+  readonly messageStatus: MessageStatusTracker;
 
   constructor(readonly deps: ConciergeDeps) {
+    this.messageStatus = new MessageStatusTracker(() => this.deps.tasks.repo);
     this.push = deps.notify
       ? new ConciergePush({
           notify: deps.notify,
@@ -953,7 +957,7 @@ export class ConciergeService {
     }
     // The tasks it reported on settle with the flush that carried them: the
     // coalescer settles exactly the news a completed turn carried
-    // (docs/domains/chats.md#status-reaction).
+    // (docs/domains/chats.md#reaction).
     return outcome;
   }
 
