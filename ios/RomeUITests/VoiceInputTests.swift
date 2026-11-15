@@ -5,7 +5,7 @@ import XCTest
 /// when idle, "Stop voice input" with the selected trait while listening, and "Finishing voice
 /// input" while the last words arrive. The notice is its own element. Each test names the rule
 /// it scores, so the verifier's report can say which leg scored which rule. Unless a test says
-/// otherwise it plays a two-minute hum, so only the test's own stop ends listening.
+/// otherwise it plays a four-minute hum, so only the test's own stop ends listening.
 ///
 /// Rule 1's 0.5 s is timed inside the app, since XCUITest waits for the app to go idle around
 /// every tap (1 to 13 s on a CI runner). The app marks each start with a `StartListening`
@@ -307,6 +307,67 @@ final class VoiceInputTests: XCTestCase {
             let idle = waitForLabel(onScreen(app.buttons, "voice-input"), "Start voice input", timeout: 30)
             stopMeasuring()
             XCTAssertTrue(idle, "listening was still shown 30 s after \(stop)")
+            // The stand-in refuses new connections for 5 s after it drops the network.
+            if stop == "losing the network" { Thread.sleep(forTimeInterval: 7) }
+        }
+    }
+
+    // MARK: Rule 4
+
+    /// Rule 4 as far as the app can break it: three minutes of dictation leave the first and the
+    /// last sentence of the stand-in's transcript in the field, listening is still on at the end
+    /// (nothing stopped it: not the screen dimming, memory or the audio session), and the field
+    /// still takes typing. How right the words are is leg A's to score.
+    @MainActor
+    func testRule4ThreeMinutesStayInTheField() throws {
+        let app = try launch()
+        // One word every 300 ms, so 600 words take three minutes.
+        let first = "The first sentence starts the long message."
+        let last = "The last sentence ends the long message."
+        let filler = Array(repeating: "and", count: 600 - 14).joined(separator: " ")
+        try standIn(["transcript": "\(first) \(filler) \(last)"])
+        defer { try? standIn(["transcript": Self.transcript]) }
+        let control = onScreen(app.buttons, "voice-input")
+        try requireControl(app, control, "the Chat has no voice control")
+        emptyTheField(app, "rule 4")
+        let field = onScreen(app.textViews, "message-field")
+        XCTAssertTrue(tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")), "listening never started")
+        let heard = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", last), object: field)
+        let arrived = XCTWaiter().wait(for: [heard], timeout: 240) == .completed
+        let stillListening = control.label == "Stop voice input"
+        XCTAssertTrue(arrived, "the last sentence never reached the field")
+        XCTAssertTrue(stillListening, "listening stopped before the three minutes were over")
+        if stillListening {
+            XCTAssertTrue(tapUntil(control, NSPredicate(format: "label IN %@", ["Finishing voice input", "Start voice input"])),
+                          "listening never stopped")
+        }
+        let text = fieldText(field)
+        XCTAssertTrue(text.contains(first), "the first sentence is not in the field")
+        XCTAssertTrue(text.contains(last), "the last sentence is not in the field")
+        XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 15), "listening never finished")
+        field.tap()
+        field.typeText("Z")
+        XCTAssertEqual(fieldText(field).count, text.count + 1, "the field did not take one typed character after three minutes")
+    }
+
+    // MARK: Rule 10
+
+    /// Rule 10 on the phone: before any dictation, the app names where speech becomes text, as
+    /// Rome says (the stand-in instance names itself, at its own address). This looks for the
+    /// name anywhere the guardian can reach from the navigation's settings.
+    @MainActor
+    func testRule10TheAppNamesWhereVoiceGoes() throws {
+        let app = try launch()
+        touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
+        let settings = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "settings")).firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10), "the navigation has no settings")
+        settings.tap()
+        let named = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "stand-in instance", "stand-in instance"))
+            .firstMatch
+        if !named.waitForExistence(timeout: 10) {
+            printScreen(app, "rule 10: settings")
+            XCTFail("the settings do not name \"stand-in instance\", where Rome says voice goes")
         }
     }
 
@@ -381,7 +442,7 @@ final class VoiceInputTests: XCTestCase {
 
     // MARK: Helpers
 
-    /// A recording the stand-in instance hears as speech for its whole two minutes, so only the
+    /// A recording the stand-in instance hears as speech for its whole four minutes, so only the
     /// stop under test ends listening.
     static let hum = "hum"
 
@@ -549,13 +610,13 @@ final class VoiceInputTests: XCTestCase {
         return index.map { matches.element(boundBy: $0) } ?? matches.firstMatch
     }
 
-    /// A generated two-minute hum, 16 kHz mono 16-bit. The stand-in instance hears it as speech,
+    /// A generated four-minute hum, 16 kHz mono 16-bit. The stand-in instance hears it as speech,
     /// so its 30 s no-speech end never comes during XCUITest's slow steps.
     private func humFile() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(Self.hum).wav")
         if FileManager.default.fileExists(atPath: url.path) { return url }
         let rate: UInt32 = 16000
-        let count = Int(rate) * 120
+        let count = Int(rate) * 240
         var data = Data()
         func text(_ s: String) { data.append(contentsOf: Array(s.utf8)) }
         func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
