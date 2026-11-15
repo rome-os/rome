@@ -36,6 +36,7 @@
     "./platform": "./src/platform.ts",
     "./persons": "./src/persons.ts",
     "./devices": "./src/devices.ts",
+    "./voice-input": "./src/voice-input.ts",
     "./node-console": "./src/node-console.ts",
     "./wechat-app": "./src/wechat-app.ts",
     "./live-events": "./src/live-events.ts",
