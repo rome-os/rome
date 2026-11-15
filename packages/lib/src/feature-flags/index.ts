@@ -12,8 +12,13 @@
  * holds no vendor or feature-specific logic (cloud-auth lives in
  * `../cloud-auth-gate.ts`, which is just one caller).
  */
+/** What a gate's rules may match on besides the unit id. */
+export interface GateAttributes {
+  email?: string;
+}
+
 export interface FeatureGates {
-  checkGate(gateName: string, unitId: string): Promise<boolean>;
+  checkGate(gateName: string, unitId: string, attributes?: GateAttributes): Promise<boolean>;
 }
 
 // Default backend: every gate is off. In force until a backend is installed, so
@@ -48,10 +53,14 @@ export function setGateOverride(gateName: string, value: boolean | undefined): v
   else overrides.set(gateName, value);
 }
 
-/** Evaluate a feature gate for a unit. An override wins; otherwise the active
- * backend decides. Fails closed. */
-export function checkGate(gateName: string, unitId: string): Promise<boolean> {
+/** Evaluate a feature gate for a unit, with any `attributes` its rules match on.
+ * An override wins; otherwise the active backend decides. Fails closed. */
+export function checkGate(
+  gateName: string,
+  unitId: string,
+  attributes?: GateAttributes,
+): Promise<boolean> {
   const forced = overrides.get(gateName);
   if (forced !== undefined) return Promise.resolve(forced);
-  return active.checkGate(gateName, unitId);
+  return active.checkGate(gateName, unitId, attributes);
 }

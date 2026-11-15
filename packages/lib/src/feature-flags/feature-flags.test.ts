@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { checkGate, setFeatureGates, setGateOverride } from "./index.js";
 import { useFakeFeatureGates, resetFeatureGates } from "./testing.js";
+import { statsigUser } from "./user.js";
 
 afterEach(() => resetFeatureGates());
 
@@ -26,6 +27,30 @@ describe("feature-flags registry", () => {
     });
     await checkGate("my_gate", "tenant-9");
     expect(seen).toEqual([["my_gate", "tenant-9"]]);
+  });
+
+  it("passes attributes through to the backend", async () => {
+    const seen: unknown[] = [];
+    setFeatureGates({
+      checkGate: async (_gate, _unit, attributes) => {
+        seen.push(attributes);
+        return true;
+      },
+    });
+    await checkGate("my_gate", "tenant-9", { email: "a@example.com" });
+    expect(seen).toEqual([{ email: "a@example.com" }]);
+  });
+});
+
+describe("statsigUser", () => {
+  it("evaluates as the unit id, with the email a rule can match on", () => {
+    const user = statsigUser("account-1", { email: "a@example.com" });
+    expect(user.userID).toBe("account-1");
+    expect(user.email).toBe("a@example.com");
+  });
+
+  it("has no email when none is given", () => {
+    expect(statsigUser("account-1").email).toBeNull();
   });
 });
 
