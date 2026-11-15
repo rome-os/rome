@@ -9,9 +9,16 @@
 //
 // Control (not part of Rome's API):
 //   GET  /__stand-in/health
-//   POST /__stand-in/voice   {transcript?, error?: {reason, detail?, afterMs?} | null}
-//     (an error posted here ends only the next voice session; --voice-error ends every one)
-//     an error set here ends the next voice session only; --voice-error ends every one
+//   POST /__stand-in/voice   {transcript?, error?, drop?, offered?}
+//     error: {reason, detail?, afterMs?} | null   ends the next voice session
+//       only with that error; --voice-error ends every one
+//     drop: {afterMs, refuseMs} | null   the network lost: the next voice
+//       session's socket and every events socket close afterMs after its
+//       start, with no ended or error, and new voice and events connections
+//       are refused for refuseMs after that
+//     offered: false   Rome Cloud refuses voice input, as with its gate off:
+//       GET /api/voice-input says unavailable and a voice session ends with
+//       service-refused; true offers it again
 //   GET  /__stand-in/stats   {requests, unrecorded, voiceSessions}
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
@@ -39,7 +46,15 @@ const voice = {
     ? { reason: args["voice-error"], afterMs: Number(args["voice-error-after-ms"] ?? 0) }
     : null,
   armed: null,
+  drop: null,
+  offered: true,
 };
+// Until when new voice and events connections are refused, after a drop.
+let refuseUntil = 0;
+// What real Rome answers and sends when Rome Cloud does not allow voice
+// input (voice-input-source.ts): no place, and the refusal with its code.
+const NOT_OFFERED = { available: false, place: null };
+const REFUSED = { type: "error", reason: "service-refused", detail: "voice_input_not_allowed" };
 const stats = { requests: 0, unrecorded: [], voiceSessions: [] };
 
 function log(line) {
@@ -121,6 +136,8 @@ const server = createServer(async (req, res) => {
     const body = await readBody(req);
     if (typeof body.transcript === "string") voice.transcript = body.transcript;
     if ("error" in body) voice.armed = body.error;
+    if ("drop" in body) voice.drop = body.drop;
+    if (typeof body.offered === "boolean") voice.offered = body.offered;
     return send(res, 200, voice);
   }
 
@@ -170,7 +187,8 @@ const server = createServer(async (req, res) => {
     body = { ...body, standIn: "stand-in instance" };
   // The transcriber here is this stand-in's own socket, whatever the recording
   // was transcribed by.
-  if (path === "/api/voice-input" && body?.available)
+  if (path === "/api/voice-input" && !voice.offered) body = NOT_OFFERED;
+  else if (path === "/api/voice-input" && body?.available)
     body = { ...body, place: { provider: "stand-in instance", host: `127.0.0.1:${PORT}` } };
   send(res, entry.status, body, entry.contentType);
 });
@@ -293,6 +311,8 @@ function serveVoice(socket) {
   const words = voice.transcript.split(/(?<=\s)/);
   const error = voice.armed ?? voice.error;
   voice.armed = null;
+  const drop = voice.drop;
+  voice.drop = null;
   let started = false;
   let sentWords = 0;
   let audioMs = 0;
@@ -327,6 +347,19 @@ function serveVoice(socket) {
         started = true;
         record.sampleRate = m.sampleRate;
         if (m.sampleRate !== SAMPLE_RATE) return finish({ type: "error", reason: "bad-request" });
+        if (!voice.offered) return finish(REFUSED);
+        if (drop)
+          timers.push(
+            setTimeout(() => {
+              // A lost network: no close frame, nothing more on any socket.
+              record.end = "dropped";
+              closed = true;
+              for (const t of timers) clearTimeout(t), clearInterval(t);
+              refuseUntil = Date.now() + (drop.refuseMs ?? 0);
+              socket.destroy();
+              for (const events of eventSockets.keys()) events.destroy();
+            }, drop.afterMs ?? 0),
+          );
         if (error)
           timers.push(
             setTimeout(
@@ -377,6 +410,11 @@ server.on("upgrade", (req, socket) => {
   log(`UPGRADE ${path}${signedIn ? "" : " (no session)"}`);
   if (!signedIn) {
     socket.end("HTTP/1.1 401 Unauthorized\r\nx-rome-stand-in: 1\r\n\r\n");
+    return;
+  }
+  if (Date.now() < refuseUntil && (path === "/ws/events" || path === "/ws/voice-input")) {
+    log(`refused: UPGRADE ${path} (dropped network)`);
+    socket.destroy();
     return;
   }
   if (path === "/ws/events") {
