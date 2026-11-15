@@ -42,13 +42,19 @@ type StatusRepo = Pick<
  * The running turns' working triggers, one tracker per process. A message
  * handed on while it shows working keeps showing it, and then carries the
  * turn's work: a newer message beside it, such as a "thanks", shows working
- * only by a task made for it.
+ * only by a task made for it. A message that joins a turn already running
+ * takes no working mark from its tools, which are the earlier work's: only
+ * its own 5 seconds can mark it.
  */
 export class MessageStatusTracker {
   /** A 5-second timer per open message, by chat and key. */
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   /** The chats with a message a running turn took. */
   private readonly open = new Set<string>();
+  /** The turn running in each chat that has begun its work, by its first event. */
+  private readonly busyTurns = new Map<string, string>();
+  /** The messages of each chat that joined a turn already running. */
+  private readonly joined = new Map<string, Set<string>>();
 
   /** `repoOf` is read at each use, as the service's task list may be wired after it. */
   constructor(
@@ -60,9 +66,26 @@ export class MessageStatusTracker {
     return this.repoOf();
   }
 
-  /** A turn of Concierge chat `chatId` took guardian message `messageKey`. */
-  taken(chatId: string, messageKey: string): void {
+  /** Turn `turnId` of chat `chatId` did something: it has begun its work. */
+  turnActive(chatId: string, turnId: string): void {
+    if (this.busyTurns.get(chatId) !== turnId) this.busyTurns.set(chatId, turnId);
+  }
+
+  /** Whether turn `turnId` of chat `chatId` has begun its work: a message it takes now joins it. */
+  isBusy(chatId: string, turnId: string): boolean {
+    return this.busyTurns.get(chatId) === turnId;
+  }
+
+  /**
+   * A turn of Concierge chat `chatId` took guardian message `messageKey`.
+   * `joined`: the turn had begun its work before it took it.
+   */
+  taken(chatId: string, messageKey: string, joined = false): void {
     this.open.add(chatId);
+    const joiners = this.joined.get(chatId) ?? new Set<string>();
+    if (joined) joiners.add(messageKey);
+    else joiners.delete(messageKey);
+    this.joined.set(chatId, joiners);
     const key = timerKey(chatId, messageKey);
     const before = this.timers.get(key);
     if (before) clearTimeout(before);
@@ -80,7 +103,8 @@ export class MessageStatusTracker {
     await this.guard(
       (async () => {
         if (await this.repo.anyInheritedWorking(chatId)) return;
-        await this.repo.markWorking(chatId);
+        // The turn's tools are its own work's, not a message's that joined it.
+        await this.repo.markWorking(chatId, { except: [...(this.joined.get(chatId) ?? [])] });
       })(),
     );
   }
@@ -108,6 +132,8 @@ export class MessageStatusTracker {
   /** Chat `chatId` runs no turn that carries its messages on: its turn's end settled them. */
   turnSettled(chatId: string): void {
     this.open.delete(chatId);
+    this.busyTurns.delete(chatId);
+    this.joined.delete(chatId);
     const prefix = timerKey(chatId, "");
     for (const [key, timer] of this.timers) {
       if (!key.startsWith(prefix)) continue;

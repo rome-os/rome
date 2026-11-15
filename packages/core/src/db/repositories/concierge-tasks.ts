@@ -752,11 +752,11 @@ export class ConciergeTasksRepository {
    * The open messages of Concierge chat `chatId` show working from now: its
    * turn called a working tool, or ran 5 seconds without answering them. A
    * message the turn reacted to is left out. `messageKey` limits it to that
-   * one. Answers the ones that changed.
+   * one; `except` leaves those out. Answers the ones that changed.
    */
   async markWorking(
     chatId: string,
-    options: { messageKey?: string } = {},
+    options: { messageKey?: string; except?: readonly string[] } = {},
     now = new Date(),
   ): Promise<MessageTarget[]> {
     const changed = await this.db
@@ -770,6 +770,9 @@ export class ConciergeTasksRepository {
           eq(conciergeMessageTurns.reacted, false),
           options.messageKey !== undefined
             ? eq(conciergeMessageTurns.messageKey, options.messageKey)
+            : undefined,
+          options.except?.length
+            ? notInArray(conciergeMessageTurns.messageKey, [...options.except])
             : undefined,
         ),
       )

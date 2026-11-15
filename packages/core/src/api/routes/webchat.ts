@@ -1122,6 +1122,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   ): void => {
     // A working tool shows the turn's open message working
     // (docs/domains/chats.md#status). Only a Concierge chat has open ones.
+    // Any event but its start says the turn has begun its work, so a message
+    // it takes from then on joins it.
+    const agentTurn = stream.agentTurnId ?? stream.turnId;
+    if (msg.type !== "turn_start" && agentTurn) {
+      deps.concierge?.messageStatus?.turnActive(stream.sessionId, agentTurn);
+    }
     if (msg.type === "tool_use" && msg.tool) {
       void deps.concierge?.messageStatus?.toolCalled(stream.sessionId, msg.tool);
     }
@@ -5067,9 +5073,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // (docs/domains/chats.md#task), and its status can show the turn
         // working on it (docs/domains/chats.md#status).
         if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
+          // Read now: a turn that had begun its work takes the message mid-turn.
+          const joined = deps.concierge?.messageStatus?.isBusy(sessionId, status.turnId) ?? false;
           await deps.concierge?.deps.tasks.repo
             .takeMessage(status.turnId, { chatId: sessionId, messageKey: status.inputId })
-            .then(() => deps.concierge?.messageStatus?.taken(sessionId, status.inputId))
+            .then(() => deps.concierge?.messageStatus?.taken(sessionId, status.inputId, joined))
             .catch((error: unknown) =>
               log.warn("failed to record the message a turn took", {
                 sessionId,

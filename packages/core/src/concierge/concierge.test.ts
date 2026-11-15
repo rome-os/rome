@@ -6619,6 +6619,54 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(marks.get("g1")).toMatchObject({ taskIds: [], earlierTaskIds: [taskId], endedAs: [] });
     });
 
+    /** Turn `turnId` has begun its work, then takes message `key`, as a steered input. */
+    const joins = async (s: ReturnType<typeof setup>, key: string, turnId: string) => {
+      const joined = s.service.messageStatus.isBusy(CONCIERGE_CHAT, turnId);
+      await s.taskRepo.takeMessage(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
+      s.service.messageStatus.taken(CONCIERGE_CHAT, key, joined);
+    };
+
+    it("gives a thanks that joins a busy turn no 👀 from its tools, and none once reacted to", async () => {
+      const s = setup({ said: false });
+      s.fakeTimers();
+      // A report turn is at work when the thanks comes in.
+      s.inTurn("report-turn");
+      s.service.messageStatus.turnActive(CONCIERGE_CHAT, "report-turn");
+      guardianSays(s, "thanks", "report-turn");
+      await joins(s, "thanks", "report-turn");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      await rs.advanceTimersByTimeAsync(2_000);
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "mcp__rome__execute_action");
+      expect(await statusOf(s, "thanks")).toBeNull();
+      await s.tool("react", { emoji: "❤️", message_id: "thanks" });
+      await rs.advanceTimersByTimeAsync(10_000);
+      expect(await statusOf(s, "thanks")).toBeNull();
+    });
+
+    it("shows 👀 on a message that joined a busy turn once 5 s pass with no answer", async () => {
+      const s = setup({ said: false });
+      s.fakeTimers();
+      s.inTurn("report-turn");
+      s.service.messageStatus.turnActive(CONCIERGE_CHAT, "report-turn");
+      guardianSays(s, "ask", "report-turn");
+      await joins(s, "ask", "report-turn");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      await rs.advanceTimersByTimeAsync(4_900);
+      expect(await statusOf(s, "ask")).toBeNull();
+      await rs.advanceTimersByTimeAsync(200);
+      expect(await statusOf(s, "ask")).toBe("working");
+    });
+
+    it("still marks the message a turn started with at its first working tool", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      // Taken before the turn did anything.
+      await joins(s, "g1", "concierge-turn-1");
+      s.service.messageStatus.turnActive(CONCIERGE_CHAT, "concierge-turn-1");
+      await s.service.messageStatus.toolCalled(CONCIERGE_CHAT, "chat_read");
+      expect(await statusOf(s, "g1")).toBe("working");
+    });
+
     it("never pushes a status to the phone", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
