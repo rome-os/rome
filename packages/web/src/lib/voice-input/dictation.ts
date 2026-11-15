@@ -150,6 +150,8 @@ export function startDictation(
         return;
       }
       socket = deps.openSocket();
+      // A connection that never opens is as lost as one that falls quiet.
+      heardFromRome();
       socket.onopen = () => {
         heardFromRome();
         // PCM s16le mono: two bytes a sample. Rome paces audio to real time,
