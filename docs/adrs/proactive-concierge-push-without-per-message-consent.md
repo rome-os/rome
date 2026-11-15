@@ -59,7 +59,7 @@ This record amends [the notification body record](sender-supplied-notification-b
 
 The guardian learns of a proactive message wherever they are, and taps it to open the chat it was said in. Nothing in the agent decides whether to push, so a model cannot forget the push or push a reply the guardian asked for.
 
-A forwarded task answer can hold a one-time code, and the Concierge's instructions alone cannot keep it off the lock screen. A task's title and a chat's name can come from the same output. So a forward pushes the Concierge's intro, and a forward with no intro or a card pushes a fixed line, never the forwarded text, the title or the name. The Concierge is told that every message can show on the lock screen, and to mark one that holds a secret private, as `send_notification` tells its callers.
+A forwarded task answer can hold a one-time code. Since the 2026-11-14 amendment a forward pushes its text and a card what it asks, so only the Concierge's instructions keep a secret off the lock screen: it is told that every message can show there, to say a secret in a private message, and never to forward one, as `send_notification` tells its callers.
 
 A message does not push while its person's phone app shows its chat or while they are active at a web dashboard. A dashboard merely open on a computer does not hold it back. A chat pushes at most once every 15 seconds, and rings at most once every 2 minutes. A proactive turn that writes its message outside `say` and is then reminded pushes nothing, since the reminder carries no push.
 
@@ -70,7 +70,7 @@ Future diffs must respect:
 - A dashboard holds back a push only through its activity signals: recent input on a visible, focused tab, for the person signed in on it. A diff that lets an open tab alone, the phone app's web view, another person's dashboard, or a dashboard's chat or watch subscription hold back a push reopens this record. A push held back this way is dropped, never sent later.
 - A Concierge push goes only to the person the chat serves. A `send_notification` push goes to the owner of a private chat, else to the one person the turn acts for. In a shared chat with no such person it is refused, never sent to the chat's owner or the guardian. A visitor's Concierge, and a visitor's `send_notification`, never reach the guardian's devices, and the guardian's never reach a visitor's. A visitor's push names its recipient, and a Rome Cloud that cannot honor the name refuses it rather than sending it to the guardian.
 - In one chat, messages within 15 seconds of the last push merge into one push showing the latest, and a push rings only after 2 minutes without one. A diff that pushes every message apart, or rings every push, reopens this record.
-- The body is only ever the message's own words, or the fixed line for a private message, a forward with no intro, or a card. A forward carries a task's short conclusion, which is the task's text: it is never the body.
+- The body is what the message shows: the Concierge's words, a forward's title and text, or what a card asks. Only a private message pushes the fixed line.
 - Quiet hours suppress the push and keep the message in the chat. Nothing queues the push for later.
 - `send_notification` keeps its rule. The agent-facing action and this push stay separate paths.
 - The push follows the [notification delivery invariants](../architecture/notification-delivery.md#invariants): the body is only ever the Concierge's own words, never forwarded or quoted text, and it never reaches a log.

@@ -82,11 +82,12 @@ private struct WidgetCardBody: View {
     }
 
     var body: some View {
-        // One view whatever shows, so the card's reads and its share go on
-        // while it shares by itself.
-        Group {
-            if let answered = autoShared {
-                // In the thread label's style: a quiet line, not a card.
+        // One container whatever shows, so the card's reads and its share
+        // keep one task while the branch inside changes.
+        VStack(spacing: 0) {
+            if let answered = autoShared ?? surface.autoSent {
+                // In the thread label's style: a quiet line, not a card. Until
+                // the stored answer arrives, the share just sent says it.
                 Text(verbatim: LocationCard.outcome(answered))
                     .romeFont(12)
                     .foregroundStyle(Palette.sub.opacity(0.75))
@@ -184,6 +185,9 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var viewModel: SurfaceViewModel?
     @Published private(set) var loaded = false
     @Published private(set) var failed = false
+    /// A share the card sent by itself and core took, as its answer reads,
+    /// until the stored answer arrives.
+    @Published private(set) var autoSent: Rome.JSONValue?
     /// Core did not take the last event the card sent.
     @Published private(set) var sendFailed = false
     /// Why core or the card's owner refused the last event, when it said.
@@ -424,7 +428,12 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             refusal = nil
             failed = false
             if let url = reply.open { open(url) }
-            if waits && reply.answered { sent = true } else { await load() }
+            if waits && reply.answered {
+                sent = true
+                if auto, let meters = body["accuracy"]?.number {
+                    autoSent = .object(["status": .string("shared"), "accuracyMeters": .number(meters.rounded()), "auto": .bool(true)])
+                }
+            } else { await load() }
         } catch {
             if auto { return }
             // Answered already, by another press or client: nothing failed.

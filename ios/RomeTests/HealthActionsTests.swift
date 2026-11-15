@@ -596,14 +596,9 @@ enum HealthFixtures {
         #expect(reply["results"]?.array?.first == parseJSON(#"{"type":"sleep","unit":"min","aggregate":"sum"}"#))
     }
 
-    @Test func mindfulMinutesMergeToo() async throws {
-        let health = FakeHealth()
-        health.segmentsByType["mindfulSession"] = [
-            HealthSegment(start: HealthFixtures.date("2026-11-09T08:00:00+08:00"), end: HealthFixtures.date("2026-11-09T08:10:00+08:00")),
-            HealthSegment(start: HealthFixtures.date("2026-11-09T08:05:00+08:00"), end: HealthFixtures.date("2026-11-09T08:20:00+08:00")),
-        ]
-        let reply = try HealthFixtures.ok(await HealthFixtures.actions(health).run("health.stats", args: parseJSON(#"{"type":"mindfulSession"}"#)))
-        #expect(reply["results"]?.array?.first?["value"]?.number == 20)
+    @Test func aTypeTheAppDoesNotAskForIsRefused() async {
+        let result = await HealthFixtures.actions(FakeHealth()).run("health.stats", args: parseJSON(#"{"type":"mindfulSession"}"#))
+        #expect(HealthFixtures.code(result) == "unsupported_type")
     }
 
     @Test func workoutsAreCountedByTheirStart() async throws {
@@ -885,7 +880,7 @@ enum HealthFixtures {
 /// Sleep, mindful minutes and workouts are read record by record, so one
 /// request reads a bounded window of them.
 @Suite struct HealthRecordWindowTests {
-    @Test(arguments: ["sleep", "mindfulSession", "workouts"])
+    @Test(arguments: ["sleep", "workouts"])
     func aWindowOverAYearOfRecordsIsRefusedBeforeHealthIsRead(type: String) async {
         let health = FakeHealth()
         let actions = HealthFixtures.actions(health)

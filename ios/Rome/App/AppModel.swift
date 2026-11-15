@@ -1420,10 +1420,14 @@ final class AppModel {
     /// open Rome, then the report.
     func connect(_ id: String) async {
         guard let capability = node.registry.capability(id: id) else { return }
+        // The Rome this connect was for: Sync turns on only there, never on
+        // one opened while the report was out.
+        let instance = currentInstanceID
         if capability.needsPermission { await capability.requestPermission() }
         // The report first, so the card's check finds the connection at once;
         // Sync's upload then runs on its own, behind it.
         await connections.connect(id)
+        guard currentInstanceID == instance else { return }
         if capability.syncSource == HealthSettings.sourceId, health.canSync, !health.isEnabled {
             health.setEnabled(true)
         }

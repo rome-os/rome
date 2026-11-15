@@ -134,6 +134,8 @@ describe("the share-location card where the browser already decided", () => {
       name: "share-location",
       context: { latitude: 1, longitude: 2, accuracy: 9, timestamp: 5, auto: true },
     });
+    // Before history brings the stored answer, the share just sent shows as one line.
+    expect(await screen.findByText("Location shared · ±9 m")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
   });
 

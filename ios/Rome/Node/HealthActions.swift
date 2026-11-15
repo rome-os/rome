@@ -291,7 +291,9 @@ struct HealthActions: Sendable {
     /// The longest window `health.stats` reads sleep, mindful minutes or workouts over.
     static let maxRecordDays = 366
 
-    private static let typeNames = HealthTypes.all.map(\.name).joined(separator: ", ")
+    /// The types the app asks iOS for: a read of any other would come back
+    /// empty, so it is refused as unsupported instead of read as no data.
+    private static let typeNames = HealthTypes.requested.map(\.name).joined(separator: ", ")
 
     /// iPhone or iPad: the word in what the agent reads.
     var device = DeviceKind.iPhone
@@ -314,7 +316,7 @@ struct HealthActions: Sendable {
                 workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
                 sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
                 A type the user has not allowed, or that has no data, has no value. \
-                Fails with live_off while Live access to Apple Health is off on the \(name), and with not_connected before the user connects it; only the user can change that, in the Rome app on the \(name): Settings → Connections → Apple Health. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+                Fails with live_off while Live access to Apple Health is off on the \(name), and with not_connected before the user connects it; either says how to get it connected. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
                 """,
             "health.samples": """
                 Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
@@ -326,7 +328,7 @@ struct HealthActions: Sendable {
     }
 
     static func off(_ device: DeviceKind) -> NodeActionResult {
-        .failed(code: "live_off", message: "Live access to Apple Health is off on this \(device.name). Offer the connect card now: connect_account with kind \"apple_health\", or where it does not list that kind, tell the user to turn it on in the Rome app on the \(device.name): Settings → Connections → Apple Health. Do not ask whether it is connected.")
+        .failed(code: "live_off", message: "Live access to Apple Health is off on this \(device.name). Where you talk with the user directly, offer the connect card: connect_account with kind \"apple_health\". In a task chat, stop and report that Apple Health needs connecting, so the chat that started the task offers it. Do not ask whether it is connected. The user turns it on in the Rome app on the \(device.name): Settings → Connections → Apple Health.")
     }
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
@@ -373,7 +375,7 @@ struct HealthActions: Sendable {
     }
 
     private func healthType(named name: String) throws -> HealthType {
-        guard let type = HealthTypes.named(name) else {
+        guard let type = HealthTypes.named(name), HealthTypes.requestedNames.contains(type.name) else {
             throw ActionFailure(code: "unsupported_type", message: "\"\(name)\" is not a supported type. Supported: \(Self.typeNames).")
         }
         return type
