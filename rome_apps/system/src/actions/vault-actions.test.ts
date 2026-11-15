@@ -47,13 +47,18 @@ describe("vault_apply", () => {
     expect(apply.inputSchema.required).toEqual(["name", "reason"]);
   });
 
-  it("previews a generic card with the duration and the reason", () => {
+  it("previews a secret-access card, with title and summary for surfaces that draw only the generic one", () => {
     expect(apply.preview?.({ name: "GITHUB_TOKEN", reason: "Push the release tag" })).toEqual({
-      kind: "generic",
+      kind: "secret_access",
+      name: "GITHUB_TOKEN",
+      ttlMinutes: 15,
+      reason: "Push the release tag",
       title: "Use GITHUB_TOKEN for 15 min",
       summary: "Push the release tag",
     });
     expect(apply.preview?.({ name: "GITHUB_TOKEN", ttlMinutes: 60, reason: "r" })).toMatchObject({
+      kind: "secret_access",
+      ttlMinutes: 60,
       title: "Use GITHUB_TOKEN for 60 min",
     });
   });

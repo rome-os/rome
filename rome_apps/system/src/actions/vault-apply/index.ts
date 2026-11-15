@@ -32,8 +32,12 @@ export function createAction(config: ActionConfig): Action {
   return defineAction({
     config,
     schema: vaultApplyInputSchema,
+    // `title` and `summary` say the same in words, for surfaces that draw only the generic card.
     preview: ({ name, ttlMinutes = DEFAULT_TTL_MINUTES, reason }) => ({
-      kind: "generic",
+      kind: "secret_access",
+      name,
+      ttlMinutes,
+      reason,
       title: `Use ${name} for ${ttlMinutes} min`,
       summary: reason,
     }),
