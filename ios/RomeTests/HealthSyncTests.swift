@@ -1046,7 +1046,8 @@ struct SyncRig {
         #expect(row(.manual).title == "Sync now" && row(.manual).symbol == "arrow.clockwise")
         let history = row(.manual, history: true)
         #expect(history.title == "History" && history.symbol == "clock.arrow.circlepath")
-        #expect(plain(history.detail) == "6:30 PM · last 6 months")
+        // The title already says it is the history; the row shows only its time.
+        #expect(plain(history.detail) == "6:30 PM")
     }
 
     @Test func aFailureIsRedWithItsReasonAndNoCount() {
