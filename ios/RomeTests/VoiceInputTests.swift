@@ -60,11 +60,15 @@ import Testing
             request: URLRequest(url: URL(string: "ws://127.0.0.1:1/ws/voice-input")!),
             source: source, stopTiming: LoggingTiming(log: log),
             handlers: .init(onText: { _ in }, onDone: { _, _ in }))
-        await withCheckedContinuation { started in
-            source.onStart = { started.resume() }
+        // Stops as soon as capture runs: the socket to nowhere fails a moment later,
+        // and that would end the dictation first.
+        await withCheckedContinuation { stopped in
+            source.onStart = {
+                dictation.stop()
+                stopped.resume()
+            }
             dictation.start()
         }
-        dictation.stop()
         #expect(log.events == ["begin guardian", "finish", "end"])
     }
 
