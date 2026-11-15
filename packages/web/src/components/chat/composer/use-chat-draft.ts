@@ -39,7 +39,9 @@ export function useChatDraft(chatId: string | null | undefined, initialText = ""
     [authEpoch],
   );
   const sendEnded = useCallback(
-    (sentFrom: string | null | undefined, sent: string, accepted: boolean) => {
+    (sent: string, accepted: boolean) => {
+      // The chat this field serves, even when a first send made it mid-upload.
+      const sentFrom = latest.current.chatId;
       if (!sentFrom) return;
       if (accepted) clearSentChatDraft(sentFrom, sent);
       else restoreUnsentChatDraft(sentFrom, sent, authEpoch);
