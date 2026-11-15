@@ -1,4 +1,11 @@
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   clearSentChatDraft,
   loadChatDraft,
@@ -22,11 +29,7 @@ import { currentAuthEpoch } from "@/lib/new-chat-draft-storage";
 export function useChatDraftText(
   chatId: string | null | undefined,
   initialText = "",
-): [
-  string,
-  Dispatch<SetStateAction<string>>,
-  (chatId: string | null | undefined, text: string, accepted: boolean) => void,
-] {
+): [string, Dispatch<SetStateAction<string>>, (text: string, accepted: boolean) => void] {
   const [authEpoch] = useState(currentAuthEpoch);
   const [text, setText] = useState(() =>
     chatId ? (loadChatDraft(chatId)?.text ?? "") : initialText,
@@ -34,8 +37,12 @@ export function useChatDraftText(
   useEffect(() => {
     if (chatId) saveChatDraft(chatId, { text }, authEpoch);
   }, [chatId, text, authEpoch]);
+  // The chat this field serves, even when a first send makes it mid-upload.
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
   const sendEnded = useCallback(
-    (sentFrom: string | null | undefined, sent: string, accepted: boolean) => {
+    (sent: string, accepted: boolean) => {
+      const sentFrom = chatIdRef.current;
       if (!sentFrom) return;
       if (accepted) clearSentChatDraft(sentFrom, sent);
       else restoreUnsentChatDraft(sentFrom, sent, authEpoch);
