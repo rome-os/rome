@@ -50,11 +50,18 @@ function setup(
   connections: unknown[] = [],
   deviceConnections: unknown[] = [],
   audience: "private" | "shared" = "private",
+  storedDevice: string | null = null,
 ) {
-  const forwarded: { url: string; body: unknown; cookie: string | null }[] = [];
+  const forwarded: {
+    url: string;
+    body: unknown;
+    cookie: string | null;
+    device?: string | null;
+  }[] = [];
   const app = widgetEventRoutes({
     chatAudience: async () => audience,
     webchatRepo: {
+      askingDeviceOf: async () => storedDevice,
       widgetMessage: async (id) =>
         rows[id] ? { chatId: rows[id].chatId, content: JSON.stringify(rows[id].content) } : null,
       getMessages: (async (chatId: string) =>
@@ -86,6 +93,9 @@ function setup(
         url: new URL(request.url).pathname,
         body: await request.json(),
         cookie: request.headers.get("cookie"),
+        ...(request.headers.has("x-rome-device")
+          ? { device: request.headers.get("x-rome-device") }
+          : {}),
       });
       return Response.json(
         new URL(request.url).pathname.startsWith("/api/apps/") ? appReply : { ok: true },
@@ -310,6 +320,7 @@ describe("an event on a widget", () => {
 
     const app = widgetEventRoutes({
       webchatRepo: {
+        askingDeviceOf: async () => null,
         widgetMessage: async () => ({ chatId: "c1", content: JSON.stringify([connect]) }),
         getMessages: (async () => [
           { id: "m7", role: "assistant", content: JSON.stringify([connect]) },
@@ -722,6 +733,47 @@ describe("an event on the connect card for a device kind", () => {
     });
   });
 
+  it("starts the turn an answer makes on the device: the caller's, else the card's, else the chat's", async () => {
+    const forAsking = {
+      ...deviceCard,
+      render: { ...deviceCard.render, props: { ...deviceCard.render.props, deviceId: "dev-card" } },
+    };
+    const rows = [
+      {
+        capability: "apple_health",
+        title: "Apple Health",
+        state: "working",
+        device: { id: "dev-card" },
+      },
+    ];
+    const answerFrom = async (
+      content: unknown,
+      headers: Record<string, string>,
+      storedDevice: string | null,
+    ) => {
+      const { fire, forwarded } = setup(
+        { m: { chatId: "c1", content: [content] } },
+        "guardian",
+        undefined,
+        [],
+        rows,
+        "private",
+        storedDevice,
+      );
+      await fire("m", { name: "check", context }, headers);
+      return forwarded[0]?.device;
+    };
+    // Pressed on the phone, which names itself.
+    expect(await answerFrom(forAsking, { "x-rome-device": "dev-phone" }, "dev-chat")).toBe(
+      "dev-phone",
+    );
+    // Pressed where no device is named: the device the card was raised for.
+    expect(await answerFrom(forAsking, {}, "dev-chat")).toBe("dev-card");
+    // A card raised for no device: the device the chat was last handed work from.
+    expect(await answerFrom(deviceCard, {}, "dev-chat")).toBe("dev-chat");
+    expect(await answerFrom(deviceCard, {}, null)).toBeUndefined();
+  });
+
   it("takes check with no button for it only on core's own card", async () => {
     const appCard = { ...deviceCard, appId: "connector" };
     const { fire } = setup(
@@ -868,6 +920,7 @@ describe("an event on the share-location card core owns", () => {
     const turns: unknown[] = [];
     const app = widgetEventRoutes({
       webchatRepo: {
+        askingDeviceOf: async () => null,
         widgetMessage: async () => ({ chatId: "c1", content: JSON.stringify([locationCard]) }),
         getMessages: (async () => [
           { id: "m", role: "assistant", content: JSON.stringify([locationCard]) },

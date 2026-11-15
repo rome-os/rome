@@ -5,6 +5,7 @@ import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 import { deviceConnectPath } from "../../connections/connect-card.js";
+import { ASKING_DEVICE_HEADER } from "../../connections/device/live-route.js";
 import { DECLINED_LOCATION, sharedLocationAnswer } from "../../webchat/location-card.js";
 import {
   DECLINE_LOCATION_EVENT,
@@ -195,7 +196,10 @@ interface StoredWidget {
 }
 
 export interface WidgetEventDeps {
-  webchatRepo: Pick<WebChatRepository, "widgetMessage" | "getSession" | "getMessages">;
+  webchatRepo: Pick<
+    WebChatRepository,
+    "widgetMessage" | "getSession" | "getMessages" | "askingDeviceOf"
+  >;
   /** Hands a request to Rome's own API, as if the caller had sent it there.
    *  `env` is the incoming request's, so the caller resolves the same way. */
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
@@ -260,6 +264,16 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     const headers = new Headers(c.req.raw.headers);
     headers.set("content-type", "application/json");
     headers.delete("content-length");
+    // The turn an answer starts asks the device the guardian pressed it on,
+    // else the device a core card was raised for, else the one the chat was
+    // last handed work from, so the read after connecting goes to that device.
+    if (!headers.has(ASKING_DEVICE_HEADER)) {
+      const deviceId =
+        (widget.appId === "core" && typeof widget.props.deviceId === "string"
+          ? widget.props.deviceId
+          : null) ?? (await deps.webchatRepo.askingDeviceOf(message.chatId));
+      if (deviceId) headers.set(ASKING_DEVICE_HEADER, deviceId);
+    }
     const to = (path: string, json: unknown) =>
       deps.forward(
         new Request(new URL(path, c.req.url), {

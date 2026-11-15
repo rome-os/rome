@@ -353,11 +353,14 @@ final class DeviceHeaderProtocol: URLProtocol, @unchecked Sendable {
         return LiveBackend(client: APIClient(origin: URL(string: "https://me.romeos.cc")!, token: { "t" }, cookieName: { cookie }, configuration: configuration, deviceId: "dev-1"))
     }
 
-    @Test func aGuardianMessageNamesThisPhone() async throws {
+    @Test func everyGuardianRequestThatCanStartATurnNamesThisPhone() async throws {
         let backend = backend(cookie: InstanceSession.guardianCookie)
         _ = try await backend.send(sessionId: "s1", text: "battery?", files: [], inputId: "i1", priority: .now)
-        await backend.markRead(sessionId: "s1")
-        #expect(DeviceHeaderProtocol.headers == ["dev-1", nil], "only the message names the phone")
+        // Answering a card starts the turn that reads after connecting.
+        _ = try? await backend.answerWidget(widgetId: "w1", name: "check", context: .object([:]))
+        try? await backend.resolveApproval(id: "a1", approve: true)
+        _ = try? await backend.sessions()
+        #expect(DeviceHeaderProtocol.headers == ["dev-1", "dev-1", "dev-1", nil], "a GET names none")
     }
 
     @Test func aVisitorsRomeIsNeverTold() async throws {

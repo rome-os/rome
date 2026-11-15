@@ -132,12 +132,13 @@ final class APIClient: Sendable {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
-    /// `fromThisDevice`: the request starts a turn the guardian sends from
-    /// this phone, so it names the phone's device id. Never to a visitor's Rome.
+    /// Every POST can start a turn (a message, a card's answer, an approval),
+    /// so each names this phone's device id, and a live read in that turn
+    /// asks this phone. Never to a visitor's Rome.
     @discardableResult
-    func post(_ path: String, json: JSONValue? = nil, fromThisDevice: Bool = false) async throws -> Data {
+    func post(_ path: String, json: JSONValue? = nil) async throws -> Data {
         var request = request(path, method: "POST")
-        if fromThisDevice, let deviceId, cookieName() == InstanceSession.guardianCookie {
+        if let deviceId, cookieName() == InstanceSession.guardianCookie {
             request.setValue(deviceId, forHTTPHeaderField: Self.deviceHeader)
         }
         if let json {
@@ -147,8 +148,8 @@ final class APIClient: Sendable {
         return try await send(request)
     }
 
-    func post<T: Decodable>(_ path: String, json: JSONValue? = nil, fromThisDevice: Bool = false, as type: T.Type) async throws -> T {
-        try decode(try await post(path, json: json, fromThisDevice: fromThisDevice))
+    func post<T: Decodable>(_ path: String, json: JSONValue? = nil, as type: T.Type) async throws -> T {
+        try decode(try await post(path, json: json))
     }
 
     @discardableResult

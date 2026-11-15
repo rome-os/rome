@@ -72,17 +72,14 @@ export function registerPersonalDataActions(
       }));
       // A source no device has synced yet, but whose device reads it live,
       // as just after a connect: listed with no types, so the Agent reads live.
-      const unsynced = PERSONAL_DATA_SOURCES.filter(
-        (spec) =>
-          !stored.some((entry) => entry.source === spec.source) &&
-          connectionPointer(spec.source, turn, connections).state !== "not_connected",
-      ).map((spec) => ({
-        source: spec.source,
-        title: spec.title,
-        note: spec.note,
-        types: [],
-        connection: connectionPointer(spec.source, turn, connections),
-      }));
+      // Listed too when only the asking device lacks the connection: the
+      // pointer then names its kind, so the Agent can offer that device's card.
+      const unsynced = PERSONAL_DATA_SOURCES.flatMap((spec) => {
+        if (stored.some((entry) => entry.source === spec.source)) return [];
+        const connection = connectionPointer(spec.source, turn, connections);
+        if (connection.state === "not_connected" && !connection.kind) return [];
+        return [{ source: spec.source, title: spec.title, note: spec.note, types: [], connection }];
+      });
       return { status: "ok", data: { sources: [...stored, ...unsynced] } };
     },
   });

@@ -206,7 +206,7 @@ final class LiveBackend: RomeBackend {
         if !files.isEmpty {
             body["files"] = .array(files.map { .object(["name": .string($0.name), "mimeType": .string($0.mimeType), "dataBase64": .string($0.dataBase64)]) })
         }
-        return try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: .object(body), fromThisDevice: true, as: CreatedTurn.self)
+        return try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: .object(body), as: CreatedTurn.self)
     }
 
     var origin: URL? { client.origin }

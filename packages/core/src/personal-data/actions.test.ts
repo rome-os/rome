@@ -277,6 +277,47 @@ describe("personal-data actions", () => {
     expect(JSON.stringify(result)).not.toContain("dev-other");
   });
 
+  it("lists a source no device has synced when only another device reads it, with its card's kind", async () => {
+    testDb.close();
+    testDb = createTestDb();
+    devices = new DeviceConnectionsRepository(testDb.db);
+    const registry = new ActionRegistryImpl();
+    registerPersonalDataActions(registry, {
+      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
+      guardianTimeZone: async () => TZ,
+      connections: createLiveRoutes(devices, () => NOV_10 + 2 * DAY + 9 * HOUR),
+    });
+    engine = new ActionEngine(registry, createActionEngineRepos(), {
+      processRole: "main",
+      isFirstPartyAction: () => true,
+    });
+    healthOn("dev-other", true, "origin-other");
+    const catalog = await engine.run(
+      "core:personal_data_catalog",
+      {},
+      {
+        audience: "private",
+        channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, "dev-asking"),
+      },
+    );
+    expect(catalog).toMatchObject({
+      status: "ok",
+      data: {
+        sources: [
+          {
+            source: "apple_health",
+            types: [],
+            connection: {
+              state: "not_connected",
+              kind: "apple_health",
+              device: { id: "dev-asking" },
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it("reads none of a removed device's data, and points at no connection of it", async () => {
     healthOn("dev-1", true, ORIGIN);
     const lifecycle = withDeviceLifecycle(
