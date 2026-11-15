@@ -139,6 +139,7 @@ struct MainShell: View {
                         destination(route)
                     }
                 }
+                .environment(\.voiceInput, workspace.voiceInput)
                 .environment(\.chatLinkOpener, actions.linkOpener)
                 .environment(\.openUsage, actions.openUsage)
                 .environment(\.openTaskChat, actions.openTaskChat)
