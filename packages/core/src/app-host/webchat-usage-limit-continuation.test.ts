@@ -261,7 +261,10 @@ describe("usage-limit continuation", () => {
       await stopped();
       await repo_.takeMessage("chat-turn", { chatId: "chat", messageKey: "chat-input" });
       await repo_.takeMessage("chat-turn", { chatId: "chat", messageKey: "handed-on" });
-      await repo_.answerTurns("chat", []);
+      // One the turn answered before the limit stays settled.
+      await repo_.takeMessage("chat-turn", { chatId: "chat", messageKey: "answered" });
+      await repo_.answerMessage("chat", "answered");
+      await repo_.answerTurns("chat", [], new Date(), { failed: true });
       claude.set(available);
       const { agent, runner } = backend();
       stop = startUsageLimitContinuation({

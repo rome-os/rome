@@ -7456,6 +7456,65 @@ describe("Webchat API", () => {
       expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("reaction");
     });
 
+    it("shows a guardian message's status beside its reaction, and streams its changes", async () => {
+      const repo = new ConciergeTasksRepository(testDb.db);
+      const tasks = new ConciergeTasks(repo);
+      deps.concierge = {
+        deps: { tasks },
+        onCardSettled: () => () => {},
+        // As the service fans out its one watch.
+        onMessageStatus: (listener: (event: unknown) => void) =>
+          tasks.onMessageStatus((target, status) =>
+            listener({ sessionId: target.chatId, messageId: target.messageKey, status }),
+          ),
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic",
+        "Topic",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      for (const [id, turn] of [
+        ["g1", "turn-1"],
+        ["g2", "turn-2"],
+      ] as const) {
+        await deps.webchatRepo.addMessage(
+          id,
+          "topic",
+          "user",
+          JSON.stringify([{ type: "text", content: id }]),
+          turn,
+        );
+      }
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "👍");
+      await repo.takeMessage("turn-1", { chatId: "topic", messageKey: "g1" });
+      const app = createWebchatRuntime(deps).routes;
+      const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
+      const working = readSseUntil(events, '"status":"working"');
+      await repo.markWorking("topic");
+      expect(await working).toContain(
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", status: "working" })}`,
+      );
+      const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
+        id: string;
+        reaction?: string;
+        status?: string;
+      }[];
+      // Both travel; the client shows the status over the reaction.
+      expect(listed.find((m) => m.id === "g1")).toMatchObject({
+        reaction: "👍",
+        status: "working",
+      });
+      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("status");
+      const failed = readSseUntil(events, '"status":"failed"');
+      await repo.answerTurns("topic", [], new Date(), { failed: true });
+      expect(await failed).toContain('"messageId":"g1"');
+      await events.cancel();
+    });
+
     it("hands a task card out with its card, in one read per page, and streams a card that settles", async () => {
       const listeners = new Set<(event: unknown) => void>();
       const reads: string[][] = [];

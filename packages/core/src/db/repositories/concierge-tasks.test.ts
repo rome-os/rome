@@ -619,17 +619,19 @@ describe("ConciergeTasksRepository", () => {
       expect(await repo.takeStoppedRequests("concierge")).toEqual([]);
     });
 
-    it("hands a message on to the turn that takes it over, and reopens it all when that turn runs again", async () => {
+    it("hands a message on to the turn that takes it over, and reopens what its failure left when that turn runs again", async () => {
       await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
       await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
       // A newer turn took g1 over.
       await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g1" });
-      await repo.answerTurns("concierge", []);
+      // It answered g3 before it failed.
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g3" });
+      await repo.answerMessage("concierge", "g3");
+      await repo.answerTurns("concierge", [], new Date(), { failed: true });
       expect(await repo.reopenTurn("concierge", "t2")).toBe(2);
-      expect([await answered("concierge", "g1"), await answered("concierge", "g2")]).toEqual([
-        false,
-        false,
-      ]);
+      expect(
+        await Promise.all(["g1", "g2", "g3"].map((key) => answered("concierge", key))),
+      ).toEqual([false, false, true]);
     });
 
     it("answers every open message after a restart, except in a chat whose turn continues", async () => {
