@@ -274,7 +274,7 @@ function ConciergeTopicEntry({
             setEditing(false);
           }
         }}
-        className="my-1 ml-6 h-[var(--control-h-sm)] min-w-0 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none"
+        className="my-1 ml-3 h-[var(--control-h-sm)] min-w-0 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none"
       />
     );
   }
@@ -282,7 +282,7 @@ function ConciergeTopicEntry({
     <div className="group/topic relative flex items-center" data-concierge-topic={chat.id}>
       <Link
         to={`/chat/${chat.id}`}
-        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS} pl-8`}
+        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS} pl-4`}
         aria-label={
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }

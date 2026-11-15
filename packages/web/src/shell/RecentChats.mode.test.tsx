@@ -480,9 +480,13 @@ describe("Concierge mode", () => {
       ]);
     });
 
-    it("opens by itself when the open chat is a task chat", async () => {
+    it("opens by itself when the open chat is a task chat, and scrolls its row into view", async () => {
       seedChatListMode({ mode: "concierge" });
       concierge.chats = topics;
+      const scrolled: Element[] = [];
+      rs.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+        scrolled.push(this);
+      });
       serve([
         mainChat(),
         ...[1, 2, 3, 4, 5, 6, 7].map((day) =>
@@ -497,20 +501,26 @@ describe("Concierge mode", () => {
           .getByRole("button", { name: /^Tasks/ })
           .getAttribute("aria-expanded"),
       ).toBe("true");
+      await waitFor(() =>
+        expect(scrolled.map((row) => row.querySelector("a")?.getAttribute("href"))).toContain(
+          "/chat/t1",
+        ),
+      );
     });
 
-    it("shows a task's waiting mark on the heading while folded", async () => {
+    it("shows only the running count on the folded heading, never a waiting mark", async () => {
       seedChatListMode({ mode: "concierge" });
       concierge.chats = topics;
       serve([
         mainChat(),
         task("t1", "Book flights", { awaitingGuardian: true }),
-        task("t2", "Two"),
+        task("t2", "Two", { running: true }),
       ]);
       open("/chat/unlisted");
       const section = await screen.findByRole("region", { name: /^Tasks/ });
       expect(within(section).queryAllByRole("link")).toEqual([]);
-      expect(within(section).getByRole("img", { name: "Waiting for you" })).toBeTruthy();
+      expect(within(section).getByRole("button", { name: "Tasks, 1 running" })).toBeTruthy();
+      expect(within(section).queryByRole("img", { name: "Waiting for you" })).toBeNull();
     });
 
     it("has no Tasks section, nor its separator, when there are no task chats", async () => {
@@ -534,7 +544,7 @@ describe("Concierge mode", () => {
       ]);
       open("/chat/unlisted");
       const section = await screen.findByRole("region", { name: /^Tasks/ });
-      expect(within(section).getByText("2 running")).toBeTruthy();
+      expect(within(section).getByRole("button", { name: "Tasks, 2 running" })).toBeTruthy();
     });
   });
 });
