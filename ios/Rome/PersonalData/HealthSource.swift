@@ -28,8 +28,8 @@ struct HealthSyncType: Equatable, Sendable {
 }
 
 enum HealthSyncPlan {
-    /// Every type `health.stats` reads, in the same order.
-    static let all: [HealthSyncType] = HealthTypes.all.map { type in
+    /// The types the app asks iOS to read, in `health.stats`'s order.
+    static let all: [HealthSyncType] = HealthTypes.requested.map { type in
         switch type.kind {
         case .quantity(let cumulative):
             return HealthSyncType(type: type, shape: dense.contains(type.name) ? .bucket(cumulative: cumulative) : .sample, unit: type.units.first?.name ?? "")

@@ -51,7 +51,8 @@ struct NodeCapabilityRegistry: Sendable {
     }
 
     /// Each capability as a device connection, for the report to the Rome:
-    /// what it is, what it can do, and its permission and Live access now.
+    /// what it is, what it can do, its permission, and whether a live request
+    /// would be answered now.
     func connections() async -> [DeviceConnectionReport.Connection] {
         var list: [DeviceConnectionReport.Connection] = []
         for capability in capabilities {
@@ -63,7 +64,9 @@ struct NodeCapabilityRegistry: Sendable {
                 operations: capability.actions.map { .init(name: $0.name, access: $0.access.rawValue) },
                 feeds: capability.syncSource,
                 permission: await capability.permission().rawValue,
-                live: capability.live.isOn
+                // Live as the phone would answer now: Health whose iOS
+                // permission was never asked refuses, so it reports off.
+                live: await capability.state() == .on
             ))
         }
         return list

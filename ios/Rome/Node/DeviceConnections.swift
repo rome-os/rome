@@ -1,6 +1,9 @@
 import Foundation
+import OSLog
 import Observation
 import SwiftUI
+
+let deviceConnectionsLog = Logger(subsystem: "cc.romeos.mobile", category: "DeviceConnections")
 
 // This phone's device connections, one per capability ("Apple Health ·
 // iPhone"), as the open Rome is told of them. Connections know nothing of
@@ -103,7 +106,12 @@ final class DeviceConnections {
     @ObservationIgnored let node: NodeHost
     @ObservationIgnored private let defaults: UserDefaults
     /// Sends the report to the open Rome; set by the app once it can.
-    @ObservationIgnored var send: (@MainActor (DeviceConnectionReport) async -> Void)?
+    /// Sends a report; false when it did not reach the Rome, as before the
+    /// app is ready or on a failed request. That report is sent again by
+    /// `reportIfUnsent` once the app is ready.
+    @ObservationIgnored var send: (@MainActor (DeviceConnectionReport) async -> Bool)?
+    /// The newest report did not reach the Rome.
+    @ObservationIgnored private(set) var unsent = false
     /// The rome-node device id and name, or nil while signed out.
     @ObservationIgnored var device: (@MainActor () -> (id: String, name: String)?)?
     @ObservationIgnored private var reporting: Task<Void, Never>?
@@ -170,10 +178,16 @@ final class DeviceConnections {
             await previous?.value
             guard let self, let send = self.send, let device = self.device?() else { return }
             let connections = await self.node.registry.connections()
-            await send(DeviceConnectionReport(device: .init(id: device.id, name: device.name, platform: "ios"), connections: connections))
+            let sent = await send(DeviceConnectionReport(device: .init(id: device.id, name: device.name, platform: "ios"), connections: connections))
+            self.unsent = !sent
         }
         reporting = task
         return task
+    }
+
+    /// Sends the report again when the newest did not land.
+    func reportIfUnsent() {
+        if unsent { report() }
     }
 
     /// Sign-out: every connection back to not connected. Live access is the

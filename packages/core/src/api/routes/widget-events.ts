@@ -130,7 +130,10 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
       // visitors were let in: then the position reaches nobody, and the card
       // is answered as declined.
       if ((await io.chatAudience()) !== "private") return { answer: DECLINED_LOCATION };
-      return { answer: shared };
+      // A share the client sent by itself is marked so only on a card core
+      // marked for it; a client cannot mark any other.
+      const auto = context.auto === true && typeof io.props.autoShareToken === "string";
+      return { answer: auto ? { ...shared, auto: true } : shared };
     },
     [DECLINE_LOCATION_EVENT]: async () => ({ answer: DECLINED_LOCATION }),
   },

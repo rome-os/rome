@@ -12,6 +12,10 @@ import type { DeviceConnection } from "./device/repository.js";
 export interface DeviceKind {
   kind: string;
   label: string;
+  /** How it stands now, the best of the devices that report it. */
+  state?: DeviceConnection["state"];
+  /** The device that reports it, by name, when one does. */
+  device?: string;
 }
 
 /** The path of the page that connects a device kind; the phone's app opens its own flow there. */
@@ -120,12 +124,20 @@ export function connectableKinds(): OAuthProvider[] {
  * is left out, so a kind always means one thing.
  */
 export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKind[] {
-  const kinds = new Map<string, string>();
+  const rank = { working: 0, off: 1, broken: 2 } as const;
+  const kinds = new Map<string, DeviceKind>();
   for (const connection of connections) {
-    if (isOAuthProvider(connection.capability) || kinds.has(connection.capability)) continue;
-    kinds.set(connection.capability, connection.title);
+    if (isOAuthProvider(connection.capability)) continue;
+    const known = kinds.get(connection.capability);
+    if (known?.state && rank[known.state] <= rank[connection.state]) continue;
+    kinds.set(connection.capability, {
+      kind: connection.capability,
+      label: known?.label ?? connection.title,
+      state: connection.state,
+      ...(connection.device.name ? { device: connection.device.name } : {}),
+    });
   }
-  return [...kinds].map(([kind, label]) => ({ kind, label }));
+  return [...kinds.values()];
 }
 
 /** The connection kind `connect_account` was asked for, or why it can't connect it. */

@@ -1881,16 +1881,6 @@
         }
       }
     },
-    "Get notified when Rome has something for you" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 有消息给你时通知你"
-          }
-        }
-      }
-    },
     "Guardian" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3603,16 +3593,6 @@
         }
       }
     },
-    "Respond" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "去处理"
-          }
-        }
-      }
-    },
     "Restarting your Rome…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3639,6 +3619,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "静息心率"
+          }
+        }
+      }
+    },
+    "Results, questions and reminders" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结果、提问和提醒"
           }
         }
       }
@@ -4963,6 +4953,16 @@
         }
       }
     },
+    "Turn on notifications" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开通知"
+          }
+        }
+      }
+    },
     "Turn on notifications in Settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5521,16 +5521,6 @@
         }
       }
     },
-    "Your battery is at 18%. I'll remind you at 5:30, before your 6 pm train." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "电量还剩 18%。我会在 5:30 提醒你，赶在 6 点的火车之前。"
-          }
-        }
-      }
-    },
     "Your Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5617,6 +5607,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 读取这台手机的电量和网络。"
+          }
+        }
+      }
+    },
+    "Your battery is at 18%. I'll remind you at 5:30, before your 6 pm train." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电量还剩 18%。我会在 5:30 提醒你，赶在 6 点的火车之前。"
           }
         }
       }

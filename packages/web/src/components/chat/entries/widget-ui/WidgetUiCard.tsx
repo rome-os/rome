@@ -113,6 +113,7 @@ export function WidgetUiCard({
   const [failed, setFailed] = useState(false);
   // A refused event, with why when core says.
   const [sendFailed, setSendFailed] = useState<string | false>(false);
+  const [autoSent, setAutoSent] = useState<number | null>(null);
   const [blockedLink, setBlockedLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -236,8 +237,12 @@ export function WidgetUiCard({
           if (tab) tab.opener = null;
           else setBlockedLink(outcome.open);
         }
-        if (outcome.answered && host) setSent(true);
-        else {
+        if (outcome.answered && host) {
+          setSent(true);
+          // A share sent by itself shows its quiet line until the stored
+          // answer arrives.
+          if (auto && typeof context.accuracy === "number") setAutoSent(context.accuracy);
+        } else {
           await load(p);
           setFailed(false);
         }
@@ -337,7 +342,7 @@ export function WidgetUiCard({
         if (document.visibilityState !== "visible" || autoShared.has(widgetId)) return;
         autoShared.add(widgetId);
         stopWaiting();
-        void fire({ name: SHARE_LOCATION_EVENT }, true);
+        void fire({ name: SHARE_LOCATION_EVENT, context: { auto: true } }, true);
       };
       document.addEventListener("visibilitychange", share);
       stopWaiting = () => document.removeEventListener("visibilitychange", share);
@@ -355,6 +360,18 @@ export function WidgetUiCard({
       {t("appComponent.widgetUndrawable", { text })}
     </span>
   );
+  // A share the card made by itself is no question the guardian answered:
+  // while it runs nothing shows, and once core has it, one quiet line.
+  if (locationCard && autoSharing && sendFailed === false) return null;
+  const autoOutcome =
+    result?.auto === true
+      ? result
+      : autoSent !== null && result === undefined
+        ? { status: "shared", accuracyMeters: Math.round(autoSent) }
+        : null;
+  if (locationCard && autoOutcome) {
+    return <p className="text-aux text-muted-foreground">{locationOutcome(autoOutcome, t)}</p>;
+  }
   return (
     <div
       tabIndex={waiting ? -1 : undefined}

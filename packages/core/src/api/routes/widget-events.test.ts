@@ -774,6 +774,26 @@ describe("an event on the share-location card core owns", () => {
     expect(forwarded).toEqual([]);
   });
 
+  it("marks a share the client sent by itself only on a card core marked for it", async () => {
+    const marked = {
+      ...locationCard,
+      render: { ...locationCard.render, props: { reason: "r", autoShareToken: "t" } },
+    };
+    const auto = setup({ m: { chatId: "c1", content: [marked] } });
+    await auto.fire("m", { name: "share-location", context: { ...position, auto: true } });
+    expect(
+      (auto.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
+        ?.output,
+    ).toMatchObject({ status: "shared", auto: true });
+    // An unmarked card's share says nothing of how it was sent, whatever the client claims.
+    const plain = setup({ m: { chatId: "c1", content: [locationCard] } });
+    await plain.fire("m", { name: "share-location", context: { ...position, auto: true } });
+    expect(
+      (plain.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
+        ?.output,
+    ).not.toHaveProperty("auto");
+  });
+
   it("answers as declined, with no position, once the chat is no longer private", async () => {
     // Visitors were let in while the card waited, so the chat is now shared.
     const { fire, forwarded } = setup(
