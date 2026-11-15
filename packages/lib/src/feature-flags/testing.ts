@@ -1,5 +1,6 @@
-import { Statsig, StatsigUser } from "@statsig/statsig-node-core";
+import { Statsig } from "@statsig/statsig-node-core";
 import { setFeatureGates, resetFeatureGates as resetActiveBackend } from "./index.js";
+import { statsigUser } from "./user.js";
 
 /** Control handle for the offline Statsig backend installed by {@link useFakeFeatureGates}. */
 export interface FakeFeatureGates {
@@ -39,10 +40,10 @@ export function useFakeFeatureGates(): FakeFeatureGates {
   let broken = false;
 
   setFeatureGates({
-    async checkGate(gateName, unitId) {
+    async checkGate(gateName, unitId, email) {
       if (broken) return false;
       await ready;
-      return statsig.checkGate(new StatsigUser({ userID: unitId }), gateName);
+      return statsig.checkGate(statsigUser(unitId, email), gateName);
     },
   });
 

@@ -63,6 +63,7 @@ function openSonioxStream(
   const queued: (Uint8Array | string)[] = [];
   let done = false;
   let finishing = false;
+  let sentBytes = 0;
   // Whether the client is showing unsettled text that a later response may clear.
   let shown = false;
 
@@ -81,8 +82,12 @@ function openSonioxStream(
     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.terminate();
   };
 
+  const deliver = (frame: Uint8Array | string) => {
+    ws.send(frame);
+    if (typeof frame !== "string") sentBytes += frame.byteLength;
+  };
   const send = (frame: Uint8Array | string) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+    if (ws.readyState === WebSocket.OPEN) deliver(frame);
     else queued.push(frame);
   };
 
@@ -97,7 +102,7 @@ function openSonioxStream(
         language_hints: ["en", "zh"],
       }),
     );
-    for (const frame of queued.splice(0)) ws.send(frame);
+    for (const frame of queued.splice(0)) deliver(frame);
   });
 
   ws.on("message", (data, isBinary) => {
@@ -175,6 +180,9 @@ function openSonioxStream(
     },
     abort() {
       stop(() => {});
+    },
+    get sentBytes() {
+      return sentBytes;
     },
   };
 }

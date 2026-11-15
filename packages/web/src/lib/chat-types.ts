@@ -159,6 +159,8 @@ export interface CreateTurnResponse {
   inputState?: import("@rome/api-types/trace-segments").AgentInputState | null;
   sessionId: string;
   startedAt: string;
+  /** The user message as the server stored it (a JSON array of parts). */
+  content?: string;
 }
 
 export interface ChatMessage {
@@ -182,9 +184,12 @@ export interface ChatMessage {
   /** The task chat of the task whose chat thread the message is in, when it
    *  has one. Absent from servers before it. */
   chatThreadTaskChatId?: string | null;
-  /** Rome's status reaction on a guardian message in a Concierge chat: how
-   *  the task it started or was passed on to stands. Absent when it has none. */
-  statusReaction?: import("@rome/api-types/concierge").ConciergeStatusReaction | null;
+  /** The emoji the Concierge reacted to a guardian message of its chat with.
+   *  Absent when it has none, and from servers before it. */
+  reaction?: string | null;
+  /** Rome's status on a guardian message of a Concierge chat, shown over its
+   *  reaction. Absent when it has none, and from servers before it. */
+  status?: import("@rome/api-types/concierge").ConciergeMessageStatus | null;
 }
 
 export interface ProjectOption {

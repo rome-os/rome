@@ -107,7 +107,8 @@
         "tidyingUp": "Tidying up context"
       }
     },
-    "statusReaction": {
+    "reaction": "Reaction",
+    "status": {
       "working": "Working on it",
       "failed": "Did not finish"
     },
@@ -181,8 +182,7 @@
     "action": "Reply",
     "dismiss": "Cancel reply",
     "jump": "Go to the original message",
-    "openThread": "Open the chat thread",
-    "toThread": "Reply to {{title}}"
+    "openThread": "Open the chat thread"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -451,6 +451,18 @@
     "dismiss": "Dismiss",
     "send": "Send"
   },
+  "deviceConnectCard": {
+    "connected": "Connected",
+    "notConnected": "Not connected"
+  },
+  "locationCard": {
+    "shared": "Location shared · ±{{accuracy}}",
+    "notShared": "Not shared",
+    "locating": "Finding your location…",
+    "denied": "Location access is off for this site. Turn it on in the browser, or press Not now.",
+    "unavailable": "Couldn't find your location. Try again, or press Not now.",
+    "unsupported": "This browser can't share a location. Press Not now and name the place in a message."
+  },
   "appComponent": {
     "dismiss": "Dismiss",
     "widgetUnavailable": "Could not read this card's data. {{text}}",
@@ -651,19 +663,8 @@
   "thread": {
     "title": "Chat thread",
     "openTaskChat": "Open task chat",
-    "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
     "replyPlaceholder": "Reply"
-  },
-  "sessionRenewal": {
-    "notice": "Context tidied up · {{reason}}",
-    "reasons": {
-      "context": "conversation got long",
-      "setup": "setup updated",
-      "idle": "after a quiet period",
-      "daily": "daily reset",
-      "working_dir": "working folder gone"
-    }
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",

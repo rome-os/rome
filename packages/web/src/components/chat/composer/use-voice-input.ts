@@ -210,13 +210,26 @@ export function useVoiceInput({
     dictationRef.current.stop();
   }, []);
 
+  // A field no one can see does not listen: a closed tab or pane hides it
+  // with `display: none`, which leaves it no boxes.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (state !== "listening" || !el || typeof ResizeObserver === "undefined") return;
+    const watching = new ResizeObserver(() => {
+      if (el.getClientRects().length === 0) stop();
+    });
+    watching.observe(el);
+    return () => watching.disconnect();
+  }, [state, stop, textareaRef]);
+
   return {
     /**
      * False hides the voice control: the instance is not signed in to Rome
      * Cloud, Rome Cloud does not allow the account, or this is the desktop
-     * app, which cannot open the microphone yet.
+     * app, which cannot open the microphone yet. A dictation under way keeps
+     * its control, so the guardian can always stop it.
      */
-    available: Boolean(info.data?.available) && !isElectronShell(),
+    available: (Boolean(info.data?.available) && !isElectronShell()) || state !== "idle",
     state,
     /** Why listening last stopped on its own, or null. */
     notice,
