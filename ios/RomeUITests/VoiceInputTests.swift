@@ -4,7 +4,8 @@ import XCTest
 /// stand-in instance, through the accessibility contract: the control is "Start voice input"
 /// when idle, "Stop voice input" with the selected trait while listening, and "Finishing voice
 /// input" while the last words arrive. The notice is its own element. Each test names the rule
-/// it scores, so the verifier's report can say which leg scored which rule.
+/// it scores, so the verifier's report can say which leg scored which rule. Rule 1's tests play
+/// silence, so listening lasts until the test stops it.
 ///
 /// Rule 1's 0.5 s is timed inside the app, since XCUITest waits for the app to go idle around
 /// every tap (1 to 13 s on a CI runner). The app marks each start with a `StartListening`
@@ -156,13 +157,14 @@ final class VoiceInputTests: XCTestCase {
         measure(metrics: [startListening], options: options) {
             index += 1
             XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 30), "\(field): not idle before start \(index)")
-            if !tapUntil(control, ["Stop voice input"]) {
-                printScreen(app, "\(field): start \(index) never showed listening")
-                XCTFail("\(field): start \(index) never showed listening")
+            let listening = NSPredicate(format: "label == %@ AND selected == true", "Stop voice input")
+            if !tapUntil(control, listening) {
+                printScreen(app, "\(field): start \(index) never showed listening with the selected trait")
+                XCTFail("\(field): start \(index) never showed listening with the selected trait")
             }
             stopMeasuring()
-            XCTAssertTrue(control.isSelected, "\(field): listening has no selected trait")
-            if !tapUntil(control, ["Finishing voice input", "Start voice input"]) {
+            let stopped = NSPredicate(format: "label IN %@", ["Finishing voice input", "Start voice input"])
+            if !tapUntil(control, stopped) {
                 printScreen(app, "\(field): stop \(index) never showed finishing or idle")
                 XCTFail("\(field): stop \(index) never showed finishing or idle")
             }
@@ -170,35 +172,54 @@ final class VoiceInputTests: XCTestCase {
     }
 
 
-    /// Taps `control` and returns whether its label becomes one of `labels` within
-    /// `settleSeconds` of the tap returning.
+    /// Taps `control` and returns whether it matches `predicate` within `settleSeconds` of the
+    /// tap returning.
     @MainActor
-    private func tapUntil(_ control: XCUIElement, _ labels: [String]) -> Bool {
+    private func tapUntil(_ control: XCUIElement, _ predicate: NSPredicate) -> Bool {
         control.tap()
-        let predicate = NSPredicate(format: "label IN %@", labels)
         let shown = XCTNSPredicateExpectation(predicate: predicate, object: control)
         return XCTWaiter().wait(for: [shown], timeout: Self.settleSeconds) == .completed
     }
 
-    /// The element with `identifier` the guardian can touch: a pushed chat leaves the Chat's
-    /// field under it, so there can be more than one. Waits up to 15 s for one to be touchable,
-    /// since a chat that is still sliding in is not yet.
+    /// The element with `identifier` the guardian can touch. A chat that is sliding in sits over
+    /// the Chat's field until the push ends, so this waits up to 15 s for one match to be left,
+    /// and then the element is found afresh on every use. When two stay, it takes the last
+    /// touchable one.
     @MainActor
     private func onScreen(_ query: XCUIElementQuery, _ identifier: String) -> XCUIElement {
         let matches = query.matching(identifier: identifier)
         let deadline = Date().addingTimeInterval(15)
-        repeat {
-            if let touchable = matches.allElementsBoundByIndex.last(where: { $0.isHittable }) {
-                return touchable
-            }
-        } while Date() < deadline
-        return matches.firstMatch
+        while matches.count != 1, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        if matches.count == 1 { return matches.firstMatch }
+        let index = matches.allElementsBoundByIndex.lastIndex(where: { $0.isHittable })
+        return index.map { matches.element(boundBy: $0) } ?? matches.firstMatch
+    }
+
+    /// A two-minute silent recording, 16 kHz mono 16-bit, so listening lasts through XCUITest's
+    /// slow steps until the test stops it.
+    private func silence() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("silence.wav")
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+        let rate: UInt32 = 16000
+        let bytes = rate * 2 * 120
+        var data = Data()
+        func text(_ s: String) { data.append(contentsOf: Array(s.utf8)) }
+        func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
+        func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
+        text("RIFF"); u32(36 + bytes); text("WAVE")
+        text("fmt "); u32(16); u16(1); u16(1); u32(rate); u32(rate * 2); u16(2); u16(16)
+        text("data"); u32(bytes)
+        data.append(Data(count: Int(bytes)))
+        try data.write(to: url)
+        return url
     }
 
     /// Launches the app signed in to the stand-in instance, playing `recording` (a WAV in this
-    /// bundle) as the microphone, or with the microphone as `microphone` says.
+    /// bundle, or silence when nil) as the microphone, or with the microphone as `microphone` says.
     @MainActor
-    private func launch(recording: String = "speech", microphone: String? = nil, language: String = "en") throws -> XCUIApplication {
+    private func launch(recording: String? = nil, microphone: String? = nil, language: String = "en") throws -> XCUIApplication {
         let env = ProcessInfo.processInfo.environment
         guard let origin = env["ROME_LOCAL_ORIGIN"], let user = env["ROME_LOCAL_USER"],
               let password = env["ROME_LOCAL_PASSWORD"] else {
@@ -215,10 +236,12 @@ final class VoiceInputTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(\(language))"]
         if let microphone {
             app.launchArguments += ["-RomeVoiceInputMicrophone", microphone]
-        } else {
+        } else if let recording {
             let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: recording, withExtension: "wav"),
                                     "\(recording).wav is missing from the test bundle")
             app.launchArguments += ["-RomeVoiceInputRecording", url.path]
+        } else {
+            app.launchArguments += ["-RomeVoiceInputRecording", try silence().path]
         }
         app.launch()
         return app
