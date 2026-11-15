@@ -11,7 +11,7 @@ A local Rome Cloud, run from a Rome Cloud checkout, that creates each new Rome a
 - The Rome's first screen after sign-in.
 - With `walk-cards`, the cards an agent waits on:
   - Core's connect card: the agent shows it for GitHub, Dismiss answers it, and the agent takes its next turn.
-  - An app's connect card, through Fake Service: Connect opens Fake Service's sign-in, the walk signs in, I've authorized answers the agent, and the agent takes its next turn.
+  - An app's connect card, through Fake Service: Connect opens Fake Service's sign-in, the walk presses Allow, I've authorized answers the agent, and the agent takes its next turn.
   - For each real provider with a test OAuth app set, Connect reaches that provider's authorization page.
 
 ## Differences from production
@@ -19,7 +19,7 @@ A local Rome Cloud, run from a Rome Cloud checkout, that creates each new Rome a
 - **Dev sign-in replaces Google, Microsoft and email.** Get started signs you in as `dev@rome.localhost` with no prompt, so the real sign-in screens are not tested. To sign up as someone else, open `/api/auth/dev/start?email=<address>` first.
 - **A model login of its own, not Rome credits.** With `ANTHROPIC_API_KEY` set, every new Rome runs on that key, and `walk-cards` and `models` send all three model tiers to `claude-haiku-5-5` (`ONBOARDING_MODEL` picks another). Production runs each tier on its own model, on Rome credits or the guardian's own login. Without the key, the new Rome says that no AI provider is available.
 - **Test OAuth apps, not Rome's central ones.** Rome Cloud connects GitHub, Slack and Shopify through test apps registered to this environment's address, owned by test accounts. The central apps' own settings, such as their scopes and Shopify's review, are not tested. A provider without a test app cannot be connected here.
-- **Fake Service is a service that exists only here.** It is an app in `fake-service/`, installed in each Rome by `walk-cards` or `fake-service`, that signs in through an OAuth test server, [mock-oauth2-server](https://github.com/navikt/mock-oauth2-server), at `https://onboarding-oauth.romeos.dev`. The sign-in page takes any user name. Fake Service goes through an app's connect card, not core's, so connecting a real provider still needs its test app. It keeps the connection in a temporary file, which a restart of the Rome forgets.
+- **Fake Service is a service that exists only here.** It is an app in `fake-service/`, installed in each Rome by `walk-cards` or `fake-service`, that signs in through an OAuth test server, [mock-oauth2-server](https://github.com/navikt/mock-oauth2-server), at `https://onboarding-oauth.romeos.dev`. The sign-in page is one Allow button (`fake-service/sign-in.html`), which signs in as `rome-test`. Fake Service goes through an app's connect card, not core's, so connecting a real provider still needs its test app. It keeps the connection in a temporary file, which a restart of the Rome forgets.
 - **Signing in at a real provider is a person's step.** `walk-cards` stops at each provider's authorization page. Finish a connection by hand: sign in there as the test account, then press I've authorized on the card.
 - **The cloud sign-in gate is forced on** in every new Rome, because there is no Statsig key. The rollout of that gate is not tested.
 - **Each Rome is a container on this machine, not a VM.** Rome Cloud's Docker provider runs it in Docker-in-Docker, so VM provisioning, upgrades over SSH and host-level setup are not tested.
