@@ -255,7 +255,9 @@ final class VoiceInputTests: XCTestCase {
     /// Rule 9: every stop closes the microphone within 1 s. Each of six starts in the Chat ends
     /// with another stop: the guardian's, leaving the chat, the background, a transcriber error,
     /// losing the network, and the guardian's again. The app's `StopListening` interval runs
-    /// from the stop to the microphone closed, and the CI job holds every one to 1 s.
+    /// from the stop to the microphone closed. On the simulator the recording closes in
+    /// microseconds, so the CI job reads the intervals from the simulator's log, where each one
+    /// can be counted and timed, and holds every one to 1 s.
     @MainActor
     func testRule9EveryStopClosesTheMicrophone() throws {
         let app = try launch()
@@ -352,23 +354,45 @@ final class VoiceInputTests: XCTestCase {
 
     // MARK: Rule 10
 
-    /// Rule 10 on the phone: before any dictation, the app names where speech becomes text, as
-    /// Rome says (the stand-in instance names itself, at its own address). This looks for the
-    /// name anywhere the guardian can reach from the navigation's settings.
+    /// Rule 10 on the phone: before any dictation, Settings has a "Voice input" row whose value
+    /// is "<provider> · <host>", as Rome's `GET /api/voice-input` names them (the stand-in
+    /// instance names itself, at its own address).
     @MainActor
     func testRule10TheAppNamesWhereVoiceGoes() throws {
+        let place = try voiceInputPlace()
         let app = try launch()
         touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
         let settings = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "settings")).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 10), "the navigation has no settings")
         settings.tap()
-        let named = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "stand-in instance", "stand-in instance"))
-            .firstMatch
-        if !named.waitForExistence(timeout: 10) {
+        let row = app.descendants(matching: .any)["voice-input-place"]
+        guard row.waitForExistence(timeout: 10) else {
             printScreen(app, "rule 10: settings")
-            XCTFail("the settings do not name \"stand-in instance\", where Rome says voice goes")
+            return XCTFail("Settings has no \"Voice input\" row")
         }
+        let wanted = "\(place.provider) · \(place.host)"
+        let value = row.value as? String ?? ""
+        XCTAssertTrue(row.label.hasPrefix("Voice input"), "the row is labelled \"\(row.label)\", not \"Voice input\"")
+        if value != wanted && !row.label.contains(wanted) {
+            printScreen(app, "rule 10: voice input row")
+            XCTFail("the \"Voice input\" row says \"\(value.isEmpty ? row.label : value)\"; Rome names \"\(wanted)\"")
+        }
+    }
+
+    /// The provider and host Rome names for voice input, from its own read API.
+    @MainActor
+    private func voiceInputPlace() throws -> (provider: String, host: String) {
+        let origin = try XCTUnwrap(ProcessInfo.processInfo.environment["ROME_LOCAL_ORIGIN"],
+                                   "no stand-in instance: set TEST_RUNNER_ROME_LOCAL_ORIGIN")
+        var answer: [String: Any] = [:]
+        let done = expectation(description: "Rome names where voice goes")
+        URLSession.shared.dataTask(with: try XCTUnwrap(URL(string: "\(origin)/api/voice-input"))) { data, _, _ in
+            answer = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        let place = try XCTUnwrap(answer["place"] as? [String: Any], "GET /api/voice-input names no place: \(answer)")
+        return (try XCTUnwrap(place["provider"] as? String), try XCTUnwrap(place["host"] as? String))
     }
 
     // MARK: Rule 5

@@ -163,7 +163,7 @@ jobs:
       # Rule 1: the field shows listening within 0.5 s of the start action. The app marks each
       # start with a StartListening signpost interval, and the voice input tests measure it;
       # XCTest has no way to assert on a measurement, so this step reads the result bundle.
-      - name: "Rules 1 and 9: every start shows listening within 0.5 s, every stop closes the microphone within 1 s"
+      - name: "Rule 1: every start shows listening within 0.5 s"
         if: always() && steps.standin.outputs.present == 'true'
         run: |
           xcrun xcresulttool get test-results metrics --path "$RUNNER_TEMP/ui-tests.xcresult" > "$RUNNER_TEMP/metrics.json"
@@ -173,7 +173,6 @@ jobs:
           # The app's signpost intervals, and the bar each rule holds every one to.
           BARS = {
               "StartListening": (0.5, "rule 1", "a start took {v:.3f} s to show listening"),
-              "StopListening": (1.0, "rule 9", "a stop took {v:.3f} s to close the microphone"),
           }
           found = {interval: [] for interval in BARS}
 
@@ -217,6 +216,58 @@ jobs:
               print(open(sys.argv[1]).read()[:4000])
           if failed:
               sys.exit(1)
+          PY
+      - name: "Rule 9: every kind of stop has a StopListening interval"
+        if: always() && steps.standin.outputs.present == 'true'
+        run: |
+          # On the simulator the recording stands in for the microphone and closes in
+          # microseconds, so leg B scores rule 9 by count: every kind of stop has a StopListening
+          # interval that begins and ends, read from the simulator's log by signpost ID. The
+          # second is scored by hand on a phone (leg C).
+          xcrun simctl spawn booted log show --last 2h --signpost --style json \
+            --predicate 'subsystem == "cc.romeos.voice-input" AND category == "VoiceInput"' > "$RUNNER_TEMP/signposts.json"
+          python3 - "$RUNNER_TEMP/signposts.json" <<'PY'
+          import json, re, sys
+          from datetime import datetime
+
+          # The stops the rule 9 test makes, by the cause the app names; every other test's stops count too.
+          WANTED = {"guardian", "left-chat", "backgrounded"}
+
+          def at(entry):
+              return datetime.strptime(entry["timestamp"][:26], "%Y-%m-%d %H:%M:%S.%f")
+
+          entries = [e for e in json.load(open(sys.argv[1])) if e.get("signpostName") == "StopListening"]
+          begins, ends = {}, {}
+          for e in entries:
+              kind = e.get("signpostType")
+              if kind in ("begin", "intervalBegin"):
+                  begins[(e.get("processID"), e["signpostID"])] = e
+              elif kind in ("end", "intervalEnd"):
+                  ends[(e.get("processID"), e["signpostID"])] = e
+          if not begins:
+              sys.exit("::error::No StopListening interval in the simulator's log, so rule 9 was not checked.")
+          causes, open_ = {}, []
+          # Signpost IDs are per process, and every test launches the app anew.
+          for sid, begin in begins.items():
+              cause = (re.search(r"cause=([\w-]+)", begin.get("eventMessage", "")) or [None, "unnamed"])[1]
+              causes[cause] = causes.get(cause, 0) + 1
+              end = ends.get(sid)
+              if end is None:
+                  open_.append(cause)
+                  continue
+              seconds = (at(end) - at(begin)).total_seconds()
+              print(f"StopListening {cause}: {seconds:.6f} s")
+          print(f"{len(begins)} stops: " + ", ".join(f"{c} {n}" for c, n in sorted(causes.items())))
+          failed = False
+          for cause in sorted(WANTED - causes.keys()):
+              print(f"::error::No StopListening interval with cause={cause}, though the rule 9 test makes that stop.")
+              failed = True
+          for cause in open_:
+              print(f"::error::A StopListening interval with cause={cause} never ended: the microphone was not seen to close.")
+              failed = True
+          if failed:
+              sys.exit(1)
+          print("Rule 9 (leg B): interval present for every kind of stop; duration not meaningful with the recording stand-in.")
           PY
       - name: Keep the stand-in's log
         if: always() && steps.standin.outputs.present == 'true'
