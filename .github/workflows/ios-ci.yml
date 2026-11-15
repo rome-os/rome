@@ -118,10 +118,12 @@ jobs:
       - name: Fetch the stand-in instance
         id: standin
         run: |
+          # The job runs in ios/, but the stand-in's path is from the repository root.
+          set -o pipefail
           if git fetch --quiet --depth=1 origin voice-input 2>/dev/null &&
              git cat-file -e FETCH_HEAD:environments/voice-input/ios-stand-in/server.mjs 2>/dev/null; then
             mkdir -p /tmp/stand-in
-            git archive FETCH_HEAD environments/voice-input/ios-stand-in | tar -x -C /tmp/stand-in
+            git -C "$GITHUB_WORKSPACE" archive FETCH_HEAD environments/voice-input/ios-stand-in | tar -x -C /tmp/stand-in
             echo "present=true" >> "$GITHUB_OUTPUT"
             echo "commit=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
           else
@@ -132,7 +134,9 @@ jobs:
         if: steps.standin.outputs.present == 'true'
         run: |
           node /tmp/stand-in/environments/voice-input/ios-stand-in/server.mjs --port 4790 --log /tmp/stand-in.log &
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4790/__stand-in/health && break; sleep 1; done
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4790/__stand-in/health && exit 0; sleep 1; done
+          echo "::error::The stand-in instance did not answer on port 4790."
+          exit 1
       - name: Run the UI tests
         env:
           STANDIN: ${{ steps.standin.outputs.present }}
