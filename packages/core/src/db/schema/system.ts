@@ -527,6 +527,10 @@ export const romeSessions = sqliteTable(
     // Folder on a rome-node device the chat works in, set only when the chat
     // is created. NULL for every chat without one and every other session type.
     deviceFolder: text("device_folder", { mode: "json" }).$type<DeviceFolder>(),
+    // The rome-node device the guardian asked from when the Concierge last
+    // handed this task chat work, so the task's live reads ask that device.
+    // NULL for every other chat, and for a task started with no device.
+    askingDeviceId: text("asking_device_id"),
     // Agent the session is bound to. NULL means the default "main" agent.
     // Locked on first turn so the session can't switch agents mid-thread.
     agentName: text("agent_name"),
@@ -654,6 +658,9 @@ export const chatMessages = sqliteTable(
     // The line is placed in its chat thread for good: its sender chose the
     // thread, or the Concierge placed it. Nothing moves a settled line.
     chatThreadSettled: integer("chat_thread_settled", { mode: "boolean" }).notNull().default(false),
+    // The emoji the Concierge reacted to the line with
+    // (docs/domains/chats.md#reaction); null for none.
+    reaction: text("reaction"),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
@@ -836,8 +843,10 @@ export const conciergeTasks = sqliteTable(
  * Which Concierge turn took each guardian message of a Concierge chat, and
  * when that turn answered it: its turn ended, or the Concierge answered it
  * with `say`. A message handed on to a newer turn is that turn's from then
- * on. A message's status reaction (docs/domains/chats.md#status-reaction)
- * is derived from this and from the status of the tasks made for it.
+ * on. A message whose turn its owner stopped before it answered is told to
+ * the next turn once (docs/domains/chats.md#task). A message's status
+ * (docs/domains/chats.md#status) is derived from this and from the status of
+ * the tasks made for it.
  */
 export const conciergeMessageTurns = sqliteTable(
   "concierge_message_turns",
@@ -856,8 +865,18 @@ export const conciergeMessageTurns = sqliteTable(
      * Concierge turn in the chat is told not to act on it.
      */
     stoppedUntold: integer("stopped_untold", { mode: "boolean" }).notNull().default(false),
+    /**
+     * When its turn started to show it working: it called a working tool, or
+     * ran 5 seconds without answering it. Null while it has not.
+     */
+    workingAt: integer("working_at", { mode: "timestamp_ms" }),
     /** Set when the turn that took it failed, by an error or a crash, before it answered it. */
     turnFailed: integer("turn_failed", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Set when its turn reacted to it: the turn handled it so, and shows it
+     * neither working nor failed. It is the turn's, so it goes with it.
+     */
+    reacted: integer("reacted", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.chatId, table.messageKey] }),
@@ -877,6 +896,14 @@ export const conciergeMessageTasks = sqliteTable(
       .references(() => conciergeTasks.id, { onDelete: "cascade" }),
     chatId: text("chat_id").notNull(),
     messageKey: text("message_key").notNull(),
+    /** The order it was made in, raised each time it is made again: a task follows its highest. */
+    seq: integer("seq").notNull().default(0),
+    /**
+     * How the task ended for this message once it ended with its result told,
+     * after which the task's later work leaves the message alone; null while
+     * the message follows it.
+     */
+    endedAs: text("ended_as"),
   },
   (table) => [
     primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
@@ -1458,4 +1485,175 @@ export const connectionGrants = sqliteTable(
       .on(table.platform, table.accountId)
       .where(sql`${table.accountId} IS NOT NULL AND ${table.state} != 'unauthorized'`),
   ],
+);
+
+// Personal data: readings the guardian's devices push to Rome, such as Apple
+// Health. Every row is personal data. Concept: docs/personal-data.md. All access
+// goes through packages/core/src/personal-data/repository.ts.
+
+// One stored reading. A sender's key names it, unique per source and origin,
+// so a repeat of the same key replaces the reading instead of adding one.
+export const personalDataPoints = sqliteTable(
+  "personal_data_points",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    type: text("type").notNull(),
+    shape: text("shape").notNull(), // bucket | sample | record
+    // hour | day for a bucket, null otherwise.
+    resolution: text("resolution"),
+    // Milliseconds since the epoch, UTC.
+    startAt: integer("start_at").notNull(),
+    endAt: integer("end_at").notNull(),
+    // The IANA zone the device was in, so a day bucket keeps its local meaning.
+    tz: text("tz").notNull(),
+    // The sum for a cumulative type, the average for the rest.
+    value: real("value"),
+    unit: text("unit"),
+    fields: text("fields", { mode: "json" }).$type<Record<string, number>>(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, string>>(),
+    dedupeKey: text("dedupe_key").notNull(),
+    // A hash of the stored fields: an upsert with the same hash changes nothing.
+    contentHash: text("content_hash").notNull(),
+    // The ingest that last wrote the row.
+    ingestId: integer("ingest_id").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_personal_data_points_key").on(table.source, table.origin, table.dedupeKey),
+    index("idx_personal_data_points_query").on(
+      table.source,
+      table.type,
+      table.resolution,
+      table.startAt,
+    ),
+  ],
+);
+
+// The catalog: one row per source, origin and type, kept current by every
+// ingest so reading the catalog never scans points.
+export const personalDataTypes = sqliteTable(
+  "personal_data_types",
+  {
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    type: text("type").notNull(),
+    shape: text("shape").notNull(),
+    unit: text("unit"),
+    resolutions: text("resolutions", { mode: "json" }).$type<string[]>().notNull(),
+    earliestAt: integer("earliest_at"),
+    latestAt: integer("latest_at"),
+    // What the device reports as complete, not the latest point: a day with no
+    // steps still counts as synced.
+    syncedThroughAt: integer("synced_through_at"),
+    pointCount: integer("point_count").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.source, table.origin, table.type] })],
+);
+
+// One row per source and origin: the device that sends it and how its syncs go.
+export const personalDataSources = sqliteTable(
+  "personal_data_sources",
+  {
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    originName: text("origin_name"),
+    platform: text("platform"),
+    appVersion: text("app_version"),
+    state: text("state").notNull(), // active | paused | off
+    firstSyncAt: integer("first_sync_at"),
+    lastSyncAt: integer("last_sync_at"),
+    lastResult: text("last_result"), // ok | partial | error
+    lastErrorCode: text("last_error_code"),
+    // The source's short text for the Agent, written by core, never by the device.
+    note: text("note"),
+    // The device connection that reads the same data live, such as
+    // `<deviceId>:apple_health`, as the device's sync names it. Null for a
+    // source no connection reads, such as an import.
+    connectionId: text("connection_id"),
+  },
+  (table) => [primaryKey({ columns: [table.source, table.origin] })],
+);
+
+// The server's ingest log, kept 90 days. It counts and ranges, and never holds
+// a reading's value.
+export const personalDataIngests = sqliteTable(
+  "personal_data_ingests",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    // Null for a row no batch wrote, such as a delete.
+    batchId: text("batch_id"),
+    trigger: text("trigger"),
+    receivedAt: integer("received_at").notNull(),
+    itemCount: integer("item_count").notNull().default(0),
+    inserted: integer("inserted").notNull().default(0),
+    updated: integer("updated").notNull().default(0),
+    unchanged: integer("unchanged").notNull().default(0),
+    deleted: integer("deleted").notNull().default(0),
+    rejected: integer("rejected").notNull().default(0),
+    rangeStartAt: integer("range_start_at"),
+    rangeEndAt: integer("range_end_at"),
+    durationMs: integer("duration_ms"),
+    status: text("status").notNull(), // ok | partial | deleted
+    errorCode: text("error_code"),
+    // The answer the batch got, returned again for a repeat of the same batch.
+    // It holds counts and rejected item codes, never a value.
+    response: text("response", { mode: "json" }).$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    uniqueIndex("uq_personal_data_ingests_batch").on(table.source, table.origin, table.batchId),
+    index("idx_personal_data_ingests_received").on(table.source, table.receivedAt),
+  ],
+);
+
+// Device connections: what each of the guardian's devices lets Agents reach
+// live over rome-node, one row per device and capability, as the device last
+// reported it. Holds nothing of personal data or sync. Concept:
+// docs/domains/connections.md#device-connection. All access goes through
+// packages/core/src/connections/device/repository.ts.
+export const deviceConnections = sqliteTable(
+  "device_connections",
+  {
+    // The rome-node device id.
+    deviceId: text("device_id").notNull(),
+    // The device's own id for the capability, such as `apple_health`.
+    capability: text("capability").notNull(),
+    deviceName: text("device_name"),
+    platform: text("platform"),
+    title: text("title").notNull(),
+    // The command prefix, without the dot, such as `health`.
+    prefix: text("prefix").notNull(),
+    personal: integer("personal", { mode: "boolean" }).notNull(),
+    // Each operation as the device reports it: name, access, and the optional
+    // description, input schema and examples.
+    operations: text("operations", { mode: "json" })
+      .$type<
+        {
+          name: string;
+          access: "read" | "write";
+          description?: string;
+          input?: Record<string, unknown>;
+          examples?: Record<string, unknown>[];
+        }[]
+      >()
+      .notNull(),
+    permission: text("permission").notNull(), // granted | denied | not_needed | unknown
+    // The device's Live access switch.
+    live: integer("live", { mode: "boolean" }).notNull(),
+    // What the capability also syncs to, as the device names it, such as
+    // `apple_health`: opaque here, so a reader of that data can find the
+    // connection before the first sync. Null when it syncs nothing.
+    feeds: text("feeds"),
+    // The personal-data origin of the app install that reports the row, which
+    // stays the same across its sign-ins while the device id does not. Null
+    // for an app that reports none.
+    originId: text("origin_id"),
+    // When a report last listed the row.
+    lastSeenAt: integer("last_seen_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.deviceId, table.capability] })],
 );

@@ -32,6 +32,8 @@ export interface TranscriptionStream {
   finish(): void;
   /** Drops the stream. The listener hears nothing more. */
   abort(): void;
+  /** Audio bytes the provider received; audio still held or dropped never counts. */
+  readonly sentBytes: number;
 }
 
 export interface Transcriber {

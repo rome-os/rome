@@ -159,7 +159,11 @@ export function startDictation(
       socket = deps.openSocket();
       socket.onopen = () => {
         heardFromRome();
-        send({ type: "start", sampleRate: opened.sampleRate });
+        // PCM s16le mono: two bytes a sample. Rome paces audio to real time,
+        // so it is told how much was recorded while the socket connected.
+        const bufferedBytes = queued.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+        const bufferedMs = Math.ceil((bufferedBytes / 2 / opened.sampleRate) * 1000);
+        send({ type: "start", sampleRate: opened.sampleRate, bufferedMs });
         for (const chunk of queued.splice(0)) socket?.send(chunk);
         sendStop();
       };

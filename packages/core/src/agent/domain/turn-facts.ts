@@ -2,6 +2,7 @@
 // it and where. Agent model: docs/domains/agents.md#rome-tools.
 
 import type { ThreadContext } from "@rome-os/app-runtime";
+import type { Audience } from "./turn-audience.js";
 import type { WidgetDrawing } from "./widget-drawing.js";
 
 /** The level at which a turn pushes the messages it says to the person the chat serves. */
@@ -44,6 +45,11 @@ export interface TurnFacts {
   widgets: WidgetDrawing;
   /** The running turn's id, or undefined between turns. */
   turnId(): string | undefined;
+  /** False once interrupted or closing. Absent facts cannot grant a task handoff. */
+  live?(): boolean;
+  /** Pins the live source before async task setup. Same-person supersession may
+   * continue it. Stop, close, or a changed person/chat/audience revokes it for good. */
+  captureTaskInputLiveness?(): () => boolean;
   /** Where the running turn stands, else where the session does. */
   threadContext(): ThreadContext | undefined;
   sharedContext(): Record<string, unknown> | undefined;
@@ -51,6 +57,9 @@ export interface TurnFacts {
   pushLevel(): PushLevel | undefined;
   /** Who the running turn acts for, or undefined for a turn no person started. */
   actor(): TurnActor | undefined;
+  /** Who can read what the running turn says, fixed when it started; shared
+   *  between turns. Domain: docs/domains/participation.md#audience. */
+  audience(): Audience;
   /** The id of the one Concierge task the running turn reports on, or
    *  undefined when it reports on none or on several. */
   reportedTask(): string | undefined;

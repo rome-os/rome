@@ -21,14 +21,31 @@ struct ConnectorState: Sendable, Equatable {
     let state: String?
     let account: String?
     let connect: MessagePart.ConnectEntry?
+    /// `capabilities.watch`: whether the service delivers what is followed
+    /// there. Nil where the entry has none.
+    var watch: Watch? = nil
+
+    /// A service's watch capability, as a follow row reads it.
+    struct Watch: Sendable, Equatable {
+        /// `unlocked`, `needs-auth`, `needs-subscription` or `unsupported`.
+        var state: String
+        /// Unlocked, yet delivering less for now (`degradation`).
+        var degraded = false
+        /// Each followed target's state there: `active`, `off` or `unavailable`.
+        var follows: [String: String] = [:]
+
+        /// Whether it delivers now.
+        var ready: Bool { state == "unlocked" && !degraded }
+    }
 
     var working: Bool { state == "working" }
 
-    init(service: String, state: String?, account: String? = nil, connect: MessagePart.ConnectEntry? = nil) {
+    init(service: String, state: String?, account: String? = nil, connect: MessagePart.ConnectEntry? = nil, watch: Watch? = nil) {
         self.service = service
         self.state = state
         self.account = account
         self.connect = connect
+        self.watch = watch
     }
 
     init?(json value: JSONValue) {
@@ -37,6 +54,26 @@ struct ConnectorState: Sendable, Equatable {
         state = value["state"]?.string
         account = value["account"]?.string
         connect = value["connect"].flatMap { $0 == .null ? nil : MessagePart.ConnectEntry(json: $0) }
+        if let watch = value["capabilities"]?["watch"], let state = watch["state"]?.string {
+            var follows: [String: String] = [:]
+            for follow in watch["follows"]?.array ?? [] {
+                if let target = follow["target"]?.string, let state = follow["state"]?.string { follows[target] = state }
+            }
+            let degradation = watch["degradation"]
+            self.watch = Watch(state: state, degraded: degradation != nil && degradation != .null, follows: follows)
+        }
+    }
+
+    /// A follow row's state. The task list says it (`off`, `active`, or,
+    /// from sources Rome read moments before, `unavailable`); the connector
+    /// list only adds `unavailable`, when it shows the follow's service cannot
+    /// deliver it. It never turns a follow on or off: its read can be older
+    /// than the list. As the web reads it (`followStateWith`).
+    static func followState(_ follow: TaskListItem.Follow, in connectors: [ConnectorState]?) -> String {
+        guard follow.state == "active", let connectors else { return follow.state }
+        // A service the list does not name may be one connected since it was read.
+        guard let watch = connectors.first(where: { $0.service == follow.source })?.watch else { return follow.state }
+        return watch.follows[follow.target] == "unavailable" || !watch.ready ? "unavailable" : follow.state
     }
 }
 

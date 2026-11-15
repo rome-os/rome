@@ -3,13 +3,10 @@ import SwiftUI
 /// The Agent page's Tasks tab: what runs for one Concierge chat, grouped as
 /// Needs you, Active, Later, Running on its own and Ended. Each row is its
 /// title and one line of state and time. A row does nothing when tapped: a
-/// small icon after the title opens the task chat, a task that needs the
-/// guardian shows Respond, and Stop and Open task chat are in the long-press
-/// menu (docs/domains/chats.md#task-list).
+/// small icon after the title opens the task chat, and Stop and Open task
+/// chat are in the long-press menu (docs/domains/chats.md#task-list).
 struct TaskListView: View {
     let store: TaskListStore?
-    /// Goes to the message in the chat that shows the card a task waits on.
-    let onRespond: (TaskListItem.Task) -> Void
     let onOpenChat: (ConciergeTask.LinkedChat) -> Void
 
     @State private var endedOpen = false
@@ -177,13 +174,13 @@ struct TaskListView: View {
                 stopping: store.stopping.contains(task.task.id),
                 now: now,
                 last: last,
-                onRespond: { onRespond(task) },
                 onStop: { store.stopTask(task.task.id) },
                 onOpenChat: task.task.chat.map { chat in { onOpenChat(chat) } }
             )
         case .check(let check):
             TaskListPlainRow(title: check.check.name, line: TaskListWords.check(check, now: now), created: item.createdAt, last: last)
-        case .follow(let follow):
+        case .follow(let listed):
+            let follow = store.shown(listed)
             TaskListPlainRow(title: follow.target, line: TaskListWords.follow(follow), created: item.createdAt, dimmed: follow.state != "active", last: last)
         case .routine(let routine):
             TaskListPlainRow(
@@ -233,9 +230,9 @@ struct TaskListPlainRow: View {
     }
 }
 
-/// A task's row: its title with a small way into its task chat, its line,
-/// and Respond while it needs the guardian. Stop and Open task chat are in
-/// the long-press menu; nothing asks to confirm, and a press shows at once.
+/// A task's row: its title with a small way into its task chat, and its
+/// line. Stop and Open task chat are in the long-press menu; nothing asks to
+/// confirm, and a press shows at once.
 struct TaskListRow: View {
     let item: TaskListItem.Task
 
@@ -243,7 +240,6 @@ struct TaskListRow: View {
     let stopping: Bool
     let now: Date
     let last: Bool
-    let onRespond: () -> Void
     let onStop: () -> Void
     let onOpenChat: (() -> Void)?
 
@@ -281,21 +277,6 @@ struct TaskListRow: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if status == "needs_you", !stopping {
-                    // An icon, as on the web: goes to the card in Chat.
-                    Button(action: onRespond) {
-                        Image(systemName: "arrow.up.forward")
-                            .romeFont(18, .medium)
-                            .foregroundStyle(Palette.fg)
-                            .frame(width: 34, height: 34)
-                            .background(Palette.fillStrong, in: Circle())
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressScaleStyle())
-                    .padding(.vertical, -6)
-                    .accessibilityLabel(Text("Respond"))
-                }
             }
         }
         // Titled with when the task was made, as a message's menu is with its time.

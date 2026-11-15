@@ -74,52 +74,12 @@ let running: boolean;
 let postStatus: number;
 let postAction: () => void;
 let fetchMock: ReturnType<typeof rs.fn<typeof fetch>>;
-/** The task rows the list answers, and the tasks a Stop on the card stopped. */
+/** The task's rows, as Rome reads them to fill a card's `closed`. */
 let taskRows: Record<string, unknown>[] = [];
 /** When the task chat was archived, or null. */
 let archivedAt: string | null = null;
-let stopped: string[] = [];
 /** How many times the chat list was read. */
 let sessionReads = 0;
-
-/**
- * What the server says the task chat waits on, as `openWait`: the newest open
- * card or pending approval while the chat waits on its owner.
- */
-function openWait() {
-  if (!waiting) return null;
-  const open = new Map<string, { id: string; messageId: string; render: unknown; at: string }>();
-  for (const each of messages) {
-    for (const part of JSON.parse(each.content) as TranscriptPart[]) {
-      if (part.type !== "pending_interaction" && part.type !== "interaction_result") continue;
-      open.delete(part.toolUseId);
-      if (part.type === "pending_interaction") {
-        open.set(part.toolUseId, {
-          id: part.toolUseId,
-          messageId: each.id,
-          render: part.render,
-          at: each.createdAt,
-        });
-      }
-    }
-  }
-  const card = [...open.values()].at(-1);
-  const pending = approvals
-    .filter((row) => row.status === "pending" && row.payload.channelContext.threadId === chatId)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-  if (pending && (!card || Date.parse(pending.createdAt) > Date.parse(card.at))) {
-    return { kind: "approval", id: pending.id, since: Date.parse(pending.createdAt) };
-  }
-  return card
-    ? {
-        kind: "card",
-        id: card.id,
-        messageId: card.messageId,
-        render: card.render,
-        since: Date.parse(card.at),
-      }
-    : null;
-}
 
 /**
  * Whether the task ended, as Rome reads it for `closed`: a row that says so,
@@ -283,31 +243,6 @@ function ServedBlocks({
   );
 }
 
-/** The task rows the list answers: each with its open wait, or one that only waits. */
-function servedTasks() {
-  const wait = openWait();
-  if (taskRows.length === 0) {
-    // An archived task chat's task is not in the list.
-    return wait && !archivedAt
-      ? [
-          {
-            id: "task-waiting",
-            title: "Draft email",
-            state: "needs_user",
-            status: "needs_you",
-            endReason: null,
-            chat: { id: chatId, name: "Draft email" },
-            conciergeChat: { id: "concierge", name: "Concierge", main: true },
-            createdAt: 1,
-            updatedAt: 2,
-            openWait: wait,
-          },
-        ]
-      : [];
-  }
-  return taskRows.map((row) => ("openWait" in row ? row : { ...row, openWait: wait }));
-}
-
 beforeEach(async () => {
   await i18n.changeLanguage("en");
   client = new QueryClient({
@@ -321,16 +256,9 @@ beforeEach(async () => {
   postStatus = 202;
   postAction = () => {};
   taskRows = [];
-  stopped = [];
   archivedAt = null;
   fetchMock = rs.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
-    if (url.startsWith("/api/concierge/tasks?")) return Response.json({ tasks: servedTasks() });
-    const stop = url.match(/^\/api\/concierge\/tasks\/([^/]+)\/stop$/);
-    if (stop && init?.method === "POST") {
-      stopped.push(stop[1]!);
-      return Response.json({ ok: true });
-    }
     if (url.endsWith("/events") && init?.method === "POST") {
       postAction();
       return Response.json(
@@ -407,9 +335,6 @@ describe("TaskChatCard with its task", () => {
     waiting = true;
     show(true, "task");
     expect(await screen.findByText("Task chat · Needs you")).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
-      false,
-    );
   });
 
   it("holds no question once it expired: its owner carries on in the task's thread", async () => {
@@ -531,15 +456,12 @@ describe("TaskChatCard shown as one card or the other", () => {
     expect(card.closest("[data-chat-task-waiting]")).toBeTruthy();
   });
 
-  it("folds an expired question read-only, saying it expired, and reads no task list", async () => {
+  it("folds an expired question read-only, saying it expired", async () => {
     taskRows = [expiredRow];
     show(true, "ask");
     // In a card like any settled one: what it asked, then that it expired.
     const line = await screen.findByText("Expired: no answer within a day");
     expect(line.closest("[data-chat-settled-card]")?.textContent).toContain("Which tone?");
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/concierge/tasks"))).toBe(
-      false,
-    );
     expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
