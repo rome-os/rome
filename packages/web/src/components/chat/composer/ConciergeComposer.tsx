@@ -159,6 +159,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     } | null>(null);
 
     const voice = useVoiceInput({ textareaRef, value: inputText, setValue: setInputText });
+    const voiceActiveRef = useRef(false);
+    voiceActiveRef.current = voice.active;
 
     // Programmatic clears fire no `input` event, so resize on every change.
     useLayoutEffect(() => {
@@ -303,7 +305,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       () => ({
         focus: () => textareaRef.current?.focus(),
         insertText: (text, options) => {
-          if (uploadInFlightRef.current) return;
+          // The field is the dictation's while it listens.
+          if (uploadInFlightRef.current || voiceActiveRef.current) return;
           setInputText(text);
           requestAnimationFrame(() => {
             const el = textareaRef.current;

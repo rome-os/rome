@@ -381,6 +381,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const voice = useVoiceInput({ textareaRef, value: inputText, setValue: setInputText });
+  const voiceActiveRef = useRef(false);
+  voiceActiveRef.current = voice.active;
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
   const [textareaMaxHeight, setTextareaMaxHeight] = useState(TEXTAREA_MAX_HEIGHT);
 
@@ -636,7 +638,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     () => ({
       focus: () => textareaRef.current?.focus(),
       insertText: (text: string, options?: { focus?: boolean }) => {
-        if (uploadInFlightRef.current) return;
+        // The field is the dictation's while it listens.
+        if (uploadInFlightRef.current || voiceActiveRef.current) return;
         setInputText(text);
         requestAnimationFrame(() => {
           const el = textareaRef.current;

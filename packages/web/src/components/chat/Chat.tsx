@@ -2460,6 +2460,10 @@ export function Chat({
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
   // The agent's logo in the header opens the chat's task list: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
+  // On a narrow screen the task list's sheet covers the composer.
+  useEffect(() => {
+    if (taskList.sheetOpen) composerRef.current?.stopVoiceInput();
+  }, [taskList.sheetOpen, composerRef]);
   // A Concierge chat's header buttons sit on round badges like its pill, except
   // in the Mac app's title bar, where they are any chat's.
   const floating = concierge && !navbarSlot;

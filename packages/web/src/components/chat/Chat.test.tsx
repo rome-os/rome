@@ -104,8 +104,9 @@ rs.mock("@/components/concierge/use-concierge-activity", () => ({
   useConciergeActivity: mockConciergeActivity,
 }));
 const mockOpenTaskList = rs.hoisted(() => rs.fn());
+const taskSheet = rs.hoisted(() => ({ open: false }));
 rs.mock("@/components/concierge/TaskListPane", () => ({
-  useTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
+  useTaskList: () => ({ open: mockOpenTaskList, sheet: null, sheetOpen: taskSheet.open }),
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -3006,6 +3007,27 @@ describe("Chat Concierge empty state", () => {
     // On a narrow screen the pane shows in place of the chat.
     view.rerender(at(true, true));
     await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
+  });
+
+  it("stops listening when the task list's sheet covers the composer", async () => {
+    const at = () => (
+      <MemoryRouter>
+        {pane(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />)}
+      </MemoryRouter>
+    );
+    twoTurns();
+    taskSheet.open = false;
+    const view = render(at(), { wrapper: withQueries() });
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+
+    try {
+      taskSheet.open = true;
+      view.rerender(at());
+      await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
+    } finally {
+      taskSheet.open = false;
+    }
   });
 
   it("keeps the composer, and its draft, through share mode", async () => {
