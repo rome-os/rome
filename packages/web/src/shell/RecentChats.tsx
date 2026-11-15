@@ -2,7 +2,9 @@ import {
   Archive,
   ArchiveRestore,
   Check,
+  ChevronUp,
   Ellipsis,
+  ListChecks,
   Folder,
   Cloud,
   FolderOpen,
@@ -284,11 +286,15 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
   );
 }
 
-/** How many task chats show before the More row. */
-const TASK_CHATS_VISIBLE = 5;
+/** The folded Tasks card: its heading row, the card's padding and border. */
+const TASKS_FOLDED_HEIGHT = "h-[calc(max(2rem,var(--control-min-h))_+_0.5rem_+_2px)]";
 
-const MORE_ROW_CLASS =
-  "rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
+// Rows fade out over the bottom padding, so a list that runs on under its
+// edge shows it, and the last row clears the fade once scrolled to the end.
+const FADE_BOTTOM_7 =
+  "[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.75rem),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.75rem),transparent)]";
+const FADE_BOTTOM_6 =
+  "[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)]";
 
 /** A dot on a segment's corner that says the other mode needs a look. */
 function ModeDot({ label, className }: { label: string; className: string }) {
@@ -626,7 +632,27 @@ export function RecentChats({
       hasConcierge ? sortedSessions.filter((s) => chatKind(s, conciergeChatId) === "task") : [],
     [hasConcierge, sortedSessions, conciergeChatId],
   );
+  // The Tasks panel starts folded, and opens when the open chat is a task
+  // chat, so its row is in view. Folding it again holds until another one opens.
   const [tasksExpanded, setTasksExpanded] = useState(false);
+  // Whether the open card's rows have scrolled under its heading.
+  const [tasksScrolled, setTasksScrolled] = useState(false);
+  const tasksListRef = useRef<HTMLDivElement | null>(null);
+  const activeTaskId = taskSessions.some((s) => s.id === activeSessionId) ? activeSessionId : null;
+  const showTasks = mode === "concierge" && conciergeChatId !== null && taskSessions.length > 0;
+  useEffect(() => {
+    if (activeTaskId) setTasksExpanded(true);
+  }, [activeTaskId]);
+  // The card scrolls on its own, so an open task chat far down its list is
+  // brought into view once the card is open and on screen (the list can be in
+  // Chat mode when the task chat opens).
+  useEffect(() => {
+    if (!showTasks || !tasksExpanded || !activeTaskId) return;
+    const link = Array.from(tasksListRef.current?.querySelectorAll("a[href]") ?? []).find(
+      (a) => a.getAttribute("href") === `/chat/${activeTaskId}`,
+    );
+    link?.closest("[data-chat-row]")?.scrollIntoView?.({ block: "nearest" });
+  }, [tasksExpanded, activeTaskId, showTasks]);
 
   const projectGroups = useMemo<SessionGroup[]>(() => {
     const buckets = new Map<
@@ -807,7 +833,9 @@ export function RecentChats({
     }
   }, [editingId]);
 
-  const renderChatRow = (session: ChatSession, nested = false) => {
+  // A row on the Tasks card, which is already `surface`, marks the open chat
+  // with the hover tone instead of the raised one.
+  const renderChatRow = (session: ChatSession, nested = false, onCard = false) => {
     const isActive = activeSessionId === session.id;
     const status = chatRowStatus(session, isActive);
     const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
@@ -828,8 +856,12 @@ export function RecentChats({
           session.archivedAt ? "text-subtle-foreground" : "text-foreground"
         } ${
           isActive
-            ? "bg-surface shadow-1 dark:bg-surface-hover"
-            : "hover:bg-surface-hover dark:hover:bg-surface"
+            ? onCard
+              ? "bg-surface-hover"
+              : "bg-surface shadow-1 dark:bg-surface-hover"
+            : onCard
+              ? "hover:bg-surface-hover"
+              : "hover:bg-surface-hover dark:hover:bg-surface"
         }`}
       >
         {isEditing ? (
@@ -1077,35 +1109,72 @@ export function RecentChats({
     );
   };
 
+  // A card pinned under the scrolling list. Folded it is just its heading,
+  // with the running count; open it grows to half the list's height and
+  // scrolls on its own. Its rows stay mounted, inert while folded, so the
+  // height can animate both ways.
   const renderTasks = () => {
-    if (taskSessions.length === 0) return null;
-    // The open task chat stays in view, even when it is past the first few.
-    const activeIndex = taskSessions.findIndex((s) => s.id === activeSessionId);
-    const showAll = tasksExpanded || activeIndex >= TASK_CHATS_VISIBLE;
-    const visible = showAll ? taskSessions : taskSessions.slice(0, TASK_CHATS_VISIBLE);
-    const hidden = taskSessions.length - visible.length;
+    if (!showTasks) return null;
     const running = taskSessions.filter((s) => s.running).length;
     return (
-      <section aria-labelledby="recent-chats-tasks-heading" data-tasks-section>
-        <hr className="mx-2 my-4 border-0 border-t border-border" aria-hidden />
+      <section
+        aria-labelledby="recent-chats-tasks-heading"
+        data-tasks-section
+        data-expanded={tasksExpanded}
+        className={`mx-2 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 border border-border bg-surface p-1 shadow-1 transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:border-border-subtle dark:shadow-none ${
+          tasksExpanded ? "h-1/2" : TASKS_FOLDED_HEIGHT
+        }`}
+      >
         <h2
           id="recent-chats-tasks-heading"
-          className="flex h-8 min-h-[var(--control-min-h)] items-center justify-between px-2 text-aux text-subtle-foreground"
+          className={`relative shrink-0 after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-border after:transition-opacity ${
+            tasksExpanded && tasksScrolled ? "after:opacity-100" : "after:opacity-0"
+          }`}
         >
-          <span>{t("recentChats.sectionTasks")}</span>
-          {running > 0 ? <span>{t("recentChats.tasksRunning", { count: running })}</span> : null}
-        </h2>
-        {visible.map((session) => renderChatRow(session))}
-        {hidden > 0 ? (
           <button
             type="button"
-            onClick={() => setTasksExpanded(true)}
-            data-tasks-more
-            className={`ml-2 ${MORE_ROW_CLASS}`}
+            aria-expanded={tasksExpanded}
+            aria-controls="recent-chats-tasks-list"
+            aria-label={
+              running > 0
+                ? t("recentChats.tasksRunning", { count: running })
+                : t("recentChats.sectionTasks")
+            }
+            onClick={() => setTasksExpanded((open) => !open)}
+            className="flex h-8 w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
           >
-            {t("recentChats.moreTasks", { count: hidden })}
+            <ListChecks className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
+            <span className="flex-1 truncate">{t("recentChats.sectionTasks")}</span>
+            {running > 0 ? (
+              <span
+                data-tasks-running
+                className="flex shrink-0 items-center gap-1 text-aux tabular-nums text-muted-foreground"
+              >
+                <ChatStatusGlyph status="running" />
+                {running}
+              </span>
+            ) : null}
+            <ChevronUp
+              className={`h-3.5 w-3.5 shrink-0 text-subtle-foreground transition-transform duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none ${
+                tasksExpanded ? "rotate-180" : ""
+              }`}
+              aria-hidden
+            />
           </button>
-        ) : null}
+        </h2>
+        <div
+          id="recent-chats-tasks-list"
+          ref={tasksListRef}
+          inert={!tasksExpanded}
+          aria-hidden={tasksExpanded ? undefined : true}
+          onScroll={(event) => setTasksScrolled(event.currentTarget.scrollTop > 0)}
+          onClickCapture={markOpening}
+          className={`min-h-0 flex-1 scroll-pb-6 overflow-y-auto overscroll-contain pb-6 scrollbar-idle-hidden ${FADE_BOTTOM_6} transition-opacity duration-180 motion-reduce:transition-none ${
+            tasksExpanded ? "opacity-100 delay-60" : "opacity-0"
+          }`}
+        >
+          {taskSessions.map((session) => renderChatRow(session, true, true))}
+        </div>
       </section>
     );
   };
@@ -1190,64 +1259,67 @@ export function RecentChats({
             {headerControls}
           </div>
         </div>
-        <div
-          className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 scrollbar-idle-hidden"
-          onClickCapture={markOpening}
-        >
-          <NewChatRow
-            kind={mode === "concierge" ? "topic" : "chat"}
-            label={t(mode === "concierge" ? "recentChats.newTopic" : "recentChats.newChat")}
-            shortcut={wideWindow && !coarsePointer ? newChatShortcutForPlatform() : null}
-          />
-          {mode === "concierge" && conciergeChatId ? (
-            <>
+        {/* The list and the Tasks card share what is left under the header. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            className={`min-h-0 flex-1 overflow-y-auto px-3 scrollbar-idle-hidden ${
+              showTasks ? `pb-7 ${FADE_BOTTOM_7}` : "pb-3"
+            }`}
+            onClickCapture={markOpening}
+          >
+            <NewChatRow
+              kind={mode === "concierge" ? "topic" : "chat"}
+              label={t(mode === "concierge" ? "recentChats.newTopic" : "recentChats.newChat")}
+              shortcut={wideWindow && !coarsePointer ? newChatShortcutForPlatform() : null}
+            />
+            {mode === "concierge" && conciergeChatId ? (
               <ConciergeChats
                 mainChatId={conciergeChatId}
                 activeSessionId={activeSessionId}
                 statusFilter={statusFilter}
                 topicSessions={conciergeTopicSessions}
               />
-              {renderTasks()}
-            </>
-          ) : (
-            <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
-              <h2
-                id="recent-chats-projects-heading"
-                className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
-              >
-                {t("recentChats.sectionProjects")}
-              </h2>
-              {phase === "loading" ? (
-                <div className="space-y-1 px-2 py-2" aria-hidden>
-                  <Skeleton className="h-8 w-full" />
-                  <Skeleton className="h-8 w-4/5" />
-                  <Skeleton className="h-8 w-3/5" />
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {projectGroups.map(renderProjectGroup)}
-                  {/* Only with nothing to show: a refetch that fails while the
+            ) : (
+              <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
+                <h2
+                  id="recent-chats-projects-heading"
+                  className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
+                >
+                  {t("recentChats.sectionProjects")}
+                </h2>
+                {phase === "loading" ? (
+                  <div className="space-y-1 px-2 py-2" aria-hidden>
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-4/5" />
+                    <Skeleton className="h-8 w-3/5" />
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {projectGroups.map(renderProjectGroup)}
+                    {/* Only with nothing to show: a refetch that fails while the
                     list already has rows keeps the rows rather than blanking them. */}
-                  {phase === "error" && sessions.length === 0 ? (
-                    <div className="px-3 py-8 text-center" role="alert">
-                      <p className="text-aux text-subtle-foreground">
-                        {t("recentChats.searchLoadError")}
-                      </p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="mt-3"
-                        onClick={() => void refetch()}
-                      >
-                        {t("recentChats.searchRetry")}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </section>
-          )}
+                    {phase === "error" && sessions.length === 0 ? (
+                      <div className="px-3 py-8 text-center" role="alert">
+                        <p className="text-aux text-subtle-foreground">
+                          {t("recentChats.searchLoadError")}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-3"
+                          onClick={() => void refetch()}
+                        >
+                          {t("recentChats.searchRetry")}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+          {renderTasks()}
         </div>
         <RomeConfirmDialog
           open={pendingDeleteId !== null}
