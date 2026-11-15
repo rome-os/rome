@@ -6461,6 +6461,30 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(await statusOf(s, "g1")).toBeNull();
     });
 
+    it("leaves a message alone once its task, made scheduled before its result was told, waits for its next run", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      expect(await statusOf(s, "g1")).toBe("working");
+      // The Concierge makes it a recurring task while its first run still works.
+      s.deps.checks = {
+        cancelFor: async () => 0,
+        laterOf: async (ids: readonly string[]) =>
+          new Map(ids.filter((id) => id === taskId).map((id) => [id, Date.now() + 86_400_000])),
+      } as never;
+      await finishTask(s, chatId);
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBeNull();
+      // Its next scheduled run, and that run failing, leave the message alone.
+      s.chats.activeTurns = (id: string) => (id === chatId ? ["task-turn-2"] : []);
+      await s.tasks.chatChanged(chatId);
+      expect(await statusOf(s, "g1")).toBeNull();
+      s.chats.activeTurns = () => [];
+      await finishTask(s, chatId, "error");
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBeNull();
+    });
+
     it("keeps how a task ended for its message once the result is told", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");

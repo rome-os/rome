@@ -470,6 +470,14 @@ export class ConciergeTasks {
     const upTo = this.repo.liveLinkSeq(row.id);
     if (upTo === null) return;
     const of = (await this.statusOf([row])).get(row.id);
+    // A task that waits for a later run, as one made scheduled after it ran,
+    // has told its result too: its next runs are no work for the message.
+    if (of?.status === "later") {
+      const failed = row.lastOutcome === "failed" || row.reportGivenUp;
+      const reason = row.lastOutcome === "stopped" ? "stopped" : failed ? "failed" : "done";
+      await this.repo.endLinks(row.id, reason, upTo);
+      return;
+    }
     if (of?.status !== "ended") return;
     const lost = row.reportGivenUp && of.endReason !== "stopped" && of.endReason !== "no_response";
     await this.repo.endLinks(row.id, lost ? "failed" : (of.endReason ?? "done"), upTo);
