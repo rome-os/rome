@@ -12,6 +12,8 @@ final class VoiceInputService {
     /// Cloud, Rome Cloud does not allow the account, or the instance is older
     /// than voice input.
     private(set) var available = false
+    /// What the instance last said, for Settings to name where speech goes.
+    private(set) var info: VoiceInputInfo?
     private let backend: RomeBackend
     private var checkedAt: Date?
     /// Why listening stopped in a chat the guardian left, shown on return.
@@ -27,11 +29,13 @@ final class VoiceInputService {
         for (chat, stop) in marks.takeLaunchNotices() { leftNotices[chat] = stop }
     }
 
-    /// Asks the instance again, at most once a minute.
-    func refresh() async {
-        if let checkedAt, Date().timeIntervalSince(checkedAt) < 60 { return }
+    /// Asks the instance again, at most once a minute unless `now`: Rome Cloud
+    /// can move voice input to another provider, so Settings asks each time.
+    func refresh(now: Bool = false) async {
+        if !now, let checkedAt, Date().timeIntervalSince(checkedAt) < 60 { return }
         checkedAt = Date()
-        available = (try? await backend.voiceInputInfo())?.available ?? false
+        info = try? await backend.voiceInputInfo()
+        available = info?.available ?? false
     }
 
     func socketRequest() -> URLRequest? { backend.voiceInputSocket() }
@@ -142,6 +146,9 @@ final class VoiceInputController {
     @ObservationIgnored private var anchor: (original: String, range: NSRange)?
     /// From the tap until the field shows it listens.
     @ObservationIgnored private var startInterval: OSSignpostIntervalState?
+    /// The words shown while listening, not yet in the field's text binding.
+    @ObservationIgnored private var preview: (text: String, binding: Binding<String>)?
+    @ObservationIgnored private var previewSyncedAt = Date.distantPast
 
     var active: Bool { state != .idle }
 
@@ -168,8 +175,8 @@ final class VoiceInputController {
             request: request,
             source: VoiceAudioSources.make(),
             handlers: .init(
-                onText: { heard in
-                    text.wrappedValue = before + SpokenText.insertion(before: before, heard: heard, after: after) + after
+                onText: { [weak self] heard in
+                    self?.show(before + SpokenText.insertion(before: before, heard: heard, after: after) + after, text: text, handle: handle)
                 },
                 onDone: { [weak self] heard, stop in
                     self?.done(heard: heard, stop: stop, text: text, handle: handle)
@@ -244,7 +251,32 @@ final class VoiceInputController {
         UIAccessibility.post(notification: .announcement, argument: stop.notice)
     }
 
+    /// Shows the words heard so far in the field's view at once. The binding,
+    /// which redraws the whole chat screen, takes them at most once a second,
+    /// so that a busy screen never holds up the guardian's stop tap.
+    private func show(_ words: String, text: Binding<String>, handle: ComposerTextHandle) {
+        guard let view = handle.view else {
+            text.wrappedValue = words
+            return
+        }
+        view.text = words
+        preview = (words, text)
+        if Date().timeIntervalSince(previewSyncedAt) >= Self.previewSyncInterval { syncPreview() }
+    }
+
+    /// Puts the words shown into the binding, so the draft keeps them.
+    private func syncPreview() {
+        guard let preview else { return }
+        self.preview = nil
+        previewSyncedAt = Date()
+        if preview.binding.wrappedValue != preview.text { preview.binding.wrappedValue = preview.text }
+    }
+
+    private static let previewSyncInterval: TimeInterval = 1
+
     private func finishListening() {
+        syncPreview()
+        previewSyncedAt = .distantPast
         dictation = nil
         state = .idle
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
