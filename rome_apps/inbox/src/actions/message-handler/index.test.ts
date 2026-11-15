@@ -14,6 +14,7 @@ import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
   buildSenderInfo,
+  recipientLabel,
   createAction as createMessageHandlerAction,
   parseSentinelDecision,
   sendAnswer,
@@ -67,6 +68,11 @@ function createMockAgentRunner(
       return (actionCapable[agentName] ?? []).includes(actionName);
     },
   };
+}
+
+function envoyAnswer(verdict: string, reason: string): AgentMessage {
+  const structuredOutput = { verdict, reason };
+  return { type: "result", content: JSON.stringify(structuredOutput), structuredOutput };
 }
 
 function createAction(
@@ -295,6 +301,24 @@ describe("buildMessageContext", () => {
     expect(result).not.toContain("project name: alpha");
     expect(result).not.toContain("## Project context");
     expect(result).not.toContain("Current selected project");
+  });
+});
+
+// Pins the inbox's label to the form core's `whoSaid`
+// (packages/core/src/chats/sender-labels.ts) gives a message the agent reads:
+// "<shown name> [<person>, <bond level in words>]", or "[not linked]".
+// Apps cannot import core, so the format is asserted literally.
+describe("recipientLabel", () => {
+  it("labels a linked sender with their person and bond level in words, as core does", () => {
+    expect(
+      recipientLabel({ shownName: "Ada", person: "Ada Lovelace", bondLevel: "inner-circle" }),
+    ).toBe("Ada [Ada Lovelace, inner circle]");
+  });
+
+  it("labels a sender with no linked person as not linked, as core does", () => {
+    expect(recipientLabel({ shownName: "Ada", person: null, bondLevel: "other" })).toBe(
+      "Ada [not linked]",
+    );
   });
 });
 
@@ -681,7 +705,7 @@ describe("message reply bond-level settings", () => {
       },
       agentResponses: [
         [{ type: "result", content: "Sure." }],
-        [{ type: "result", content: "APPROVE" }],
+        [envoyAnswer("approve", "Fine to send.")],
       ],
     });
     const action = createAction(actionConfig, deps);
@@ -711,6 +735,39 @@ describe("message reply bond-level settings", () => {
     ]);
   });
 
+  it("tells the envoy the reply goes to the sender, not the guardian", async () => {
+    const priya: PersonRecord = {
+      id: "priya",
+      displayName: "Priya Lindqvist-Mbeki",
+      bondLevel: "acquaintance",
+      channelMappings: [{ channel: "discord", channelUserId: "priya-dc" }],
+      profilePath: null,
+    };
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      settings: { replyToBondLevels: ["guardian", "acquaintance"] },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => priya) },
+      agentResponses: [
+        [{ type: "result", content: "You committed to the launch plan." }],
+        [{ type: "result", content: "APPROVE" }],
+      ],
+    });
+
+    await createAction(actionConfig, deps).execute({
+      channel: "discord",
+      channelUserId: "priya-dc",
+      threadId: "thread-1",
+      threadType: "group",
+      displayName: "Priya",
+      text: "What did I commit to?",
+      messageId: "msg-1",
+    });
+
+    const envoyPrompt = agentRunner.calls[1]?.prompt ?? "";
+    expect(envoyPrompt).toContain("from Priya [Priya Lindqvist-Mbeki, acquaintance]:");
+    expect(envoyPrompt).toContain("in the same group chat the message was sent in");
+    expect(envoyPrompt).toContain("The sender is not the guardian");
+  });
+
   it("escalates malformed sentinel output instead of sending reasoning to other senders", async () => {
     const mappedPerson: PersonRecord = {
       id: "casey",
@@ -733,7 +790,7 @@ describe("message reply bond-level settings", () => {
           },
         ],
         [{ type: "result", content: "Here is the answer." }],
-        [{ type: "result", content: "APPROVE" }],
+        [envoyAnswer("approve", "Fine to send.")],
       ],
     });
     (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
@@ -815,6 +872,58 @@ describe("message reply bond-level settings", () => {
     });
     expect(agentRunner.calls).toHaveLength(0);
     expect(sentMessages).toHaveLength(0);
+  });
+});
+
+describe("envoy verdict", () => {
+  const casey: PersonRecord = {
+    id: "casey",
+    displayName: "Casey",
+    bondLevel: "other",
+    channelMappings: [{ channel: "telegram", channelUserId: "casey-tg" }],
+    profilePath: null,
+  };
+
+  async function replyWithEnvoyAnswer(answer: AgentMessage) {
+    const { deps, sentMessages } = createMessageHandlerDeps({
+      settings: { replyToBondLevels: ["guardian", "other"] },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => casey) },
+      agentResponses: [[{ type: "result", content: "Sure." }], [answer]],
+    });
+    const result = await createAction(actionConfig, deps).execute({
+      channel: "telegram",
+      channelUserId: "casey-tg",
+      threadId: "thread-1",
+      threadType: "private",
+      displayName: "Casey",
+      text: "Can you answer?",
+      messageId: "msg-1",
+    });
+    return { action: (result.data as { action: string }).action, sentMessages };
+  }
+
+  it.each([
+    ["approve", "sent", 1],
+    ["require_approval", "pending_approval", 0],
+    ["reject", "rejected_by_envoy", 0],
+  ])("acts on the verdict %s", async (verdict, action, sent) => {
+    const outcome = await replyWithEnvoyAnswer(envoyAnswer(verdict, "Because."));
+    expect(outcome.action).toBe(action);
+    expect(outcome.sentMessages).toHaveLength(sent);
+  });
+
+  it("sends an approved reply whose reason names another verdict", async () => {
+    const outcome = await replyWithEnvoyAnswer(
+      envoyAnswer("approve", "No need to REJECT or REQUIRE_APPROVAL; it answers the question."),
+    );
+    expect(outcome.action).toBe("sent");
+    expect(outcome.sentMessages).toHaveLength(1);
+  });
+
+  it("holds the reply when the envoy answers without a verdict", async () => {
+    const outcome = await replyWithEnvoyAnswer({ type: "result", content: "APPROVE" });
+    expect(outcome.action).toBe("pending_approval");
+    expect(outcome.sentMessages).toEqual([]);
   });
 });
 

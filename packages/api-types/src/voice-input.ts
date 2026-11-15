@@ -41,7 +41,15 @@ export const VOICE_INPUT_SAMPLE_RATE = 16_000;
  * `ended`.
  */
 export const voiceInputClientMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("start"), sampleRate: z.number().int().min(8_000).max(48_000) }),
+  z.object({
+    type: z.literal("start"),
+    sampleRate: z.number().int().min(8_000).max(48_000),
+    /**
+     * How much audio the client recorded while its socket connected, which it
+     * sends right after `start`. Rome allows that burst on top of real time.
+     */
+    bufferedMs: z.number().int().min(0).optional(),
+  }),
   z.object({ type: z.literal("stop") }),
 ]);
 export type VoiceInputClientMessage = z.infer<typeof voiceInputClientMessageSchema>;

@@ -42,6 +42,18 @@ struct HealthType: Equatable, Sendable {
 }
 
 enum HealthTypes {
+    /// The types the app asks iOS to read, and syncs: a short list keeps the
+    /// system's access sheet short. A type outside it simply has no data;
+    /// the Rome's own list of types is unchanged.
+    static let requestedNames: Set<String> = [
+        "stepCount", "distanceWalkingRunning", "activeEnergyBurned", "appleExerciseTime",
+        "heartRate", "restingHeartRate", "heartRateVariabilitySDNN", "sleep", "workouts",
+        "bodyMass", "oxygenSaturation", "bloodGlucose",
+    ]
+
+    /// `all`, kept to the requested types, in the same order.
+    static var requested: [HealthType] { all.filter { requestedNames.contains($0.name) } }
+
     private static let count = [HealthUnit(name: "count", hk: "count")]
     private static let perMinute = [HealthUnit(name: "count/min", hk: "count/min")]
     private static let length = [("m", "m"), ("km", "km"), ("mi", "mi"), ("ft", "ft")].map { HealthUnit(name: $0.0, hk: $0.1) }
@@ -264,20 +276,11 @@ struct ActionFailure: Error {
 
 // MARK: - Actions
 
-/// The user's "Apple Health" switch, readable from the executor's threads.
-final class HealthSwitch: Sendable {
-    private let state: OSAllocatedUnfairLock<Bool>
-
-    init(_ on: Bool = true) { state = OSAllocatedUnfairLock(initialState: on) }
-
-    var isOn: Bool { state.withLock { $0 } }
-    func set(_ on: Bool) { state.withLock { $0 = on } }
-}
-
 struct HealthActions: Sendable {
     let reader: HealthReading
-    /// Off: the health actions are refused before Health is touched.
-    var enabled = HealthSwitch()
+    /// Apple Health's Live access. Off: the health actions are refused
+    /// before Health is touched.
+    var enabled = NodeFlag(true)
     var now: @Sendable () -> Date = { Date() }
     /// The phone's calendar. Only its time zone and first weekday count: the
     /// wire speaks Gregorian dates (see `HealthDates.wire`).
@@ -288,12 +291,25 @@ struct HealthActions: Sendable {
     /// The longest window `health.stats` reads sleep, mindful minutes or workouts over.
     static let maxRecordDays = 366
 
-    private static let typeNames = HealthTypes.all.map(\.name).joined(separator: ", ")
+    /// The types the app asks iOS for: a read of any other would come back
+    /// empty, so it is refused as unsupported instead of read as no data.
+    private static let typeNames = HealthTypes.requested.map(\.name).joined(separator: ", ")
 
     /// iPhone or iPad: the word in what the agent reads.
     var device = DeviceKind.iPhone
 
     /// What `system.info` tells the agent about each action's arguments.
+    /// Each action's examples for the connection report: the ones its usage ends with.
+    static let examples: [String: [JSONValue]] = [
+        "health.stats": [
+            .object(["types": .array(["stepCount", "sleep", "restingHeartRate", "workouts"].map(JSONValue.string))]),
+            .object(["type": .string("stepCount"), "start": .string("2026-11-03"), "end": .string("2026-11-09"), "interval": .string("day")]),
+        ],
+        "health.samples": [
+            .object(["type": .string("heartRate"), "limit": .number(50)]),
+        ],
+    ]
+
     static func usage(_ device: DeviceKind = .iPhone) -> [String: String] {
         let name = device.name
         return [
@@ -311,21 +327,23 @@ struct HealthActions: Sendable {
                 workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
                 sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
                 A type the user has not allowed, or that has no data, has no value. \
-                Apple Health is off for Rome until the user turns it on in Settings → Apple Health in the Rome app on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+                Fails with live_off while Live access to Apple Health is off on the \(name), and with not_connected before the user connects it; the user turns it on in the Rome app on the \(name): Settings → Connections → Apple Health, and the error says how to offer that. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
                 """,
             "health.samples": """
                 Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
                 limit 1-1000 (default 100), order desc (default) | asc by start, cursor (nextCursor of the previous reply), \
                 sources (array of app names or bundle ids), includeMetadata (bool, default false), activity (workouts only). \
-                A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn it on in Settings → Apple Health in the Rome app on the \(name). Example: {"type":"heartRate","start":"2026-11-08","limit":50}
+                A reply with nextCursor has more. Fails with live_off or not_connected as health.stats does. Example: {"type":"heartRate","start":"2026-11-08","limit":50}
                 """,
         ]
     }
 
+    static func off(_ device: DeviceKind) -> NodeActionResult {
+        .failed(code: "live_off", message: "Live access to Apple Health is off on this \(device.name). Where you talk with the user directly, offer the connect card: connect_account with kind \"apple_health\". In a task chat, stop and report that Apple Health needs connecting, so the chat that started the task offers it. Do not ask whether it is connected. The user turns it on in the Rome app on the \(device.name): Settings → Connections → Apple Health.")
+    }
+
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
-        if Self.actions.contains(action), action != "system.info", !enabled.isOn {
-            return .failed(code: "health_off", message: "Apple Health is off for Rome on this \(device.name). The user must turn it on in Settings → Apple Health in the Rome app on the \(device.name).")
-        }
+        if Self.actions.contains(action), action != "system.info", !enabled.isOn { return Self.off(device) }
         do {
             switch action {
             case "health.stats": return try await stats(args)
@@ -368,7 +386,7 @@ struct HealthActions: Sendable {
     }
 
     private func healthType(named name: String) throws -> HealthType {
-        guard let type = HealthTypes.named(name) else {
+        guard let type = HealthTypes.named(name), HealthTypes.requestedNames.contains(type.name) else {
             throw ActionFailure(code: "unsupported_type", message: "\"\(name)\" is not a supported type. Supported: \(Self.typeNames).")
         }
         return type
