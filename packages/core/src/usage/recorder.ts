@@ -3,7 +3,7 @@ import { createLogger } from "../logger.js";
 import type { UsageAttributionResolver } from "./attribution.js";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { SessionKind, TurnUsageFacts } from "../agent/index.js";
-import type { LoginMethod, TurnUsageEvent, UsageEvent } from "./events.js";
+import type { LoginMethod, TranscriptionUsageEvent, TurnUsageEvent, UsageEvent } from "./events.js";
 
 /** The chat type a turn counts under when its chat's row is missing, by its
  *  session's kind. A web chat always has its row, so a conversation without
@@ -27,6 +27,13 @@ export interface LoginUsageSink {
   recordLogin(method: LoginMethod): void;
 }
 
+/** The seam voice input hands each ended Rome Cloud listening session to. Never throws. */
+export interface TranscriptionUsageSink {
+  recordTranscription(
+    session: Omit<TranscriptionUsageEvent, "type" | "eventId" | "kind" | "occurredAt">,
+  ): void;
+}
+
 export interface UsageRecorderDeps {
   outbox: { enqueue(event: UsageEvent, credential: string): Promise<void> };
   attribution: Pick<UsageAttributionResolver, "forTurn">;
@@ -42,7 +49,7 @@ export interface UsageRecorderDeps {
  * that happens while the instance is not signed in to Rome Cloud is not
  * recorded.
  */
-export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
+export class UsageRecorder implements TurnUsageSink, LoginUsageSink, TranscriptionUsageSink {
   private readonly pending = new Set<Promise<void>>();
 
   constructor(private readonly deps: UsageRecorderDeps) {}
@@ -75,6 +82,28 @@ export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
       this.deps.outbox.enqueue(event, credential).catch((err: unknown) => {
         log.warn("failed to queue login usage", {
           method,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
+    );
+  }
+
+  recordTranscription(
+    session: Omit<TranscriptionUsageEvent, "type" | "eventId" | "kind" | "occurredAt">,
+  ): void {
+    const credential = this.deps.credential();
+    if (!credential) return;
+    const event: UsageEvent = {
+      type: "transcription",
+      eventId: session.sessionId,
+      kind: "voice_input",
+      ...session,
+      occurredAt: new Date().toISOString(),
+    };
+    this.track(
+      this.deps.outbox.enqueue(event, credential).catch((err: unknown) => {
+        log.warn("failed to queue transcription usage", {
+          sessionId: session.sessionId,
           error: err instanceof Error ? err.message : String(err),
         });
       }),
