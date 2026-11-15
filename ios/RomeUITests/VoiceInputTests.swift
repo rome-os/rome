@@ -147,6 +147,7 @@ final class VoiceInputTests: XCTestCase {
               let password = env["ROME_LOCAL_PASSWORD"] else {
             throw XCTSkip("no stand-in instance: set TEST_RUNNER_ROME_LOCAL_ORIGIN, _USER and _PASSWORD")
         }
+        try assertAnswers(origin)
         let app = XCUIApplication()
         app.launchEnvironment["ROME_LOCAL_ORIGIN"] = origin
         app.launchEnvironment["ROME_LOCAL_USER"] = user
@@ -174,6 +175,24 @@ final class VoiceInputTests: XCTestCase {
         }.min() ?? 0
     }
 
+    /// Fails the test, rather than letting every check after it fail for another reason, when
+    /// the instance the CI job named does not answer.
+    @MainActor
+    private func assertAnswers(_ origin: String) throws {
+        let url = try XCTUnwrap(URL(string: "\(origin)/api/voice-input"), "bad origin \(origin)")
+        var answered = false
+        let done = expectation(description: "the instance answers")
+        URLSession.shared.dataTask(with: url) { _, response, _ in
+            answered = response != nil
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        if !answered {
+            XCTFail("the stand-in instance at \(origin) does not answer")
+            throw InstanceUnreachable()
+        }
+    }
+
     /// Taps `control` when asked and returns the seconds until its label is one of `labels`,
     /// or infinity after 3 s.
     @MainActor
@@ -192,3 +211,5 @@ final class VoiceInputTests: XCTestCase {
         return XCTWaiter().wait(for: [shown], timeout: timeout) == .completed
     }
 }
+
+private struct InstanceUnreachable: Error {}
