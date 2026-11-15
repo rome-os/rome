@@ -64,14 +64,12 @@ What one of the guardian's devices lets Agents reach on it live, over rome-node:
            └── live ──► device connection  ask the device now
                                          read with core:device_describe / core:device_run
 
-  personal data ──(stale?)──► connection layer: which device, its state, the next step
+  personal data ──(not covered?)──► connection layer: which device, its state, the next step
 ```
 
-- **Sync** is personal data's. The device pushes readings, Rome stores them, and Agents read them with no device online. Its switch is per Rome.
+- **Sync** is personal data's. The device pushes readings, Rome stores them, and Agents read them with no device online. Its switch is per Rome and origin: one install's sync to one Rome.
 - **Live** is the device connection's. An Agent asks the device now, and it answers only while it is online and its Live access is on. Its switch is per device.
-- **They meet in one place.** When the stored data does not cover a question, personal data asks the connection layer how to read it live: which device, its state, and the next step (a live read or a connect card). The dependency runs one way: personal data uses connections, and connections never read personal data. Neither stores the other's state.
-- **The asking device answers.** A live read goes to the device the guardian asks from, and never to another device they did not name.
-- **What a capability can do comes from the device's report**, never from a prompt.
+- **They meet in one place.** When the stored data does not cover a question, personal data asks the connection layer how to read it live: which device, its state, and the next step (a live read or a connect card). The dependency runs one way: personal data uses connections, and connections never read personal data. Neither stores the other's state. Which device a live read asks follows **The asking device answers** below.
 
 - The device declares its capabilities: each one's title, command prefix, operations with read or write, and whether it is personal. Core stores what the device reports and names no capability itself, so a new capability needs no core change.
 - Its grant is the device's own permission, such as the iOS permission for Health, and the device's Live access switch for that capability. A capability that needs no permission says so.
