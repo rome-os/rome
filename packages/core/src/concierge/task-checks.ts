@@ -180,6 +180,17 @@ export class TaskChecks {
     return later;
   }
 
+  /** The tasks of `taskIds` with a repeating schedule's next run pending, not a one-off check. */
+  async recurringOf(taskIds: readonly string[]): Promise<Set<string>> {
+    const wanted = new Set(taskIds);
+    const recurring = new Set<string>();
+    if (wanted.size === 0) return recurring;
+    for (const check of await this.pending()) {
+      if (check.recurring && check.taskId && wanted.has(check.taskId)) recurring.add(check.taskId);
+    }
+    return recurring;
+  }
+
   /** How many checks were scheduled for each task, fired ones included. */
   async timesScheduled(taskIds: readonly string[]): Promise<Map<string, number>> {
     const wanted = new Set(taskIds);

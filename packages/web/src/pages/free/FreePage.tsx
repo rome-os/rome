@@ -8,7 +8,10 @@ import {
   EmptyStateIcon,
   EmptyStateTitle,
 } from "@/components/ui/empty-state";
+import { useLastOrdinaryChatId, useStoredChatListMode } from "@/hooks/use-chat-list-mode";
+import { useChatSessionMayExist } from "@/hooks/use-chat-sessions";
 import { useConciergeChat } from "@/hooks/use-concierge";
+import { railChatHref } from "@/lib/chat-list-mode";
 import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { FreeGrid } from "./FreeGrid";
 
@@ -16,6 +19,23 @@ import { FreeGrid } from "./FreeGrid";
 export function MainChatRedirect() {
   const { search, state } = useLocation();
   return <Navigate to={{ pathname: MAIN_CHAT_PATH, search }} state={state} replace />;
+}
+
+/**
+ * The home address opens the chat the rail's Chat entry would: the main chat
+ * in Concierge mode or on a device with no stored mode, else the last ordinary
+ * chat. The chat list follows the open chat, so opening the main chat here
+ * would put a guardian who left the list in Chat mode back in Concierge mode.
+ */
+export function HomeRedirect() {
+  const mode = useStoredChatListMode();
+  const lastOrdinaryChatId = useLastOrdinaryChatId();
+  const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
+  const to =
+    mode === "chat"
+      ? railChatHref("chat", lastOrdinaryChatId, lastOrdinaryChatExists)
+      : MAIN_CHAT_PATH;
+  return <Navigate to={to} replace />;
 }
 
 function MainChatUnavailable({ onRetry }: { onRetry: () => void }) {

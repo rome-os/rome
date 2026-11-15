@@ -195,6 +195,24 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(store.thread == nil)
     }
 
+    /// A root only the thread read brought follows its status and reaction live.
+    @Test func aRootOnlyTheReadBroughtFollowsItsBadge() async {
+        let backend = FakeBackend()
+        let root = message("r", role: "user", "plan", at: 0, thread: "r")
+        let reply = message("a1", "sure", at: 10, thread: "r")
+        let store = await chat(backend, [reply])
+        backend.threads["a1"] = [root, reply]
+        store.openThread(at: "a1")
+        let thread = store.thread!
+        await settle { thread.messages.count == 2 }
+        let row = { thread.rows.first { $0.messageId == "r" }! }
+        backend.bus.emit(LiveTopic.chat("concierge"), .status(sessionId: "concierge", messageId: "r", status: "working"))
+        #expect(thread.info(for: row()).mark?.emoji == "👀")
+        backend.bus.emit(LiveTopic.chat("concierge"), .reaction(sessionId: "concierge", messageId: "r", reaction: "👍"))
+        backend.bus.emit(LiveTopic.chat("concierge"), .status(sessionId: "concierge", messageId: "r", status: nil))
+        #expect(thread.info(for: row()).mark?.emoji == "👍")
+    }
+
     /// An older instance has no thread read: the message shows alone.
     @Test func anOlderInstanceShowsTheMessageAlone() async {
         let backend = FakeBackend()

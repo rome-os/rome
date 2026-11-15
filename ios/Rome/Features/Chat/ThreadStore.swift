@@ -117,6 +117,11 @@ final class ThreadStore {
                 // Moved to another thread: it leaves this one.
                 older.removeAll { $0.id == messageId }
             }
+        // A message only the read brought follows its badge too.
+        case .reaction(let id, let messageId, let reaction) where id == sessionId:
+            if let index = older.firstIndex(where: { $0.id == messageId }) { older[index].reaction = reaction }
+        case .status(let id, let messageId, let status) where id == sessionId:
+            if let index = older.firstIndex(where: { $0.id == messageId }) { older[index].status = status }
         case .reconnected:
             Task { await load() }
         default:

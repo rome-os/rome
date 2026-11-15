@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.4](https://github.com/rome-os/rome/compare/libs-v0.0.3...libs-v0.0.4) (2026-11-15)
+
+
+### Features
+
+* **lib:** let feature gate rules match on email ([#2213](https://github.com/rome-os/rome/issues/2213)) ([bee837e](https://github.com/rome-os/rome/commit/bee837e970d4f5733b17ec5e0b6acbb3774a2cf3))
+
 ## [0.0.3](https://github.com/rome-os/rome/compare/libs-v0.0.2...libs-v0.0.3) (2026-10-19)
 
 

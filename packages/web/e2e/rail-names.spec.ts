@@ -98,7 +98,7 @@ test.describe("phone", () => {
     await header.getByRole("button", { name: "Chat list", exact: true }).click();
     await list
       .locator('[data-project-group="project:default"]')
-      .getByRole("link", { name: "New chat in this project", exact: true })
+      .getByRole("button", { name: "New chat in this project", exact: true })
       .click();
     await expect(list).toHaveCount(0);
     await expect(page).toHaveURL(/\/chat$/);

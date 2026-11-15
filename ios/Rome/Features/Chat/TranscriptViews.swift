@@ -94,12 +94,13 @@ struct UserBubble: View {
     /// Removes a send that cannot go through; nil leaves it out.
     var onDelete: (() -> Void)? = nil
     var menu = BubbleMenu()
-    /// Rome's mark on the message: being worked on, or failed.
-    var mark: StatusMark? = nil
+    /// The badge on the message: Rome's status, else the Concierge's reaction.
+    var mark: MessageMark? = nil
     /// What the message replies to, quoted at the top of the bubble.
     var quote: MessagePart.ReplyQuote? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
+    @Environment(\.rowTinted) private var tinted
 
     private var problem: SendProblem? {
         SendProblem(pending, onRetry: onRetry, onDelete: onDelete)
@@ -141,7 +142,7 @@ struct UserBubble: View {
                             .bubbleMenu(text: text, menu: bubbleMenu)
                     }
                 }
-                // The mark sits on the top leading corner of the bubble, or of the
+                // The badge sits on the top leading corner of the bubble, or of the
                 // photos, over the corner and clear of the first line's start.
                 .overlay(alignment: .topLeading) {
                     if let mark {
@@ -151,6 +152,8 @@ struct UserBubble: View {
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
+                // Behind the photos and the bubble, not the row.
+                .tinted(tinted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -478,20 +481,20 @@ struct CopyButton: View {
     }
 }
 
-/// A card for a task chat the Concierge started: "Task" + status, then its title.
 /// A task the Concierge started, as a card in the chat: the label and the
-/// title. Its status is left out, since progress is not reported accurately.
+/// title. The label says only what the task chat says live: Working or Needs
+/// you. It has no Stop; Stop is on the Tasks tab's row.
 struct TaskCard: View {
     let title: String
-    /// How the task stands, as "Task chat · <word>"; nil keeps the bare "Task".
+    /// How the task chat stands; nil keeps the bare "Task".
     var state: TaskCardState? = nil
-    var stopping = false
-    var onStop: (() -> Void)? = nil
     let action: () -> Void
 
     /// The line above the title.
     private var label: String {
-        state.map { String(localized: "Task chat · \($0.word)") } ?? String(localized: "Task")
+        guard let state else { return String(localized: "Task") }
+        guard let word = state.word else { return String(localized: "Task chat") }
+        return String(localized: "Task chat · \(word)")
     }
 
     var body: some View {
@@ -508,8 +511,6 @@ struct TaskCard: View {
                         .multilineTextAlignment(.leading)
                 }
             }
-            // Room for Stop on the right.
-            .padding(.trailing, state?.stoppable == true ? 58 : 0)
             // One width whatever the state line says, so a state change never moves the card's edge.
             .fillsBubbleWidth()
             .cardPadding()
@@ -518,28 +519,9 @@ struct TaskCard: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        // On the card's own button: on the whole view they would name Stop too.
+        .bubbleWidth()
         .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
         .accessibilityIdentifier("task-card")
-        .overlay(alignment: .trailing) {
-            // On the right of the card, beside its own tap, so a press on Stop
-            // never opens the chat. A quiet button, not a row of its own.
-            if state?.stoppable == true, let onStop {
-                Button(action: onStop) {
-                    Text(stopping ? "Stopping…" : "Stop")
-                        .romeFont(12, .semibold)
-                        .foregroundStyle(Palette.sub)
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                        .background(Palette.fill, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(stopping)
-                .accessibilityIdentifier("task-stop")
-                .padding(.trailing, 12)
-            }
-        }
-        .bubbleWidth()
     }
 }
 
@@ -569,7 +551,7 @@ enum TranscriptSpacing {
         if case .notice = row { return 14 }
         // A faint line stands apart, like a time separator.
         switch (row, previous) {
-        case (.sessionRenewal, _), (_, .sessionRenewal): return 14
+        case (.sessionRenewal, _), (_, .sessionRenewal), (.unreadDivider, _), (_, .unreadDivider): return 14
         default: break
         }
         // Tight under its own message, and apart from the next one.
