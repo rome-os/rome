@@ -3217,6 +3217,21 @@ describe("Chat Concierge empty state", () => {
       expect(composer().dataset.thread).toBe("");
     });
 
+    it("brings no thread into focus while share mode is on, whether by label or by quote", async () => {
+      threaded();
+      renderChat(concierge());
+      await screen.findAllByTestId("user-row");
+      await userEvent.click(screen.getByRole("button", { name: "navbar.more" }));
+      await userEvent.click(screen.getByRole("menuitem", { name: "share.title" }));
+      await screen.findByTestId("share-bar");
+
+      fireEvent.click(screen.getByTestId("open-thread"));
+      fireEvent.click(screen.getByTestId("open-other-thread"));
+
+      expect(back()).toBeNull();
+      expect(composer().dataset.thread).toBe("");
+    });
+
     it("closes the focus before share mode opens from the header menu", async () => {
       threaded();
       renderChat(concierge());

@@ -129,6 +129,9 @@ function Harness({
             <button type="button" onClick={() => void threadFocus.close()}>
               back
             </button>
+            <button type="button" onClick={() => void threadFocus.close(true)}>
+              close now
+            </button>
             <p data-testid="focus">{threadFocus.focus?.title ?? ""}</p>
           </div>
         </ReplyDraftProvider>
@@ -235,6 +238,24 @@ describe("focusing a thread", () => {
     expect(transcript().hasAttribute("data-thread-motion")).toBe(true);
     expect(entry("f2").style.height).toBe("0px");
     await waitFor(() => expect(hidden()).toEqual([]), { timeout: 2000 });
+    expect(entry("f2").getAttribute("style") ?? "").toBe("");
+  });
+
+  it("closes at once even while the open motion still runs, leaving no blank or hidden row", async () => {
+    render(<Harness />);
+    fireEvent.click(kyotoLabels()[0]!);
+    // Mid motion: the rows are still being folded.
+    expect(transcript().hasAttribute("data-thread-motion")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "close now" }));
+
+    await waitFor(() => expect(screen.getByTestId("focus").textContent).toBe(""), {
+      timeout: 2000,
+    });
+    await waitFor(() => expect(hidden()).toEqual([]), { timeout: 2000 });
+    expect(transcript().hasAttribute("data-thread-motion")).toBe(false);
+    expect(screen.getByTestId("top-space").style.height).toBe("");
+    expect(screen.getByTestId("bottom-space").style.height).toBe("");
     expect(entry("f2").getAttribute("style") ?? "").toBe("");
   });
 

@@ -67,6 +67,8 @@ interface UseOlderMessagesOptions {
    * up arrow outside a field. That also holds with too little to scroll.
    */
   onDemand?: boolean;
+  /** With `onDemand`, whether the reader already has all they can want: a push then loads nothing. */
+  satisfied?: boolean;
 }
 
 export interface OlderMessages {
@@ -97,6 +99,7 @@ export function useOlderMessages(
     setMessages,
     onOlderPage,
     onDemand = false,
+    satisfied = false,
   }: UseOlderMessagesOptions,
 ): OlderMessages {
   const [cursors, setCursors] = useState<ReadonlyMap<string, string | null>>(() => new Map());
@@ -217,7 +220,7 @@ export function useOlderMessages(
   // delays the handlers, and must not split a gesture in two. A page that is
   // still on its way is not asked for twice.
   useEffect(() => {
-    if (!onDemand || !sessionId || !scroller || !waiting) return;
+    if (!onDemand || satisfied || !sessionId || !scroller || !waiting) return;
     let loaded = false;
     let last = Number.NEGATIVE_INFINITY;
     const push = (at: number) => {
@@ -245,7 +248,13 @@ export function useOlderMessages(
       const typing =
         event.target instanceof Element &&
         event.target.closest("input, textarea, select, [contenteditable]");
-      if (event.repeat || typing || !["PageUp", "Home", "ArrowUp"].includes(event.key)) return;
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        typing ||
+        !["PageUp", "Home", "ArrowUp"].includes(event.key)
+      )
+        return;
       loaded = false;
       push(event.timeStamp);
     };
@@ -259,7 +268,7 @@ export function useOlderMessages(
       scroller.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [onDemand, sessionId, scroller, waiting, loadOlder]);
+  }, [onDemand, satisfied, sessionId, scroller, waiting, loadOlder]);
 
   return { setCursor, hasOlder, sentinelRef, loadOlder };
 }

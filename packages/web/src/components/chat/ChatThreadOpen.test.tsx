@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ChatMessage } from "@/lib/chat-types";
@@ -310,6 +311,7 @@ const idle = {
 function renderTranscript(
   shown: ChatMessage[] = messages,
   focused?: { thread: string; title: string },
+  selection?: ComponentProps<typeof ConciergeTranscript>["selection"],
 ) {
   const box: { thread: string | null } = { thread: null };
   const rows = buildRows(shown, new Map(), idle.identity, {
@@ -346,6 +348,7 @@ function renderTranscript(
                 live={idle}
                 actions={actions}
                 contentRef={() => {}}
+                selection={selection}
               />
             </ChatThreadsProvider>
           </ThemeProvider>
@@ -618,5 +621,32 @@ describe("the transcript with a thread in focus", () => {
     expect(
       screen.getAllByRole("button", { name: "Flights" })[0]!.closest("[data-thread-out]"),
     ).toBeTruthy();
+  });
+
+  it("hides nothing while share selection runs, so a turn of messages in several threads shows whole", () => {
+    // One turn holds a Kyoto message and a Flights one.
+    const mixed = [
+      ...messages,
+      {
+        ...message("ax", "assistant", "said ax", "n1", 4),
+        turnId: "t-a2",
+        chatThreadTitle: "Flights",
+      } as ChatMessage,
+    ];
+    const selection = {
+      selectedTurns: new Set(["t-a2"]),
+      selectableSessionId: "concierge",
+      onToggleTurn: () => {},
+    };
+    renderTranscript(mixed, focusKyoto, selection);
+
+    expect(marked()).toEqual([]);
+    expect(entry("ax").closest("[data-thread-out]")).toBeNull();
+    // The labels stay reachable under the overlay: they focus nothing here.
+    cleanup();
+
+    // Without the selection the same focus hides the Flights message.
+    renderTranscript(mixed, focusKyoto);
+    expect(entry("ax").closest("[data-thread-out]")).not.toBeNull();
   });
 });

@@ -79,6 +79,7 @@ function Harness({
 }) {
   const [messages, setMessages] = useState(new Map([["s1", initial]]));
   const [onDemand, setOnDemand] = useState(focused);
+  const [satisfied, setSatisfied] = useState(false);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const stick = useStickToBottom({ initialStuck });
   const older = useOlderMessages("s1", {
@@ -87,6 +88,7 @@ function Harness({
     pinned: stick.isAtBottom,
     setMessages,
     onDemand,
+    satisfied,
   });
   const { setCursor } = older;
   useEffect(() => setCursor("s1", "cursor-1"), [setCursor]);
@@ -120,6 +122,7 @@ function Harness({
       }}
     >
       <button type="button" data-testid="end-focus" onClick={() => setOnDemand(false)} />
+      <button type="button" data-testid="satisfy" onClick={() => setSatisfied(true)} />
       {older.hasOlder("s1") ? <div ref={older.sentinelRef} data-testid="sentinel" /> : null}
       <div ref={stick.contentRef}>
         {rows.map((row) => (
@@ -456,6 +459,39 @@ describe("useOlderMessages on demand", () => {
     await waitFor(() => expect(shownIds()).toEqual(["m2", "m3"]));
     expect(pages()).toBe(1);
     field.remove();
+  });
+
+  it("loads nothing once the reader has all they can want, as with the thread's first message in", async () => {
+    twoPages();
+    renderHarness([message("m3", 3)], false, true);
+    await act(async () => screen.getByTestId("satisfy").click());
+
+    await act(async () => wheelUp());
+    await act(async () => fireEvent.keyDown(document.body, { key: "Home" }));
+    await act(async () => {
+      fireEvent.touchStart(scroller(), { touches: [{ clientY: 100 }] });
+      fireEvent.touchMove(scroller(), { touches: [{ clientY: 200 }] });
+    });
+
+    expect(pages()).toBe(0);
+  });
+
+  it("leaves a key that something used first, such as an arrow in a menu", async () => {
+    twoPages();
+    renderHarness([message("m3", 3)], false, true);
+    const menu = document.body.appendChild(document.createElement("div"));
+    menu.addEventListener("keydown", (event) => event.preventDefault());
+
+    await act(async () => {
+      menu.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }),
+      );
+    });
+    expect(pages()).toBe(0);
+
+    await act(async () => fireEvent.keyDown(document.body, { key: "ArrowUp" }));
+    expect(pages()).toBe(1);
+    menu.remove();
   });
 
   it("hands the paging back to the sentinel when the focus ends", async () => {

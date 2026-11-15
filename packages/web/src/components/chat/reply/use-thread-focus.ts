@@ -165,8 +165,8 @@ const reducedMotion = () =>
  * `focus` is the reader's: it is null as soon as a close starts. `shown`
  * is what the transcript still filters to, and outlasts `focus` by the motion.
  * `open` does nothing while a motion runs or a thread is already in focus.
- * `close` does nothing while a motion runs, and with `instant` skips the
- * motion, as for a jump to a message the focus hides.
+ * `close` waits for a motion that runs, then closes; with `instant` it skips
+ * its own motion, as for a jump to a message the focus hides.
  */
 export function useThreadFocus({
   scroller,
@@ -182,6 +182,8 @@ export function useThreadFocus({
   const [focus, setFocus] = useState<ThreadFocus | null>(null);
   const [shown, setShown] = useState<string | null>(null);
   const moving = useRef(false);
+  // Settles when the motion that is running ends.
+  const motion = useRef<Promise<void>>(Promise.resolve());
   const latest = useRef({ scroller, content, focus });
   latest.current = { scroller, content, focus };
 
@@ -197,6 +199,8 @@ export function useThreadFocus({
       const env = envOf();
       if (!env || moving.current || latest.current.focus) return;
       moving.current = true;
+      let done!: () => void;
+      motion.current = new Promise<void>((resolve) => (done = resolve));
       try {
         const anchor = entryOf(env.scroller, next.thread);
         const y = anchor ? yOf(env, anchor) : 0;
@@ -218,6 +222,7 @@ export function useThreadFocus({
       } finally {
         env.scroller.style.overflowAnchor = "";
         moving.current = false;
+        done();
       }
     },
     [envOf],
@@ -225,10 +230,14 @@ export function useThreadFocus({
 
   const close = useCallback(
     async (instant = false) => {
+      // A close that comes while a motion runs waits for it, then closes.
+      while (moving.current) await motion.current;
       const env = envOf();
       const focused = latest.current.focus;
-      if (!env || !focused || moving.current) return;
+      if (!env || !focused) return;
       moving.current = true;
+      let done!: () => void;
+      motion.current = new Promise<void>((resolve) => (done = resolve));
       try {
         const anchor = anchorOf(env, focused);
         const y = anchor ? yOf(env, anchor) : 0;
@@ -250,6 +259,7 @@ export function useThreadFocus({
       } finally {
         env.scroller.style.overflowAnchor = "";
         moving.current = false;
+        done();
       }
     },
     [envOf],

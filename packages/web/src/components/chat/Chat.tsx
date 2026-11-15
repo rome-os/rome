@@ -782,6 +782,13 @@ export function Chat({
     content: contentEl,
     resetKey: mainSessionId,
   });
+  const focusRoot = threadFocus.focus?.root;
+  const rootLoaded = useMemo(
+    () =>
+      focusRoot !== undefined &&
+      (messages.get(mainSessionId ?? "") ?? []).some((message) => message.id === focusRoot),
+    [focusRoot, messages, mainSessionId],
+  );
   // The main session loads its newest turns first and pages older ones in as
   // the transcript scrolls toward the top. With a thread in focus, the pages
   // would add no height, so one loads only for each push against the top.
@@ -797,6 +804,8 @@ export function Chat({
     setMessages,
     onOlderPage,
     onDemand: threadFocus.shown !== null,
+    // The thread starts at its root, so with the root loaded nothing older can be in it.
+    satisfied: rootLoaded,
   });
 
   // The view derivation lives in the pure `buildChatView`; here we just memoize
@@ -1045,6 +1054,8 @@ export function Chat({
   const coarsePointer = useCoarsePointer();
   const openThread = useCallback(
     (next: ReplyThread) => {
+      // A share picks whole turns, so no thread comes into focus meanwhile.
+      if (shareMode) return;
       if (focus) {
         void closeFocus();
         return;
@@ -1056,7 +1067,7 @@ export function Chat({
         if (!coarsePointer) composerRef.current?.focus();
       });
     },
-    [focus, closeFocus, openFocus, chatThreads, coarsePointer],
+    [shareMode, focus, closeFocus, openFocus, chatThreads, coarsePointer],
   );
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,

@@ -41,7 +41,8 @@ const TYPING_BUBBLE = <TypingBubble />;
  * summary, live activity, or live text: the agent's text is private, and what
  * it says arrives as messages. While a chat thread is in focus
  * (`useChatThreads().focus`), it marks what is outside the thread for
- * use-thread-focus.ts to fold away, and CSS hides it.
+ * use-thread-focus.ts to fold away, and CSS hides it, except in share
+ * selection.
  */
 export function ConciergeTranscript({
   rows: allRows,
@@ -73,8 +74,13 @@ export function ConciergeTranscript({
   );
   const threads = useChatThreads();
   const hidden = useMemo(
-    () => (threads?.focus ? focusHidden(items, threads.focus, threads.taskThreads) : undefined),
-    [items, threads],
+    // Share selection picks whole turns, which can hold messages of other
+    // threads: nothing is hidden while it runs, whatever is in focus.
+    () =>
+      threads?.focus && !selection
+        ? focusHidden(items, threads.focus, threads.taskThreads)
+        : undefined,
+    [items, threads, selection],
   );
   const messageIds = useMemo(
     () =>
