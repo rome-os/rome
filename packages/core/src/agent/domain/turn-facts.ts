@@ -47,6 +47,9 @@ export interface TurnFacts {
   turnId(): string | undefined;
   /** False once interrupted or closing. Absent facts cannot grant a task handoff. */
   live?(): boolean;
+  /** Pins the live source before async task setup. Same-person supersession may
+   * continue it. Stop, close, or a changed person/chat/audience revokes it for good. */
+  captureTaskInputLiveness?(): () => boolean;
   /** Where the running turn stands, else where the session does. */
   threadContext(): ThreadContext | undefined;
   sharedContext(): Record<string, unknown> | undefined;

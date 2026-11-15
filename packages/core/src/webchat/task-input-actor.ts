@@ -15,7 +15,7 @@ export interface TaskInputSource {
   turnId: string;
   actor: SessionActor;
   audience: Audience;
-  /** False after cancellation, a different turn, or mixed-actor input. */
+  /** False after Stop, close, or changed identity/chat/audience. Same-person supersession may continue it. */
   isCurrent(): boolean;
 }
 

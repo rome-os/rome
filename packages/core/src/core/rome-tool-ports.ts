@@ -239,6 +239,8 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
                   live?.threadId === sourceChatId
                 );
               };
+              const sourceCurrent =
+                turn.captureTaskInputLiveness?.() ?? (() => turn.live?.() === true && sameSource());
               const source =
                 turn.live?.() === true &&
                 actor &&
@@ -256,12 +258,12 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
                       turnId,
                       actor,
                       audience,
-                      isCurrent: () => turn.live?.() === true && sameSource(),
+                      isCurrent: sourceCurrent,
                     }
                   : undefined;
               return async (chatId, body, send) =>
                 turn.inTurn(() => {
-                  if (source && (!sameSource() || turn.live?.() === false)) {
+                  if (source && !source.isCurrent()) {
                     throw new Error("Task input source changed before delivery; it was not sent");
                   }
                   return withoutSessionActor(() => withTaskInputActor(source, chatId, body, send));
