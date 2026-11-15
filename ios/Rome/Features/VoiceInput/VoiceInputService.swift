@@ -102,6 +102,16 @@ struct VoiceInputMarks {
 @MainActor
 final class ComposerTextHandle {
     weak var view: PastingTextView?
+    /// Where the guardian last left the cursor or selection. The view's own
+    /// `selectedRange` is not that once the field has lost focus.
+    var caret: NSRange?
+
+    /// Where spoken words go in `text`: the guardian's cursor, else the end.
+    func cursor(in text: String) -> NSRange {
+        let length = (text as NSString).length
+        guard let caret, NSMaxRange(caret) <= length else { return NSRange(location: length, length: 0) }
+        return caret
+    }
 
     /// Puts `original` back, selects `range`, and types `text` there: the
     /// field's change handler sees typed text, and one undo removes it.
@@ -111,6 +121,8 @@ final class ComposerTextHandle {
         view.text = original
         view.selectedRange = range
         view.insertText(text)
+        // The next words go after these.
+        caret = NSRange(location: range.location + (text as NSString).length, length: 0)
         view.delegate?.textViewDidChange?(view)
         return true
     }
@@ -145,9 +157,7 @@ final class VoiceInputController {
         guard dictation == nil, let request = service.socketRequest() else { return }
         startInterval = VoiceInputSignpost.begin(field)
         let original = text.wrappedValue
-        let length = (original as NSString).length
-        let selected = handle.view?.selectedRange ?? NSRange(location: length, length: 0)
-        let range = NSIntersectionRange(selected, NSRange(location: 0, length: length))
+        let range = handle.cursor(in: original)
         anchor = (original, range)
         notice = nil
         if let chat { service.listening(in: chat) }
