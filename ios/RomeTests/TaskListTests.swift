@@ -176,6 +176,26 @@ private let listJSON = #"""
         store.stop()
     }
 
+    /// A follow that changes while the connector list is being read is read
+    /// again once that read is done: the older answer never counts as fresh.
+    @Test func aFollowChangeDuringAConnectorReadReadsAgain() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try decoded()
+        backend.connectorReads = [[ConnectorState(service: "github", state: "broken", watch: .init(state: "needs-auth"))],
+                                  [ConnectorState(service: "github", state: "working", watch: .init(state: "unlocked"))]]
+        backend.duringConnectorRead = {
+            backend.bus.emit(LiveTopic.chatTasks("concierge"), .taskListChanged(chatId: "concierge", follows: true))
+        }
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        store.open()
+        for _ in 0..<100 where backend.connectorReadCount < 2 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.connectorReadCount == 2)
+        for _ in 0..<50 where store.connectors?.first?.watch?.state != "unlocked" { try? await Task.sleep(for: .milliseconds(10)) }
+        guard case .follow(let listed)? = store.groups.first(where: { $0.key == .onItsOwn })?.items.first else { Issue.record("no follow"); return }
+        #expect(store.shown(listed).state == "active")
+        store.stop()
+    }
+
     /// A change on the chat's topic reads the list again.
     @Test func aChangeReadsTheListAgain() async throws {
         let backend = FakeBackend()

@@ -1516,8 +1516,8 @@ export class ConciergeService {
 
   /**
    * The owner cancelled check `checkId` of chat `chatId` from the chat's
-   * checks. One for a task tells the Concierge quietly, as cancelling from
-   * the task's row does. Answers whether there was such a check.
+   * checks. One for a task tells the Concierge quietly. Answers whether
+   * there was such a check.
    */
   async cancelCheckByOwner(chatId: string, checkId: string): Promise<boolean> {
     const checks = this.deps.checks;

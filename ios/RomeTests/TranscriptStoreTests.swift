@@ -298,7 +298,13 @@ final class FakeBackend: RomeBackend {
     var connectCalls: [(method: String, path: String, body: JSONValue?)] = []
     var notified: [(chatId: String, service: String)] = []
 
+    /// Runs inside a connector read, before it answers, once.
+    var duringConnectorRead: (() async -> Void)?
     func connectors() async throws -> [ConnectorState] {
+        if let during = duringConnectorRead {
+            duringConnectorRead = nil
+            await during()
+        }
         guard !connectorReads.isEmpty else { return [] }
         let index = min(connectorReadCount, connectorReads.count - 1)
         connectorReadCount += 1

@@ -14,7 +14,6 @@ import {
   legacyTaskState,
   taskStatus,
 } from "@rome/api-types/concierge-task-status";
-import type { LiveEventEmit } from "../lib/live-event.js";
 import type { OpenWaitItem } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";

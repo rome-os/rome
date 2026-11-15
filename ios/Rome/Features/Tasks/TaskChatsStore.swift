@@ -11,9 +11,7 @@ import Observation
 final class TaskChatsStore {
     private let backend: RomeBackend
     private(set) var chats: [String: ChatSession] = [:]
-    private(set) var loaded = false
     private var tokens: [UUID] = []
-    private var refreshingChats = false
     private var resyncWork: Task<Void, Never>?
     private var resyncAgain = false
     /// Task chats archived or deleted from this app. A refetch of a list that
@@ -39,7 +37,6 @@ final class TaskChatsStore {
 
     func refresh() async {
         if let list = try? await backend.sessions() { setChats(list) }
-        if !loaded { loaded = true }
     }
 
     /// Refreshes after events may have been missed. A burst of requests (one
@@ -60,13 +57,6 @@ final class TaskChatsStore {
         }
     }
 
-    private func refreshChats() async {
-        guard !refreshingChats else { return }
-        refreshingChats = true
-        defer { refreshingChats = false }
-        if let list = try? await backend.sessions() { setChats(list) }
-    }
-
     /// Written only when it changes: every task card in a chat reads the
     /// store, and a write that changes nothing would still draw them all.
     private func setChats(_ list: [ChatSession]) {
@@ -83,7 +73,7 @@ final class TaskChatsStore {
             }
             // A turn that ends, or a task that ends with no turn, changes
             // whether the chat waits on the guardian: the list says it.
-            if !running || chats[id] == nil { Task { await refreshChats() } }
+            if !running || chats[id] == nil { resync() }
         case .reconnected:
             resync()
         default:
