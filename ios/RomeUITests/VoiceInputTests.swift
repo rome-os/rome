@@ -220,6 +220,165 @@ final class VoiceInputTests: XCTestCase {
         }
     }
 
+    /// Rule 7 when the network to Rome is lost: the stand-in instance drops the voice socket
+    /// and the events socket partway, and refuses new ones for 15 s.
+    @MainActor
+    func testRule7LosingTheNetworkKeepsTheWords() throws {
+        let app = try launch()
+        try standIn(["drop": ["afterMs": 10000, "refuseMs": 15000]])
+        try checkWordsKept(app, stop: "losing the network", notice: "Connection to Rome lost. Listening stopped") {
+            _ = waitForLabel(onScreen(app.buttons, "voice-input"), "Start voice input", timeout: 20)
+            return app
+        }
+    }
+
+    // MARK: Rule 11
+
+    /// Rule 11 with Rome Cloud refusing voice input, as with its gate off: the Chat has its
+    /// message field and no voice control.
+    @MainActor
+    func testRule11NoVoiceControlWhenRomeCloudRefuses() throws {
+        try standIn(["offered": false])
+        defer { try? standIn(["offered": true]) }
+        let app = try launch()
+        XCTAssertTrue(onScreen(app.textViews, "message-field").waitForExistence(timeout: 15), "the Chat has no message field")
+        // Give the app the time it takes to ask Rome whether voice input is offered.
+        Thread.sleep(forTimeInterval: 5)
+        if app.buttons.matching(identifier: "voice-input").count > 0 {
+            printScreen(app, "rule 11: refused")
+            XCTFail("the Chat shows a voice control while Rome Cloud refuses voice input")
+        }
+    }
+
+    // MARK: Rule 9
+
+    /// Rule 9: every stop closes the microphone within 1 s. Each of six starts in the Chat ends
+    /// with another stop: the guardian's, leaving the chat, the background, a transcriber error,
+    /// losing the network, and the guardian's again. The app's `StopListening` interval runs
+    /// from the stop to the microphone closed, and the CI job holds every one to 1 s.
+    @MainActor
+    func testRule9EveryStopClosesTheMicrophone() throws {
+        let app = try launch()
+        let control = onScreen(app.buttons, "voice-input")
+        try requireControl(app, control, "the Chat has no voice control")
+        // A stand-in instance without the network control leaves that stop out, and says so.
+        let canDrop = (try? standIn(["drop": NSNull()])) != nil
+        if !canDrop { print("rule 9: not run for losing the network: the stand-in instance has no drop control") }
+        let stops = ["the guardian's stop", "leaving the chat", "the background", "a transcriber error",
+                     canDrop ? "losing the network" : "the guardian's stop", "the guardian's stop"]
+        let options = XCTMeasureOptions()
+        options.iterationCount = stops.count - 1
+        options.invocationOptions = [.manuallyStart, .manuallyStop]
+        let stopListening = XCTOSSignpostMetric(
+            subsystem: "cc.romeos.voice-input", category: "VoiceInput", name: "StopListening")
+        var index = 0
+        measure(metrics: [stopListening], options: options) {
+            let stop = stops[index % stops.count]
+            index += 1
+            let control = onScreen(app.buttons, "voice-input")
+            XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 30), "not idle before \(stop)")
+            if stop == "a transcriber error" {
+                try? standIn(["error": ["reason": "provider-unavailable", "afterMs": 12000]])
+            } else if stop == "losing the network" {
+                try? standIn(["drop": ["afterMs": 12000, "refuseMs": 5000]])
+            }
+            if !tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")) {
+                printScreen(app, "rule 9: listening never started before \(stop)")
+                XCTFail("listening never started before \(stop)")
+            }
+            startMeasuring()
+            switch stop {
+            case "leaving the chat":
+                touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
+                let other = app.buttons.matching(identifier: "topic-chat").firstMatch
+                if other.waitForExistence(timeout: 3) { other.tap() } else { app.buttons["New topic chat"].tap() }
+                _ = onScreen(app.textViews, "message-field").waitForExistence(timeout: 10)
+                touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
+                touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Chat"))).tap()
+            case "the background":
+                XCUIDevice.shared.press(.home)
+                Thread.sleep(forTimeInterval: 3)
+                app.activate()
+            case "a transcriber error", "losing the network":
+                break
+            default:
+                control.tap()
+            }
+            let idle = waitForLabel(onScreen(app.buttons, "voice-input"), "Start voice input", timeout: 30)
+            stopMeasuring()
+            XCTAssertTrue(idle, "listening was still shown 30 s after \(stop)")
+        }
+    }
+
+    // MARK: Rule 5
+
+    /// Rule 5: spoken words stay in the field for 60 s after listening stops, and only the send
+    /// action sends them.
+    @MainActor
+    func testRule5OnlyTheGuardianSends() throws {
+        let app = try launch()
+        let phrase = "only you send \(Int(Date().timeIntervalSince1970))"
+        try standIn(["transcript": phrase])
+        defer { try? standIn(["transcript": Self.transcript]) }
+        let control = onScreen(app.buttons, "voice-input")
+        try requireControl(app, control, "the Chat has no voice control")
+        emptyTheField(app, "rule 5")
+        let field = onScreen(app.textViews, "message-field")
+        XCTAssertTrue(tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")), "listening never started")
+        let heard = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", phrase), object: field)
+        XCTAssertEqual(XCTWaiter().wait(for: [heard], timeout: 30), .completed, "the spoken words never reached the field")
+        XCTAssertTrue(tapUntil(control, NSPredicate(format: "label IN %@", ["Finishing voice input", "Start voice input"])),
+                      "listening never stopped")
+        let sent = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", phrase)).firstMatch
+        Thread.sleep(forTimeInterval: 60)
+        XCTAssertFalse(sent.exists, "a message with the spoken words appeared without the send action")
+        XCTAssertTrue(fieldText(field).contains(phrase), "the spoken words left the field without the send action")
+        onScreen(app.buttons, "send").tap()
+        XCTAssertTrue(sent.waitForExistence(timeout: 10), "the send action did not send the spoken words")
+    }
+
+    // MARK: Rule 6
+
+    /// Rule 6 with text already in the field: the spoken words land at the cursor as typing them
+    /// would, with the contract's leading space, and the sent message is the field's text. A
+    /// second dictation checks that one undo (the three-finger double tap) removes them.
+    @MainActor
+    func testRule6SpeakingIsTypingAfterText() throws {
+        let app = try launch()
+        let spoken = "spoken after typing"
+        try standIn(["transcript": spoken])
+        defer { try? standIn(["transcript": Self.transcript]) }
+        let control = onScreen(app.buttons, "voice-input")
+        try requireControl(app, control, "the Chat has no voice control")
+        for undo in [false, true] {
+            emptyTheField(app, "rule 6")
+            let field = onScreen(app.textViews, "message-field")
+            let typed = "Typed \(Int(Date().timeIntervalSince1970))"
+            field.tap()
+            field.typeText(typed)
+            let whole = "\(typed) \(spoken)"
+            XCTAssertTrue(tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")), "listening never started")
+            let heard = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", spoken), object: field)
+            XCTAssertEqual(XCTWaiter().wait(for: [heard], timeout: 30), .completed, "the spoken words never reached the field")
+            XCTAssertTrue(tapUntil(control, NSPredicate(format: "label IN %@", ["Finishing voice input", "Start voice input"])),
+                          "listening never stopped")
+            XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 10), "listening never finished")
+            XCTAssertEqual(fieldText(field), whole, "the field is not what typing the words at the cursor gives")
+            if undo {
+                field.tap(withNumberOfTaps: 2, numberOfTouches: 3)
+                let undone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", typed), object: field)
+                if XCTWaiter().wait(for: [undone], timeout: 5) != .completed {
+                    printScreen(app, "rule 6: after one undo")
+                    XCTFail("one undo left \"\(fieldText(field))\"; wanted \"\(typed)\"")
+                }
+            } else {
+                onScreen(app.buttons, "send").tap()
+                let sent = app.staticTexts.containing(NSPredicate(format: "label == %@", whole)).firstMatch
+                XCTAssertTrue(sent.waitForExistence(timeout: 10), "the sent message is not \"\(whole)\"")
+            }
+        }
+    }
+
     // MARK: Helpers
 
     /// A recording the stand-in instance hears as speech for its whole two minutes, so only the
@@ -240,14 +399,7 @@ final class VoiceInputTests: XCTestCase {
         let control = onScreen(app.buttons, "voice-input")
         try requireControl(app, control, "\(stop): the Chat has no voice control")
         let field = onScreen(app.textViews, "message-field")
-        // Spoken words go in at the cursor, so start from an empty field: a draft an earlier
-        // test left is sent, which is how a guardian empties it.
-        let send = onScreen(app.buttons, "send")
-        if send.isEnabled {
-            send.tap()
-            let emptied = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: send)
-            XCTAssertEqual(XCTWaiter().wait(for: [emptied], timeout: 10), .completed, "\(stop): the earlier draft did not send")
-        }
+        emptyTheField(app, stop)
         let empty = fieldText(field)
         guard tapUntil(control, NSPredicate(format: "label == %@", stopLabel)) else {
             printScreen(app, "\(stop): listening never started")
@@ -285,6 +437,17 @@ final class VoiceInputTests: XCTestCase {
         return back
     }
 
+    /// Sends a draft an earlier test left, which is how a guardian empties the field: spoken
+    /// words go in at the cursor, so a check of them starts from an empty field.
+    @MainActor
+    private func emptyTheField(_ app: XCUIApplication, _ check: String) {
+        let send = onScreen(app.buttons, "send")
+        guard send.isEnabled else { return }
+        send.tap()
+        let emptied = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: send)
+        XCTAssertEqual(XCTWaiter().wait(for: [emptied], timeout: 10), .completed, "\(check): the earlier draft did not send")
+    }
+
     /// What the stand-in instance transcribes by default, and a transcript long enough that
     /// words keep arriving until any stop: one word every 300 ms for about a minute.
     static let transcript = "Remind me to call the dentist tomorrow at 9 in the morning."
@@ -299,7 +462,8 @@ final class VoiceInputTests: XCTestCase {
         text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
     }
 
-    /// Sets how the stand-in instance's next voice session goes, through its control route.
+    /// Sets how the stand-in instance's next voice session goes, through its control route. A
+    /// control the stand-in does not know is missing from its answer, and the test does not run.
     @MainActor
     private func standIn(_ body: [String: Any]) throws {
         let origin = try XCTUnwrap(ProcessInfo.processInfo.environment["ROME_LOCAL_ORIGIN"])
@@ -308,13 +472,19 @@ final class VoiceInputTests: XCTestCase {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         var status = 0
+        var answer: [String: Any] = [:]
         let done = expectation(description: "the stand-in instance takes \(body.keys.sorted())")
-        URLSession.shared.dataTask(with: request) { _, response, _ in
+        URLSession.shared.dataTask(with: request) { data, response, _ in
             status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            answer = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
             done.fulfill()
         }.resume()
         wait(for: [done], timeout: 10)
         XCTAssertEqual(status, 200, "the stand-in instance refused \(body.keys.sorted())")
+        let unknown = body.keys.filter { $0 != "error" && answer[$0] == nil }
+        if status == 200, !unknown.isEmpty {
+            throw XCTSkip("not run: the stand-in instance has no \(unknown.sorted()) control")
+        }
     }
 
     /// Starts and stops `repeats` times in the open field: one tap shows listening, with the
