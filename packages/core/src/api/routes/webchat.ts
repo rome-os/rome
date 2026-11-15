@@ -5111,6 +5111,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (said.taskInput) {
       try {
         await refreshTaskInputActor(said.taskInput, deps.webchatRepo, taskSourceChat);
+        assertTaskInputCurrent(said.taskInput);
       } catch {
         agentSess.release();
         await deps.webchatRepo.updateUserInput(sessionId, {
@@ -5414,6 +5415,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ),
       );
       if (sent.status >= 400) {
+        // A refused attributed input never reached submit, even if recorded.
+        if (claim) return { ok: false, error: `${routeError(sent)}; task input was not admitted` };
         // Once the input is recorded it is said, even when the agent could not
         // be woken on it: answering failed would invite a second message.
         if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {

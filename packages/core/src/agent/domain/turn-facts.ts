@@ -45,6 +45,8 @@ export interface TurnFacts {
   widgets: WidgetDrawing;
   /** The running turn's id, or undefined between turns. */
   turnId(): string | undefined;
+  /** False once interrupted or closing. Absent facts cannot grant a task handoff. */
+  live?(): boolean;
   /** Where the running turn stands, else where the session does. */
   threadContext(): ThreadContext | undefined;
   sharedContext(): Record<string, unknown> | undefined;

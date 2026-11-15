@@ -211,7 +211,7 @@ describe("webchat task actor admission without a database or provider", () => {
     expect(s.submit.mock.calls[0]![1]).not.toHaveProperty("actor");
   });
 
-  it("does not submit after Stop while the model session opens, and does not invite resend", async () => {
+  it("reports a refused admission after Stop rather than claiming delivery", async () => {
     const s = harness();
     s.open.mockImplementation(async () => {
       s.revoke();
@@ -222,13 +222,39 @@ describe("webchat task actor admission without a database or provider", () => {
         release: s.release,
       };
     });
-    expect(await s.send()).toMatchObject({ ok: true });
+    expect(await s.send()).toMatchObject({ ok: false });
     expect(s.submit).not.toHaveBeenCalled();
     expect(s.release).toHaveBeenCalledTimes(1);
     expect(s.updateUserInput).toHaveBeenCalledWith(
       "target",
       expect.objectContaining({ state: "failed" }),
     );
+  });
+
+  it("reports lease expiry during a cold open without submitting or claiming success", async () => {
+    const s = harness();
+    const now = Date.now();
+    const clock = rs.spyOn(Date, "now").mockReturnValue(now);
+    s.open.mockImplementation(async () => {
+      clock.mockReturnValue(now + 30_001);
+      return {
+        sessionId: "agent-session",
+        key: { agentName: "core:main", channelThreadKey: "webchat:target" },
+        submit: s.submit,
+        release: s.release,
+      };
+    });
+    try {
+      expect(await s.send()).toMatchObject({ ok: false });
+      expect(s.submit).not.toHaveBeenCalled();
+      expect(s.release).toHaveBeenCalledTimes(1);
+      expect(s.updateUserInput).toHaveBeenCalledWith(
+        "target",
+        expect.objectContaining({ state: "failed" }),
+      );
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   for (const change of ["owner", "archive"] as const) {
@@ -245,7 +271,7 @@ describe("webchat task actor admission without a database or provider", () => {
           release: s.release,
         };
       });
-      expect(await s.send()).toMatchObject({ ok: true });
+      expect(await s.send()).toMatchObject({ ok: false });
       expect(s.submit).not.toHaveBeenCalled();
       expect(s.updateUserInput).toHaveBeenCalledWith(
         "target",

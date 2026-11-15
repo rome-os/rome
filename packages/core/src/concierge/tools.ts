@@ -21,7 +21,7 @@ import {
   conversationTitleLength,
 } from "../core/conversation-title.js";
 import { romeToolRunner, type RomeTool } from "../agent/index.js";
-import type { SessionToolContext } from "../core/session-tools.js";
+import type { TaskInputSender, SessionToolContext } from "../core/session-tools.js";
 import { createLogger } from "../logger.js";
 import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
 import {
@@ -310,14 +310,17 @@ export async function buildConciergeTools(
   // Said as Concierge's account, so the task event reads who asked off the
   // message. The device the guardian asks from goes with the work, so the
   // task chat's live reads ask that device too, not another install.
-  const sendInput = async (chatId: string, text: string, skillName?: string) => {
+  const sendInput = async (
+    sender: TaskInputSender | undefined,
+    chatId: string,
+    text: string,
+    skillName?: string,
+  ) => {
     const asking = askingDeviceOf(context.getThreadContext());
     if (asking) await webchatRepo.setAskingDevice(chatId, asking);
     const body = { text, ...(skillName ? { skillName } : {}) };
     const send = () => service.dashboard.send(taskChatPlace(chatId), body, CONCIERGE_ACCOUNT);
-    const sent = context.withTaskInput
-      ? await context.withTaskInput(chatId, body, send)
-      : await send();
+    const sent = sender ? await sender(chatId, body, send) : await send();
     if (!sent.ok) throw new Error(refusal(sent));
   };
 
@@ -1310,6 +1313,7 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runTool("chat_start", input, async (args) => {
+          const sender = context.captureTaskInput?.();
           currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
@@ -1412,7 +1416,7 @@ export async function buildConciergeTools(
               await sendLinked(
                 started,
                 start?.answered,
-                () => sendInput(chatId, brief, skill?.name),
+                () => sendInput(sender, chatId, brief, skill?.name),
                 { keepOnFailure: true },
               );
             }
@@ -1479,6 +1483,7 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runTool("chat_send", input, async (args) => {
+          const sender = context.captureTaskInput?.();
           currentTurn();
           const chatId = requireString(args, "chatId");
           const chat = await requireOwnTaskChat(chatId);
@@ -1496,8 +1501,9 @@ export async function buildConciergeTools(
           // A scheduled task's runs are no work for one message: it links none.
           const relayed = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
           const scheduled = task ? await service.deps.schedules?.of(task.id) : null;
-          if (task && !scheduled) await sendLinked(task.id, relayed, () => sendInput(chatId, text));
-          else await sendInput(chatId, text);
+          if (task && !scheduled)
+            await sendLinked(task.id, relayed, () => sendInput(sender, chatId, text));
+          else await sendInput(sender, chatId, text);
           await relayToTaskThread(chatId, answers);
           return "Sent; the task chat takes it as input.";
         }),

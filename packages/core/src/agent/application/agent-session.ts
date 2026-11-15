@@ -825,6 +825,7 @@ interface TurnExecRefs {
   bindTurnCtx: <T>(fn: () => T) => T;
   /** Who the running turn acts for; its subagents' turns act for the same person. */
   getActor: () => TurnActor | undefined;
+  isLive?: () => boolean;
   /** Who can read the running turn; its subagents' turns are never more private. */
   getAudience: () => Audience;
 }
@@ -1435,6 +1436,7 @@ async function openSession(
     attachSubagentCall: (toolUseId, call) => impl.addSubagentCall(toolUseId, call),
     bindTurnCtx: inCurrentTurnCtx,
     getActor: () => impl.currentTurnActorRef,
+    isLive: () => impl.currentTurnLiveRef,
     getAudience: () => impl.currentTurnAudienceRef,
   };
 
@@ -1463,6 +1465,7 @@ async function openSession(
     sharedContext: refs.getSharedContext,
     pushLevel,
     actor: refs.getActor,
+    live: () => refs.isLive?.() === true,
     audience: refs.getAudience,
     reportedTask,
     inTurn: refs.bindTurnCtx,
@@ -2384,9 +2387,16 @@ class AgentSessionImpl implements AgentSession {
   }
 
   get currentTurnActorRef(): TurnActor | undefined {
-    return this.currentSink?.lifecycleInterrupted || this.closing
-      ? undefined
-      : this.currentSink?.actor;
+    return this.currentSink?.actor;
+  }
+
+  get currentTurnLiveRef(): boolean {
+    return (
+      !!this.currentSink &&
+      !this.currentSink.done &&
+      !this.currentSink.lifecycleInterrupted &&
+      !this.closing
+    );
   }
 
   /** The running turn's audience; between turns, the session's place read alone. */

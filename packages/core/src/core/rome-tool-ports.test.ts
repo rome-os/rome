@@ -39,6 +39,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     actions: ["send_message", "create_routine"],
     widgets: "card",
     turnId: () => "turn-1",
+    live: () => true,
     threadContext: () => ({ channel: "webchat", threadId: "chat-1" }),
     sharedContext: () => undefined,
     pushLevel: () => undefined,
@@ -317,7 +318,7 @@ describe("scoped task input from a session tool", () => {
     });
     const { sessionTools } = ports(provider);
     await sessionTools.forTurn(turn({ agentName: "core:concierge" }), true);
-    expect(typeof supplied?.withTaskInput).toBe("function");
+    expect(typeof supplied?.captureTaskInput).toBe("function");
   });
 });
 
@@ -358,7 +359,7 @@ describe("task input actor through the session tool port", () => {
         audience: () => audience,
         actor: () => (audience === "shared" ? visitor : guardian),
       });
-      await context.withTaskInput!("target", body, async () => {
+      await context.captureTaskInput!()("target", body, async () => {
         expect(claimTaskInputActor("target", body, speaker)?.source.audience).toBe(audience);
       });
     });
@@ -367,7 +368,7 @@ describe("task input actor through the session tool port", () => {
   it("revokes a handoff when the live audience changes", async () => {
     let audience: "private" | "shared" = "private";
     const { context } = await provided({ audience: () => audience });
-    await context.withTaskInput!("target", body, async () => {
+    await context.captureTaskInput!()("target", body, async () => {
       audience = "shared";
       expect(() => claimTaskInputActor("target", body, speaker)).toThrow();
     });
@@ -384,7 +385,7 @@ describe("task input actor through the session tool port", () => {
       }),
     };
     await runWithSessionActor(guardian, () =>
-      built.context.withTaskInput!("target", body, async () => {
+      built.context.captureTaskInput!()("target", body, async () => {
         expect(await currentSessionActor()).toBeUndefined();
         const claim = claimTaskInputActor("target", body, speaker)!;
         const actor = await taskInputActor(claim, repo as never, async () => "source");
@@ -417,7 +418,7 @@ describe("task input actor through the session tool port", () => {
     it(`does not attribute a ${name} send, even in a guardian HTTP scope`, async () => {
       const { context } = await provided(overrides);
       await runWithSessionActor(guardian, () =>
-        context.withTaskInput!("target", body, async () => {
+        context.captureTaskInput!()("target", body, async () => {
           expect(await currentSessionActor()).toBeUndefined();
           expect(claimTaskInputActor("target", body, speaker)).toBeUndefined();
         }),
@@ -435,7 +436,7 @@ describe("task input actor through the session tool port", () => {
         turnId: () => turnId,
         threadContext: () => liveThread,
       });
-      await context.withTaskInput!("target", body, async () => {
+      await context.captureTaskInput!()("target", body, async () => {
         if (change === "actor") liveActor = undefined;
         if (change === "turn") turnId = "next";
         if (change === "privacy") liveThread = { ...thread, threadType: "group" };
@@ -466,17 +467,113 @@ it("snapshots the source identity rather than following mutation of its objects"
     true,
   );
   const body = { text: "synthetic" };
-  await context.withTaskInput!("target", body, async () => {
+  await context.captureTaskInput!()("target", body, async () => {
     actor.kind = "visitor";
     expect(() =>
       claimTaskInputActor("target", body, { platform: "webchat", id: "core:concierge" }),
     ).toThrow();
   });
   actor.kind = "guardian";
-  await context.withTaskInput!("target", body, async () => {
+  await context.captureTaskInput!()("target", body, async () => {
     thread.threadId = "another-source";
     expect(() =>
       claimTaskInputActor("target", body, { platform: "webchat", id: "core:concierge" }),
     ).toThrow();
+  });
+});
+
+describe("task input source capture precedes asynchronous setup", () => {
+  for (const initial of [
+    undefined,
+    { kind: "visitor", accountId: "synthetic-v" },
+    { kind: "guardian", userId: "synthetic-seat" },
+  ] as const) {
+    it(`does not rebind an old ${initial?.kind ?? "autonomous"} callback to a newer guardian turn`, async () => {
+      let actor: import("../agent/index.js").TurnActor | undefined = initial;
+      let turnId = "original";
+      let context!: SessionToolContext;
+      const { sessionTools } = ports(
+        rs.fn(async (value: SessionToolContext) => {
+          context = value;
+          return [];
+        }),
+      );
+      await sessionTools.forTurn(
+        turn({
+          agentName: "core:concierge",
+          actor: () => actor,
+          turnId: () => turnId,
+          audience: () => "private",
+          threadContext: () => ({ channel: "webchat", threadId: "source", threadType: "private" }),
+        }),
+        true,
+      );
+      const sender = context.captureTaskInput!();
+      await Promise.resolve();
+      actor = { kind: "guardian", userId: "synthetic-seat" };
+      turnId = "new-turn";
+      const send = rs.fn(async () => ({}));
+      await expect(sender("target", { text: "old callback" }, send)).rejects.toThrow(
+        "source changed",
+      );
+      expect(send).not.toHaveBeenCalled();
+    });
+  }
+
+  it("revokes only handoff liveness while keeping the visitor actor for other actions", async () => {
+    const visitor = { kind: "visitor", accountId: "synthetic-v", email: "v@example.invalid" };
+    let live = true;
+    let context!: SessionToolContext;
+    const built = ports(
+      rs.fn(async (value: SessionToolContext) => {
+        context = value;
+        return [];
+      }),
+    );
+    const facts = turn({
+      agentName: "core:concierge",
+      actor: () => visitor,
+      live: () => live,
+      threadContext: () => ({ channel: "webchat", threadId: "source", threadType: "private" }),
+    });
+    await built.sessionTools.forTurn(facts, true);
+    const sender = context.captureTaskInput!();
+    live = false;
+    const send = rs.fn(async () => ({}));
+    await expect(sender("target", { text: "stopped" }, send)).rejects.toThrow();
+    expect(send).not.toHaveBeenCalled();
+    expect(() => context.captureTaskInput!()).toThrow("not live");
+    await built.actions.run(facts, "send_message", {});
+    expect(built.run).toHaveBeenCalledWith(
+      "send_message",
+      {},
+      expect.objectContaining({ actor: visitor }),
+    );
+  });
+
+  it("does not grant attribution when the host has no liveness fact", async () => {
+    let context!: SessionToolContext;
+    const built = ports(
+      rs.fn(async (value: SessionToolContext) => {
+        context = value;
+        return [];
+      }),
+    );
+    await built.sessionTools.forTurn(
+      turn({
+        agentName: "core:concierge",
+        actor: () => ({ kind: "guardian", userId: "synthetic-seat" }),
+        live: undefined,
+        audience: () => "private",
+        threadContext: () => ({ channel: "webchat", threadId: "source", threadType: "private" }),
+      }),
+      true,
+    );
+    const body = { text: "unknown liveness" };
+    await context.captureTaskInput!()("target", body, async () => {
+      expect(
+        claimTaskInputActor("target", body, { platform: "webchat", id: "core:concierge" }),
+      ).toBeUndefined();
+    });
   });
 });

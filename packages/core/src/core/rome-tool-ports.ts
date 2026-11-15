@@ -218,45 +218,55 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             getThreadContext: turn.threadContext,
             getTurnPushLevel: turn.pushLevel,
             getTurnReportedTask: turn.reportedTask,
-            withTaskInput: (chatId, body, send) =>
-              turn.inTurn(() => {
-                const thread = turn.threadContext();
-                const turnId = turn.turnId();
-                const admitted = turn.actor() as SessionActor | undefined;
-                const actor = admitted ? Object.freeze({ ...admitted }) : undefined;
-                const sourceChatId = thread?.threadId;
-                const audience = turn.audience();
-                const source =
-                  actor &&
-                  (actor.kind === "guardian" || actor.kind === "visitor") &&
-                  (actor.kind !== "guardian" || audience === "private") &&
-                  turn.agentName === "core:concierge" &&
-                  !turn.isSubagent &&
-                  turnId &&
-                  thread?.channel === "webchat" &&
-                  thread.threadType === "private" &&
-                  sourceChatId
-                    ? {
-                        agentName: turn.agentName,
-                        chatId: sourceChatId,
-                        turnId,
-                        actor,
-                        audience,
-                        isCurrent: () => {
-                          const live = turn.threadContext();
-                          return (
-                            turn.turnId() === turnId &&
-                            sameActor(turn.actor(), actor) &&
-                            turn.audience() === audience &&
-                            live?.channel === "webchat" &&
-                            live.threadType === "private" &&
-                            live.threadId === sourceChatId
-                          );
-                        },
-                      }
-                    : undefined;
-                return asTurnActor(turn, () => withTaskInputActor(source, chatId, body, send));
-              }),
+            captureTaskInput: () => {
+              if (turn.live?.() === false) throw new Error("Task input source is not live");
+              const thread = turn.threadContext();
+              const turnId = turn.turnId();
+              const admitted = turn.actor() as SessionActor | undefined;
+              const actor = admitted ? Object.freeze({ ...admitted }) : undefined;
+              const sourceChatId = thread?.threadId;
+              const channel = thread?.channel;
+              const threadType = thread?.threadType;
+              const audience = turn.audience();
+              const sameSource = () => {
+                const live = turn.threadContext();
+                return (
+                  turn.turnId() === turnId &&
+                  sameActor(turn.actor(), actor) &&
+                  turn.audience() === audience &&
+                  live?.channel === channel &&
+                  live?.threadType === threadType &&
+                  live?.threadId === sourceChatId
+                );
+              };
+              const source =
+                turn.live?.() === true &&
+                actor &&
+                (actor.kind === "guardian" || actor.kind === "visitor") &&
+                (actor.kind !== "guardian" || audience === "private") &&
+                turn.agentName === "core:concierge" &&
+                !turn.isSubagent &&
+                turnId &&
+                channel === "webchat" &&
+                threadType === "private" &&
+                sourceChatId
+                  ? {
+                      agentName: turn.agentName,
+                      chatId: sourceChatId,
+                      turnId,
+                      actor,
+                      audience,
+                      isCurrent: () => turn.live?.() === true && sameSource(),
+                    }
+                  : undefined;
+              return async (chatId, body, send) =>
+                turn.inTurn(() => {
+                  if (!sameSource() || turn.live?.() === false) {
+                    throw new Error("Task input source changed before delivery; it was not sent");
+                  }
+                  return withoutSessionActor(() => withTaskInputActor(source, chatId, body, send));
+                });
+            },
           })) ?? [])
         : [];
       return [
