@@ -68,7 +68,7 @@ export class MessageStatusTracker {
     if (before) clearTimeout(before);
     const timer = setTimeout(() => {
       this.timers.delete(key);
-      void this.guard(this.ranLong(chatId));
+      void this.guard(this.ranLong(chatId, messageKey));
     }, this.workingAfterMs);
     timer.unref?.();
     this.timers.set(key, timer);
@@ -91,10 +91,13 @@ export class MessageStatusTracker {
    * more. A task made for it still does.
    */
   async reactedTo(chatId: string, messageKey: string): Promise<void> {
-    const timer = this.timers.get(timerKey(chatId, messageKey));
-    if (timer) clearTimeout(timer);
-    this.timers.delete(timerKey(chatId, messageKey));
+    this.clearTimer(chatId, messageKey);
     await this.guard(this.repo.markReacted(chatId, messageKey));
+  }
+
+  /** The running turn of chat `chatId` answered guardian message `messageKey`: its timer goes. */
+  answered(chatId: string, messageKey: string): void {
+    this.clearTimer(chatId, messageKey);
   }
 
   /** The running turn of chat `chatId` took its reaction to `messageKey` back. */
@@ -113,16 +116,24 @@ export class MessageStatusTracker {
     }
   }
 
+  private clearTimer(chatId: string, messageKey: string): void {
+    const key = timerKey(chatId, messageKey);
+    const timer = this.timers.get(key);
+    if (timer) clearTimeout(timer);
+    this.timers.delete(key);
+  }
+
   /** Stops every timer, as when the process shuts down. */
   stop(): void {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
   }
 
-  private async ranLong(chatId: string): Promise<void> {
-    // Every message the turn took is treated alike, whichever trigger fires first.
+  // A timer is its message's alone: it marks that message, never one taken
+  // after it.
+  private async ranLong(chatId: string, messageKey: string): Promise<void> {
     if (await this.repo.anyInheritedWorking(chatId)) return;
-    await this.repo.markWorking(chatId);
+    await this.repo.markWorking(chatId, { messageKey });
   }
 
   // The status only shows how the work stands, so failing to write it never

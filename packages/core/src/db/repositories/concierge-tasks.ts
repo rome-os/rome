@@ -9,6 +9,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lte,
   ne,
   notInArray,
   or,
@@ -84,10 +85,15 @@ export interface MessageTarget {
   messageKey: string;
 }
 
-/** A message's link to a task as it stood, to put back. */
-export interface LinkState {
-  seq: number;
-  endedAs: string | null;
+/** How a link that a newer message took over over ends: settled, showing nothing. */
+export const LINK_SUPERSEDED = "superseded";
+
+/** What {@link ConciergeTasksRepository.linkMessage} changed, to put back. */
+export interface LinkUndo {
+  /** The message's own link as it stood, or null when it is new. */
+  before: { seq: number; endedAs: string | null } | null;
+  /** The links it superseded. */
+  superseded: MessageTarget[];
 }
 
 /** What a guardian message's status is derived from, as stored. */
@@ -98,9 +104,9 @@ export interface MessageMarkRow {
   working: boolean;
   /** Whether that turn failed, by an error or a crash, before it answered it. */
   turnFailed: boolean;
-  /** The tasks that follow it: the ones made for it last. */
+  /** The tasks it follows: its live links. */
   taskIds: string[];
-  /** The tasks made for it that follow a newer message now. */
+  /** The tasks made for it that a newer message took over. */
   earlierTaskIds: string[];
   /** How each task made for it ended for it, once it did with its result told. */
   endedAs: string[];
@@ -975,83 +981,125 @@ export class ConciergeTasksRepository {
 
   /**
    * Task `taskId` was made for guardian message `target`: started for it, or
-   * given its words. The message it was made for last follows it from now
-   * on, so the ones before settle; making it for an older one again moves it
-   * back there, and it follows the task again even if it had ended for it.
-   * Answers the link as it was, or null when it is new, for
-   * {@link unlinkMessage}.
+   * given its words. A task has at most one live link, to the message it was
+   * made for last: the live link it had to another message settles as
+   * superseded, for good, so that message keeps no part in the task's later
+   * work or how it ends. Made for a message again, the link is live again.
+   * Answers what to put back for {@link unlinkMessage}.
    */
-  async linkMessage(taskId: string, target: MessageTarget): Promise<LinkState | null> {
-    // Read at once, in the same step as the write that follows.
-    const before = this.db
-      .select({ seq: conciergeMessageTasks.seq, endedAs: conciergeMessageTasks.endedAs })
-      .from(conciergeMessageTasks)
-      .where(
-        and(
-          eq(conciergeMessageTasks.taskId, taskId),
-          eq(conciergeMessageTasks.chatId, target.chatId),
-          eq(conciergeMessageTasks.messageKey, target.messageKey),
-        ),
-      )
-      .get();
-    const next = sql`(SELECT COALESCE(MAX(${conciergeMessageTasks.seq}), 0) + 1 FROM ${conciergeMessageTasks})`;
-    await this.db
-      .insert(conciergeMessageTasks)
-      .values({ taskId, ...target, seq: next })
-      .onConflictDoUpdate({
-        target: [
-          conciergeMessageTasks.taskId,
-          conciergeMessageTasks.chatId,
-          conciergeMessageTasks.messageKey,
-        ],
-        set: { seq: next, endedAs: null },
-      });
-    this.messageChanged([target]);
-    // The messages before it settle; told after, so the send is not held up.
-    void this.messagesOfTask(taskId)
-      .then((all) =>
-        this.messageChanged(
-          all.filter((one) => one.messageKey !== target.messageKey || one.chatId !== target.chatId),
-        ),
-      )
-      .catch((error: unknown) =>
-        log.warn("failed to tell the messages a task was made for before", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    return before ?? null;
-  }
-
-  /**
-   * Takes back {@link linkMessage}, as when the task never heard the message:
-   * a link that stood before keeps its old order, and a new one goes.
-   */
-  async unlinkMessage(
-    taskId: string,
-    target: MessageTarget,
-    before: LinkState | null,
-  ): Promise<void> {
-    const which = and(
+  async linkMessage(taskId: string, target: MessageTarget): Promise<LinkUndo> {
+    const own = and(
       eq(conciergeMessageTasks.taskId, taskId),
       eq(conciergeMessageTasks.chatId, target.chatId),
       eq(conciergeMessageTasks.messageKey, target.messageKey),
     );
-    if (before === null) await this.db.delete(conciergeMessageTasks).where(which);
-    else await this.db.update(conciergeMessageTasks).set(before).where(which);
-    this.messageChanged([target]);
-    for (const other of await this.messagesOfTask(taskId)) this.messageChanged([other]);
+    // One step, so no other write lands between the read and the writes.
+    const undo = this.db.transaction((tx): LinkUndo => {
+      const before =
+        tx
+          .select({ seq: conciergeMessageTasks.seq, endedAs: conciergeMessageTasks.endedAs })
+          .from(conciergeMessageTasks)
+          .where(own)
+          .get() ?? null;
+      const superseded = tx
+        .update(conciergeMessageTasks)
+        .set({ endedAs: LINK_SUPERSEDED })
+        .where(
+          and(
+            eq(conciergeMessageTasks.taskId, taskId),
+            isNull(conciergeMessageTasks.endedAs),
+            or(
+              ne(conciergeMessageTasks.chatId, target.chatId),
+              ne(conciergeMessageTasks.messageKey, target.messageKey),
+            ),
+          ),
+        )
+        .returning({
+          chatId: conciergeMessageTasks.chatId,
+          messageKey: conciergeMessageTasks.messageKey,
+        })
+        .all();
+      const seq =
+        (tx
+          .select({ max: sql<number>`COALESCE(MAX(${conciergeMessageTasks.seq}), 0)` })
+          .from(conciergeMessageTasks)
+          .get()?.max ?? 0) + 1;
+      tx.insert(conciergeMessageTasks)
+        .values({ taskId, ...target, seq })
+        .onConflictDoUpdate({
+          target: [
+            conciergeMessageTasks.taskId,
+            conciergeMessageTasks.chatId,
+            conciergeMessageTasks.messageKey,
+          ],
+          set: { seq, endedAs: null },
+        })
+        .run();
+      return { before, superseded };
+    });
+    this.messageChanged([target, ...undo.superseded]);
+    return undo;
   }
 
   /**
-   * Task `taskId` ended, with its result told, `endedAs`: every message that
-   * still follows it keeps that and follows it no more, so the task's later
-   * work, a scheduled run or its owner typing in its chat, leaves them alone.
+   * Takes back {@link linkMessage}, as when the task never heard the message:
+   * its link is as it was, a new one goes, and the link it superseded is
+   * live again.
    */
-  async endLinks(taskId: string, endedAs: string): Promise<void> {
+  async unlinkMessage(taskId: string, target: MessageTarget, undo: LinkUndo): Promise<void> {
+    this.db.transaction((tx) => {
+      const own = and(
+        eq(conciergeMessageTasks.taskId, taskId),
+        eq(conciergeMessageTasks.chatId, target.chatId),
+        eq(conciergeMessageTasks.messageKey, target.messageKey),
+      );
+      if (undo.before === null) tx.delete(conciergeMessageTasks).where(own).run();
+      else tx.update(conciergeMessageTasks).set(undo.before).where(own).run();
+      for (const other of undo.superseded) {
+        tx.update(conciergeMessageTasks)
+          .set({ endedAs: null })
+          .where(
+            and(
+              eq(conciergeMessageTasks.taskId, taskId),
+              eq(conciergeMessageTasks.chatId, other.chatId),
+              eq(conciergeMessageTasks.messageKey, other.messageKey),
+              eq(conciergeMessageTasks.endedAs, LINK_SUPERSEDED),
+            ),
+          )
+          .run();
+      }
+    });
+    this.messageChanged([target, ...undo.superseded]);
+  }
+
+  /** The order of task `taskId`'s live link, or null when it has none. */
+  liveLinkSeq(taskId: string): number | null {
+    return (
+      this.db
+        .select({ seq: conciergeMessageTasks.seq })
+        .from(conciergeMessageTasks)
+        .where(and(eq(conciergeMessageTasks.taskId, taskId), isNull(conciergeMessageTasks.endedAs)))
+        .get()?.seq ?? null
+    );
+  }
+
+  /**
+   * Task `taskId` ended, with its result told, `endedAs`: its live link, when
+   * its order is at most `upToSeq`, keeps that and follows the task no more,
+   * so the task's later work leaves the message alone. A link made after the
+   * caller read the task's state has a higher order and stays live.
+   */
+  async endLinks(taskId: string, endedAs: string, upToSeq: number): Promise<void> {
     const changed = await this.db
       .update(conciergeMessageTasks)
       .set({ endedAs })
-      .where(and(eq(conciergeMessageTasks.taskId, taskId), isNull(conciergeMessageTasks.endedAs)))
+      .where(
+        and(
+          eq(conciergeMessageTasks.taskId, taskId),
+          isNull(conciergeMessageTasks.endedAs),
+          lte(conciergeMessageTasks.seq, upToSeq),
+        ),
+      )
       .returning({
         chatId: conciergeMessageTasks.chatId,
         messageKey: conciergeMessageTasks.messageKey,
@@ -1115,11 +1163,10 @@ export class ConciergeTasksRepository {
       mark.working = row.workingAt !== null;
       mark.turnFailed = row.turnFailed;
     }
-    const links = await this.db
+    for (const row of await this.db
       .select({
         messageKey: conciergeMessageTasks.messageKey,
         taskId: conciergeMessageTasks.taskId,
-        at: conciergeMessageTasks.seq,
         endedAs: conciergeMessageTasks.endedAs,
       })
       .from(conciergeMessageTasks)
@@ -1128,35 +1175,11 @@ export class ConciergeTasksRepository {
           eq(conciergeMessageTasks.chatId, chatId),
           inArray(conciergeMessageTasks.messageKey, keys),
         ),
-      );
-    // A task follows only the newest message made for it: an older one does
-    // not light up again when the task runs for a newer one.
-    const newest = new Map(
-      links.length === 0
-        ? []
-        : (
-            await this.db
-              .select({
-                taskId: conciergeMessageTasks.taskId,
-                at: sql<number>`max(${conciergeMessageTasks.seq})`,
-              })
-              .from(conciergeMessageTasks)
-              .where(
-                and(
-                  inArray(conciergeMessageTasks.taskId, [
-                    ...new Set(links.map((row) => row.taskId)),
-                  ]),
-                  isNull(conciergeMessageTasks.endedAs),
-                ),
-              )
-              .groupBy(conciergeMessageTasks.taskId)
-          ).map((row) => [row.taskId, row.at]),
-    );
-    for (const row of links) {
+      )) {
       const mark = of(row.messageKey);
-      if (row.endedAs !== null) mark.endedAs.push(row.endedAs);
-      else if (newest.get(row.taskId) === row.at) mark.taskIds.push(row.taskId);
-      else mark.earlierTaskIds.push(row.taskId);
+      if (row.endedAs === null) mark.taskIds.push(row.taskId);
+      else if (row.endedAs === LINK_SUPERSEDED) mark.earlierTaskIds.push(row.taskId);
+      else mark.endedAs.push(row.endedAs);
     }
     return out;
   }

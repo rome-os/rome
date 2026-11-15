@@ -432,7 +432,9 @@ export async function buildConciergeTools(
       await send();
     } catch (error) {
       if (!keepOnFailure) {
-        await writeStatus("unlink", () => tasks.repo.unlinkMessage(taskId, target, before));
+        if (before) {
+          await writeStatus("unlink", () => tasks.repo.unlinkMessage(taskId, target, before));
+        }
       }
       throw error;
     }
@@ -857,6 +859,7 @@ export async function buildConciergeTools(
     const { chatId } = currentTurn();
     const answered = answers ?? (await certainlyAnswered(taskId));
     if (!answered) return;
+    service.messageStatus.answered(chatId, answered);
     await tasks.repo.answerMessage(chatId, answered).catch((error: unknown) =>
       log.warn("failed to settle an answered message", {
         chatId,

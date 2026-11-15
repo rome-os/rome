@@ -6495,17 +6495,51 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(await statusOf(s, "ask")).toBeNull();
     });
 
-    it("treats every message the turn took alike, whichever trigger fires first", async () => {
+    it("gives each message its own 5-second timer, gone once the message is answered", async () => {
       const s = setup({ said: false });
       s.fakeTimers();
       guardianSays(s, "a");
-      guardianSays(s, "b");
+      guardianSays(s, "thanks");
       await taken(s, "a");
       await rs.advanceTimersByTimeAsync(1_000);
-      await taken(s, "b");
-      // a's timer fires first.
-      await rs.advanceTimersByTimeAsync(4_100);
-      expect([await statusOf(s, "a"), await statusOf(s, "b")]).toEqual(["working", "working"]);
+      await s.tool("say", { text: "Sunny", answers: "a" });
+      await rs.advanceTimersByTimeAsync(3_900);
+      await taken(s, "thanks");
+      // a's timer is gone with its answer: nothing reaches the "thanks".
+      await rs.advanceTimersByTimeAsync(300);
+      expect([await statusOf(s, "a"), await statusOf(s, "thanks")]).toEqual([null, null]);
+      // Its own timer, 5 s after it was taken, does.
+      await rs.advanceTimersByTimeAsync(5_000);
+      expect(await statusOf(s, "thanks")).toBe("working");
+    });
+
+    it("keeps an older message settled when a newer one's task work fails", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      s.inTurn("follow-up");
+      guardianSays(s, "g2", "follow-up");
+      await s.tool("chat_send", { chatId, text: "And tomorrow?" });
+      expect([await statusOf(s, "g1"), await statusOf(s, "g2")]).toEqual([null, "working"]);
+      await finishTask(s, chatId, "error");
+      await s.settle();
+      expect([await statusOf(s, "g1"), await statusOf(s, "g2")]).toEqual([null, "failed"]);
+    });
+
+    it("never ends a link made after an ending check read the task", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { taskId } = await started(s);
+      // The task reads as ended with its result told, and g1 still follows it.
+      s.chats.activeTurns = () => [];
+      const row = { ...(await s.taskRepo.get(taskId))!, lastOutcome: "succeeded" as const };
+      // A new message goes to the task while that check still runs.
+      const check = s.tasks.endLinksIfEnded(row);
+      await s.taskRepo.linkMessage(taskId, { chatId: CONCIERGE_CHAT, messageKey: "g2" });
+      await check;
+      const marks = await s.taskRepo.messageMarks(CONCIERGE_CHAT, ["g1", "g2"]);
+      expect(marks.get("g2")?.taskIds).toEqual([taskId]);
+      expect(marks.get("g1")).toMatchObject({ taskIds: [], earlierTaskIds: [taskId], endedAs: [] });
     });
 
     it("never pushes a status to the phone", async () => {

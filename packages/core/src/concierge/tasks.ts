@@ -465,10 +465,14 @@ export class ConciergeTasks {
     // ended too, and one whose result waits is still the message's work.
     const told = row.stoppedAt !== null || (row.lastOutcome !== null && !row.outcomeUnsaid);
     if (!told) return;
+    // Read before the state, at once: a link made after it is new work and
+    // has a higher order, so this ending never reaches it.
+    const upTo = this.repo.liveLinkSeq(row.id);
+    if (upTo === null) return;
     const of = (await this.statusOf([row])).get(row.id);
     if (of?.status !== "ended") return;
     const lost = row.reportGivenUp && of.endReason !== "stopped" && of.endReason !== "no_response";
-    await this.repo.endLinks(row.id, lost ? "failed" : (of.endReason ?? "done"));
+    await this.repo.endLinks(row.id, lost ? "failed" : (of.endReason ?? "done"), upTo);
   }
 
   /**
