@@ -70,8 +70,9 @@ private struct WidgetCardBody: View {
     let waiting: WidgetUICardView.Waiting?
     @ObservedObject var surface: WidgetSurface
     @Environment(\.openURL) private var openURL
+    @Environment(\.connectDevice) private var connectDevice
 
-    private var locked: Bool { waiting?.answered != nil || surface.sent }
+    private var locked: Bool { waiting?.answered != nil || surface.sent || surface.autoSharing }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -86,8 +87,16 @@ private struct WidgetCardBody: View {
                     .foregroundStyle(Palette.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let answered = waiting?.answered {
-                Text(answered["dismissed"]?.bool == true ? "Dismissed" : "Answered")
+            if let answered = waiting?.answered, LocationCard.isLocationCard(part) {
+                Text(verbatim: LocationCard.outcome(answered))
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
+            } else if let answered = waiting?.answered {
+                Text(answered["dismissed"]?.bool == true ? "Dismissed" : answered["status"]?.string == "connected" ? "Connected" : "Answered")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
+            } else if surface.locating {
+                Text("Finding your location…")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
             } else if surface.sent {
@@ -120,9 +129,15 @@ private struct WidgetCardBody: View {
         .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
         .task(id: part) {
             surface.answered = waiting?.answered != nil
-            surface.show(part, call: call, press: press, open: { openURL($0) })
+            surface.show(part, call: call, press: press, open: { openURL($0) }, connectDevice: { [connectDevice] url in
+                await connectDevice?.run(url)
+            })
             surface.showAnswered(waiting?.answered)
             await surface.load()
+            await surface.shareIfAllowed()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            Task { await surface.shareIfAllowed() }
         }
         .onChange(of: waiting?.answered) {
             surface.answered = waiting?.answered != nil
@@ -147,6 +162,18 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     @Published private(set) var clears = WidgetClears()
     /// Set once core takes an event on a card the agent waits on.
     @Published private(set) var sent = false
+    /// The share-location card is reading the phone's position.
+    @Published private(set) var locating = false
+    /// Where Share on the share-location card reads the position.
+    var locator: DeviceLocating = CoreLocationLocator.shared
+    /// Whether the guardian is looking at the app, so a share-location card
+    /// may answer itself.
+    var appActive: () -> Bool = { UIApplication.shared.applicationState == .active }
+    /// A share-location card answering itself, or about to: it shows no buttons.
+    @Published private(set) var autoSharing = false
+    /// The share-location cards this app answered by itself, so a card drawn
+    /// again does not send a second share.
+    private static var autoShared: Set<String> = []
     /// Whether the card the agent waits on is answered, as stored.
     var answered = false
 
@@ -155,6 +182,9 @@ final class WidgetSurface: ObservableObject, ActionHandling {
     private var call: ((String, String, Rome.JSONValue?) async throws -> ConnectReply)?
     private var send: ((String, Rome.JSONValue) async throws -> WidgetEventReply)?
     private var open: (URL) -> Void = { _ in }
+    /// Runs the app's own authorization for a device connection's link: nil
+    /// for any other link, else whether it was connected.
+    private var connectDevice: (URL) async -> Bool? = { _ in nil }
     /// Only the newest read writes the data: a slow read must not land after
     /// a newer one and put back an older value.
     private var reads = 0
@@ -163,9 +193,11 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         _ part: WidgetUIPart,
         call: @escaping (String, String, Rome.JSONValue?) async throws -> ConnectReply,
         press: @escaping (String, Rome.JSONValue) async throws -> WidgetEventReply = { _, _ in throw APIError.notFound },
-        open: @escaping (URL) -> Void = { _ in }
+        open: @escaping (URL) -> Void = { _ in },
+        connectDevice: @escaping (URL) async -> Bool? = { _ in nil }
     ) {
         self.open = open
+        self.connectDevice = connectDevice
         guard self.part != part else { return }
         self.part = part
         self.call = call
@@ -198,6 +230,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             return send("updateDataModel", ["surfaceId": surfaceId, "path": .string("/\(token)"), "value": value])
         }
         viewModel = created ? processor.surfaceGroupModel.surfacesMap[part.toolUseId] : nil
+        autoSharing = mayShareItself && (locator.permission == .granted || Self.autoShared.contains(autoKey))
         undrawable = viewModel == nil
         clears = WidgetClears(targets: targets) { [weak self] path, list in
             self?.viewModel?.dataModel.set(path, value: list ? .array([]) : .string(""))
@@ -274,14 +307,75 @@ final class WidgetSurface: ObservableObject, ActionHandling {
 
     nonisolated func handle(error: RendererError, from surfaceID: String) {}
 
-    private func press(_ name: String, body: Rome.JSONValue) async {
+    private var autoKey: String { "\(part?.widgetId ?? "")/\(part?.toolUseId ?? "")" }
+
+    /// An open share-location card the agent waits on, which core marked as
+    /// one that may answer itself: core marks only a card the guardian's own
+    /// message asked for, so an unmarked card always waits for Share.
+    private var mayShareItself: Bool {
+        guard let part else { return false }
+        return part.waits && !answered && !sent && LocationCard.isLocationCard(part)
+            && LocationCard.mayAutoShare(part)
+    }
+
+    /// Answers an open share-location card at once where the app may already
+    /// read the position and the guardian is looking at it; says so where
+    /// iOS refuses, leaving Not now; otherwise leaves Share to ask.
+    func shareIfAllowed() async {
+        guard mayShareItself, !Self.autoShared.contains(autoKey) else { return }
+        switch locator.permission {
+        case .granted:
+            guard appActive() else { return }
+            Self.autoShared.insert(autoKey)
+            autoSharing = true
+            await press(LocationCard.shareEvent, body: .object([:]), auto: true)
+            autoSharing = false
+        case .denied:
+            autoSharing = false
+            sendFailed = true
+            refusal = LocationCard.failureText(.denied)
+        case .undetermined:
+            autoSharing = false
+        }
+    }
+
+    /// `auto` is a share the card sends itself: a refusal from core then says
+    /// nothing, since another client answered first.
+    private func press(_ name: String, body: Rome.JSONValue, auto: Bool = false) async {
         // Core decides what every event means; the card only sends it.
         let waits = part?.waits == true
         guard let send, !busy, !(waits && (answered || sent)) else { return }
         busy = true
         defer { busy = false }
+        var body = body
+        // Share on the share-location card carries the phone's position, read
+        // on the press so iOS asks for permission then.
+        if name == LocationCard.shareEvent, let part, LocationCard.isLocationCard(part) {
+            locating = true
+            let read = await locator.currentPosition()
+            locating = false
+            switch read {
+            case .success(let position):
+                if case .object(var fields) = body, case .object(let fix) = position.json {
+                    fields.merge(fix) { _, new in new }
+                    body = .object(fields)
+                } else {
+                    body = position.json
+                }
+            case .failure(let failure):
+                sendFailed = true
+                refusal = LocationCard.failureText(failure)
+                return
+            }
+        }
         do {
-            let reply = try await send(name, body)
+            var reply = try await send(name, body)
+            // A device connection's link runs the app's own authorization,
+            // and the card checks once it is done: core reads the report.
+            if let url = reply.open, let connected = await connectDevice(url) {
+                guard connected else { return }
+                reply = try await send("check", body)
+            }
             // A link the reply names opens; a card core says is answered is
             // sent, and any other card reads its data again, and that read
             // says whether the card's data failed.
@@ -291,6 +385,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
             if let url = reply.open { open(url) }
             if waits && reply.answered { sent = true } else { await load() }
         } catch {
+            if auto { return }
             sendFailed = true
             if case APIError.server(_, let message?) = error, !message.isEmpty { refusal = message } else { refusal = nil }
         }

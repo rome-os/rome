@@ -21,10 +21,14 @@ enum MainSection: Hashable {
 /// Pages pushed inside the Settings sheet.
 enum SettingsRoute: Hashable {
     case instances
-    case requests
-    case health
-    /// iPhone use (iPad use on an iPad): Rome's use of this device.
-    case device
+    /// This phone's connections.
+    case connections
+    /// One connection's page, by its id.
+    case connection(String)
+    /// One connection's live reads, by its id.
+    case liveReads(String)
+    /// Apple Health → Sync history.
+    case syncHistory
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -82,6 +86,7 @@ struct MainShell: View {
     @State private var photoViewerPreview = false
     @State private var pagePreview: URL?
     @State private var appPreview: InstalledApp?
+    @State private var connectPreview: String?
     #endif
 
     /// The drawer pinned beside the page rather than pushed aside.
@@ -141,6 +146,7 @@ struct MainShell: View {
                 }
                 .environment(\.chatLinkOpener, actions.linkOpener)
                 .environment(\.openUsage, actions.openUsage)
+                .environment(\.connectDevice, model.deviceConnectAction)
                 .environment(\.openTaskChat, actions.openTaskChat)
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
@@ -187,6 +193,7 @@ struct MainShell: View {
             .environment(\.chatLinkOpener, actions.linkOpener)
             // Settings is a sheet of this view: the cover closes first.
             .environment(\.openUsage, actions.openUsageFromCover)
+            .environment(\.connectDevice, model.deviceConnectAction)
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
@@ -197,6 +204,12 @@ struct MainShell: View {
         }
         .sheet(isPresented: $showSettings) {
             settingsSheet
+        }
+        // A connect card's device connection: its authorization, then the card checks.
+        .sheet(item: Binding(get: { model.connections.request }, set: { if $0 == nil { model.connections.request?.finish(false) } })) { request in
+            ConnectDeviceSheet(request: request)
+                .presentationBackground(Palette.sheet)
+                .presentationCornerRadius(22)
         }
         #if DEBUG
         .overlay {
@@ -213,6 +226,15 @@ struct MainShell: View {
             }
             if settingsPreview {
                 SheetStandIn { settingsSheet }
+            }
+            if let connectPreview {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    ConnectDeviceSheet(request: DeviceConnectRequest(capability: connectPreview) { _ in }, standIn: true)
+                        .background(Palette.sheet)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                }
+                .ignoresSafeArea(edges: .bottom)
             }
         }
         #endif
@@ -270,6 +292,18 @@ struct MainShell: View {
             guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
             Task { await follow(link) }
         }
+        // A tapped "sign in again" notice: Settings at Apple Health's Sync history.
+        // Taken on appear too: a tap that launched the app came before this shell.
+        .onChange(of: model.settingsRequest, initial: true) {
+            guard let routes = model.takeSettingsRequest() else { return }
+            agentPage = nil
+            page = nil
+            openApp = nil
+            settingsPage = nil
+            closeDrawer()
+            settingsPath = routes
+            showSettings = true
+        }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
             agentPage = nil
@@ -308,6 +342,8 @@ struct MainShell: View {
                 if SnapshotRunner.directory != nil { appPreview = app } else { openApp = app }
             case .photoViewer(let open):
                 photoViewerPreview = open
+            case .connectSheet(let id):
+                connectPreview = id
             case .composerPhotos, .appIdeas, nil: break
             }
         }
@@ -536,15 +572,14 @@ struct MainShell: View {
         }
     }
 
-    /// Settings slides up with its own stack, so its pages (instances, Apple
-    /// Health, iPhone use) push inside the sheet and the X closes all of it.
+    /// Settings slides up with its own stack, so its pages (instances,
+    /// Connections) push inside the sheet and the X closes all of it.
     private var settingsSheet: some View {
         NavigationStack(path: $settingsPath) {
             SettingsScreen(
                 workspace: workspace,
                 onInstances: { settingsPath.append(.instances) },
-                onHealth: { settingsPath.append(.health) },
-                onDevice: { settingsPath.append(.device) },
+                onConnections: { settingsPath.append(.connections) },
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -554,12 +589,22 @@ struct MainShell: View {
                         showSettings = false
                         show(.chat)
                     })
-                case .requests:
-                    NodeRequestsScreen()
-                case .health:
-                    HealthAccessScreen()
-                case .device:
-                    NodeSettingsScreen(onRequests: { settingsPath.append(.requests) })
+                case .connections:
+                    ConnectionsScreen(
+                        isVisitor: workspace.isVisitor,
+                        onConnection: { settingsPath.append(.connection($0)) },
+                        onWeb: { if let web = model.webURL { settingsPage = InstancePages.connections(origin: web) } }
+                    )
+                case .connection(let id):
+                    ConnectionScreen(
+                        id: id,
+                        onActivity: { settingsPath.append(.liveReads(id)) },
+                        onHistory: { settingsPath.append(.syncHistory) }
+                    )
+                case .liveReads(let id):
+                    NodeRequestsScreen(capability: id)
+                case .syncHistory:
+                    SyncHistoryScreen()
                 }
             }
         }

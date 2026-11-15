@@ -1,3 +1,4 @@
+import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
@@ -38,14 +39,14 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
 
 // The host's own built-in cards (vs an app's inline component):
 // the only suspensions auto-dismissed by a free-text reply, since typing in
-// chat instead of using the card is the natural "skip this" for a question or a
-// provider sign-in, but not for an app's half-filled form.
+// chat instead of using the card is the natural "skip this" for a question, a
+// location share or a provider sign-in, but not for an app's half-filled form.
 //
 // The connect-AI card has to be here as well as the question card: it resolves
 // itself once a provider signs in, so an earlier copy left open would submit a
 // second `{ connected: true }` and drive the script a step past where the
 // guardian is.
-const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card"]);
+const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card", LOCATION_CARD_ID]);
 
 function isAutoDismissedCard(b: TranscriptPart): boolean {
   return (

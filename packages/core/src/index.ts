@@ -222,6 +222,12 @@ import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
 import { registerReadPersonAction } from "./people/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
+import { placeAudience } from "./core/place-audience.js";
+import { registerPersonalDataActions } from "./personal-data/actions.js";
+import { PersonalDataRepository } from "./personal-data/repository.js";
+import { DeviceConnectionsRepository } from "./connections/device/repository.js";
+import { deviceKinds } from "./connections/connect-card.js";
+import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -575,7 +581,31 @@ async function main() {
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
-  const routinesRepo = new RoutinesRepository(db);
+  // Made here so the Concierge can tell whether a visitor is still served,
+  // and who can read a dashboard chat; it is loaded with the other access
+  // settings further down.
+  const dashboardAccessState = new DashboardAccessState();
+  // Who can read a chat, for every audience check (docs/domains/participation.md#audience).
+  const chatAudience = placeAudience({
+    connectionKindOf: connectionKindOfChannel,
+    dashboardChat: (chatId) => webchatRepo.getSession(chatId),
+    visitorsAllowed: () => dashboardAccessState.hasCloudEmailAccess(),
+    // Main reads who sent a message itself, never the bond a caller names.
+    senderBondLevel: async (context) =>
+      context.channelUserId
+        ? (
+            await peopleRepo.byAccount({
+              platform: platformOfChannel(context.channel),
+              id: context.channelUserId,
+            })
+          )?.bondLevel
+        : undefined,
+  });
+  const routinesRepo = new RoutinesRepository(db, (chatId) =>
+    chatAudience({ channel: "webchat", threadId: chatId }),
+  );
+  const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
+  const deviceConnectionsRepo = new DeviceConnectionsRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
   // Runs before the action engine, routine engine, and ingress below exist, so
   // every `running` row it ends belongs to the stopped process.
@@ -925,6 +955,7 @@ async function main() {
       // Coordination roots run in main only when the lockfile marks their app
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
+      placeAudience: chatAudience,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -1179,9 +1210,6 @@ async function main() {
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
-  // Made here so the Concierge can tell whether a visitor is still served;
-  // it is loaded with the other access settings further down.
-  const dashboardAccessState = new DashboardAccessState();
   // The chats the guardian's phone app holds open, from the live-events socket;
   // the Concierge does not push what it says in one of them.
   const phoneWatching = new PhoneWatching();
@@ -1244,7 +1272,11 @@ async function main() {
       .talker;
     return talker ? talkerChannelSurface(talker) : null;
   };
-  const openingFor = sessionOpeningFor({ channelSurface, connectionKindOfChannel });
+  const openingFor = sessionOpeningFor({
+    channelSurface,
+    connectionKindOfChannel,
+    placeAudience: chatAudience,
+  });
   const agentSessionManager = createSessions(
     {
       agentLoader,
@@ -1278,10 +1310,16 @@ async function main() {
         actionRegistry,
         actionEngine,
         webchatRepo,
+        placeAudience: chatAudience,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
+        deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+        // The turn's audience, narrowed by the chat's as it stands now, so a
+        // chat that opens to visitors after the turn started is no longer private.
+        privateTurn: async (turn) =>
+          turn.audience() === "private" && (await chatAudience(turn.threadContext())) === "private",
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
@@ -1390,6 +1428,11 @@ async function main() {
   });
 
   registerShowFileAction(actionRegistry);
+  registerPersonalDataActions(actionRegistry, {
+    personalData: personalDataRepo,
+    guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
+    connections: deviceConnectionsRepo,
+  });
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {
     people: peopleRepo,
@@ -2250,6 +2293,9 @@ async function main() {
   try {
     const apiDeps: ApiDeps = {
       agentNameEvents,
+      personalData: personalDataRepo,
+      deviceConnections: deviceConnectionsRepo,
+      placeAudience: chatAudience,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,

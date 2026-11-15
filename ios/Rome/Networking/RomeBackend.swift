@@ -119,6 +119,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func routines() async throws -> [RoutineRef]
     /// Tells Chat in `chatId` that `service` is connected, so it goes on.
     func notifyServiceConnected(chatId: String, service: String) async
+    /// `PUT /api/device-connections`: this phone's connections, in full.
+    func reportDeviceConnections(_ report: DeviceConnectionReport) async throws
     /// Makes a public link to these turns of the chat, showing the Agent as
     /// `agentName` (nil: the page says Rome). No title: the instance names
     /// the share after the first turn.
@@ -344,6 +346,12 @@ final class LiveBackend: RomeBackend {
         _ = try? await client.post("/concierge/chats/\(escape(chatId))/service-connected", json: .object(["service": .string(service)]))
     }
 
+    func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {
+        let body = try JSONEncoder().encode(report)
+        let reply = try await client.raw("PUT", "/device-connections", json: body)
+        guard (200..<300).contains(reply.status) else { throw APIError.server(status: reply.status, message: reply.errorCode) }
+    }
+
     func isGuardian() async -> Bool {
         let body: JSONValue? = try? await client.get("/auth/me")
         return body?["kind"]?.string == "guardian"
@@ -480,6 +488,7 @@ extension RomeBackend {
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] { throw APIError.notFound }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
+    func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {}
     /// Demo data and test doubles have no read mark: no unread line.
     func readMark(sessionId: String) async -> String? { nil }
     /// Stand-ins (demo, tests) are no guardian of a real instance.

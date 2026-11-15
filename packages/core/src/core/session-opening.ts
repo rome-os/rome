@@ -3,6 +3,7 @@ import type { ConnectionKindOfChannel } from "../db/repositories/channel-records
 import { createLogger } from "../logger.js";
 import { sessionKeyChannel } from "./agent-session-key.js";
 import type { SessionOpening } from "../agent/index.js";
+import type { PlaceAudience } from "./place-audience.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 
 const log = createLogger("session-opening");
@@ -45,13 +46,22 @@ export interface SessionOpeningDeps {
   /** The connection kind behind a channel id. When absent, every channel id reads as
    *  its own connection kind, which holds only where no connection kind has a second channel. */
   connectionKindOfChannel?: ConnectionKindOfChannel;
+  /** Who can read a chat. Absent, every chat is shared. */
+  placeAudience?: PlaceAudience;
 }
 
 /** What an opener states for the session it opens under `continuityKey`. */
 export type SessionOpeningFor = (
   continuityKey: string,
   threadContext?: ThreadContext,
-) => Required<Pick<SessionOpening, "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes">>;
+) => Promise<
+  Required<
+    Pick<
+      SessionOpening,
+      "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes" | "audience"
+    >
+  >
+>;
 
 /**
  * What an opener states for a session it opens: whether its conversation
@@ -60,7 +70,7 @@ export type SessionOpeningFor = (
  * falls back to the channel the continuity key names.
  */
 export function sessionOpeningFor(deps: SessionOpeningDeps): SessionOpeningFor {
-  return (continuityKey, threadContext) => {
+  return async (continuityKey, threadContext) => {
     const keyChannel = sessionKeyChannel(continuityKey);
     const openingChannel = threadContext?.channel ?? keyChannel;
     if (keyChannel && openingChannel !== keyChannel && deps.channelSurface(keyChannel) !== null) {
@@ -69,15 +79,24 @@ export function sessionOpeningFor(deps: SessionOpeningDeps): SessionOpeningFor {
         openingChannel,
       });
     }
+    const audience = (await deps.placeAudience?.(threadContext)) ?? "shared";
     return {
       drawsCards:
         !!openingChannel && surfaceOf(deps.channelSurface, openingChannel).interactiveCards,
       guardianFacing: isGuardianFacingChannel(continuityKey, deps.connectionKindOfChannel),
-      // The channel the session's turns are delivered on. Shell tools such as
-      // the Discord CLI read it to act as that channel's account. Set even
-      // when undefined, so a value Rome itself inherited never leaks in.
-      toolEnv: { ROME_CHANNEL: keyChannel },
+      // ROME_CHANNEL is the channel the session's turns are delivered on.
+      // Shell tools such as the Discord CLI read it to act as that channel's
+      // account. Set even when undefined, so a value Rome itself inherited
+      // never leaks in. ROME_TURN_AUDIENCE says who can read the session's
+      // turns, and the rome-node CLI refuses a device's personal capability
+      // while it says shared. It is read when the session opens and holds for
+      // the session's life. The action check reads the chat again on every call.
+      toolEnv: {
+        ROME_CHANNEL: keyChannel,
+        ROME_TURN_AUDIENCE: audience,
+      },
       spanAttributes: keyChannel ? { "channel.name": keyChannel } : {},
+      audience,
     };
   };
 }

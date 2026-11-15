@@ -5,7 +5,10 @@ import Testing
 @testable import Rome
 
 /// A Health that answers from what a test puts in it, and remembers what it was asked.
+/// The phone answers several requests at once, so what it records is behind a lock.
 final class FakeHealth: HealthReading, @unchecked Sendable {
+    private let lock = NSLock()
+
     var available = true
     var accessError: HealthReadError?
     /// True until iOS has been asked, as on a fresh install.
@@ -24,38 +27,55 @@ final class FakeHealth: HealthReading, @unchecked Sendable {
     var isAvailable: Bool { available }
 
     func requestAccess() async throws {
-        accessRequests += 1
-        if let accessError { throw accessError }
-        neverAsked = false
+        let error = lock.withLock { () -> HealthReadError? in
+            accessRequests += 1
+            return accessError
+        }
+        if let error { throw error }
+        lock.withLock { neverAsked = false }
     }
 
-    func shouldRequestAccess() async -> Bool { neverAsked }
+    func shouldRequestAccess() async -> Bool { lock.withLock { neverAsked } }
 
     /// Set, every quantity read waits here until it opens: a read still under way.
     var gate: ReadGate?
 
     func quantityStats(_ request: QuantityRequest) async throws -> [Double?] {
-        reads += 1
+        let gate = lock.withLock { () -> ReadGate? in
+            reads += 1
+            return self.gate
+        }
         if let gate { await gate.wait() }
-        quantityRequests.append(request)
-        return quantities[request.type.name] ?? Array(repeating: nil, count: request.buckets.count)
+        return lock.withLock {
+            quantityRequests.append(request)
+            return quantities[request.type.name] ?? Array(repeating: nil, count: request.buckets.count)
+        }
     }
 
     func segments(_ type: HealthType, in window: DateInterval) async throws -> [HealthSegment] {
-        reads += 1
-        return (segmentsByType[type.name] ?? []).filter { $0.end > window.start && $0.start < window.end }
+        let all = lock.withLock { () -> [HealthSegment] in
+            reads += 1
+            return segmentsByType[type.name] ?? []
+        }
+        return all.filter { $0.end > window.start && $0.start < window.end }
     }
 
     func workouts(in window: DateInterval, activity: String?) async throws -> [WorkoutRecord] {
-        reads += 1
-        workoutActivities.append(activity)
-        return workoutRecords.filter { $0.end > window.start && $0.start < window.end && (activity == nil || $0.activity == activity) }
+        let records = lock.withLock { () -> [WorkoutRecord] in
+            reads += 1
+            workoutActivities.append(activity)
+            return workoutRecords
+        }
+        return records.filter { $0.end > window.start && $0.start < window.end && (activity == nil || $0.activity == activity) }
     }
 
     func samples(_ request: SampleRequest) async throws -> [HealthSample] {
-        reads += 1
-        sampleRequests.append(request)
-        var found = sampleStore.enumerated().filter { _, sample in
+        let store = lock.withLock { () -> [HealthSample] in
+            reads += 1
+            sampleRequests.append(request)
+            return sampleStore
+        }
+        var found = store.enumerated().filter { _, sample in
             sample.end >= request.window.start && sample.start < request.window.end
                 && (request.sources.isEmpty || request.sources.contains(sample.source.name) || request.sources.contains(sample.source.bundleId))
         }
@@ -389,14 +409,12 @@ enum HealthFixtures {
         #expect(usage.contains("clipped to the window or bucket"))
         #expect(usage.contains("previous day 18:00 to 12:00"))
         #expect(usage.contains("with or without offset (without offset = the iPhone's time zone"))
-        #expect(HealthActions.usage()["health.stats"]?.contains("health_off") == true)
-        #expect(HealthActions.usage()["health.samples"]?.contains("health_off") == true)
-        for action in ["health.stats", "health.samples"] {
-            let text = HealthActions.usage()[action] ?? ""
-            #expect(text.contains("Settings → Apple Health in the Rome app"), "\(action)")
-            #expect(text.contains("on the iPhone"), "\(action)")
-        }
-        #expect(HealthActions.usage()["health.stats"]?.contains("off for Rome until the user turns it on") == true, "off is the default")
+        #expect(HealthActions.usage()["health.stats"]?.contains("live_off") == true)
+        #expect(HealthActions.usage()["health.samples"]?.contains("live_off") == true)
+        let stats = HealthActions.usage()["health.stats"] ?? ""
+        #expect(stats.contains("Settings → Connections → Apple Health"))
+        #expect(stats.contains("on the iPhone"))
+        #expect(stats.contains("not_connected before the user connects it"), "not connected is the default")
     }
 
     @Test func unknownActionIsUnsupported() async {
@@ -422,14 +440,14 @@ enum HealthFixtures {
 
     @Test func withTheSwitchOffTheHealthActionsAreRefusedBeforeHealthIsTouched() async {
         let health = FakeHealth()
-        var actions = HealthFixtures.actions(health)
+        let actions = HealthFixtures.actions(health)
         actions.enabled.set(false)
         for (action, args) in [("health.stats", #"{"type":"stepCount"}"#), ("health.samples", #"{"type":"heartRate"}"#), ("health.stats", "{}"), ("health.stats", #"{"type":"bloodType"}"#)] {
             let result = await actions.run(action, args: parseJSON(args))
-            #expect(HealthFixtures.code(result) == "health_off", "\(action) \(args)")
+            #expect(HealthFixtures.code(result) == "live_off", "\(action) \(args)")
         }
         guard case .failed(code: _, message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else { return }
-        #expect(message.contains("Settings → Apple Health in the Rome app"), "the agent is told where the user turns it on")
+        #expect(message.contains("Settings → Connections → Apple Health"), "the agent is told where the user turns it on")
         #expect(message.contains("on the iPhone"))
         #expect(health.accessRequests == 0 && health.reads == 0)
         // Other actions are not Health's to refuse.
@@ -908,33 +926,33 @@ enum HealthFixtures {
 
     @Test func anIPadTellsTheAgentWhereItsSwitchIs() async {
         var actions = actions(.iPad)
-        actions.enabled = HealthSwitch(false)
-        guard case .failed(code: "health_off", message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else {
-            Issue.record("expected health_off")
+        actions.enabled = NodeFlag(false)
+        guard case .failed(code: "live_off", message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else {
+            Issue.record("expected live_off")
             return
         }
-        #expect(message.contains("Settings → Apple Health in the Rome app"))
+        #expect(message.contains("Settings → Connections → Apple Health"))
         #expect(!message.contains("iPhone"))
         for text in HealthActions.usage(.iPad).values {
             #expect(!text.contains("iPhone") && !text.contains("phone's"), "\(text.prefix(40))")
         }
-        #expect(HealthActions.usage(.iPad)["health.stats"]?.contains("Settings → Apple Health in the Rome app") == true)
+        #expect(HealthActions.usage(.iPad)["health.stats"]?.contains("Settings → Connections → Apple Health") == true)
     }
 
     @Test func anIPhoneStillSaysIPhone() async {
         var actions = actions(.iPhone)
-        actions.enabled = HealthSwitch(false)
+        actions.enabled = NodeFlag(false)
         guard case .failed(code: _, message: let message) = await actions.run("health.samples", args: parseJSON(#"{"type":"heartRate"}"#)) else {
-            Issue.record("expected health_off")
+            Issue.record("expected live_off")
             return
         }
-        #expect(message.contains("Settings → Apple Health in the Rome app"))
+        #expect(message.contains("Settings → Connections → Apple Health"))
     }
 
     @Test func theAuditRefusalNamesTheDevice() async throws {
         let audit = FakeAudit()
         audit.refuse = true
-        let executor = NodeExecutor(name: { "iPad" }, audit: audit, health: actions(.iPad))
+        let executor = NodeExecutor(name: { "iPad" }, audit: audit, registry: .testing(actions(.iPad)), device: .iPad)
         let reply = parseJSON(try #require(await executor.respond(
             to: #"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#,
             session: NodeSession()
@@ -948,7 +966,7 @@ enum HealthFixtures {
         #expect(DeviceKind.iPad.name == "iPad")
         #expect(DeviceKind.iPad.symbol == "ipad")
         #expect(DeviceKind.iPhone.symbol == "iphone")
-        #expect(DeviceKind.iPad.useSwitchTitle == LocalizedStringKey("Can Rome use this iPad"))
-        #expect(DeviceKind.iPhone.groupTitle == LocalizedStringKey("iPhone use"))
+        #expect(DeviceKind.iPad.thisDevice == LocalizedStringKey("This iPad"))
+        #expect(DeviceKind.iPhone.thisDevice == LocalizedStringKey("This iPhone"))
     }
 }
