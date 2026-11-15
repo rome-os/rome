@@ -123,6 +123,11 @@ final class VoiceInputTests: XCTestCase {
             let typed = "typed after refusing \(item.language) \(Int(Date().timeIntervalSince1970))"
             let field = onScreen(app.textViews, "message-field")
             field.tap()
+            // A draft an earlier test left in this chat is kept across launches, as it should be.
+            let kept = field.value as? String ?? ""
+            if !kept.isEmpty {
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: kept.count))
+            }
             field.typeText(typed)
             XCTAssertEqual(field.value as? String, typed, "\(item.language): a key was lost after the notice")
             onScreen(app.buttons, "send").tap()
