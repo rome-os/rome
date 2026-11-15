@@ -381,6 +381,28 @@ rs.mock("@/components/chat/ChatComposer", () => ({
         {props.onSend ? (
           <button
             type="button"
+            data-testid="send-upload-button"
+            onClick={() =>
+              void props
+                .onSend?.(
+                  {
+                    text: "look",
+                    uploads: [
+                      { id: "u1", file: new File(["png"], "image.png", { type: "image/png" }) },
+                    ],
+                    reasoningEffort: "medium",
+                    projectPath: "",
+                    inputId: "22222222-2222-4222-8222-222222222222",
+                  },
+                  { onUploadProgress: () => {}, signal: new AbortController().signal },
+                )
+                .catch(() => {})
+            }
+          />
+        ) : null}
+        {props.onSend ? (
+          <button
+            type="button"
             data-testid="send-text-button"
             onClick={() =>
               void props
@@ -1980,6 +2002,49 @@ describe("Chat turn stream lifecycle", () => {
 
     expect(screen.getAllByTestId("user-row")).toHaveLength(1);
     expect(screen.getByTestId("user-row")).toBe(bubble);
+  });
+
+  it("shows an upload's sent row as the server stored it, without a refetch", async () => {
+    const stored = JSON.stringify([
+      {
+        type: "text",
+        content: `look\n\n- File 1: [image.png](</api/assets/${"a".repeat(32)}.png>)`,
+      },
+    ]);
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        turnId: "turn-1",
+        inputId: "22222222-2222-4222-8222-222222222222",
+        inputState: "submitted",
+        content: stored,
+      },
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByTestId("send-upload-button"));
+
+    const row = await screen.findByTestId("user-row");
+    expect(row.dataset.rowKey).toBe("22222222-2222-4222-8222-222222222222");
+    expect(row.textContent).toBe(stored);
+    // The row came from the POST's answer: the chat was not read again for it.
+    expect(listSessionMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the text it built for an upload when the answer carries no content", async () => {
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({
+      ok: true,
+      data: { turnId: "turn-1", inputId: "22222222-2222-4222-8222-222222222222" },
+    });
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-upload-button"));
+
+    const row = await screen.findByTestId("user-row");
+    expect(JSON.parse(row.textContent ?? "[]")).toEqual([
+      { type: "text", content: "look\n\n- File 1: image\\.png" },
+    ]);
   });
 
   it("posts the reply and its quote, and shows the quote in the early bubble", async () => {

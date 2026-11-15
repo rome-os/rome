@@ -4610,7 +4610,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           error: modelError.error,
         });
 
-        return answer({ turnId, sessionId, startedAt: stream.startedAt });
+        return answer({ turnId, sessionId, startedAt: stream.startedAt, content: userContent });
       }
       const message = err instanceof Error ? err.message : "Failed to open agent session";
       return answer({ error: message }, 500);
@@ -5107,6 +5107,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       disposition: receipt.landed === "steered" ? "steering" : receipt.landed,
       sessionId,
       startedAt: stream?.startedAt ?? new Date().toISOString(),
+      // The message as stored, so the sender's row shows what a reload would,
+      // uploads as their asset links included.
+      content: userContent,
     });
   };
 

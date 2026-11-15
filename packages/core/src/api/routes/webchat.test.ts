@@ -1077,9 +1077,13 @@ describe("Webchat API", () => {
         body: JSON.stringify({ text: "look", files }),
       });
     try {
-      expect((await send([file("first"), file("second")])).status).toBe(200);
+      const res = await send([file("first"), file("second")]);
+      expect(res.status).toBe(200);
 
       const [shown] = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      // The answer carries the message as stored, so the sender's row can show
+      // the uploads before any reload.
+      expect(((await res.json()) as { content?: string }).content).toBe(shown.content);
       const links = [
         ...shown.content.matchAll(/\[image\.png\]\(<(\/api\/assets\/[0-9a-f]{32}\.png)>\)/g),
       ];

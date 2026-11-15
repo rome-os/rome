@@ -1959,7 +1959,9 @@ export function Chat({
         turnId: pendingTurnId,
         inputState: createResp.inputState ?? (createResp.inputId ? "queued" : undefined),
         role: "user",
-        content: optimisticUserContent,
+        // The stored message, as a reload shows it: an upload's line links its
+        // asset, which the text built before the POST cannot.
+        content: createResp.content ?? optimisticUserContent,
         createdAt: sentAt,
         sender: viewerSenderRef.current,
       };
