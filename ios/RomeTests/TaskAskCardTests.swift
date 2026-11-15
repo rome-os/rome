@@ -4,12 +4,13 @@ import Testing
 
 private let questionRender = #"{"componentId":"question-card","builtin":true,"props":{"questions":[{"id":"s","question":"Which?","type":"single","options":["A","B"]}]}}"#
 
-private func question(outcome: String? = nil, expired: Bool = false, id: String = "q1") -> String {
-    #"{"kind":"question","id":"\#(id)","messageId":"m","render":\#(questionRender),"since":5,"expired":\#(expired)\#(outcome.map { #","outcome":\#($0)"# } ?? "")}"#
+/// `closed` nil leaves the field out, as a server before it does.
+private func question(outcome: String? = nil, expired: Bool = false, closed: Bool? = nil, id: String = "q1") -> String {
+    #"{"kind":"question","id":"\#(id)","messageId":"m","render":\#(questionRender),"since":5,"expired":\#(expired)\#(closed.map { #","closed":\#($0)"# } ?? "")\#(outcome.map { #","outcome":\#($0)"# } ?? "")}"#
 }
 
-private func approval(outcome: String? = nil, id: String = "ap") -> String {
-    #"{"kind":"approval","id":"\#(id)","title":"Send the mail","actionName":"send","since":7\#(outcome.map { #","outcome":\#($0)"# } ?? "")}"#
+private func approval(outcome: String? = nil, closed: Bool? = nil, id: String = "ap") -> String {
+    #"{"kind":"approval","id":"\#(id)","title":"Send the mail","actionName":"send","since":7\#(closed.map { #","closed":\#($0)"# } ?? "")\#(outcome.map { #","outcome":\#($0)"# } ?? "")}"#
 }
 
 private func card(_ json: String) -> TaskAskCard? {
@@ -22,14 +23,6 @@ private func content(show: String?, card: String?, chat: String = "task-1") -> S
 
 private func message(_ id: String, _ content: String, at seconds: TimeInterval) -> ChatMessage {
     ChatMessage(id: id, sessionId: "concierge", role: "assistant", content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)))
-}
-
-private func task(status: String, waitId: String?, endReason: String? = nil) -> ConciergeTask {
-    var task = ConciergeTask(id: "k", title: "T", state: .needsUser, createdAt: 0, updatedAt: 0)
-    task.status = status
-    task.endReason = endReason
-    task.openWait = waitId.map { .object(["kind": .string("card"), "id": .string($0), "since": .number(5)]) } ?? .null
-    return task
 }
 
 /// What a `task_chat` part's `card` says, and how the app draws from it
@@ -74,54 +67,47 @@ private func task(status: String, waitId: String?, endReason: String? = nil) -> 
         #expect(parts == [.taskChat(chatId: "task-1", title: "T", show: .ask, card: nil)])
     }
 
-    @Test func anExpiredQuestionIsNotWaiting() throws {
+    /// An expired question waits on no one and takes no answer: it folds,
+    /// read only, to why.
+    @Test func anExpiredQuestionIsReadOnly() throws {
         let expired = try #require(card(question(expired: true)))
-        #expect(expired.expired)
-        #expect(TaskAskMode.of(card: expired, latest: true, task: task(status: "ended", waitId: "q1", endReason: "no_response")) == .expired)
+        #expect(expired.expired && !expired.waits)
+        #expect(TaskAskMode.of(card: expired, latest: true) == .expired)
+        #expect(TaskAskMode.expired.foldLine == "Expired: no answer within a day")
     }
 
-    /// Before the task list arrives, the newest card goes by its own word:
-    /// no "No longer waiting" that turns into a form a moment later.
-    @Test func beforeTheTasksArriveACardGoesByItsOwnState() throws {
-        let open = try #require(card(question()))
-        let expired = try #require(card(question(expired: true)))
-        #expect(TaskAskMode.of(card: open, latest: true, task: nil, tasksListed: false) == .waiting)
-        #expect(TaskAskMode.of(card: expired, latest: true, task: nil, tasksListed: false) == .expired)
-        #expect(TaskAskMode.of(card: open, latest: false, task: nil, tasksListed: false) == .open)
+    /// A card whose task ended with it open is read only, newest or not,
+    /// question or approval; a missing `closed` reads as false.
+    @Test func aClosedCardIsReadOnly() throws {
+        for json in [question(closed: true), approval(closed: true)] {
+            let closed = try #require(card(json))
+            #expect(closed.closed && !closed.waits && !closed.settled)
+            #expect(TaskAskMode.of(card: closed, latest: true) == .closed)
+            #expect(TaskAskMode.of(card: closed, latest: false) == .closed)
+        }
+        #expect(TaskAskMode.closed.foldLine == "Closed: the task ended")
+        let older = try #require(card(question()))
+        #expect(!older.closed && older.waits)
+        let reopened = try #require(card(question(closed: false)))
+        #expect(reopened.waits)
+        // An outcome says how it ended, whatever `closed` says.
+        let answered = try #require(card(question(outcome: #"{"kind":"dismissed"}"#, closed: true)))
+        #expect(TaskAskMode.of(card: answered, latest: true) == .settled)
     }
 
-    /// A card that stopped waiting re-reads the page once per task state,
-    /// however often it scrolls back into view.
-    @MainActor @Test func aCardReReadsOncePerChange() async {
-        let backend = FakeBackend()
-        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
-        await store.reload()
-        let before = backend.newestFetches
-        store.recoverCard("q1|active|-")
-        for _ in 0..<50 where backend.newestFetches == before { try? await Task.sleep(for: .milliseconds(10)) }
-        store.recoverCard("q1|active|-")
-        try? await Task.sleep(for: .milliseconds(100))
-        #expect(backend.newestFetches == before + 1)
-        store.recoverCard("q1|ended|-")
-        for _ in 0..<50 where backend.newestFetches == before + 1 { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(backend.newestFetches == before + 2)
-    }
-
-    /// The newest card, with no outcome, of a task that needs the guardian
-    /// and whose open wait is this card, takes the answer.
+    /// Whether a card waits is read from the card alone: no outcome, not
+    /// expired, not closed. Only the newest one takes the answer.
     @Test func theWaitingRule() throws {
         let open = try #require(card(question()))
-        let needs = task(status: "needs_you", waitId: "q1")
-        #expect(TaskAskMode.of(card: open, latest: true, task: needs) == .waiting)
-        #expect(TaskAskMode.of(card: open, latest: false, task: needs) == .open)
-        #expect(TaskAskMode.of(card: open, latest: true, task: task(status: "needs_you", waitId: "other")) == .open)
-        #expect(TaskAskMode.of(card: open, latest: true, task: task(status: "active", waitId: "q1")) == .open)
-        #expect(TaskAskMode.of(card: open, latest: true, task: nil) == .open)
+        #expect(TaskAskMode.of(card: open, latest: true) == .waiting)
+        #expect(TaskAskMode.of(card: open, latest: false) == .open)
+        #expect(TaskAskMode.open.foldLine == "Waiting: answer the card below")
         let answered = try #require(card(question(outcome: #"{"kind":"dismissed"}"#)))
-        #expect(TaskAskMode.of(card: answered, latest: true, task: needs) == .settled)
+        #expect(TaskAskMode.of(card: answered, latest: true) == .settled)
         let approving = try #require(card(approval()))
-        #expect(TaskAskMode.of(card: approving, latest: true, task: task(status: "needs_you", waitId: "ap")) == .waiting)
-        #expect(TaskAskMode.of(card: nil, latest: true, task: needs) == .settled)
+        #expect(TaskAskMode.of(card: approving, latest: true) == .waiting)
+        #expect(TaskAskMode.of(card: nil, latest: true) == .settled)
+        #expect(card(#"{"kind":"unavailable"}"#)?.waits == false)
     }
 
     /// `chat_card_settled` replaces the card of every part with the same kind and id.
@@ -177,6 +163,29 @@ private func task(status: String, waitId: String?, endReason: String? = nil) -> 
               case .approval(let value) = card.kind
         else { Issue.record("no ask row"); return }
         #expect(value.outcome == .approved)
+    }
+
+    /// A task that ends sends `chat_card_settled` with `closed: true` for each
+    /// card still open: the waiting card turns read only at once.
+    @Test func aSettledEventClosesAWaitingCardLive() async throws {
+        let backend = FakeBackend()
+        backend.stored = [message("a", content(show: "ask", card: question()), at: 0)]
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        func shown() -> TaskAskCard? {
+            guard case .taskAsk(_, _, _, let card, _)? = store.rows.first(where: { if case .taskAsk = $0 { return true } else { return false } }) else { return nil }
+            return card
+        }
+        #expect(TaskAskMode.of(card: shown(), latest: true) == .waiting)
+        let closed = try JSONDecoder().decode(JSONValue.self, from: Data(question(closed: true).utf8))
+        backend.bus.emit(LiveTopic.chat("concierge"), .cardSettled(sessionId: "concierge", card: closed))
+        #expect(TaskAskMode.of(card: shown(), latest: true) == .closed)
+        // A task that starts again sets it back.
+        let reopened = try JSONDecoder().decode(JSONValue.self, from: Data(question(closed: false).utf8))
+        backend.bus.emit(LiveTopic.chat("concierge"), .cardSettled(sessionId: "concierge", card: reopened))
+        #expect(TaskAskMode.of(card: shown(), latest: true) == .waiting)
+        store.stop()
     }
 
     /// An answer or a decision shows at once, before the instance announces it.

@@ -75,6 +75,9 @@ enum TranscriptRow: Identifiable, Hashable {
     /// A faint centered line where the chat's agent session was renewed,
     /// with why; `sessionId` is the new session, whose handoff a tap opens.
     case sessionRenewal(id: String, reason: String, sessionId: String?)
+    /// "New messages": above the first message that was unread when the
+    /// Concierge chat opened.
+    case unreadDivider
     case typing
 
     var isSeparatorOrError: Bool {
@@ -91,6 +94,8 @@ enum TranscriptRow: Identifiable, Hashable {
              .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
              .threadLabel(let id, _, _), .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
             return id
+        case .unreadDivider:
+            return "unread-divider"
         case .typing:
             return "typing"
         }
@@ -140,6 +145,8 @@ enum TranscriptBuilder {
         /// session, where the turn they belong to starts.
         var showNotices = false
         var typing = false
+        /// The message the unread line goes above; it ends the run before it.
+        var unreadFrom: String? = nil
     }
 
     static func rows(
@@ -349,6 +356,10 @@ enum TranscriptBuilder {
                 output.append(.separator(id: "sep-\(entry.id)", date: entry.date))
             } else if entry.guardian != previous?.guardian || gap >= groupGap || entry.notice || previous?.notice == true {
                 closeRun()
+            }
+            if entry.id == options.unreadFrom {
+                closeRun()
+                output.append(.unreadDivider)
             }
             for (index, row) in entry.rows.enumerated() {
                 // Cards sit inside an agent run without breaking its corner chain:
