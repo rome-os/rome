@@ -29,6 +29,7 @@ const noSources: LiveEventSources = {
   hasChatSession: async () => false,
   subscribeChatSession: () => () => {},
   subscribeAppCatalog: () => () => {},
+  subscribeConciergeTasks: () => () => {},
   subscribeConciergeActivity: () => () => {},
   hasChatTasks: async () => false,
   subscribeChatTasks: () => () => {},
