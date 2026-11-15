@@ -117,10 +117,63 @@ private let listJSON = #"""
     }
 
     @Test func theLiveEventIsRead() {
-        guard case .taskListChanged(let chat) = LiveEventsSocket.decode(name: "tasks_changed", data: .object(["chatId": .string("c")])) else {
+        guard case .taskListChanged(let chat, let follows) = LiveEventsSocket.decode(name: "tasks_changed", data: .object(["chatId": .string("c")])) else {
             Issue.record("not read"); return
         }
-        #expect(chat == "c" && LiveTopic.chatTasks("c") == "chat.tasks:c")
+        #expect(chat == "c" && !follows && LiveTopic.chatTasks("c") == "chat.tasks:c")
+        guard case .taskListChanged(_, true) = LiveEventsSocket.decode(name: "tasks_changed", data: .object(["chatId": .string("c"), "follows": .bool(true)])) else {
+            Issue.record("follows not read"); return
+        }
+    }
+
+    /// The list says on or off; the connector list only adds unavailable,
+    /// when the follow's service cannot deliver it now, as the web reads it.
+    @Test func aFollowIsUnavailableWhenItsServiceCannotDeliver() throws {
+        let json = #"""
+        {"connectors":[
+         {"service":"github","state":"working","capabilities":{"chat":{"state":"unlocked"},"act":{"state":"unlocked"},"watch":{"state":"unlocked","follows":[{"target":"rome-os/rome","state":"active"},{"target":"rome-os/old","state":"unavailable"}]}}},
+         {"service":"gmail","state":"broken","capabilities":{"watch":{"state":"needs-auth","missingGrants":[]}}},
+         {"service":"slack","state":"working","capabilities":{"watch":{"state":"unlocked","degradation":{"reason":"limit"}}}}
+        ]}
+        """#
+        let body = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        let list = (body["connectors"]?.array ?? []).compactMap(ConnectorState.init(json:))
+        #expect(list.first?.watch == .init(state: "unlocked", degraded: false, follows: ["rome-os/rome": "active", "rome-os/old": "unavailable"]))
+        func follow(_ source: String, _ target: String, _ state: String = "active") -> TaskListItem.Follow {
+            .init(source: source, label: source, target: target, state: state, digestTimes: [])
+        }
+        #expect(ConnectorState.followState(follow("github", "rome-os/rome"), in: list) == "active")
+        #expect(ConnectorState.followState(follow("github", "rome-os/old"), in: list) == "unavailable")
+        #expect(ConnectorState.followState(follow("gmail", "me"), in: list) == "unavailable")
+        #expect(ConnectorState.followState(follow("slack", "#news"), in: list) == "unavailable")
+        // It never turns a follow on or off, and a list not read or not
+        // naming the service leaves the row as the task list says.
+        #expect(ConnectorState.followState(follow("gmail", "me", "off"), in: list) == "off")
+        #expect(ConnectorState.followState(follow("github", "rome-os/rome"), in: nil) == "active")
+        #expect(ConnectorState.followState(follow("linear", "team"), in: list) == "active")
+    }
+
+    /// The tab reads the connector list for its follows, and again when a
+    /// follow changes; the list shows without waiting for it.
+    @Test func theTabReadsTheConnectorsForItsFollows() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try decoded()
+        backend.connectorReads = [[ConnectorState(service: "github", state: "broken", watch: .init(state: "needs-auth"))]]
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        store.open()
+        for _ in 0..<50 where store.connectors == nil { try? await Task.sleep(for: .milliseconds(10)) }
+        guard case .follow(let listed)? = store.groups.first(where: { $0.key == .onItsOwn })?.items.first else { Issue.record("no follow"); return }
+        #expect(listed.state == "active" && store.shown(listed).state == "unavailable")
+        #expect(backend.connectorReadCount == 1)
+        // Another change, with no follow in it, reads the list alone.
+        backend.bus.emit(LiveTopic.chatTasks("concierge"), .taskListChanged(chatId: "concierge"))
+        for _ in 0..<50 where backend.taskListReads < 2 { try? await Task.sleep(for: .milliseconds(10)) }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(backend.connectorReadCount == 1)
+        backend.bus.emit(LiveTopic.chatTasks("concierge"), .taskListChanged(chatId: "concierge", follows: true))
+        for _ in 0..<50 where backend.connectorReadCount < 2 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.connectorReadCount == 2)
+        store.stop()
     }
 
     /// A change on the chat's topic reads the list again.

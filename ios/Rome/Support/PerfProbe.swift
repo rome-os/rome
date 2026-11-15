@@ -184,7 +184,7 @@ extension PerfProbe {
             if let scroll = transcriptScroll() { log.notice("pagingdown to \(scroll.contentOffset.y, privacy: .public) of \(scroll.contentSize.height, privacy: .public)") }
         case "chats":
             // Opens and leaves 24 task chats, for the memory the kept stores take.
-            let chats = (model.workspace?.tasks.tasks.compactMap(\.chat?.id) ?? []) + (0..<24).map { "perf-chat-\($0)" }
+            let chats = (model.workspace.map { Array($0.taskChats.chats.keys) } ?? []) + (0..<24).map { "perf-chat-\($0)" }
             for chatId in chats.prefix(24) {
                 model.debugCommand = .route([.taskChat(chatId: chatId, title: "Task")])
                 try? await Task.sleep(for: .milliseconds(600))

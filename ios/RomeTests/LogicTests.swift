@@ -4,24 +4,6 @@ import Testing
 import UIKit
 @testable import Rome
 
-private func task(_ id: String, _ state: TaskState, updated: Double, completed: Double? = nil, archived: Double? = nil, rank: Double? = nil) -> ConciergeTask {
-    ConciergeTask(
-        id: id, title: id, state: state, summary: nil, waitingOn: nil, dueAt: nil, rank: rank, chat: nil,
-        sourceMessageId: nil, createdAt: updated, updatedAt: updated, completedAt: completed, archivedAt: archived, notSynced: nil
-    )
-}
-
-@Suite struct TaskRowTests {
-    @MainActor @Test func olderUpsertsAreIgnoredAndArchivedRowsLeave() {
-        let store = TasksStore(backend: StubBackend())
-        store.apply(task("x", .doing, updated: 10))
-        store.apply(task("x", .needsUser, updated: 5))
-        #expect(store.tasks.first?.state == .doing)
-        store.apply(task("x", .done, updated: 20, archived: 20))
-        #expect(store.tasks.isEmpty)
-    }
-}
-
 @Suite struct MarkdownTests {
     @Test func parsesBlocks() {
         let blocks = MarkdownParser.parse("""
@@ -267,7 +249,6 @@ final class StubBackend: RomeBackend {
     func sessions() async throws -> [ChatSession] { [] }
     func activeTurns(sessionId: String) async throws -> [ActiveTurn] { [] }
     func interrupt(turnId: String) async throws {}
-    func tasks() async throws -> [ConciergeTask] { [] }
     func approval(id: String) async throws -> ApprovalRecord { .init(id: id, status: "pending") }
     func resolveApproval(id: String, approve: Bool) async throws {}
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }

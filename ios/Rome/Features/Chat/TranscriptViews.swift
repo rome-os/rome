@@ -481,20 +481,20 @@ struct CopyButton: View {
     }
 }
 
-/// A card for a task chat the Concierge started: "Task" + status, then its title.
 /// A task the Concierge started, as a card in the chat: the label and the
-/// title. Its status is left out, since progress is not reported accurately.
+/// title. The label says only what the task chat says live: Working or Needs
+/// you. It has no Stop; Stop is on the Tasks tab's row.
 struct TaskCard: View {
     let title: String
-    /// How the task stands, as "Task chat · <word>"; nil keeps the bare "Task".
+    /// How the task chat stands; nil keeps the bare "Task".
     var state: TaskCardState? = nil
-    var stopping = false
-    var onStop: (() -> Void)? = nil
     let action: () -> Void
 
     /// The line above the title.
     private var label: String {
-        state.map { String(localized: "Task chat · \($0.word)") } ?? String(localized: "Task")
+        guard let state else { return String(localized: "Task") }
+        guard let word = state.word else { return String(localized: "Task chat") }
+        return String(localized: "Task chat · \(word)")
     }
 
     var body: some View {
@@ -511,8 +511,6 @@ struct TaskCard: View {
                         .multilineTextAlignment(.leading)
                 }
             }
-            // Room for Stop on the right.
-            .padding(.trailing, state?.stoppable == true ? 58 : 0)
             // One width whatever the state line says, so a state change never moves the card's edge.
             .fillsBubbleWidth()
             .cardPadding()
@@ -521,23 +519,6 @@ struct TaskCard: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .overlay(alignment: .trailing) {
-            // On the right of the card, beside its own tap, so a press on Stop
-            // never opens the chat. A quiet button, not a row of its own.
-            if state?.stoppable == true, let onStop {
-                Button(action: onStop) {
-                    Text(stopping ? "Stopping…" : "Stop")
-                        .romeFont(12, .semibold)
-                        .foregroundStyle(Palette.sub)
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                        .background(Palette.fill, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(stopping)
-                .padding(.trailing, 12)
-            }
-        }
         .bubbleWidth()
         .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
     }

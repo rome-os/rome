@@ -952,17 +952,6 @@ final class TranscriptStore {
         messages.first { $0.id == id }
     }
 
-    /// Card states a re-read was asked for already (`TaskAskView`).
-    @ObservationIgnored private var recoveredCards: Set<String> = []
-
-    /// A card stopped waiting with no outcome held: `chat_card_settled` may
-    /// have been missed, so the page is read again, once per card state, however
-    /// often the card scrolls back into view.
-    func recoverCard(_ key: String) {
-        guard recoveredCards.insert(key).inserted else { return }
-        resync()
-    }
-
     /// Reloads after events may have been missed. A burst of requests (one per
     /// topic, a resume and a push tap) shares one reload, plus one more for
     /// requests that came while it ran.
@@ -1263,9 +1252,6 @@ final class TranscriptStore {
     }
 
     /// Shows `text` for a few seconds.
-    /// A Stop on a task card did not go through.
-    func stopTaskFailed() { say(String(localized: "Couldn't stop. Try again")) }
-
     private func say(_ text: String) {
         notice = text
         noticeWork?.cancel()

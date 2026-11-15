@@ -8,7 +8,7 @@ import SwiftUI
 struct ThreadOverlay: View {
     let thread: ThreadStore
     let chat: TranscriptStore
-    let tasks: TasksStore
+    let tasks: TaskChatsStore
     /// The chat's name and status, as its header shows them.
     let name: String
     /// Read by the header copy, so a status change redraws it alone.
