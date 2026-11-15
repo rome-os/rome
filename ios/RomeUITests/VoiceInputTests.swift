@@ -150,12 +150,16 @@ final class VoiceInputTests: XCTestCase {
         measure(metrics: [startListening], options: options) {
             index += 1
             XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 30), "\(field): not idle before start \(index)")
-            XCTAssertTrue(tapUntil(control, ["Stop voice input"]), "\(field): start \(index) never showed listening")
+            if !tapUntil(control, ["Stop voice input"]) {
+                printScreen(app, "\(field): start \(index) never showed listening")
+                XCTFail("\(field): start \(index) never showed listening")
+            }
             stopMeasuring()
             XCTAssertTrue(control.isSelected, "\(field): listening has no selected trait")
-            XCTAssertTrue(
-                tapUntil(control, ["Finishing voice input", "Start voice input"]),
-                "\(field): stop \(index) never showed finishing or idle")
+            if !tapUntil(control, ["Finishing voice input", "Start voice input"]) {
+                printScreen(app, "\(field): stop \(index) never showed finishing or idle")
+                XCTFail("\(field): stop \(index) never showed finishing or idle")
+            }
         }
     }
 
