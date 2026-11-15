@@ -1,8 +1,7 @@
-// Fake ports for the voice input behavior tests.
+// Fake ports for the voice input tests.
 
 import type { Dictation, DictationHandlers } from "@/lib/voice-input/dictation";
-import type { PageEvents } from "./field-presence";
-import type { TextEditor } from "./spoken-insertion";
+import type { PageEvents, TextEditor } from "./voice-input";
 
 /** A field held in memory. `focusable` false stands in for a hidden field. */
 export function fakeEditor(value = "", start = value.length, end = start) {

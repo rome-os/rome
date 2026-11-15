@@ -204,6 +204,9 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
       window.dispatchEvent(new Event("pagehide"));
     });
     expect(microphone.closed).toBe(1);
+    // A page restored from the back/forward cache takes the guardian's edits again.
+    expect(first.field().readOnly).toBe(false);
+    expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
     first.leave();
 
     const back = renderComposer(kind, SONIOX, "chat-a");

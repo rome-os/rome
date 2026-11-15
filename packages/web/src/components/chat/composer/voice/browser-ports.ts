@@ -1,10 +1,9 @@
-// The browser side of the voice input ports. Not behaviors: these reach the
-// DOM and React directly, so the behaviors do not have to.
+// The browser side of the voice input ports. These reach the DOM and React
+// directly, so the controller does not have to.
 
 import type { RefObject } from "react";
 import { flushSync } from "react-dom";
-import type { PageEvents } from "./field-presence";
-import type { TextEditor } from "./spoken-insertion";
+import type { PageEvents, TextEditor } from "./voice-input";
 
 /** A controlled textarea as a `TextEditor`. `value` and `setValue` are the field's React state. */
 export function textareaEditor(

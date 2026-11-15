@@ -1,6 +1,4 @@
-import { type RefObject, useEffect, useRef, useState } from "react";
-import { useStore } from "zustand";
-import { createStore } from "zustand/vanilla";
+import { type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
 import { shellAllowsMicrophone } from "@/lib/electron-shell";
 import {
@@ -9,22 +7,19 @@ import {
   startDictation,
 } from "@/lib/voice-input/dictation";
 import { textareaEditor, windowPage } from "./voice/browser-ports";
-import { createVoiceField, type VoiceField, type VoiceFieldState } from "./voice/voice-field";
+import { createVoiceInput, type VoiceInput, type VoiceInputView } from "./voice/voice-input";
 
-export type { VoiceInputState } from "./voice/listening";
 export { spokenInsertion } from "./voice/spoken-insertion";
+export type { VoiceInputState } from "./voice/voice-input";
+
+const IDLE: VoiceInputView = { phase: "idle", asking: false };
 
 /**
- * Dictation into a composer's textarea. While listening, the heard text shows
- * at the cursor and the field is read-only. When listening ends the text is
- * inserted the way typing inserts it, as one edit, so one undo removes it and
- * the field's change handler sees it as typed text.
- *
- * Why listening stopped on its own is the notice, which the caller keeps with
- * the field's draft. It goes away on the next edit or send. Leaving the chat
- * or the page while listening ends it, and `keepNotice` saves why at once,
- * since the field may be going away. `shown` false, as when a card locks the
- * field, stops listening as the stop control does.
+ * Dictation into a composer's textarea: `createVoiceInput` on the field's
+ * React state. While listening the field is read-only and sending waits.
+ * `notice` lives with the caller's draft, and `keepNotice` saves it at once
+ * when the field goes away mid-dictation. `shown` false, as when a card locks
+ * the field, stops listening as the stop control does.
  */
 export function useVoiceInput(props: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -38,17 +33,13 @@ export function useVoiceInput(props: {
 }) {
   const { textareaRef, notice, shown = true } = props;
   const info = useVoiceInputInfo();
-  const [store] = useState(() =>
-    createStore<VoiceFieldState>(() => ({ phase: "idle", asking: false })),
-  );
-  const { phase, asking } = useStore(store);
-  // The ports read the latest props, so the behaviors outlive each render.
+  // The ports read the latest props, so the controller outlives each render.
   const latest = useRef(props);
   latest.current = props;
-  const fieldRef = useRef<VoiceField | null>(null);
+  const [voice, setVoice] = useState<VoiceInput | null>(null);
 
   useEffect(() => {
-    const field = createVoiceField(store, {
+    const created = createVoiceInput({
       editor: textareaEditor(
         textareaRef,
         () => latest.current.value,
@@ -61,22 +52,26 @@ export function useVoiceInput(props: {
       },
       page: windowPage,
     });
-    fieldRef.current = field;
-    return () => {
-      fieldRef.current = null;
-      field.destroy();
-    };
-  }, [store, textareaRef]);
+    setVoice(created);
+    return created.destroy;
+  }, [textareaRef]);
 
   useEffect(() => {
-    fieldRef.current?.presence.shown(shown);
-  }, [shown]);
+    voice?.shown(shown);
+  }, [voice, shown]);
 
+  const { phase, asking } = useSyncExternalStore(
+    voice?.subscribe ?? noSubscribe,
+    voice?.view ?? idleView,
+  );
+  // Stable across renders, as callers list them in effect dependencies.
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
   const [api] = useState(() => ({
-    start: () => fieldRef.current?.listening.start(),
-    stop: () => fieldRef.current?.listening.stop(),
-    dismissNotice: () => fieldRef.current?.notice.clear(),
-    noticeEdited: () => fieldRef.current?.notice.edited(),
+    start: () => voiceRef.current?.start(),
+    stop: () => voiceRef.current?.stop(),
+    dismissNotice: () => voiceRef.current?.dismissNotice(),
+    noticeEdited: () => voiceRef.current?.noticeEdited(),
   }));
 
   return {
@@ -102,3 +97,6 @@ export function useVoiceInput(props: {
     stop: api.stop,
   };
 }
+
+const noSubscribe = () => () => {};
+const idleView = () => IDLE;
