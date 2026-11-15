@@ -4,6 +4,29 @@ import Foundation
 /// instance is signed in to Rome Cloud and Rome Cloud allows the account.
 struct VoiceInputInfo: Decodable, Equatable, Sendable {
     var available: Bool
+    /// Where speech becomes text; nil while Rome cannot name it, or from an
+    /// instance older than the field.
+    var place: Place? = nil
+    /// Why `place` is nil: `rome-cloud-unreachable`, `rome-cloud-not-configured`
+    /// or `rome-cloud-signed-out`.
+    var placeUnknown: String? = nil
+
+    struct Place: Decodable, Equatable, Sendable {
+        /// The provider's name, such as "Soniox".
+        var provider: String
+        /// The host Rome sends the audio to.
+        var host: String
+    }
+
+    /// What Settings says about where speech goes.
+    var placeText: String {
+        if let place { return "\(place.provider) · \(place.host)" }
+        switch placeUnknown {
+        case "rome-cloud-not-configured": return String(localized: "Not set up in Rome Cloud")
+        case "rome-cloud-signed-out": return String(localized: "Sign in to Rome Cloud again")
+        default: return String(localized: "Rome Cloud can't be reached")
+        }
+    }
 }
 
 /// Why listening stopped without the guardian's stop action. The raw values
