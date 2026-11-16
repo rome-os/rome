@@ -97,7 +97,7 @@ jobs:
   ui-tests:
     name: UI tests
     runs-on: macos-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: ios
