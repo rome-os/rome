@@ -96,7 +96,7 @@ final class VoiceInputTests: XCTestCase {
         emptyTheField(app, "rules 2 and 3")
         let empty = fieldText(field)
         control.tap()
-        let shown = expectation(for: NSPredicate(format: "value != %@", empty), evaluatedWith: field)
+        let shown = expectation(for: NSPredicate(format: "value != nil AND value != %@", empty), evaluatedWith: field)
         wait(for: [shown], timeout: 15)
         // The recording may end, and listening with it, before the guardian stops.
         if control.label == "Stop voice input" { control.tap() }
