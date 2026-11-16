@@ -12,7 +12,12 @@ import { SenderLabels } from "../chats/sender-labels.js";
 import type { SaidMessage } from "../chats/storage/message.js";
 import type { RunLineDeps } from "../connections/speaker-messages.js";
 import type { AgentDefinition } from "../agent/index.js";
-import { claudeStoppedTurnResult, readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import {
+  claudeStoppedTurnResult,
+  INSTRUCTIONS_CHANGED_NOTICE,
+  readAnswerShape,
+  romeSessionTracing,
+} from "../agent/index.js";
 import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../webchat/privacy.js";
@@ -3318,6 +3323,7 @@ describe("AgentRunner", () => {
         find: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
         turn: rs.fn(),
+        refreshPrompts: () => {},
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -3373,6 +3379,7 @@ describe("AgentRunner", () => {
         find: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
         turn: rs.fn(),
+        refreshPrompts: () => {},
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -3533,7 +3540,6 @@ describe("AgentRunner", () => {
         const sources: PromptSources = {
           material: () => ({
             charter: charter.text,
-            identity: identity.text,
             runtime: {
               profileDir: "/profile",
               profileMemoryDir: "/profile/memory",
@@ -3548,6 +3554,8 @@ describe("AgentRunner", () => {
           }),
           // Memory is not part of the setup.
           memory: () => ({ index: `Memory read at ${Math.random()}`, projects: [] }),
+          // Nor is the identity.
+          identity: () => identity.text,
           onChanged: () => {},
         };
         const manager = createSessions(
@@ -3583,6 +3591,17 @@ describe("AgentRunner", () => {
         inputSchema: { type: "object", properties: { text: { type: "string" } } },
         handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
       });
+
+      /**
+       * Records on the chat's current session a setup fingerprinted before
+       * setups had parts, so its next cold open cannot tell what changed and
+       * renews it with a handoff, as after a change of every part.
+       */
+      async function staleSetup() {
+        const row = (await sessionRepository.current(key, "core:test-renewing"))!;
+        row.ranOnSetup("0".repeat(64));
+        await sessionRepository.save(row);
+      }
 
       const managerOf = new WeakMap<AgentRunner, Sessions>();
       /** Closes the chat's live session, as its idle eviction does, so the
@@ -3631,7 +3650,7 @@ describe("AgentRunner", () => {
 
         expect(second).toBe(first);
         expect((await sessionRepository.current(key, "core:test-renewing"))?.setup).toMatch(
-          /^[0-9a-f]{64}$/,
+          /^v2:[0-9a-f]{64}:[0-9a-f]{64}$/,
         );
       });
 
@@ -3734,7 +3753,7 @@ describe("AgentRunner", () => {
         const declared = definition.mcpServers;
         try {
           definition.mcpServers = { notes: { command: "node", args: ["notes.js"] } };
-          const runner = renewingRunner(new MockModelProvider(replies(4)));
+          const runner = renewingRunner(threadedProvider(4, { keepsThreadTools: true }));
           const first = await turn(runner);
           const unchanged = await turn(runner);
           definition.mcpServers = { notes: { command: "node", args: ["notes.js", "--v2"] } };
@@ -3783,7 +3802,7 @@ describe("AgentRunner", () => {
               properties: { answer: { type: "string" } },
             }),
         ],
-      ])("renews on %s, and the fresh backend opens with it", async (_change, change, check) => {
+      ])("renews on %s where the provider keeps a thread's tools, and the fresh backend opens with it", async (_change, change, check) => {
         // A reload gives the agent a new definition; the open-time one stays as it was.
         const agent = agentLoader.find("test-renewing")! as { definition: AgentDefinition };
         const original = agent.definition;
@@ -3794,7 +3813,7 @@ describe("AgentRunner", () => {
             networkDiscovery: true,
             mcpServers: { notes: { command: "node", args: ["notes.js"] } },
           };
-          const provider = new MockModelProvider(replies(2));
+          const provider = threadedProvider(2, { keepsThreadTools: true });
           provider.builtinTools = new Set(["Bash"]);
           const runner = renewingRunner(provider, undefined, {
             networkMcpServers: () => ({ found: { command: "found", args: [] } }),
@@ -3808,7 +3827,7 @@ describe("AgentRunner", () => {
 
           expect(renewed).not.toBe(first);
           const setupAfter = (await sessionRepository.session(renewed!))?.setup;
-          expect(setupAfter).toMatch(/^[0-9a-f]{64}$/);
+          expect(setupAfter).toMatch(/^v2:[0-9a-f]{64}:[0-9a-f]{64}$/);
           expect(setupAfter).not.toBe(setupBefore);
           expect(provider.sessions).toHaveLength(2);
           check(provider.sessions[1]!);
@@ -3833,7 +3852,7 @@ describe("AgentRunner", () => {
         };
         const runner = renewingRunner(provider);
         const first = await turn(runner);
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
         failNext = true;
 
         await evict(runner);
@@ -3869,7 +3888,7 @@ describe("AgentRunner", () => {
               workingDir: folder,
             }),
           );
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           const renewed = await turn(runner);
           expect((await sessionRepository.session(renewed!))?.workingDir).toBe(folder);
 
@@ -3895,42 +3914,78 @@ describe("AgentRunner", () => {
         expect([afterInstall, afterAddress]).toEqual([first, first]);
       });
 
+      it("resumes the same thread after a rename, with the new name in its prompt and no notice", async () => {
+        const provider = threadedProvider(2);
+        const runner = renewingRunner(provider);
+        const first = await turn(runner);
+        identity.text = "**Agent Name:** YoYo";
+        const second = await turn(runner);
+
+        expect(second).toBe(first);
+        expect(provider.sessions[1]?.thread).toEqual({ kind: "resume", modelThreadId: "thread-1" });
+        expect(provider.sessions[1]?.config.systemPrompt).toContain("**Agent Name:** YoYo");
+        expect(provider.calls[1]?.prompt).not.toContain("<instructions_changed>");
+        expect(provider.calls[1]?.prompt).not.toContain("<continuation>");
+      });
+
+      it("closes a live session once it is quiet after a rename, so its next turn reads the new name", async () => {
+        const provider = threadedProvider(2);
+        const runner = renewingRunner(provider);
+        const first = await turn(runner);
+        identity.text = "**Agent Name:** YoYo";
+        managerOf.get(runner)!.refreshPrompts();
+        const second = await turn(runner, { live: true });
+
+        expect(second).toBe(first);
+        expect(provider.sessions).toHaveLength(2);
+        expect(provider.sessions[1]?.config.systemPrompt).toContain("**Agent Name:** YoYo");
+      });
+
       it.each([
-        ["a rename", () => (identity.text = "**Agent Name:** YoYo")],
         ["a tool change", () => (sessionTools = [tool("Send one message, in a thread.")])],
         [
           "a new tool",
           () => (sessionTools = [tool("Send one message."), { ...tool("x"), name: "x" }]),
         ],
-      ])("starts a fresh session in the same chat after %s", async (_change, change) => {
-        const provider = new MockModelProvider(replies(2));
+      ])("resumes the same thread after %s where the provider's resume takes the tools", async (_change, change) => {
+        const provider = threadedProvider(3);
         const runner = renewingRunner(provider);
         const first = await turn(runner);
+        const setupBefore = (await sessionRepository.session(first!))?.setup;
         change();
         const second = await turn(runner);
 
-        expect(second).not.toBe(first);
-        expect((await sessionRepository.session(first!))?.status).toBe("completed");
-        expect(await sessionRepository.current(key, "core:test-renewing")).toMatchObject({
-          id: second,
-          status: "active",
-        });
-        // The fresh session continues the chat, so it reads the earlier messages.
-        expect(provider.calls[1]?.prompt).toContain("<continuation>");
-        expect(provider.calls[0]?.prompt).not.toContain("<continuation>");
+        expect(second).toBe(first);
+        expect(provider.sessions[1]?.thread).toEqual({ kind: "resume", modelThreadId: "thread-1" });
+        expect(toolNames(provider.sessions[1]!.tools, "ask_user")).toEqual(
+          expect.arrayContaining(sessionTools.map((tool) => tool.name)),
+        );
+        expect(provider.calls[1]?.prompt).not.toContain("<instructions_changed>");
+        // Recorded once the turn on it succeeded, so the next cold open keeps it.
+        expect((await sessionRepository.session(first!))?.setup).not.toBe(setupBefore);
+        expect(await turn(runner)).toBe(first);
       });
 
       /** A provider whose every open names a thread of its own, as real ones do. */
-      function threadedProvider(count: number) {
+      function threadedProvider(count: number, options: { keepsThreadTools?: boolean } = {}) {
         const provider = new MockModelProvider(replies(count));
+        Object.assign(provider, { keepsThreadTools: options.keepsThreadTools });
         const open = provider.openSession.bind(provider);
-        provider.openSession = async (params) =>
-          Object.assign(await open(params), {
+        provider.openSession = async (params) => {
+          // A branch runs on a thread of its own, as a fork does.
+          const opened =
+            params.thread.kind === "branch"
+              ? await open({ ...params, thread: { kind: "new" } })
+              : await open(params);
+          if (params.thread.kind === "branch")
+            provider.sessions[provider.sessions.length - 1] = params;
+          return Object.assign(opened, {
             modelThreadId:
               params.thread.kind === "resume"
                 ? params.thread.modelThreadId
                 : `thread-${provider.sessions.length}`,
           });
+        };
         return provider;
       }
 
@@ -3948,7 +4003,7 @@ describe("AgentRunner", () => {
           return start?.type === "turn_start" ? start.sessionId : undefined;
         };
         const first = await run();
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
         const renewed = await run();
         const after = await run();
 
@@ -3982,7 +4037,7 @@ describe("AgentRunner", () => {
         await evict(runner);
         await say("Home", "four");
         // A setup change starts a new thread, which reads it from its first input.
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
         await evict(runner);
         await say("Home", "five");
 
@@ -4213,7 +4268,7 @@ describe("AgentRunner", () => {
           };
           const runner = renewingRunner(provider, undefined, { handoffs, turnLifecycle });
           await coldTurn(runner);
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           const renewedEvents = await coldTurn(runner);
           // Two messages, two turns: the handoff turn is none of them.
           expect(lifecycle).toEqual({ started: 2, ended: 2, couldNotStart: 0 });
@@ -4277,7 +4332,7 @@ describe("AgentRunner", () => {
           const { handoffs, asked } = fakeHandoffs({ timeoutMs: 20 });
           const runner = renewingRunner(provider, undefined, { handoffs });
           await coldTurn(runner);
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           await coldTurn(runner);
 
           expect(asked.fallback).toBe(1);
@@ -4293,7 +4348,7 @@ describe("AgentRunner", () => {
           const { handoffs, asked } = fakeHandoffs({ fallback: async () => null });
           const runner = renewingRunner(provider, undefined, { handoffs });
           const first = await coldTurn(runner);
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           await coldTurn(runner);
 
           const renewed = await sessionRepository.current(key, "core:test-renewing");
@@ -4301,20 +4356,23 @@ describe("AgentRunner", () => {
             first.find((event) => event.type === "turn_start")?.sessionId,
           );
           expect(renewed?.handoff).toBeNull();
-          expect(asked.context).toBe(0);
+          // The successor still reads the chat's open tasks and recent messages.
+          expect(asked.context).toBe(1);
           expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
           expect(provider.calls.at(-1)?.prompt).not.toContain("<handoff>");
+          expect(provider.calls.at(-1)?.prompt).toContain("Guardian: Friday at 7 then");
         });
 
         /** Lets a turn end's background renewal run, as a guardian's pause would. */
         const settleRenewal = () => new Promise((resolve) => setTimeout(resolve, 100));
 
-        /** A result whose last model request read `usedTokens` of context. */
-        const fullResult = (usedTokens: number, content = "ok") =>
+        /** A result whose last model request read `usedTokens` of context, at checkpoint `checkpointId` of thread-1. */
+        const fullResult = (usedTokens: number, content = "ok", checkpointId = "c-1") =>
           [
             {
               type: "result" as const,
               content,
+              position: { provider: "mock", modelThreadId: "thread-1", checkpointId },
               accounting: {
                 provider: "mock",
                 model: "mock",
@@ -4328,7 +4386,7 @@ describe("AgentRunner", () => {
                 costUsd: 0,
               },
             },
-          ] as AgentEvent[];
+          ] as unknown as AgentEvent[];
 
         it("renews a session whose turn ended past the context limit, with a handoff, before the next message", async () => {
           const provider = threadedProvider(4);
@@ -4354,13 +4412,19 @@ describe("AgentRunner", () => {
             reason: "context",
             sessionId: renewed?.id,
           });
+          // The handoff turn ran on a branch of the live thread, at its latest turn.
           expect(provider.sessions.map((params) => params.thread)).toEqual([
             { kind: "new" },
-            { kind: "resume", modelThreadId: "thread-1" },
+            {
+              kind: "branch",
+              at: { provider: "mock", modelThreadId: "thread-1", checkpointId: "c-1" },
+              lifetime: "ephemeral",
+            },
             { kind: "new" },
           ]);
           expect(provider.calls[2]?.prompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
-          expect(asked.tidying).toHaveLength(1);
+          // Written in the background: the chat never said it was tidying up.
+          expect(asked.tidying).toEqual([]);
         });
 
         it("does not renew again a successor no turn ran on when the setup changes: it takes the new setup and keeps its handoff", async () => {
@@ -4378,7 +4442,7 @@ describe("AgentRunner", () => {
           expect(successor?.modelThreadId).toBeNull();
           const setupBefore = successor?.setup;
 
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           const events = await collectMessages(
             runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
           );
@@ -4387,7 +4451,7 @@ describe("AgentRunner", () => {
 
           expect(after?.id).toBe(successor?.id);
           expect(after?.handoff).toBe(HANDOFF);
-          expect(after?.setup).not.toBe(setupBefore);
+          expect(after?.setup).toBe(setupBefore);
           expect(asked.fallback).toBe(0);
           // One handoff turn in all: the retired thread was asked once.
           expect(
@@ -4415,7 +4479,7 @@ describe("AgentRunner", () => {
           const { handoffs } = fakeHandoffs();
           const runner = renewingRunner(provider, undefined, { handoffs });
           await coldTurn(runner);
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           failFresh = true;
           await evict(runner);
           await expect(
@@ -4447,6 +4511,131 @@ describe("AgentRunner", () => {
           expect((await sessionRepository.session(first!))?.supersededFor).toBe("context");
         });
 
+        it("opens a fresh session with the recent messages, and no handoff turn, after a tool change where the provider keeps a thread's tools", async () => {
+          const provider = threadedProvider(3, { keepsThreadTools: true });
+          const { handoffs, asked } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner);
+          sessionTools = [tool("Send one message, in a thread.")];
+          const second = await turn(runner);
+
+          expect(second).not.toBe(first);
+          expect((await sessionRepository.session(first!))?.supersededFor).toBe("setup");
+          expect((await sessionRepository.session(second!))?.handoff).toBeNull();
+          expect(provider.sessions.map((params) => params.thread)).toEqual([
+            { kind: "new" },
+            { kind: "new" },
+          ]);
+          expect(provider.calls.some((call) => call.prompt.includes("<handoff_request>"))).toBe(
+            false,
+          );
+          expect(asked).toEqual({ tidying: [], fallback: 0, context: 1 });
+          const prompt = provider.calls[1]?.prompt ?? "";
+          expect(prompt).toContain("<continuation>");
+          expect(prompt).not.toContain("<handoff>");
+          expect(prompt).toContain("<open_tasks>\n- t-1 · Book dinner · active");
+          expect(prompt).toContain("Guardian: Friday at 7 then");
+        });
+
+        /**
+         * The handoff turns a provider runs on branches, each answering with
+         * the handoff only once released, and ending without one when
+         * interrupted first.
+         */
+        function gatedBranches(provider: MockModelProvider) {
+          const branches: {
+            params: ModelSessionParams;
+            release: () => void;
+            interrupted: boolean;
+          }[] = [];
+          const open = provider.openSession.bind(provider);
+          provider.openSession = async (params) => {
+            if (params.thread.kind !== "branch") return open(params);
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            const branch = { params, release, interrupted: false };
+            branches.push(branch);
+            return {
+              providerId: "mock",
+              model: params.config.model,
+              events: (async function* () {
+                await gate;
+                if (!branch.interrupted) yield { type: "result", content: HANDOFF };
+              })(),
+              sendUserInput: async () => {},
+              interrupt: async () => {
+                branch.interrupted = true;
+                release();
+              },
+              close: async () => release(),
+            } as unknown as ModelSession;
+          };
+          return branches;
+        }
+
+        it("answers a message that comes while the handoff is written with the live session, and writes the handoff again after that turn", async () => {
+          const provider = threadedProvider(3);
+          provider["responses"][0] = fullResult(900);
+          provider["responses"][1] = fullResult(950, "answered", "c-2");
+          const branches = gatedBranches(provider);
+          const { handoffs, asked } = fakeHandoffs({
+            contextLimitTokens: 500,
+            hardContextLimitTokens: 2_000,
+          });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          await rs.waitFor(() => expect(branches).toHaveLength(1));
+
+          // At once, on the retired session: the handoff is dropped as stale.
+          expect(await turn(runner, { live: true })).toBe(first);
+          expect(branches[0]!.interrupted).toBe(true);
+          expect(
+            provider.sessions.filter((params) => params.thread.kind !== "branch"),
+          ).toHaveLength(1);
+
+          // That turn ended past the limit too, so the handoff is written again, at its end.
+          await rs.waitFor(() => expect(branches).toHaveLength(2));
+          expect(branches[1]!.params.thread).toMatchObject({
+            kind: "branch",
+            at: { checkpointId: "c-2" },
+          });
+          branches[1]!.release();
+          await rs.waitFor(async () =>
+            expect((await sessionRepository.session(first!))?.supersededFor).toBe("context"),
+          );
+          expect((await sessionRepository.current(key, "core:test-renewing"))?.handoff).toBe(
+            HANDOFF,
+          );
+          expect(asked.tidying).toEqual([]);
+          expect(asked.fallback).toBe(0);
+        });
+
+        it("makes a message wait for the renewal only when the context is past the hard limit", async () => {
+          const provider = threadedProvider(3);
+          provider["responses"][0] = fullResult(900);
+          const branches = gatedBranches(provider);
+          const { handoffs, asked } = fakeHandoffs({
+            contextLimitTokens: 500,
+            hardContextLimitTokens: 800,
+          });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          await rs.waitFor(() => expect(branches).toHaveLength(1));
+
+          const waiting = turn(runner, { live: true });
+          // It waits under the chat's tidying activity, and the handoff goes on.
+          await rs.waitFor(() => expect(asked.tidying).toHaveLength(1));
+          expect(branches[0]!.interrupted).toBe(false);
+          branches[0]!.release();
+          const second = await waiting;
+
+          expect(second).not.toBe(first);
+          expect((await sessionRepository.session(first!))?.supersededFor).toBe("context");
+          expect(provider.calls[1]?.prompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
+        });
+
         it("keeps a session under the limit, or one an approval holds", async () => {
           const provider = threadedProvider(4);
           provider["responses"][0] = fullResult(400);
@@ -4467,7 +4656,7 @@ describe("AgentRunner", () => {
           const { handoffs, asked } = fakeHandoffs();
           const runner = renewingRunner(provider, undefined, { handoffs });
           await coldTurn(runner);
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           await coldTurn(runner);
 
           expect(provider.sessions.map((params) => params.thread.kind)).toEqual(["new", "new"]);
@@ -4476,26 +4665,47 @@ describe("AgentRunner", () => {
         });
       });
 
-      it("starts a fresh session after an instruction change", async () => {
-        const provider = new MockModelProvider(replies(2));
+      it("resumes the same thread after an instruction change, with the notice on its next turn only", async () => {
+        const provider = threadedProvider(3);
         const runner = renewingRunner(provider);
         const first = await turn(runner);
         const before = provider.sessions[0]?.config.systemPrompt;
         charter.text = "Be kind. Always answer in one line.";
         const second = await turn(runner);
+        const third = await turn(runner);
 
-        expect(second).not.toBe(first);
-        expect(provider.sessions.at(-1)?.config.systemPrompt).not.toBe(before);
-        expect(provider.sessions.at(-1)?.config.systemPrompt).toContain(
-          "Always answer in one line.",
-        );
+        expect([second, third]).toEqual([first, first]);
+        expect(provider.sessions.map((params) => params.thread)).toEqual([
+          { kind: "new" },
+          { kind: "resume", modelThreadId: "thread-1" },
+          { kind: "resume", modelThreadId: "thread-1" },
+        ]);
+        expect(provider.sessions[1]?.config.systemPrompt).not.toBe(before);
+        expect(provider.sessions[1]?.config.systemPrompt).toContain("Always answer in one line.");
+        expect(provider.calls[1]?.prompt.startsWith(INSTRUCTIONS_CHANGED_NOTICE)).toBe(true);
+        expect(provider.calls[1]?.prompt).not.toContain("<continuation>");
+        expect(provider.calls[2]?.prompt).not.toContain("<instructions_changed>");
+      });
+
+      it("keeps the notice for the next turn when the first turn after an instruction change fails", async () => {
+        const provider = threadedProvider(3);
+        provider["responses"][1] = [{ type: "error", error: "provider failed" }];
+        const runner = renewingRunner(provider);
+        const first = await turn(runner);
+        charter.text = "Be kind. Always answer in one line.";
+        await turn(runner);
+        await turn(runner);
+
+        expect((await sessionRepository.current(key, "core:test-renewing"))?.id).toBe(first);
+        expect(provider.calls[1]?.prompt).toContain("<instructions_changed>");
+        expect(provider.calls[2]?.prompt).toContain("<instructions_changed>");
       });
 
       it("resumes the session a wake names as it is, and the next cold open by the chat renews it", async () => {
         const provider = new MockModelProvider(replies(3));
         const runner = renewingRunner(provider);
         const first = await turn(runner);
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
         const woken = await turn(runner, { sessionId: first });
         const next = await turn(runner);
 
@@ -4507,7 +4717,7 @@ describe("AgentRunner", () => {
       it("routes a wake-up for a session a renewal replaced to the chat's current session", async () => {
         const runner = renewingRunner(new MockModelProvider(replies(3)));
         const scheduledFrom = await turn(runner);
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
         const current = await turn(runner);
 
         const woken = await turn(runner, { sessionId: scheduledFrom });
@@ -4541,7 +4751,7 @@ describe("AgentRunner", () => {
         const runner = renewingRunner(provider);
         const deferredFrom = await turn(runner);
         const wake = await deferredWake(deferredFrom!, "webchat", "renewing-chat");
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
         const current = await turn(runner);
 
         const woken = await collectMessages(
@@ -4563,6 +4773,7 @@ describe("AgentRunner", () => {
         const runner = renewingRunner(provider);
         const first = await turn(runner);
         identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
 
         // Live, between turns: the session keeps running as it opened.
         const live = await turn(runner, { live: true });
@@ -4591,7 +4802,7 @@ describe("AgentRunner", () => {
         };
         const runner = renewingRunner(provider);
         const first = await turn(runner);
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
 
         const [incoming, woken] = await Promise.all([
           turn(runner),
@@ -4625,7 +4836,7 @@ describe("AgentRunner", () => {
           const runner = renewingRunner(new MockModelProvider(replies(3)));
           const first = (await run(runner)).sessionId;
           const wake = run(runner, { sessionId: first });
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           const incoming = run(runner);
 
           const [woken, sent] = await Promise.all([wake, incoming]);
@@ -4654,7 +4865,7 @@ describe("AgentRunner", () => {
             | { isQuiescentForRotation: boolean }
             | undefined;
           await rs.waitFor(() => expect(live?.isQuiescentForRotation).toBe(true));
-          identity.text = "**Agent Name:** YoYo";
+          await staleSetup();
           await evict(runner);
 
           expect((await run(runner)).sessionId).not.toBe(first);
@@ -4664,7 +4875,7 @@ describe("AgentRunner", () => {
       it("an approval hold blocks a cold renewal, and the next cold open once it clears renews", async () => {
         const runner = renewingRunner(new MockModelProvider(replies(3)));
         const first = await turn(runner);
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
         held.add(first!);
 
         const whileHeld = await turn(runner);
@@ -4694,7 +4905,7 @@ describe("AgentRunner", () => {
         expect(await turn(runner)).toBe(first);
         expect(provider.sessions.at(-1)?.config.model).toBe("tier-model-1");
 
-        identity.text = "**Agent Name:** YoYo";
+        await staleSetup();
         const renewed = await turn(runner);
         expect(renewed).not.toBe(first);
         expect(provider.sessions.at(-1)?.config.model).toBe("tier-model-2");

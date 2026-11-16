@@ -82,7 +82,6 @@ export function createPromptSources(options: {
       const emailAddress = options.emailAddress?.()?.trim();
       return {
         charter: readFileGracefully(join(coreRoot, "CHARTER.md")),
-        identity: readFileGracefully(join(profileMemoryDir, "IDENTITY.md")),
         runtime: {
           profileDir,
           profileMemoryDir,
@@ -98,6 +97,9 @@ export function createPromptSources(options: {
           .listResolved()
           .map((app) => ({ appId: app.appId, description: app.manifest.description })),
       };
+    },
+    identity() {
+      return readFileGracefully(join(profileMemoryDir, "IDENTITY.md"));
     },
     memory() {
       return {

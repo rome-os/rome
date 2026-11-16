@@ -266,6 +266,16 @@ export class Session {
     this.changes.add("setup");
   }
 
+  /**
+   * The session's thread ran a turn on setup `setup`, which it was resumed
+   * with after the setup changed: the thread has read it now, so a later
+   * cold open compares with it. docs/concepts/sessions.md#renewal
+   */
+  ranOnSetup(setup: string): void {
+    this.state.setup = setup;
+    this.changes.add("setup");
+  }
+
   /** The provider's transcript now lives here. */
   moveTo(workingDir: string): void {
     this.state.workingDir = workingDir;

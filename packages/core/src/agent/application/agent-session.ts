@@ -25,7 +25,7 @@ import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/
 import { type TurnAttribution, type TurnUsageReporting } from "../domain/turn-usage-reporting.js";
 import { type SessionSettings, restoresSavedSelection } from "../domain/session-settings.js";
 import { evaluateProviderSessionReset } from "../domain/session-reset.js";
-import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
+import { type SetupChange, setupChange, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
@@ -68,6 +68,7 @@ import { type Skill, type SkillCatalog } from "../domain/skill.js";
 import { type SystemPrompts } from "./system-prompts.js";
 import {
   buildContinuationBlock,
+  INSTRUCTIONS_CHANGED_NOTICE,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
@@ -348,6 +349,12 @@ export interface Sessions {
    * after it ends.
    */
   turn(id: string): Turn | undefined;
+  /**
+   * The agents' prompts changed in a way a live session cannot read, as on a
+   * rename: each open session closes once it is quiet, so its next turn opens
+   * it cold, on the same thread, with the prompt as it is then.
+   */
+  refreshPrompts(): void;
   shutdown(): Promise<void>;
 }
 
@@ -443,6 +450,9 @@ interface ManagerOptions {
 /** How long a context renewal waits for the ending turn's own cleanup. */
 const CONTEXT_RENEWAL_SETTLE_MS = 5_000;
 
+/** How long an open waits for a stale-prompt session's last turn to finish its cleanup. */
+const STALE_PROMPT_SETTLE_MS = 2_000;
+
 async function waitUntilQuiescent(session: AgentSessionImpl, timeoutMs?: number): Promise<void> {
   if (session.status === "closed" || session.isQuiescentForRotation) return;
   await new Promise<void>((resolve) => {
@@ -488,6 +498,9 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         () => {
           const cutoff = Date.now() - idleTtlMs;
           for (const session of [...sessions.values()]) {
+            // A session writing its handoff for a full context stays open:
+            // its renewal closes it.
+            if (contextHandoffs.get(keyOf(session.key))?.session === session) continue;
             if (session.isQuiescentForRotation && session.lastActiveAt < cutoff) {
               void session.close("idle").catch(() => {
                 // best-effort sweeper
@@ -519,32 +532,53 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     sentHeaders.set(sess.sessionId, sess.readHeaders);
   };
 
-  // A renewal for a full context, by key, from the close of the session it
-  // renews until its successor is written. An open of the same key waits for
-  // that, and opens the successor; nothing waits while the session is in use.
+  // A renewal for a full context (docs/concepts/sessions.md#handoff), by key.
+  // While its handoff is written the session stays live, and a message that
+  // comes meanwhile goes to it at once and drops the handoff as stale: the
+  // turn's end, still past the limit, writes it again. Only a session past
+  // the hard limit makes that message wait. Once a handoff is written with
+  // no turn since, the session is closed and its successor stored; an open of
+  // the same key waits for that commit, and opens the successor.
+  const contextHandoffs = new Map<
+    string,
+    { session: AgentSessionImpl; abort: AbortController; done: Promise<void> }
+  >();
   const contextRenewals = new Map<string, Promise<void>>();
-  const pendingFull = new Set<string>();
   const onContextFull = (sess: AgentSessionImpl) => {
     const k = keyOf(sess.key);
-    if (contextRenewals.has(k) || pendingFull.has(k) || shutDown) return;
-    pendingFull.add(k);
-    void (async () => {
+    const handoffs = deps.handoffs;
+    // A handoff dropped as stale may still be winding down: this one replaces it.
+    const writing = contextHandoffs.get(k);
+    if (!handoffs || (writing && !writing.abort.signal.aborted) || contextRenewals.has(k)) return;
+    if (shutDown) return;
+    const abort = new AbortController();
+    const stillCurrent = () =>
+      !abort.signal.aborted &&
+      sessions.get(k) === sess &&
+      !sess.closing &&
+      sess.status !== "closed";
+    const done = (async () => {
       try {
         // Only the ending turn's own cleanup is waited for. A session still in
         // use after it (a caller, a queued input, an approval) is left alone,
         // and the next turn end past the limit tries again.
         await waitUntilQuiescent(sess, CONTEXT_RENEWAL_SETTLE_MS);
-        if (sess.status === "closed" || sessions.get(k) !== sess) return;
-        if (!sess.isQuiescentForRotation) return;
+        if (!stillCurrent() || !sess.isQuiescentForRotation) return;
         if (await deps.heldMidTurn?.(sess.sessionId)) return;
-        if (!sess.isQuiescentForRotation || sessions.get(k) !== sess || sess.closing) return;
-        const run = (async () => {
+        if (!stillCurrent()) return;
+        const handoff = await sess.writeContextHandoff(handoffs, abort.signal);
+        if (!handoff || !stillCurrent()) return;
+        if (await deps.heldMidTurn?.(sess.sessionId)) return;
+        // Nothing awaits between this check and the close, so no caller gets
+        // the session in between.
+        if (!stillCurrent() || !sess.isQuiescentForRotation) return;
+        const commit = (async () => {
           await sess.close("idle");
-          await renewForContext(deps, sess);
+          await storeContextSuccessor(deps, sess, handoff);
         })();
-        contextRenewals.set(k, run);
+        contextRenewals.set(k, commit);
         try {
-          await run;
+          await commit;
         } finally {
           contextRenewals.delete(k);
         }
@@ -555,9 +589,54 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
           error: err instanceof Error ? err.message : String(err),
         });
       } finally {
-        pendingFull.delete(k);
+        if (contextHandoffs.get(k)?.abort === abort) contextHandoffs.delete(k);
       }
     })();
+    contextHandoffs.set(k, { session: sess, abort, done });
+  };
+
+  /**
+   * An open meets a renewal for a full context. While its handoff is written,
+   * the live session answers, and the handoff is dropped, unless its context
+   * is past the hard limit: then the open waits for the renewal, under the
+   * chat's tidying activity. An open during the commit waits for it.
+   */
+  const meetContextRenewal = async (k: string): Promise<void> => {
+    const writing = contextHandoffs.get(k);
+    if (writing) {
+      const hard = deps.handoffs?.hardContextLimitTokens;
+      const used = writing.session.contextTokens;
+      if (deps.handoffs && hard !== undefined && used !== undefined && used >= hard) {
+        await deps.handoffs.tidying(writing.session.chatId, () => writing.done);
+      } else {
+        writing.abort.abort();
+        log.info("session_handoff.dropped", {
+          agentName: writing.session.key.agentName,
+          sessionId: writing.session.sessionId,
+          contextTokens: used,
+        });
+      }
+    }
+    // A renewal that failed leaves the session current: this open finds it.
+    const renewal = contextRenewals.get(k);
+    if (renewal) await renewal.catch(() => undefined);
+  };
+
+  // Live sessions whose prompt went stale, closed as soon as each is quiet.
+  const stalePrompts = new WeakSet<AgentSessionImpl>();
+  const refreshPrompts = () => {
+    for (const sess of sessions.values()) {
+      if (sess.closing) continue;
+      stalePrompts.add(sess);
+      void waitUntilQuiescent(sess)
+        .then(async () => {
+          if (sess.closing || sess.status === "closed" || !sess.isQuiescentForRotation) return;
+          // A renewal for a full context closes it itself.
+          if (contextHandoffs.get(keyOf(sess.key))?.session === sess) return;
+          await sess.close("idle");
+        })
+        .catch(() => undefined);
+    }
   };
 
   const acquireInner = async (
@@ -566,10 +645,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     init?: OpenRequest,
   ): Promise<AgentSession> => {
     const k = keyOf(key);
-    // A renewal for a full context writes the successor this open is for.
-    const renewal = contextRenewals.get(k);
-    // A renewal that failed leaves the session current: this open finds it.
-    if (renewal) await renewal.catch(() => undefined);
+    await meetContextRenewal(k);
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -594,6 +670,19 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     if (existing?.closing) {
       await existing.closeSettled();
       existing = undefined;
+    }
+    // A live session whose prompt went stale, as on a rename, reopens cold
+    // on the same thread once it is quiet, with the prompt as it is now.
+    if (existing && stalePrompts.has(existing) && existing.status === "idle") {
+      // Its last turn's cleanup may still run; a session still in use after
+      // it keeps serving, and closes once it is quiet.
+      await waitUntilQuiescent(existing, STALE_PROMPT_SETTLE_MS);
+      if (existing.closing || existing.isQuiescentForRotation) {
+        if (existing.closing) await existing.closeSettled();
+        else await existing.close("idle");
+        existing = undefined;
+        reopen = true;
+      }
     }
     let explicitResume = init?.resumeSessionId;
     // A cold open renewed the chat since the resume named its session: a
@@ -763,6 +852,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       return undefined;
     },
     turn: (id) => turns.find(id),
+    refreshPrompts,
     async shutdown() {
       shutDown = true;
       if (sweeperTimer) clearInterval(sweeperTimer);
@@ -1135,38 +1225,21 @@ async function prepareSetup(
 }
 
 /**
- * Renews the chat of a session just closed for a full context: the retired
- * session writes its handoff, and its successor is written with it, on no
- * thread yet, for the chat's next open to start (docs/concepts/sessions.md#handoff).
- * Nothing is written when no handoff is, so the chat keeps its session until
- * a later turn end tries again, or the provider's own compaction runs.
+ * Renews the chat of a session just closed for a full context, with the
+ * handoff it wrote while live: its successor is stored with it, on no thread
+ * yet, for the chat's next open to start (docs/concepts/sessions.md#handoff).
  */
-async function renewForContext(deps: ManagerDeps, closed: AgentSessionImpl): Promise<void> {
+async function storeContextSuccessor(
+  deps: ManagerDeps,
+  closed: AgentSessionImpl,
+  handoff: string,
+): Promise<void> {
   const { log } = deps;
   const { key } = closed;
-  if (!deps.handoffs || !key.channelThreadKey) return;
-  const retired = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-  if (!retired || retired.id !== closed.sessionId) return;
-  const handoff = await writeRenewalHandoff(
-    {
-      retired,
-      agentName: key.agentName,
-      chatId: closed.chatId,
-      systemPrompt: closed.openedSystemPrompt,
-      workingDir: closed.workingDirectory,
-      env: {},
-    },
-    {
-      handoffs: deps.handoffs,
-      modelResolver: deps.modelResolver,
-      turnUsage: deps.turnUsage,
-      log,
-    },
-  );
-  if (!handoff) return;
+  if (!key.channelThreadKey) return;
   // Something else renewed the chat meanwhile: its session stays.
   const still = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-  if (!still || still.id !== retired.id) return;
+  if (!still || still.id !== closed.sessionId) return;
   const successor = still.replace({
     setup: still.setup ?? undefined,
     reason: "context",
@@ -1184,6 +1257,26 @@ async function renewForContext(deps: ManagerDeps, closed: AgentSessionImpl): Pro
     contextTokens: still.contextTokens ?? undefined,
     result: "succeeded",
   });
+}
+
+/**
+ * Whether the provider of a session's thread keeps the tools the thread
+ * started with on a resume, so a tool change needs a new thread. A provider
+ * that cannot run now is taken to keep them: a new thread is the change that
+ * never leaves a thread on tools that are gone.
+ */
+async function keepsThreadTools(deps: ManagerDeps, session: Session): Promise<boolean> {
+  if (!session.modelThreadId || !session.provider || !session.model) return false;
+  try {
+    const { modelProvider } = await deps.modelResolver.resolve({
+      kind: "exact",
+      providerId: session.provider as ProviderId,
+      model: session.model,
+    });
+    return modelProvider.id !== session.provider || modelProvider.keepsThreadTools === true;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -1278,11 +1371,15 @@ async function openSession(
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultWorkingDir(deps.folders));
 
   // The one place a session is renewed (docs/concepts/sessions.md#renewal):
-  // a cold open by continuity key, when the setup changed since the stored
-  // session opened or the chat's reset policy says a reset is due, and no
-  // approval holds it. A live session is never renewed; it takes the new
-  // setup on its next cold open. A resume by id resumes what it names.
+  // a cold open by continuity key, when the setup changed in a way its thread
+  // cannot take on a resume, or the chat's reset policy says a reset is due,
+  // and no approval holds it. A live session is never renewed; it takes the
+  // new setup on its next cold open. A resume by id resumes what it names.
+  const change: SetupChange =
+    resumed && setupNow !== undefined ? setupChange(resumed.setup, setupNow) : "none";
   let renewing: { retired: Session; successor: Session; reason: string } | undefined;
+  // The setup a resumed thread takes, recorded once a turn on it succeeds.
+  let resumedOn: { setup: string; notice: boolean } | undefined;
   if (
     resumed &&
     !init.resumeSessionId &&
@@ -1290,20 +1387,28 @@ async function openSession(
     resumed.handoff !== null &&
     !resumed.modelThreadId &&
     setupNow !== undefined &&
-    setupChanged(resumed.setup, setupNow)
+    change !== "none"
   ) {
     // It started from a handoff and no turn ran on it yet, so there is no
     // thread to hand off from: it takes the new setup in place, and keeps the
     // handoff and the renewal it came from.
     resumed.adoptSetup(setupNow);
     await deps.sessionRepository.save(resumed);
-  } else if (resumed && !init.resumeSessionId && !opts.isSubagent) {
+  } else if (resumed && !opts.isSubagent) {
+    // A text change, and a tool change on a provider whose resume takes the
+    // tools it is given, resume the same thread on the new setup. A tool
+    // change on a provider that keeps a thread's first tools needs a new
+    // thread, which reads the chat's recent messages and writes no handoff.
+    // A session that recorded no setup, or one of a single part, renews with
+    // a handoff, since nothing says which part changed.
     let reason: string | undefined;
-    if (setupNow !== undefined && setupChanged(resumed.setup, setupNow)) {
-      reason = "setup";
-    } else if (init.resetPolicy) {
-      const decision = evaluateProviderSessionReset(init.resetPolicy, resumed, new Date());
-      if (decision.due) reason = decision.reason;
+    const toolsKept = change === "tools" && (await keepsThreadTools(deps, resumed));
+    if (!init.resumeSessionId) {
+      if (change === "unknown" || toolsKept) reason = "setup";
+      if (!reason && init.resetPolicy) {
+        const decision = evaluateProviderSessionReset(init.resetPolicy, resumed, new Date());
+        if (decision.due) reason = decision.reason;
+      }
     }
     if (reason && (await deps.heldMidTurn?.(resumed.id))) {
       log.info("provider_session.reset_held", {
@@ -1313,13 +1418,24 @@ async function openSession(
       });
       reason = undefined;
     }
+    if (
+      !reason &&
+      setupNow !== undefined &&
+      (change === "text" || (change === "tools" && !toolsKept))
+    ) {
+      // A thread that has read the earlier instructions is told they changed.
+      resumedOn = { setup: setupNow, notice: change === "text" && !!resumed.modelThreadId };
+    }
     if (reason) {
       // Written at send time, before the fresh session opens, so the message
       // that caused the cold open is answered by a session that has read it.
+      // A new thread for a tool change starts from the chat's recent messages
+      // alone, since that change is rare and the wait is not worth it.
       const written = opts.writtenHandoffs?.get(resumed.id);
       const handoff =
         written ??
-        (deps.handoffs &&
+        (!toolsKept &&
+        deps.handoffs &&
         !config.codeBacked &&
         resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
           ? await writeRenewalHandoff(
@@ -1896,6 +2012,14 @@ async function openSession(
     renewal,
     // Shown with the continuation notice until a turn of this session succeeds.
     handoff: continuesChat ? (session.handoff ?? undefined) : undefined,
+    // A successor of an agent that renews with a handoff reads the chat's
+    // open tasks and recent messages, whether or not a handoff was written.
+    carriesRecent:
+      continuesChat &&
+      !opts.isSubagent &&
+      !config.codeBacked &&
+      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal,
+    resumedOn,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     modelProvider: initialResolution?.modelProvider,
@@ -1974,6 +2098,14 @@ interface ImplArgs {
   renewal?: SessionRenewal;
   /** The handoff the session started from, while no turn of it has succeeded. */
   handoff?: string;
+  /** Its first turns carry the chat's open tasks and recent messages, with the handoff if any. */
+  carriesRecent?: boolean;
+  /**
+   * The setup the resumed thread takes, which the row records once a turn
+   * on it succeeds, and whether that turn opens with the notice that the
+   * instructions changed.
+   */
+  resumedOn?: { setup: string; notice: boolean };
   /** The model the row's thread ran on. */
   previousModel?: string;
   openModelSession: (
@@ -2000,6 +2132,8 @@ interface TurnSink {
   carriesContinuation?: boolean;
   /** The notice carries the session's handoff, which goes with it. */
   carriesHandoff?: boolean;
+  /** The turn opens with the notice that the instructions changed. */
+  carriesSetupNotice?: boolean;
   /** The headers the thread has read once this turn returns a result. */
   sentHeaders?: Map<string, string>;
   /** The provider compacted the thread while the turn ran. */
@@ -2262,6 +2396,12 @@ class AgentSessionImpl implements AgentSession {
   private renewalPending?: SessionRenewal;
   /** The renewal's handoff, carried by the continuation notice until a turn succeeds. */
   private handoff?: string;
+  /** The continuation notice carries the chat's open tasks and recent messages until a turn succeeds. */
+  private carriesRecent: boolean;
+  /** The setup the resumed thread took, recorded on the row once a turn succeeds. */
+  private pendingSetup?: string;
+  /** Turns open with the notice that the instructions changed until one succeeds. */
+  private setupNoticePending: boolean;
   /** The header blocks the current thread has read, by name (`stickyHeaders`). */
   private sentHeaders: SentHeaders = new Map();
   /** The context the last turn that reported one left the thread at. */
@@ -2332,6 +2472,9 @@ class AgentSessionImpl implements AgentSession {
     this.continuationPending = args.replacedThread;
     this.renewalPending = args.renewal;
     this.handoff = args.handoff;
+    this.carriesRecent = args.carriesRecent === true;
+    this.pendingSetup = args.resumedOn?.setup;
+    this.setupNoticePending = args.resumedOn?.notice === true;
     this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
@@ -2760,6 +2903,13 @@ class AgentSessionImpl implements AgentSession {
               turnStatus({ terminal: outbound, stoppedByRome: sink.lifecycleInterrupted }) ===
               "interrupted";
             if (!interrupted) this.lastPosition = position;
+            // The thread has run on the setup it was resumed with, so the
+            // next cold open compares with it.
+            if (this.pendingSetup !== undefined) {
+              this.session.ranOnSetup(this.pendingSetup);
+              this.pendingSetup = undefined;
+            }
+            if (sink.carriesSetupNotice) this.setupNoticePending = false;
             await this.persistTurn(
               session,
               sink.turnId,
@@ -2768,7 +2918,10 @@ class AgentSessionImpl implements AgentSession {
               outbound.accounting?.context?.usedTokens,
             );
             if (sink.carriesContinuation) this.continuationPending = false;
-            if (sink.carriesHandoff) this.handoff = undefined;
+            if (sink.carriesHandoff) {
+              this.handoff = undefined;
+              this.carriesRecent = false;
+            }
             if (sink.sentHeaders) this.sentHeaders = sink.sentHeaders;
             const used = outbound.accounting?.context?.usedTokens;
             // A compaction, which the provider reports, or less context than
@@ -2820,15 +2973,54 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
+  /** The context the thread was left at by the last turn that reported one. */
+  get contextTokens(): number | undefined {
+    return this.lastContextTokens;
+  }
+
+  /**
+   * The handoff of a renewal for a full context, written while the session
+   * stays live and answers what comes: on a branch of its thread at the
+   * latest turn, so the thread never reads the request, or by the fallback
+   * when no turn left a place to branch at. Null when none was written, or
+   * `signal` dropped it as stale. docs/concepts/sessions.md#handoff
+   */
+  async writeContextHandoff(
+    handoffs: RenewalHandoffs,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const at = this.lastPosition;
+    return await writeRenewalHandoff(
+      {
+        retired: this.session,
+        agentName: this.key.agentName,
+        chatId: this.chatId,
+        systemPrompt: this.systemPrompt,
+        workingDir: this.workingDir,
+        env: {},
+        thread: at ? { kind: "branch", at, lifetime: "ephemeral" } : null,
+        background: true,
+        signal,
+      },
+      {
+        handoffs,
+        modelResolver: this.deps.modelResolver,
+        turnUsage: this.deps.turnUsage,
+        log: this.log,
+      },
+    );
+  }
+
   /**
    * The handoff sections of the continuation notice, with the open tasks and
-   * recent messages read now. Undefined when the session carries no handoff,
-   * or the turn is in no chat. A failed read leaves out what it would add.
+   * recent messages read now. Undefined when the session carries neither a
+   * handoff nor the recent messages, or the turn is in no chat. A failed read
+   * leaves out what it would add.
    */
   private async handoffSectionsFor(sink: TurnSink): Promise<string[] | undefined> {
     const handoff = this.handoff;
     const handoffs = this.deps.handoffs;
-    if (!handoff || !handoffs || !sink.romeSessionId) return undefined;
+    if ((!handoff && !this.carriesRecent) || !handoffs || !sink.romeSessionId) return undefined;
     sink.carriesHandoff = true;
     const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch((err) => {
       this.log.warn("session_handoff.context_failed", {
@@ -2837,7 +3029,7 @@ class AgentSessionImpl implements AgentSession {
       });
       return { openTasks: null, recent: [] };
     });
-    return handoffSections(handoff, context);
+    return handoffSections(handoff ?? null, context);
   }
 
   /**
@@ -3895,6 +4087,10 @@ class AgentSessionImpl implements AgentSession {
           ...(handoff ? { handoff } : {}),
         });
         userPrompt = `${block}\n\n${userPrompt}`;
+      }
+      if (!this.isSubagent && this.setupNoticePending) {
+        sink.carriesSetupNotice = true;
+        userPrompt = `${INSTRUCTIONS_CHANGED_NOTICE}\n\n${userPrompt}`;
       }
       // A thread that starts in this session, the first one or one that
       // replaced it on another provider, has not seen the block yet.

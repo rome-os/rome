@@ -200,6 +200,14 @@ export function buildContinuationBlock(input: {
 }
 
 /**
+ * The line a thread's first turn after a resume on changed instructions
+ * starts with (docs/concepts/sessions.md#renewal): its history still shows
+ * what the earlier instructions asked for.
+ */
+export const INSTRUCTIONS_CHANGED_NOTICE =
+  "<instructions_changed>Your instructions changed since earlier in this conversation. Where they differ from what you did or said before, the current ones win.</instructions_changed>";
+
+/**
  * Render the chat's device folder as a `<device_folder>` block. Unlike
  * `<thread_context>`, AgentSession prepends it to EVERY user message, so the
  * agent still knows where to work after context compaction drops the first

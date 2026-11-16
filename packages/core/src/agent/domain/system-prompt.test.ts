@@ -17,7 +17,6 @@ const agent: PromptAgent = { name: "main", owner: "core", systemPromptPrefix: "Y
 
 const material: PromptMaterial = {
   charter: "The charter.",
-  identity: "The identity.",
   runtime: {
     profileDir: "/profile",
     profileMemoryDir: "/profile/memory",
@@ -52,7 +51,6 @@ describe("buildPromptPrefix", () => {
     expect(headings).toEqual([
       "You are main.",
       "# Charter",
-      "# Identity",
       "# Runtime Context",
       "# Command Line Tools",
       "# Installed Apps",
@@ -81,12 +79,6 @@ describe("buildPromptPrefix", () => {
         "- Rome's docs are in `/docs`. Search them before answering whether Rome supports something.",
       ].join("\n"),
     );
-  });
-
-  it("leaves a heading the identity already has", () => {
-    const prefix = buildPromptPrefix(agent, { ...material, identity: "# identity\n\nMine." });
-    expect(prefix).toContain("# identity\n\nMine.");
-    expect(prefix).not.toContain("# Identity");
   });
 });
 
@@ -127,6 +119,14 @@ describe("buildSystemPrompt", () => {
         "Suffix.",
       ].join("\n\n"),
     );
+  });
+
+  it("puts a core agent's identity right after the fixed part, keeping a heading it has", () => {
+    const build = (identity: string, owner: "core" | "app" = "core") =>
+      buildSystemPrompt({ prefix: "Fixed.", owner, identity, memory, widgets: "plain_text" });
+    expect(build("I am Yo.").startsWith("Fixed.\n\n# Identity\n\nI am Yo.\n\n# Memory")).toBe(true);
+    expect(build("# identity\n\nMine.")).toContain("Fixed.\n\n# identity\n\nMine.");
+    expect(build("I am Yo.", "app")).not.toContain("I am Yo.");
   });
 
   it("adds no section for memory that has nothing in it", () => {
@@ -219,7 +219,7 @@ describe("the prompts and device connections", () => {
       const { systemPromptPrefix, actions, policy } = definition(name);
       const prompt = buildPromptPrefix(
         { name, owner: "core", systemPromptPrefix, actions, policy },
-        { ...material, charter: "", identity: "" },
+        { ...material, charter: "" },
       );
       for (const word of [
         /health/i,
@@ -239,7 +239,7 @@ describe("the prompts and device connections", () => {
     const { systemPromptPrefix, actions, policy } = definition("main");
     const prompt = buildPromptPrefix(
       { name: "main", owner: "core", systemPromptPrefix, actions, policy },
-      { ...material, charter: "", identity: "" },
+      { ...material, charter: "" },
     );
     expect(prompt).toContain(
       "goes through `core:device_describe` and `core:device_run`, never `rome-node`",

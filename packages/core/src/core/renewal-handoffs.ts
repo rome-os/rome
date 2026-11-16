@@ -61,6 +61,7 @@ export interface ChatRow {
 export interface RenewalHandoffSources {
   timeoutMs: number;
   contextLimitTokens?: number;
+  hardContextLimitTokens?: number;
   modelResolver: ModelResolver;
   /** The rows of chat `chatId`'s latest `turns` turns, oldest first. */
   rows(chatId: string, turns: number): Promise<readonly ChatRow[]>;
@@ -105,6 +106,7 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
   return {
     timeoutMs: sources.timeoutMs,
     contextLimitTokens: sources.contextLimitTokens,
+    hardContextLimitTokens: sources.hardContextLimitTokens,
     tidying: (chatId, work) => (chatId && sources.tidying ? sources.tidying(chatId, work) : work()),
     async fallback(chatId, agentName) {
       if (!chatId) return null;

@@ -623,6 +623,9 @@ export class CodexAppServerProvider implements ModelProvider {
     "Task",
     "ImageGeneration",
   ]);
+  // `thread/resume` takes no `dynamicTools`: a resumed thread keeps the tools
+  // it started with (#1301).
+  readonly keepsThreadTools = true;
 
   private readonly appServerManager: CodexAppServerManager;
 

@@ -69,6 +69,13 @@ export interface RenewalHandoffs {
    * reset renews it.
    */
   readonly contextLimitTokens?: number;
+  /**
+   * The context size, in tokens, past which a message that comes while that
+   * renewal's handoff is written waits for the renewal, and is answered by
+   * the successor. Under it, the retired session answers the message at
+   * once. Absent, no message waits.
+   */
+  readonly hardContextLimitTokens?: number;
   /** Runs `work` while chat `chatId` says it is tidying up its context. */
   tidying<T>(chatId: string | undefined, work: () => Promise<T>): Promise<T>;
   /**
@@ -126,17 +133,22 @@ export function recentWithin(
 
 /**
  * The sections a successor's first turn carries inside its `<continuation>`
- * notice: the handoff its predecessor wrote, the chat's open tasks as Rome
- * holds them, and the chat's latest messages up to {@link HANDOFF_RECENT_TOKENS}.
+ * notice: the handoff its predecessor wrote, when it wrote one, the chat's
+ * open tasks as Rome holds them, and the chat's latest messages up to
+ * {@link HANDOFF_RECENT_TOKENS}.
  */
-export function handoffSections(handoff: string, context: HandoffContext): string[] {
-  const sections = [
-    "Your previous session wrote this handoff for you before it was replaced. The chat's owner can open it from the chat, but has not been told about it.",
-    `<handoff>\n${handoff.trim()}\n</handoff>`,
-  ];
+export function handoffSections(handoff: string | null, context: HandoffContext): string[] {
+  const sections = handoff
+    ? [
+        "Your previous session wrote this handoff for you before it was replaced. The chat's owner can open it from the chat, but has not been told about it.",
+        `<handoff>\n${handoff.trim()}\n</handoff>`,
+      ]
+    : [];
   if (context.openTasks) {
     sections.push(
-      "The open tasks, as Rome holds them now. They are newer than the handoff where the two differ.",
+      handoff
+        ? "The open tasks, as Rome holds them now. They are newer than the handoff where the two differ."
+        : "The open tasks, as Rome holds them now.",
       `<open_tasks>\n${context.openTasks.trim()}\n</open_tasks>`,
     );
   }

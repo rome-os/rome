@@ -16,6 +16,8 @@ function fakeSources() {
     memoryIndex: "First memory.",
     materialReads: 0,
     memoryReads: 0,
+    identity: "I am Yo." as string | null,
+    identityReads: 0,
     changed: () => {},
   };
   const sources: PromptSources = {
@@ -23,7 +25,6 @@ function fakeSources() {
       state.materialReads += 1;
       return {
         charter: state.charter,
-        identity: null,
         runtime: {
           profileDir: "/profile",
           profileMemoryDir: "/profile/memory",
@@ -35,6 +36,10 @@ function fakeSources() {
         },
         installedApps: [],
       };
+    },
+    identity() {
+      state.identityReads += 1;
+      return state.identity;
     },
     memory(): PromptMemory {
       state.memoryReads += 1;
@@ -81,6 +86,17 @@ describe("createSystemPrompts", () => {
     expect(systemPrompts.build(agent, plainText)).toContain("First memory.");
     state.memoryIndex = "Second memory.";
     expect(systemPrompts.build(agent, plainText)).toContain("Second memory.");
+  });
+
+  it("reads the identity on every build, and leaves it out of the setup", () => {
+    const { sources, state } = fakeSources();
+    const systemPrompts = createSystemPrompts({ sources });
+
+    expect(systemPrompts.build(agent, plainText)).toContain("# Identity\n\nI am Yo.");
+    state.identity = "I am YoYo.";
+    expect(systemPrompts.build(agent, plainText)).toContain("# Identity\n\nI am YoYo.");
+    expect(systemPrompts.setup(agent, plainText)).not.toContain("YoYo");
+    expect(systemPrompts.build({ ...agent, owner: "app" }, plainText)).not.toContain("YoYo");
   });
 
   it("reads no memory for an agent that does not carry it", () => {
