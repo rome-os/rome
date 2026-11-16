@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { allowsMedia, installMicrophonePermission } from "./microphone-permission";
+import { allowsMedia, dashboardOrigin, installMicrophonePermission } from "./microphone-permission";
 
 const ROME = "https://rome.example.com";
 const ask = (overrides: Partial<Parameters<typeof allowsMedia>[0]> = {}) =>
@@ -74,6 +74,19 @@ function installed(origin: string | null = ROME) {
     (check as (...args: unknown[]) => boolean)({}, permission, ROME, details);
   return { requested, checked };
 }
+
+describe("dashboardOrigin", () => {
+  it("is the dev URL's origin on a dev launch, even with a Rome saved", () => {
+    expect(dashboardOrigin("http://localhost:3200/chat", "https://saved.romeos.cc")).toBe(
+      "http://localhost:3200",
+    );
+  });
+
+  it("is the open Rome's origin otherwise, and nothing before one is open", () => {
+    expect(dashboardOrigin(null, "https://saved.romeos.cc")).toBe("https://saved.romeos.cc");
+    expect(dashboardOrigin(undefined, undefined)).toBeNull();
+  });
+});
 
 describe("installMicrophonePermission", () => {
   it("gives the open Rome's main frame the microphone", () => {

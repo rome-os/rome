@@ -339,7 +339,7 @@ enum MessagePart: Hashable, Sendable {
         var title: String?
         var summary: String?
         switch preview?["kind"]?.string {
-        case "generic":
+        case "generic", "secret_access":
             title = preview?["title"]?.string
             summary = preview?["summary"]?.string
             fields = (preview?["fields"]?.array ?? []).compactMap { field in

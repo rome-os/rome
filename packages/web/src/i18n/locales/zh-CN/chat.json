@@ -383,6 +383,12 @@
       "rejected": "已拒绝",
       "failed": "执行失败"
     },
+    "secretAccess": {
+      "allow": "允许 {{minutes}} 分钟",
+      "duration": "{{minutes}} 分钟",
+      "allowed": "已允许 {{name}} · {{minutes}} 分钟",
+      "rejected": "已拒绝 {{name}}"
+    },
     "actions": {
       "approve": "批准",
       "approving": "批准中…",
@@ -661,10 +667,8 @@
     }
   },
   "thread": {
-    "title": "对话串",
-    "openTaskChat": "打开任务对话",
-    "loadFailed": "无法加载这个对话串。",
-    "replyPlaceholder": "回复"
+    "back": "返回对话：{{title}}",
+    "replyPlaceholder": "回复：{{title}}"
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
