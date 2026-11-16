@@ -446,6 +446,10 @@ export class AnthropicProvider implements ModelProvider {
     "TodoWrite",
     "Task",
   ]);
+  // A resumed Claude thread answers from the system prompt it started with:
+  // the SDK takes the tools a resume passes but not its `systemPrompt`
+  // (#2249, checked with a resume and a fork on the Agent SDK).
+  readonly keepsThreadInstructions = true;
 
   constructor(private options: AnthropicProviderOptions = {}) {}
 

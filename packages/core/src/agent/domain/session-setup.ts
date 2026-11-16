@@ -9,6 +9,8 @@ export interface SessionSetup {
   /** The system prompt without memory, identity or the opener's context
    *  suffix: the agent's instructions and the charter. */
   systemPrompt: string;
+  /** The agent's identity as the thread's system prompt quoted it. */
+  identity: string | null;
   /** The provider's own tools the agent declares. */
   builtinTools: readonly string[];
   /** The MCP servers the agent declares, each with its whole config, by name. */
@@ -19,7 +21,7 @@ export interface SessionSetup {
   tools: Readonly<Record<RomeToolGroup, readonly RomeToolDefinition[]>>;
 }
 
-/** What tells a fingerprint of two parts from one recorded before setups had parts. */
+/** What tells a fingerprint of parts from one recorded before setups had parts. */
 const PREFIX = "v2";
 
 function hash(value: unknown): string {
@@ -27,10 +29,12 @@ function hash(value: unknown): string {
 }
 
 /**
- * A fingerprint of a setup, in two parts: one for its text (the instructions
- * and the charter) and one for its tools (Rome's tools, the provider's tools,
- * the MCP servers and the answer's shape). Each part is equal for two setups
- * the model would read the same way.
+ * A fingerprint of a setup, in parts: one for its text (the instructions and
+ * the charter), one for its tools (Rome's tools, the provider's tools, the
+ * MCP servers and the answer's shape), and one for the identity the thread
+ * read in its system prompt, which only a provider that keeps a thread's first
+ * system prompt needs (docs/concepts/sessions.md#setup). Each part is equal
+ * for two setups the model would read the same way.
  */
 export function setupFingerprint(setup: SessionSetup): string {
   const tools = ROME_TOOL_GROUPS.map((group) => [
@@ -48,27 +52,37 @@ export function setupFingerprint(setup: SessionSetup): string {
     setup.outputSchema,
     tools,
   ]);
-  return `${PREFIX}:${text}:${toolsPart}`;
+  return `${PREFIX}:${text}:${toolsPart}:${hash([setup.identity])}`;
 }
 
 /**
- * What changed between the setup a session recorded and the current one:
- * nothing, only its text, its tools (whether or not its text changed too),
- * or `unknown` for a session that recorded no setup or one fingerprinted
- * before setups had two parts, so nothing says which part changed.
+ * Which parts changed between the setup a session recorded and the current
+ * one, or `unknown` for a session that recorded no setup or one fingerprinted
+ * before setups had parts, so nothing says which part changed.
  */
-export type SetupChange = "none" | "text" | "tools" | "unknown";
+export type SetupChange = { text: boolean; tools: boolean; identity: boolean } | "unknown";
 
 export function setupChange(recorded: string | null, current: string): SetupChange {
-  if (recorded === current) return "none";
   const before = parts(recorded);
   const now = parts(current);
   if (!before || !now) return "unknown";
-  if (before.tools !== now.tools) return "tools";
-  return before.text !== now.text ? "text" : "none";
+  return {
+    text: before.text !== now.text,
+    tools: before.tools !== now.tools,
+    identity: before.identity !== now.identity,
+  };
 }
 
-function parts(fingerprint: string | null): { text: string; tools: string } | null {
-  const [prefix, text, tools, ...rest] = fingerprint?.split(":") ?? [];
-  return prefix === PREFIX && text && tools && rest.length === 0 ? { text, tools } : null;
+/** Whether `change` changed any part. */
+export function setupChanged(change: SetupChange): boolean {
+  return change === "unknown" || change.text || change.tools || change.identity;
+}
+
+function parts(
+  fingerprint: string | null,
+): { text: string; tools: string; identity: string } | null {
+  const [prefix, text, tools, identity, ...rest] = fingerprint?.split(":") ?? [];
+  return prefix === PREFIX && text && tools && identity && rest.length === 0
+    ? { text, tools, identity }
+    : null;
 }

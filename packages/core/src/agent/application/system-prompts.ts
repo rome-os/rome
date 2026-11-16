@@ -25,6 +25,8 @@ export interface SystemPrompts {
    * new one is held, so the next `build` uses it too.
    */
   setup(agent: PromptAgent, options: PromptOptions): string;
+  /** The identity a core agent's prompt carries now, or null. */
+  identity(agent: PromptAgent): string | null;
 }
 
 /** Holds each agent's fixed part until the sources change, and reads memory and the identity on every build. */
@@ -50,6 +52,9 @@ export function createSystemPrompts(options: { sources: PromptSources }): System
         widgets,
         delegatesWork: resolveAgentPolicy(agent).delegatesWork,
       });
+    },
+    identity(agent) {
+      return agent.owner === "core" ? sources.identity() : null;
     },
     setup(agent, { contextSuffix, widgets }) {
       // Read again, since a file the fixed part quotes, such as the

@@ -25,7 +25,12 @@ import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/
 import { type TurnAttribution, type TurnUsageReporting } from "../domain/turn-usage-reporting.js";
 import { type SessionSettings, restoresSavedSelection } from "../domain/session-settings.js";
 import { evaluateProviderSessionReset } from "../domain/session-reset.js";
-import { type SetupChange, setupChange, setupFingerprint } from "../domain/session-setup.js";
+import {
+  type SetupChange,
+  setupChange,
+  setupChanged,
+  setupFingerprint,
+} from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
@@ -1162,6 +1167,7 @@ function sessionSetupOf(
       );
       return setupFingerprint({
         systemPrompt: deps.systemPrompts.setup(promptAgent, { widgets }),
+        identity: deps.systemPrompts.identity(promptAgent),
         builtinTools: config.tools,
         // Each declared server's whole config, by name: a changed command or
         // argument is a changed tool. Only the fingerprint's hash is kept,
@@ -1260,22 +1266,31 @@ async function storeContextSuccessor(
 }
 
 /**
- * Whether the provider of a session's thread keeps the tools the thread
- * started with on a resume, so a tool change needs a new thread. A provider
- * that cannot run now is taken to keep them: a new thread is the change that
- * never leaves a thread on tools that are gone.
+ * What the provider of a session's thread keeps from its start when the
+ * thread is resumed: its tools, its system prompt. A provider that cannot run
+ * now is taken to keep both, so a change never leaves a thread on tools or
+ * instructions that are gone.
  */
-async function keepsThreadTools(deps: ManagerDeps, session: Session): Promise<boolean> {
-  if (!session.modelThreadId || !session.provider || !session.model) return false;
+async function threadKeeps(
+  deps: ManagerDeps,
+  session: Session,
+): Promise<{ tools: boolean; instructions: boolean }> {
+  if (!session.modelThreadId || !session.provider || !session.model) {
+    return { tools: false, instructions: false };
+  }
   try {
     const { modelProvider } = await deps.modelResolver.resolve({
       kind: "exact",
       providerId: session.provider as ProviderId,
       model: session.model,
     });
-    return modelProvider.id !== session.provider || modelProvider.keepsThreadTools === true;
+    if (modelProvider.id !== session.provider) return { tools: true, instructions: true };
+    return {
+      tools: modelProvider.keepsThreadTools === true,
+      instructions: modelProvider.keepsThreadInstructions === true,
+    };
   } catch {
-    return true;
+    return { tools: true, instructions: true };
   }
 }
 
@@ -1376,7 +1391,9 @@ async function openSession(
   // and no approval holds it. A live session is never renewed; it takes the
   // new setup on its next cold open. A resume by id resumes what it names.
   const change: SetupChange =
-    resumed && setupNow !== undefined ? setupChange(resumed.setup, setupNow) : "none";
+    resumed && setupNow !== undefined
+      ? setupChange(resumed.setup, setupNow)
+      : { text: false, tools: false, identity: false };
   let renewing: { retired: Session; successor: Session; reason: string } | undefined;
   // The setup a resumed thread takes, recorded once a turn on it succeeds.
   let resumedOn: { setup: string; notice: boolean } | undefined;
@@ -1387,7 +1404,7 @@ async function openSession(
     resumed.handoff !== null &&
     !resumed.modelThreadId &&
     setupNow !== undefined &&
-    change !== "none"
+    setupChanged(change)
   ) {
     // It started from a handoff and no turn ran on it yet, so there is no
     // thread to hand off from: it takes the new setup in place, and keeps the
@@ -1395,16 +1412,23 @@ async function openSession(
     resumed.adoptSetup(setupNow);
     await deps.sessionRepository.save(resumed);
   } else if (resumed && !opts.isSubagent) {
-    // A text change, and a tool change on a provider whose resume takes the
-    // tools it is given, resume the same thread on the new setup. A tool
-    // change on a provider that keeps a thread's first tools needs a new
-    // thread, which reads the chat's recent messages and writes no handoff.
-    // A session that recorded no setup, or one of a single part, renews with
-    // a handoff, since nothing says which part changed.
+    // A change the thread's provider takes on a resume resumes the same
+    // thread on the new setup. A tool change on a provider that keeps a
+    // thread's first tools needs a new thread, which reads the chat's recent
+    // messages and writes no handoff. A change of text or identity on a
+    // provider that keeps a thread's first system prompt renews with a
+    // handoff, as does a session that recorded no setup, or one without
+    // parts, since nothing says which part changed.
     let reason: string | undefined;
-    const toolsKept = change === "tools" && (await keepsThreadTools(deps, resumed));
+    const kept =
+      change !== "unknown" && setupChanged(change)
+        ? await threadKeeps(deps, resumed)
+        : { tools: false, instructions: false };
+    const toolsKept = change !== "unknown" && change.tools && kept.tools;
+    const instructionsKept =
+      change !== "unknown" && (change.text || change.identity) && kept.instructions;
     if (!init.resumeSessionId) {
-      if (change === "unknown" || toolsKept) reason = "setup";
+      if (change === "unknown" || toolsKept || instructionsKept) reason = "setup";
       if (!reason && init.resetPolicy) {
         const decision = evaluateProviderSessionReset(init.resetPolicy, resumed, new Date());
         if (decision.due) reason = decision.reason;
@@ -1421,10 +1445,13 @@ async function openSession(
     if (
       !reason &&
       setupNow !== undefined &&
-      (change === "text" || (change === "tools" && !toolsKept))
+      change !== "unknown" &&
+      setupChanged(change) &&
+      !toolsKept &&
+      !instructionsKept
     ) {
       // A thread that has read the earlier instructions is told they changed.
-      resumedOn = { setup: setupNow, notice: change === "text" && !!resumed.modelThreadId };
+      resumedOn = { setup: setupNow, notice: change.text && !!resumed.modelThreadId };
     }
     if (reason) {
       // Written at send time, before the fresh session opens, so the message
