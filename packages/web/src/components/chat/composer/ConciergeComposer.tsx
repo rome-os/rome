@@ -65,7 +65,7 @@ import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
-import { VoiceInputButton, VoiceInputNotice } from "./VoiceInputControl";
+import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -176,7 +176,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       notice: draft.notice,
       setNotice: draft.setNotice,
       keepNotice: draft.keepNotice,
+      onSend: () => void runSendRef.current(),
     });
+    const runSendRef = useRef<() => Promise<void>>(async () => {});
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;
 
@@ -284,6 +286,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       replyDraft,
       voice.active,
     ]);
+    runSendRef.current = runSend;
 
     useImperativeHandle(
       ref,
@@ -593,7 +596,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                       }
                       if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
                         event.preventDefault();
-                        void runSend();
+                        // While listening, Enter ends voice input and sends what it heard.
+                        if (voice.active) voice.stopAndSend();
+                        else void runSend();
                       }
                     }}
                     onPaste={(event) => {
@@ -621,6 +626,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 }
               />
             </div>
+            {voice.state === "listening" ? (
+              <VoiceInputWaveform level={voice.level} className="w-20 shrink-0" />
+            ) : null}
             {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}

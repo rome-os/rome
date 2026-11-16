@@ -89,6 +89,21 @@ export interface Microphone {
   finish(): Promise<void>;
   /** Releases the microphone at once, dropping audio not yet handed over. Safe to call more than once. */
   close(): void;
+  /** How loud the microphone is right now, from 0 for a quiet room to 1 for close, loud speech. */
+  level(): number;
+}
+
+// -55 dBFS, a quiet room, reads as 0, and -10 dBFS, close loud speech, as 1.
+const QUIET_DB = -55;
+const LOUD_DB = -10;
+
+/** The loudness of `samples` on the 0 to 1 scale `Microphone.level` reports. */
+export function loudness(samples: Float32Array): number {
+  let sum = 0;
+  for (const sample of samples) sum += sample * sample;
+  const rms = Math.sqrt(sum / (samples.length || 1));
+  const db = 20 * Math.log10(rms || 1e-8);
+  return Math.max(0, Math.min(1, (db - QUIET_DB) / (LOUD_DB - QUIET_DB)));
 }
 
 /**
@@ -141,6 +156,10 @@ export async function openMicrophone(
       else onAudio(event.data);
     };
     source.connect(capture);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    const samples = new Float32Array(analyser.fftSize);
     let closed = false;
     const opened = context;
     const close = () => {
@@ -149,6 +168,7 @@ export async function openMicrophone(
       capture.port.onmessage = null;
       source.disconnect();
       capture.disconnect();
+      analyser.disconnect();
       for (const track of stream.getTracks()) track.stop();
       void opened.close();
     };
@@ -168,6 +188,11 @@ export async function openMicrophone(
         close();
       },
       close,
+      level() {
+        if (closed) return 0;
+        analyser.getFloatTimeDomainData(samples);
+        return loudness(samples);
+      },
     };
   } catch (error) {
     for (const track of stream.getTracks()) track.stop();

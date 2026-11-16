@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { describe, expect, it, rs } from "@rstest/core";
-import { openMicrophoneStream } from "./microphone";
+import { loudness, openMicrophoneStream } from "./microphone";
 import { chooseMicrophone, chosenMicrophone } from "./microphone-choice";
 
 function browser(getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>) {
@@ -42,5 +42,30 @@ describe("opening the microphone", () => {
     });
     await expect(openMicrophoneStream("usb")).rejects.toThrow("NotAllowedError");
     expect(getUserMedia).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("loudness", () => {
+  const tone = (amplitude: number) =>
+    Float32Array.from({ length: 1024 }, (_, i) => amplitude * Math.sin(i / 4));
+
+  it("reads silence as 0", () => {
+    expect(loudness(new Float32Array(1024))).toBe(0);
+  });
+
+  it("reads a quiet room as 0", () => {
+    expect(loudness(tone(0.001))).toBe(0);
+  });
+
+  it("reads speech between 0 and 1, louder reading higher", () => {
+    const soft = loudness(tone(0.02));
+    const loud = loudness(tone(0.2));
+    expect(soft).toBeGreaterThan(0);
+    expect(loud).toBeGreaterThan(soft);
+    expect(loud).toBeLessThan(1);
+  });
+
+  it("caps very loud input at 1", () => {
+    expect(loudness(tone(1))).toBe(1);
   });
 });
