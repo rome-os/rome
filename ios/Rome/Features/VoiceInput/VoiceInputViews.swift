@@ -55,8 +55,8 @@ struct VoiceInputNotice: View {
     }
 }
 
-/// The microphone's recent sound as bars scrolling in from the right, so the
-/// guardian sees voice input hears them. It scrolls while audio comes in, and
+/// The microphone's recent sound as bars scrolling in from the right, across
+/// the message field's bottom row, so the guardian sees voice input hears them. It scrolls while audio comes in, and
 /// silence draws only flat dots, so a bar that rises means sound. Decoration
 /// only: the voice control says whether it listens.
 struct VoiceInputWaveform: View {
@@ -64,7 +64,9 @@ struct VoiceInputWaveform: View {
 
     static let height: CGFloat = 28
     static let barWidth: CGFloat = 3
-    static let gap: CGFloat = 2
+    static let gap: CGFloat = 3
+    /// A quiet step is a dot this wide.
+    static let dot: CGFloat = 2
     /// Loudness below this is a quiet room, not speech.
     static let silence: Float = 0.02
 
@@ -72,34 +74,45 @@ struct VoiceInputWaveform: View {
     @State private var bars = Bars()
 
     var body: some View {
-        // Fewer, slower steps when the guardian asks for less motion.
+        // Fewer, slower steps that jump rather than slide when the guardian
+        // asks for less motion.
         let steps = reduceMotion ? 4 : 1
-        TimelineView(.periodic(from: .now, by: 0.05 * Double(steps))) { timeline in
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.2 : nil)) { timeline in
             Canvas { context, size in
-                bars.advance(to: timeline.date, meter: meter, steps: steps)
-                Self.draw(bars.values, in: &context, size: size)
+                let now = timeline.date
+                bars.advance(to: now, meter: meter, steps: steps)
+                Self.draw(bars.values, in: &context, size: size, slide: reduceMotion ? 0 : bars.slide(at: now))
             }
         }
         .frame(height: Self.height)
-        .foregroundStyle(Palette.primary)
+        // The oldest steps fade out at the left edge.
+        .mask {
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12)],
+                           startPoint: .leading, endPoint: .trailing)
+        }
         .accessibilityHidden(true)
         .accessibilityIdentifier("voice-input-waveform")
     }
 
-    /// The newest bar at the right edge, each older one a step to the left and
-    /// fainter, down to 25% at the left edge. A quiet bar is a dot.
-    static func draw(_ values: [Float], in context: inout GraphicsContext, size: CGSize) {
+    /// The newest step at the right edge, each older one a step to the left.
+    /// Sound is a bar in the text color; a quiet step is a dimmer dot.
+    /// `slide`, 0 to 1, is how much of a step the newest still has to travel
+    /// in from the right, so the row moves smoothly between steps.
+    static func draw(_ values: [Float], in context: inout GraphicsContext, size: CGSize, slide: CGFloat = 0) {
         let pitch = barWidth + gap
         let capacity = max(1, Int((size.width / pitch).rounded(.up)))
         for index in 0..<capacity {
-            let x = size.width - CGFloat(index + 1) * pitch + gap
+            let x = size.width - CGFloat(index + 1) * pitch + gap + slide * pitch
             guard x + barWidth > 0 else { break }
             let value = index < values.count ? values[values.count - 1 - index] : 0
-            let barHeight = max(barWidth, CGFloat(value) * size.height)
-            let rect = CGRect(x: x, y: (size.height - barHeight) / 2, width: barWidth, height: barHeight)
-            var bar = context
-            bar.opacity = max(0.25, 1 - Double(index) / Double(capacity) * 0.75)
-            bar.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2), with: .foreground)
+            if value > 0 {
+                let barHeight = max(barWidth, CGFloat(value) * size.height)
+                let rect = CGRect(x: x, y: (size.height - barHeight) / 2, width: barWidth, height: barHeight)
+                context.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2), with: .color(Palette.fg))
+            } else {
+                let rect = CGRect(x: x + (barWidth - dot) / 2, y: (size.height - dot) / 2, width: dot, height: dot)
+                context.fill(Path(ellipseIn: rect), with: .color(Palette.sub))
+            }
         }
     }
 
@@ -109,17 +122,25 @@ struct VoiceInputWaveform: View {
         private(set) var values: [Float] = []
         private var steppedAt: Date?
 
+        /// How much of a step the newest bar still has to slide in, 1 just
+        /// after it is added and 0 once 50 ms have passed.
+        func slide(at now: Date) -> CGFloat {
+            guard let steppedAt else { return 0 }
+            return CGFloat(max(0, 1 - now.timeIntervalSince(steppedAt) / 0.05))
+        }
+
         /// Takes one step of the meter for each 50 ms since the last, at most
         /// `steps` at once, and adds a bar for the loudest. Silence adds a dot.
         func advance(to now: Date, meter: VoiceLevelMeter, steps: Int) {
             if let steppedAt, now.timeIntervalSince(steppedAt) < 0.045 * Double(steps) { return }
-            steppedAt = now
             var peak: Float?
             for _ in 0..<steps {
                 guard let step = meter.next() else { break }
                 peak = max(peak ?? 0, step)
             }
+            // No audio yet: try again on the next frame.
             guard let peak else { return }
+            steppedAt = now
             values.append(peak > VoiceInputWaveform.silence ? peak : 0)
             // The last 5 s, whatever the width.
             if values.count > 100 { values.removeFirst(values.count - 100) }
