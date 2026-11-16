@@ -1,0 +1,15 @@
+name: vault_apply
+type: system
+description: >-
+  Ask the guardian for time-limited use of one vault secret. The guardian sees the
+  name, the duration and your reason, and approves or rejects. After approval, run
+  `vault load NAME -- <command>` in the shell: the command gets the secret in its
+  environment and its output is masked. The grant is per secret name, lasts 15
+  minutes by default (up to 180) and does not stop commands already running. Find
+  names with vault_search. Give a short, concrete reason. If the secret is not in the
+  vault, tell the guardian to add it in Settings, Advanced, Vault.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write
+requiresApproval: true

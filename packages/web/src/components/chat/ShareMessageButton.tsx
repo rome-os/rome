@@ -14,7 +14,7 @@ export interface SharedMessageTurn {
  * Starts the chat's share mode with the turn of one message selected. The
  * live chat provides it; a shared chat and a read-only viewer leave it null,
  * so they show no Share. `turn` names the message's turn where the chat's
- * loaded timeline may not hold it, such as a thread view's older message.
+ * loaded timeline may not hold it.
  */
 export const MessageSharingContext = createContext<
   ((messageId: string, turn?: SharedMessageTurn) => void) | null

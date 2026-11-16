@@ -185,9 +185,12 @@ describe("RecentChats", () => {
       ],
       { agentName: "Milo" },
     );
+    const user = userEvent.setup();
     renderRecentChats();
     const entry = await screen.findByRole("link", { name: "Main chat" });
     expect(entry.getAttribute("href")).toBe("/message");
+    // The Tasks panel starts folded.
+    await user.click(await screen.findByRole("button", { name: /^Tasks/ }));
     const task = await screen.findByRole("link", { name: /Find flights/ });
     expect(task.getAttribute("href")).toBe("/chat/task-1");
     expect(
@@ -1730,7 +1733,7 @@ describe("RecentChats", () => {
     });
   });
 
-  it("lists the latest five topic chats, then More for the rest", async () => {
+  it("lists every topic chat latest first, with no More row", async () => {
     concierge.chatId = "concierge";
     concierge.chats = [
       { id: "concierge", name: "Concierge", main: true, unread: 0 },
@@ -1755,7 +1758,6 @@ describe("RecentChats", () => {
         projectPath: "default",
       })) as MockSession[],
     );
-    const user = userEvent.setup();
     renderRecentChats();
 
     await waitFor(() =>
@@ -1763,14 +1765,12 @@ describe("RecentChats", () => {
         Array.from(document.querySelectorAll("[data-concierge-topic]")).map((row) =>
           row.getAttribute("data-concierge-topic"),
         ),
-      ).toEqual(["topic-7", "topic-6", "topic-5", "topic-4", "topic-3"]),
+      ).toEqual(["topic-7", "topic-6", "topic-5", "topic-4", "topic-3", "topic-2", "topic-1"]),
     );
-    await user.click(screen.getByRole("button", { name: "2 more" }));
-    expect(screen.getByRole("link", { name: "Topic 1" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /more$/ })).toBeNull();
   });
 
-  it("updates a topic chat folded under More when a turn in it ends", async () => {
+  it("updates a topic chat's row when a turn in it ends", async () => {
     concierge.chatId = "concierge";
     concierge.fromServer = true;
     const unread: Record<string, number> = {};
@@ -1779,7 +1779,6 @@ describe("RecentChats", () => {
       name: `Topic ${index + 1}`,
       agentName: "core:concierge",
       createdAt: "2026-07-01T00:00:00.000Z",
-      // Topic 1 moved first, so it is the sixth and folded under More.
       activityAt: new Date(Date.UTC(2026, 6, 2 + index)).toISOString(),
       lastSeenActivityAt: null,
       unread: false,
@@ -1806,9 +1805,8 @@ describe("RecentChats", () => {
       return new Response("not found", { status: 404 });
     }) as typeof fetch);
     FakeWebSocket.instances = [];
-    const user = userEvent.setup();
     renderRecentChats("/chat/open-chat", fakeSocketLiveEventsClient());
-    await screen.findByRole("button", { name: "1 more" });
+    await screen.findByRole("link", { name: "Topic 1" });
     let socket!: FakeWebSocket;
     act(() => {
       socket = acceptLatestSocket();
@@ -1829,15 +1827,14 @@ describe("RecentChats", () => {
         data: { sessionId: "topic-1", running: false },
       }),
     );
-    await user.click(screen.getByRole("button", { name: "1 more" }));
     expect(await screen.findByRole("link", { name: "Topic 1, 2 unread messages" })).toBeTruthy();
   });
 
-  it("keeps the open topic chat in view when it is past the first five", async () => {
+  it("keeps the open topic chat in view when it is past the first page", async () => {
     concierge.chatId = "concierge";
     concierge.chats = [
       { id: "concierge", name: "Concierge", main: true, unread: 0 },
-      ...Array.from({ length: 6 }, (_, index) => ({
+      ...Array.from({ length: 40 }, (_, index) => ({
         id: `topic-${index + 1}`,
         name: `Topic ${index + 1}`,
         main: false,

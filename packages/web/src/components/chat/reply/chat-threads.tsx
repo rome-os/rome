@@ -1,8 +1,7 @@
 // The label under each of the agent's messages in a task's chat thread, in a
 // Concierge chat's main transcript (docs/domains/chats.md#chat-thread): it
-// names the task and opens its thread's view. Only a task has a thread, so a
-// thread no task has, from before, shows no label. The thread view's own
-// transcript has no provider, so it shows none.
+// names the task and focuses the chat on its thread. Only a task has a
+// thread, so a thread no task has, from before, shows no label.
 
 import { CornerDownRight } from "lucide-react";
 import { createContext, useContext, useMemo } from "react";
@@ -26,13 +25,15 @@ export interface ChatThreads {
   taskThreads: ReadonlyMap<string, string>;
   /** Each task thread's title, by the thread. */
   titles: ReadonlyMap<string, string>;
+  /** The thread the transcript is filtered to, or null when it shows every message. */
+  focus: string | null;
 }
 
 const ChatThreadsContext = createContext<ChatThreads | null>(null);
 
 export const ChatThreadsProvider = ChatThreadsContext.Provider;
 
-/** The chat threads of the transcript this renders in, or null inside the thread view. */
+/** The chat threads of the transcript this renders in, or null outside a Concierge chat's own. */
 export function useChatThreads(): ChatThreads | null {
   return useContext(ChatThreadsContext);
 }
@@ -129,12 +130,13 @@ export function useChatThreadsValue(
   messages: readonly ThreadTimelineMessage[],
   rethreaded: ReadonlyMap<string, ThreadPlacement>,
   liveTitles: ReadonlyMap<string, string | null>,
+  focus: string | null = null,
 ): ChatThreads {
   return useMemo(() => {
     const shown = placed(messages, rethreaded);
     const { threads, titles } = taskThreads(shown, liveTitles);
-    return { labels: threadLabels(shown, liveTitles), taskThreads: threads, titles };
-  }, [messages, rethreaded, liveTitles]);
+    return { labels: threadLabels(shown, liveTitles), taskThreads: threads, titles, focus };
+  }, [messages, rethreaded, liveTitles, focus]);
 }
 
 /**
@@ -193,8 +195,8 @@ function LabelArrow() {
 
 /**
  * The subdued `<arrow> <task title>` label under an agent message in a task's chat
- * thread, which opens the thread. Renders nothing under the guardian's
- * messages and inside the thread view. A message in no thread whose turn the
+ * thread, which focuses the chat on the thread, and closes the focus while it
+ * is on that thread. Renders nothing under the guardian's messages. A message in no thread whose turn the
  * Concierge took on its own, from a routine, an app, another agent or what
  * it follows, shows `source` instead, in the same place and look, as plain
  * text: at most one label per message, and a thread's wins.
@@ -215,17 +217,20 @@ export function ThreadLabelLine({
     return source ? <SourceLabel source={source} /> : null;
   }
   const name = label.title;
+  const active = draft.thread !== null && threads?.taskThreads.get(draft.thread) === label.thread;
   return (
     <button
       type="button"
       data-thread-label={label.thread}
+      aria-pressed={active}
       title={name}
       onClick={() => draft.openThread({ thread: message.id, title: name })}
       // About 4px (a spacing step) from its own bubble and 12px before the next
-      // message, so it reads as its bubble's. It keeps its look on hover; a
-      // keyboard focus shows a ring. A long title is cut at a fixed width,
-      // whole in the tooltip and the accessible name.
-      className={`${LABEL_LINE} cursor-pointer rounded-4 text-left outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50`}
+      // message, so it reads as its bubble's. It keeps its look on hover, and
+      // darkens while its thread is in focus; a keyboard focus shows a ring. A
+      // long title is cut at a fixed width, whole in the tooltip and the
+      // accessible name.
+      className={`${LABEL_LINE} cursor-pointer rounded-4 text-left aria-pressed:text-muted-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50`}
     >
       <LabelArrow />
       <span className="max-w-56 truncate">{name}</span>
