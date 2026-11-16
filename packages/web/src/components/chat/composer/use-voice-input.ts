@@ -91,6 +91,7 @@ export function useVoiceInput({
 }) {
   const info = useVoiceInputInfo();
   const [state, setState] = useState<VoiceInputState>("idle");
+  const [asking, setAsking] = useState(false);
   const anchorRef = useRef<Anchor | null>(null);
   const dictationRef = useRef<Dictation | null>(null);
   const valueRef = useRef(value);
@@ -113,6 +114,7 @@ export function useVoiceInput({
       anchorRef.current = null;
       keepNoticeRef.current({ reason });
       setState("idle");
+      setAsking(false);
       setNoticeRef.current({ reason });
     };
     // `persisted`: the page went into the back/forward cache, not away.
@@ -194,8 +196,10 @@ export function useVoiceInput({
               anchor.before + spokenInsertion(anchor.before, heard, anchor.after) + anchor.after,
             );
         },
+        onAsking: setAsking,
         onDone: (heard, stop) => {
           dictationRef.current = null;
+          setAsking(false);
           commit(heard);
           setState("idle");
           setNotice(stop);
@@ -242,6 +246,8 @@ export function useVoiceInput({
     state,
     /** Why listening last stopped on its own, or null. */
     notice,
+    /** True while the browser asks the guardian for the microphone. */
+    asking,
     /** Clears the notice, as a send does. */
     dismissNotice,
     /** Call from the field's change handler: an edit clears the notice. */
