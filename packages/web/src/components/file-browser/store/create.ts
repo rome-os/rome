@@ -160,7 +160,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         discardChangesResolver: null,
         acceptedBrowserPath: `${initialRouteSnapshot.pathname}${initialRouteSnapshot.search}${initialRouteSnapshot.hash}`,
         sidebarResize: null,
-        dragDepth: 0,
       },
 
       tree: {
