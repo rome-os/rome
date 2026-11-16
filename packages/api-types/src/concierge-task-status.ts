@@ -151,8 +151,8 @@ export interface MessageStatusFacts {
   /** Whether the turn that took the message answered it; null when no turn took it. */
   answered: boolean | null;
   /**
-   * Whether that turn showed it working: a working tool it called ran 2
-   * seconds before the turn answered it.
+   * Whether that turn showed it working: before the turn answered it, a
+   * working tool it called ran half a second, or it made a second one.
    */
   working: boolean;
   /** Whether the Concierge reacted to it: then it never shows working. */

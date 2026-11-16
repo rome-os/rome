@@ -6157,7 +6157,7 @@ describe("Concierge tasks started for a guardian message", () => {
       rs.useRealTimers();
     });
 
-    it("works once a working tool call ran 2 seconds, and clears when the turn ends with no task", async () => {
+    it("works once a working tool call ran half a second, and clears when the turn ends with no task", async () => {
       const s = setup({ said: false });
       s.fakeTimers();
       guardianSays(s, "g1");
@@ -6212,15 +6212,30 @@ describe("Concierge tasks started for a guardian message", () => {
       await taken(s, "g1");
       // A quick defer, then a reaction: no call ran past its grace.
       const { id } = callTool(s, "defer");
-      await rs.advanceTimersByTimeAsync(300);
+      await rs.advanceTimersByTimeAsync(50);
       s.service.messageStatus.toolEnded(CONCIERGE_CHAT, id);
-      await rs.advanceTimersByTimeAsync(1_500);
+      await rs.advanceTimersByTimeAsync(3_000);
       expect((await s.tool("react", { emoji: "👍" })).isError).toBeFalsy();
       await rs.advanceTimersByTimeAsync(10_000);
       await conciergeEnds(s);
       await rs.advanceTimersByTimeAsync(100);
       expect(seen.filter(([, status]) => status !== null)).toEqual([]);
       expect(s.reactions.get(`${CONCIERGE_CHAT}:g1`)).toBe("👍");
+    });
+
+    it("works at the turn's second working tool call, however short each call is", async () => {
+      const s = setup({ said: false });
+      s.fakeTimers();
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const first = callTool(s, "Read");
+      await rs.advanceTimersByTimeAsync(30);
+      s.service.messageStatus.toolEnded(CONCIERGE_CHAT, first.id);
+      await rs.advanceTimersByTimeAsync(3_000);
+      expect(await statusOf(s, "g1")).toBeNull();
+      const second = callTool(s, "Read");
+      await second.ran;
+      expect(await statusOf(s, "g1")).toBe("working");
     });
 
     it("shows work past the grace as working, and takes no reaction after it", async () => {

@@ -752,7 +752,8 @@ export class ConciergeTasksRepository {
 
   /**
    * The open messages of Concierge chat `chatId` show working from now: a
-   * working tool its turn called ran 2 seconds. A message the turn reacted
+   * working tool its turn called ran half a second, or it made a second one.
+   * A message the turn reacted
    * to is left out, and so are those of `except`. Answers the ones that
    * changed.
    */

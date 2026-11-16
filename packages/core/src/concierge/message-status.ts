@@ -1,7 +1,8 @@
 // When a guardian message of a Concierge chat starts to show its turn working
-// (docs/domains/chats.md#status): once a working tool call of the turn ran 2
-// seconds. A turn that only answers, or whose work answers or reacts within
-// that grace, never shows it. A message that joined the turn after it began
+// (docs/domains/chats.md#status): once a working tool call of the turn ran
+// half a second, or at the turn's second working tool call. A turn that only
+// answers, or whose one quick call it follows with an answer or a reaction,
+// never shows it. A message that joined the turn after it began
 // working shows it only by a task made for it. The stored facts and the
 // status derived from them live in ConciergeTasksRepository and
 // ConciergeTasks; this keeps only the running calls' timers and which
@@ -14,7 +15,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("concierge-message-status");
 
 /** How long a working tool call runs before its turn's messages show working. */
-export const WORKING_GRACE_MS = 2_000;
+export const WORKING_GRACE_MS = 500;
 
 /**
  * The tools that are no work on a message: reacting to it, sending a message
@@ -59,6 +60,8 @@ export class MessageStatusTracker {
   private readonly joined = new Map<string, Set<string>>();
   /** Per chat, its turn's working tool calls that run, by call id. */
   private readonly calls = new Map<string, Map<string, RunningCall>>();
+  /** Per chat, how many working tool calls its turn made. */
+  private readonly callCounts = new Map<string, number>();
 
   /** `repoOf` is read at each use, as the service's task list may be wired after it. */
   constructor(
@@ -85,12 +88,16 @@ export class MessageStatusTracker {
 
   /**
    * The running turn of chat `chatId` called `tool` as call `callId`. A
-   * working one that still runs after the grace shows the messages the turn
-   * started with working. Resolves once that is written, or the call ended
-   * first.
+   * working one that still runs after the grace, or the turn's second
+   * working one, shows the messages the turn started with working. Resolves
+   * once that is written, or the call ended first.
    */
   toolCalled(chatId: string, tool: string, callId: string): Promise<void> {
     if (!this.open.has(chatId) || !isWorkingTool(tool)) return Promise.resolve();
+    const count = (this.callCounts.get(chatId) ?? 0) + 1;
+    this.callCounts.set(chatId, count);
+    // Work made of short calls is work too: the second one shows it.
+    if (count === 2) return this.guard(this.ranLong(chatId));
     const calls = this.calls.get(chatId) ?? new Map<string, RunningCall>();
     this.calls.set(chatId, calls);
     calls.get(callId)?.done();
@@ -134,6 +141,7 @@ export class MessageStatusTracker {
   turnSettled(chatId: string): void {
     this.open.delete(chatId);
     this.joined.delete(chatId);
+    this.callCounts.delete(chatId);
     for (const call of this.calls.get(chatId)?.values() ?? []) call.done();
     this.calls.delete(chatId);
   }
