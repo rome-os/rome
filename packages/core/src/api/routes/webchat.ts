@@ -4748,6 +4748,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       stream.interrupt = async (reason) => {
         await handle.stop(reason);
       };
+      // The effort the turn runs at: a Concierge turn names none and runs at its agent's.
+      const timedEffort =
+        reasoningEffort ?? deps.agentLoader.find(agentName)?.definition.reasoningEffort;
       if (isConciergeChat(session)) {
         timeTurn(
           stream,
@@ -4758,7 +4761,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               trigger: said.taskInput || saidBy ? "system" : "guardian",
               messageKey: inputId,
               startedAtMs: receivedAtMs,
-              ...(reasoningEffort ? { effort: reasoningEffort } : {}),
+              ...(timedEffort ? { effort: timedEffort } : {}),
               ...(sessionWarmth ? { session: sessionWarmth } : {}),
             },
             agentName,
