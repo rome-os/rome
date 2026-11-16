@@ -86,29 +86,12 @@ export interface StoredWebchatMessage {
   senderName?: string | null;
   replyToPlatformMessageId?: string | null;
   contextInjectedTurnId?: string | null;
-  /** The chat thread the message is in (docs/domains/chats.md#chat-thread),
-   *  or null when it is in none. */
+  /** The key of the root of the chat thread the message is in
+   *  (docs/domains/chats.md#chat-thread). Absent for a line kept outside Chats. */
   chatThreadId?: string | null;
   /** The emoji the message was reacted to with (docs/domains/chats.md#reaction), when it has one. */
   reaction?: string | null;
   createdAt: Date;
-}
-
-/**
- * Where a message goes among its chat's chat threads: into the thread of
- * the message `in` names, or into a thread of its own. With `settle` it
- * stays there for good: its sender chose the thread, or a task's thread took
- * it. A settled message is never moved.
- */
-export type ChatThreadPlacement = ({ in: string } | { starts: true }) & {
-  settle?: boolean;
-};
-
-/** A message was placed in a chat thread. */
-export interface ChatThreadPlaced {
-  sessionId: string;
-  messageId: string;
-  chatThreadId: string;
 }
 
 export interface StoredSharedChat {
@@ -302,7 +285,6 @@ export interface TraceBatch {
 }
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
-export type ChatThreadPlacedListener = (event: ChatThreadPlaced) => void;
 export type MessageReactionListener = (event: MessageReactionEvent) => void;
 export type WebchatSessionNameChangedListener = (event: {
   sessionId: string;
@@ -864,20 +846,6 @@ export class WebChatRepository {
     }
   }
 
-  private chatThreadPlacedListeners = new Set<ChatThreadPlacedListener>();
-
-  /** Told when a message is placed in a chat thread after it was said. */
-  onChatThreadPlaced(listener: ChatThreadPlacedListener): () => void {
-    this.chatThreadPlacedListeners.add(listener);
-    return () => {
-      this.chatThreadPlacedListeners.delete(listener);
-    };
-  }
-
-  protected emitChatThreadPlaced(event: ChatThreadPlaced): void {
-    for (const listener of this.chatThreadPlacedListeners) listener(event);
-  }
-
   private messageReactionListeners = new Set<MessageReactionListener>();
 
   /** Told when a message's reaction is set, replaced or cleared. */
@@ -906,40 +874,36 @@ export class WebChatRepository {
   }
 
   /**
-   * Places message `messageId` of chat `sessionId` in a chat thread. A
-   * message whose sender chose its thread is never moved. Answers the
-   * thread the message is in after, or null when the chat holds no such
-   * message or keeps no chat threads. Chat threads live in Chats, so this
-   * repository keeps none.
-   */
-  async placeInChatThread(
-    _sessionId: string,
-    _messageId: string,
-    _placement: ChatThreadPlacement,
-  ): Promise<string | null> {
-    return null;
-  }
-
-  /** The chat thread message `messageId` of chat `sessionId` is in, else the
-   *  one it would start, or null when the chat holds no such message. */
-  async chatThreadOf(_sessionId: string, _messageId: string): Promise<string | null> {
-    return null;
-  }
-
-  /**
-   * The messages of the chat thread that message `messageId` of chat
-   * `sessionId` is in, in the order they were said. A message in no chat
-   * thread is alone in its own. Empty when the chat holds no such message.
+   * The messages of the chat thread whose root is keyed `root` in chat
+   * `sessionId`, in the order they were said. Empty when the chat holds no
+   * such message or keeps no chat threads. Chat threads live in Chats, so
+   * this repository keeps none.
    */
   async getChatThreadMessages(
     _sessionId: string,
-    _messageId: string,
+    _root: string,
   ): Promise<
     Array<
       StoredWebchatMessage & { inputState: import("@rome-os/app-runtime").AgentInputState | null }
     >
   > {
     return [];
+  }
+
+  /** The key of the last message of the chat thread whose root is keyed
+   *  `root` in chat `sessionId`, or null when the chat holds none. */
+  async lastInChatThread(_sessionId: string, _root: string): Promise<string | null> {
+    return null;
+  }
+
+  /** Of the chat threads `roots` name in chat `sessionId`, the ones that hold
+   *  more than one message: each one's size and the text of its root, by the
+   *  root's key. */
+  async chatThreadSizes(
+    _sessionId: string,
+    _roots: readonly string[],
+  ): Promise<Map<string, { size: number; rootText: string }>> {
+    return new Map();
   }
 
   /** Told when a session is renamed, from the dashboard or by its channel. */
@@ -1931,7 +1895,7 @@ export class WebChatRepository {
     content: string,
     actor?: SessionActor,
     saidBy?: Account,
-    _chatThread?: ChatThreadPlacement,
+    _replyTo?: string,
   ): Promise<boolean> {
     return this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2196,7 +2160,7 @@ export class WebChatRepository {
     role: string,
     parts: TranscriptPart[],
     id: string = randomUUID(),
-    _chatThread?: ChatThreadPlacement,
+    _replyTo?: string,
   ): Promise<StoredWebchatMessage> {
     assertWidgetAlone(parts);
     const message = await this.db.transaction((tx) => {
@@ -2307,7 +2271,7 @@ export class WebChatRepository {
     sessionId: string,
     turnId: string,
     parts: TranscriptPart[],
-    options: { chatThread?: ChatThreadPlacement } = {},
+    options: { replyTo?: string } = {},
   ): Promise<StoredWebchatMessage> {
     return this.insertBackendMessage(
       sessionId,
@@ -2315,7 +2279,7 @@ export class WebChatRepository {
       "assistant",
       parts,
       undefined,
-      options.chatThread,
+      options.replyTo,
     );
   }
 

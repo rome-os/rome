@@ -35,7 +35,6 @@ function task(
     dueAt: null,
     rank: null,
     chat: { id: `mock-task-chat-${id}`, name: title },
-    threadRoot: null,
     conciergeChat: { id: CONCIERGE_CHAT_ID, name: "Main chat", main: true },
     sourceMessageId: null,
     createdAt: now - 3 * HOUR,
