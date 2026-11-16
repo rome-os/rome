@@ -30,6 +30,7 @@ import { MAIN_CHAT_PATH, sessionActivityTime } from "@/lib/chat-session";
 import type { ChatSession } from "@/lib/chat-types";
 import { emitSessionsChanged, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
+import { useListEnd } from "@/hooks/use-list-end";
 
 const anyEvent = z.unknown();
 
@@ -182,19 +183,12 @@ export function ConciergeChats({
   const hasMore = topics.length > shown;
   // Near the end of the list, the next page: the list's scroller is the root,
   // so the page lands a little before the guardian reaches the last row.
-  const endRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const end = endRef.current;
-    if (!hasMore || !end || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) setLimit(shown + TOPIC_CHATS_PAGE);
-      },
-      { root: findScrollableYAncestor(end), rootMargin: "0px 0px 160px 0px" },
-    );
-    observer.observe(end);
-    return () => observer.disconnect();
-  }, [hasMore, shown]);
+  const end = useListEnd({
+    enabled: hasMore,
+    page: shown,
+    onReached: () => setLimit(shown + TOPIC_CHATS_PAGE),
+    rootMargin: "0px 0px 160px 0px",
+  });
   return (
     <section aria-label={t("recentChats.conciergeSection")} className="pt-1" data-concierge-section>
       {statusFilter === "archived" ? null : (
@@ -211,7 +205,7 @@ export function ConciergeChats({
           }}
         />
       ))}
-      {hasMore ? <div ref={endRef} aria-hidden className="h-px" data-topic-chats-end /> : null}
+      {hasMore ? <div ref={end.ref} aria-hidden className="h-px" data-topic-chats-end /> : null}
     </section>
   );
 }
