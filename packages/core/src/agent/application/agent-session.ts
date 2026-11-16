@@ -29,7 +29,7 @@ import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
-import { handoffSections, type RenewalHandoffs } from "../domain/session-handoff.js";
+import { handoffSections, LIGHT_HANDOFF, type RenewalHandoffs } from "../domain/session-handoff.js";
 import { writeRenewalHandoff } from "./session-handoff.js";
 import type { PromptFacts } from "../domain/prompt-facts.js";
 import { type AgentLog } from "../domain/agent-log.js";
@@ -931,7 +931,7 @@ async function reachableRecordedWorkingDir(
   return isDirectory ? recorded : undefined;
 }
 
-/** How many setup renewals back a successor looks for what its predecessor held. */
+/** How many light renewals back a successor looks for what its predecessor held. */
 const HELD_READS = 20;
 
 /** How many renewals a resume follows that land while it resolves. */
@@ -1390,7 +1390,7 @@ async function openSession(
         setup: setupNow ?? resumed.setup ?? undefined,
         reason,
         workingDir,
-        handoff: handoff ?? undefined,
+        handoff: reason === "setup" ? LIGHT_HANDOFF : (handoff ?? undefined),
       });
       renewing = { retired: resumed, successor, reason };
       resumed = undefined;
@@ -1945,7 +1945,7 @@ async function openSession(
       !opts.isSubagent &&
       !config.codeBacked &&
       resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
-        ? predecessor?.supersededFor === "setup" && session.handoff === null
+        ? session.handoff === LIGHT_HANDOFF
           ? "held"
           : "recent"
         : undefined,
@@ -2957,17 +2957,24 @@ class AgentSessionImpl implements AgentSession {
 
   /**
    * What the session this one replaced on a setup change held: the handoff
-   * the earliest session of that run of setup renewals started from, if any,
-   * and the chat's messages since that session opened.
+   * it started from, if any, and the chat's messages since it opened. A run
+   * of light renewals counts as one session.
    */
-  private async heldByPredecessor(): Promise<{ handoff: string | null; since: Date }> {
-    let held: Session = this.session;
-    for (let read = 0; read < HELD_READS && held.handoff === null; read += 1) {
-      const predecessor = await this.deps.sessionRepository.predecessorOf(held.id);
-      if (predecessor?.supersededFor !== "setup") break;
-      held = predecessor;
+  private async heldByPredecessor(): Promise<{ handoff: string | null; since: Date } | null> {
+    const repository = this.deps.sessionRepository;
+    // A predecessor renewed lightly itself held what its own predecessor did,
+    // and everything said since.
+    let held = await repository.predecessorOf(this.sessionId);
+    for (let read = 0; held && held.handoff === LIGHT_HANDOFF && read < HELD_READS; read += 1) {
+      const before = await repository.predecessorOf(held.id);
+      if (!before) break;
+      held = before;
     }
-    return { handoff: held.handoff, since: held.createdAt };
+    if (!held) return null;
+    return {
+      handoff: held.handoff === LIGHT_HANDOFF ? null : held.handoff,
+      since: held.createdAt,
+    };
   }
 
   /**

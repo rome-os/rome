@@ -30,6 +30,14 @@ export const HANDOFF_REQUEST = [
   "</handoff_request>",
 ].join("\n");
 
+/**
+ * The handoff a renewal for a setup change stores: no note, since no turn
+ * writes one. The successor reads what its predecessor held instead: the
+ * handoff that one started from and the chat's messages since it opened.
+ * docs/concepts/sessions.md#renewal
+ */
+export const LIGHT_HANDOFF = "";
+
 /** One message said in the chat, as the handoff reads it. */
 export interface RecentMessage {
   readonly senderName: string | null;

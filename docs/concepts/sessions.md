@@ -72,11 +72,11 @@ A renewal replaces a chat's session with a fresh one, on a new provider thread, 
 - A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then. Its model comes from the agent's tier or model as they map now, never the retired session's [model pin](#model-pin). A model the guardian picked for the chat still applies.
 - The successor is written, with its setup, its reason and the working folder, and the retired session marked superseded, only once the fresh thread has opened. If that open fails, nothing is written, and the next cold open tries again on a fresh thread, never the retired one.
 - An agent whose policy asks for it carries the chat over to the successor. The Concierge's chats work this way.
-  - A setup change takes a light handoff: no turn writes a note and no model is asked, so the message that caused the cold open does not wait. The successor reads what the retired session held: the handoff that session started from, if any, and the chat's text messages since it opened. A run of setup renewals counts as one session.
+  - A setup change takes a light handoff: no turn writes a note and no model is asked, so the message that caused the cold open does not wait. The successor reads what the retired session held: the handoff that session started from, if any, and the chat's text messages since it opened. A turn counts whole when any of its messages came since, so the message that opened the session comes with its reply. A run of light renewals counts as one session, and nothing reaches back past a session that started any other way.
   - A reset writes a [handoff](#handoff), and the successor reads it with the chat's latest messages up to about 8,000 tokens.
   - A full context writes a handoff ahead of time ([Handoff](#handoff)), which the successor reads the same way.
 - Every successor of such an agent carries what it reads inside its continuation notice, with the chat's open tasks as Rome holds them when the turn runs. Messages are the guardian's and the agent's text, never tool traces. It stops carrying them once a turn of its own succeeds.
-- What a light handoff carries is no larger than what the retired session held, which was under the context limit. A successor that still ends a turn past the limit renews for a full context like any session.
+- A light handoff carries every such message, with no cap: it is no larger than what the retired session held, which was under the context limit. A successor that still ends a turn past the limit renews for a full context like any session.
 
 ## Handoff
 

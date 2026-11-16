@@ -4470,7 +4470,8 @@ describe("AgentRunner", () => {
 
           expect(second).not.toBe(first);
           expect((await sessionRepository.session(first!))?.supersededFor).toBe("setup");
-          expect((await sessionRepository.session(second!))?.handoff).toBeNull();
+          // A light handoff: no note, so the successor reads what its predecessor held.
+          expect((await sessionRepository.session(second!))?.handoff).toBe("");
           expect(provider.sessions.map((params) => params.thread)).toEqual([
             { kind: "new" },
             { kind: "new" },
@@ -4489,6 +4490,38 @@ describe("AgentRunner", () => {
           expect(provider.sessions[1]?.config.systemPrompt).toContain(
             identity.text === "**Agent Name:** YoYo" ? "YoYo" : "Be kind.",
           );
+        });
+
+        it("counts a run of light renewals as one session: the next one carries what the first held", async () => {
+          const provider = threadedProvider(3);
+          const { handoffs, since } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner);
+          charter.text = "Be kind. Always answer in one line.";
+          await turn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          await turn(runner);
+
+          const firstOpened = (await sessionRepository.session(first!))?.createdAt;
+          expect(since).toEqual([firstOpened, firstOpened]);
+          expect(provider.calls.at(-1)?.prompt).not.toContain("<handoff>");
+        });
+
+        it("reaches back no further than a predecessor that started from no light handoff", async () => {
+          const provider = threadedProvider(3);
+          const { handoffs, since } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner);
+          // A setup renewal from before light handoffs: it wrote no note, and its
+          // successor never read what the first session held.
+          const retired = (await sessionRepository.session(first!))!;
+          const older = retired.replace({ setup: retired.setup ?? undefined, reason: "setup" });
+          await sessionRepository.replace(retired, older);
+          await turn(runner);
+          charter.text = "Be kind. Always answer in one line.";
+          await turn(runner);
+
+          expect(since).toEqual([(await sessionRepository.session(older.id))?.createdAt]);
         });
 
         it("carries, on a setup change, the handoff the retired session started from and the messages since", async () => {
