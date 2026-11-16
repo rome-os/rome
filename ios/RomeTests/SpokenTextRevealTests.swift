@@ -53,7 +53,7 @@ import Testing
         var reveal = SpokenTextReveal()
         reveal.setTarget("hi", now: 0)
         reveal.advance(to: 1)
-        reveal.advance(to: 3)
+        // The display link stops once settled: no frame runs during the pause.
         reveal.setTarget("hi there", now: 3)
         reveal.advance(to: 3.1)
         #expect(reveal.shownText == "hi t")

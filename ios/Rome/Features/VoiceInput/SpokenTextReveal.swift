@@ -29,12 +29,17 @@ struct SpokenTextReveal {
     /// characters past the first that no longer matches; those before it keep
     /// their place and their fade.
     mutating func setTarget(_ text: String, now: TimeInterval) {
+        // Caught up: the display link has stopped, so the time since the last
+        // frame was a pause and banks no characters for the next words.
+        if shown.count == target.count {
+            tickedAt = now
+            credit = 0
+        }
         target = Array(text)
         var same = 0
         while same < shown.count, same < target.count, shown[same].character == target[same] { same += 1 }
         shown.removeLast(shown.count - same)
         if instant { reveal(upTo: target.count, at: -.infinity) }
-        // A pause in the text does not bank characters for the next words.
         if shown.count == target.count { credit = 0 }
         tickedAt = tickedAt ?? now
     }
@@ -102,6 +107,8 @@ final class SpokenTextRevealer {
         draw()
         if link == nil, !reveal.settled(at: CACurrentMediaTime()) {
             let link = CADisplayLink(target: self, selector: #selector(frame))
+            // A 280 ms fade reads smoothly at 60 Hz; ProMotion's 120 Hz only costs layout.
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
             link.add(to: .main, forMode: .common)
             self.link = link
         }
@@ -134,13 +141,19 @@ final class SpokenTextRevealer {
     private func draw() {
         guard let view else { return }
         let now = CACurrentMediaTime()
-        let text = NSMutableAttributedString(string: before, attributes: [.font: font, .foregroundColor: color])
-        for (index, item) in reveal.shown.enumerated() {
+        let shownText = reveal.shownText
+        let text = NSMutableAttributedString(string: before + shownText + after, attributes: [.font: font, .foregroundColor: color])
+        // Only the newest few characters are still fading: they appear in
+        // order, so they are a run at the end of what shows, and each gets
+        // its own shade while the rest keep the text color.
+        var end = (before as NSString).length + (shownText as NSString).length
+        for index in reveal.shown.indices.reversed() {
             let opacity = reveal.opacity(at: index, now: now)
-            let shade = opacity < 1 ? color.withAlphaComponent(color.cgColor.alpha * opacity) : color
-            text.append(NSAttributedString(string: String(item.character), attributes: [.font: font, .foregroundColor: shade]))
+            guard opacity < 1 else { break }
+            let length = (String(reveal.shown[index].character) as NSString).length
+            end -= length
+            text.addAttribute(.foregroundColor, value: color.withAlphaComponent(color.cgColor.alpha * opacity), range: NSRange(location: end, length: length))
         }
-        text.append(NSAttributedString(string: after, attributes: [.font: font, .foregroundColor: color]))
         view.attributedText = text
         onDraw(text.string)
     }
