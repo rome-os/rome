@@ -169,6 +169,8 @@ final class VoiceInputController {
     /// The words shown while listening, not yet in the field's text binding.
     @ObservationIgnored private var preview: (text: String, binding: Binding<String>)?
     @ObservationIgnored private var previewSyncedAt = Date.distantPast
+    /// Draws the words heard into the field while listening.
+    @ObservationIgnored private var revealer: SpokenTextRevealer?
 
     var active: Bool { state != .idle }
 
@@ -196,8 +198,8 @@ final class VoiceInputController {
             source: VoiceAudioSources.make(),
             handlers: .init(
                 onText: { [weak self] heard in
-                    let words = before + SpokenText.insertion(before: before, heard: heard, after: after) + after
-                    self?.show(words, text: text, handle: handle)
+                    let insertion = SpokenText.insertion(before: before, heard: heard, after: after)
+                    self?.show(insertion, before: before, after: after, text: text, handle: handle)
                 },
                 onDone: { [weak self] heard, stop in
                     self?.done(heard: heard, stop: stop, text: text, handle: handle)
@@ -272,17 +274,22 @@ final class VoiceInputController {
         UIAccessibility.post(notification: .announcement, argument: stop.notice)
     }
 
-    /// Shows the words heard so far in the field's view at once. The binding,
-    /// which redraws the whole chat screen, takes them at most once a second,
-    /// so that a busy screen never holds up the guardian's stop tap.
-    private func show(_ words: String, text: Binding<String>, handle: ComposerTextHandle) {
+    /// Reveals the words heard so far in the field's view, a character at a
+    /// time. The binding, which redraws the whole chat screen, takes the text
+    /// shown at most once a second, so that a busy screen never holds up the
+    /// guardian's stop tap.
+    private func show(_ insertion: String, before: String, after: String, text: Binding<String>, handle: ComposerTextHandle) {
         guard let view = handle.view else {
-            text.wrappedValue = words
+            text.wrappedValue = before + insertion + after
             return
         }
-        view.text = words
-        preview = (words, text)
-        if Date().timeIntervalSince(previewSyncedAt) >= Self.previewSyncInterval { syncPreview() }
+        let revealer = revealer ?? SpokenTextRevealer(view: view, before: before, after: after) { [weak self] words in
+            self?.preview = (words, text)
+            guard let self, Date().timeIntervalSince(self.previewSyncedAt) >= Self.previewSyncInterval else { return }
+            self.syncPreview()
+        }
+        self.revealer = revealer
+        revealer.show(insertion)
     }
 
     /// Puts the words shown into the binding, so the draft keeps them.
@@ -296,6 +303,8 @@ final class VoiceInputController {
     private static let previewSyncInterval: TimeInterval = 1
 
     private func finishListening() {
+        revealer?.stop()
+        revealer = nil
         syncPreview()
         previewSyncedAt = .distantPast
         dictation = nil
