@@ -14,6 +14,10 @@ on:
     paths:
       - "ios/**"
       - ".github/workflows/ios-ci.yml"
+  # Nightly, every voice input UI test, including the ones too long for each PR.
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -112,11 +116,39 @@ jobs:
         run: |
           name=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9]+( Pro)?' | sort -V | tail -1)
           echo "name=$name" >> "$GITHUB_OUTPUT"
+      # The voice input suite takes about 20 minutes, so a PR or push runs it only when it
+      # changes voice input; nightly runs it whole, with rules 4 and 5, whose three minutes
+      # of dictation and 60 s wait are too long for every change.
+      - name: Decide which UI tests run
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            echo "voice=true" >> "$GITHUB_OUTPUT"
+            echo "long=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "long=false" >> "$GITHUB_OUTPUT"
+          # The voice control lives in the message field, so the field's file counts too.
+          voice='^(ios/Rome/Features/VoiceInput/|ios/Rome(UI)?Tests/VoiceInput|ios/Rome/Features/Chat/TranscriptViews\.swift$|\.github/workflows/ios-ci\.yml$)'
+          if git fetch --quiet --no-tags --depth=1 origin "$BASE" 2>/dev/null &&
+             git diff --name-only "$BASE" HEAD | grep -qE "$voice"; then
+            echo "voice=true" >> "$GITHUB_OUTPUT"
+          elif git cat-file -e "$BASE" 2>/dev/null; then
+            echo "::notice::No voice input change, so only LaunchTests run; the voice input suite runs nightly."
+            echo "voice=false" >> "$GITHUB_OUTPUT"
+          else
+            # No base to compare with, such as a branch's first push: run it.
+            echo "voice=true" >> "$GITHUB_OUTPUT"
+          fi
       # The voice input tests run against a stand-in instance that the
       # voice-input environment keeps on its own branch. Without it, only the
       # launch test runs.
       - name: Fetch the stand-in instance
         id: standin
+        if: steps.scope.outputs.voice == 'true'
         run: |
           # The job runs in ios/, but the stand-in's path is from the repository root.
           set -o pipefail
@@ -140,6 +172,7 @@ jobs:
       - name: Run the UI tests
         env:
           STANDIN: ${{ steps.standin.outputs.present }}
+          LONG: ${{ steps.scope.outputs.long }}
         run: |
           # xcodebuild hands TEST_RUNNER_* environment variables to the tests
           # without the prefix; the tests pass them to the app.
@@ -148,6 +181,10 @@ jobs:
             export TEST_RUNNER_ROME_LOCAL_ORIGIN=http://127.0.0.1:4790
             export TEST_RUNNER_ROME_LOCAL_USER=guardian
             export TEST_RUNNER_ROME_LOCAL_PASSWORD=stand-in
+            if [ "$LONG" != "true" ]; then
+              extra=(-skip-testing:RomeUITests/VoiceInputTests/testRule4ThreeMinutesStayInTheField
+                     -skip-testing:RomeUITests/VoiceInputTests/testRule5OnlyTheGuardianSends)
+            fi
           else
             extra=(-only-testing:RomeUITests/LaunchTests)
           fi
