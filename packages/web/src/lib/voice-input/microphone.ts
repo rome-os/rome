@@ -4,7 +4,12 @@
 // rate, and the worklet brings the audio down to 16 kHz.
 
 import { VOICE_INPUT_SAMPLE_RATE } from "@rome/api-types/voice-input";
-import { chooseMicrophone, chosenMicrophone } from "./microphone-choice";
+import {
+  chooseMicrophone,
+  chosenMicrophone,
+  findChosenMicrophone,
+  listMicrophones,
+} from "./microphone-choice";
 
 // Runs on the audio thread. Each output sample is the mean of the input
 // samples it covers, which also filters out most content above the new
@@ -74,9 +79,25 @@ export async function openMicrophoneStream(device: string | null): Promise<Media
       error instanceof Error &&
       (error.name === "OverconstrainedError" || error.name === "NotFoundError");
     if (!gone) throw error;
+    const fallback = await navigator.mediaDevices.getUserMedia({ audio: AUDIO });
+    // The id can be new on each page load; with the microphone now allowed,
+    // the browser names its devices, so look for the chosen one by name.
+    const match = findChosenMicrophone((await listMicrophones().catch(() => null)) ?? []);
+    if (match && match.id !== device) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { ...AUDIO, deviceId: { exact: match.id } },
+        });
+        for (const track of fallback.getTracks()) track.stop();
+        chooseMicrophone(match);
+        return stream;
+      } catch {
+        // Recording from the system default below.
+      }
+    }
     // Unplugged: the choice switches to the system default, as Settings shows.
     chooseMicrophone(null);
-    return navigator.mediaDevices.getUserMedia({ audio: AUDIO });
+    return fallback;
   }
 }
 

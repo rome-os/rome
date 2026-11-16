@@ -1,6 +1,11 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { chooseMicrophone, chosenMicrophone, listMicrophones } from "./microphone-choice";
+import {
+  chooseMicrophone,
+  chosenMicrophone,
+  findChosenMicrophone,
+  listMicrophones,
+} from "./microphone-choice";
 
 function devices(list: Array<Partial<MediaDeviceInfo>>) {
   Object.defineProperty(navigator, "mediaDevices", {
@@ -16,19 +21,29 @@ afterEach(() => {
 describe("the chosen microphone", () => {
   it("is the system default until one is chosen, and again after it is cleared", () => {
     expect(chosenMicrophone()).toBeNull();
-    chooseMicrophone("usb-mic");
+    chooseMicrophone({ id: "usb-mic", label: "USB Microphone" });
     expect(chosenMicrophone()).toBe("usb-mic");
     chooseMicrophone(null);
     expect(chosenMicrophone()).toBeNull();
   });
 
   it("reports the earlier choice when storage refuses a new one", () => {
-    chooseMicrophone("usb-mic");
+    chooseMicrophone({ id: "usb-mic", label: "USB Microphone" });
     const setItem = rs.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("full", "QuotaExceededError");
     });
-    expect(chooseMicrophone("headset")).toBe("usb-mic");
+    expect(chooseMicrophone({ id: "headset", label: "Headset" })).toBe("usb-mic");
     setItem.mockRestore();
+  });
+
+  it("finds the chosen microphone by name when the browser gives it a new id", () => {
+    chooseMicrophone({ id: "old-id", label: "USB Microphone" });
+    const options = [
+      { id: "mbp", label: "MacBook Pro Microphone" },
+      { id: "new-id", label: "USB Microphone" },
+    ];
+    expect(findChosenMicrophone(options)).toEqual({ id: "new-id", label: "USB Microphone" });
+    expect(findChosenMicrophone([{ id: "mbp", label: "MacBook Pro Microphone" }])).toBeNull();
   });
 
   it("lists the browser's microphones without Chrome's default and communications entries", async () => {

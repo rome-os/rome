@@ -20,6 +20,7 @@ import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
 import {
   chooseMicrophone,
   chosenMicrophone,
+  findChosenMicrophone,
   listMicrophones,
   type MicrophoneOption,
   revealMicrophones,
@@ -102,10 +103,13 @@ function MicrophoneRow() {
 
   // An unplugged microphone leaves the list, and Settings switches to the
   // system default, which voice input then records from.
-  const missing = chosen !== null && options != null && !options.some((o) => o.id === chosen);
+  // A choice found by name after a reload gets the device's new id.
+  const found = chosen !== null && options ? findChosenMicrophone(options) : null;
+  const missing = chosen !== null && options != null && !found;
   useEffect(() => {
     if (missing) setChosen(chooseMicrophone(null));
-  }, [missing]);
+    else if (found && found.id !== chosen) setChosen(chooseMicrophone(found));
+  }, [missing, found, chosen]);
   const description = refused
     ? t("system.voiceInput.microphone.refused")
     : t("system.voiceInput.microphone.description");
@@ -126,10 +130,10 @@ function MicrophoneRow() {
           </Button>
         ) : (
           <Select
-            value={chosen && !missing ? chosen : SYSTEM_DEFAULT}
+            value={found?.id ?? SYSTEM_DEFAULT}
             disabled={options === undefined}
             onValueChange={(value) =>
-              setChosen(chooseMicrophone(value === SYSTEM_DEFAULT ? null : value))
+              setChosen(chooseMicrophone(options?.find((option) => option.id === value) ?? null))
             }
           >
             <SelectTrigger
