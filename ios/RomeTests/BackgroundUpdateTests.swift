@@ -196,4 +196,60 @@ final class CloudStatusBox {
         #expect(backend.started == ["1.1.198"])
         #expect(updater.rowState == .offered("1.1.199"))
     }
+
+    /// A Retry whose check answers after another instance opened leaves that
+    /// instance alone.
+    @Test func aSlowRetryNeverStartsAnotherInstance() async throws {
+        let first = offered()
+        first.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
+        let defaults = defaults()
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        await updater.attach(backend: first, instanceID: "a")
+        await updater.updateInBackground()
+        first.checkDelay = .milliseconds(200)
+        let retry = Task { await updater.retryInBackground() }
+        try await Task.sleep(for: .milliseconds(20))
+        // Another instance, offered the same release, opens meanwhile.
+        let second = offered()
+        await updater.attach(backend: second, instanceID: "b")
+        await retry.value
+        #expect(second.started.isEmpty)
+        #expect(first.started == ["1.1.198"])
+        #expect(updater.rowState == .offered("1.1.198"))
+    }
+
+    /// A Retry that cannot check keeps the failure and its Retry.
+    @Test func aRetryThatCannotCheckKeepsTheRow() async {
+        let backend = offered()
+        backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
+        let defaults = defaults()
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        await updater.attach(backend: backend, instanceID: "i1")
+        await updater.updateInBackground()
+        backend.check = .failure(APIError.network)
+        await updater.retryInBackground()
+        if case .failed(.start)? = updater.rowState {} else { Issue.record("row: \(String(describing: updater.rowState))") }
+        // Back online, Retry starts it.
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.197"), latest: .init(version: "1.1.198"), upgradeAvailable: true))
+        await updater.retryInBackground()
+        #expect(updater.rowState == .updating(target: "1.1.198"))
+        updater.reset()
+    }
+
+    /// A check that finds the instance current on another release ends the
+    /// wait without saying the target was reached.
+    @Test func onlyTheTargetAnsweringIsAnnounced() async {
+        let defaults = defaults()
+        let store = PendingUpgradeStore(defaults: defaults)
+        store.save(PendingUpgrade(target: "1.1.198", since: .now, from: "1.1.197", background: true), for: "i1")
+        let backend = FakeBackend()
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.199"), latest: .init(version: "1.1.199"), upgradeAvailable: false))
+        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults))
+        var finished: Bool?
+        updater.onFinished = { finished = $0 }
+        await updater.attach(backend: backend, instanceID: "i1")
+        #expect(finished == true)
+        #expect(store.load("i1") == nil)
+        #expect(updater.updatedInBackgroundTo == nil)
+    }
 }

@@ -544,7 +544,8 @@ final class InstanceUpdater {
         case .keepWaiting:
             break
         case .finished:
-            await finish()
+            // Up to date, but only an answer on the target says it got there.
+            await finish(reached: try? result.get().current?.version)
         case .stale(let verdict):
             store.clear(instanceID)
             stopPolling()
@@ -618,6 +619,7 @@ final class InstanceUpdater {
         poll?.cancel()
         poll = nil
         let background = runsInBackground
+        let mine = generation
         guard let backend, let instanceID else {
             if case .timedOut(let target) = failure, let instanceID {
                 let pending = PendingUpgrade(target: target, since: now(), from: behindOn, background: background)
@@ -629,6 +631,8 @@ final class InstanceUpdater {
         store.clear(instanceID)
         let result: Result<UpgradeCheck, Error>
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        // Another instance opened, or the updater started over, meanwhile.
+        guard mine == generation else { return }
         noteRunning(result)
         let verdict = UpdateGate.verdict(result)
         if case .unknown = verdict, case .timedOut(let target) = failure {
@@ -638,7 +642,13 @@ final class InstanceUpdater {
             return
         }
         if verdict == .upToDate, case .timedOut = failure {
-            await finish()
+            await finish(reached: try? result.get().current?.version)
+            return
+        }
+        // The drawer keeps the failure and its Retry while nothing can be
+        // checked; the offer it would go back to is not known.
+        if case .unknown = verdict, background {
+            state = .failed(failure)
             return
         }
         apply(verdict, latestChanged: false)
@@ -651,7 +661,10 @@ final class InstanceUpdater {
         guard case .failed(let failure) = state, runsInBackground, !retrying else { return }
         retrying = true
         defer { retrying = false }
+        let mine = generation, instance = instanceID
         await retry()
+        // Only on the instance it failed on, never on one opened meanwhile.
+        guard mine == generation, instanceID == instance else { return }
         if let offered, offered == failure.target { await updateInBackground() }
     }
 
@@ -708,7 +721,7 @@ final class InstanceUpdater {
             // Long enough to read "Almost done…" before the app opens.
             try? await Task.sleep(for: .milliseconds(800))
             guard mine == generation else { return true }
-            await finish()
+            await finish(reached: version)
             return true
         case .timedOut:
             state = .failed(.timedOut(target: pending.target))
@@ -761,12 +774,16 @@ final class InstanceUpdater {
         return endedLooks >= 2
     }
 
-    private func finish() async {
+    /// `reached`: the release the instance answered on. Only the target
+    /// itself is said as reached; a check that found it current on another
+    /// release only ends the wait.
+    private func finish(reached: String?) async {
         let background = runsInBackground
         if let instanceID {
             store.clear(instanceID)
             switch state {
-            case .updating(let target, _), .failed(.timedOut(let target)): justUpdated = (instanceID, target, background)
+            case .updating(let target, _), .failed(.timedOut(let target)):
+                if reached == target { justUpdated = (instanceID, target, background) }
             default: break
             }
         }

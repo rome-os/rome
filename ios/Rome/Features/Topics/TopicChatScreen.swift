@@ -16,6 +16,7 @@ struct TopicChatScreen: View {
     let onCreated: (String) -> Void
 
     @Environment(\.visibleChat) private var visibleChat
+    @Environment(\.offScreen) private var offScreen
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
@@ -100,7 +101,7 @@ struct TopicChatScreen: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
                 // Inside the composer's inset, so the last message rests above it too.
-                UpdatedNotice(agentName: workspace.agentName)
+                UpdatedNotice(agentName: workspace.agentName, visible: chatId.map { visibleChat == $0 } ?? !offScreen)
                 if let store, store.showsQuoteBar {
                     QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))

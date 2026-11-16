@@ -126,6 +126,9 @@ struct DrawerUpdateRow: View {
 struct UpdatedNotice: View {
     /// The Agent's display name, as the header shows it.
     let agentName: String?
+    /// The chat is in front: Chat stays mounted, hidden, under the other
+    /// sections, and a hidden one must not use the line up.
+    let visible: Bool
 
     @Environment(AppModel.self) private var model
 
@@ -136,7 +139,7 @@ struct UpdatedNotice: View {
         // with no motion of its own, so the space under the transcript never
         // changes on its own schedule.
         Group {
-            if let version = updater.updatedInBackgroundTo {
+            if visible, let version = updater.updatedInBackgroundTo {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle")
                         .romeFont(14, .semibold)
@@ -150,7 +153,7 @@ struct UpdatedNotice: View {
                 .frame(height: 36)
                 .glassSurface(Capsule(), frost: Frost.composer)
                 .accessibilityElement(children: .combine)
-                // Said once, for about three seconds.
+                // Said once, for about three seconds on screen.
                 .task(id: version) {
                     try? await Task.sleep(for: .seconds(3))
                     guard !Task.isCancelled else { return }
