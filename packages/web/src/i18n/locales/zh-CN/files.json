@@ -130,6 +130,8 @@
     "hideHistory": "隐藏历史",
     "loadingFile": "加载文件中…",
     "loadingDocument": "加载文档中…",
+    "previewNeedsReload": "重新加载页面后才能显示此预览。",
+    "reload": "重新加载",
     "noRowsToPreview": "没有可预览的行。",
     "htmlPreviewFailedTitle": "无法预览 HTML",
     "htmlPreviewFailedDescription": "该 HTML 文件可以编辑，但当前没有可用的预览资源。",

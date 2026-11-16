@@ -130,6 +130,8 @@
     "hideHistory": "Hide history",
     "loadingFile": "Loading file...",
     "loadingDocument": "Loading document...",
+    "previewNeedsReload": "Reload the page to show this preview.",
+    "reload": "Reload",
     "noRowsToPreview": "No rows to preview.",
     "htmlPreviewFailedTitle": "HTML preview unavailable",
     "htmlPreviewFailedDescription": "The HTML file is editable, but no preview asset is available.",

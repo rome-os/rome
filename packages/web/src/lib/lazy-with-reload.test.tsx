@@ -1,6 +1,13 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { CHUNK_RELOAD_KEY, isChunkLoadError, loadWithReload } from "./lazy-with-reload";
+import { render, screen } from "@testing-library/react";
+import { type ComponentType, Suspense } from "react";
+import {
+  CHUNK_RELOAD_KEY,
+  isChunkLoadError,
+  lazyInPlace,
+  loadWithReload,
+} from "./lazy-with-reload";
 
 function chunkError(): Error {
   const error = new Error("Loading chunk 812 failed.\n(missing: http://x/static/js/async/812.js)");
@@ -121,6 +128,23 @@ describe("loadWithReload", () => {
     expect(reload).toHaveBeenCalledTimes(2);
   });
 
+  it("does not loop when two parts stay missing side by side", async () => {
+    const partA = () => Promise.reject(chunkError());
+    const partB = async () => {
+      throw chunkError();
+    };
+    // The first load: both parts fail together, and each claims its reload.
+    void loadWithReload(partA);
+    void loadWithReload(partB);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reload).toHaveBeenCalledTimes(2);
+
+    // The reloaded page: both still missing, in either order.
+    await expect(loadWithReload(partB)).rejects.toThrow("Loading chunk 812 failed");
+    await expect(loadWithReload(partA)).rejects.toThrow("Loading chunk 812 failed");
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
   it("fails instead of reloading the same URL a second time", async () => {
     void loadWithReload(() => Promise.reject(chunkError()));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -164,5 +188,38 @@ describe("loadWithReload", () => {
 
     await expect(loaded).resolves.toEqual({ default: "page" });
     expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe("lazyInPlace", () => {
+  function Missing() {
+    return <p>needs reload</p>;
+  }
+
+  it("shows the stand-in for a missing chunk and never reloads", async () => {
+    const Preview = lazyInPlace(Missing)<ComponentType<{ title: string }>>(() =>
+      Promise.reject(chunkError()),
+    );
+    render(
+      <Suspense fallback={null}>
+        <Preview title="x" />
+      </Suspense>,
+    );
+
+    expect(await screen.findByText("needs reload")).toBeTruthy();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("renders the module when it loads", async () => {
+    const Preview = lazyInPlace(Missing)(async () => ({
+      default: ({ title }: { title: string }) => <p>{title}</p>,
+    }));
+    render(
+      <Suspense fallback={null}>
+        <Preview title="loaded" />
+      </Suspense>,
+    );
+
+    expect(await screen.findByText("loaded")).toBeTruthy();
   });
 });

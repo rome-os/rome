@@ -1,5 +1,5 @@
 import { Suspense, useMemo } from "react";
-import { lazy } from "@/lib/lazy-with-reload";
+import { lazyInPlace } from "@/lib/lazy-with-reload";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import Markdown from "@/components/markdown";
 import { IconButton } from "@/components/ui/icon-button";
 import { MonacoFileEditor } from "@/components/monaco-file-editor";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { PreviewNeedsReload } from "./PreviewNeedsReload";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import {
   getDelimitedSeparator,
@@ -15,13 +16,17 @@ import {
   parseDelimitedContent,
 } from "@/lib/file-preview";
 
-const DocxPreviewPane = lazy(() =>
+// The agent can open a file here on its own, so a preview whose code is gone
+// after an upgrade asks for a reload rather than reloading the page.
+const lazyPreview = lazyInPlace(PreviewNeedsReload);
+
+const DocxPreviewPane = lazyPreview(() =>
   import("@/components/docx-preview-pane").then((module) => ({
     default: module.DocxPreviewPane,
   })),
 );
 
-const SpreadsheetPreviewPane = lazy(() =>
+const SpreadsheetPreviewPane = lazyPreview(() =>
   import("@/components/spreadsheet-preview-pane").then((module) => ({
     default: module.SpreadsheetPreviewPane,
   })),
