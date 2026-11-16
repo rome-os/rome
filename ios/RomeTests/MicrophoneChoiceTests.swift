@@ -110,7 +110,8 @@ import Testing
     func capturesAtTheWireRateFromAnyInputRate(rate: Double) throws {
         let format = try #require(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1))
         let chunks = Chunks()
-        let chunker = try #require(PCMChunker(from: format, onChunk: { chunks.add($0) }))
+        let made = PCMChunker(from: format, onChunk: { chunks.add($0) })
+        let chunker = try #require(made)
         let second = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate)))
         second.frameLength = AVAudioFrameCount(rate)
         chunker.take(second)
