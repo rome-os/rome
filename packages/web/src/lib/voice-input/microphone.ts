@@ -4,12 +4,7 @@
 // rate, and the worklet brings the audio down to 16 kHz.
 
 import { VOICE_INPUT_SAMPLE_RATE } from "@rome/api-types/voice-input";
-import {
-  chooseMicrophone,
-  chosenMicrophone,
-  findChosenMicrophone,
-  listMicrophones,
-} from "./microphone-choice";
+import { chosenMicrophone, findMicrophone, listMicrophones } from "./microphone-choice";
 
 // Runs on the audio thread. Each output sample is the mean of the input
 // samples it covers, which also filters out most content above the new
@@ -64,41 +59,32 @@ registerProcessor("rome-pcm-capture", PcmCapture);
 
 const AUDIO = { channelCount: 1, echoCancellation: true, noiseSuppression: true };
 
+/** Opens `id` when it is connected, otherwise the system default. */
+function open(id?: string): Promise<MediaStream> {
+  return navigator.mediaDevices.getUserMedia({
+    audio: id ? { ...AUDIO, deviceId: { ideal: id } } : AUDIO,
+  });
+}
+
+function recordsFrom(stream: MediaStream, id: string): boolean {
+  return stream.getAudioTracks()[0]?.getSettings().deviceId === id;
+}
+
 /**
- * Opens `device`, or the system default when it is null. A chosen microphone
- * that is no longer connected falls back to the default rather than failing.
+ * Opens the chosen microphone, or the system default when none is chosen or
+ * the chosen one is not connected. Never changes the choice.
  */
-export async function openMicrophoneStream(device: string | null): Promise<MediaStream> {
-  if (!device) return navigator.mediaDevices.getUserMedia({ audio: AUDIO });
-  try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: { ...AUDIO, deviceId: { exact: device } },
-    });
-  } catch (error) {
-    const gone =
-      error instanceof Error &&
-      (error.name === "OverconstrainedError" || error.name === "NotFoundError");
-    if (!gone) throw error;
-    const fallback = await navigator.mediaDevices.getUserMedia({ audio: AUDIO });
-    // The id can be new on each page load; with the microphone now allowed,
-    // the browser names its devices, so look for the chosen one by name.
-    const match = findChosenMicrophone((await listMicrophones().catch(() => null)) ?? []);
-    if (match && match.id !== device) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { ...AUDIO, deviceId: { exact: match.id } },
-        });
-        for (const track of fallback.getTracks()) track.stop();
-        chooseMicrophone(match);
-        return stream;
-      } catch {
-        // Recording from the system default below.
-      }
-    }
-    // Unplugged: the choice switches to the system default, as Settings shows.
-    chooseMicrophone(null);
-    return fallback;
-  }
+export async function openMicrophoneStream(): Promise<MediaStream> {
+  const chosen = chosenMicrophone();
+  const stream = await open(chosen?.id);
+  if (!chosen?.label || recordsFrom(stream, chosen.id)) return stream;
+  // The id can be new on each page load. With the microphone now allowed the
+  // browser names its devices, so look for the chosen one by name.
+  const match = findMicrophone(chosen, (await listMicrophones().catch(() => null)) ?? []);
+  if (!match || recordsFrom(stream, match.id)) return stream;
+  // Released first: on iOS Safari a second capture can end the first.
+  for (const track of stream.getTracks()) track.stop();
+  return open(match.id).catch(() => open());
 }
 
 export interface Microphone {
@@ -150,7 +136,7 @@ export async function openMicrophone(
     });
   let stream: MediaStream;
   try {
-    stream = await openMicrophoneStream(chosenMicrophone());
+    stream = await openMicrophoneStream();
   } finally {
     answered = true;
   }

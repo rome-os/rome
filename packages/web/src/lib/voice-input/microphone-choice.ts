@@ -1,48 +1,64 @@
 // Which microphone voice input records from, kept in this browser. Device ids
 // belong to one browser profile and one origin, so the choice cannot follow
-// the guardian to another device.
+// the guardian to another device. The choice changes only when the guardian
+// picks another one: a chosen microphone that is not connected now leaves
+// voice input on the system default, and is used again once it is back.
 
 import { readStored, writeStored } from "@/lib/stored-preference";
 
 const KEY = "rome.voiceInput.microphone";
-// The chosen microphone's name. A browser that allows the microphone for one
-// page load at a time gives it a new device id on each load, so the name finds
-// it again.
-const LABEL_KEY = "rome.voiceInput.microphoneLabel";
 
 export interface MicrophoneOption {
   id: string;
   label: string;
 }
 
-/** The chosen microphone's device id, or null for the system default. */
-export function chosenMicrophone(): string | null {
-  return readStored(KEY) || null;
+/**
+ * The chosen microphone, or null for the system default. It is stored as one
+ * JSON record; a choice saved before names were kept is a bare device id,
+ * read with an empty name.
+ */
+export function chosenMicrophone(): MicrophoneOption | null {
+  const raw = readStored(KEY);
+  if (!raw) return null;
+  try {
+    const stored: unknown = JSON.parse(raw);
+    if (stored && typeof stored === "object") {
+      const { id, label } = stored as Record<string, unknown>;
+      if (typeof id === "string" && id)
+        return { id, label: typeof label === "string" ? label : "" };
+    }
+  } catch {
+    // A bare device id.
+  }
+  return { id: raw, label: "" };
 }
 
 /**
  * Keeps `option` as the microphone to record from; null goes back to the
- * system default. Returns the device id storage now holds, which is the
- * earlier one when storage refuses the write (private mode, full).
+ * system default. Returns the choice storage now holds, which is the earlier
+ * one when storage refuses the write (private mode, full).
  */
-export function chooseMicrophone(option: MicrophoneOption | null): string | null {
-  writeStored(KEY, option?.id || null);
-  writeStored(LABEL_KEY, option?.label || null);
+export function chooseMicrophone(option: MicrophoneOption | null): MicrophoneOption | null {
+  writeStored(KEY, option ? JSON.stringify({ id: option.id, label: option.label }) : null);
   return chosenMicrophone();
 }
 
 /**
- * The chosen microphone among `options`: the one with its device id, else the
- * one with its name. Null when neither is there.
+ * `chosen` among `options`: the one with its device id, else the one with its
+ * name, since a browser that allows the microphone for one page load at a
+ * time gives it a new id on each load. Null when it is not connected.
  */
-export function findChosenMicrophone(options: MicrophoneOption[]): MicrophoneOption | null {
-  const id = chosenMicrophone();
-  if (!id) return null;
-  const byId = options.find((option) => option.id === id);
-  if (byId) return byId;
-  const label = readStored(LABEL_KEY);
-  const byLabel = label ? options.find((option) => option.label === label) : undefined;
-  return byLabel ?? null;
+export function findMicrophone(
+  chosen: MicrophoneOption | null,
+  options: MicrophoneOption[],
+): MicrophoneOption | null {
+  if (!chosen) return null;
+  return (
+    options.find((option) => option.id === chosen.id) ??
+    (chosen.label ? options.find((option) => option.label === chosen.label) : undefined) ??
+    null
+  );
 }
 
 /**

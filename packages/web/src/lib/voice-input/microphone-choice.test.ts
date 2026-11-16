@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   chooseMicrophone,
   chosenMicrophone,
-  findChosenMicrophone,
+  findMicrophone,
   listMicrophones,
 } from "./microphone-choice";
 
@@ -22,7 +22,7 @@ describe("the chosen microphone", () => {
   it("is the system default until one is chosen, and again after it is cleared", () => {
     expect(chosenMicrophone()).toBeNull();
     chooseMicrophone({ id: "usb-mic", label: "USB Microphone" });
-    expect(chosenMicrophone()).toBe("usb-mic");
+    expect(chosenMicrophone()).toEqual({ id: "usb-mic", label: "USB Microphone" });
     chooseMicrophone(null);
     expect(chosenMicrophone()).toBeNull();
   });
@@ -32,18 +32,27 @@ describe("the chosen microphone", () => {
     const setItem = rs.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("full", "QuotaExceededError");
     });
-    expect(chooseMicrophone({ id: "headset", label: "Headset" })).toBe("usb-mic");
+    expect(chooseMicrophone({ id: "headset", label: "Headset" })).toEqual({
+      id: "usb-mic",
+      label: "USB Microphone",
+    });
     setItem.mockRestore();
   });
 
-  it("finds the chosen microphone by name when the browser gives it a new id", () => {
-    chooseMicrophone({ id: "old-id", label: "USB Microphone" });
-    const options = [
-      { id: "mbp", label: "MacBook Pro Microphone" },
-      { id: "new-id", label: "USB Microphone" },
-    ];
-    expect(findChosenMicrophone(options)).toEqual({ id: "new-id", label: "USB Microphone" });
-    expect(findChosenMicrophone([{ id: "mbp", label: "MacBook Pro Microphone" }])).toBeNull();
+  it("reads a choice saved as a bare device id, before names were kept", () => {
+    localStorage.setItem("rome.voiceInput.microphone", "usb-mic");
+    expect(chosenMicrophone()).toEqual({ id: "usb-mic", label: "" });
+  });
+
+  it("finds the chosen microphone by id, else by name when the browser gives it a new id", () => {
+    const usb = { id: "old-id", label: "USB Microphone" };
+    const mbp = { id: "mbp", label: "MacBook Pro Microphone" };
+    expect(findMicrophone(usb, [mbp, usb])).toEqual(usb);
+    const renamed = { id: "new-id", label: "USB Microphone" };
+    expect(findMicrophone(usb, [mbp, renamed])).toEqual(renamed);
+    expect(findMicrophone(usb, [mbp])).toBeNull();
+    expect(findMicrophone({ id: "old-id", label: "" }, [mbp, renamed])).toBeNull();
+    expect(findMicrophone(null, [mbp])).toBeNull();
   });
 
   it("lists the browser's microphones without Chrome's default and communications entries", async () => {

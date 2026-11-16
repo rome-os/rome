@@ -20,7 +20,7 @@ import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
 import {
   chooseMicrophone,
   chosenMicrophone,
-  findChosenMicrophone,
+  findMicrophone,
   listMicrophones,
   type MicrophoneOption,
   revealMicrophones,
@@ -76,20 +76,11 @@ function MicrophoneRow() {
   const [options, setOptions] = useState<MicrophoneOption[] | null | undefined>(undefined);
   const [chosen, setChosen] = useState(chosenMicrophone);
   const [refused, setRefused] = useState(false);
-  // The browser failed to list the microphones: nothing was unplugged.
-  const [listFailed, setListFailed] = useState(false);
 
+  // A failed listing keeps the last list. Before any list, the select stays
+  // disabled and shows no choice.
   const refresh = useCallback(() => {
-    listMicrophones().then(
-      (listed) => {
-        setListFailed(false);
-        setOptions(listed);
-      },
-      () => {
-        setListFailed(true);
-        setOptions([]);
-      },
-    );
+    listMicrophones().then(setOptions, () => {});
   }, []);
 
   useEffect(() => {
@@ -112,15 +103,10 @@ function MicrophoneRow() {
     );
   };
 
-  // An unplugged microphone leaves the list, and Settings switches to the
-  // system default, which voice input then records from.
-  // A choice found by name after a reload gets the device's new id.
-  const found = chosen !== null && options ? findChosenMicrophone(options) : null;
-  const missing = chosen !== null && options != null && !found && !listFailed;
-  useEffect(() => {
-    if (missing) setChosen(chooseMicrophone(null));
-    else if (found && found.id !== chosen) setChosen(chooseMicrophone(found));
-  }, [missing, found, chosen]);
+  // A chosen microphone that is not connected shows as the system default,
+  // which voice input then records from. The choice itself is kept, so the
+  // microphone is chosen again once it is back.
+  const found = options ? findMicrophone(chosen, options) : null;
   const description = refused
     ? t("system.voiceInput.microphone.refused")
     : t("system.voiceInput.microphone.description");
@@ -141,7 +127,7 @@ function MicrophoneRow() {
           </Button>
         ) : (
           <Select
-            value={found?.id ?? SYSTEM_DEFAULT}
+            value={options === undefined ? "" : (found?.id ?? SYSTEM_DEFAULT)}
             disabled={options === undefined}
             onValueChange={(value) =>
               setChosen(chooseMicrophone(options?.find((option) => option.id === value) ?? null))
