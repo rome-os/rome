@@ -35,6 +35,9 @@ final class MicrophoneSource: VoiceAudioSource {
     private let engine = AVAudioEngine()
     private var capture: PCMChunker?
     private var running = false
+    /// Whether any microphone source is recording now, which leaves the
+    /// audio session active.
+    private(set) static var capturing = false
 
     func requestAccess() async -> Bool {
         switch AVAudioApplication.shared.recordPermission {
@@ -70,6 +73,7 @@ final class MicrophoneSource: VoiceAudioSource {
             throw error
         }
         running = true
+        Self.capturing = true
     }
 
     /// Built outside the main actor: the audio thread calls it.
@@ -86,6 +90,7 @@ final class MicrophoneSource: VoiceAudioSource {
     func close() {
         guard running else { return }
         running = false
+        Self.capturing = false
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         capture = nil

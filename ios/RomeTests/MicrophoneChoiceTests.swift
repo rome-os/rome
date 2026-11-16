@@ -25,7 +25,9 @@ import Testing
         defer { try? session.setCategory(.soloAmbient) }
         // iOS adds options of its own, such as mixing with others when ducking.
         let options = session.categoryOptions
-        _ = MicrophoneChoice.available(session)
+        let list = MicrophoneChoice.available(session)
+        // Complete only when Settings could activate the session without disturbing audio.
+        if AVAudioApplication.shared.recordPermission != .granted { #expect(!list.complete) }
         #expect(session.category == .playback)
         #expect(session.mode == .spokenAudio)
         #expect(session.categoryOptions == options)
@@ -59,5 +61,25 @@ import Testing
         choice.chosen = "headset"
         #expect(choice.settle(connected: ["built-in", "headset"]) == "headset")
         #expect(choice.settle(connected: []) == "headset")
+    }
+
+    @Test func settingsSwitchesToTheSystemDefaultForGoodWhenACompleteListLacksTheChoice() {
+        let choice = fresh()
+        choice.chosen = "headset"
+        let builtIn = MicrophoneOption(id: "built-in", name: "iPhone Microphone")
+        let headset = MicrophoneOption(id: "headset", name: "Headset")
+        // Unplugged while Settings is open, with no recording in between.
+        #expect(choice.settle(MicrophoneList(options: [builtIn], complete: true)) == nil)
+        // Plugged back in: the system default stays chosen.
+        #expect(choice.settle(MicrophoneList(options: [builtIn, headset], complete: true)) == nil)
+        #expect(choice.chosen == nil)
+    }
+
+    @Test func settingsKeepsTheChoiceWhenTheListMayLeaveItOut() {
+        let choice = fresh()
+        choice.chosen = "headset"
+        let builtIn = MicrophoneOption(id: "built-in", name: "iPhone Microphone")
+        #expect(choice.settle(MicrophoneList(options: [builtIn], complete: false)) == "headset")
+        #expect(choice.chosen == "headset")
     }
 }

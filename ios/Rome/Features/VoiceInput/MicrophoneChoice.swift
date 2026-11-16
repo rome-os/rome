@@ -8,6 +8,14 @@ struct MicrophoneOption: Identifiable, Hashable {
     let name: String
 }
 
+/// The microphones iOS lists, and whether the list is complete. iOS lists
+/// every input only on an active session, so a list from an inactive one may
+/// leave out a microphone that is still connected.
+struct MicrophoneList {
+    let options: [MicrophoneOption]
+    let complete: Bool
+}
+
 /// Which microphone voice input records from, kept on this phone. Nil is the
 /// system default, which follows iOS's own audio route.
 struct MicrophoneChoice {
@@ -42,6 +50,15 @@ struct MicrophoneChoice {
         return chosen
     }
 
+    /// The choice after Settings lists the microphones. A complete list
+    /// without the chosen microphone switches the choice to the system
+    /// default, which stays chosen when that microphone comes back. An
+    /// incomplete list leaves the choice as it is.
+    @discardableResult
+    func settle(_ list: MicrophoneList) -> String? {
+        list.complete ? settle(connected: list.options.map(\.id)) : chosen
+    }
+
     /// Sets the audio session to record, as voice input does, so that iOS
     /// lists every input, Bluetooth headsets included. Does not activate it.
     @MainActor
@@ -49,23 +66,39 @@ struct MicrophoneChoice {
         try session.setCategory(.record, mode: .default, options: [.allowBluetooth])
     }
 
-    /// The microphones iOS can record from now. Leaves the session's category
-    /// as it found it, so that showing the list changes no other audio.
+    /// The microphones iOS can record from now. Leaves the session as it
+    /// found it, so that showing the list changes no other audio.
     @MainActor
-    static func available(_ session: AVAudioSession = .sharedInstance()) -> [MicrophoneOption] {
+    static func available(_ session: AVAudioSession = .sharedInstance()) -> MicrophoneList {
+        if MicrophoneSource.capturing {
+            return MicrophoneList(options: inputs(of: session), complete: true)
+        }
         let category = session.category
         let mode = session.mode
         let options = session.categoryOptions
         let listsEveryInput = category == .record && options.contains(.allowBluetooth)
         if !listsEveryInput { try? prepare(session) }
-        defer { if !listsEveryInput { try? session.setCategory(category, mode: mode, options: options) } }
-        return (session.availableInputs ?? []).map { MicrophoneOption(id: $0.uid, name: $0.portName) }
+        // Activating a session that records stops other apps' audio and asks
+        // for the microphone, so Settings activates it only when neither happens.
+        let activated = AVAudioApplication.shared.recordPermission == .granted
+            && !session.isOtherAudioPlaying
+            && (try? session.setActive(true)) != nil
+        defer {
+            if activated { try? session.setActive(false, options: .notifyOthersOnDeactivation) }
+            if !listsEveryInput { try? session.setCategory(category, mode: mode, options: options) }
+        }
+        return MicrophoneList(options: inputs(of: session), complete: activated)
+    }
+
+    @MainActor
+    private static func inputs(of session: AVAudioSession) -> [MicrophoneOption] {
+        (session.availableInputs ?? []).map { MicrophoneOption(id: $0.uid, name: $0.portName) }
     }
 
     /// Points the session at the chosen microphone, or back at the system
     /// default when none is chosen. Call it on an active session: iOS takes a
-    /// preferred input only then, and lists every input only then. A chosen microphone that is unplugged
-    /// switches the choice to the system default, as Settings shows.
+    /// preferred input only then, and lists every input only then. A chosen
+    /// microphone that is unplugged switches the choice to the system default.
     @MainActor
     func apply(to session: AVAudioSession = .sharedInstance()) {
         let inputs = session.availableInputs ?? []

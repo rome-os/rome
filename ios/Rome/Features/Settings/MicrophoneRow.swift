@@ -10,8 +10,8 @@ struct MicrophoneRow: View {
 
     /// The chosen microphone while it is listed, else nil for System default.
     /// An unplugged microphone leaves the list, so the row shows System
-    /// default, which voice input then records from. Only listening forgets
-    /// the choice, from the list an active session gives.
+    /// default. Settings forgets the choice only from a complete list, which
+    /// it cannot always get; until then the row still shows System default.
     private var shown: String? {
         options.contains { $0.id == chosen } ? chosen : nil
     }
@@ -22,14 +22,15 @@ struct MicrophoneRow: View {
     }
 
     private func refresh() {
-        options = MicrophoneChoice.available()
-        chosen = MicrophoneChoice().chosen
+        let list = MicrophoneChoice.available()
+        options = list.options
+        chosen = MicrophoneChoice().settle(list)
     }
 
     /// Only a microphone plugged in or taken off changes the list. Listing
     /// the microphones changes the session's category and back, which iOS
     /// also reports as a route change, so refreshing on that would loop.
-    static func refreshes(on reason: AVAudioSession.RouteChangeReason?) -> Bool {
+    nonisolated static func refreshes(on reason: AVAudioSession.RouteChangeReason?) -> Bool {
         reason == .newDeviceAvailable || reason == .oldDeviceUnavailable
     }
 
