@@ -569,15 +569,16 @@ final class VoiceInputTests: XCTestCase {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        var status = 0
-        var answer: [String: Any] = [:]
+        let reply = StandInReply()
         let done = expectation(description: "the stand-in instance takes \(body.keys.sorted())")
         URLSession.shared.dataTask(with: request) { data, response, _ in
-            status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            answer = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            reply.status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            reply.data = data
             done.fulfill()
         }.resume()
         wait(for: [done], timeout: 10)
+        let status = reply.status
+        let answer = reply.data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         XCTAssertEqual(status, 200, "the stand-in instance refused \(body.keys.sorted())")
         let unknown = body.keys.filter { $0 != "error" && answer[$0] == nil }
         if status == 200, !unknown.isEmpty {
@@ -734,6 +735,13 @@ final class VoiceInputTests: XCTestCase {
         let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: control)
         return XCTWaiter().wait(for: [shown], timeout: timeout) == .completed
     }
+}
+
+/// What the stand-in's control route answered, written once by the request's callback and read
+/// after the test's wait for it.
+private final class StandInReply: @unchecked Sendable {
+    var status = 0
+    var data: Data?
 }
 
 private struct InstanceUnreachable: Error {}
