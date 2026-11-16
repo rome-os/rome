@@ -45,23 +45,29 @@ USER_VOLUME="rome-env-${NAME}-user"
 # A throwaway checkout where this branch is merged with Rome changes under test,
 # so they never land on this branch.
 BUILD_TREE="$RUN_DIR/agent-tree"
+# What the last `up` ran with, so a later `up`, `reset` or `clock` that does
+# not set a COS_* setting keeps it rather than falling back to the default.
+# A setting given in the environment, even empty, wins over the saved one.
+SETTINGS_FILE="$RUN_DIR/settings"
+# shellcheck disable=SC1090
+[ ! -f "$SETTINGS_FILE" ] || . "$SETTINGS_FILE"
 # Rome changes merged into the build, in order, separated by spaces. Each is a
 # pull request as #<number>, a remote branch as origin/<branch>, or any commit.
 # Empty builds this branch as it is.
-AGENT_REFS="${COS_AGENT_REF-#2173}"
+AGENT_REFS="${COS_AGENT_REF-${SAVED_AGENT_REF-#2173}}"
 # The chief of staff app, from its own private repository, installed into the
 # running Rome the way a guardian installs an app from source. The devbox's
 # GitHub sign-in fetches it, so no token enters the container.
-APP_REPO="${COS_APP_REPO:-zhangfand/chief-of-staff}"
-APP_REF="${COS_APP_REF:-main}"
+APP_REPO="${COS_APP_REPO:-${SAVED_APP_REPO:-zhangfand/chief-of-staff}}"
+APP_REF="${COS_APP_REF:-${SAVED_APP_REF:-main}}"
 APP_SRC="$RUN_DIR/app-src"
 APP_PATH_IN_ROME=/home/rome/app-sources/chief-of-staff
 # Test only. An agent name to link the connected account to in place of
 # COS_AGENT_NAME, written straight into Rome's database because no loaded agent
 # has it. See link_unloaded_agent.
-UNLOADED_AGENT="${COS_LINK_UNLOADED_AGENT:-}"
+UNLOADED_AGENT="${COS_LINK_UNLOADED_AGENT-${SAVED_LINK_UNLOADED_AGENT-}}"
 # 1 makes every chat answer every message, not only the dm-* chats.
-HEAR_EVERY_MESSAGE="${COS_HEAR_EVERY_MESSAGE:-0}"
+HEAR_EVERY_MESSAGE="${COS_HEAR_EVERY_MESSAGE:-${SAVED_HEAR_EVERY_MESSAGE:-0}}"
 # A note `version` carries for a ref, as JSON keyed by the ref, for what the
 # ref's own state does not say.
 REF_NOTES="${COS_REF_NOTES:-}"
@@ -561,12 +567,38 @@ let_agent_answer_team() {
     api PUT /settings >/dev/null
 }
 
+save_settings() {
+  {
+    printf 'SAVED_AGENT_REF=%q\n' "$AGENT_REFS"
+    printf 'SAVED_APP_REPO=%q\n' "$APP_REPO"
+    printf 'SAVED_APP_REF=%q\n' "$APP_REF"
+    printf 'SAVED_LINK_UNLOADED_AGENT=%q\n' "$UNLOADED_AGENT"
+    printf 'SAVED_HEAR_EVERY_MESSAGE=%q\n' "$HEAR_EVERY_MESSAGE"
+  } >"$SETTINGS_FILE"
+  log "settings: Rome refs \"$AGENT_REFS\", app $APP_REPO at $APP_REF, linked agent ${UNLOADED_AGENT:-$COS_AGENT_NAME}, every chat hears every message: $([ "$HEAR_EVERY_MESSAGE" = 1 ] && echo yes || echo no)"
+}
+
+# Fails unless Rome runs the app at APP_REF and the connected account links the
+# agent the settings name.
+check_settings_took() {
+  local want_agent="${UNLOADED_AGENT:-$COS_AGENT_NAME}" agent app_ref
+  app_ref="$(state app.ref)"
+  [ "$app_ref" = "$APP_REF" ] || die "the installed app is at \"$app_ref\", not COS_APP_REF \"$APP_REF\""
+  agent="$(api GET /connected-accounts | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      const a = JSON.parse(s).accounts.find((x) => x.account.platform === "discord" && x.account.id === process.argv[1]);
+      process.stdout.write(a?.agent ?? "");
+    });' "$(state agent.id)")"
+  [ "$agent" = "$want_agent" ] || die "the connected account links \"$agent\", not \"$want_agent\""
+}
+
 cmd_up() {
   local build=1
   [ "${1:-}" = "--no-build" ] && build=0
   mkdir -p "$RUN_DIR"
   claim_ownership
   load_secrets
+  save_settings
   if [ "$build" = 1 ] || [ -z "$(image_sha)" ]; then build_rome_image; fi
   rm -f "$CLOCK_FILE"
   log "reading the bots and chats on Discord ..."
@@ -586,6 +618,7 @@ cmd_up() {
   let_chats_hear_bots
   set_model
   let_agent_answer_team
+  check_settings_took
   log "ready. Drive it with environments/chief-of-staff/cos-env. Hand it the team with: cos-env seed <dir>"
 }
 

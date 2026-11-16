@@ -63,6 +63,8 @@ Run them from the repository root inside `nix develop`.
 
 The agent's app lives in its own private repository, `zhangfand/chief-of-staff`. Once Rome is up, `up` fetches it on the devbox with `gh`, at `COS_APP_REF` (default `main`), copies the checkout into the container at `/home/rome/app-sources/chief-of-staff`, and installs it from source through `POST /api/apps`, the install `system:app_management` runs. The devbox's GitHub sign-in does the fetch, so no GitHub token enters the container. `COS_APP_REPO` points at another repository. `version` reports the app's repository, ref and commit under `app`. The installed app lives on Rome's home volume, so it survives restarts.
 
+`up` saves the COS_* settings it ran with (`COS_AGENT_REF`, `COS_APP_REPO`, `COS_APP_REF`, `COS_LINK_UNLOADED_AGENT`, `COS_HEAR_EVERY_MESSAGE`) in the state folder. A later `up`, `reset` or `clock` that leaves a setting unset keeps the saved one; a setting given in the environment wins. `up` logs the settings it uses, and fails unless the installed app is at `COS_APP_REF` and the connected account links the agent the settings name.
+
 Two switches serve test runs only:
 
 - `COS_LINK_UNLOADED_AGENT=<agent name>` links the agent's connected account to that name in place of `COS_AGENT_NAME`. No loaded agent has the name, so a message the bot hears wakes no agent, and the installed app handles it on its own. Rome's API refuses such a link and Rome does not support this setup, so `up` stops Rome, writes the link into its database, and starts it again.
