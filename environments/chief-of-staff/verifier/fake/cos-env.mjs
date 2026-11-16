@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { respond } from "./stand-in.mjs";
+import { goalsDocument, respond } from "./stand-in.mjs";
 
 const statePath = process.env.COS_FAKE_STATE;
 if (!statePath) {
@@ -172,6 +172,9 @@ switch (command) {
     // "clock forward <hours>": the agent's clock, and the messages after it, move ahead.
     state.clock += Number(positionals[1]) * 3600 * 1000;
     state.dayMovedAt = state.nextId;
+    break;
+  case "doc":
+    console.log(goalsDocument(state, agent));
     break;
   case "usage":
     for (const turn of state.turns ?? []) console.log(JSON.stringify(turn));

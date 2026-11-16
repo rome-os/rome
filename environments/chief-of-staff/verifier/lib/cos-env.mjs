@@ -90,6 +90,10 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
         .filter((l) => l.trim())
         .map((l) => JSON.parse(l));
     },
+    /** A document the app holds for the agent (`goals` or `roster`), as its current text. */
+    async doc(name) {
+      return call(["doc", name]);
+    },
     async rename({ as, displayName }) {
       await call(["rename", "--as", as, displayName]);
     },

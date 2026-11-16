@@ -166,7 +166,12 @@
       "goal": "G3",
       "title": "Install 16 sensors on Orkney piers",
       "date": "2027-03-12",
-      "tokens": [["16"], ["2027-03-12", "12 March", "March 12"]]
+      "tokens": [["16"], ["2027-03-12", "12 March", "March 12"]],
+      "doc": {
+        "entry": ["Orkney"],
+        "holds": [["16"], ["2027-03-12"]],
+        "former": ["2027-02-05"]
+      }
     },
     {
       "as": "member2",
@@ -174,7 +179,12 @@
       "text": "Ownership change: Marisol Okonkwo-Vance owns the salinity ingest lag goal from today, I'm handing it over to focus on Saltmarsh.",
       "goal": "G2",
       "owner": "Marisol Okonkwo-Vance",
-      "tokens": []
+      "tokens": [],
+      "doc": {
+        "entry": ["salinity"],
+        "holds": [["Okonkwo-Vance"]],
+        "former": ["Halvorsen-Abara"]
+      }
     }
   ],
   "a7": {
@@ -218,6 +228,16 @@
       "as": "member3",
       "text": "What version of the Kelpie-7 firmware is the team shipping to the buoys?",
       "tokens": ["3.0"]
+    }
+  },
+  "k4Proposal": {
+    "as": "member1",
+    "chat": "general",
+    "text": "Thinking out loud: should we push the Kelpie-7 firmware 3.0 date to 2027-03-19? Nothing decided yet, let's talk on Friday.",
+    "doc": {
+      "entry": ["Kelpie-7"],
+      "holds": [["2027-01-22"]],
+      "absent": ["2027-03-19"]
     }
   }
 }

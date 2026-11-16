@@ -141,6 +141,15 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     });
   }
 
+  it("fails K4 when the goals document takes a proposal as a decision", async () => {
+    const { report } = await runAgainst("fail-K4proposal", { rules: ["K4"], phase: 2 });
+    const k4 = report.results[0];
+    assert.equal(k4.status, "fail");
+    const legs = Object.fromEntries(k4.checks.map((c) => [c.name.split(",")[0], c.status]));
+    assert.equal(legs["a proposal that is not a decision leaves the document as it was"], "fail");
+    assert.equal(legs["the goals document shows each change"], "pass");
+  });
+
   it("counts A7 replies that answer apart from ones that decline", async () => {
     const { report } = await runAgainst("fail-A7", { rules: ["A7"], phase: 2 });
     const a7 = report.results.find((r) => r.rule === "A7");

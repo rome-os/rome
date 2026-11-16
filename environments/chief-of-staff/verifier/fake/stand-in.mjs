@@ -42,6 +42,28 @@ function roster(state, breaks) {
   return `The team (source: ${ROSTER_LINK}):\n${members.join("\n")}`;
 }
 
+/**
+ * The goals document as the app holds it: "good" writes each change said in a chat into its
+ * goal's entry with a link; "fail-K4" never updates it; "fail-K4proposal" also takes the
+ * proposal as a decision.
+ */
+export function goalsDocument(state, agent) {
+  const breaks = agent.startsWith("fail-") ? agent.slice("fail-".length) : null;
+  const said = (t) => state.messages.find((m) => m.text === t);
+  const heard = breaks === "K4" ? [] : hearing.k4Changes.filter((c) => said(c.text));
+  const rows = state.team.goals.map((g) => {
+    const change = heard.find((c) => c.goal === g.id);
+    let row = { ...g, ...(change ?? {}) };
+    const proposal = said(hearing.k4Proposal.text);
+    if (breaks === "K4proposal" && g.id === "G1" && proposal) row = { ...row, date: "2027-03-19" };
+    const source = change ? ` (changed in ${link(said(change.text))})` : "";
+    return `| ${row.title} | ${row.owner} | ${row.date}${source} |`;
+  });
+  return ["# Team goals", "", "| Goal | Owner | Date |", "| --- | --- | --- |", ...rows, ""].join(
+    "\n",
+  );
+}
+
 function goals(state, breaks) {
   // Applies each K4 change said in a chat, unless "fail-K4" misses them.
   const heard = hearing.k4Changes.filter(

@@ -37,10 +37,38 @@ export async function aDayLater(ctx) {
   const hearing = loadHearing();
   const factIds = await sayAll(ctx, hearing.a2Facts);
   const changeIds = await sayAll(ctx, hearing.k4Changes);
+  const [proposalId] = await sayAll(ctx, [hearing.k4Proposal]);
   const hours = ctx.waits.dayHours ?? DAY_HOURS;
   await ctx.env.clockForward(hours);
-  ctx.memo.day = { factIds, changeIds, hours };
+  ctx.memo.day = { factIds, changeIds, proposalId, hours };
   return ctx.memo.day;
+}
+
+/** A marker that a value in a document is no longer current. */
+const FORMER =
+  /\b(was|were|previous(ly)?|former(ly)?|old|from|moved|changed|replac\w*|instead|no longer|not)\b/i;
+
+/**
+ * Checks a document's text against one expected entry: `entry` words find the entry's lines;
+ * those lines must hold every `holds` group, give no `former` value unless marked as former,
+ * and name no `absent` value at all. Resolves to the problems found, empty when it matches.
+ */
+export function entryProblems(text, { entry, holds = [], former = [], absent = [] }) {
+  const lines = String(text ?? "")
+    .split("\n")
+    .filter((l) => entry.every((e) => l.toLowerCase().includes(e.toLowerCase())));
+  if (lines.length === 0) return [`no entry naming ${entry.join(" ")}`];
+  const problems = [];
+  const joined = lines.join("\n");
+  for (const forms of holds)
+    if (!holdsAll(joined, [forms])) problems.push(`entry lacks ${forms.join(" or ")}`);
+  for (const value of former)
+    for (const l of lines)
+      if (l.includes(value) && !FORMER.test(l))
+        problems.push(`entry still gives ${value} as current`);
+  for (const value of absent)
+    if (lines.some((l) => l.includes(value))) problems.push(`entry names ${value}`);
+  return [...new Set(problems)];
 }
 
 /** Whether `text` holds one form of every token group (case aside). */
