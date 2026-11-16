@@ -73,7 +73,7 @@ import { chatSessionTopic, chatStatusTopic, useLiveEvents } from "@/hooks/use-li
 import { ConciergeChats } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
-import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
+import { useRenameInPlace } from "@/hooks/use-rename-in-place";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -420,12 +420,8 @@ export function RecentChats({
     readStringSetFromStorage(COLLAPSED_GROUPS_STORAGE_KEY),
   );
   const [visibleGroupCounts, setVisibleGroupCounts] = useState<Record<string, number>>({});
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingValue, setEditingValue] = useState("");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const renamingRef = useRef(false);
 
   const {
     sessions: cachedSessions,
@@ -788,51 +784,16 @@ export function RecentChats({
     [activeSessionId, conciergeChatId, navigate, sessions, updateSessions],
   );
 
-  const startRename = useCallback((session: ChatSession) => {
-    // Rename is the one row action that moves focus into the row, so the
-    // closing menu must not restore focus on top of it. The flag tells the
-    // menu below to skip that restore.
-    renamingRef.current = true;
-    // Defer entering edit mode until the row menu has fully closed, so its
-    // focus restoration doesn't blur (and prematurely commit) the new input.
-    setEditingValue(session.name);
-    setTimeout(() => setEditingId(session.id), 0);
-  }, []);
-
-  const cancelRename = useCallback(() => {
-    setEditingId(null);
-    setEditingValue("");
-  }, []);
-
-  const commitRename = useCallback(
-    async (id: string) => {
-      const name = editingValue.trim();
-      const current = sessions.find((s) => s.id === id);
-      // Empty/whitespace-only or unchanged names revert without a round-trip.
-      if (name.length === 0 || (current && current.name === name)) {
-        cancelRename();
-        return;
-      }
-      setEditingId(null);
-      setEditingValue("");
+  const rename = useRenameInPlace({
+    onCommit: (id, name) => {
       updateSessions((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
-      try {
-        await renameSession(id, name);
-      } catch {
-        // Server rejected/unchanged — the refetch below reconciles either way.
-      }
-      emitSessionsChanged();
+      void renameSession(id, name)
+        .catch(() => {
+          // Server rejected/unchanged — the refetch below reconciles either way.
+        })
+        .then(emitSessionsChanged);
     },
-    [editingValue, sessions, cancelRename, updateSessions],
-  );
-
-  // Focus and select the rename field as soon as it mounts.
-  useEffect(() => {
-    if (editingId && renameInputRef.current) {
-      renameInputRef.current.focus();
-      renameInputRef.current.select();
-    }
-  }, [editingId]);
+  });
 
   // A row on the Tasks card, which is already `surface`, marks the open chat
   // with the hover tone instead of the raised one.
@@ -840,8 +801,8 @@ export function RecentChats({
     const isActive = activeSessionId === session.id;
     const status = chatRowStatus(session, isActive);
     const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
-    const isEditing = editingId === session.id;
-    const beginRename = () => startRename(session);
+    const isEditing = rename.editingId === session.id;
+    const beginRename = () => rename.start(session.id, session.name);
     const toggleArchive = session.archivedAt
       ? () => void handleUnarchive(session.id)
       : () => void setArchived(session.id, true);
@@ -867,23 +828,10 @@ export function RecentChats({
       >
         {isEditing ? (
           <input
-            ref={renameInputRef}
+            {...rename.inputProps}
             type="text"
-            value={editingValue}
             maxLength={SESSION_NAME_MAX_LENGTH}
             aria-label={t("recentChats.renameLabel")}
-            onChange={(event) => setEditingValue(event.target.value)}
-            onBlur={() => void commitRename(session.id)}
-            onKeyDown={(event) => {
-              if (isImeCompositionEvent(event)) return;
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void commitRename(session.id);
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                cancelRename();
-              }
-            }}
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
               nested ? "ml-4" : "ml-2"
             }`}
@@ -922,17 +870,7 @@ export function RecentChats({
             <DropdownMenuContent
               side="bottom"
               align="end"
-              onCloseAutoFocus={(event) => {
-                // Radix restores focus to the trigger as the menu closes, but
-                // the trigger is display:none while the row is renaming, so the
-                // restore lands on <body> and blurs the rename input — which
-                // commits the rename before a key is typed. The rename path
-                // owns focus, so skip the restore there and leave it for every
-                // other action, where returning to the trigger is right.
-                if (!renamingRef.current) return;
-                renamingRef.current = false;
-                event.preventDefault();
-              }}
+              {...rename.menuContentProps}
               onKeyDown={(event) => {
                 // Radix composes this ahead of its own typeahead and drops that
                 // handler once the event is defaulted. Without the preventDefault
