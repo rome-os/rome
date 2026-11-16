@@ -659,7 +659,7 @@ struct Composer: View {
                     committedText: $committedText,
                     handle: textHandle,
                     editable: !voice.active,
-                    onReturn: voice.active ? sendWhenHeard : nil,
+                    onReturn: returnSends,
                     onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
                 )
                 if let voiceInput, voiceInput.available {
@@ -760,6 +760,11 @@ struct Composer: View {
 
     /// Return on a hardware keyboard while listening: listening ends, and the
     /// message is sent once the last words are in. Shift-Return does nothing.
+    private var returnSends: (() -> Void)? {
+        guard voice.active else { return nil }
+        return sendWhenHeard
+    }
+
     private func sendWhenHeard() {
         voice.stopAndSend {
             guard !(attachments?.isPreparing ?? false),
