@@ -520,17 +520,27 @@ final class VoiceInputTests: XCTestCase {
         XCTAssertTrue(listened, "listening stopped by itself during the photographs")
         XCTAssertEqual(fieldText(field), "", "words reached the field, so the photographs cannot tell hearing from text")
 
-        let same = { (a: [UInt8], b: [UInt8]) in Self.differing(a, b) <= Self.pixelSlack }
-        let counts = shots.map { shot in shots.filter { same($0.pixels, shot.pixels) }.count }
+        // Identical photographs are grouped first, so the slow pixel comparison runs once a look.
+        var looks: [[UInt8]] = []
+        var lookOf: [[UInt8]: Int] = [:]
+        let shotLook = shots.map { shot -> Int in
+            if let index = lookOf[shot.pixels] { return index }
+            looks.append(shot.pixels)
+            lookOf[shot.pixels] = looks.count - 1
+            return looks.count - 1
+        }
+        let close = looks.map { a in looks.map { b in Self.differing(a, b, atMost: Self.pixelSlack) <= Self.pixelSlack } }
+        let counts = looks.indices.map { look in shotLook.filter { close[look][$0] }.count }
         let most = counts.max() ?? 0
-        let silent = shots[counts.firstIndex(of: most) ?? 0].pixels
-        print("rule 14: \(shots.count) photographs; the steady silent look repeats in \(most)")
+        let silent = counts.firstIndex(of: most) ?? 0
+        let same = { (shot: Int) in close[silent][shotLook[shot]] }
+        print("rule 14: \(shots.count) photographs, \(looks.count) looks; the steady silent look repeats in \(most)")
         XCTAssertGreaterThanOrEqual(most, Self.cyclesPhotographed,
                                     "the field never settled in silence: no photograph repeats once a cycle")
         for cycle in 0..<Self.cyclesPhotographed {
             let from = Double(cycle) * Self.cycleSeconds
-            let seen = shots.filter { $0.at >= from && $0.at < from + Self.cycleSeconds }
-            let flat = seen.filter { same($0.pixels, silent) }.count
+            let seen = shots.indices.filter { shots[$0].at >= from && shots[$0].at < from + Self.cycleSeconds }
+            let flat = seen.filter(same).count
             XCTAssertGreaterThan(flat, 0, "cycle \(cycle + 1): the field never looked as it does in steady silence")
             XCTAssertLessThan(flat, seen.count, "cycle \(cycle + 1): the field showed nothing while sound played")
         }
@@ -556,12 +566,13 @@ final class VoiceInputTests: XCTestCase {
         return bytes
     }
 
-    /// How many pixels of two same-sized photographs differ by more than a little in a channel.
-    private static func differing(_ a: [UInt8], _ b: [UInt8]) -> Int {
+    /// How many pixels of two same-sized photographs differ by more than a little in a channel,
+    /// counting no further than one past `atMost`.
+    private static func differing(_ a: [UInt8], _ b: [UInt8], atMost: Int) -> Int {
         guard a.count == b.count else { return Int.max }
         var n = 0
         var i = 0
-        while i < a.count {
+        while i < a.count, n <= atMost {
             if abs(Int(a[i]) - Int(b[i])) > 48 || abs(Int(a[i + 1]) - Int(b[i + 1])) > 48
                 || abs(Int(a[i + 2]) - Int(b[i + 2])) > 48 { n += 1 }
             i += 4
