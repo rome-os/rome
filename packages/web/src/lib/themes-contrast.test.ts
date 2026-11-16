@@ -214,11 +214,6 @@ const PAIRINGS: Pairing[] = [
   { fg: "ring", bg: "primary", min: AA_NON_TEXT, why: "inner edge on a Button" },
   { fg: "ring", bg: "secondary", min: AA_NON_TEXT, why: "inner edge on a secondary Button" },
   { fg: "ring", bg: "input", min: AA_NON_TEXT, why: "inner edge on a Switch track" },
-
-  // The sidebar's upgrade arrow: a `success` disc with the glyph knocked out
-  // in `surface`. The glyph is the whole control (its label is `aria-label`),
-  // so the bar is the non-text one.
-  { fg: "surface", bg: "success", min: AA_NON_TEXT, why: "upgrade arrow on its disc" },
 ];
 
 /** Every pairing's id, pinned so shrinking the roster is an explicit edit.
@@ -277,7 +272,6 @@ const PAIRING_IDS = [
   "ring/primary",
   "ring/secondary",
   "ring/input",
-  "surface/success",
 ];
 
 // ─── Known failures ───────────────────────────────────────────────────────────
@@ -496,10 +490,11 @@ describe("theme contrast", () => {
 });
 
 // ─── Mixed colors ─────────────────────────────────────────────────────────────
-// A few surfaces paint `color-mix(in oklab, …)` of two tokens rather than a
-// token. That is static, unlike alpha over an unknown backdrop, so it is
-// measured here: the mix is taken in OKLab, as the browser takes it, and
-// printed back as `#rrggbb` for the gate's own ratio.
+// A few surfaces paint `color-mix(in oklab, …)` of two tokens, or a token at a
+// fixed alpha over a known canvas, rather than a token. Both are static,
+// unlike alpha over an unknown backdrop, so they are measured here, each the
+// way the browser computes it, and printed back as `#rrggbb` for the gate's
+// own ratio.
 
 function srgbToOklab([r, g, b]: [number, number, number]): [number, number, number] {
   const [lr, lg, lb] = [r, g, b].map(srgbToLinear);
@@ -511,6 +506,22 @@ function srgbToOklab([r, g, b]: [number, number, number]): [number, number, numb
     1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
     0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
   ];
+}
+
+/**
+ * `a` at alpha `share` painted over `b`, as `#rrggbb`: the browser composites
+ * in gamma-encoded sRGB, whatever space the translucent color was mixed in.
+ */
+function overSrgb(a: string, share: number, b: string): string {
+  const [x, y] = [parseColor(a), parseColor(b)];
+  const rgb = x.map((v, i) => v * share + y[i] * (1 - share));
+  return `#${rgb
+    .map((c) =>
+      Math.round(c * 255)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
 }
 
 /** `color-mix(in oklab, a share, b)`, as `#rrggbb`. */
@@ -530,8 +541,9 @@ function mixOklab(a: string, share: number, b: string): string {
 
 describe("sidebar upgrade row", () => {
   // `.rome-upgrade-row` in globals.css: ink 60% of the way from the text
-  // color to `primary`, on a `primary` tint over the rail's canvas, at rest
-  // and hovered. Change one, change the other.
+  // color to `primary` (an opaque OKLab mix), on `primary` at 15–28% alpha
+  // painted over the rail's canvas, at rest and hovered. Change one, change
+  // the other.
   const INK_SHARE = 0.6;
   const TINTS = { light: [0.15, 0.22], dark: [0.2, 0.28] } as const;
 
@@ -542,7 +554,7 @@ describe("sidebar upgrade row", () => {
         const canvas = resolveToken(theme, mode, "background");
         const ink = mixOklab(primary, INK_SHARE, resolveToken(theme, mode, "foreground"));
         return TINTS[mode].flatMap((tint) => {
-          const ratio = contrastRatio(ink, mixOklab(primary, tint, canvas));
+          const ratio = contrastRatio(ink, overSrgb(primary, tint, canvas));
           return ratio < AA_TEXT ? [`${theme.id}/${mode} at ${tint}: ${ratio.toFixed(2)}:1`] : [];
         });
       }),
