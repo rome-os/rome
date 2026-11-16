@@ -7,7 +7,7 @@
 import type { Step } from "./scenarios.js";
 import type { TimedTurn } from "./timing.js";
 
-export const BASELINE_VERSION = 1;
+export const BASELINE_VERSION = 2;
 
 /** The policy row a scenario stands for. */
 export type PolicyRow =
@@ -210,6 +210,24 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
     steps: [
       {
         text: "Make it a task: find the Louvre's opening hours and which day it's closed, and summarise them in two lines.",
+        settleS: 20,
+      },
+    ],
+    check: (i) => [
+      ...delegated(i),
+      ...matches(i.said, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
+      ...noFiller(i.said),
+    ],
+    rubric: `The relayed result should give the Louvre's opening hours (around 9:00-18:00, with late opening on some evenings, e.g. Wednesday/Friday until 21:00) and say it is closed on Tuesdays, in about two lines. Score the final relayed result, not the hand-off line. ${VOICE}`,
+  },
+  {
+    id: "task-simple-strong",
+    row: "simple-task",
+    about:
+      "The simple task on the strong model at high effort, to compare with the fast model the prompt picks",
+    steps: [
+      {
+        text: "Make it a task, on the strong model at high effort: find the Louvre's opening hours and which day it's closed, and summarise them in two lines.",
         settleS: 20,
       },
     ],

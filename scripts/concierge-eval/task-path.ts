@@ -38,6 +38,8 @@ export interface TaskPath {
   /** The task chat's turns, summed. */
   taskTurnsMs: number | null;
   taskTurns: number;
+  /** The model the task chat's own turns ran on. */
+  taskModel: string | null;
   subagentCalls: SubagentCall[];
   /** Read, Grep and Glob calls of the task chat, which its memory checks use. */
   readCalls: number;
@@ -158,6 +160,9 @@ export function taskPath(
     taskOpenMs: opening.length ? opening.reduce((n, r) => n + r.ms, 0) : null,
     taskTurnsMs: taskAgentSpans.length ? taskAgentSpans.reduce((n, r) => n + r.ms, 0) : null,
     taskTurns: taskAgentSpans.length,
+    taskModel:
+      inTask.find((r) => r.name === "model.turn" && r.agent === taskAgentSpans[0]?.agent)?.model ??
+      null,
     subagentCalls,
     readCalls: taskTools.filter((t) => ["Read", "Grep", "Glob"].includes(t.tool)).length,
     tools: toolCounts,
