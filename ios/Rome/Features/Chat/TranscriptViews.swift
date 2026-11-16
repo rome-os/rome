@@ -661,6 +661,11 @@ struct Composer: View {
                     editable: !voice.active,
                     onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
                 )
+                if voice.state == .listening {
+                    VoiceInputWaveform(meter: voice.meter)
+                        .frame(width: 80)
+                        .padding(.bottom, controlPadding + (36 - VoiceInputWaveform.height) / 2)
+                }
                 if let voiceInput, voiceInput.available {
                     VoiceInputButton(state: voice.state) {
                         voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
