@@ -132,7 +132,10 @@ export function VoiceInputWaveform({
       peak = Math.max(peak, levelRef.current());
       const stepped = now - lastStep >= step;
       if (stepped) {
-        lastStep = now;
+        // On the step's own schedule, not the frame's, so no step lasts a frame
+        // longer and the slide never stalls. After a pause, such as a hidden
+        // tab, it starts again from now.
+        lastStep = now - lastStep < step * 2 ? lastStep + step : now;
         steps.push(peak > SILENCE ? peak : 0);
         peak = 0;
       }
@@ -150,7 +153,7 @@ export function VoiceInputWaveform({
       aria-hidden
       data-voice-input-waveform
       className={cn(
-        "h-7 min-w-0 text-foreground [mask-image:linear-gradient(to_right,transparent,black_12%)]",
+        "h-7 min-w-0 text-foreground [mask-image:linear-gradient(to_right,transparent,black_12%)] [-webkit-mask-image:linear-gradient(to_right,transparent,black_12%)]",
         className,
       )}
     />
