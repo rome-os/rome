@@ -1004,6 +1004,13 @@ final class AppModel {
             return
         }
         guard let current = list.first(where: { $0.id == instance.id }), current.origin == instance.origin, current.isVisitor == instance.isVisitor, current.isRunning else {
+            // Down for this phone's background upgrade: `follow` keeps the
+            // workspace, which starts here, so the upgrade's row and its
+            // refresh run. Its requests renew once the instance is back.
+            if let current = list.first(where: { $0.id == instance.id }), current.origin == instance.origin,
+               current.isVisitor == instance.isVisitor, !current.isRunning, update.backgroundUpgradePending(for: current.id) {
+                Task { await bootstrap(workspace, instanceID: instance.id) }
+            }
             await follow(list, instance: instance, workspace: workspace)
             return
         }
