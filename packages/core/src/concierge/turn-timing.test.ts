@@ -18,7 +18,14 @@ describe("ConciergeTurnTiming", () => {
   it("times the start, the first sign, the first say and the end from the send", () => {
     const c = clock();
     const timing = new ConciergeTurnTiming(
-      { chatId: "c", turnId: "t", trigger: "guardian", startedAtMs: 1_000, effort: "low", session: "cold" },
+      {
+        chatId: "c",
+        turnId: "t",
+        trigger: "guardian",
+        startedAtMs: 1_000,
+        effort: "low",
+        session: "cold",
+      },
       "core:concierge",
       c.now,
     );
@@ -79,7 +86,11 @@ describe("ConciergeTurnTiming", () => {
       c.now,
     );
     timing.event({ type: "tool_use", tool: "Read", agent: "assistant:explore" });
-    timing.event({ type: "result", accounting: accounting({ numTurns: 5 }), agent: "assistant:explore" });
+    timing.event({
+      type: "result",
+      accounting: accounting({ numTurns: 5 }),
+      agent: "assistant:explore",
+    });
     timing.event({ type: "result", accounting: accounting({ numTurns: 1, used: 40_000 }) });
     timing.event({ type: "error", accounting: accounting({ numTurns: 1, used: 41_000 }) });
     const timed = timing.finish("turn-own");

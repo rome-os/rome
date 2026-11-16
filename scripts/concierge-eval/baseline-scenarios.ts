@@ -53,7 +53,9 @@ const FILLER =
   /^\s*(got it|on it|sure[,!.]|okay[,!.]|ok[,!.]|noted|will do|let me|i['’]ll (look|check|find|get)|i['’]m (on|checking|looking)|one moment|好的|收到|马上|我来)/i;
 
 function noFiller(said: string[]): string[] {
-  return said.filter((t) => FILLER.test(t) && t.length < 120).map((t) => `filler: "${t.slice(0, 60)}"`);
+  return said
+    .filter((t) => FILLER.test(t) && t.length < 120)
+    .map((t) => `filler: "${t.slice(0, 60)}"`);
 }
 
 function answeredInline(input: CheckInput, step: number, maxSearches = 0): string[] {
@@ -95,7 +97,10 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
     id: "chat-hi-thanks",
     row: "chat",
     about: "A greeting, then a thanks sent while the session is still warm",
-    steps: [{ text: "hey, good morning!", settleS: 4 }, { text: "thanks!", settleS: 4 }],
+    steps: [
+      { text: "hey, good morning!", settleS: 4 },
+      { text: "thanks!", settleS: 4 },
+    ],
     check: (i) => [
       ...answeredInline(i, 0),
       ...(i.steps[1] && (tool(i.steps[1], "chat_start") > 0 || tool(i.steps[1], "websearch") > 0)
@@ -123,7 +128,11 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
     row: "simple-qa",
     about: "A quick calculation",
     steps: [{ text: "How much is 72°F in Celsius?", settleS: 6 }],
-    check: (i) => [...answeredInline(i, 0), ...matches(i.said, /22[.,]2/, "22.2 °C"), ...noFiller(i.said)],
+    check: (i) => [
+      ...answeredInline(i, 0),
+      ...matches(i.said, /22[.,]2/, "22.2 °C"),
+      ...noFiller(i.said),
+    ],
     rubric: `Correct answer: about 22.2 °C. One line is ideal. ${VOICE}`,
   },
   {
@@ -161,7 +170,11 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
         settleS: 8,
       },
     ],
-    check: (i) => [...answeredInline(i, 0), ...matches(i.said, /11[:.]30/, "11:30"), ...noFiller(i.said)],
+    check: (i) => [
+      ...answeredInline(i, 0),
+      ...matches(i.said, /11[:.]30/, "11:30"),
+      ...noFiller(i.said),
+    ],
     rubric: `Correct answer: 11:30. Arrive by 12:35; a drive inside the 11:00-13:00 window takes 65 minutes, so leave at 11:30 (the whole drive falls in the window). Leaving at 11:45 with a 50-minute drive is wrong. Score 1 for a wrong time, 3 for right time with muddled reasoning, 5 for right time with one short line of reasoning. ${VOICE}`,
   },
   {
@@ -180,7 +193,8 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   {
     id: "reason-schedule-task",
     row: "reasoning",
-    about: "The same constraint puzzle, delegated, to compare a task's latency with an inline answer",
+    about:
+      "The same constraint puzzle, delegated, to compare a task's latency with an inline answer",
     steps: [
       {
         text: "Make it a task: three meetings to fit into one afternoon from 13:00 to 17:00: A takes 90 minutes, B takes 60, C takes 45. B must end before A starts, C can't be right after B, and I need a 15-minute break between any two meetings. Give me a schedule that works.",
@@ -229,7 +243,10 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
     row: "recall",
     about: "A fact told early in the chat, asked for again later",
     steps: [
-      { text: "FYI my sister Lena just moved to Porto, she starts at a design studio there next month.", settleS: 6 },
+      {
+        text: "FYI my sister Lena just moved to Porto, she starts at a design studio there next month.",
+        settleS: 6,
+      },
       { text: "What's a good gift for someone who just started a new job?", settleS: 6 },
       { text: "Which city did I say my sister moved to, and what's her new job?", settleS: 6 },
     ],

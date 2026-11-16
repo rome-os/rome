@@ -61,7 +61,10 @@ const { values: args } = parseArgs({
     user: { type: "string", default: "dev" },
     out: { type: "string", default: ".concierge-eval/baseline" },
     timeout: { type: "string", default: "25" },
-    obs: { type: "string", default: process.env.ROME_OBS_QUERY_URL ?? "http://clickhouse.rome.localhost:3000" },
+    obs: {
+      type: "string",
+      default: process.env.ROME_OBS_QUERY_URL ?? "http://clickhouse.rome.localhost:3000",
+    },
     help: { type: "boolean" },
   },
 });
@@ -108,7 +111,14 @@ async function playScenario(
   const driven = await drive(
     api,
     chat.id,
-    { id: scenario.id, about: scenario.about, steps: scenario.steps, cards: "first", approvals: "approve", expect: { endReason: "done" } },
+    {
+      id: scenario.id,
+      about: scenario.about,
+      steps: scenario.steps,
+      cards: "first",
+      approvals: "approve",
+      expect: { endReason: "done" },
+    },
     {
       settleMs: 20_000,
       timeoutMs: Number(args.timeout) * 60_000,
@@ -198,7 +208,11 @@ async function playScenario(
 }
 
 /** The breakdown of the chat's first task, once its traces reached rome-obs. */
-async function taskPathOf(chatId: string, sentAt: number, sinceIso: string): Promise<TaskPath | null> {
+async function taskPathOf(
+  chatId: string,
+  sentAt: number,
+  sinceIso: string,
+): Promise<TaskPath | null> {
   const [tasks] = stack.query<{ session_id: string }>([
     {
       sql: "SELECT session_id FROM concierge_tasks WHERE chat_id = ? AND session_id IS NOT NULL ORDER BY created_at",
@@ -233,7 +247,9 @@ function readRuns(): ScenarioRun[] {
     const dir = join(args.out, config);
     if (!config.match(/^[\w.-]+$/) || !statSync(dir).isDirectory()) continue;
     for (const file of readdirSync(dir).filter((f) => /^run-\d+\.json$/.test(f))) {
-      const saved = JSON.parse(readFileSync(join(dir, file), "utf8")) as { scenarios: ScenarioRun[] };
+      const saved = JSON.parse(readFileSync(join(dir, file), "utf8")) as {
+        scenarios: ScenarioRun[];
+      };
       runs.push(...saved.scenarios);
     }
   }

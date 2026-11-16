@@ -981,8 +981,7 @@ function carriesText(content: string): boolean {
   try {
     const parts = JSON.parse(content) as unknown;
     return (
-      Array.isArray(parts) &&
-      parts.some((p) => (p as { type?: unknown } | null)?.type === "text")
+      Array.isArray(parts) && parts.some((p) => (p as { type?: unknown } | null)?.type === "text")
     );
   } catch {
     return false;

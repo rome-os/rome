@@ -64,7 +64,9 @@ export function configRow(runs: ScenarioRun[]): string {
     k(mean(guardian.map((t) => t.cacheReadTokens))),
     k(mean(guardian.map((t) => t.cacheWriteTokens))),
     `${passed}/${runs.length}`,
-    scores.length ? `${fixed(mean(scores), 2)} (${Math.min(...scores)}–${Math.max(...scores)})` : "–",
+    scores.length
+      ? `${fixed(mean(scores), 2)} (${Math.min(...scores)}–${Math.max(...scores)})`
+      : "–",
   ];
   return `| ${cells.join(" | ")} |`;
 }
@@ -102,7 +104,8 @@ export function baselineMarkdown(runs: ScenarioRun[]): string {
     out.push(`## ${id} (${ofScenario[0]?.row})`, "");
     out.push(`| ${HEADER.join(" | ")} |`, `|${HEADER.map(() => "---").join("|")}|`);
     const configs = [...new Set(ofScenario.map((r) => r.config))].sort();
-    for (const config of configs) out.push(configRow(ofScenario.filter((r) => r.config === config)));
+    for (const config of configs)
+      out.push(configRow(ofScenario.filter((r) => r.config === config)));
     const paths = ofScenario.filter((r) => r.taskPath);
     if (paths.length) out.push("", ...taskPathTable(paths));
     const failed = ofScenario.filter((r) => r.notes.length);
@@ -113,7 +116,8 @@ export function baselineMarkdown(runs: ScenarioRun[]): string {
     const low = ofScenario.filter((r) => r.verdict && r.verdict.score <= 3);
     if (low.length) {
       out.push("", "Low scores:");
-      for (const r of low) out.push(`- ${r.config} r${r.run} (${r.verdict?.score}): ${r.verdict?.why}`);
+      for (const r of low)
+        out.push(`- ${r.config} r${r.run} (${r.verdict?.score}): ${r.verdict?.why}`);
     }
     out.push("");
   }
