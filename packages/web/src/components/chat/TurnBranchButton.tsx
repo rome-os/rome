@@ -17,7 +17,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { placeChatWidget } from "@/pages/free/use-free-cells";
-import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
+import { shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
