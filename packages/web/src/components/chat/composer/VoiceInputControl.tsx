@@ -29,7 +29,7 @@ export function VoiceInputButton({
   return (
     <Button
       type="button"
-      variant={listening ? "default" : "ghost"}
+      variant={listening ? "secondary" : "ghost"}
       size="icon-sm"
       aria-pressed={listening}
       aria-label={label}
