@@ -107,7 +107,8 @@
         "tidyingUp": "Tidying up context"
       }
     },
-    "statusReaction": {
+    "reaction": "Reaction",
+    "status": {
       "working": "Working on it",
       "failed": "Did not finish"
     },
@@ -181,8 +182,7 @@
     "action": "Reply",
     "dismiss": "Cancel reply",
     "jump": "Go to the original message",
-    "openThread": "Open the chat thread",
-    "toThread": "Reply to {{title}}"
+    "openThread": "Open the chat thread"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -383,6 +383,12 @@
       "rejected": "Rejected",
       "failed": "Execution failed"
     },
+    "secretAccess": {
+      "allow": "Allow {{minutes}} min",
+      "duration": "{{minutes}} min",
+      "allowed": "Allowed {{name}} · {{minutes}} min",
+      "rejected": "Rejected {{name}}"
+    },
     "actions": {
       "approve": "Approve",
       "approving": "Approving…",
@@ -450,6 +456,18 @@
     "answered": "Answered",
     "dismiss": "Dismiss",
     "send": "Send"
+  },
+  "deviceConnectCard": {
+    "connected": "Connected",
+    "notConnected": "Not connected"
+  },
+  "locationCard": {
+    "shared": "Location shared · ±{{accuracy}}",
+    "notShared": "Not shared",
+    "locating": "Finding your location…",
+    "denied": "Location access is off for this site. Turn it on in the browser, or press Not now.",
+    "unavailable": "Couldn't find your location. Try again, or press Not now.",
+    "unsupported": "This browser can't share a location. Press Not now and name the place in a message."
   },
   "appComponent": {
     "dismiss": "Dismiss",
@@ -649,21 +667,8 @@
     }
   },
   "thread": {
-    "title": "Chat thread",
-    "openTaskChat": "Open task chat",
-    "close": "Close chat thread",
-    "loadFailed": "Couldn't load this chat thread.",
-    "replyPlaceholder": "Reply"
-  },
-  "sessionRenewal": {
-    "notice": "Context tidied up · {{reason}}",
-    "reasons": {
-      "context": "conversation got long",
-      "setup": "setup updated",
-      "idle": "after a quiet period",
-      "daily": "daily reset",
-      "working_dir": "working folder gone"
-    }
+    "back": "Back to the chat: {{title}}",
+    "replyPlaceholder": "Reply: {{title}}"
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
@@ -699,5 +704,33 @@
     "channel": "Channel",
     "sendMessage": "Send a message",
     "action": "Action"
+  },
+  "voiceInput": {
+    "start": "Start voice input",
+    "stop": "Stop voice input",
+    "finishing": "Finishing voice input",
+    "whyMicrophone": "Rome uses the microphone to turn your speech into text",
+    "stopped": {
+      "provider-unavailable": "Transcription service unavailable. Listening stopped",
+      "provider-refused": "Transcription service refused the request. Listening stopped",
+      "bad-request": "Listening stopped after an error",
+      "microphone-blocked": "Microphone blocked. Allow it in the browser's site settings",
+      "microphone-missing": "No microphone found",
+      "connection-lost": "Connection to Rome lost. Listening stopped",
+      "microphone-failed": "Microphone could not start. Listening stopped",
+      "time-limit": "Listening stopped after 10 minutes",
+      "service-refused": "Rome Cloud refused voice input ({{code}}). Listening stopped",
+      "service-unavailable": "Rome Cloud could not be reached. Listening stopped",
+      "service-signed-out": "Rome Cloud does not accept this Rome's sign-in. Sign in to Rome Cloud again. Listening stopped",
+      "left-chat": "Listening stopped when you left this chat",
+      "page-reloaded": "Listening stopped when the page reloaded",
+      "no-speech": "Listening stopped after 30 seconds without speech"
+    },
+    "romeCloud": {
+      "voice_input_rate_limited": "Too many voice inputs in the last minute. Try again shortly",
+      "voice_input_not_configured": "Rome Cloud has not set up voice input yet. Listening stopped",
+      "provider_unavailable": "Rome Cloud's transcription service is unavailable. Listening stopped",
+      "insufficient_credits": "Not enough Rome credits for voice input. Listening stopped"
+    }
   }
 }

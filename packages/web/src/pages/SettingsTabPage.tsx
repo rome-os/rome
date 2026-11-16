@@ -8,6 +8,7 @@ import {
   SectionTitle,
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
+import { VoiceInputRow } from "@/components/voice-input-row";
 import { ComputerUseRow } from "@/components/computer-use-section";
 import { SpokenRecapsRows } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
@@ -91,7 +92,7 @@ import {
   ADVANCED_EASTER_EGG_INITIAL_SEQUENCE,
   advanceAdvancedEasterEggSequence,
 } from "@/lib/advanced-easter-egg";
-import { AppKeysRow } from "@/components/app-keys-section";
+import { AppKeysRow, VaultRow } from "@/components/app-keys-section";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import { ChannelsSettingsPage } from "@/components/channels/channels-settings-page";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
@@ -114,6 +115,8 @@ import {
   fetchConnections,
   type ApiConnection,
 } from "@/lib/connections-api";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -908,6 +911,7 @@ function AdvancedSection({
             <SystemVersionRow />
             <SystemDiagnosisRow details={<RelayHealthSection />} />
             <ComputerUseRow />
+            <VoiceInputRow />
           </FormRows>
         </Section>
         <FeaturesSection />
@@ -1275,24 +1279,16 @@ function RelayHealthRow({ label, children }: { label: string; children: ReactNod
 
 function CopyValueButton({ value }: { value: string }) {
   const { t } = useTranslation("settings");
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1_500);
-    } catch {
-      // Clipboard unavailable (e.g. non-secure context); the value is selectable text.
-    }
-  }
+  // When the clipboard is unavailable, the value is still selectable text.
+  const { copiedText, copy } = useCopyFeedback();
+  const copied = copiedText !== null;
 
   return (
     <IconButton
       size="sm"
       label={copied ? t("advanced.relayHealth.copied") : t("advanced.relayHealth.copy")}
       icon={copied ? <Check className="text-success-fg" /> : <Copy />}
-      onClick={() => void copy()}
+      onClick={() => void copy(value)}
     />
   );
 }
@@ -1500,6 +1496,7 @@ function AccessControlSection({
       </SectionHeader>
       <FormRows>
         <AppKeysRow />
+        <VaultRow />
         <SettingsToggleRow
           title={t("advanced.feedback.agentReports.title")}
           description={t("advanced.feedback.agentReports.description")}
@@ -1645,7 +1642,7 @@ function AllowedCloudEmailsRows() {
                 if (draftError) setDraftError("");
               }}
               onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
+                if (event.key !== "Enter" || isImeCompositionEvent(event)) return;
                 event.preventDefault();
                 commitDraft(draft);
               }}

@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { type ComponentProps, useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
 import { RoutineDraftCard } from "./entries/RoutineDraftCard";
@@ -32,7 +32,14 @@ function Harness({
   currentReplyMessageIds = new Set(["message"]),
   kind = "routine",
   aiResult,
+  hidden = false,
+  whenShown,
+  scrollPaddingTop = 0,
 }: {
+  /** The card is in a thread the focus hides. */
+  hidden?: boolean;
+  whenShown?: ComponentProps<typeof ChatPendingCardJump>["whenShown"];
+  scrollPaddingTop?: number;
   questionResult?: Record<string, unknown>;
   currentReplyMessageIds?: ReadonlySet<string>;
   kind?: "routine" | "app" | "ai" | "approval" | "question";
@@ -43,9 +50,9 @@ function Harness({
   const [floor, setFloor] = useState<HTMLDivElement | null>(null);
   return (
     <MemoryRouter>
-      <div ref={setScroller} data-testid="scroller">
+      <div ref={setScroller} data-testid="scroller" style={{ scrollPaddingTop }}>
         <div ref={setContent}>
-          <div data-chat-card-message="message">
+          <div data-chat-card-message="message" data-thread-out={hidden || undefined}>
             {kind === "approval" ? (
               <div data-chat-pending-card="approval">Pending approval</div>
             ) : kind === "app" ? (
@@ -84,6 +91,7 @@ function Harness({
             content={content}
             floor={floor}
             currentReplyMessageIds={currentReplyMessageIds}
+            whenShown={whenShown}
           />
         </div>
       </div>
@@ -107,7 +115,12 @@ beforeEach(() => {
   rs.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
     const top =
       this.dataset.testid === "scroller" ? 0 : this.dataset.testid === "floor" ? 500 : cardTop;
-    const height = this.dataset.testid === "scroller" ? 600 : 100;
+    // A card a thread's focus hides has no box.
+    const height = this.closest("[data-thread-out]")
+      ? 0
+      : this.dataset.testid === "scroller"
+        ? 600
+        : 100;
     return {
       top,
       bottom: top + height,
@@ -124,7 +137,8 @@ beforeEach(() => {
     configurable: true,
     value: (options: ScrollToOptions) => {
       scrollTo(options);
-      cardTop = 0;
+      cardTop =
+        Number.parseFloat(getComputedStyle(screen.getByTestId("scroller")).scrollPaddingTop) || 0;
       fireEvent.scroll(screen.getByTestId("scroller"));
     },
   });
@@ -164,6 +178,24 @@ describe("ChatPendingCardJump", () => {
     });
     expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBe(jump);
     expect(document.activeElement).toBe(jump);
+  });
+
+  it("still reminds about a card the focused thread hides, and closes the focus before it jumps", async () => {
+    const pending: Array<() => void> = [];
+    const whenShown = rs.fn((find: () => HTMLElement | null, then: (el: HTMLElement) => void) => {
+      pending.push(() => {
+        const el = find();
+        if (el) then(el);
+      });
+    });
+    render(<Harness kind="approval" hidden whenShown={whenShown} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Needs you: jump to waiting card" }));
+
+    // The jump waits for the focus to close.
+    expect(whenShown).toHaveBeenCalledOnce();
+    expect(scrollTo).not.toHaveBeenCalled();
+    act(() => pending[0]!());
+    expect(scrollTo).toHaveBeenCalledOnce();
   });
 
   it("keeps a server-owned approval eligible even after a newer reply", async () => {
@@ -226,6 +258,23 @@ describe("ChatPendingCardJump", () => {
     fireEvent.click(jump);
     expect(scrollTo).toHaveBeenCalledWith({ top: -200, behavior: "instant" });
     expect(document.activeElement?.hasAttribute("data-chat-pending-card")).toBe(true);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
+    );
+  });
+
+  it("keeps reminding about a card entirely behind the floating header", async () => {
+    cardTop = -68;
+    render(<Harness kind="app" scrollPaddingTop={48} />);
+
+    await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
+  });
+
+  it("lands a waiting card below the floating header", async () => {
+    render(<Harness scrollPaddingTop={48} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Needs you: jump to waiting card" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: -248, behavior: "instant" });
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
     );

@@ -47,6 +47,8 @@ import {
   type WidgetPlacement,
   type WidgetType,
 } from "./use-free-cells";
+import { usePaneResize } from "@/hooks/use-pane-resize";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 export { COMPACT_WIDTH } from "./use-free-cells";
 
@@ -59,12 +61,11 @@ const TRACE_TAB_ID = "__trace__";
 // Tab value of the Tasks tab, likewise.
 const TASKS_TAB_ID = "__tasks__";
 
+type BuiltinTab = "trace" | "tasks";
+
 function readRatio() {
-  try {
-    const value = Number(localStorage.getItem(WIDTH_KEY));
-    if (value >= 0.2 && value <= 0.8) return value;
-  } catch {}
-  return DEFAULT_RATIO;
+  const value = Number(readStored(WIDTH_KEY));
+  return value >= 0.2 && value <= 0.8 ? value : DEFAULT_RATIO;
 }
 
 interface ToolTabProps {
@@ -164,7 +165,6 @@ export function ToolWorkspace({
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [ratio, setRatio] = useState(readRatio);
-  const [resizing, setResizing] = useState(false);
   const [outlet, setOutlet] = useState<HTMLDivElement | null>(null);
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
   const [stripWidth, setStripWidth] = useState<number | null>(null);
@@ -173,7 +173,7 @@ export function ToolWorkspace({
   // `use-free-cells`, and so is not saved with the session. Selecting it leaves
   // the store's `activeId` alone, so the app tab that was active before is
   // still the one the store holds, and closing the Trace tab restores it by
-  // clearing `traceSelected`.
+  // clearing `selected`.
   //
   // The pane's expansion is view state too. The store's `collapsed` is saved per
   // session and written through the module-global active session, so a trace
@@ -189,15 +189,15 @@ export function ToolWorkspace({
   //   the store, because the user has moved on to the pane. The flag is then
   //   redundant and clears, so the app stays visible after the trace closes.
   //
-  // The Tasks tab is the same kind of tab: view state, never saved, at most one.
-  // Selecting one built-in tab deselects the other. A built-in tab opened over
-  // a collapsed pane holds it open with the same flag.
+  // The Tasks tab is the same kind of tab: view state, never saved, at most
+  // one. At most one built-in tab is selected, and a built-in tab opened over a
+  // collapsed pane holds it open with the same flag, until the last of them
+  // closes.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
-  const [traceSelected, setTraceSelected] = useState(false);
+  const [selected, setSelected] = useState<BuiltinTab | null>(null);
   // The Concierge chat whose task list the tab shows; null while it is not open.
   const [tasksChatId, setTasksChatId] = useState<string | null>(null);
   const tasksOpen = tasksChatId !== null;
-  const [tasksSelected, setTasksSelected] = useState(false);
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
@@ -206,8 +206,7 @@ export function ToolWorkspace({
 
   const reveal = useCallback(() => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
-    setTraceSelected(true);
-    setTasksSelected(false);
+    setSelected("trace");
   }, []);
 
   const setTraceTab = useCallback(
@@ -216,8 +215,7 @@ export function ToolWorkspace({
         if (traceOwnerRef.current !== owner) return;
         traceOwnerRef.current = null;
         traceCloseRef.current = null;
-        setTraceSelected(false);
-        setHoldsOpen(false);
+        setSelected((current) => (current === "trace" ? null : current));
         setTrace(null);
         return;
       }
@@ -242,15 +240,11 @@ export function ToolWorkspace({
   // app under a new id or a background app closing, move `view.activeId`
   // without the user asking to leave the trace, so they never touch it.
   useEffect(() => {
-    if (activations !== undefined) {
-      setTraceSelected(false);
-      setTasksSelected(false);
-    }
+    if (activations !== undefined) setSelected(null);
   }, [activations]);
 
   function addAndShow(type: WidgetType, targetId?: string) {
-    setTraceSelected(false);
-    setTasksSelected(false);
+    setSelected(null);
     addWidget(type, targetId);
   }
 
@@ -259,32 +253,36 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const open = !view.collapsed || ((trace !== null || tasksOpen) && holdsOpen);
+  const builtinOpen = trace !== null || tasksOpen;
+  // The hold ends with the last built-in tab: the pane falls back to the
+  // session's stored state.
+  useEffect(() => {
+    if (!builtinOpen) setHoldsOpen(false);
+  }, [builtinOpen]);
+  const open = !view.collapsed || (builtinOpen && holdsOpen);
   const setPaneCollapsed = useCallback((collapsed: boolean) => {
     setHoldsOpen(false);
     latest.current.setCollapsed(collapsed);
   }, []);
 
-  const traceActive = trace !== null && traceSelected;
-  const tasksActive = tasksOpen && tasksSelected;
+  const traceActive = trace !== null && selected === "trace";
+  const tasksActive = tasksOpen && selected === "tasks";
   const builtinActive = traceActive || tasksActive;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
     [outlet, open, setPaneCollapsed, reveal, setTraceTab],
   );
   const sorted = [...placements].sort((a, b) => a.order - b.order);
-  const hasTabs = sorted.length > 0 || trace !== null || tasksOpen;
+  const hasTabs = sorted.length > 0 || builtinOpen;
   const compact = width < COMPACT_WIDTH;
   const showTasks = useCallback((chatId: string) => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
     setTasksChatId(chatId);
-    setTasksSelected(true);
-    setTraceSelected(false);
+    setSelected("tasks");
   }, []);
   const hideTasks = useCallback(() => {
     setTasksChatId(null);
-    setTasksSelected(false);
-    if (traceOwnerRef.current === null) setHoldsOpen(false);
+    setSelected((current) => (current === "tasks" ? null : current));
   }, []);
   const tasksHost = useMemo<ToolTasksHost>(
     () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
@@ -332,11 +330,8 @@ export function ToolWorkspace({
     ...(tasksOpen ? [TASKS_TAB_ID] : []),
     ...sorted.map((widget) => widget.id),
   ];
-  const activeTabId = traceActive
-    ? TRACE_TAB_ID
-    : tasksActive
-      ? TASKS_TAB_ID
-      : (view.activeId ?? null);
+  const builtinTabId = traceActive ? TRACE_TAB_ID : tasksActive ? TASKS_TAB_ID : null;
+  const activeTabId = builtinTabId ?? view.activeId ?? null;
   const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
   const hiddenCount = tabIds.length - shownIds.size;
   const allToolsLabel =
@@ -466,28 +461,26 @@ export function ToolWorkspace({
   );
 
   function pickTab(id: string) {
-    if (id === TRACE_TAB_ID) {
-      setTraceSelected(true);
-      setTasksSelected(false);
-      return;
-    }
-    if (id === TASKS_TAB_ID) {
-      setTasksSelected(true);
-      setTraceSelected(false);
-      return;
-    }
-    setTraceSelected(false);
-    setTasksSelected(false);
+    if (id === TRACE_TAB_ID) return setSelected("trace");
+    if (id === TASKS_TAB_ID) return setSelected("tasks");
+    setSelected(null);
     selectTool(id);
   }
 
   function changeRatio(next: number) {
     const constrained = Math.max(0.2, Math.min(0.8, next));
     setRatio(constrained);
-    try {
-      localStorage.setItem(WIDTH_KEY, String(constrained));
-    } catch {}
+    writeStored(WIDTH_KEY, String(constrained));
   }
+
+  const edge = usePaneResize({
+    size: chatWidth,
+    min: MIN_PANE_WIDTH,
+    max: available - MIN_PANE_WIDTH,
+    onResize: (next) => changeRatio(next / available),
+    onReset: () => changeRatio(DEFAULT_RATIO),
+  });
+  const resizing = edge.resizing;
 
   function closeTab(id: string) {
     const focused = document.activeElement;
@@ -526,51 +519,13 @@ export function ToolWorkspace({
         </div>
         {open && !compact && (
           <div
-            role="separator"
-            tabIndex={0}
+            {...edge.separatorProps}
             aria-label={t("chat.resizeTools")}
-            aria-orientation="vertical"
-            aria-valuemin={MIN_PANE_WIDTH}
-            aria-valuemax={Math.round(available - MIN_PANE_WIDTH)}
-            aria-valuenow={Math.round(chatWidth)}
-            data-resizing={resizing || undefined}
             className="relative z-40 w-px shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:-inset-x-1 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border-subtle after:transition-[width] hover:after:w-1 focus-visible:outline-ring/50 focus-visible:after:w-1 data-[resizing]:after:w-1"
-            onDoubleClick={() => changeRatio(DEFAULT_RATIO)}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              event.preventDefault();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              setResizing(true);
-            }}
-            onPointerMove={(event) => {
-              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-              const left = rootRef.current?.getBoundingClientRect().left ?? 0;
-              changeRatio(
-                Math.max(
-                  MIN_PANE_WIDTH,
-                  Math.min(available - MIN_PANE_WIDTH, event.clientX - left),
-                ) / available,
-              );
-            }}
-            onPointerUp={(event) => {
-              if (event.currentTarget.hasPointerCapture(event.pointerId))
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              setResizing(false);
-            }}
-            onLostPointerCapture={() => setResizing(false)}
-            onKeyDown={(event) => {
-              if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
-              event.preventDefault();
-              changeRatio(
-                event.key === "Home"
-                  ? DEFAULT_RATIO
-                  : (chatWidth + (event.key === "ArrowLeft" ? -24 : 24)) / available,
-              );
-            }}
           />
         )}
         <Tabs
-          value={traceActive ? TRACE_TAB_ID : tasksActive ? TASKS_TAB_ID : (view.activeId ?? "")}
+          value={builtinTabId ?? view.activeId ?? ""}
           onValueChange={pickTab}
           activationMode="automatic"
           className="min-h-0 min-w-0 flex-1 gap-0 bg-background"

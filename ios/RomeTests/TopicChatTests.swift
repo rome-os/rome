@@ -54,6 +54,40 @@ import Testing
         #expect(TopicChatsStore.title(store.chat("topic-1")) == "Kyoto trip")
     }
 
+    /// The drawer's fold lasts across launches, per instance, and goes with the account.
+    @Test func theFoldIsKeptPerInstance() {
+        let defaults = UserDefaults(suiteName: "topics-fold-\(UUID())")!
+        let me = TopicChatsFold(host: "me.romeos.cc", defaults: defaults)
+        let store = TopicChatsStore(backend: FakeBackend(), fold: me)
+        #expect(!store.folded)
+        store.setFolded(true)
+        #expect(TopicChatsStore(backend: FakeBackend(), fold: me).folded)
+        #expect(!TopicChatsStore(backend: FakeBackend(), fold: TopicChatsFold(host: "team.romeos.cc", defaults: defaults)).folded)
+        store.setFolded(false)
+        #expect(!me.load())
+        me.save(true)
+        TopicChatsFold.removeAll(defaults: defaults)
+        #expect(!me.load())
+    }
+
+    /// Folded, the header counts every unread reply, and the open chat keeps its row.
+    @Test func aFoldedListKeepsUnreadAndTheOpenChat() async {
+        let backend = FakeBackend()
+        backend.topicChats = [
+            ConciergeChat(id: "topic-1", name: "Kyoto", main: false, unread: 2),
+            ConciergeChat(id: "topic-2", name: "Meals", main: false, unread: 0),
+            ConciergeChat(id: "topic-3", name: "Books", main: false, unread: 1),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.unreadCount == 3)
+        store.markRead("topic-1")
+        #expect(store.unreadCount == 1)
+        #expect(TopicChatsStore.foldedRows(store.chats, openId: "topic-2").map(\.id) == ["topic-2"])
+        #expect(TopicChatsStore.foldedRows(store.chats, openId: nil).isEmpty)
+    }
+
     /// As on the web, a named chat's composer says which chat a message goes to.
     @Test func theComposerNamesTheChatOnceItHasOne() {
         #expect(TopicChatsStore.composerPlaceholder(nil, replying: false) == "Message")
@@ -108,6 +142,41 @@ import Testing
         #expect(workspace.topics.chats.map(\.id) == ["topic-2"])
     }
 
+    /// As on the web: a delete moves the chat's follows and open tasks unless
+    /// the guardian chose to stop them.
+    @Test func deleteStopsTheChatsWorkOnlyWhenAsked() async {
+        let backend = FakeBackend()
+        backend.topicChats = [
+            ConciergeChat(id: "topic-1", name: "Trip", main: false, unread: 0),
+            ConciergeChat(id: "topic-2", name: "Home", main: false, unread: 0),
+        ]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await workspace.deleteTopic("topic-1"))
+        #expect(await workspace.deleteTopic("topic-2", stoppingWork: true))
+        #expect(backend.calls == ["delete topic-1", "delete topic-2 stopping work"])
+        #expect(workspace.topics.chats.isEmpty)
+    }
+
+    /// The list arrives; a failed read, or one slower than the wait, gives
+    /// nil, and the delete moves them. The waits are far apart, so a busy
+    /// test machine cannot flip the outcome.
+    @Test func theDeleteReadsTheChatsWorkOrGivesUp() async {
+        let backend = FakeBackend()
+        let workspace = workspace(backend)
+        #expect(await workspace.topicWork("topic-1", wait: .seconds(60)) == nil)
+        let work = ConciergeChatWork(openTasks: [.init(id: "t1", title: "Book the hotel")])
+        backend.chatWorkAnswer = work
+        #expect(await workspace.topicWork("topic-1", wait: .seconds(60)) == work)
+        // An answer that would take two minutes is given up on long before.
+        backend.chatWorkDelay = .seconds(120)
+        let started = ContinuousClock.now
+        #expect(await workspace.topicWork("topic-1", wait: .milliseconds(50)) == nil)
+        #expect(ContinuousClock.now - started < .seconds(60))
+        #expect(backend.calls == ["work topic-1", "work topic-1", "work topic-1"])
+    }
+
     @Test func aTurnInAnUnknownChatRefetchesTheList() async {
         let backend = FakeBackend()
         let store = TopicChatsStore(backend: backend)
@@ -117,6 +186,80 @@ import Testing
         backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "topic-9", running: true))
         await settle()
         #expect(store.chats.map(\.id) == ["topic-9"])
+    }
+
+    /// As on the web: latest activity first, and a chat the chat list has no
+    /// time for yet counts as newest.
+    @Test func theDrawerListsTopicChatsLatestActivityFirst() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c", "d"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T08:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T09:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["d", "a", "c", "b"])
+    }
+
+    @Test func aTurnStartingInAChatMovesItUp() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T08:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b"])
+        // The guardian's message moved the chat's time on the server.
+        backend.sessionRows[1].activityAt = "2026-11-15T11:00:00.000Z"
+        backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "b", running: true))
+        await settle()
+        #expect(store.chats.map(\.id) == ["b", "a"])
+    }
+
+    /// A reconnect replays each chat's running state: nothing happened, so
+    /// nothing moves.
+    @Test func aReplayedStatusLeavesTheOrder() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T09:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T08:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
+        backend.bus.emit(LiveTopic.chatStatus, .reconnected)
+        for id in ["c", "b"] {
+            backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: id, running: true))
+        }
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
+    }
+
+    /// A page at a time; the open chat stays in view even past the page.
+    @Test func theDrawerShowsAPageAndTheOpenChat() {
+        let page = TopicChatsStore.pageSize
+        #expect(page == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: nil) == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 2) == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 44) == 45)
+        #expect(TopicChatsStore.shownCount(12, limit: page, openIndex: nil) == 12)
+    }
+
+    @Test func theOrderWithoutTimesIsNewestStartedFirst() {
+        let chats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        #expect(TopicChatsStore.ordered(chats, lastActive: [:]).map(\.id) == ["c", "b", "a"])
+        let early = Date(timeIntervalSince1970: 0)
+        #expect(TopicChatsStore.ordered(chats, lastActive: ["c": early]).map(\.id) == ["b", "a", "c"])
     }
 }
 
@@ -133,6 +276,52 @@ import Testing
         let json = #"{"id":"t","title":"T","state":"doing","createdAt":1,"updatedAt":1,"conciergeChat":{"id":"c-2","name":"Trip","main":false}}"#
         let task = try JSONDecoder().decode(ConciergeTask.self, from: Data(json.utf8))
         #expect(task.conciergeChat?.id == "c-2")
+    }
+}
+
+/// The delete alert of a topic chat says what the web's dialog says.
+@Suite struct TopicDeletePromptTests {
+    @Test func listsFiveThenCountsTheRestAndAsks() {
+        let work = ConciergeChatWork(
+            follows: [.init(source: "github", label: "GitHub", target: "rome-os/rome"), .init(source: "gmail", label: "Gmail", target: "inbox")],
+            openTasks: (1...5).map { .init(id: "t\($0)", title: "Task \($0)") }
+        )
+        let prompt = TopicDeletePrompt(id: "topic-1", name: "Trip", work: work)
+        #expect(prompt.title == "Delete “Trip”?")
+        #expect(prompt.asksAboutWork)
+        #expect(prompt.message == """
+        This chat is deleted permanently. It has:
+        • Following GitHub · rome-os/rome
+        • Following Gmail · inbox
+        • Open task: Task 1
+        • Open task: Task 2
+        • Open task: Task 3
+        and 2 more
+
+        What happens to them?
+        """)
+    }
+
+    @Test func anEmptyChatHasNothingToChoose() {
+        let prompt = TopicDeletePrompt(id: "topic-1", name: "Trip", work: ConciergeChatWork())
+        #expect(!prompt.asksAboutWork)
+        #expect(prompt.message == "This chat is deleted permanently.")
+    }
+
+    /// Unread (an older instance, a slow network), they move, and the alert says so.
+    @Test func anUnreadListSaysTheyMove() {
+        let prompt = TopicDeletePrompt(id: "topic-1", name: "Trip", work: nil)
+        #expect(!prompt.asksAboutWork)
+        #expect(prompt.message == "This chat is deleted permanently. Its follows and open tasks move to Chat.")
+    }
+
+    @Test func parsesTheServersList() throws {
+        let json = #"{"follows":[{"source":"github","label":"GitHub","target":"rome-os/rome"}],"openTasks":[{"id":"t1","title":"Book the hotel"}]}"#
+        let work = try JSONDecoder().decode(ConciergeChatWork.self, from: Data(json.utf8))
+        #expect(work.follows.map(\.label) == ["GitHub"])
+        #expect(work.openTasks.map(\.title) == ["Book the hotel"])
+        let partial = try JSONDecoder().decode(ConciergeChatWork.self, from: Data(#"{"follows":[]}"#.utf8))
+        #expect(partial.isEmpty)
     }
 }
 

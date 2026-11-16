@@ -2,7 +2,9 @@ import {
   Archive,
   ArchiveRestore,
   Check,
+  ChevronUp,
   Ellipsis,
+  ListChecks,
   Folder,
   Cloud,
   FolderOpen,
@@ -23,7 +25,6 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { RomeLogo } from "@/components/logo";
@@ -65,17 +66,15 @@ import {
   CONCIERGE_CHATS_QUERY_KEY,
   useConciergeChatId,
   useConciergeChats,
-  useConciergeName,
   useRefreshTopicChats,
 } from "@/hooks/use-concierge";
 import { useDesktop } from "@/hooks/use-desktop";
 import { chatSessionTopic, chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
-import { useMediaQuery } from "@/hooks/use-media-query";
 import { ConciergeChats } from "./ConciergeEntry";
-import { isElectronShell } from "@/lib/electron-shell";
-import { STANDALONE_DISPLAY_QUERY } from "@/lib/media-query";
 import { emitSessionsChanged, useArchiveSession, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
+import { useRenameInPlace } from "@/hooks/use-rename-in-place";
+import { readStored, readStoredJson, writeStored, writeStoredJson } from "@/lib/stored-preference";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -190,29 +189,18 @@ const STATUS_FILTER_STORAGE_KEY = "rome-recent-chats-status-filter";
 const COLLAPSED_GROUPS_STORAGE_KEY = "rome-recent-chats-collapsed-groups";
 
 function readScope(): SessionScope {
-  if (typeof window === "undefined") return "mine";
-  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
+  return readStored(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
 }
 
 function readStatusFilter(): StatusFilter {
-  if (typeof window === "undefined") return "active";
-  const raw = window.localStorage.getItem(STATUS_FILTER_STORAGE_KEY);
+  const raw = readStored(STATUS_FILTER_STORAGE_KEY);
   return raw === "all" || raw === "archived" ? raw : "active";
 }
 
 function readStringSetFromStorage(storageKey: string): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) {
-      return new Set(parsed.filter((x): x is string => typeof x === "string"));
-    }
-  } catch {
-    // ignore
-  }
-  return new Set();
+  const parsed = readStoredJson(storageKey);
+  if (!Array.isArray(parsed)) return new Set();
+  return new Set(parsed.filter((x): x is string => typeof x === "string"));
 }
 
 function projectNameFromPath(projectPath: string): string {
@@ -238,15 +226,6 @@ function projectPathForSession(session: ChatSession): string {
   return isDefaultProjectChat(session) ? DEFAULT_PROJECT_NAME : session.projectPath || "";
 }
 
-/** A project row's plus: hidden until the row is hovered, shown at once on touch. */
-const PROJECT_PLUS_CLASS =
-  "touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100";
-
-/** The new chat page with the project chosen, as an address a new tab can open. */
-function newChatInProjectHref(projectPath: string): string {
-  return `/chat?project=${encodeURIComponent(projectPath)}`;
-}
-
 const PROJECT_DEFAULT_VISIBLE = 4;
 const PROJECT_LOAD_MORE_COUNT = 10;
 // Keep in sync with the server-side cap in webchat.ts (PATCH /chat/sessions/:id/name).
@@ -256,18 +235,7 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({
-  id,
-  name,
-  nested,
-  marker,
-}: {
-  id: string;
-  name: string;
-  nested: boolean;
-  /** Names who started the chat, shown as a small mark after the name. */
-  marker?: string;
-}) {
+function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -300,13 +268,6 @@ function ChatRowLink({
           <span ref={nameRef} className="truncate">
             {name}
           </span>
-          {marker ? (
-            <ChatBubbleIcon
-              role="img"
-              aria-label={marker}
-              className="ml-2 h-3 w-3 shrink-0 text-subtle-foreground"
-            />
-          ) : null}
         </Link>
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
@@ -316,11 +277,15 @@ function ChatRowLink({
   );
 }
 
-/** How many task chats show before the More row. */
-const TASK_CHATS_VISIBLE = 5;
+/** The folded Tasks card: its heading row, the card's padding and border. */
+const TASKS_FOLDED_HEIGHT = "h-[calc(max(2rem,var(--control-min-h))_+_0.5rem_+_2px)]";
 
-const MORE_ROW_CLASS =
-  "rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
+// Rows fade out over the bottom padding, so a list that runs on under its
+// edge shows it, and the last row clears the fade once scrolled to the end.
+const FADE_BOTTOM_7 =
+  "[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.75rem),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.75rem),transparent)]";
+const FADE_BOTTOM_6 =
+  "[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)]";
 
 /** A dot on a segment's corner that says the other mode needs a look. */
 function ModeDot({ label, className }: { label: string; className: string }) {
@@ -358,7 +323,7 @@ function ChatModeSwitch({
       aria-label={t("recentChats.modeSwitch")}
       value={mode}
       onValueChange={onChange}
-      className="ml-1 shrink-0"
+      className="shrink-0"
       options={[
         {
           value: "chat",
@@ -436,28 +401,17 @@ export function RecentChats({
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
-  // A project's plus opens its chat in a new tab, so the chat on screen stays
-  // open, wherever there are tabs to open: a wide window of a normal browser.
-  // A phone, the installed home-screen app, the Mac app and the mobile app's
-  // WebView have none, and a new tab there would take the user out of Rome.
-  // The touch signal is the one AppGrid uses for the WebView, which sets no
-  // marker of its own.
+  // The New chat row shows its keyboard shortcut only where there is a keyboard.
   const wideWindow = useDesktop();
-  const installedApp = useMediaQuery(STANDALONE_DISPLAY_QUERY);
   const coarsePointer = useCoarsePointer();
-  const plusOpensNewTab = wideWindow && !installedApp && !coarsePointer && !isElectronShell();
   const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
     readStringSetFromStorage(COLLAPSED_GROUPS_STORAGE_KEY),
   );
   const [visibleGroupCounts, setVisibleGroupCounts] = useState<Record<string, number>>({});
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingValue, setEditingValue] = useState("");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const renamingRef = useRef(false);
 
   const {
     sessions: cachedSessions,
@@ -486,7 +440,6 @@ export function RecentChats({
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
-  const conciergeName = useConciergeName();
   const conciergeChats = useConciergeChats();
   // Without a Concierge there is nothing to switch to: the list is the
   // ordinary chats alone.
@@ -623,21 +576,15 @@ export function RecentChats({
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STATUS_FILTER_STORAGE_KEY, statusFilter);
+    writeStored(STATUS_FILTER_STORAGE_KEY, statusFilter);
   }, [statusFilter]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      COLLAPSED_GROUPS_STORAGE_KEY,
-      JSON.stringify(Array.from(collapsedGroups)),
-    );
+    writeStoredJson(COLLAPSED_GROUPS_STORAGE_KEY, Array.from(collapsedGroups));
   }, [collapsedGroups]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(SCOPE_STORAGE_KEY, scope);
+    writeStored(SCOPE_STORAGE_KEY, scope);
   }, [scope]);
 
   // Projects mark their location only once some chat lives on a device;
@@ -666,7 +613,27 @@ export function RecentChats({
       hasConcierge ? sortedSessions.filter((s) => chatKind(s, conciergeChatId) === "task") : [],
     [hasConcierge, sortedSessions, conciergeChatId],
   );
+  // The Tasks panel starts folded, and opens when the open chat is a task
+  // chat, so its row is in view. Folding it again holds until another one opens.
   const [tasksExpanded, setTasksExpanded] = useState(false);
+  // Whether the open card's rows have scrolled under its heading.
+  const [tasksScrolled, setTasksScrolled] = useState(false);
+  const tasksListRef = useRef<HTMLDivElement | null>(null);
+  const activeTaskId = taskSessions.some((s) => s.id === activeSessionId) ? activeSessionId : null;
+  const showTasks = mode === "concierge" && conciergeChatId !== null && taskSessions.length > 0;
+  useEffect(() => {
+    if (activeTaskId) setTasksExpanded(true);
+  }, [activeTaskId]);
+  // The card scrolls on its own, so an open task chat far down its list is
+  // brought into view once the card is open and on screen (the list can be in
+  // Chat mode when the task chat opens).
+  useEffect(() => {
+    if (!showTasks || !tasksExpanded || !activeTaskId) return;
+    const link = Array.from(tasksListRef.current?.querySelectorAll("a[href]") ?? []).find(
+      (a) => a.getAttribute("href") === `/chat/${activeTaskId}`,
+    );
+    link?.closest("[data-chat-row]")?.scrollIntoView?.({ block: "nearest" });
+  }, [tasksExpanded, activeTaskId, showTasks]);
 
   const projectGroups = useMemo<SessionGroup[]>(() => {
     const buckets = new Map<
@@ -801,58 +768,25 @@ export function RecentChats({
     [activeSessionId, conciergeChatId, navigate, sessions, updateSessions],
   );
 
-  const startRename = useCallback((session: ChatSession) => {
-    // Rename is the one row action that moves focus into the row, so the
-    // closing menu must not restore focus on top of it. The flag tells the
-    // menu below to skip that restore.
-    renamingRef.current = true;
-    // Defer entering edit mode until the row menu has fully closed, so its
-    // focus restoration doesn't blur (and prematurely commit) the new input.
-    setEditingValue(session.name);
-    setTimeout(() => setEditingId(session.id), 0);
-  }, []);
-
-  const cancelRename = useCallback(() => {
-    setEditingId(null);
-    setEditingValue("");
-  }, []);
-
-  const commitRename = useCallback(
-    async (id: string) => {
-      const name = editingValue.trim();
-      const current = sessions.find((s) => s.id === id);
-      // Empty/whitespace-only or unchanged names revert without a round-trip.
-      if (name.length === 0 || (current && current.name === name)) {
-        cancelRename();
-        return;
-      }
-      setEditingId(null);
-      setEditingValue("");
+  const rename = useRenameInPlace({
+    onCommit: (id, name) => {
       updateSessions((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
-      try {
-        await renameSession(id, name);
-      } catch {
-        // Server rejected/unchanged — the refetch below reconciles either way.
-      }
-      emitSessionsChanged();
+      void renameSession(id, name)
+        .catch(() => {
+          // Server rejected/unchanged — the refetch below reconciles either way.
+        })
+        .then(emitSessionsChanged);
     },
-    [editingValue, sessions, cancelRename, updateSessions],
-  );
+  });
 
-  // Focus and select the rename field as soon as it mounts.
-  useEffect(() => {
-    if (editingId && renameInputRef.current) {
-      renameInputRef.current.focus();
-      renameInputRef.current.select();
-    }
-  }, [editingId]);
-
-  const renderChatRow = (session: ChatSession, nested = false) => {
+  // A row on the Tasks card, which is already `surface`, marks the open chat
+  // with the hover tone instead of the raised one.
+  const renderChatRow = (session: ChatSession, nested = false, onCard = false) => {
     const isActive = activeSessionId === session.id;
     const status = chatRowStatus(session, isActive);
     const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
-    const isEditing = editingId === session.id;
-    const beginRename = () => startRename(session);
+    const isEditing = rename.editingId === session.id;
+    const beginRename = () => rename.start(session.id, session.name);
     const toggleArchive = session.archivedAt
       ? () => void handleUnarchive(session.id)
       : () => void setArchived(session.id, true);
@@ -868,43 +802,26 @@ export function RecentChats({
           session.archivedAt ? "text-subtle-foreground" : "text-foreground"
         } ${
           isActive
-            ? "bg-surface shadow-1 dark:bg-surface-hover"
-            : "hover:bg-surface-hover dark:hover:bg-surface"
+            ? onCard
+              ? "bg-surface-hover"
+              : "bg-surface shadow-1 dark:bg-surface-hover"
+            : onCard
+              ? "hover:bg-surface-hover"
+              : "hover:bg-surface-hover dark:hover:bg-surface"
         }`}
       >
         {isEditing ? (
           <input
-            ref={renameInputRef}
+            {...rename.inputProps}
             type="text"
-            value={editingValue}
             maxLength={SESSION_NAME_MAX_LENGTH}
             aria-label={t("recentChats.renameLabel")}
-            onChange={(event) => setEditingValue(event.target.value)}
-            onBlur={() => void commitRename(session.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void commitRename(session.id);
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                cancelRename();
-              }
-            }}
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
               nested ? "ml-4" : "ml-2"
             }`}
           />
         ) : (
-          <ChatRowLink
-            id={session.id}
-            name={session.name}
-            nested={nested}
-            marker={
-              chatKind(session) === "task"
-                ? t("recentChats.startedByConcierge", { name: conciergeName })
-                : undefined
-            }
-          />
+          <ChatRowLink id={session.id} name={session.name} nested={nested} />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -937,17 +854,7 @@ export function RecentChats({
             <DropdownMenuContent
               side="bottom"
               align="end"
-              onCloseAutoFocus={(event) => {
-                // Radix restores focus to the trigger as the menu closes, but
-                // the trigger is display:none while the row is renaming, so the
-                // restore lands on <body> and blurs the rename input — which
-                // commits the rename before a key is typed. The rename path
-                // owns focus, so skip the restore there and leave it for every
-                // other action, where returning to the trigger is right.
-                if (!renamingRef.current) return;
-                renamingRef.current = false;
-                event.preventDefault();
-              }}
+              {...rename.menuContentProps}
               onKeyDown={(event) => {
                 // Radix composes this ahead of its own typeahead and drops that
                 // handler once the event is defaulted. Without the preventDefault
@@ -1093,31 +1000,19 @@ export function RecentChats({
             </button>
           ) : null}
           {projectPath ? (
-            // A real link either way, so "open in new tab" works from the
-            // keyboard and the context menu. The project rides the URL because
-            // a new tab does not inherit router state.
-            plusOpensNewTab ? (
-              <a
-                href={newChatInProjectHref(projectPath)}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={t("recentChats.newChatInProject")}
-                title={t("recentChats.newChatInProject")}
-                className={PROJECT_PLUS_CLASS}
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            ) : (
-              <Link
-                to={newChatInProjectHref(projectPath)}
-                state={{ projectPath }}
-                aria-label={t("recentChats.newChatInProject")}
-                title={t("recentChats.newChatInProject")}
-                className={PROJECT_PLUS_CLASS}
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-              </Link>
-            )
+            <button
+              type="button"
+              onClick={() =>
+                navigate("/chat", {
+                  state: { projectPath },
+                })
+              }
+              aria-label={t("recentChats.newChatInProject")}
+              title={t("recentChats.newChatInProject")}
+              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+            </button>
           ) : null}
         </div>
         {collapsed ? null : (
@@ -1138,35 +1033,72 @@ export function RecentChats({
     );
   };
 
+  // A card pinned under the scrolling list. Folded it is just its heading,
+  // with the running count; open it grows to half the list's height and
+  // scrolls on its own. Its rows stay mounted, inert while folded, so the
+  // height can animate both ways.
   const renderTasks = () => {
-    if (taskSessions.length === 0) return null;
-    // The open task chat stays in view, even when it is past the first few.
-    const activeIndex = taskSessions.findIndex((s) => s.id === activeSessionId);
-    const showAll = tasksExpanded || activeIndex >= TASK_CHATS_VISIBLE;
-    const visible = showAll ? taskSessions : taskSessions.slice(0, TASK_CHATS_VISIBLE);
-    const hidden = taskSessions.length - visible.length;
+    if (!showTasks) return null;
     const running = taskSessions.filter((s) => s.running).length;
     return (
-      <section aria-labelledby="recent-chats-tasks-heading" data-tasks-section>
-        <hr className="mx-2 my-4 border-0 border-t border-border" aria-hidden />
+      <section
+        aria-labelledby="recent-chats-tasks-heading"
+        data-tasks-section
+        data-expanded={tasksExpanded}
+        className={`mx-2 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 border border-border bg-surface p-1 shadow-1 transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:border-border-subtle dark:shadow-none ${
+          tasksExpanded ? "h-1/2" : TASKS_FOLDED_HEIGHT
+        }`}
+      >
         <h2
           id="recent-chats-tasks-heading"
-          className="flex h-8 min-h-[var(--control-min-h)] items-center justify-between px-2 text-aux text-subtle-foreground"
+          className={`relative shrink-0 after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-border after:transition-opacity ${
+            tasksExpanded && tasksScrolled ? "after:opacity-100" : "after:opacity-0"
+          }`}
         >
-          <span>{t("recentChats.sectionTasks")}</span>
-          {running > 0 ? <span>{t("recentChats.tasksRunning", { count: running })}</span> : null}
-        </h2>
-        {visible.map((session) => renderChatRow(session))}
-        {hidden > 0 ? (
           <button
             type="button"
-            onClick={() => setTasksExpanded(true)}
-            data-tasks-more
-            className={`ml-2 ${MORE_ROW_CLASS}`}
+            aria-expanded={tasksExpanded}
+            aria-controls="recent-chats-tasks-list"
+            aria-label={
+              running > 0
+                ? t("recentChats.tasksRunning", { count: running })
+                : t("recentChats.sectionTasks")
+            }
+            onClick={() => setTasksExpanded((open) => !open)}
+            className="flex h-8 w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
           >
-            {t("recentChats.moreTasks", { count: hidden })}
+            <ListChecks className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
+            <span className="flex-1 truncate">{t("recentChats.sectionTasks")}</span>
+            {running > 0 ? (
+              <span
+                data-tasks-running
+                className="flex shrink-0 items-center gap-1 text-aux tabular-nums text-muted-foreground"
+              >
+                <ChatStatusGlyph status="running" />
+                {running}
+              </span>
+            ) : null}
+            <ChevronUp
+              className={`h-3.5 w-3.5 shrink-0 text-subtle-foreground transition-transform duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none ${
+                tasksExpanded ? "rotate-180" : ""
+              }`}
+              aria-hidden
+            />
           </button>
-        ) : null}
+        </h2>
+        <div
+          id="recent-chats-tasks-list"
+          ref={tasksListRef}
+          inert={!tasksExpanded}
+          aria-hidden={tasksExpanded ? undefined : true}
+          onScroll={(event) => setTasksScrolled(event.currentTarget.scrollTop > 0)}
+          onClickCapture={markOpening}
+          className={`min-h-0 flex-1 scroll-pb-6 overflow-y-auto overscroll-contain pb-6 scrollbar-idle-hidden ${FADE_BOTTOM_6} transition-opacity duration-180 motion-reduce:transition-none ${
+            tasksExpanded ? "opacity-100 delay-60" : "opacity-0"
+          }`}
+        >
+          {taskSessions.map((session) => renderChatRow(session, true, true))}
+        </div>
       </section>
     );
   };
@@ -1185,6 +1117,8 @@ export function RecentChats({
             <span className="truncate text-section text-foreground">
               {t(mode === "concierge" ? "recentChats.modeConcierge" : "recentChats.title")}
             </span>
+          </div>
+          <div className="flex items-center gap-1">
             {hasConcierge ? (
               <ChatModeSwitch
                 mode={mode}
@@ -1193,8 +1127,6 @@ export function RecentChats({
                 chatReplying={chatReplying}
               />
             ) : null}
-          </div>
-          <div className="flex items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton
@@ -1251,64 +1183,67 @@ export function RecentChats({
             {headerControls}
           </div>
         </div>
-        <div
-          className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 scrollbar-idle-hidden"
-          onClickCapture={markOpening}
-        >
-          <NewChatRow
-            kind={mode === "concierge" ? "topic" : "chat"}
-            label={t(mode === "concierge" ? "recentChats.newTopic" : "recentChats.newChat")}
-            shortcut={wideWindow && !coarsePointer ? newChatShortcutForPlatform() : null}
-          />
-          {mode === "concierge" && conciergeChatId ? (
-            <>
+        {/* The list and the Tasks card share what is left under the header. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            className={`min-h-0 flex-1 overflow-y-auto px-3 scrollbar-idle-hidden ${
+              showTasks ? `pb-7 ${FADE_BOTTOM_7}` : "pb-3"
+            }`}
+            onClickCapture={markOpening}
+          >
+            <NewChatRow
+              kind={mode === "concierge" ? "topic" : "chat"}
+              label={t(mode === "concierge" ? "recentChats.newTopic" : "recentChats.newChat")}
+              shortcut={wideWindow && !coarsePointer ? newChatShortcutForPlatform() : null}
+            />
+            {mode === "concierge" && conciergeChatId ? (
               <ConciergeChats
                 mainChatId={conciergeChatId}
                 activeSessionId={activeSessionId}
                 statusFilter={statusFilter}
                 topicSessions={conciergeTopicSessions}
               />
-              {renderTasks()}
-            </>
-          ) : (
-            <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
-              <h2
-                id="recent-chats-projects-heading"
-                className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
-              >
-                {t("recentChats.sectionProjects")}
-              </h2>
-              {phase === "loading" ? (
-                <div className="space-y-1 px-2 py-2" aria-hidden>
-                  <Skeleton className="h-8 w-full" />
-                  <Skeleton className="h-8 w-4/5" />
-                  <Skeleton className="h-8 w-3/5" />
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {projectGroups.map(renderProjectGroup)}
-                  {/* Only with nothing to show: a refetch that fails while the
+            ) : (
+              <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
+                <h2
+                  id="recent-chats-projects-heading"
+                  className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
+                >
+                  {t("recentChats.sectionProjects")}
+                </h2>
+                {phase === "loading" ? (
+                  <div className="space-y-1 px-2 py-2" aria-hidden>
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-4/5" />
+                    <Skeleton className="h-8 w-3/5" />
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {projectGroups.map(renderProjectGroup)}
+                    {/* Only with nothing to show: a refetch that fails while the
                     list already has rows keeps the rows rather than blanking them. */}
-                  {phase === "error" && sessions.length === 0 ? (
-                    <div className="px-3 py-8 text-center" role="alert">
-                      <p className="text-aux text-subtle-foreground">
-                        {t("recentChats.searchLoadError")}
-                      </p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="mt-3"
-                        onClick={() => void refetch()}
-                      >
-                        {t("recentChats.searchRetry")}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </section>
-          )}
+                    {phase === "error" && sessions.length === 0 ? (
+                      <div className="px-3 py-8 text-center" role="alert">
+                        <p className="text-aux text-subtle-foreground">
+                          {t("recentChats.searchLoadError")}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-3"
+                          onClick={() => void refetch()}
+                        >
+                          {t("recentChats.searchRetry")}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+          {renderTasks()}
         </div>
         <RomeConfirmDialog
           open={pendingDeleteId !== null}

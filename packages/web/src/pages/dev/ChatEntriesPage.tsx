@@ -16,6 +16,7 @@
  * animates, or reads the clock needs a frozen fixture before it belongs here.
  */
 
+import { LOCATION_CARD_ID, locationCardUi } from "@rome/api-types/location-card";
 import { type Question, questionCardUi } from "@rome/api-types/question-card";
 import type { ChatEntry } from "@/lib/chat-types";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -41,6 +42,20 @@ const askQuestion = (toolUseId: string, questions: Question[]): ChatEntry => ({
     builtin: true,
     props: { questions },
     ui: questionCardUi(questions),
+  },
+});
+
+/** A pending `share_location` card as core stores it. */
+const shareLocation = (toolUseId: string): ChatEntry => ({
+  type: "pending_interaction",
+  toolUseId,
+  appId: "core",
+  render: {
+    kind: "inline",
+    componentId: LOCATION_CARD_ID,
+    builtin: true,
+    props: { reason: "To find coffee shops near you" },
+    ui: locationCardUi("To find coffee shops near you"),
   },
 });
 
@@ -212,6 +227,32 @@ export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
       answers: [{ questionId: "tone", value: "Warm" }],
       card: [{ values: ["Warm"], text: "" }],
     },
+  },
+  {
+    id: "location-card-open",
+    title: "Share location — open",
+    note: "The agent waits on the card: Share reads the browser's position on the press; Not now declines.",
+    block: shareLocation("dev-location-open"),
+  },
+  {
+    id: "location-card-shared",
+    title: "Share location — shared",
+    note: "Answered with a position: the buttons are gone and the card says how precise it was.",
+    block: shareLocation("dev-location-shared"),
+    result: {
+      status: "shared",
+      latitude: 31.23,
+      longitude: 121.47,
+      accuracyMeters: 18,
+      fixedAt: "2026-11-14T08:00:00.000Z",
+    },
+  },
+  {
+    id: "location-card-declined",
+    title: "Share location — not shared",
+    note: "Declined with Not now, or skipped by a typed message.",
+    block: shareLocation("dev-location-declined"),
+    result: { status: "declined", dismissed: true },
   },
 ];
 

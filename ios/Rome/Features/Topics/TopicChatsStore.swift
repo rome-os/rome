@@ -1,11 +1,12 @@
 import Foundation
 import Observation
 
-/// The guardian's Concierge topic chats, for the drawer. It refetches when the
-/// drawer opens, after a chat is started here, when events may have been
-/// missed, and when a chat it does not hold starts a turn. Names follow each
-/// chat's `session_name` events, so an untitled chat shows its name once the
-/// server picks one.
+/// The guardian's Concierge topic chats, for the drawer, latest activity
+/// first. It refetches when the drawer opens, after a chat is started here,
+/// when events may have been missed, and when a turn starts or ends in a
+/// topic chat. Names follow each chat's
+/// `session_name` events, so an untitled chat shows its name once the server
+/// picks one.
 @MainActor
 @Observable
 final class TopicChatsStore {
@@ -23,11 +24,31 @@ final class TopicChatsStore {
     private var activityAt: [String: Double] = [:]
     private var activityHeard: [String: Date] = [:]
     private var chatTokens: [String: UUID] = [:]
+    /// Each chat's last activity, from the chat list (`GET /chat/sessions`).
+    /// Only the server's time moves a chat, so a replayed status never does.
+    /// A chat missing here counts as newest.
+    private var lastActive: [String: Date] = [:]
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
+    /// Whether the drawer folds the list away, kept on this phone per instance.
+    private(set) var folded: Bool
+    @ObservationIgnored private let fold: TopicChatsFold?
 
-    init(backend: RomeBackend) {
+    /// Without a `fold`, the folded state lasts only as long as the store.
+    init(backend: RomeBackend, fold: TopicChatsFold? = nil) {
         self.backend = backend
+        self.fold = fold
+        folded = fold?.load() ?? false
+    }
+
+    func setFolded(_ folded: Bool) {
+        self.folded = folded
+        fold?.save(folded)
+    }
+
+    /// Replies waiting unread across every topic chat, for the folded header.
+    var unreadCount: Int {
+        chats.reduce(0) { $0 + max($1.unread ?? 0, 0) }
     }
 
     func start() {
@@ -62,14 +83,21 @@ final class TopicChatsStore {
             repeat {
                 refreshAgain = false
                 let asked = Date.now
+                async let listed = try? backend.sessions()
                 // Off or unreachable: keep what is held.
-                if let all = try? await backend.conciergeChats() {
+                let all = try? await backend.conciergeChats()
+                if let sessions = await listed {
+                    for session in sessions {
+                        if let at = RomeDate.parse(session.activityAt) { lastActive[session.id] = at }
+                    }
+                }
+                if let all {
                     mainChatId = all.first { $0.main }?.id
                     // A chat whose event came after the list was asked for keeps the event.
                     for chat in all where chat.activity != nil && (activityHeard[chat.id] ?? .distantPast) < asked {
                         setActivity(chat.activity, for: chat.id)
                     }
-                    apply(Self.topics(in: all))
+                    apply(Self.ordered(Self.topics(in: all), lastActive: lastActive))
                 }
             } while refreshAgain
             refreshWork = nil
@@ -106,7 +134,7 @@ final class TopicChatsStore {
     /// A chat this app just started: listed now, ahead of the next refetch.
     func add(_ chat: ConciergeChat) {
         guard !chat.main, !chats.contains(where: { $0.id == chat.id }) else { return }
-        apply(chats + [chat])
+        apply([chat] + chats)
         refresh()
     }
 
@@ -150,6 +178,38 @@ final class TopicChatsStore {
         String(localized: "Message in \(name)")
     }
 
+    /// The topic chats latest activity first, as the web lists them. The
+    /// Concierge lists them oldest first; walking it backwards leaves the
+    /// newest first among those with no time yet, which count as newest.
+    nonisolated static func ordered(_ oldestFirst: [ConciergeChat], lastActive: [String: Date]) -> [ConciergeChat] {
+        resorted(oldestFirst.reversed(), lastActive: lastActive)
+    }
+
+    /// A list already latest first, sorted again after a time changed; chats
+    /// with the same time keep their places.
+    nonisolated static func resorted(_ list: [ConciergeChat], lastActive: [String: Date]) -> [ConciergeChat] {
+        let times = list.map { lastActive[$0.id] ?? Date.distantFuture }
+        let order = list.indices.sorted { a, b in
+            times[a] != times[b] ? times[a] > times[b] : a < b
+        }
+        return order.map { list[$0] }
+    }
+
+    /// How many topic chats the drawer shows at first, and how many more each
+    /// scroll near the end adds, as on the web.
+    nonisolated static let pageSize = 30
+
+    /// How many of `count` chats show: the first `limit`, and as far as the
+    /// open chat when it is further down, so it stays in view.
+    nonisolated static func shownCount(_ count: Int, limit: Int, openIndex: Int?) -> Int {
+        min(count, max(limit, (openIndex ?? -1) + 1))
+    }
+
+    /// The rows a folded list keeps: only the open chat, so it stays reachable.
+    nonisolated static func foldedRows(_ chats: [ConciergeChat], openId: String?) -> [ConciergeChat] {
+        chats.filter { $0.id == openId }
+    }
+
     /// The topic chats of a `GET /concierge/chats` list, in its order.
     nonisolated static func topics(in all: [ConciergeChat]) -> [ConciergeChat] {
         all.filter { !$0.main && $0.id != conciergeChatID }
@@ -165,13 +225,15 @@ final class TopicChatsStore {
     /// read again.
     nonisolated static let liveNameLimit = 20
 
-    /// The chats whose renames the drawer hears live: the list is oldest first.
+    /// The chats whose renames the drawer hears live: the list is latest first.
     nonisolated static func liveIDs(_ list: [ConciergeChat]) -> Set<String> {
-        Set(list.suffix(liveNameLimit).map(\.id))
+        Set(list.prefix(liveNameLimit).map(\.id))
     }
 
+    /// Takes a list latest first.
     private func apply(_ list: [ConciergeChat]) {
-        chats = list
+        let list = Self.resorted(list, lastActive: lastActive)
+        if list != chats { chats = list }
         loaded = true
         let ids = Self.liveIDs(list)
         for (id, token) in chatTokens where !ids.contains(id) {
@@ -190,15 +252,39 @@ final class TopicChatsStore {
         case .sessionName(let id, let name):
             if let index = chats.firstIndex(where: { $0.id == id }) { chats[index].name = name }
         case .sessionRunning(let id, let running):
-            // A turn starting in a chat this list does not hold may be a new
-            // topic chat; a turn ending in one it holds changes the unread count.
+            // A turn starting may be in a new topic chat, or moves one up; a
+            // turn ending changes its unread count. The refetch brings the
+            // server's activity time, so a status replayed on a reconnect or
+            // a resync, with nothing new, leaves the order as it is.
             let held = chat(id) != nil
             let main = id == conciergeChatID || id == mainChatId
-            if (running && !held && !main) || (!running && held) { refresh() }
+            if (running && !main) || (!running && held) { refresh() }
         case .reconnected:
             refresh()
         default:
             break
         }
+    }
+}
+
+/// Whether the drawer's topic chat list is folded, per instance, like the
+/// recent apps. Only a fold is stored; unfolded is the default.
+struct TopicChatsFold {
+    static let prefix = "topicChatsFolded."
+
+    let host: String
+    var defaults: UserDefaults = .standard
+
+    private var key: String { Self.prefix + host }
+
+    func load() -> Bool { defaults.bool(forKey: key) }
+
+    func save(_ folded: Bool) {
+        if folded { defaults.set(true, forKey: key) } else { defaults.removeObject(forKey: key) }
+    }
+
+    /// Sign-out, or another account: every instance's choice.
+    static func removeAll(defaults: UserDefaults = .standard) {
+        defaults.removeKeys(prefix: prefix)
     }
 }

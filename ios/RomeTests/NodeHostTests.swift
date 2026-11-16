@@ -143,6 +143,8 @@ final class HostRig {
     let gateway = FakeGateway()
     let audit = FakeAudit()
     let health = FakeHealth()
+    /// Apple Health's Live access, which the host keeps in the app.
+    let healthFlag = NodeFlag()
     let delays = DelayLog()
     let defaults = UserDefaults(suiteName: "rome-node-\(UUID().uuidString)")!
     /// Marks this rig's requests: a host left from an earlier test can still
@@ -153,13 +155,13 @@ final class HostRig {
     private let pingInterval: TimeInterval
     private let pingTimeout: TimeInterval
 
-    /// `deviceOn`: the person has turned "Can Rome use this iPhone" on, as
-    /// most tests need; false is a fresh install.
+    /// `deviceOn`: the person has turned Device's Live access on, so the
+    /// phone connects, as most tests need; false is a fresh install.
     init(pingInterval: TimeInterval = 25, pingTimeout: TimeInterval = 10, deviceOn: Bool = true) {
         self.pingInterval = pingInterval
         self.pingTimeout = pingTimeout
         ConfigProtocol.reset()
-        if deviceOn { defaults.set(true, forKey: "nodeEnabled") }
+        if deviceOn { defaults.set(true, forKey: NodeHost.Defaults.live("device")) }
         host = makeHost()
         host.onCredentialRejected = { [unowned self] in rejections += 1 }
     }
@@ -171,7 +173,7 @@ final class HostRig {
         configuration.httpAdditionalHeaders = ["X-Test-Rig": id]
         let delays = delays
         return NodeHost(
-            credentials: credentials, audit: audit, health: HealthFixtures.actions(health), device: .iPhone, defaults: defaults,
+            credentials: credentials, audit: audit, registry: .testing(HealthFixtures.actions(health), health: healthFlag), device: .iPhone, defaults: defaults,
             http: URLSession(configuration: configuration), connect: gateway.factory,
             pause: { delay in
                 delays.add(delay)
@@ -400,50 +402,52 @@ final class HostRig {
         rig.host.setActive(false)
     }
 
-    @Test func aFreshInstallIsNotADeviceUntilTheSwitchIsOn() async {
+    @Test func aFreshInstallIsNotADeviceUntilALiveAccessIsOn() async {
         let rig = HostRig(deviceOn: false)
-        #expect(!rig.host.isEnabled, "off by default")
-        #expect(rig.defaults.object(forKey: "nodeEnabled") == nil, "nothing is stored until it is chosen")
+        #expect(!rig.host.anyLive, "off by default")
+        #expect(rig.defaults.object(forKey: NodeHost.Defaults.live("device")) == nil, "nothing is stored until it is chosen")
         rig.gateway.enqueue(FakeSocket())
         rig.host.setActive(true)
         try? await Task.sleep(for: .milliseconds(50))
         #expect(rig.host.status == .off)
         #expect(rig.configRequests.isEmpty && rig.gateway.attempts.isEmpty, "nothing connects")
-        rig.host.setEnabled(true)
+        rig.host.setLive("device", on: true)
         #expect(await eventually { rig.host.status == .online })
-        #expect(rig.makeHost().isEnabled, "kept across launches")
+        #expect(rig.makeHost().anyLive, "kept across launches")
+    }
+
+    @Test func anyLiveAccessConnectsAndTheLastOneOffDisconnects() async {
+        let rig = HostRig(deviceOn: false)
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        rig.host.setLive("apple_health", on: true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.healthFlag.isOn, "the capability reads its own switch")
+        rig.host.setLive("device", on: true)
+        rig.host.setLive("apple_health", on: false)
+        #expect(rig.host.status == .online, "Device still keeps it connected")
+        rig.host.setLive("device", on: false)
+        #expect(rig.host.status == .off)
+        rig.host.setActive(false)
     }
 
     @Test func theSwitchDisconnectsAndIsKept() async {
         let rig = HostRig()
-        #expect(rig.host.isEnabled)
+        #expect(rig.host.anyLive)
         let socket = await rig.online()
-        rig.host.setEnabled(false)
+        rig.host.setLive("device", on: false)
         #expect(rig.host.status == .off)
         #expect(socket.closed)
-        #expect(rig.makeHost().isEnabled == false, "kept across launches")
+        #expect(rig.makeHost().anyLive == false, "kept across launches")
 
         rig.host.setActive(true)
         try? await Task.sleep(for: .milliseconds(50))
         #expect(rig.gateway.attempts.count == 1, "off stays off, in front or not")
 
         rig.gateway.enqueue(FakeSocket())
-        rig.host.setEnabled(true)
+        rig.host.setLive("device", on: true)
         #expect(await eventually { rig.host.status == .online })
-        #expect(rig.makeHost().isEnabled)
-    }
-
-    @Test func theAppleHealthSwitchIsOffByDefaultAndKept() async {
-        let rig = HostRig()
-        #expect(!rig.host.isHealthEnabled, "Health data goes to an AI model: the guardian turns it on")
-        #expect(rig.host.isEnabled, "turning the device on leaves Health off")
-        #expect(rig.defaults.object(forKey: "nodeHealthEnabled") == nil, "nothing is stored until it is chosen")
-        rig.host.setHealthEnabled(true)
-        #expect(rig.host.isHealthEnabled)
-        #expect(rig.makeHost().isHealthEnabled, "kept across launches")
-        rig.host.setHealthEnabled(false)
-        #expect(!rig.makeHost().isHealthEnabled)
-        #expect(rig.host.isEnabled, "independent of the device switch")
+        #expect(rig.makeHost().anyLive)
     }
 
     @Test func aFreshInstallRefusesHealthRequestsUntilTheSwitchIsOn() async throws {
@@ -452,40 +456,22 @@ final class HostRig {
         socket.push(#"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
         #expect(await eventually { socket.sent.count == 1 })
         let error = parseJSON(socket.sent[0])["payload"]?["error"]
-        #expect(error?["code"]?.string == "health_off")
-        #expect(error?["message"]?.string?.contains("Settings → Apple Health in the Rome app") == true)
+        #expect(error?["code"]?.string == "live_off")
+        #expect(error?["message"]?.string?.contains("Settings → Connections → Apple Health") == true)
         #expect(rig.health.reads == 0 && rig.health.accessRequests == 0)
-    }
-
-    @Test func turningHealthOnAsksOnlyWhileIOSHasNeverBeenAsked() async {
-        let rig = HostRig()
-        rig.health.neverAsked = true
-        await rig.host.setHealthEnabled(true)?.value
-        #expect(rig.health.accessRequests == 1, "the system sheet shows at once")
-        #expect(!rig.health.neverAsked)
-        rig.host.setHealthEnabled(false)
-        await rig.host.setHealthEnabled(true)?.value
-        #expect(rig.health.accessRequests == 1, "once asked, iOS shows nothing more: neither does the app")
-    }
-
-    @Test func turningHealthOffNeverAsks() async {
-        let rig = HostRig()
-        rig.health.neverAsked = true
-        #expect(rig.host.setHealthEnabled(false) == nil)
-        #expect(rig.health.accessRequests == 0)
     }
 
     @Test func withTheSwitchOffARequestOnTheSocketGetsHealthOff() async throws {
         let rig = HostRig()
         let socket = await rig.online()
-        rig.host.setHealthEnabled(true)
-        rig.host.setHealthEnabled(false)
+        rig.healthFlag.set(true)
+        rig.healthFlag.set(false)
         socket.push(#"{"id":"r9","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
         #expect(await eventually { socket.sent.count == 1 })
-        #expect(parseJSON(socket.sent[0])["payload"]?["error"]?["code"]?.string == "health_off")
+        #expect(parseJSON(socket.sent[0])["payload"]?["error"]?["code"]?.string == "live_off")
         #expect(rig.health.reads == 0)
         #expect(rig.audit.begun.count == 1, "still audited")
-        rig.host.setHealthEnabled(true)
+        rig.healthFlag.set(true)
         socket.push(#"{"id":"r10","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
         #expect(await eventually { socket.sent.count == 2 })
         #expect(parseJSON(socket.sent[1])["payload"]?["ok"]?.bool == true)
@@ -605,7 +591,7 @@ final class HostRig {
         let rig = HostRig()
         let gate = ReadGate()
         rig.health.gate = gate
-        rig.host.setHealthEnabled(true)
+        rig.healthFlag.set(true)
         let socket = await rig.online()
         func stats(_ id: String) -> String {
             #"{"id":"\#(id)","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#
@@ -634,29 +620,17 @@ final class HostRig {
 
     // MARK: Another account
 
-    @Test func forgettingTheAccountTurnsBothSwitchesOffAndEmptiesTheLog() async {
+    @Test func forgettingTheAccountTurnsEverySwitchOffAndEmptiesTheLog() async {
         let rig = HostRig()
-        rig.host.setHealthEnabled(true)
+        rig.host.setLive("apple_health", on: true)
         await rig.host.forgetAccount().value
-        #expect(!rig.host.isEnabled)
-        #expect(!rig.host.isHealthEnabled)
+        #expect(!rig.host.anyLive)
+        #expect(rig.host.liveSwitches == ["device": false, "apple_health": false])
+        #expect(!rig.healthFlag.isOn)
         #expect(rig.audit.removals == 1)
         // Nothing kept for the next launch either.
         let relaunched = rig.makeHost()
-        #expect(!relaunched.isEnabled)
-        #expect(!relaunched.isHealthEnabled)
-    }
-
-    @Test func theNextAccountsHealthRequestsAreRefusedUntilItTurnsHealthOn() async throws {
-        let rig = HostRig()
-        rig.host.setHealthEnabled(true)
-        rig.host.forgetAccount()
-        rig.host.setEnabled(true)
-        let socket = await rig.online()
-        socket.push(#"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
-        #expect(await eventually { socket.sent.count == 1 })
-        #expect(parseJSON(socket.sent[0])["payload"]?["error"]?["code"]?.string == "health_off")
-        #expect(rig.health.reads == 0)
+        #expect(!relaunched.anyLive)
     }
 
     @Test func aDeviceTheLastAccountTurnedOnIsOffForTheNext() async {

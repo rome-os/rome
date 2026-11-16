@@ -49,6 +49,12 @@
     "remove": "移除",
     "cancel": "取消"
   },
+  "deviceConnect": {
+    "title": "连接 {{title}}",
+    "onDevice": "请在{{device}}上连接 {{title}}：打开那台设备上的 Rome App，在“设置 › 连接”里打开它。然后回到聊天，告诉 Agent 已连接。",
+    "connected": "{{title}} 已在{{device}}上连接。回到聊天，告诉 Agent 已连接。",
+    "yourDevice": "你的设备"
+  },
   "connections": {
     "loading": "正在加载连接",
     "errorTitle": "无法加载连接",
@@ -351,6 +357,38 @@
     "batchOverridden": "部分已保存的密钥被服务器设置覆盖，输入的值未被使用。",
     "summary": "应用可以读取的密钥，比如数据库密码或 API Key。",
     "manage": "管理"
+  },
+  "vault": {
+    "title": "密码箱",
+    "openLabel": "打开密码箱",
+    "keyCount_one": "{{count}} 个密钥",
+    "keyCount_other": "{{count}} 个密钥",
+    "loading": "正在加载密码箱",
+    "errorTitle": "密码箱加载失败",
+    "emptyTitle": "密码箱里还没有内容",
+    "emptyBody": "添加一个密钥，比如访问令牌，经你批准后智能体才能使用它。",
+    "add": "添加密钥",
+    "removeBody": "智能体将无法再使用该密钥。此操作无法撤销。",
+    "form": {
+      "titleAdd": "新密钥",
+      "labelField": "这个密钥是做什么用的？",
+      "labelPlaceholder": "例如：发布用的 GitHub 令牌",
+      "nameField": "名称",
+      "namePlaceholder": "例如：GITHUB_TOKEN",
+      "nameHint": "大写字母、数字和下划线。命令会按这个名称读取密钥。",
+      "consent": "智能体只有在你批准后才能使用它。",
+      "save": "保存",
+      "inputMethod": "添加密钥的方式",
+      "singleKey": "单个密钥",
+      "back": "返回密码箱"
+    },
+    "saved": "已保存 {{name}}。",
+    "batchSaved_one": "已保存 {{count}} 个密钥。",
+    "batchSaved_other": "已保存 {{count}} 个密钥。",
+    "summary": "经你批准后，智能体可以使用的密钥。",
+    "lastUsed": "使用于 {{time}}",
+    "neverUsed": "从未使用",
+    "grantedUntil": "授权至 {{time}}"
   },
   "trust": {
     "title": "关系层级规则",
@@ -908,7 +946,22 @@
     "restartTimeoutTitle": "升级耗时超出预期",
     "restartTimeoutBody": "{{name}} 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。",
-    "close": "关闭"
+    "close": "关闭",
+    "voiceInput": {
+      "title": "语音输入",
+      "loadFailed": "语音输入信息加载失败",
+      "placeViaRomeCloud": "口述的消息经由 Rome 发送到 {{provider}}（{{host}}）转为文字，该服务由 Rome Cloud 提供。Rome 不保存任何音频。",
+      "romeCloudUnreachable": "语音输入由 Rome Cloud 提供。目前无法连接 Rome Cloud，因此 Rome 无法显示转写服务的名称。",
+      "romeCloudNotConfigured": "语音输入由 Rome Cloud 提供，但 Rome Cloud 尚未开通转写服务。",
+      "romeCloudSignedOut": "语音输入由 Rome Cloud 提供，但 Rome Cloud 不接受此 Rome 的登录。请重新登录 Rome Cloud 后使用。",
+      "microphone": {
+        "title": "麦克风",
+        "description": "在此浏览器中，语音输入使用这个麦克风录音。",
+        "systemDefault": "系统默认",
+        "show": "显示麦克风",
+        "refused": "浏览器已阻止使用麦克风，因此无法列出。请在浏览器的网站设置中允许。"
+      }
+    }
   },
   "easterEgg": {
     "closeLabel": "关闭高级彩蛋",

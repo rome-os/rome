@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogHeader, DialogTitle, DialogBody } from "@/components/ui/dialog";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 type Status = "connecting" | "connected" | "error";
 
@@ -306,6 +307,7 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
                     submitCode(pasted);
                   }}
                   onKeyDown={(e) => {
+                    if (isImeCompositionEvent(e)) return;
                     if (e.key === "Enter") {
                       e.preventDefault();
                       submitCode(codeInput);

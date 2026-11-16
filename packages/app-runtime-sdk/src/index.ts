@@ -241,6 +241,16 @@ export type PreviewPayload =
       title: string;
       summary: string;
       fields?: { label: string; value: string }[];
+    }
+  | {
+      /** Time-limited use of one named secret. `title` and `summary` say the same
+       * in words, for a surface that draws only the generic card. */
+      kind: "secret_access";
+      name: string;
+      ttlMinutes: number;
+      reason: string;
+      title: string;
+      summary: string;
     };
 
 /** Execution was suspended pending guardian approval; the action body has NOT
@@ -2123,6 +2133,33 @@ export interface SaidInboundEvent extends InboundEvent {
     /** The message's own id in that chat. */
     readonly messageId: string;
   };
+  /**
+   * Who said the message: People's answer for the account it came from, the
+   * same answer Rome's own turns read. The name the message showed stays on
+   * {@link ChannelMessage.senderDisplayName}, apart from it. Absent from a
+   * host that predates it, and when People could not be asked.
+   */
+  readonly sender?: SaidSender;
+}
+
+/** How close a person is to the guardian. */
+export type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
+
+/** Who said a message, as People answers for the account it came from. */
+export interface SaidSender {
+  /** The person linked to the account, or null when it is linked to nobody:
+   *  a stranger, or an account the guardian dismissed. */
+  readonly person: {
+    readonly id: string;
+    readonly name: string;
+    readonly bondLevel: BondLevel;
+  } | null;
+  /** The account is an agent's, acting for `person` (a delegate link), so
+   *  the message comes from that person's agent, not from the person. */
+  readonly delegate: boolean;
+  /** The answer as Rome's own turns read it, such as "Ana Lopez, inner
+   *  circle", "agent acting for Ana Lopez, inner circle" or "not linked". */
+  readonly label: string;
 }
 
 /**
@@ -2909,7 +2946,7 @@ export interface ChannelMappingRecord {
 export interface PersonRecord {
   id: string;
   displayName: string;
-  bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
+  bondLevel: BondLevel;
   /** Superseded by {@link PersonRecord.accounts}, which names the same links
    *  by the {@link Account} value. Still filled. */
   channelMappings: ChannelMappingRecord[];

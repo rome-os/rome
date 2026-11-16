@@ -3,12 +3,13 @@ import Observation
 
 /// An instance below `minimumInstanceVersion` lacks an API the app calls:
 /// the update page covers the app until it is updated. A newer release for
-/// an instance at or above it is only offered, in a banner and the drawer.
+/// an instance at or above it is only offered, in the drawer, and updates in
+/// the background.
 /// These are the rules, kept free of state so tests can read them.
 enum UpdateGate {
     /// The oldest instance release with every API the app calls. Raise it
     /// only when the app starts calling an API a newer release brought.
-    static let minimumInstanceVersion = "1.1.194"
+    static let minimumInstanceVersion = "1.1.196"
 
     /// Whether the app works with an instance on `version`. An unknown or
     /// unreadable version is never held against it.
@@ -67,6 +68,20 @@ enum UpdateGate {
         /// The instance came back on a release that is neither the one it
         /// started from nor the target: the target will never answer.
         case movedOn
+    }
+
+    /// Rome Cloud's instance statuses once an upgrade is over: it claims
+    /// `upgrading` before it accepts the upgrade, and a failed or rolled-back
+    /// one lands on `unhealthy`, then `running` on the old release.
+    static let upgradeOver: Set<String> = ["running", "unhealthy"]
+
+    /// Whether the upgrade is over without the target: Rome Cloud reports
+    /// the instance as running or unhealthy, and it still answers on the
+    /// release it started from. Any other status, an unknown one included,
+    /// keeps the wait, which the timeout still ends.
+    static func endedWithoutTarget(cloudStatus: String?, version: String?, from: String?) -> Bool {
+        guard let cloudStatus, let version, let from else { return false }
+        return upgradeOver.contains(cloudStatus) && version == from
     }
 
     /// After an upgrade starts, the instance restarts on the target release.
@@ -162,6 +177,24 @@ struct PendingUpgrade: Codable, Equatable {
     var since: Date
     /// The release the instance ran when the upgrade started.
     var from: String?
+    /// Started from the drawer: it runs behind the app, with no update page.
+    /// Absent from a record kept before background upgrades: the page's.
+    var background = false
+
+    init(target: String, since: Date, from: String? = nil, background: Bool = false) {
+        self.target = target
+        self.since = since
+        self.from = from
+        self.background = background
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        target = try container.decode(String.self, forKey: .target)
+        since = try container.decode(Date.self, forKey: .since)
+        from = try container.decodeIfPresent(String.self, forKey: .from)
+        background = try container.decodeIfPresent(Bool.self, forKey: .background) ?? false
+    }
 }
 
 /// The latest release whose banner the guardian closed, per instance: a
@@ -200,8 +233,9 @@ struct PendingUpgradeStore {
 
 /// Whether the open instance is on its latest release, and the upgrade that
 /// brings it there. While `blocking`, the update page covers the app: always
-/// below the minimum version and while an update runs, otherwise only once
-/// the guardian opens it.
+/// below the minimum version, and while an upgrade started from the page
+/// runs. An upgrade started from the drawer runs in the background, its
+/// progress in the drawer's row.
 @MainActor
 @Observable
 final class InstanceUpdater {
@@ -223,6 +257,26 @@ final class InstanceUpdater {
         case start(current: String?, latest: String, message: String)
         /// The target never answered within `UpdateGate.upgradeTimeout`.
         case timedOut(target: String)
+        /// Rome Cloud ended the upgrade and the instance is back on `from`:
+        /// it failed, or was rolled back.
+        case rolledBack(target: String, from: String)
+
+        /// The release the failed upgrade was for.
+        var target: String {
+            switch self {
+            case .start(_, let latest, _): return latest
+            case .timedOut(let target), .rolledBack(let target, _): return target
+            }
+        }
+    }
+
+    /// What the drawer's update row shows.
+    enum RowState: Equatable {
+        /// A release the instance can do without: confirm, then update.
+        case offered(String)
+        case starting
+        case updating(target: String)
+        case failed(Failure)
     }
 
     private(set) var state: State = .idle
@@ -233,9 +287,11 @@ final class InstanceUpdater {
     private(set) var presented = false
     /// The release the guardian closed the banner for, on this instance.
     private(set) var dismissedVersion: String?
-    /// The release an upgrade from this device just reached, said once back
-    /// in the chat. It outlives the reopen that follows the upgrade.
-    private(set) var justUpdated: (instanceID: String, version: String)?
+    /// The release an upgrade from this device just reached. A background
+    /// upgrade's is said once above the composer.
+    private(set) var justUpdated: (instanceID: String, version: String, background: Bool)?
+    /// The upgrade under way, or failed, was started from the drawer.
+    private(set) var runsInBackground = false
     /// The instance's release when the check last found it behind.
     private var behindOn: String?
     /// The release the open instance runs, as its last check answered.
@@ -243,7 +299,8 @@ final class InstanceUpdater {
 
     var blocking: Bool {
         switch state {
-        case .starting, .updating: return true
+        // `behindOn` is the release the upgrade started from.
+        case .starting, .updating: return presented || !UpdateGate.isSupported(behindOn)
         case .required, .failed: return belowMinimum || presented
         case .idle, .upToDate, .unknown: return false
         }
@@ -263,6 +320,19 @@ final class InstanceUpdater {
         return latest
     }
 
+    /// The drawer's row: the offer, then a background upgrade's progress and
+    /// failure. Nil when there is nothing to offer or the page shows it.
+    var rowState: RowState? {
+        if let offered { return .offered(offered) }
+        guard runsInBackground, !blocking else { return nil }
+        switch state {
+        case .starting: return .starting
+        case .updating(let target, _): return .updating(target: target)
+        case .failed(let failure): return .failed(failure)
+        default: return nil
+        }
+    }
+
     /// The banner: offered, not open, and not closed for this release.
     var showsBanner: Bool {
         guard let offered, !presented else { return false }
@@ -277,13 +347,32 @@ final class InstanceUpdater {
         }
     }
 
+    /// An upgrade is starting or waited on.
+    var isUnderway: Bool {
+        switch state {
+        case .starting, .updating: return true
+        default: return false
+        }
+    }
+
+    /// This device started a background upgrade on `instanceID` that is still
+    /// waited on: Rome Cloud reporting it as not running is the upgrade.
+    func backgroundUpgradePending(for instanceID: String) -> Bool {
+        guard let pending = store.load(instanceID) else { return false }
+        return pending.background && !expired(pending)
+    }
+
     var cannotCheck: Bool {
         if case .unknown = state { return true }
         return false
     }
 
-    /// Called once the instance answers on the target release.
-    var onFinished: (() async -> Void)?
+    /// Called once the instance answers on the target release; true for an
+    /// upgrade that ran in the background.
+    var onFinished: ((_ background: Bool) async -> Void)?
+    /// Rome Cloud's status for an instance id, or nil when it cannot say.
+    /// It tells a failed or rolled-back upgrade from one still running.
+    var cloudStatus: ((String) async -> String?)?
 
     private var backend: RomeBackend?
     private var instanceID: String?
@@ -304,6 +393,13 @@ final class InstanceUpdater {
     private var reconnecting = false
     /// Probes since the last check while waiting; a check runs every few.
     private var probesSinceCheck = 0
+    /// The drawer's Retry is asking; the row stays on the failure meanwhile.
+    private(set) var retrying = false
+    /// Probes since Rome Cloud's status was last read while waiting.
+    private var probesSinceStatus = 0
+    /// Rome Cloud's looks in a row that found the upgrade over without the
+    /// target. Two end the wait: one could catch a passing state.
+    private var endedLooks = 0
 
     /// How long the poll waits between looks at an upgrading instance.
     private let pollInterval: Duration
@@ -331,13 +427,16 @@ final class InstanceUpdater {
         if case .failed(let failure) = state {
             switch failure {
             case .start(let current, let latest, _): state = .required(current: current, latest: latest, latestChanged: false)
-            case .timedOut(let target): state = .required(current: behindOn, latest: target, latestChanged: false)
+            case .timedOut(let target), .rolledBack(let target, _): state = .required(current: behindOn, latest: target, latestChanged: false)
             }
         }
     }
 
     /// The release reached, while it is still to be said.
     var updatedTo: String? { justUpdated?.version }
+
+    /// The release a background upgrade reached, said once above the composer.
+    var updatedInBackgroundTo: String? { justUpdated?.background == true ? justUpdated?.version : nil }
 
     /// The "updated" line was shown.
     func clearUpdated() { justUpdated = nil }
@@ -391,6 +490,7 @@ final class InstanceUpdater {
         reconnect = nil
         state = .idle
         presented = false
+        runsInBackground = false
         dismissedVersion = nil
         behindOn = nil
         runningVersion = nil
@@ -444,7 +544,8 @@ final class InstanceUpdater {
         case .keepWaiting:
             break
         case .finished:
-            await finish()
+            // Up to date, but only an answer on the target says it got there.
+            await finish(reached: try? result.get().current?.version)
         case .stale(let verdict):
             store.clear(instanceID)
             stopPolling()
@@ -459,6 +560,7 @@ final class InstanceUpdater {
     }
 
     private func apply(_ verdict: UpdateGate.Verdict, latestChanged: Bool) {
+        runsInBackground = false
         switch verdict {
         case .upToDate: state = .upToDate
         case .unknown(let reason): state = .unknown(reason: reason)
@@ -470,15 +572,29 @@ final class InstanceUpdater {
 
     // MARK: Updating
 
+    /// From the update page: the page stays up until the upgrade ends.
     func updateNow() async {
+        await start(background: false)
+    }
+
+    /// From the drawer, once confirmed: the app stays usable, and the
+    /// drawer's row shows how it goes. A release the app needs never runs
+    /// in the background.
+    func updateInBackground() async {
+        guard offered != nil else { return }
+        await start(background: true)
+    }
+
+    private func start(background: Bool) async {
         guard let backend, let instanceID, case .required(let current, let latest, _) = state else { return }
-        presented = true
+        if !background { presented = true }
+        runsInBackground = background
         state = .starting(current: current, latest: latest)
         let mine = generation
         do {
             let started = try await backend.startUpgrade(target: latest)
             guard mine == generation else { return }
-            let pending = PendingUpgrade(target: started.target ?? latest, since: now(), from: current)
+            let pending = PendingUpgrade(target: started.target ?? latest, since: now(), from: current, background: background)
             store.save(pending, for: instanceID)
             startPolling(pending)
         } catch {
@@ -502,39 +618,68 @@ final class InstanceUpdater {
         guard case .failed(let failure) = state else { return }
         poll?.cancel()
         poll = nil
+        let background = runsInBackground
+        let mine = generation
         guard let backend, let instanceID else {
             if case .timedOut(let target) = failure, let instanceID {
-                startPolling(PendingUpgrade(target: target, since: now()))
-                store.save(PendingUpgrade(target: target, since: now()), for: instanceID)
+                let pending = PendingUpgrade(target: target, since: now(), from: behindOn, background: background)
+                store.save(pending, for: instanceID)
+                startPolling(pending)
             }
             return
         }
         store.clear(instanceID)
         let result: Result<UpgradeCheck, Error>
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        // Another instance opened, or the updater started over, meanwhile.
+        guard mine == generation else { return }
         noteRunning(result)
         let verdict = UpdateGate.verdict(result)
         if case .unknown = verdict, case .timedOut(let target) = failure {
-            let pending = PendingUpgrade(target: target, since: now())
+            let pending = PendingUpgrade(target: target, since: now(), from: behindOn, background: background)
             store.save(pending, for: instanceID)
             startPolling(pending)
             return
         }
         if verdict == .upToDate, case .timedOut = failure {
-            await finish()
+            await finish(reached: try? result.get().current?.version)
+            return
+        }
+        // The drawer keeps the failure and its Retry while nothing can be
+        // checked; the offer it would go back to is not known.
+        if case .unknown = verdict, background {
+            state = .failed(failure)
             return
         }
         apply(verdict, latestChanged: false)
     }
 
+    /// The drawer's Retry: asks again, and the release the guardian
+    /// confirmed starts again in the background. A newer one goes back to
+    /// the offer, to be confirmed. A second tap while it asks does nothing.
+    func retryInBackground() async {
+        guard case .failed(let failure) = state, runsInBackground, !retrying else { return }
+        retrying = true
+        defer { retrying = false }
+        let mine = generation, instance = instanceID
+        await retry()
+        // Only on the instance it failed on, never on one opened meanwhile.
+        guard mine == generation, instanceID == instance else { return }
+        if let offered, offered == failure.target { await updateInBackground() }
+    }
+
     private func startPolling(_ pending: PendingUpgrade) {
         poll?.cancel()
         probesSinceCheck = 0
+        probesSinceStatus = 0
+        endedLooks = 0
         progress = .downloading
-        // A running update keeps the page up until the guardian closes it, so
+        // An update from the page keeps it up until the guardian closes it, so
         // a failure, after a relaunch too, is always seen; and the release it
-        // started from decides whether the page may close.
-        presented = true
+        // started from decides whether the page may close. One from the
+        // drawer shows in the drawer.
+        runsInBackground = pending.background
+        if !pending.background { presented = true }
         behindOn = pending.from ?? behindOn
         state = .updating(target: pending.target, since: pending.since)
         let mine = generation
@@ -576,7 +721,7 @@ final class InstanceUpdater {
             // Long enough to read "Almost done…" before the app opens.
             try? await Task.sleep(for: .milliseconds(800))
             guard mine == generation else { return true }
-            await finish()
+            await finish(reached: version)
             return true
         case .timedOut:
             state = .failed(.timedOut(target: pending.target))
@@ -590,6 +735,13 @@ final class InstanceUpdater {
             Task { [weak self] in await self?.check() }
             return true
         case .wait:
+            if await upgradeEnded(pending, version: version) {
+                guard mine == generation else { return true }
+                if let instanceID { store.clear(instanceID) }
+                state = .failed(.rolledBack(target: pending.target, from: pending.from ?? ""))
+                return true
+            }
+            guard mine == generation else { return true }
             // The instance answers but not on the target yet. Every so often ask
             // Rome Cloud too, which notices a target that will never come.
             probesSinceCheck += 1
@@ -602,19 +754,46 @@ final class InstanceUpdater {
         }
     }
 
-    private func finish() async {
+    /// While the instance answers on the release it started from, Rome
+    /// Cloud's status is read every other probe: an upgrade it no longer
+    /// holds as running ended without the target.
+    private func upgradeEnded(_ pending: PendingUpgrade, version: String?) async -> Bool {
+        guard let cloudStatus, let instanceID, let from = pending.from, version == from else {
+            endedLooks = 0
+            return false
+        }
+        probesSinceStatus += 1
+        guard probesSinceStatus >= 2 else { return false }
+        probesSinceStatus = 0
+        let status = await cloudStatus(instanceID)
+        if UpdateGate.endedWithoutTarget(cloudStatus: status, version: version, from: from) {
+            endedLooks += 1
+        } else {
+            endedLooks = 0
+        }
+        return endedLooks >= 2
+    }
+
+    /// `reached`: the release the instance answered on. Only the target
+    /// itself is said as reached; a check that found it current on another
+    /// release only ends the wait.
+    private func finish(reached: String?) async {
+        let background = runsInBackground
         if let instanceID {
             store.clear(instanceID)
             switch state {
-            case .updating(let target, _), .failed(.timedOut(let target)): justUpdated = (instanceID, target)
+            case .updating(let target, _), .failed(.timedOut(let target)):
+                if reached == target { justUpdated = (instanceID, target, background) }
             default: break
             }
         }
-        poll?.cancel()
-        poll = nil
+        // A probe or check still in flight is over too: it must not finish
+        // the upgrade a second time.
+        stopPolling()
         presented = false
+        runsInBackground = false
         state = .upToDate
-        await onFinished?()
+        await onFinished?(background)
     }
 
     private func expired(_ pending: PendingUpgrade) -> Bool {
@@ -622,17 +801,24 @@ final class InstanceUpdater {
     }
 
     #if DEBUG
-    /// Snapshot runs only: the line said after an upgrade.
+    /// Snapshot runs only: the line said after a background upgrade.
     func debugShowUpdated(_ version: String) {
-        if let instanceID { justUpdated = (instanceID, version) }
+        if let instanceID { justUpdated = (instanceID, version, true) }
     }
 
     /// Snapshot runs only: show a state without a server round trip.
-    func debugShow(_ state: State, progress: UpdateGate.Progress = .downloading) {
+    /// `background`: as an upgrade started from the drawer.
+    func debugShow(_ state: State, progress: UpdateGate.Progress = .downloading, background: Bool = false) {
         poll?.cancel()
         poll = nil
         self.state = state
         self.progress = progress
+        runsInBackground = background
+        switch state {
+        // From the page unless shown as a background upgrade, as before.
+        case .starting, .updating, .failed: presented = !background
+        default: break
+        }
         if case .required(let current, _, _) = state { behindOn = current }
     }
     #endif

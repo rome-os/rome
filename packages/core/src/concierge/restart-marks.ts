@@ -7,13 +7,11 @@ import { willContinueAfterRestart } from "../webchat/restart-continuation.js";
 const log = createLogger("restart-marks");
 
 /**
- * Settles the status reactions a stopped Rome process left working, once at
- * startup, before any turn runs (docs/domains/chats.md#status-reaction). A
- * stopped process ends no turn, so no turn's end answers its messages: they
- * are answered here, unless startup continues that turn, whose end then
- * answers them. A task's mark follows its status, which a restart recomputes.
- * Marks only show how work stands, so a failure is logged and never stops
- * boot. Answers how many changed.
+ * Settles the messages a stopped Rome process left open, once at startup,
+ * before any turn runs. A stopped process ends no turn, so no turn's end
+ * answers its messages: they are answered here, unless startup continues that
+ * turn, whose end then answers them. A task chat's turn it ended is failed.
+ * A failure is logged and never stops boot. Answers how many changed.
  */
 export async function settleMarksAfterRestart(
   tasks: Pick<ConciergeTasksRepository, "answerInterrupted" | "findBySession" | "setLastOutcome">,
@@ -37,7 +35,7 @@ export async function settleMarksAfterRestart(
     }
     return (await tasks.answerInterrupted(continuing)) + failed;
   } catch (error) {
-    log.warn("failed to settle status reactions a stopped process left working", {
+    log.warn("failed to settle the messages a stopped process left open", {
       error: error instanceof Error ? error.message : String(error),
     });
     return 0;

@@ -7,10 +7,11 @@ import {
   type ConciergeOpenWait,
   type ConciergeTaskDto,
 } from "@rome/api-types/concierge";
-import type { ConciergeStatusReaction } from "@rome/api-types/concierge";
+import type { ConciergeMessageStatus } from "@rome/api-types/concierge";
 import {
   CONCIERGE_TASK_WAIT_EXPIRY_MS,
-  messageStatusReaction,
+  messageStatus,
+  parseTaskStatus,
   type ConciergeTaskFacts,
   type ConciergeTaskStatusResult,
   legacyTaskState,
@@ -19,12 +20,13 @@ import {
 import type { LiveEventEmit } from "../lib/live-event.js";
 import type { OpenWaitItem } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
+import { cardMessagesOf } from "./task-cards.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 import type {
   ConciergeTaskRow,
   ConciergeTasksRepository,
   ConciergeTaskWithChat,
-  ReactionTarget,
+  MessageTarget,
 } from "../db/repositories/concierge-tasks.js";
 
 const log = createLogger("concierge-tasks");
@@ -42,6 +44,13 @@ export interface TaskFactSources {
   reportPending(): readonly string[];
   /** When each task's soonest pending check is due, epoch milliseconds. */
   laterOf?(taskIds: readonly string[]): Promise<Map<string, number>>;
+  /** The tasks whose pending check is a repeating schedule's next run, not a one-off check. */
+  recurringOf?(taskIds: readonly string[]): Promise<Set<string>>;
+  /** The messages of Concierge chat `chatId` said from `since` on that hold a task chat part, in the order said. */
+  taskChatPartMessages?(
+    chatId: string,
+    since: Date,
+  ): Promise<Array<{ id: string; content: string; createdAt: Date }>>;
 }
 
 /**
@@ -416,59 +425,153 @@ export class ConciergeTasks {
   }
 
   /**
-   * The status reaction of each of `messageKeys` in Concierge chat `chatId`
-   * that has one, derived from its turn and the status of the tasks made
-   * for it (`messageStatusReaction`).
+   * The status of each of `messageKeys` in Concierge chat `chatId` that has
+   * one, derived from its turn and the status of the tasks made for it
+   * (`messageStatus`).
    */
-  async reactionsOf(
+  async messageStatusesOf(
     chatId: string,
     messageKeys: readonly string[],
-  ): Promise<Map<string, ConciergeStatusReaction>> {
+  ): Promise<Map<string, ConciergeMessageStatus>> {
     const marks = await this.repo.messageMarks(chatId, messageKeys);
     const taskIds = [...new Set([...marks.values()].flatMap((mark) => mark.taskIds))];
     const rows = await this.repo.getMany(taskIds);
     const status = await this.statusOf(rows);
-    const out = new Map<string, ConciergeStatusReaction>();
+    const cards = await this.shownCardsOf(chatId, rows, status);
+    const out = new Map<string, ConciergeMessageStatus>();
     for (const [key, mark] of marks) {
-      const reaction = messageStatusReaction({
+      const found = messageStatus({
         answered: mark.answered,
+        working: mark.working,
+        reacted: mark.reacted,
         turnFailed: mark.turnFailed,
-        tasks: mark.taskIds.flatMap((id) => {
-          const of = status.get(id);
-          const row = rows.find((candidate) => candidate.id === id);
-          return of ? [{ ...of, reportLost: row?.reportGivenUp === true }] : [];
-        }),
+        handedToNewer: mark.earlierTaskIds.length > 0,
+        tasks: [
+          ...mark.taskIds.flatMap((id) => {
+            const of = status.get(id);
+            const row = rows.find((candidate) => candidate.id === id);
+            if (!of) return [];
+            return [
+              {
+                ...of,
+                reportLost: row?.reportGivenUp === true,
+                ...(cards ? { cardShown: row?.sessionId ? cards.has(row.sessionId) : false } : {}),
+              },
+            ];
+          }),
+          // A task that ended for it with its result told stays as it ended.
+          ...mark.endedAs.map((reason) => ({
+            status: "ended" as const,
+            endReason: parseTaskStatus("ended", reason).endReason,
+          })),
+        ],
       });
-      if (reaction) out.set(key, reaction);
+      if (found) out.set(key, found);
     }
     return out;
   }
 
   /**
-   * Calls `listener` whenever a guardian message's status reaction changes,
-   * with null once it has none: a fact of its turn changed, or a task made
-   * for it changed status. Returns the unsubscribe.
+   * For the tasks of `rows` that wait on their owner, the task chats whose
+   * card for that wait shows in Concierge chat `chatId`
+   * (docs/domains/chats.md#status). Null when no source can tell, so such a
+   * task reads as its card shown.
    */
-  onReaction(
-    listener: (target: ReactionTarget, reaction: ConciergeStatusReaction | null) => void,
+  private async shownCardsOf(
+    chatId: string,
+    rows: readonly ConciergeTaskRow[],
+    status: ReadonlyMap<string, TaskStatusView>,
+  ): Promise<Set<string> | null> {
+    const read = this.facts?.taskChatPartMessages;
+    if (!read) return null;
+    const waits = new Map(
+      rows.flatMap((row) => {
+        const of = status.get(row.id);
+        return of?.status === "needs_you" && of.openWait && row.sessionId
+          ? [[row.sessionId, of.openWait] as const]
+          : [];
+      }),
+    );
+    if (waits.size === 0) return new Set();
+    // A card that shows a wait is said once the wait began.
+    const since = new Date(Math.min(...[...waits.values()].map((wait) => wait.since)) - 1_000);
+    return new Set(cardMessagesOf(await read(chatId, since), waits).keys());
+  }
+
+  /**
+   * Task `taskId`'s result was just said, as a message naming it or a
+   * forward: its messages settle now (docs/domains/chats.md#status), not
+   * when the turn that said it ends.
+   */
+  async resultSaid(taskId: string): Promise<void> {
+    const row = await this.repo.get(taskId);
+    if (row) await this.endLinksIfEnded(row, { resultSaid: true });
+  }
+
+  /**
+   * Ends the links of task row `row` to its messages once it ended with its
+   * result told (docs/domains/chats.md#status): they keep how it ended, and
+   * its later work leaves them alone. A result Rome gave up telling ends
+   * them failed. `resultSaid` reads a result that waits as told.
+   */
+  async endLinksIfEnded(
+    row: ConciergeTaskRow,
+    { resultSaid = false }: { resultSaid?: boolean } = {},
+  ): Promise<void> {
+    // Only a result, told, ends them: a task that has not run yet reads as
+    // ended too, and one whose result waits is still the message's work.
+    const told =
+      row.stoppedAt !== null || (row.lastOutcome !== null && (!row.outcomeUnsaid || resultSaid));
+    if (!told) return;
+    // Read before the state, at once: a link made after it is new work and
+    // has a higher order, so this ending never reaches it.
+    const upTo = this.repo.liveLinkSeq(row.id);
+    if (upTo === null) return;
+    const facts = (await this.factsOf([row])).get(row.id);
+    if (!facts) return;
+    if (resultSaid) facts.reportPending = false;
+    let of = taskStatus(facts, this.now(), this.waitExpiryMs);
+    // A task waiting for its repeating schedule's next run, as one made
+    // scheduled after it started, has told its result: it ends for the
+    // message as it would with no run to come. One waiting on a one-off
+    // check is still working for it.
+    if (of.status === "later" && (await this.facts?.recurringOf?.([row.id]))?.has(row.id)) {
+      of = taskStatus({ ...facts, laterAt: null }, this.now(), this.waitExpiryMs);
+    }
+    if (of.status !== "ended") return;
+    const lost = row.reportGivenUp && of.endReason !== "stopped" && of.endReason !== "no_response";
+    await this.repo.endLinks(row.id, lost ? "failed" : (of.endReason ?? "done"), upTo);
+  }
+
+  /**
+   * Calls `listener` whenever a guardian message's status changes, with null
+   * once it has none: a fact of its turn changed, or a task made for it
+   * changed status. Returns the unsubscribe.
+   */
+  onMessageStatus(
+    listener: (target: MessageTarget, status: ConciergeMessageStatus | null) => void,
   ): () => void {
-    const told = new Map<string, ConciergeStatusReaction | null>();
+    const told = new Map<string, ConciergeMessageStatus | null>();
     let telling: Promise<void> = Promise.resolve();
-    const check = (targets: readonly ReactionTarget[]) => {
+    const check = (targets: readonly MessageTarget[]) => {
       telling = telling
         .then(async () => {
           for (const target of targets) {
-            const reaction =
-              (await this.reactionsOf(target.chatId, [target.messageKey])).get(target.messageKey) ??
-              null;
+            const status =
+              (await this.messageStatusesOf(target.chatId, [target.messageKey])).get(
+                target.messageKey,
+              ) ?? null;
             const key = `${target.chatId}\u0000${target.messageKey}`;
-            if (told.has(key) && told.get(key) === reaction) continue;
-            told.set(key, reaction);
-            listener(target, reaction);
+            if (told.has(key) && told.get(key) === status) continue;
+            // A message with none is forgotten, so the map holds only the
+            // ones showing a status; one may then be told none twice.
+            if (status === null) told.delete(key);
+            else told.set(key, status);
+            listener(target, status);
           }
         })
         .catch((error: unknown) =>
-          log.warn("failed to tell a status reaction", {
+          log.warn("failed to tell a message status", {
             error: error instanceof Error ? error.message : String(error),
           }),
         );
@@ -477,7 +580,11 @@ export class ConciergeTasks {
     // Any change of a task, its row or a fact its status reads, reads again
     // the messages it was made for.
     const offTask = this.repo.onChange(({ row }) => {
-      void this.repo.messagesOfTask(row.id).then(check);
+      void this.repo.messagesOfTask(row.id).then(check, (error: unknown) =>
+        log.warn("failed to read a task's messages", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     });
     return () => {
       offMessage();

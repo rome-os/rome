@@ -1,11 +1,11 @@
 import { ThreadLabelLine } from "@/components/chat/reply/chat-threads";
-import { Fragment, memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleContent";
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
-import { StatusReactionBadge, useStatusReaction } from "@/components/chat/status-reaction";
+import { ReactionBadge, useMessageStatus, useReaction } from "@/components/chat/reaction";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
@@ -18,8 +18,8 @@ import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
-// Room every guardian bubble keeps above it for its status reaction, whose
-// badge stands 14px above the bubble's top-left corner (status-reaction.tsx).
+// Room every guardian bubble keeps above it for its reaction, whose badge
+// stands 14px above the bubble's top-left corner (reaction.tsx).
 // With the group's 8px gap it leaves 10px clear of the message above, its
 // shadow included. It is there whether or not a mark shows, so nothing moves
 // when one comes or goes.
@@ -30,7 +30,8 @@ const GUARDIAN_BUBBLE_GAP = "mt-4";
 const GuardianBubble = memo(
   function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
-    const reaction = useStatusReaction(msg);
+    const reaction = useReaction(msg);
+    const status = useMessageStatus(msg);
     // The bubble is a direct child of the group, so its width cap is a share
     // of the column, as the agent's is.
     return (
@@ -59,7 +60,7 @@ const GuardianBubble = memo(
           msg={msg}
           text={text}
           own
-          badge={<StatusReactionBadge reaction={reaction} />}
+          badge={<ReactionBadge reaction={reaction} status={status} />}
         />
       </ConciergeBubble>
     );
@@ -68,7 +69,8 @@ const GuardianBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.inputState === next.msg.inputState &&
-    prev.msg.statusReaction === next.msg.statusReaction &&
+    prev.msg.reaction === next.msg.reaction &&
+    prev.msg.status === next.msg.status &&
     prev.arrival === next.arrival,
 );
 
@@ -186,6 +188,10 @@ const AgentEntry = memo(function AgentEntry({
  * In share mode (`selection`), every bubble carries its turn's checkbox, and a
  * click anywhere on it picks or drops the whole turn, as a common chat's row
  * does. A bubble of no turn, or of another session, is dimmed and not picked.
+ *
+ * Each message is one `data-thread-entry` box, so a thread in focus can fold
+ * away the messages of the others one by one: `hidden` holds the ids of those
+ * it hides (use-thread-focus.ts), and a group with nothing left folds whole.
  */
 export const ConciergeGroup = memo(function ConciergeGroup({
   group,
@@ -195,6 +201,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   feedback,
   arrival,
   typing,
+  hidden,
 }: {
   group: Extract<ConciergeItem, { kind: "group" }>;
   actions: BlockActions;
@@ -204,9 +211,17 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   /** Marks the bubbles that arrived while the transcript is open. */
   arrival: ArrivalProps;
   typing: ReactNode;
+  /** The ids of the messages a thread in focus hides, or undefined with none in focus. */
+  hidden?: ReadonlySet<string>;
 }) {
+  const allHidden =
+    hidden !== undefined &&
+    !group.typing &&
+    group.entries.length > 0 &&
+    group.entries.every(({ message }) => hidden.has(message.id));
   return (
     <div
+      data-thread-out={allHidden || undefined}
       className={cn(
         // A card keeps no margin of its own here, so its thread label sits as
         // close to it as a bubble's does.
@@ -215,6 +230,12 @@ export const ConciergeGroup = memo(function ConciergeGroup({
       )}
     >
       {group.entries.map((entry) => {
+        const side = group.sender === "guardian" ? "items-end" : "items-start";
+        // A message folds on its own unless its whole group does.
+        const box = {
+          "data-thread-entry": entry.message.id,
+          "data-thread-out": (!allHidden && hidden?.has(entry.message.id)) || undefined,
+        };
         const bubble = (
           <>
             {group.sender === "guardian" ? (
@@ -235,13 +256,23 @@ export const ConciergeGroup = memo(function ConciergeGroup({
             <ThreadLabelLine message={entry.message} source={entry.source} />
           </>
         );
-        if (!selection) return <Fragment key={entry.message.id}>{bubble}</Fragment>;
-        const side = group.sender === "guardian" ? "items-end" : "items-start";
+        if (!selection) {
+          return (
+            <div
+              key={entry.message.id}
+              {...box}
+              className={cn("flex w-full flex-col gap-2 empty:hidden", side)}
+            >
+              {bubble}
+            </div>
+          );
+        }
         const turnId = entry.message.turnId;
         if (!turnId || entry.message.sessionId !== selection.selectableSessionId) {
           return (
             <div
               key={entry.message.id}
+              {...box}
               className={cn("flex w-full flex-col gap-2 pl-9 opacity-60", side)}
             >
               {bubble}
@@ -250,7 +281,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
         }
         const selected = selection.selectedTurns.has(turnId);
         return (
-          <div key={entry.message.id} className="w-full">
+          <div key={entry.message.id} {...box} className="w-full">
             <SelectableRow
               selected={selected}
               onToggle={() => selection.onToggleTurn(turnId)}

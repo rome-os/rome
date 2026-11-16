@@ -1048,6 +1048,11 @@ private struct UpdateStrip: View {
                     AlertGlyph(size: 13)
                     Text("Could not start the update")
                 }
+            case .didNotFinish:
+                row {
+                    AlertGlyph(size: 13)
+                    Text("The update did not finish")
+                }
             case .reached(let version):
                 row {
                     Image(systemName: "checkmark").romeFont(12, .semibold).foregroundStyle(Palette.success)
@@ -1083,7 +1088,7 @@ private struct UpdateStrip: View {
 /// `updatedTo` once it has said it.
 struct UpdateStripTracker: Equatable {
     enum Line: Equatable {
-        case progress, tookTooLong, couldNotStart, reached(String), none
+        case progress, tookTooLong, couldNotStart, didNotFinish, reached(String), none
     }
 
     /// An upgrade is under way, or failed in a way it may still finish from.
@@ -1111,6 +1116,7 @@ struct UpdateStripTracker: Equatable {
         case .starting, .updating: return .progress
         case .failed(.timedOut): return .tookTooLong
         case .failed(.start): return .couldNotStart
+        case .failed(.rolledBack): return .didNotFinish
         default: return reached.map(Line.reached) ?? .none
         }
     }

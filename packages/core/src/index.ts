@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
+import { createVoiceInputSource } from "./voice-input/index.js";
 import { resolveCloudAuthEnabled } from "./access/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
@@ -222,6 +223,15 @@ import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
 import { registerReadPersonAction } from "./people/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
+import { placeAudience } from "./core/place-audience.js";
+import { registerPersonalDataActions } from "./personal-data/actions.js";
+import { PersonalDataRepository } from "./personal-data/repository.js";
+import { DeviceConnectionsRepository } from "./connections/device/repository.js";
+import { registerDeviceActions } from "./connections/device/actions.js";
+import { createLiveRoutes } from "./connections/device/live-route.js";
+import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
+import { deviceKinds, deviceKindState } from "./connections/connect-card.js";
+import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -319,14 +329,8 @@ import {
   getProfileInstalledAppsDir,
   getProjectRoot,
 } from "./paths.js";
-import {
-  createAppActionsSubscriber,
-  createNoopChannelMessageHook,
-  createChannelMessageHookFromCatalog,
-  createChannelMessageHookReloader,
-  registerAppActions,
-} from "./app-host/app-actions-wiring.js";
-import type { ChannelMessageHook } from "./apps/hooks/types.js";
+import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
+import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
@@ -497,7 +501,15 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
-  const nodeDevices = createNodeDevicesService();
+  // A device removed from the account through this Rome loses its connection
+  // rows; an origin the removal leaves with no install is turned off.
+  const nodeDevices = withDeviceLifecycle(createNodeDevicesService(), {
+    connections: () => deviceConnectionsRepo,
+    turnOriginOff: (originId) => {
+      for (const spec of PERSONAL_DATA_SOURCES)
+        personalDataRepo.setState(spec.source, originId, "off");
+    },
+  });
   const provisionNodeCaller = createNodeCallerProvisioner();
 
   // App keys: guardian-entered values go live in process.env before any app
@@ -575,7 +587,34 @@ async function main() {
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
-  const routinesRepo = new RoutinesRepository(db);
+  // Made here so the Concierge can tell whether a visitor is still served,
+  // and who can read a dashboard chat; it is loaded with the other access
+  // settings further down.
+  const dashboardAccessState = new DashboardAccessState();
+  // Who can read a chat, for every audience check (docs/domains/participation.md#audience).
+  const chatAudience = placeAudience({
+    connectionKindOf: connectionKindOfChannel,
+    dashboardChat: (chatId) => webchatRepo.getSession(chatId),
+    visitorsAllowed: () => dashboardAccessState.hasCloudEmailAccess(),
+    // Main reads who sent a message itself, never the bond a caller names.
+    senderBondLevel: async (context) =>
+      context.channelUserId
+        ? (
+            await peopleRepo.byAccount({
+              platform: platformOfChannel(context.channel),
+              id: context.channelUserId,
+            })
+          )?.bondLevel
+        : undefined,
+  });
+  const routinesRepo = new RoutinesRepository(db, (chatId) =>
+    chatAudience({ channel: "webchat", threadId: chatId }),
+  );
+  const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
+  const deviceConnectionsRepo = new DeviceConnectionsRepository(db);
+  // Which device connection answers a live read for a turn: one choice for
+  // device_run, the personal-data pointer and the connect card.
+  const deviceLiveRoutes = createLiveRoutes(deviceConnectionsRepo);
   const routineRunsRepo = new RoutineRunsRepository(db);
   // Runs before the action engine, routine engine, and ingress below exist, so
   // every `running` row it ends belongs to the stopped process.
@@ -925,6 +964,7 @@ async function main() {
       // Coordination roots run in main only when the lockfile marks their app
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
+      placeAudience: chatAudience,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -1179,9 +1219,6 @@ async function main() {
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
-  // Made here so the Concierge can tell whether a visitor is still served;
-  // it is loaded with the other access settings further down.
-  const dashboardAccessState = new DashboardAccessState();
   // The chats the guardian's phone app holds open, from the live-events socket;
   // the Concierge does not push what it says in one of them.
   const phoneWatching = new PhoneWatching();
@@ -1244,7 +1281,11 @@ async function main() {
       .talker;
     return talker ? talkerChannelSurface(talker) : null;
   };
-  const openingFor = sessionOpeningFor({ channelSurface, connectionKindOfChannel });
+  const openingFor = sessionOpeningFor({
+    channelSurface,
+    connectionKindOfChannel,
+    placeAudience: chatAudience,
+  });
   const agentSessionManager = createSessions(
     {
       agentLoader,
@@ -1278,10 +1319,17 @@ async function main() {
         actionRegistry,
         actionEngine,
         webchatRepo,
+        placeAudience: chatAudience,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
+        deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+        deviceState: (kind, turn) => deviceKindState(deviceLiveRoutes.forKind(kind, turn), turn),
+        // The turn's audience, narrowed by the chat's as it stands now, so a
+        // chat that opens to visitors after the turn started is no longer private.
+        privateTurn: async (turn) =>
+          turn.audience() === "private" && (await chatAudience(turn.threadContext())) === "private",
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
@@ -1390,6 +1438,15 @@ async function main() {
   });
 
   registerShowFileAction(actionRegistry);
+  registerPersonalDataActions(actionRegistry, {
+    personalData: personalDataRepo,
+    guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
+    connections: deviceLiveRoutes,
+  });
+  registerDeviceActions(actionRegistry, {
+    connections: deviceConnectionsRepo,
+    run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
+  });
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {
     people: peopleRepo,
@@ -1399,15 +1456,15 @@ async function main() {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  // The marks the stopped process left working settle before any turn runs.
+  // The messages the stopped process left open settle before any turn runs.
   const settledMarks = await settleMarksAfterRestart(
     concierge.deps.tasks.repo,
     webchatRepo,
     endedTurns,
   );
   if (settledMarks > 0) {
-    log.warn("Settled status reactions a stopped Rome process left working", {
-      reactions: settledMarks,
+    log.warn("Settled the messages a stopped Rome process left open", {
+      messages: settledMarks,
     });
   }
   startConciergeEvents(concierge, turnListeners);
@@ -1744,15 +1801,14 @@ async function main() {
     appStartedDispatcher.flush(appCatalog);
   });
 
-  const messageHandlerRegistered = actionRegistry.has("message_handler");
-  if (!messageHandlerRegistered) {
-    const ownerId =
-      appCatalog
-        .listArtifacts("action")
-        .find((artifact) => artifact.publicName === "message_handler")?.ownerId ?? "inbox";
+  /** The app that declares `message_handler`: Inbox. */
+  const messageHandlerOwner = () =>
+    appCatalog.listArtifacts("action").find((artifact) => artifact.publicName === "message_handler")
+      ?.ownerId ?? "inbox";
+  if (!actionRegistry.has("message_handler")) {
     markAppFailed(
       "message-handler:missing",
-      ownerId,
+      messageHandlerOwner(),
       'Required action "message_handler" is not registered',
     );
     log.warn("message_handler action is unavailable; inbound channel messages will be ignored");
@@ -1889,74 +1945,60 @@ async function main() {
     recording: inboundRecorder,
     events: chatsEvents,
     wakes: chatsWired.links,
+    labels: chatsWired.labels,
   });
   const hookChatStop = legacyChatIdStop(chatStop);
-  let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
-  const channelMessageHookArtifact = appCatalog
-    .listArtifacts("hook")
-    .find((artifact) => artifact.publicName === "channel-message");
-  if (messageHandlerRegistered) {
-    try {
-      const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
-        actionEngine,
-        chatSettings: appChatSettings,
-        conversationSettings: appChatSettings,
-        chatStop: hookChatStop,
-        channels: hookChannels,
-        messagesSaid: hookMessagesSaid,
-        accountAgentOf: hookAgentOf,
-        linkedAgentOf: hookAgentOf,
-      });
-      if (loadedHook) {
-        messageHook = loadedHook;
-      } else {
-        log.warn("channel-message hook is unavailable; inbound channel messages will be ignored");
-        if (channelMessageHookArtifact?.ownerType === "app") {
-          markAppFailed(
-            "channel-message:missing",
-            channelMessageHookArtifact.ownerId,
-            'Required hook "channel-message" is not registered',
-          );
-        }
-      }
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      log.warn("channel-message hook failed to initialize; using noop hook", { error });
-      if (channelMessageHookArtifact?.ownerType === "app") {
-        markAppFailed("channel-message:init", channelMessageHookArtifact.ownerId, error);
-      }
-    }
-  }
-  // The hook subscribes to every channel that can receive, and a channel's
+  // Every app that declares a channel-message hook hears through its own,
+  // each created with the same deps. The app that owns `message_handler`
+  // (Inbox) loads its hook only while that action is registered, as its hook
+  // dispatches turns to it.
+  const clearHookFailure = (appId: string) => {
+    runtimeStatusFailures.clearSources((source) => source === `channel-message:init:${appId}`);
+    refreshRuntimeAppStatus();
+  };
+  const messageHooks = new ChannelMessageHooks({
+    catalog: appCatalog,
+    deps: {
+      actionEngine,
+      chatSettings: appChatSettings,
+      conversationSettings: appChatSettings,
+      chatStop: hookChatStop,
+      channels: hookChannels,
+      messagesSaid: hookMessagesSaid,
+      accountAgentOf: hookAgentOf,
+      linkedAgentOf: hookAgentOf,
+    },
+    mayLoad: (appId) => appId !== messageHandlerOwner() || actionRegistry.has("message_handler"),
+    onFailed: (appId, error) => markAppFailed(`channel-message:init:${appId}`, appId, error),
+    onLoaded: (appId) => clearHookFailure(appId),
+    onReset: (appId) => clearHookFailure(appId),
+  });
+  // A hook subscribes to every channel that can receive, and a channel's
   // subscription follows whatever backs it. Only a channel added later, when a
-  // new account first unlocks Talk, reaches the hook again, through
+  // new account first unlocks Talk, reaches the hooks again, through
   // `addChannels`.
-  await messageHook.register();
-  // App-keys refreshes recreate this hook: it is instantiated once and held by
-  // the channels' subscriptions, so an env value captured in its module graph
-  // would otherwise outlive the key edit. The let-binding is the single handle,
-  // and register() on the fresh instance re-subscribes every channel that can
-  // receive.
-  const reloadChannelMessageHook = messageHandlerRegistered
-    ? createChannelMessageHookReloader({
-        catalog: appCatalog,
-        deps: {
-          actionEngine,
-          chatSettings: appChatSettings,
-          conversationSettings: appChatSettings,
-          chatStop: hookChatStop,
-          channels: hookChannels,
-          messagesSaid: hookMessagesSaid,
-          accountAgentOf: hookAgentOf,
-          linkedAgentOf: hookAgentOf,
-        },
-        getCurrent: () => messageHook,
-        setCurrent: (hook) => {
-          messageHook = hook;
-        },
-        onSkip: (reason) => log.warn(reason),
-      })
-    : null;
+  await messageHooks.start();
+  if (messageHooks.size === 0) {
+    log.warn("channel-message hook is unavailable; inbound channel messages will be ignored");
+  }
+  // Installing, removing, enabling or disabling an app starts or stops its
+  // hook alone. Runs after the action loader's subscriber, so Inbox's
+  // `message_handler` is registered by the time its hook asks.
+  // The status file was written earlier in the same change, so what a hook
+  // change reports is written after it.
+  const persistHookStatus = async () => {
+    try {
+      await writeAppRuntimeStatus(refreshRuntimeAppStatus());
+    } catch (err) {
+      log.warn("failed to persist channel-message runtime status", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  appCatalog.subscribe(async function channelMessageHooksSubscriber(event) {
+    await messageHooks.follow(event.appId);
+    await persistHookStatus();
+  });
 
   // A later channel minted at runtime (a second Feishu bot) joins the channel
   // list when its Connection first unlocks Talk, before its stream starts, and
@@ -1981,37 +2023,8 @@ async function main() {
     );
     hookChannels.push(...added);
     inboundRecorder.addChannels(added);
-    const hook = messageHook;
-    // A hook without `addChannels` re-registers, as the app-keys reloader
-    // does, and its register() reads the grown channel list. Events waiting
-    // on its other subscriptions are dropped, which beats never hearing the
-    // new account until the next reload. A hook that cannot unregister is
-    // left alone, as the reloader leaves it, since registering it again would
-    // double its existing subscriptions.
-    const subscribe = hook.addChannels
-      ? () => hook.addChannels?.(added)
-      : hook.unregister
-        ? () => {
-            hook.unregister?.();
-            return hook.register();
-          }
-        : () =>
-            log.warn("channel-message hook can neither add channels nor unregister", {
-              channel: channel.name,
-            });
-    // Subscribe before the new talker starts. A hook built outside this repo
-    // may throw synchronously or return no promise.
-    const failed = (error: unknown) => {
-      log.error("channel-message hook did not subscribe to a later channel", {
-        channel: channel.name,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    };
-    try {
-      Promise.resolve(subscribe()).catch(failed);
-    } catch (error) {
-      failed(error);
-    }
+    // Subscribe before the new talker starts.
+    void messageHooks.addChannels(added);
   });
 
   // Hydrate connection/grant state without starting provider transports, so
@@ -2163,15 +2176,8 @@ async function main() {
     await actionEngine.restartWorkerWarmPool();
     await reloadLifecycleHooks("app-keys-change");
     await reloadTurnMiddlewareHooks("app-keys-change");
-    if (reloadChannelMessageHook) {
-      try {
-        await reloadChannelMessageHook();
-      } catch (err) {
-        log.warn("channel-message hook reload failed; keeping the previous instance", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    await messageHooks.reload();
+    await persistHookStatus();
   };
   const permissions = new Permissions();
   try {
@@ -2250,6 +2256,9 @@ async function main() {
   try {
     const apiDeps: ApiDeps = {
       agentNameEvents,
+      personalData: personalDataRepo,
+      deviceConnections: deviceConnectionsRepo,
+      placeAudience: chatAudience,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
@@ -2320,6 +2329,10 @@ async function main() {
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       permissions,
       dashboardAccessState,
+      voiceInput: createVoiceInputSource({
+        romeCloud: romeCloudAccess,
+      }),
+      transcriptionUsage: usageRecorder,
       dashboardAccessStore,
       visitorAllowListSync,
       phoneWatching,

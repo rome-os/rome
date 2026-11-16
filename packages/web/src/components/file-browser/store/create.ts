@@ -159,8 +159,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         pendingUploadTarget: null,
         discardChangesResolver: null,
         acceptedBrowserPath: `${initialRouteSnapshot.pathname}${initialRouteSnapshot.search}${initialRouteSnapshot.hash}`,
-        sidebarResize: null,
-        dragDepth: 0,
       },
 
       tree: {
@@ -731,7 +729,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         discardChangesConfirmOpen: false,
         isDragActive: false,
         sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
-        isResizingSidebar: false,
         creating: false,
         deleting: false,
         moving: false,
@@ -768,9 +765,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         },
         setSidebarWidth(value) {
           set((s) => ({ ui: { ...s.ui, sidebarWidth: value } }));
-        },
-        setIsResizingSidebar(value) {
-          set((s) => ({ ui: { ...s.ui, isResizingSidebar: value } }));
         },
         setFilesPaneDrillPath(value) {
           set((s) => ({ ui: { ...s.ui, filesPaneDrillPath: value } }));

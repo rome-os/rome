@@ -4,7 +4,7 @@
 // Server, web and iOS read it through `taskStatus`, as they read a chat's
 // activity through `conciergeActivity`. docs/domains/chats.md#task
 
-import type { ConciergeStatusReaction, ConciergeTaskState } from "./concierge.js";
+import type { ConciergeMessageStatus, ConciergeTaskState } from "./concierge.js";
 
 /** The four states a task is in, one at a time. */
 export const CONCIERGE_TASK_STATUSES = ["needs_you", "active", "later", "ended"] as const;
@@ -146,36 +146,62 @@ export function taskStatusOfDto(task: {
   }
 }
 
-/** What a guardian message's status reaction follows from. */
-export interface MessageMarkFacts {
+/** What a guardian message's status follows from. */
+export interface MessageStatusFacts {
   /** Whether the turn that took the message answered it; null when no turn took it. */
   answered: boolean | null;
-  /** Whether that turn failed, by an error or a crash, before it answered. A stop or a newer input is no failure. */
-  turnFailed?: boolean;
   /**
-   * The status of each task made for the message, and whether Rome gave up
-   * telling the Concierge its result, so its owner was never told.
+   * Whether that turn showed it working: before the turn answered it, a
+   * working tool it called ran half a second, or it made a second one.
    */
-  tasks: readonly (ConciergeTaskStatusResult & { reportLost?: boolean })[];
+  working: boolean;
+  /** Whether the Concierge reacted to it: then it never shows working. */
+  reacted?: boolean;
+  /** Whether that turn failed, by an error or a crash, before it answered. A stop or a newer input is no failure. */
+  turnFailed: boolean;
+  /**
+   * Whether a task made for it follows a newer message now: the work went on
+   * from it, so its turn's failure no longer stands.
+   */
+  handedToNewer?: boolean;
+  /**
+   * The status of each task made for the message, whether Rome gave up
+   * telling the Concierge its result, so its owner was never told, and, for
+   * a task that waits on its owner, whether its question or approval card
+   * shows in the chat yet.
+   */
+  tasks: readonly (ConciergeTaskStatusResult & { reportLost?: boolean; cardShown?: boolean })[];
 }
 
 /**
- * A guardian message's status reaction (docs/domains/chats.md#status-reaction):
- * working only while the Concierge works for it now, that is while its turn
- * has not answered it or a task made for it is active, its report included;
- * failed when its turn failed, a task made for it ended failed, or Rome gave
- * up telling the result of a task not stopped since, once none of its tasks
- * is still open; else none. A task that waits for its owner or for later,
- * such as a scheduled task between runs, shows none. A task that ended for
- * no response shows none, even when Rome gave up telling it.
+ * A guardian message's status (docs/domains/chats.md#status): working while
+ * its turn shows it working and has not answered it, while a task made for it
+ * is active, its report included, or while such a task waits on its owner
+ * and its card does not show yet; never for a message the Concierge reacted
+ * to. Failed when its turn failed and no task made for it got done, a task
+ * made for it ended failed, or Rome gave up telling the result of a task not
+ * stopped since, once none of its tasks is still open; else none. A task that
+ * waits on its owner with its card shown, or waits for later, shows none: its
+ * card says so. A task that ended for no response shows none, even when Rome
+ * gave up telling it.
  */
-export function messageStatusReaction(facts: MessageMarkFacts): ConciergeStatusReaction | null {
-  if (facts.answered === false || facts.tasks.some((task) => task.status === "active")) {
+export function messageStatus(facts: MessageStatusFacts): ConciergeMessageStatus | null {
+  if (
+    facts.reacted !== true &&
+    ((facts.answered === false && facts.working) ||
+      facts.tasks.some(
+        (task) =>
+          task.status === "active" || (task.status === "needs_you" && task.cardShown === false),
+      ))
+  ) {
     return "working";
   }
   if (facts.tasks.some((task) => task.status !== "ended")) return null;
+  // A task made for the message that got done answers it, though its turn failed.
   const failed =
-    facts.turnFailed === true ||
+    (facts.turnFailed &&
+      facts.handedToNewer !== true &&
+      !facts.tasks.some((task) => task.endReason === "done")) ||
     facts.tasks.some(
       (task) =>
         task.endReason === "failed" ||

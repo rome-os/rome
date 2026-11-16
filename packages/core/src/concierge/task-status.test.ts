@@ -3,7 +3,7 @@ import { approvalWaits } from "../test/open-waits.js";
 import {
   type ConciergeTaskFacts,
   legacyTaskState,
-  messageStatusReaction,
+  messageStatus,
   parseTaskStatus,
   taskStatus,
 } from "@rome/api-types/concierge-task-status";
@@ -98,39 +98,59 @@ describe("taskStatus", () => {
   });
 });
 
-describe("messageStatusReaction", () => {
-  it("shows failed for a result Rome gave up telling, unless its task was stopped since", () => {
-    const lost = { status: "ended" as const, reportLost: true };
-    expect(messageStatusReaction({ answered: true, tasks: [{ ...lost, endReason: "done" }] })).toBe(
-      "failed",
-    );
+describe("messageStatus", () => {
+  const turn = { answered: false, working: false, turnFailed: false, tasks: [] };
+  const task = (status: "needs_you" | "active" | "later") => ({ status, endReason: null });
+
+  it("works only once its turn shows it working, until the turn answers it", () => {
+    expect(messageStatus(turn)).toBeNull();
+    expect(messageStatus({ ...turn, working: true })).toBe("working");
+    expect(messageStatus({ ...turn, answered: true, working: true })).toBeNull();
+    expect(messageStatus({ ...turn, answered: null })).toBeNull();
+  });
+
+  it("works while a task made for it is active, and shows none while it waits on its owner or for later", () => {
+    const answered = { ...turn, answered: true };
+    expect(messageStatus({ ...answered, tasks: [task("active")] })).toBe("working");
+    expect(messageStatus({ ...answered, tasks: [task("needs_you")] })).toBeNull();
+    expect(messageStatus({ ...answered, tasks: [task("later")] })).toBeNull();
+    expect(messageStatus({ ...answered, tasks: [task("later"), task("active")] })).toBe("working");
+  });
+
+  it("works while a task made for it waits on its owner until the card shows", () => {
+    const answered = { ...turn, answered: true };
+    const waiting = (cardShown: boolean) => ({ ...task("needs_you"), cardShown });
+    expect(messageStatus({ ...answered, tasks: [waiting(false)] })).toBe("working");
+    expect(messageStatus({ ...answered, tasks: [waiting(true)] })).toBeNull();
+  });
+
+  it("never works on a message the Concierge reacted to", () => {
+    expect(messageStatus({ ...turn, working: true, reacted: true })).toBeNull();
     expect(
-      messageStatusReaction({ answered: true, tasks: [{ ...lost, endReason: "stopped" }] }),
+      messageStatus({ ...turn, answered: true, reacted: true, tasks: [task("active")] }),
     ).toBeNull();
   });
 
-  it("works only while its turn has not answered it or a task made for it is active", () => {
-    const task = (status: "needs_you" | "active" | "later") => ({ status, endReason: null });
-    expect(messageStatusReaction({ answered: false, tasks: [] })).toBe("working");
-    expect(messageStatusReaction({ answered: true, tasks: [task("active")] })).toBe("working");
-    expect(messageStatusReaction({ answered: true, tasks: [task("later")] })).toBeNull();
-    expect(messageStatusReaction({ answered: true, tasks: [task("needs_you")] })).toBeNull();
-    expect(messageStatusReaction({ answered: true, tasks: [task("later"), task("active")] })).toBe(
-      "working",
-    );
-  });
-
-  it("shows failed only once none of the message's tasks is still open", () => {
+  it("fails when its turn failed or a task made for it ended failed, once none is still open", () => {
     const failed = { status: "ended" as const, endReason: "failed" as const };
-    const later = { status: "later" as const, endReason: null };
-    expect(messageStatusReaction({ answered: true, tasks: [failed, later] })).toBeNull();
-    expect(messageStatusReaction({ answered: true, turnFailed: true, tasks: [later] })).toBeNull();
-    expect(messageStatusReaction({ answered: true, tasks: [failed] })).toBe("failed");
+    expect(messageStatus({ ...turn, answered: true, turnFailed: true })).toBe("failed");
+    expect(messageStatus({ ...turn, answered: true, tasks: [failed] })).toBe("failed");
+    expect(messageStatus({ ...turn, answered: true, tasks: [failed, task("later")] })).toBeNull();
   });
 
-  it("shows none for a task that ended for no response, even when its report was lost", () => {
-    const lost = { status: "ended" as const, reportLost: true, endReason: "no_response" as const };
-    expect(messageStatusReaction({ answered: true, tasks: [lost] })).toBeNull();
+  it("shows none for a failed turn whose task got done", () => {
+    const done = { status: "ended" as const, endReason: "done" as const };
+    expect(messageStatus({ ...turn, answered: true, turnFailed: true, tasks: [done] })).toBeNull();
+  });
+
+  it("fails for a result Rome gave up telling, unless its task was stopped or got no response", () => {
+    const lost = { status: "ended" as const, reportLost: true };
+    const answered = { ...turn, answered: true };
+    expect(messageStatus({ ...answered, tasks: [{ ...lost, endReason: "done" }] })).toBe("failed");
+    expect(messageStatus({ ...answered, tasks: [{ ...lost, endReason: "stopped" }] })).toBeNull();
+    expect(
+      messageStatus({ ...answered, tasks: [{ ...lost, endReason: "no_response" }] }),
+    ).toBeNull();
   });
 });
 

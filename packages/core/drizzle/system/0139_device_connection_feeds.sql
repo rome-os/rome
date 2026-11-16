@@ -1,0 +1,1 @@
+ALTER TABLE `device_connections` ADD `feeds` text;

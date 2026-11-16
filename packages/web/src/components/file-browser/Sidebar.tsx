@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent, PointerEvent } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { FilePlus, FolderPlus, Plus, Search } from "lucide-react";
 import {
@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import { Tree } from "./Tree";
 import { UploadProgressFromStore } from "./UploadProgress";
-import { useSidebarResize } from "./hooks/useSidebarResize";
 import { usePersistedSidebarWidth } from "./hooks/usePersistedSidebarWidth";
 import {
   DEFAULT_SIDEBAR_WIDTH,
@@ -22,6 +21,9 @@ import {
   getIsDesktopViewport,
 } from "./store/utils";
 import { SidebarRootContextMenu, type ContextMenuActions } from "./ContextMenu";
+import { usePaneResize } from "@/hooks/use-pane-resize";
+import { writeStored } from "@/lib/stored-preference";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 interface SidebarProps {
   rootLabel: string;
@@ -42,7 +44,6 @@ export function Sidebar({
   const store = useFileBrowserStoreApi();
   const logicalRootPath = useFileBrowserStore((s) => s.config.logicalRootPath);
   const sidebarWidth = useFileBrowserStore((s) => s.ui.sidebarWidth);
-  const isResizingSidebar = useFileBrowserStore((s) => s.ui.isResizingSidebar);
   const tree = useFileBrowserStore((s) => s.tree.nodes);
   const creating = useFileBrowserStore((s) => s.ui.creating);
   const deleting = useFileBrowserStore((s) => s.ui.deleting);
@@ -53,7 +54,6 @@ export function Sidebar({
   const searching = useFileBrowserStore((s) => s.ui.searching);
 
   const sidebarStorageKey = usePersistedSidebarWidth(logicalRootPath);
-  useSidebarResize(sidebarStorageKey);
 
   const handleSidebarEmptyClick = (event: MouseEvent<HTMLElement>) => {
     const target = event.target instanceof Element ? event.target : null;
@@ -68,25 +68,19 @@ export function Sidebar({
     store.getState().selection.clearMultiSelect();
   };
 
-  const handleSidebarResizeStart = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    store.getState().refs.sidebarResize = {
-      startWidth: sidebarWidth,
-      startX: event.clientX,
-    };
-    store.getState().ui.setIsResizingSidebar(true);
-  };
-
-  const resetSidebarWidth = () => {
-    store.getState().ui.setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-    try {
-      window.localStorage.removeItem(sidebarStorageKey);
-    } catch {
-      // Width persistence is a convenience only.
-    }
-  };
+  const edge = usePaneResize({
+    size: sidebarWidth,
+    min: MIN_SIDEBAR_WIDTH,
+    max: MAX_SIDEBAR_WIDTH,
+    onResize: (width) => store.getState().ui.setSidebarWidth(width),
+    onResizeEnd: (width) => {
+      writeStored(sidebarStorageKey, String(width));
+    },
+    onReset: () => {
+      store.getState().ui.setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+      writeStored(sidebarStorageKey, null);
+    },
+  });
 
   return (
     <aside
@@ -155,7 +149,10 @@ export function Sidebar({
               placeholder={searchPlaceholder}
               value={searchQuery}
               onChange={(event) => store.getState().ui.setSearchQuery(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && void store.getState().ui.doSearch()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !isImeCompositionEvent(event))
+                  void store.getState().ui.doSearch();
+              }}
               className="flex-1 pl-8"
               aria-label={t("header.search")}
             />
@@ -200,18 +197,9 @@ export function Sidebar({
         </div>
       </div>
       <div
-        role="separator"
+        {...edge.separatorProps}
         aria-label={t("sidebar.resize")}
-        aria-orientation="vertical"
-        aria-valuemax={MAX_SIDEBAR_WIDTH}
-        aria-valuemin={MIN_SIDEBAR_WIDTH}
-        aria-valuenow={sidebarWidth}
-        tabIndex={-1}
-        onDoubleClick={resetSidebarWidth}
-        onPointerDown={handleSidebarResizeStart}
-        className={`absolute inset-y-0 right-0 block w-2 translate-x-1/2 cursor-col-resize touch-none transition-colors hover:bg-info/30 ${
-          isResizingSidebar ? "bg-info/30" : ""
-        }`}
+        className="absolute inset-y-0 right-0 block w-2 translate-x-1/2 cursor-col-resize touch-none outline-none outline-1 outline-offset-0 outline-transparent transition-colors hover:bg-info/30 focus-visible:bg-info/30 focus-visible:outline-solid focus-visible:outline-ring/50 data-[resizing]:bg-info/30"
       />
     </aside>
   );

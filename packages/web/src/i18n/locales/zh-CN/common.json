@@ -43,7 +43,6 @@
     "newChat": "新对话",
     "mainChat": "主对话",
     "conciergeSection": "主对话和话题对话",
-    "moreTopicChats": "还有 {{count}} 个",
     "mainChatUnavailable": "无法加载主对话",
     "conciergeUnread_one": "{{name}}，{{label}} 条未读消息",
     "conciergeUnread_other": "{{name}}，{{label}} 条未读消息",
@@ -51,13 +50,12 @@
     "conciergeUnreadBadge_other": "{{label}} 条未读消息",
     "newTopic": "新话题",
     "sectionTasks": "任务",
-    "tasksRunning": "{{count}} 个运行中",
-    "moreTasks": "还有 {{count}} 个",
+    "tasksRunning": "任务，{{count}} 个运行中",
     "modeSwitch": "对话列表模式",
     "modeChat": "对话",
-    "modeConcierge": "Concierge",
+    "modeConcierge": "Agent",
     "modeChatReplying": "有对话正在回复",
-    "modeConciergeUnread": "Concierge 有未读消息或等你处理的任务",
+    "modeConciergeUnread": "Agent 有未读消息或等你处理的任务",
     "topicChatActions": "{{name}} 的操作",
     "topicChatUnread_one": "{{name}}，{{label}} 条未读消息",
     "topicChatUnread_other": "{{name}}，{{label}} 条未读消息",
@@ -152,8 +150,7 @@
       "previous7Days": "过去 7 天",
       "previous30Days": "过去 30 天",
       "older": "更早"
-    },
-    "startedByConcierge": "由 {{name}} 发起"
+    }
   },
   "language": {
     "label": "语言"

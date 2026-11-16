@@ -1,3 +1,4 @@
+import { clearAllChatDrafts } from "./lib/chat-draft-storage";
 import { hasSession, useAuthStateSnapshot } from "./lib/auth-state";
 import { invalidateNewChatDrafts } from "./lib/new-chat-draft-storage";
 import { lazy, Suspense, useEffect } from "react";
@@ -10,8 +11,7 @@ import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
 import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
 import { useSettingsBackdrop } from "./hooks/use-settings-backdrop";
-import FreePage, { MainChatRedirect } from "./pages/free/FreePage";
-import { MAIN_CHAT_PATH } from "@/lib/chat-session";
+import FreePage, { HomeRedirect, MainChatRedirect } from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
 // /chat is the home route and what the first-load trace targets, so FreePage +
@@ -45,6 +45,7 @@ const AppEmbeddedPage = lazy(() => import("./pages/AppEmbeddedPage"));
 const AppFullPage = lazy(() => import("./pages/AppFullPage"));
 const DesktopPage = lazy(() => import("./pages/DesktopPage"));
 const WechatDesktopPage = lazy(() => import("./pages/WechatDesktopPage"));
+const DeviceConnectPage = lazy(() => import("./pages/DeviceConnectPage"));
 const NamedDesktopPage = lazy(() =>
   import("./pages/DesktopPage").then((m) => ({ default: m.NamedDesktopPage })),
 );
@@ -66,8 +67,10 @@ const DevIndexPage = import.meta.env.DEV
 export default function App() {
   const auth = useAuthStateSnapshot();
   useEffect(() => {
-    if (auth.ready && auth.backendReachable && auth.bootstrap && !hasSession(auth.bootstrap))
+    if (auth.ready && auth.backendReachable && auth.bootstrap && !hasSession(auth.bootstrap)) {
       invalidateNewChatDrafts();
+      clearAllChatDrafts();
+    }
   }, [auth]);
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
   // react-router navigations for every surface (shell, full-mode apps, auth).
@@ -155,7 +158,7 @@ export default function App() {
               </AuthGate>
             }
           >
-            <Route path="/" element={<Navigate to={MAIN_CHAT_PATH} replace />} />
+            <Route path="/" element={<HomeRedirect />} />
             <Route path="/chat/concierge" element={<MainChatRedirect />} />
             <Route path="/chat/*" element={<FreePage />} />
             {/* The signed-in person's main Concierge chat. It shares FreePage
@@ -201,6 +204,9 @@ export default function App() {
             <Route path="/desktop" element={<DesktopPage />} />
             <Route path="/desktop/wechat" element={<WechatDesktopPage />} />
             <Route path="/desktop/:name" element={<NamedDesktopPage />} />
+            {/* Where a connect card's Connect leads for a device capability;
+                the device's own app opens its flow at this path. */}
+            <Route path="/connections/device/:capability" element={<DeviceConnectPage />} />
             {/* Guide merged into the Showcases app; keep the old path working. */}
             <Route path="/guide" element={<Navigate to="/apps/showcases" replace />} />
           </Route>

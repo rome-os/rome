@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/ui",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "Shared React component kit for the Rome dashboard and Rome apps",
   "repository": {
     "type": "git",
@@ -95,6 +95,10 @@
       "types": "./dist/input.d.ts",
       "default": "./dist/input.js"
     },
+    "./keyboard-submit": {
+      "types": "./dist/keyboard-submit.d.ts",
+      "default": "./dist/keyboard-submit.js"
+    },
     "./layout-form": {
       "types": "./dist/layout-form.d.ts",
       "default": "./dist/layout-form.js"
@@ -118,6 +122,10 @@
     "./popover": {
       "types": "./dist/popover.d.ts",
       "default": "./dist/popover.js"
+    },
+    "./progressive-blur": {
+      "types": "./dist/progressive-blur.d.ts",
+      "default": "./dist/progressive-blur.js"
     },
     "./radio-group": {
       "types": "./dist/radio-group.d.ts",

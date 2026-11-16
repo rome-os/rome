@@ -31,6 +31,7 @@ import { parseEmailTextarea } from "@/lib/email-list";
 import { shareableOrigin } from "@/lib/shareable-origin";
 import { fetchJson } from "@/lib/fetch-json";
 import { useInvalidateApps, useUpgradeCandidates, type UpgradeCandidate } from "@/hooks/use-apps";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 
 // Every app lifecycle write (upgrade, enable/disable, uninstall, publish,
 // public access) plus the confirm/access dialogs they need, shared by the
@@ -125,7 +126,8 @@ export function useAppLifecycle(
   const [accessEmailsDraft, setAccessEmailsDraft] = useState<string[]>([]);
   const [accessEmailInput, setAccessEmailInput] = useState("");
   const [accessDialogError, setAccessDialogError] = useState("");
-  const [accessLinkCopied, setAccessLinkCopied] = useState(false);
+  const accessLinkCopy = useCopyFeedback();
+  const accessLinkCopied = accessLinkCopy.copiedText !== null;
 
   // Every lifecycle write follows the same shape: mark the app as acting, run
   // the request, toast any error, then invalidate the apps query so consumers
@@ -437,7 +439,7 @@ export function useAppLifecycle(
     setAccessEmailsDraft(app.cloudAllowedEmails);
     setAccessEmailInput("");
     setAccessDialogError("");
-    setAccessLinkCopied(false);
+    accessLinkCopy.reset();
   };
 
   const cancelAccessDialog = () => {
@@ -578,13 +580,7 @@ export function useAppLifecycle(
   const canCopyAccessLink = typeof navigator !== "undefined" && Boolean(navigator.clipboard);
   const copyAccessShareUrl = () => {
     if (!accessShareUrl) return;
-    void navigator.clipboard?.writeText(accessShareUrl).then(
-      () => {
-        setAccessLinkCopied(true);
-        setTimeout(() => setAccessLinkCopied(false), 1500);
-      },
-      () => {},
-    );
+    void accessLinkCopy.copy(accessShareUrl);
   };
 
   const dialogs = (

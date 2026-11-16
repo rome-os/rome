@@ -107,7 +107,8 @@
         "tidyingUp": "正在整理上下文"
       }
     },
-    "statusReaction": {
+    "reaction": "表情回应",
+    "status": {
       "working": "正在处理",
       "failed": "未完成"
     },
@@ -181,8 +182,7 @@
     "action": "回复",
     "dismiss": "取消回复",
     "jump": "跳到原消息",
-    "openThread": "打开对话串",
-    "toThread": "回复：{{title}}"
+    "openThread": "打开对话串"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -383,6 +383,12 @@
       "rejected": "已拒绝",
       "failed": "执行失败"
     },
+    "secretAccess": {
+      "allow": "允许 {{minutes}} 分钟",
+      "duration": "{{minutes}} 分钟",
+      "allowed": "已允许 {{name}} · {{minutes}} 分钟",
+      "rejected": "已拒绝 {{name}}"
+    },
     "actions": {
       "approve": "批准",
       "approving": "批准中…",
@@ -450,6 +456,18 @@
     "answered": "已回答",
     "dismiss": "跳过",
     "send": "发送"
+  },
+  "deviceConnectCard": {
+    "connected": "已连接",
+    "notConnected": "未连接"
+  },
+  "locationCard": {
+    "shared": "已共享位置 · ±{{accuracy}}",
+    "notShared": "未共享",
+    "locating": "正在获取你的位置…",
+    "denied": "此网站的位置权限已关闭。请在浏览器中开启，或点按“暂不”。",
+    "unavailable": "无法获取你的位置。请重试，或点按“暂不”。",
+    "unsupported": "此浏览器无法共享位置。请点按“暂不”，并在消息中说明地点。"
   },
   "appComponent": {
     "dismiss": "跳过",
@@ -649,21 +667,8 @@
     }
   },
   "thread": {
-    "title": "对话串",
-    "openTaskChat": "打开任务对话",
-    "close": "关闭对话串",
-    "loadFailed": "无法加载这个对话串。",
-    "replyPlaceholder": "回复"
-  },
-  "sessionRenewal": {
-    "notice": "已整理上下文 · {{reason}}",
-    "reasons": {
-      "context": "对话较长",
-      "setup": "设定已更新",
-      "idle": "闲置后",
-      "daily": "每日重置",
-      "working_dir": "工作目录不存在"
-    }
+    "back": "返回对话：{{title}}",
+    "replyPlaceholder": "回复：{{title}}"
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
@@ -699,5 +704,33 @@
     "channel": "渠道",
     "sendMessage": "发送消息",
     "action": "动作"
+  },
+  "voiceInput": {
+    "start": "开始语音输入",
+    "stop": "停止语音输入",
+    "finishing": "正在完成语音输入",
+    "whyMicrophone": "Rome 使用麦克风将你的语音转成文字",
+    "stopped": {
+      "provider-unavailable": "转写服务不可用，已停止收听",
+      "provider-refused": "转写服务拒绝了请求，已停止收听",
+      "bad-request": "出错，已停止收听",
+      "microphone-blocked": "麦克风被阻止，请在浏览器的网站设置中允许",
+      "microphone-missing": "未找到麦克风",
+      "connection-lost": "与 Rome 的连接已断开，已停止收听",
+      "microphone-failed": "麦克风无法启动，已停止收听",
+      "time-limit": "已达 10 分钟，已停止收听",
+      "service-refused": "Rome Cloud 拒绝了语音输入（{{code}}），已停止收听",
+      "service-unavailable": "无法连接 Rome Cloud，已停止收听",
+      "service-signed-out": "Rome Cloud 不接受此 Rome 的登录，请重新登录 Rome Cloud，已停止收听",
+      "left-chat": "离开此聊天时已停止收听",
+      "page-reloaded": "页面重新加载时已停止收听",
+      "no-speech": "30 秒未检测到语音，已停止收听"
+    },
+    "romeCloud": {
+      "voice_input_rate_limited": "最近一分钟语音输入次数过多，请稍后再试",
+      "voice_input_not_configured": "Rome Cloud 尚未开通语音输入，已停止收听",
+      "provider_unavailable": "Rome Cloud 的转写服务暂不可用，已停止收听",
+      "insufficient_credits": "Rome 额度不足，无法使用语音输入，已停止收听"
+    }
   }
 }

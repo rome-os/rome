@@ -49,6 +49,12 @@
     "remove": "Remove",
     "cancel": "Cancel"
   },
+  "deviceConnect": {
+    "title": "Connect {{title}}",
+    "onDevice": "Connect {{title}} on {{device}}: open the Rome app there and turn it on under Settings › Connections. Then go back to the chat and say it's done.",
+    "connected": "{{title}} is connected on {{device}}. Go back to the chat and say it's done.",
+    "yourDevice": "your device"
+  },
   "connections": {
     "loading": "Loading connections",
     "errorTitle": "Connections couldn't be loaded",
@@ -351,6 +357,38 @@
     "batchOverridden": "Some saved keys are overridden by server settings. Their entered values are not in use.",
     "summary": "Secrets apps can read, like a database password or an API key.",
     "manage": "Manage"
+  },
+  "vault": {
+    "title": "Vault",
+    "openLabel": "Open Vault",
+    "keyCount_one": "{{count}} secret",
+    "keyCount_other": "{{count}} secrets",
+    "loading": "Loading the vault",
+    "errorTitle": "The vault couldn't be loaded",
+    "emptyTitle": "Nothing in the vault yet",
+    "emptyBody": "Add a secret, like an access token, so an agent can use it once you approve.",
+    "add": "Add secret",
+    "removeBody": "Agents will no longer be able to use this secret. This can't be undone.",
+    "form": {
+      "titleAdd": "New secret",
+      "labelField": "What is this secret for?",
+      "labelPlaceholder": "e.g. GitHub token for releases",
+      "nameField": "Name",
+      "namePlaceholder": "e.g. GITHUB_TOKEN",
+      "nameHint": "Uppercase letters, digits, and underscores. Commands read the secret under this name.",
+      "consent": "An agent can use this only after you approve it.",
+      "save": "Save",
+      "inputMethod": "How to add secrets",
+      "singleKey": "Single secret",
+      "back": "Back to the vault"
+    },
+    "saved": "Saved {{name}}.",
+    "batchSaved_one": "Saved {{count}} secret.",
+    "batchSaved_other": "Saved {{count}} secrets.",
+    "summary": "Secrets agents can use with your approval.",
+    "lastUsed": "Used {{time}}",
+    "neverUsed": "Never used",
+    "grantedUntil": "Granted until {{time}}"
   },
   "trust": {
     "title": "Bond Level Rules",
@@ -908,7 +946,22 @@
     "restartTimeoutTitle": "The upgrade is taking longer than expected",
     "restartTimeoutBody": "{{name}} hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud.",
-    "close": "Close"
+    "close": "Close",
+    "voiceInput": {
+      "title": "Voice input",
+      "loadFailed": "Failed to load voice input",
+      "placeViaRomeCloud": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, provided through Rome Cloud. Rome keeps no audio.",
+      "romeCloudUnreachable": "Voice input is provided through Rome Cloud, which cannot be reached right now, so Rome cannot name the transcription service.",
+      "romeCloudNotConfigured": "Voice input is provided through Rome Cloud, which has not set up a transcription service yet.",
+      "romeCloudSignedOut": "Voice input is provided through Rome Cloud, which does not accept this Rome's sign-in. Sign in to Rome Cloud again to use it.",
+      "microphone": {
+        "title": "Microphone",
+        "description": "Voice input in this browser records from this microphone.",
+        "systemDefault": "System default",
+        "show": "Show microphones",
+        "refused": "The browser blocked the microphone, so it won't list them. Allow it in the browser's site settings."
+      }
+    }
   },
   "easterEgg": {
     "closeLabel": "Close advanced easter egg",

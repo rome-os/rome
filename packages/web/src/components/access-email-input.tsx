@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { contactEmailSuggestions, EMAIL_CHANNEL } from "@/lib/contact-emails";
 import { parseEmailTextarea } from "@/lib/email-list";
-import { isImeCompositionEvent } from "@/lib/keyboard-submit";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { useAccountSearch } from "@/pages/people/use-roster";
 

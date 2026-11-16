@@ -1,6 +1,6 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { CodexAppServerManager, readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -18,7 +18,7 @@ import { AgentLoader } from "../app-host/agent-loader.js";
 import { TurnListeners } from "../agent/index.js";
 import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
-import { createSessions, type Sessions } from "../agent/index.js";
+import { createSessions, type AgentSession, type Sessions } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../app-host/skill-loader.js";
@@ -45,6 +45,7 @@ describe("AgentSession events loop", () => {
   let nextRun: () => AsyncIterable<AgentEvent | ModelSessionEvent>;
   let opened: ModelSession[];
   let closeCalls: number;
+  let codexManager: CodexAppServerManager | undefined;
   // Whether the provider's event stream throws after its first event.
   let streamBreaks: boolean;
   const log = createLogger("agent-session");
@@ -71,15 +72,30 @@ describe("AgentSession events loop", () => {
     repository = new DrizzleSessionRepository(testDb.db);
     opened = [];
     closeCalls = 0;
+    codexManager = undefined;
     streamBreaks = false;
     const provider: ModelProvider = {
       id: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
+        const bindingManager = codexManager;
+        const thread = await bindingManager?.openThread(
+          { model: params.config.model },
+          {
+            onNotification() {},
+            onExit() {},
+            async onDynamicToolCall() {
+              return { success: false, contentItems: [] };
+            },
+          },
+          params.thread.kind === "resume" ? params.thread.modelThreadId : undefined,
+        );
         const session = createSessionFromRun("openai", () => nextRun(), params);
+        if (thread) Object.defineProperty(session, "modelThreadId", { value: thread.threadId });
         const close = session.close.bind(session);
         session.close = async () => {
           closeCalls++;
+          if (thread) await bindingManager!.unsubscribe(thread.threadId);
           await close();
         };
         if (streamBreaks) {
@@ -137,6 +153,7 @@ describe("AgentSession events loop", () => {
 
   afterEach(async () => {
     await manager.shutdown();
+    codexManager?.close();
     testDb.close();
     await rm(directory, { recursive: true, force: true });
     rs.restoreAllMocks();
@@ -193,5 +210,54 @@ describe("AgentSession events loop", () => {
 
     await session.close("user");
     expect(closeCalls).toBe(1);
+  });
+
+  it.each([
+    false,
+    true,
+  ])("keeps the reopened session after child shutdown (Codex binding: %s)", async (sharedBinding) => {
+    if (sharedBinding) {
+      codexManager = new CodexAppServerManager({
+        env: {},
+        createClient: () => ({
+          start() {},
+          notify() {},
+          close() {},
+          async request(method, params) {
+            if (method === "thread/start") return { thread: { id: "synthetic-thread" } };
+            if (method === "thread/resume")
+              return { thread: { id: (params as { threadId: string }).threadId } };
+            return {};
+          },
+        }),
+      });
+    }
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const parent = await manager.open(key);
+    await collect((await startAfter(parent, { prompt: "hello" })).events());
+    const children = (parent as unknown as { childManager: Sessions }).childManager;
+    let finishShutdown!: () => void;
+    const shutdownDone = new Promise<void>((resolve) => {
+      finishShutdown = resolve;
+    });
+    const shutdown = rs.spyOn(children, "shutdown").mockImplementation(() => shutdownDone);
+    const closing = parent.close("user");
+    await expect.poll(() => shutdown.mock.calls.length).toBe(1);
+    await expect.poll(() => parent.status).toBe("closed");
+    let successor: AgentSession;
+    try {
+      successor = await manager.open(key);
+    } finally {
+      finishShutdown();
+      await closing;
+    }
+    expect(successor.sessionId).toBe(parent.sessionId);
+    // Losing the live entry tries to bind its still-owned provider thread again.
+    const acquired = await manager.open(key);
+    expect(acquired === successor).toBe(true);
+    expect(manager.find(key) === successor).toBe(true);
+    expect(opened).toHaveLength(2);
   });
 });

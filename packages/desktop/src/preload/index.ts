@@ -108,7 +108,12 @@ const api = {
 // sign-in page. It gets the marker that says "inside the Mac app" (see
 // `isElectronShell` in the dashboard) and the device bridge, which main answers
 // only for the Rome this launch opened. Main refuses everything else.
-contextBridge.exposeInMainWorld("rome", location.protocol === "file:" ? api : { device });
+// `microphone` tells the dashboard this app gives it the microphone for voice
+// input; an older app does not, and the dashboard then hides the control.
+contextBridge.exposeInMainWorld(
+  "rome",
+  location.protocol === "file:" ? api : { device, microphone: true },
+);
 
 // Tag the document so the web app can conditionally apply
 // Electron-shell-only styles (drag regions, traffic-light insets) without

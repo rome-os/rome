@@ -43,7 +43,6 @@
     "newChat": "New chat",
     "mainChat": "Main chat",
     "conciergeSection": "Main chat and topic chats",
-    "moreTopicChats": "{{count}} more",
     "mainChatUnavailable": "Could not load the main chat",
     "conciergeUnread_one": "{{name}}, {{label}} unread message",
     "conciergeUnread_other": "{{name}}, {{label}} unread messages",
@@ -51,13 +50,12 @@
     "conciergeUnreadBadge_other": "{{label}} unread messages",
     "newTopic": "New topic",
     "sectionTasks": "Tasks",
-    "tasksRunning": "{{count}} running",
-    "moreTasks": "{{count}} more",
+    "tasksRunning": "Tasks, {{count}} running",
     "modeSwitch": "Chat list mode",
     "modeChat": "Chat",
-    "modeConcierge": "Concierge",
+    "modeConcierge": "Agent",
     "modeChatReplying": "A chat is replying",
-    "modeConciergeUnread": "Unread Concierge messages or a task waiting for you",
+    "modeConciergeUnread": "Unread Agent messages or a task waiting for you",
     "topicChatActions": "Actions for {{name}}",
     "topicChatUnread_one": "{{name}}, {{label}} unread message",
     "topicChatUnread_other": "{{name}}, {{label}} unread messages",
@@ -152,8 +150,7 @@
       "previous7Days": "Previous 7 days",
       "previous30Days": "Previous 30 days",
       "older": "Older"
-    },
-    "startedByConcierge": "Started by {{name}}"
+    }
   },
   "language": {
     "label": "Language"

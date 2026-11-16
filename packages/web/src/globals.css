@@ -979,54 +979,51 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
 [data-timeline-landed] {
   background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
-/* A Concierge bubble is as wide as its anchor, so the tint alone hides behind
-   it. The ring shows around the bubble. */
-[data-concierge-transcript] [data-timeline-anchor] {
-  transition:
-    background 300ms ease-out,
-    box-shadow 300ms ease-out;
-}
+/* A Concierge bubble's anchor is not as wide as the bubble: it takes up to 90%
+   of the column, where the bubble stops at its reading width, and a touch
+   device's details row sits in it. So the anchor draws nothing of its own, and
+   the tint alone would hide behind the bubble. The ring shows around the
+   bubble or card itself, the first thing in its box, so it is exactly as wide. */
 [data-concierge-transcript] [data-timeline-landed] {
+  background: none;
+}
+[data-concierge-transcript] [data-bubble-box] > :first-child {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 300ms;
+  transition-timing-function: ease-out;
+}
+[data-concierge-transcript] [data-timeline-landed] > [data-bubble-box] > :first-child {
+  border-radius: var(--rome-radius-16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
-/* A status reaction grows in from 0.6, as a tapback does, and fades out
-   (status-reaction.tsx, MARK_FADE_MS). */
+/* A chat thread in focus hides what is outside it (ConciergeTranscript). The
+   transcript carries data-thread-motion while use-thread-focus.ts folds those
+   rows away or back, so they show for the length of the motion. */
+[data-concierge-transcript]:not([data-thread-motion]) [data-thread-out] {
+  display: none;
+}
+/* A reaction grows in from 0.6, as a tapback does, and fades out
+   (reaction.tsx, MARK_FADE_MS). */
 @keyframes rome-mark-pop-in {
   from {
     opacity: 0;
     transform: scale(0.6);
   }
 }
-[data-status-reaction] {
+[data-reaction] {
   animation: rome-mark-pop-in 150ms ease-out;
   transition: opacity 150ms ease-in;
 }
-[data-status-reaction][data-leaving] {
+[data-reaction][data-leaving] {
   opacity: 0;
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-status-reaction] {
+  [data-reaction] {
     animation: none;
     transition: none;
   }
 }
 
-/* The chat thread view fades in on open, each layer on its own
-   (ChatThreadView.tsx), and closes at once: a backdrop blur does not fade
-   out cleanly. 180ms is THREAD_FADE_MS in reply/thread-anchor.ts. */
-@keyframes rome-thread-fade-in {
-  from {
-    opacity: 0;
-  }
-}
-[data-chat-thread-fade] {
-  animation: rome-thread-fade-in 180ms ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-chat-thread-fade] {
-    animation: none;
-  }
-}
 [data-chat-pending-card]:focus-visible {
   outline: 1px solid color-mix(in srgb, var(--ring) 50%, transparent);
   outline-offset: -1px;

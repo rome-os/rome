@@ -50,3 +50,5 @@ actions:
   - actions/show-app
   - actions/summon
   - actions/system-upgrade
+  - actions/vault-apply
+  - actions/vault-search

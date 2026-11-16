@@ -24,6 +24,7 @@
     "./anthropic-compatible-providers": "./src/anthropic-compatible-providers.ts",
     "./anthropic-compatible-env": "./src/anthropic-compatible-env.ts",
     "./app-keys": "./src/app-keys.ts",
+    "./vault": "./src/vault.ts",
     "./apps-runtime": "./src/apps-runtime.ts",
     "./discord-broker": "./src/discord-broker.ts",
     "./favors": "./src/favors.ts",
@@ -36,11 +37,13 @@
     "./platform": "./src/platform.ts",
     "./persons": "./src/persons.ts",
     "./devices": "./src/devices.ts",
+    "./voice-input": "./src/voice-input.ts",
     "./node-console": "./src/node-console.ts",
     "./wechat-app": "./src/wechat-app.ts",
     "./live-events": "./src/live-events.ts",
     "./app-connection-access": "./src/app-connection-access.ts",
-    "./question-card": "./src/question-card.ts"
+    "./question-card": "./src/question-card.ts",
+    "./location-card": "./src/location-card.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

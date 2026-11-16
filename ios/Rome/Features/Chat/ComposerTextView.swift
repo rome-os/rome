@@ -14,6 +14,13 @@ struct ComposerTextView: UIViewRepresentable {
     var onPasteImages: (([NSItemProvider]) -> Void)?
     /// The text without what an input method is still composing.
     var committedText: Binding<String>? = nil
+    /// Gets the UIKit view, for voice input to type into.
+    var handle: ComposerTextHandle? = nil
+    /// False while voice input listens: the field shows the words as they come.
+    var editable = true
+    /// Called on each change the guardian makes, typed, pasted or deleted. Text
+    /// the app sets (a restored draft, a send clearing the field) is not one.
+    var onEdit: () -> Void = {}
 
     static let maxLines = 6
 
@@ -31,6 +38,8 @@ struct ComposerTextView: UIViewRepresentable {
         // The placeholder is fitted to the width: draw it again when that changes.
         view.contentMode = .redraw
         view.accessibilityLabel = placeholder
+        view.accessibilityIdentifier = "message-field"
+        handle?.view = view
         return view
     }
 
@@ -42,11 +51,14 @@ struct ComposerTextView: UIViewRepresentable {
         if view.textContainerInset.top != inset {
             view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
         }
-        if view.text != text { view.text = text }
+        // While voice input listens, the view shows the words before the binding has them.
+        if editable, view.text != text { view.text = text }
         view.named = named
         if view.placeholder != placeholder { view.placeholder = placeholder }
         view.accessibilityLabel = placeholder
         view.onPasteImages = onPasteImages
+        handle?.view = view
+        if view.isEditable != editable { view.isEditable = editable }
         if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
             DispatchQueue.main.async { committedText.wrappedValue = text }
         }
@@ -111,6 +123,7 @@ struct ComposerTextView: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             parent.committedText?.wrappedValue = Self.committed(in: textView)
+            parent.onEdit()
             (textView as? PastingTextView)?.setNeedsDisplay()
             // Past six lines it scrolls: keep the caret in view.
             if textView.isScrollEnabled { textView.scrollRangeToVisible(textView.selectedRange) }
@@ -123,6 +136,12 @@ struct ComposerTextView: UIViewRepresentable {
             let length = textView.offset(from: marked.start, to: marked.end)
             let text = textView.text as NSString
             return text.replacingCharacters(in: NSRange(location: start, length: length), with: "")
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            // Only the guardian's own: text the app sets moves the selection too.
+            guard textView.isFirstResponder else { return }
+            parent.handle?.caret = textView.selectedRange
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
@@ -155,6 +174,11 @@ final class PastingTextView: UITextView {
 
     override var text: String! { didSet { setNeedsDisplay() } }
     override var font: UIFont? { didSet { setNeedsDisplay() } }
+    /// Spoken text is drawn as attributed text once a frame, so the
+    /// placeholder redraws only when the field turns empty or stops being so.
+    override var attributedText: NSAttributedString! {
+        didSet { if (oldValue?.length ?? 0 == 0) != (attributedText?.length ?? 0 == 0) { setNeedsDisplay() } }
+    }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), onPasteImages != nil, pasteboard.hasImages { return true }

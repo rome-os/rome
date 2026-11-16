@@ -54,6 +54,7 @@ import { newChatTarget } from "@/lib/chat-list-mode";
 import { isElectronShell } from "@/lib/electron-shell";
 import { routeTitle } from "@/lib/page-title";
 import { isApplePlatform } from "@/lib/platform";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -73,21 +74,13 @@ const isSupportedLanguage = (lng: string | undefined): lng is string =>
   !!lng && (SUPPORTED_LANGUAGES as readonly string[]).includes(lng);
 
 function readSidebarCollapsed(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return readStored(SIDEBAR_COLLAPSED_KEY) === "1";
 }
 
 // Names show until the guardian hides them, so a first visit reads the rail
 // instead of guessing at its icons.
 function readRailNames(): boolean {
-  try {
-    return localStorage.getItem(RAIL_NAMES_KEY) !== "0";
-  } catch {
-    return true;
-  }
+  return readStored(RAIL_NAMES_KEY) !== "0";
 }
 
 function sidebarShortcutForPlatform(): string {
@@ -203,18 +196,14 @@ export function RomeShellLayout() {
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
-      } catch {}
+      writeStored(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
       return next;
     });
   }, []);
 
   const setRailNamesPersisted = useCallback((next: boolean) => {
     setRailNames(next);
-    try {
-      localStorage.setItem(RAIL_NAMES_KEY, next ? "1" : "0");
-    } catch {}
+    writeStored(RAIL_NAMES_KEY, next ? "1" : "0");
   }, []);
 
   // The rail's right edge switches the names. A click flips them; a drag

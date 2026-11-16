@@ -1,3 +1,4 @@
+import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
@@ -38,14 +39,14 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
 
 // The host's own built-in cards (vs an app's inline component):
 // the only suspensions auto-dismissed by a free-text reply, since typing in
-// chat instead of using the card is the natural "skip this" for a question or a
-// provider sign-in, but not for an app's half-filled form.
+// chat instead of using the card is the natural "skip this" for a question, a
+// location share or a provider sign-in, but not for an app's half-filled form.
 //
 // The connect-AI card has to be here as well as the question card: it resolves
 // itself once a provider signs in, so an earlier copy left open would submit a
 // second `{ connected: true }` and drive the script a step past where the
 // guardian is.
-const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card"]);
+const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card", LOCATION_CARD_ID]);
 
 function isAutoDismissedCard(b: TranscriptPart): boolean {
   return (
@@ -95,90 +96,6 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
     }
   }
   return map;
-}
-
-// (session, toolUseId) → the message holding that id's latest card. A tool id
-// like `item_0` recurs across turns, so the key alone does not say which card
-// a result answers; the message does.
-function latestCardMessages(messages: ChatMessage[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const msg of messages) {
-    if (msg.role !== "assistant") continue;
-    for (const b of parseMessageEntries(msg)) {
-      if (b.type === "pending_interaction") {
-        map.set(interactionResultKey(msg.sessionId, b.toolUseId), msg.id);
-      }
-    }
-  }
-  return map;
-}
-
-// (card message, session, toolUseId) → the result that card occurrence got,
-// read in transcript order as buildInteractionResults reads it. Kept per
-// occurrence, so a later card that reuses the tool id has its own.
-function resultsByCard(messages: ChatMessage[]): Map<string, Record<string, unknown>> {
-  const results = new Map<string, Record<string, unknown>>();
-  const cardOf = new Map<string, string>();
-  // Per session, the built-in cards still open, which a typed reply dismisses.
-  const openCards = new Map<string, Set<string>>();
-  const occurrence = (key: string) => `${cardOf.get(key)}\u0000${key}`;
-  for (const msg of messages) {
-    let userTextReply = false;
-    for (const b of parseMessageEntries(msg)) {
-      if (msg.role === "assistant" && b.type === "pending_interaction") {
-        const key = interactionResultKey(msg.sessionId, b.toolUseId);
-        cardOf.set(key, msg.id);
-        const open = openCards.get(msg.sessionId) ?? new Set<string>();
-        open.delete(key);
-        if (isAutoDismissedCard(b)) open.add(key);
-        openCards.set(msg.sessionId, open);
-      } else if (msg.role === "user" && b.type === "interaction_result") {
-        const key = interactionResultKey(msg.sessionId, b.toolUseId);
-        if (cardOf.has(key)) results.set(occurrence(key), b.output);
-        openCards.get(msg.sessionId)?.delete(key);
-      } else if (msg.role === "user" && b.type === "text" && b.content.trim()) {
-        userTextReply = true;
-      }
-    }
-    const open = userTextReply ? openCards.get(msg.sessionId) : undefined;
-    if (open) {
-      for (const key of open) results.set(occurrence(key), { dismissed: true });
-      open.clear();
-    }
-  }
-  return results;
-}
-
-/**
- * The card results a chat thread's own transcript reads. They are read from
- * the thread's fetched messages and the main timeline's together, in order
- * and each message once: the thread's can lie well before the main
- * timeline's loaded page, and a typed reply placed in another thread, which
- * dismisses the card, is only in the main timeline's. Each card gets the
- * result of its own occurrence, so a later card that reuses the tool id
- * leaves it as it was. The main timeline's results, which also hold ones not
- * yet in any message, then apply to a card the thread shows as the same
- * message.
- */
-export function threadInteractionResults(
-  threadMessages: ChatMessage[],
-  main: { messages: ChatMessage[]; results: ChatView["interactionResults"] },
-): ChatView["interactionResults"] {
-  const union = new Map<string, ChatMessage>();
-  for (const msg of [...threadMessages, ...main.messages]) union.set(msg.id, msg);
-  const byCard = resultsByCard(orderChatMessages([...union.values()]));
-  const threadCards = latestCardMessages(threadMessages);
-  const mainCards = latestCardMessages(main.messages);
-  const results: ChatView["interactionResults"] = new Map();
-  for (const [key, card] of threadCards) {
-    const own = byCard.get(`${card}\u0000${key}`);
-    if (own !== undefined) results.set(key, own);
-  }
-  for (const [key, output] of main.results) {
-    const card = threadCards.get(key);
-    if (card !== undefined && card === mainCards.get(key)) results.set(key, output);
-  }
-  return results;
 }
 
 export function buildChatView(
@@ -303,15 +220,6 @@ export type ChatRow =
   // The chat moved to another model: the turn after it ran on `model`, the
   // session's turn before it on another one.
   | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string })
-  // The chat's agent session was renewed before this turn, for `reason`.
-  | (RowBase & {
-      kind: "session_renewal";
-      reason: string;
-      renewedSessionId: string;
-      /** The chat the renewed session serves. */
-      chatId: string;
-      turnId: string;
-    })
   // The turn after it ran on what a routine, an app or another agent sent
   // into the chat, which shows as a faint line naming the source.
   | (RowBase & { kind: "automated_input"; source: SystemInputSource; turnId: string });
@@ -323,8 +231,6 @@ export type ChatRow =
 const builtRows = new WeakMap<ChatMessage, ChatRow>();
 // A model-switch notice is keyed by the row it stands before.
 const builtSwitches = new WeakMap<ChatRow, ChatRow>();
-// A session-renewal notice is keyed by the row it stands before.
-const builtRenewals = new WeakMap<ChatRow, ChatRow>();
 // So is an automated input's line.
 const builtInputs = new WeakMap<ChatRow, ChatRow>();
 
@@ -337,9 +243,6 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
   if (a.kind === "user") return true;
   if (a.kind === "model_switch") {
     return b.kind === "model_switch" && a.model === b.model && a.turnId === b.turnId;
-  }
-  if (a.kind === "session_renewal") {
-    return b.kind === "session_renewal" && a.reason === b.reason && a.turnId === b.turnId;
   }
   if (a.kind === "automated_input") {
     return (
@@ -449,13 +352,7 @@ export function buildRows(
 
 /** The turn and session a row belongs to, or null for a row with no turn. */
 function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
-  if (
-    row.kind === "model_switch" ||
-    row.kind === "session_renewal" ||
-    row.kind === "automated_input"
-  ) {
-    return null;
-  }
+  if (row.kind === "model_switch" || row.kind === "automated_input") return null;
   const message = row.kind === "agent" ? row.messages[0] : row.message;
   return message?.turnId ? { turnId: message.turnId, sessionId: message.sessionId } : null;
 }
@@ -469,31 +366,11 @@ function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
 function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessage>): ChatRow[] {
   const lastModelBySession = new Map<string, string>();
   const seenTurns = new Set<string>();
-  // A renewed session's first turn says so once, even when it ran again.
-  const renewedSessions = new Set<string>();
   const out: ChatRow[] = [];
   for (const row of rows) {
     const turn = rowTurn(row);
     if (turn && !seenTurns.has(turn.turnId)) {
       seenTurns.add(turn.turnId);
-      const renewal = tracesByTurn.get(turn.turnId)?.traceSummary?.sessionRenewal;
-      if (renewal && !renewedSessions.has(renewal.sessionId)) {
-        renewedSessions.add(renewal.sessionId);
-        const notice: ChatRow = {
-          kind: "session_renewal",
-          key: `session-renewal:${renewal.sessionId}`,
-          reason: renewal.reason,
-          renewedSessionId: renewal.sessionId,
-          chatId: turn.sessionId,
-          turnId: turn.turnId,
-        };
-        const built = builtRenewals.get(row);
-        if (built && sameRow(built, notice)) out.push(built);
-        else {
-          builtRenewals.set(row, notice);
-          out.push(notice);
-        }
-      }
       const source = tracesByTurn.get(turn.turnId)?.traceSummary?.automatedInput;
       if (source) {
         const line: ChatRow = {
