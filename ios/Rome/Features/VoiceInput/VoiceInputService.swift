@@ -36,10 +36,14 @@ final class VoiceInputService {
         checkedAt = Date()
         do {
             info = try await backend.voiceInputInfo()
-        } catch {
-            // An instance still waking, or no network: the next field to open asks again.
+        } catch APIError.notFound {
+            // An instance older than voice input: an answer, held for the minute.
             info = nil
+        } catch {
+            // An instance still waking, or no network: keep what it last said, and let the
+            // next field to open ask again.
             checkedAt = nil
+            return
         }
         available = info?.available ?? false
     }
