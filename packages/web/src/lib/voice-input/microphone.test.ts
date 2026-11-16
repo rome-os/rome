@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { describe, expect, it, rs } from "@rstest/core";
 import { loudness, openMicrophoneStream } from "./microphone";
+import { chooseMicrophone, chosenMicrophone } from "./microphone-choice";
 
 function browser(getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>) {
   const spy = rs.fn(getUserMedia);
@@ -22,7 +23,8 @@ describe("opening the microphone", () => {
     expect(audio.deviceId).toEqual({ exact: "usb" });
   });
 
-  it("falls back to the system default when the chosen microphone is unplugged", async () => {
+  it("falls back to the system default, and switches the choice to it, when the chosen microphone is unplugged", async () => {
+    chooseMicrophone("usb");
     const getUserMedia = browser(async (constraints) => {
       if ((constraints.audio as MediaTrackConstraints).deviceId)
         throw failure("OverconstrainedError");
@@ -31,6 +33,7 @@ describe("opening the microphone", () => {
     expect(await openMicrophoneStream("usb")).toBe(stream);
     const audio = getUserMedia.mock.calls[1]?.[0]?.audio as MediaTrackConstraints;
     expect(audio.deviceId).toBeUndefined();
+    expect(chosenMicrophone()).toBeNull();
   });
 
   it("still reports a refused microphone rather than trying another", async () => {

@@ -174,6 +174,11 @@ final class PastingTextView: UITextView {
 
     override var text: String! { didSet { setNeedsDisplay() } }
     override var font: UIFont? { didSet { setNeedsDisplay() } }
+    /// Spoken text is drawn as attributed text once a frame, so the
+    /// placeholder redraws only when the field turns empty or stops being so.
+    override var attributedText: NSAttributedString! {
+        didSet { if (oldValue?.length ?? 0 == 0) != (attributedText?.length ?? 0 == 0) { setNeedsDisplay() } }
+    }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), onPasteImages != nil, pasteboard.hasImages { return true }

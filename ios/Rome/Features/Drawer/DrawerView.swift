@@ -8,8 +8,6 @@ struct DrawerView: View {
     let onSection: (MainSection) -> Void
     let onNewTopic: () -> Void
     let onSettings: () -> Void
-    /// Opens the update page from the line shown while the Rome is behind.
-    let onUpdate: () -> Void
     /// How many topic chats show; a scroll near the end adds a page.
     @State private var topicLimit = TopicChatsStore.pageSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -134,9 +132,10 @@ struct DrawerView: View {
             .scrollBounceBehavior(.basedOnSize)
             .frame(maxHeight: .infinity)
 
-            // The open Rome behind its latest release, for a guardian and a visitor alike.
-            if model.update.offered != nil {
-                DrawerUpdateRow(agentName: workspace.agentName, action: onUpdate)
+            // The open Rome behind its latest release, or updating in the
+            // background, for a guardian and a visitor alike.
+            if let state = model.update.rowState {
+                DrawerUpdateRow(agentName: workspace.agentName, state: state)
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
             }

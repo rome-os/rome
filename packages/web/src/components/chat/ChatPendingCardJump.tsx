@@ -42,6 +42,8 @@ export function ChatPendingCardJump({
     const measure = () => {
       frame = 0;
       const viewport = scroller.getBoundingClientRect();
+      const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+      const top = viewport.top + clear;
       // The sticky composer covers part of the scroller, even though cards
       // behind it still intersect the scroller's bounding box.
       const bottom = Math.min(viewport.bottom, floor.getBoundingClientRect().top);
@@ -70,7 +72,7 @@ export function ChatPendingCardJump({
           // A card another thread's focus hides has no height, yet it waits.
           if (card.closest("[data-thread-out]")) return true;
           const rect = card.getBoundingClientRect();
-          return rect.height > 0 && (rect.bottom <= viewport.top || rect.top >= bottom);
+          return rect.height > 0 && (rect.bottom <= top || rect.top >= bottom);
         });
       setTarget(next ?? null);
     };
@@ -114,11 +116,13 @@ export function ChatPendingCardJump({
       onClick={() => {
         const jump = (card: HTMLElement) => {
           card.focus({ preventScroll: true });
+          const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
           scroller.scrollTo({
             top:
               scroller.scrollTop +
               card.getBoundingClientRect().top -
-              scroller.getBoundingClientRect().top,
+              scroller.getBoundingClientRect().top -
+              clear,
             behavior: "instant",
           });
         };
