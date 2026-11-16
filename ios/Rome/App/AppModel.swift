@@ -216,7 +216,7 @@ final class Workspace {
         main.showCached()
         if main.loaded { conciergeState = .ready }
         concierge = main
-        topics = TopicChatsStore(backend: backend)
+        topics = TopicChatsStore(backend: backend, fold: TopicChatsFold(host: host))
     }
 
     /// The main Chat's sharing, for its Shared links in Settings; nil until
@@ -1290,7 +1290,8 @@ final class AppModel {
     }
 
     /// What this phone keeps for the signed-in account: drafts, kept chats,
-    /// pictures, recent apps, closed update banners, the language last seen,
+    /// pictures, recent apps, closed update banners, the folded topic chats,
+    /// the language last seen,
     /// voice input's notices, the last instance, and this phone's device
     /// switches and activity log. Gone on
     /// sign-out, and before a new Cloud sign-in, which may be another
@@ -1302,6 +1303,7 @@ final class AppModel {
         LanguageSync.removeAll()
         RecentApps.removeAll()
         UpdateBannerStore.removeAll()
+        TopicChatsFold.removeAll()
         // The account picture, fetched through the shared session.
         URLCache.shared.removeAllCachedResponses()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)

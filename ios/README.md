@@ -176,6 +176,8 @@ Unit tests use Swift Testing. They run on a simulator, or on Mac Catalyst when n
 xcodebuild test -project Rome.xcodeproj -scheme Rome -destination 'platform=macOS,variant=Mac Catalyst' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual
 ```
 
+A local run of some tests (`-only-testing:`) on a simulator passes `-parallel-testing-enabled NO`. A parallel run clones the simulator into `~/Library/Developer/XCTestDevices`, and an interrupted run leaves its clones there; they once reached 57 copies. When nothing is testing, clear the leftovers with `xcrun simctl --set ~/Library/Developer/XCTestDevices delete all`.
+
 The scheme runs tests in English (US region), whatever the Mac's language. `LocalizationTests` checks that every key in `Rome/Localizable.xcstrings` has Simplified Chinese text.
 
 `LiveIntegrationTests` runs only when `TEST_RUNNER_ROME_LOCAL_ORIGIN`, `TEST_RUNNER_ROME_LOCAL_USER` and `TEST_RUNNER_ROME_LOCAL_PASSWORD` are set. It reads every surface the app reads and sends one real message to the Concierge.

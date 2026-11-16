@@ -54,6 +54,40 @@ import Testing
         #expect(TopicChatsStore.title(store.chat("topic-1")) == "Kyoto trip")
     }
 
+    /// The drawer's fold lasts across launches, per instance, and goes with the account.
+    @Test func theFoldIsKeptPerInstance() {
+        let defaults = UserDefaults(suiteName: "topics-fold-\(UUID())")!
+        let me = TopicChatsFold(host: "me.romeos.cc", defaults: defaults)
+        let store = TopicChatsStore(backend: FakeBackend(), fold: me)
+        #expect(!store.folded)
+        store.setFolded(true)
+        #expect(TopicChatsStore(backend: FakeBackend(), fold: me).folded)
+        #expect(!TopicChatsStore(backend: FakeBackend(), fold: TopicChatsFold(host: "team.romeos.cc", defaults: defaults)).folded)
+        store.setFolded(false)
+        #expect(!me.load())
+        me.save(true)
+        TopicChatsFold.removeAll(defaults: defaults)
+        #expect(!me.load())
+    }
+
+    /// Folded, the header counts every unread reply, and the open chat keeps its row.
+    @Test func aFoldedListKeepsUnreadAndTheOpenChat() async {
+        let backend = FakeBackend()
+        backend.topicChats = [
+            ConciergeChat(id: "topic-1", name: "Kyoto", main: false, unread: 2),
+            ConciergeChat(id: "topic-2", name: "Meals", main: false, unread: 0),
+            ConciergeChat(id: "topic-3", name: "Books", main: false, unread: 1),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.unreadCount == 3)
+        store.markRead("topic-1")
+        #expect(store.unreadCount == 1)
+        #expect(TopicChatsStore.foldedRows(store.chats, openId: "topic-2").map(\.id) == ["topic-2"])
+        #expect(TopicChatsStore.foldedRows(store.chats, openId: nil).isEmpty)
+    }
+
     /// As on the web, a named chat's composer says which chat a message goes to.
     @Test func theComposerNamesTheChatOnceItHasOne() {
         #expect(TopicChatsStore.composerPlaceholder(nil, replying: false) == "Message")

@@ -12,6 +12,21 @@ struct DrawerView: View {
     let onUpdate: () -> Void
     /// How many topic chats show; a scroll near the end adds a page.
     @State private var topicLimit = TopicChatsStore.pageSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var folded: Bool { workspace.topics.folded }
+    private var unread: Int { workspace.topics.unreadCount }
+
+    private func toggleFold() {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {
+            workspace.topics.setFolded(!folded)
+        }
+    }
+
+    private var foldValue: Text {
+        guard folded else { return Text("Expanded") }
+        return unread > 0 ? Text("Collapsed") + Text(verbatim: ", ") + Text("\(unread) unread") : Text("Collapsed")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -46,12 +61,33 @@ struct DrawerView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 14)
 
-            HStack {
-                Text("Topic chats")
-                    .romeFont(13, .semibold)
+            HStack(spacing: 0) {
+                // The header folds the list; the "+" beside it keeps its own tap.
+                Button(action: toggleFold) {
+                    HStack(spacing: 6) {
+                        Text("Topic chats")
+                            .romeFont(13, .semibold)
+                        Image(systemName: "chevron.right")
+                            .romeFont(10, .bold)
+                            .rotationEffect(.degrees(folded ? 0 : 90))
+                            .accessibilityHidden(true)
+                        // Folded, the list's unread replies still show.
+                        if folded && unread > 0 {
+                            // Read out in the header's value instead.
+                            UnreadBadge(count: unread)
+                                .transition(.opacity)
+                                .accessibilityHidden(true)
+                        }
+                        Spacer(minLength: 0)
+                    }
                     .foregroundStyle(Palette.sub)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityValue(foldValue)
+                .accessibilityIdentifier("topic-chats-header")
                 Button(action: onNewTopic) {
                     // Lighter and thinner than the header beside it, so it
                     // never outweighs the list.
@@ -69,19 +105,22 @@ struct DrawerView: View {
 
             ScrollView {
                 let chats = workspace.topics.chats
-                let shown = TopicChatsStore.shownCount(
+                let openId = chats.first { section == .topic($0.id) }?.id
+                // Folded, only the open chat stays, so it is still reachable.
+                let shown = folded ? 0 : TopicChatsStore.shownCount(
                     chats.count,
                     limit: topicLimit,
-                    openIndex: chats.firstIndex { section == .topic($0.id) }
+                    openIndex: chats.firstIndex { $0.id == openId }
                 )
+                let rows = folded ? TopicChatsStore.foldedRows(chats, openId: openId) : Array(chats.prefix(shown))
                 // Lazy, so the end below appears only as the list nears it.
                 LazyVStack(spacing: 2) {
-                    ForEach(chats.prefix(shown)) { chat in
+                    ForEach(rows) { chat in
                         TopicItem(chat: chat, selected: section == .topic(chat.id)) {
                             onSection(.topic(chat.id))
                         }
                     }
-                    if shown < chats.count {
+                    if !folded && shown < chats.count {
                         // A new view for each page, so an end still in view
                         // after a page lands asks for the next one.
                         Color.clear
@@ -192,14 +231,7 @@ private struct TopicItem: View {
                     .foregroundStyle(Palette.fg)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                if unread > 0 {
-                    Text(verbatim: "\(unread)")
-                        .romeFont(12, .bold, monospacedDigits: true)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .frame(minWidth: 20, minHeight: 20)
-                        .background(Palette.primary, in: Capsule())
-                }
+                if unread > 0 { UnreadBadge(count: unread) }
             }
             .padding(.horizontal, 12)
             .frame(minHeight: 44)
@@ -216,5 +248,19 @@ private struct TopicItem: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityValue(unread > 0 ? Text("\(unread) unread") : Text(verbatim: ""))
         .accessibilityIdentifier("topic-chat")
+    }
+}
+
+/// How many replies wait unread, in the drawer's primary capsule.
+private struct UnreadBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text(verbatim: "\(count)")
+            .romeFont(12, .bold, monospacedDigits: true)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 20, minHeight: 20)
+            .background(Palette.primary, in: Capsule())
     }
 }
