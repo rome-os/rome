@@ -140,6 +140,9 @@ final class PCMChunker: @unchecked Sendable {
     private let target: AVAudioFormat
     private let onChunk: @Sendable (Data) -> Void
     private let lock = NSLock()
+    /// The converter is not safe to use from two threads: the audio thread
+    /// converts while `flush` drains from main.
+    private let converting = NSLock()
     private var pending = Data()
     /// 100 ms of 16-bit mono samples.
     private let chunkBytes = VoiceInputWire.sampleRate / 10 * 2
@@ -160,14 +163,11 @@ final class PCMChunker: @unchecked Sendable {
     }
 
     func take(_ buffer: AVAudioPCMBuffer) {
-        let ratio = target.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 16
-        guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
-        // The converter asks for input until told there is none for now.
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * target.sampleRate / buffer.format.sampleRate) + 16
         let given = Flag()
         nonisolated(unsafe) let input = buffer
-        var error: NSError?
-        converter.convert(to: out, error: &error) { _, status in
+        send(convert(capacity: capacity) { _, status in
+            // The converter asks for input until told there is none for now.
             if given.value {
                 status.pointee = .noDataNow
                 return nil
@@ -175,9 +175,45 @@ final class PCMChunker: @unchecked Sendable {
             given.value = true
             status.pointee = .haveData
             return input
+        })
+    }
+
+    /// Hands over the audio still held, the converter's included. The
+    /// converter holds back part of the input to resample it, and gives it
+    /// out only when told the input has ended.
+    func flush() {
+        let tail = convert(capacity: AVAudioFrameCount(target.sampleRate / 10)) { _, status in
+            status.pointee = .endOfStream
+            return nil
         }
-        guard error == nil, out.frameLength > 0, let samples = out.int16ChannelData else { return }
-        let bytes = Data(bytes: samples[0], count: Int(out.frameLength) * 2)
+        converting.withLock { converter.reset() }
+        lock.lock()
+        pending.append(tail)
+        let rest = pending
+        pending = Data()
+        lock.unlock()
+        if !rest.isEmpty { onChunk(rest) }
+    }
+
+    /// Everything the converter gives out for the input `next` supplies,
+    /// taken as long as it fills each output buffer.
+    private func convert(capacity: AVAudioFrameCount, _ next: @escaping AVAudioConverterInputBlock) -> Data {
+        converting.withLock {
+            var bytes = Data()
+            while let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) {
+                var error: NSError?
+                let status = converter.convert(to: out, error: &error, withInputFrom: next)
+                if error == nil, out.frameLength > 0, let samples = out.int16ChannelData {
+                    bytes.append(Data(bytes: samples[0], count: Int(out.frameLength) * 2))
+                }
+                if status != .haveData { break }
+            }
+            return bytes
+        }
+    }
+
+    private func send(_ bytes: Data) {
+        guard !bytes.isEmpty else { return }
         var ready: [Data] = []
         lock.lock()
         pending.append(bytes)
@@ -187,14 +223,6 @@ final class PCMChunker: @unchecked Sendable {
         }
         lock.unlock()
         for chunk in ready { onChunk(Data(chunk)) }
-    }
-
-    func flush() {
-        lock.lock()
-        let rest = pending
-        pending = Data()
-        lock.unlock()
-        if !rest.isEmpty { onChunk(rest) }
     }
 }
 
