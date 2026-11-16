@@ -32,6 +32,7 @@ struct ComposerTextView: UIViewRepresentable {
     static let maxLines = 6
 
     static func heightLimit(lineHeight: CGFloat, inset: CGFloat, expanded: Bool) -> CGFloat {
+        // Leave room for the keyboard and conversation at large text sizes.
         max(lineHeight + inset * 2, min(expanded ? 280 : 160,
             lineHeight * CGFloat(expanded ? 12 : maxLines) + inset * 2))
     }
@@ -153,7 +154,6 @@ struct ComposerTextView: UIViewRepresentable {
             parent.committedText?.wrappedValue = Self.committed(in: textView)
             parent.onEdit()
             (textView as? PastingTextView)?.setNeedsDisplay()
-            // Past six lines it scrolls: keep the caret in view.
             if textView.isScrollEnabled { textView.scrollRangeToVisible(textView.selectedRange) }
         }
 
