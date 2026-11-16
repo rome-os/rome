@@ -9,7 +9,6 @@ import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
-import type { ChatThreadPlacement } from "../webchat/repository.js";
 import { askingDeviceOf } from "../connections/device/live-route.js";
 import type { SendResult } from "../chats/send.js";
 import type {
@@ -56,41 +55,18 @@ const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
 
-/**
- * Which guardian message each message of a recent turn named with
- * `answers`, by Concierge and turn, so a task started later in the turn can
- * take its acknowledgements along. Tools are built afresh, so it lives here;
- * the oldest turns are dropped.
- */
-const NAMED_ANSWERS = new WeakMap<object, Map<string, Map<string, string>>>();
-const NAMED_ANSWERS_TURNS = 64;
-
 /** The parameter that names the task a message reports on. */
 const TASK_PARAMETER = {
   type: "string",
   description:
-    "The id of the task this message reports on, from task_list or a <task id> line. Pass it whenever the message tells a task's result or news, in any turn: the message then goes in that task's thread. In a turn that holds both a guardian message and another task's news, a message that names no task or answers goes in no thread.",
-};
-
-/** The parameter that names the guardian message whose words go on to a task. */
-const RELAYS_PARAMETER = {
-  type: "string",
-  description:
-    "The message_id of the guardian message whose words you send on to the task, from its <chat_thread> line. That message joins the task's chat thread. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on; without it nothing joins.",
+    "The id of the task this message reports on, from task_list or a <task id> line. Pass it whenever the message tells a task's result or news: the message replies to the task's start message.",
 };
 
 /** The parameter that names the one guardian message an answer answers. */
 const ANSWERS_PARAMETER = {
   type: "string",
   description:
-    "The message_id of the guardian message this answers, from its <chat_thread> line. Required when the turn carries several guardian messages, its own or ones an interrupted turn handed on, or a guardian message and another task's news, so the answer goes where that message is; without it such an answer goes in no thread.",
-};
-
-/** The parameter that names the guardian message a forward is the content of. */
-const FORWARD_ANSWERS_PARAMETER = {
-  type: "string",
-  description:
-    "The message_id of the guardian message, from its <chat_thread> line, that asked for this content. Set it only when this forward is what that message asked for: that message then joins the task's thread for good. A forward that only reports a task's news names none.",
+    "The message_id of the guardian message this answers, from its <chat_thread> line. Without it, the message answers this turn's last guardian message.",
 };
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -564,258 +540,82 @@ export async function buildConciergeTools(
     return prompts;
   };
 
-  /**
-   * This turn's guardian messages, once it is certain which one `answers`
-   * names or, with none named, that the turn has at most one: a message sent
-   * on to a task is never a guess.
-   */
-  const requireOnePrompt = async (answers: string | undefined, what: string) => {
-    const prompts = await requireTurnPrompt(answers);
-    if (answers === undefined && prompts.length > 1) {
-      throw new Error(
-        `This turn carries several guardian messages. Pass answers: the message_id of the one ${what}.`,
-      );
-    }
-    return prompts;
-  };
-
-  /**
-   * The task whose chat thread message `messageId` is in, with the thread's
-   * root, or null. Only a task has a thread: a thread no task has, from
-   * before, counts as none (docs/domains/chats.md#chat-thread).
-   */
-  const taskThreadOf = async (chatId: string, messageId: string) => {
-    const root = (await webchatRepo.getReplyTarget(chatId, messageId))?.chatThreadId ?? null;
-    const task = root ? await tasks.repo.taskOfThread(chatId, root) : null;
-    return root && task ? { root, task } : null;
-  };
-
-  /** The task chat thread a message is in, or null when it is in none. */
-  const threadOf = async (chatId: string, messageId: string) =>
-    (await taskThreadOf(chatId, messageId))?.root ?? null;
-
-  /**
-   * Whether a message is in any chat thread, one from before that no task
-   * has included: such a message is settled there, so nothing moves it into
-   * a task's thread and no task takes it as its root.
-   */
-  const inAnyThread = async (chatId: string, messageId: string) =>
-    Boolean((await webchatRepo.getReplyTarget(chatId, messageId))?.chatThreadId);
-
-  // A guardian message in a task's thread is that task's: the Concierge
-  // sends it on to that task or answers it itself, never sends it to another.
-  const requireOwnTask = async (taskChatId: string, messageId: string | undefined) => {
-    if (!messageId) return;
-    const owner = await taskThreadOf(currentTurn().chatId, messageId);
-    if (!owner) return;
-    // Rows from before one root per task may share it: each owns the thread.
-    if ((await tasks.repo.findBySession(taskChatId))?.threadRoot === owner.root) return;
-    throw new Error(
-      `Guardian message ${messageId} is in the thread of task ${owner.task.id} ("${owner.task.title}"). Send it on to that task, or answer it yourself with say.`,
-    );
-  };
-
   // The guardian messages turn `turnId` took, as its prompts.
   const promptsOf = async (chatId: string, turnId: string) =>
     (await webchatRepo.getTurnChatMessages(chatId, turnId))
       .filter((row) => row.role === "user" && row.inputState !== "queued")
       .map((row) => row.id);
 
-  // The guardian message a task is for, and the root it starts with: the
-  // message's thread, or the message. `answers` names it, in this turn or an
-  // earlier one. Without it, it is read from the message the task's row
-  // points to: that message when the guardian said it, else the only
-  // guardian message of the turn that said it. A row pointing nowhere asks
-  // this turn. Several, or none, and the task starts with no root
-  // (docs/domains/chats.md#chat-thread).
-  const startingRoot = async (
+  // The guardian message a task started for `answers` or `pointsTo` works
+  // for, which shows working while the task does. `answers` names it, in
+  // this turn or an earlier one. Without it, it is the message the task's
+  // row points to when the guardian said it, else the only guardian message
+  // of the turn that said it. Several, or none, is none.
+  const promptFor = async (
     answers: string | undefined,
     pointsTo: string | undefined,
-  ): Promise<{ answered: string; root: string | null; turnId: string | null } | null> => {
+  ): Promise<string | undefined> => {
     const { chatId, turnId } = currentTurn();
-    let answered: string | undefined;
     if (answers !== undefined) {
-      const named = await webchatRepo.getReplyTarget(chatId, answers);
-      if (named?.role !== "user") {
+      if ((await webchatRepo.getReplyTarget(chatId, answers))?.role !== "user") {
         throw new Error(
           `No guardian message ${answers} in this chat. Pass a message_id from a <chat_thread> line.`,
         );
       }
-      answered = answers;
-    } else {
-      const pointed = pointsTo ? await webchatRepo.getReplyTarget(chatId, pointsTo) : null;
-      if (pointed?.role === "user") answered = pointed.id;
-      else {
-        const prompts =
-          !pointed?.turnId || pointed.turnId === turnId
-            ? await turnPrompts()
-            : await promptsOf(chatId, pointed.turnId);
-        answered = prompts.length === 1 ? prompts[0] : undefined;
-      }
+      return answers;
     }
-    if (!answered) return null;
-    const message = await webchatRepo.getReplyTarget(chatId, answered);
-    return {
-      answered,
-      // A message already in a thread roots nothing: one in a task's thread
-      // is that task's, and one in a thread from before is settled there.
-      // The task then takes the first thing it brings back.
-      root: message?.chatThreadId ? null : answered,
-      turnId: message?.turnId ?? null,
-    };
+    const pointed = pointsTo ? await webchatRepo.getReplyTarget(chatId, pointsTo) : null;
+    if (pointed?.role === "user") return pointed.id;
+    const prompts =
+      !pointed?.turnId || pointed.turnId === turnId
+        ? await turnPrompts()
+        : await promptsOf(chatId, pointed.turnId);
+    return prompts.length === 1 ? prompts[0] : undefined;
   };
 
-  const namedAnswers = () => {
-    let turns = NAMED_ANSWERS.get(service);
-    if (!turns) {
-      turns = new Map();
-      NAMED_ANSWERS.set(service, turns);
-    }
-    return turns;
-  };
-  const noteAnswers = (messageId: string, answers: string | undefined) => {
-    if (!answers) return;
-    const { turnId } = currentTurn();
-    const turns = namedAnswers();
-    const turn = turns.get(turnId) ?? new Map<string, string>();
-    turn.set(messageId, answers);
-    turns.delete(turnId);
-    turns.set(turnId, turn);
-    if (turns.size > NAMED_ANSWERS_TURNS) turns.delete(turns.keys().next().value as string);
-  };
-
-  // A task started for guardian message `start.answered` takes its root, for
-  // good. A message in no thread becomes the root itself, and the messages of
-  // the turn it prompted that answer it join it: that turn's only guardian
-  // message, or the one their `answers` named. Only the Concierge's messages
-  // in no thread move; a guardian's choice never does.
-  const rootTaskAt = async (
-    taskId: string,
-    start: { answered: string; root: string | null; turnId: string | null },
-  ) => {
-    if (!start.root) return;
-    const { chatId } = currentTurn();
-    const root = await tasks.repo.setThreadRoot(taskId, start.root);
-    if (!root) return;
-    if (root === start.answered && !(await inAnyThread(chatId, root))) {
-      await webchatRepo.placeInChatThread(chatId, root, { starts: true, settle: true });
-    }
-    // The acknowledgements are in the turn the guardian's message prompted.
-    const turnId = start.turnId;
-    if (!turnId) return;
-    const prompts = await promptsOf(chatId, turnId);
-    const answersOf = (id: string) => namedAnswers().get(turnId)?.get(id);
-    for (const row of await webchatRepo.getTurnChatMessages(chatId, turnId)) {
-      if (row.role !== "assistant" || (await inAnyThread(chatId, row.id))) continue;
-      const answered = answersOf(row.id) ?? (prompts.length === 1 ? prompts[0] : undefined);
-      if (answered !== start.answered) continue;
-      await webchatRepo.placeInChatThread(chatId, row.id, { in: root });
-    }
-  };
-
-  // A task's stored root in this Concierge chat, or null.
-  const rootOf = async (taskId: string): Promise<string | null> => {
-    const { chatId } = currentTurn();
+  // The key of task `taskId`'s start message in this Concierge chat, or
+  // undefined: another chat's task, or one that points nowhere.
+  const startOf = async (taskId: string) => {
     const found = await tasks.repo.getWithChat(taskId);
-    if (!found || found.conciergeChat.id !== chatId || !found.row.threadRoot) return null;
-    // A row whose Concierge chat is archived reads as the main chat's, and
-    // keeps its root, which names a message only that chat has. A deleted
-    // chat's rows keep none.
-    return (await webchatRepo.getReplyTarget(chatId, found.row.threadRoot))
-      ? found.row.threadRoot
-      : null;
+    return found?.conciergeChat.id === currentTurn().chatId
+      ? (found.sourceMessageId ?? undefined)
+      : undefined;
   };
 
-  // Where a message the Concierge says goes (docs/domains/chats.md#chat-thread).
-  // Only a task has a thread. A message that names its subject goes there,
-  // whichever turn says it: the task it is about goes into the task's thread,
-  // and when the task has none yet the message becomes its root (`rootFor`);
-  // the guardian message it answers takes it to that message's task thread.
-  // One that names nothing goes where the turn's one subject is: the task it
-  // reports on, or its only guardian message's task thread. A turn with two
-  // subjects, the owner's message and a report a newer input took over, puts
-  // it in no thread.
-  const placementFor = async (
-    answers: string | undefined,
-    about: { taskId?: string | null } = {},
-  ): Promise<{ chatThread?: ChatThreadPlacement; rootFor?: string }> => {
-    const { chatId } = currentTurn();
-    const prompts = await requireTurnPrompt(answers);
-    const toTask = async (taskId: string) => {
-      const own = await tasks.repo.getWithChat(taskId);
-      if (own?.conciergeChat.id !== chatId) return null;
-      const root = await rootOf(taskId);
-      return root ? { chatThread: { in: root } } : { rootFor: taskId };
-    };
-    if (about.taskId) {
-      const placed = await toTask(about.taskId);
-      if (placed) return placed;
-    }
-    if (answers) {
-      const thread = await threadOf(chatId, answers);
-      return thread ? { chatThread: { in: thread } } : {};
-    }
-    if (prompts.length === 0) {
-      const reported = context.getTurnReportedTask();
-      return (reported ? await toTask(reported) : null) ?? {};
-    }
-    // Two subjects, or several guardian messages: which one this is about
-    // is a guess, so it goes in no thread.
-    if (prompts.length > 1 || service.carriedReport(chatId)) return {};
-    const thread = await threadOf(chatId, prompts[0] as string);
-    return thread ? { chatThread: { in: thread } } : {};
+  // The message a message the Concierge says replies to, which puts it in
+  // that message's chat thread (docs/domains/chats.md#chat-thread). A message
+  // about a task replies to the task's start message, and to nothing when
+  // the task has none in this chat: it never falls back to an unrelated
+  // guardian message of the turn. A message about no task answers the
+  // guardian message `answers` names, or the turn's last one. A turn with
+  // none that reports a task answers that task's start message. Anything
+  // else replies to nothing.
+  const replyTarget = async (
+    answers?: string,
+    taskId?: string | null,
+  ): Promise<string | undefined> => {
+    if (answers !== undefined) await requireTurnPrompt(answers);
+    if (taskId) return startOf(taskId);
+    if (answers !== undefined) return answers;
+    const last = (await turnPrompts()).at(-1);
+    if (last) return last;
+    const reported = context.getTurnReportedTask();
+    return reported ? startOf(reported) : undefined;
   };
 
-  // Says `parts` where `placementFor` puts them, and roots the task there
-  // when the message is the first it brings back.
+  // Says `parts`, replying to `replyTo`.
   const addMessage = async (
     parts: Parameters<typeof webchatRepo.addBackendMessage>[2],
-    placement: { chatThread?: ChatThreadPlacement; rootFor?: string },
+    replyTo: string | undefined,
   ) => {
     const { chatId, turnId } = currentTurn();
     const { id } = await webchatRepo.addBackendMessage(
       chatId,
       turnId,
       parts,
-      placement.chatThread ? { chatThread: placement.chatThread } : {},
+      replyTo ? { replyTo } : {},
     );
-    if (placement.rootFor) {
-      const root = await tasks.repo.setThreadRoot(placement.rootFor, id);
-      await webchatRepo.placeInChatThread(
-        chatId,
-        id,
-        root === id || !root ? { starts: true, settle: true } : { in: root, settle: true },
-      );
-    }
     return id;
-  };
-
-  // The guardian's words this turn are sent on to the task chat
-  // `taskChatId`, so the message they came from joins the task's thread:
-  // the one `answers` names, or the turn's only guardian message in no
-  // thread. With several and none named, none moves. A task with no root
-  // yet takes that message as its root.
-  const relayToTaskThread = async (taskChatId: string, answers?: string) => {
-    const { chatId } = currentTurn();
-    const prompts = await requireTurnPrompt(answers);
-    // A turn that also carries another task's report has two subjects:
-    // which one the guardian's message goes with is a guess.
-    if (answers === undefined && service.carriedReport(chatId)) return;
-    // Without `answers`, only the turn's one message is certain.
-    const named = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
-    const relayed = named && !(await inAnyThread(chatId, named)) ? named : undefined;
-    const task = relayed ? await tasks.repo.findBySession(taskChatId) : null;
-    if (!relayed || !task) return;
-    const found = await tasks.repo.getWithChat(task.id);
-    if (found?.conciergeChat.id !== chatId) return;
-    const root = (await rootOf(task.id)) ?? (await tasks.repo.setThreadRoot(task.id, relayed));
-    // Another task claimed the message as its root first.
-    if (!root) return;
-    await webchatRepo.placeInChatThread(
-      chatId,
-      relayed,
-      root === relayed ? { starts: true, settle: true } : { in: root, settle: true },
-    );
   };
 
   // Points the task in task chat `taskChatId` to `messageId`, its panel's
@@ -851,10 +651,9 @@ export async function buildConciergeTools(
     const key = sayKey(JSON.stringify(parts), taskId, answers);
     const repeated = service.saidInTurn(turnId, key);
     if (repeated) return repeated;
-    const id = await addMessage(parts, await placementFor(answers, taskId ? { taskId } : {}));
+    const id = await addMessage(parts, await replyTarget(answers, taskId));
     service.keepSaid(turnId, key, id);
     if (taskId) service.noteSaid(taskId);
-    noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
     await settleAnswered(answers, taskId);
     return id;
@@ -877,7 +676,8 @@ export async function buildConciergeTools(
 
   // The guardian message a `say` naming no `answers` answers, when that is
   // certain: the turn's only one, when the message is about no task or about
-  // the task whose thread that one is in. Otherwise the turn's end settles it.
+  // a task started in the thread that one is in. Otherwise the turn's end
+  // settles it.
   const certainlyAnswered = async (taskId: string | undefined) => {
     const { chatId } = currentTurn();
     if (service.carriedReport(chatId)) return undefined;
@@ -885,9 +685,12 @@ export async function buildConciergeTools(
     const only = prompts.length === 1 ? prompts[0] : undefined;
     if (!only || !taskId) return only;
     // A message naming a task answers the turn's message when that message
-    // is in the task's thread.
-    const root = await rootOf(taskId);
-    return root && (await threadOf(chatId, only)) === root ? only : undefined;
+    // is in the thread the task started in.
+    const start = await startOf(taskId);
+    if (!start) return undefined;
+    const rootOf = async (key: string) =>
+      (await webchatRepo.getReplyTarget(chatId, key))?.chatThreadId ?? key;
+    return (await rootOf(start)) === (await rootOf(only)) ? only : undefined;
   };
 
   // The guardian message `react` puts its emoji on: the one named, in this
@@ -922,7 +725,7 @@ export async function buildConciergeTools(
 
   // One message, so the lead-in and the report always arrive together. The
   // transcript still shows them as two bubbles.
-  const forward = async (text: string, from: ForwardedFrom, intro?: string, answers?: string) => {
+  const forward = async (text: string, from: ForwardedFrom, intro?: string) => {
     const { chatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(from.chatId);
     const id = await addMessage(
@@ -930,12 +733,11 @@ export async function buildConciergeTools(
         ...(intro ? [{ type: "text" as const, content: intro }] : []),
         { type: "text", content: text, format: "long", forwardedFrom: from },
       ],
-      await placementFor(answers, { taskId: task?.id ?? null }),
+      await replyTarget(undefined, task?.id),
     );
     // Only a result the guardian was shown counts as said.
     if (task) service.noteSaid(task.id);
-    noteAnswers(id, answers);
-    await settleAnswered(answers, task?.id);
+    await settleAnswered(undefined, task?.id);
     // The push shows the message: the Concierge's lead-in, or else the
     // task's title and a preview of what it brought back (the guardian's
     // call, 2026-11-14). A secret is kept off the lock screen only by
@@ -979,7 +781,7 @@ export async function buildConciergeTools(
     const task = await tasks.repo.findBySession(chatId);
     const id = await addMessage(
       [{ type: "task_chat", chatId, title, show, ...(waitedOn ? { waitedOn } : {}) }],
-      await placementFor(undefined, { taskId: task?.id ?? null }),
+      await replyTarget(undefined, task?.id),
     );
     // The push shows what the card asks: its question or approval, else the
     // task's title.
@@ -1206,13 +1008,6 @@ export async function buildConciergeTools(
             if (open && !stops.includes(write.id)) await stopTask(write.id);
             await service.cancelChecks(write.id);
           }
-          // A row made in this turn is a task for its guardian message.
-          for (const [index, row] of rows.entries()) {
-            const write = writes[index];
-            if (!write || write.id) continue;
-            const start = await startingRoot(undefined, write.sourceMessageId ?? undefined);
-            if (start) await rootTaskAt(row.id, start);
-          }
           const anchors = await Promise.all(
             rows.map(async (row) => (await tasks.repo.getWithChat(row.id))?.sourceMessageId),
           );
@@ -1301,7 +1096,7 @@ export async function buildConciergeTools(
           answers: {
             type: "string",
             description:
-              "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on, or the task is for one from an earlier turn: the task's results join that message's chat thread. Without it, with several, none joins.",
+              "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one: the task starts at it. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on, or the task is for one from an earlier turn.",
           },
           schedule: SCHEDULE_PARAMETER,
           card: {
@@ -1353,8 +1148,8 @@ export async function buildConciergeTools(
               : undefined
             : await sourceMessageForTask(messageId, optionalString(args, "answers"));
           // The guardian message the task is for, if one can tell. Checked
-          // before anything starts; the root is set once the task runs.
-          const start = await startingRoot(
+          // before anything starts.
+          const prompt = await promptFor(
             optionalString(args, "answers"),
             sourceMessageId ??
               (taskId
@@ -1415,7 +1210,7 @@ export async function buildConciergeTools(
             } else {
               await sendLinked(
                 started,
-                start?.answered,
+                prompt,
                 () => sendInput(sender, chatId, brief, skill?.name),
                 { keepOnFailure: true },
               );
@@ -1439,7 +1234,6 @@ export async function buildConciergeTools(
               `${reason} Task ${task.id} did not start and is marked failed. Do not start it again; tell the guardian.`,
             );
           }
-          if (start) await rootTaskAt(task.id, start);
           // Named after the first turn: the first message would rename it.
           if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
             // The task already runs, so a failure here must not read as a
@@ -1478,7 +1272,6 @@ export async function buildConciergeTools(
         properties: {
           chatId: { type: "string" },
           text: { type: "string", description: "The message for the other agent." },
-          answers: RELAYS_PARAMETER,
         },
       },
       handler: (input) =>
@@ -1487,24 +1280,19 @@ export async function buildConciergeTools(
           currentTurn();
           const chatId = requireString(args, "chatId");
           const chat = await requireOwnTaskChat(chatId);
-          const answers = optionalString(args, "answers");
-          // Checked before the task hears anything, so a retry never sends twice.
-          const prompts = await requireOnePrompt(answers, "whose words you pass on");
-          await requireOwnTask(chatId, answers ?? (prompts.length === 1 ? prompts[0] : undefined));
           await ensureTaskRow(chat);
           const task = await tasks.repo.findBySession(chatId);
           const text = requireString(args, "text");
           // New work for a task the guardian or you stopped takes it up again.
           if (task) await tasks.repo.resume(task.id);
-          // The guardian message whose words go on: the one named, or the
-          // turn's only one. It shows working while the task works for it.
-          // A scheduled task's runs are no work for one message: it links none.
-          const relayed = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
+          // The guardian message whose words go on: the turn's last one. It
+          // shows working while the task works for it. A scheduled task's
+          // runs are no work for one message: it links none.
+          const relayed = (await turnPrompts()).at(-1);
           const scheduled = task ? await service.deps.schedules?.of(task.id) : null;
           if (task && !scheduled)
             await sendLinked(task.id, relayed, () => sendInput(sender, chatId, text));
           else await sendInput(sender, chatId, text);
-          await relayToTaskThread(chatId, answers);
           return "Sent; the task chat takes it as input.";
         }),
     },
@@ -1552,7 +1340,9 @@ export async function buildConciergeTools(
               role: message.direction === "fromRome" ? "assistant" : "user",
               text: message.body.text,
               at: message.at.toISOString(),
-              ...(message.chatThread ? { thread: message.chatThread } : {}),
+              ...(message.chatThread && message.chatThread !== message.id
+                ? { thread: message.chatThread }
+                : {}),
             })),
           };
         }),
@@ -1662,7 +1452,7 @@ export async function buildConciergeTools(
         "Send the guardian a finished task's conclusion, word for word, without retyping it: the closing section the task chat writes at the end of its final answer. " +
         `A conclusion over ${CONCLUSION_MAX_CHARS} characters, or none, is refused and nothing is sent: then report the outcome yourself in a few sentences with the key specifics. ` +
         "Set full to send the whole answer instead, only when the guardian explicitly asks for the full text in a message they sent this turn. " +
-        "The task chat must be one started from this Concierge chat. An existing task row automatically points to the forwarded message in this Concierge chat, unless the task already has a chat thread.",
+        "The task chat must be one started from this Concierge chat. The message replies to the task's start message, and the task's row then points to it.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -1674,7 +1464,6 @@ export async function buildConciergeTools(
             description:
               "Send the whole answer, not its conclusion. Refused unless the guardian sent a message this turn: a turn that reports on a task never sends a full report.",
           },
-          answers: FORWARD_ANSWERS_PARAMETER,
         },
       },
       handler: (input) =>
@@ -1713,15 +1502,10 @@ export async function buildConciergeTools(
             );
           }
           const text = conclusion?.kind === "found" ? conclusion.text : withoutMarkers(answer);
-          // A forward shows the task's result to the guardian; it passes their
-          // message on to no task, so it needs no message named. A message
-          // already in a thread stays there.
-          await relayToTaskThread(chatId, optionalString(args, "answers"));
           const messageId = await forward(
             text,
             { chatId, title: chat.name },
             optionalString(args, "intro"),
-            optionalString(args, "answers"),
           );
           const task = await pointTaskTo(chatId, messageId);
           return {
@@ -1736,7 +1520,7 @@ export async function buildConciergeTools(
       name: "chat_card",
       description:
         "Show the guardian a task chat as a card. While the task waits on them, the card is its question or approval alone: the guardian answers on it, straight into the task chat, and the task waits for them until they do. Otherwise it is the task's card, with its live status and a link that opens it: use it to open or find a task chat instead of sending its id. " +
-        "An existing task row automatically points to this card in this Concierge chat, unless the task already has a chat thread.",
+        "The card replies to the task's start message, and the task's row then points to it.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -1779,9 +1563,7 @@ export async function buildConciergeTools(
           if (connector.state === "working") {
             return { connected: true, note: "Already connected; no card shown." };
           }
-          const { id } = await webchatRepo.addBackendMessage(
-            chatId,
-            turnId,
+          const id = await addMessage(
             [
               {
                 type: "connect_card",
@@ -1792,9 +1574,7 @@ export async function buildConciergeTools(
                 connect: connector.connect ?? { kind: "dashboard" },
               },
             ],
-            await placementFor(undefined).then(({ chatThread }) =>
-              chatThread ? { chatThread } : {},
-            ),
+            await replyTarget(),
           );
           said(chatId, turnId, `Connect ${connector.label}`);
           return { sent: "Shown; the guardian sees the card.", messageId: id };

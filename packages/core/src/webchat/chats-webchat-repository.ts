@@ -30,7 +30,6 @@ import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/pla
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import type { SessionRecords } from "../sessions/session-records.js";
 import {
-  type ChatThreadPlacement,
   type EnsureRomeSessionInput,
   type InterruptedTurn,
   type MessagePageCursor,
@@ -350,15 +349,14 @@ export class ChatsWebChatRepository extends WebChatRepository {
     content: string,
     actor?: SessionActor,
     saidBy?: Account,
-    chatThread?: ChatThreadPlacement,
+    replyTo?: string,
   ): Promise<boolean> {
     const standing = this.standingOf(sessionId);
     if (!standing) return super.recordUserInput(id, sessionId, content, actor, saidBy);
     const parts = partsOf(content);
     // The input, its queued link and the session's activity commit together,
     // so an input on record is always one the session can admit.
-    let root: string | null = null;
-    const recorded = this.db.transaction(() => {
+    return this.db.transaction(() => {
       const recorded = this.lines.record({
         direction: "toRome",
         key: id,
@@ -379,34 +377,14 @@ export class ChatsWebChatRepository extends WebChatRepository {
           : dashboardSender(actor),
         body: { text: partsText(parts) },
         parts,
+        ...(replyTo === undefined ? {} : { replyTo }),
         at: new Date(),
       });
       if (!recorded) return false;
-      if (chatThread) root = this.place(standing, id, chatThread).rooted;
       this.links.prompt(recorded.id, sessionId, null, "queued");
       this.advanceActivity(sessionId, recorded.at);
       return true;
     });
-    this.emitRooted(sessionId, root);
-    const thread = recorded && chatThread ? this.lines.chatThreadOf(standing.place.chat, id) : null;
-    if (thread) this.emitChatThreadPlaced({ sessionId, messageId: id, chatThreadId: thread });
-    return recorded;
-  }
-
-  override async placeInChatThread(
-    sessionId: string,
-    messageId: string,
-    placement: ChatThreadPlacement,
-  ): Promise<string | null> {
-    const standing = this.standingOf(sessionId);
-    if (!standing || this.lines.idOf(standing.place.chat, messageId) === null) return null;
-    const { placed, rooted } = this.db.transaction(() =>
-      this.place(standing, messageId, placement),
-    );
-    this.emitRooted(sessionId, rooted);
-    const thread = this.lines.chatThreadOf(standing.place.chat, messageId);
-    if (placed && thread) this.emitChatThreadPlaced({ sessionId, messageId, chatThreadId: thread });
-    return thread;
   }
 
   override async setMessageReaction(
@@ -421,48 +399,29 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return true;
   }
 
-  override async chatThreadOf(sessionId: string, messageId: string): Promise<string | null> {
-    const standing = this.standingOf(sessionId);
-    return standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;
-  }
-
-  override async getChatThreadMessages(
-    sessionId: string,
-    messageId: string,
-  ): Promise<TranscriptLine[]> {
-    const standing = this.standingOf(sessionId);
-    const thread = standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;
-    if (!thread) return [];
-    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, thread);
-  }
-
   /**
-   * Put the line keyed `key` where `standing` is in the chat thread
-   * `placement` names. Answers whether it was placed. Runs inside the
-   * caller's transaction when there is one.
+   * The messages of the chat thread whose root is keyed `root`, in the order
+   * they were said. Empty when the chat holds no such message.
    */
-  private place(
-    standing: Standing,
-    key: string,
-    placement: ChatThreadPlacement,
-  ): { placed: boolean; rooted: string | null } {
-    const chat = standing.place.chat;
-    const thread = "in" in placement ? (this.lines.chatThreadOf(chat, placement.in) ?? key) : key;
-    // A message in no thread that a reply joins becomes its thread's root, so
-    // whether a message is in a thread has one answer.
-    const rooted =
-      "in" in placement && thread === placement.in && thread !== key
-        ? this.lines.rootChatThread(chat, thread)
-        : false;
-    const placed = this.lines.placeInChatThread(chat, key, thread, {
-      settle: placement.settle === true,
-    });
-    return { placed, rooted: rooted ? thread : null };
+  override async getChatThreadMessages(sessionId: string, root: string): Promise<TranscriptLine[]> {
+    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, root);
   }
 
-  /** Tells the chat's listeners that `root` now starts its own thread. */
-  private emitRooted(sessionId: string, root: string | null): void {
-    if (root) this.emitChatThreadPlaced({ sessionId, messageId: root, chatThreadId: root });
+  /** The key of the last message of the chat thread whose root is keyed
+   *  `root` in chat `sessionId`, or null when the chat holds none. */
+  override async lastInChatThread(sessionId: string, root: string): Promise<string | null> {
+    const standing = this.standingOf(sessionId);
+    return standing ? this.lines.lastInChatThread(standing.place.chat, root) : null;
+  }
+
+  /** How many messages each chat thread of `roots` holds in chat `sessionId`,
+   *  and the text its root message starts with, by the root's key. */
+  override async chatThreadSizes(
+    sessionId: string,
+    roots: readonly string[],
+  ): Promise<Map<string, { size: number; rootText: string }>> {
+    const standing = this.standingOf(sessionId);
+    return standing ? this.lines.chatThreadSizes(standing.place.chat, roots) : new Map();
   }
 
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
@@ -729,20 +688,27 @@ export class ChatsWebChatRepository extends WebChatRepository {
     role: string,
     parts: TranscriptPart[],
     id?: string,
-    chatThread?: ChatThreadPlacement,
+    replyTo?: string,
   ): Promise<StoredWebchatMessage> {
     assertWidgetAlone(parts);
     const standing = role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.insertBackendMessage(sessionId, turnId, role, parts, id);
     const key = id ?? randomUUID();
-    const at = this.say(standing, key, "assistant", parts as MessagePart[], turnId, chatThread);
+    const { at, thread } = this.say(
+      standing,
+      key,
+      "assistant",
+      parts as MessagePart[],
+      turnId,
+      replyTo,
+    );
     const message: StoredWebchatMessage = {
       id: key,
       sessionId,
       turnId,
       role,
       content: JSON.stringify(parts),
-      ...(chatThread ? { chatThreadId: this.lines.chatThreadOf(standing.place.chat, key) } : {}),
+      ...(thread ? { chatThreadId: thread } : {}),
       createdAt: new Date(Math.floor(at.getTime() / 1000) * 1000),
     };
     this.emitMessageInserted(message);
@@ -1086,11 +1052,10 @@ export class ChatsWebChatRepository extends WebChatRepository {
     role: "user" | "assistant",
     parts: MessagePart[],
     turnId: string | null,
-    chatThread?: ChatThreadPlacement,
+    replyTo?: string,
     at: Date = new Date(),
-  ): Date {
-    let root: string | null = null;
-    this.db.transaction(() => {
+  ): { at: Date; thread: string | null } {
+    return this.db.transaction(() => {
       const recorded = this.lines.record({
         direction: "toRome",
         key,
@@ -1098,17 +1063,16 @@ export class ChatsWebChatRepository extends WebChatRepository {
         saidBy: role === "user" ? dashboardSender(undefined) : agentSender(standing),
         body: { text: partsText(parts) },
         parts,
+        ...(replyTo === undefined ? {} : { replyTo }),
         at,
       });
       const id = recorded?.id ?? this.lines.idOf(standing.place.chat, key);
       if (id === null) throw new Error(`Dashboard line ${key} could not be recorded`);
-      if (chatThread) root = this.place(standing, key, chatThread).rooted;
       if (turnId && role === "user") this.links.prompt(id, standing.sessionId, turnId);
       if (turnId && role === "assistant") this.links.answer(id, standing.sessionId, turnId);
       this.advanceActivity(standing.sessionId, at);
+      return { at, thread: recorded?.chatThread ?? null };
     });
-    this.emitRooted(standing.sessionId, root);
-    return at;
   }
 
   override async taskChatPartMessages(
@@ -1275,7 +1239,9 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       m.sender_name, COALESCE(m.sender_agent, m.sender_account_id) AS turn_sender_id,
       CASE WHEN m.sender_agent IS NOT NULL THEN m.sender_agent
            WHEN m.sender_account_id GLOB 'automated::*' THEN m.sender_account_id END AS source_id,
-      m.chat_thread_id AS chat_thread_id, m.reaction AS reaction,
+      COALESCE((SELECT r.key FROM chat_messages r WHERE r.id = m.root_message_id), m.key)
+        AS chat_thread_id,
+      m.reaction AS reaction,
       -- A turn's first prompt goes before its trace in the same second; every
       -- other line goes after it, in the order it was said, as a steered
       -- input after the card it answers.
@@ -1290,12 +1256,12 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
       ${
-        // A line from before chat threads is in none, so the thread its own
-        // key names holds it. A line that is in a thread, even one that
-        // started here and moved on, is read by that thread alone.
+        // The thread's root and every message that replies down to it.
         chatThread === undefined
           ? sql``
-          : sql`AND (m.chat_thread_id = ${chatThread} OR (m.chat_thread_id IS NULL AND m.key = ${chatThread}))`
+          : sql`AND COALESCE(m.root_message_id, m.id) = (
+              SELECT t.id FROM chat_messages t WHERE t.chat_id = s.chat_id AND t.key = ${chatThread}
+            )`
       }
     -- Only a prompt or answer link says whose turn a line is: one caught up
     -- on is read by who said it.

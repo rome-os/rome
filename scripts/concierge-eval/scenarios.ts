@@ -7,7 +7,7 @@ export const SCENARIOS_VERSION = 2;
 
 export interface Step {
   text: string;
-  /** Send it as a Reply to the Concierge's latest text message in a task's thread. */
+  /** Send it as a Reply to the Concierge's latest result: its newest text message, preferring one in a chat thread. */
   replyToResult?: boolean;
 }
 
