@@ -1460,11 +1460,6 @@ async function main() {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  // The identity is read on each cold open, so after a rename each live
-  // session reopens cold once it is quiet (docs/concepts/sessions.md#setup).
-  agentNameEvents.subscribe((event) => {
-    if (event === "agent_name_changed") agentSessionManager.refreshPrompts();
-  });
   // The messages the stopped process left open settle before any turn runs.
   const settledMarks = await settleMarksAfterRestart(
     concierge.deps.tasks.repo,

@@ -354,12 +354,6 @@ export interface Sessions {
    * after it ends.
    */
   turn(id: string): Turn | undefined;
-  /**
-   * The agents' prompts changed in a way a live session cannot read, as on a
-   * rename: each open session closes once it is quiet, so its next turn opens
-   * it cold, on the same thread, with the prompt as it is then.
-   */
-  refreshPrompts(): void;
   shutdown(): Promise<void>;
 }
 
@@ -454,9 +448,6 @@ interface ManagerOptions {
 
 /** How long a context renewal waits for the ending turn's own cleanup. */
 const CONTEXT_RENEWAL_SETTLE_MS = 5_000;
-
-/** How long an open waits for a stale-prompt session's last turn to finish its cleanup. */
-const STALE_PROMPT_SETTLE_MS = 2_000;
 
 async function waitUntilQuiescent(session: AgentSessionImpl, timeoutMs?: number): Promise<void> {
   if (session.status === "closed" || session.isQuiescentForRotation) return;
@@ -627,23 +618,6 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     if (renewal) await renewal.catch(() => undefined);
   };
 
-  // Live sessions whose prompt went stale, closed as soon as each is quiet.
-  const stalePrompts = new WeakSet<AgentSessionImpl>();
-  const refreshPrompts = () => {
-    for (const sess of sessions.values()) {
-      if (sess.closing) continue;
-      stalePrompts.add(sess);
-      void waitUntilQuiescent(sess)
-        .then(async () => {
-          if (sess.closing || sess.status === "closed" || !sess.isQuiescentForRotation) return;
-          // A renewal for a full context closes it itself.
-          if (contextHandoffs.get(keyOf(sess.key))?.session === sess) return;
-          await sess.close("idle");
-        })
-        .catch(() => undefined);
-    }
-  };
-
   const acquireInner = async (
     key: AgentSessionKey,
     span: Span,
@@ -675,19 +649,6 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     if (existing?.closing) {
       await existing.closeSettled();
       existing = undefined;
-    }
-    // A live session whose prompt went stale, as on a rename, reopens cold
-    // on the same thread once it is quiet, with the prompt as it is now.
-    if (existing && stalePrompts.has(existing) && existing.status === "idle") {
-      // Its last turn's cleanup may still run; a session still in use after
-      // it keeps serving, and closes once it is quiet.
-      await waitUntilQuiescent(existing, STALE_PROMPT_SETTLE_MS);
-      if (existing.closing || existing.isQuiescentForRotation) {
-        if (existing.closing) await existing.closeSettled();
-        else await existing.close("idle");
-        existing = undefined;
-        reopen = true;
-      }
     }
     let explicitResume = init?.resumeSessionId;
     // A cold open renewed the chat since the resume named its session: a
@@ -857,7 +818,6 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       return undefined;
     },
     turn: (id) => turns.find(id),
-    refreshPrompts,
     async shutdown() {
       shutDown = true;
       if (sweeperTimer) clearInterval(sweeperTimer);
@@ -1393,7 +1353,7 @@ async function openSession(
   const change: SetupChange =
     resumed && setupNow !== undefined
       ? setupChange(resumed.setup, setupNow)
-      : { text: false, tools: false, identity: false };
+      : { text: false, tools: false };
   let renewing: { retired: Session; successor: Session; reason: string } | undefined;
   // The setup a resumed thread takes, recorded once a turn on it succeeds.
   let resumedOn: { setup: string; notice: boolean } | undefined;
@@ -1413,20 +1373,21 @@ async function openSession(
     await deps.sessionRepository.save(resumed);
   } else if (resumed && !opts.isSubagent) {
     // A change the thread's provider takes on a resume resumes the same
-    // thread on the new setup. A tool change on a provider that keeps a
-    // thread's first tools needs a new thread, which reads the chat's recent
-    // messages and writes no handoff. A change of text or identity on a
-    // provider that keeps a thread's first system prompt renews with a
-    // handoff, as does a session that recorded no setup, or one without
-    // parts, since nothing says which part changed.
+    // thread on the new setup. A change it keeps the thread's first version
+    // of (tools on Codex, the system prompt on Claude) needs a new thread,
+    // which reads the chat's recent messages and writes no handoff. A session
+    // that recorded no setup, or one without parts, renews with a handoff,
+    // since nothing says which part changed.
     let reason: string | undefined;
     const kept =
       change !== "unknown" && setupChanged(change)
         ? await threadKeeps(deps, resumed)
         : { tools: false, instructions: false };
     const toolsKept = change !== "unknown" && change.tools && kept.tools;
-    const instructionsKept =
-      change !== "unknown" && (change.text || change.identity) && kept.instructions;
+    const instructionsKept = change !== "unknown" && change.text && kept.instructions;
+    // A new thread for a change the old one cannot take starts from the
+    // chat's recent messages alone: the wait is not worth it.
+    const handoffDue = !toolsKept && !instructionsKept;
     if (!init.resumeSessionId) {
       if (change === "unknown" || toolsKept || instructionsKept) reason = "setup";
       if (!reason && init.resetPolicy) {
@@ -1456,12 +1417,10 @@ async function openSession(
     if (reason) {
       // Written at send time, before the fresh session opens, so the message
       // that caused the cold open is answered by a session that has read it.
-      // A new thread for a tool change starts from the chat's recent messages
-      // alone, since that change is rare and the wait is not worth it.
       const written = opts.writtenHandoffs?.get(resumed.id);
       const handoff =
         written ??
-        (!toolsKept &&
+        (handoffDue &&
         deps.handoffs &&
         !config.codeBacked &&
         resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal

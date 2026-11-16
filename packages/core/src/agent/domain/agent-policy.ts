@@ -18,7 +18,7 @@ export interface AgentPolicy {
   loadMemory: boolean;
   /**
    * Whether a session opened cold takes a change of the agent's setup since
-   * it opened (its instructions or its tools): on the same thread where its
+   * it opened (its instructions, identity or tools): on the same thread where its
    * provider's resume can take the change, else on a fresh session in the
    * same chat. A session resumed by id is never replaced.
    * docs/concepts/sessions.md#setup

@@ -3323,7 +3323,6 @@ describe("AgentRunner", () => {
         find: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
         turn: rs.fn(),
-        refreshPrompts: () => {},
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -3379,7 +3378,6 @@ describe("AgentRunner", () => {
         find: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
         turn: rs.fn(),
-        refreshPrompts: () => {},
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -3650,7 +3648,7 @@ describe("AgentRunner", () => {
 
         expect(second).toBe(first);
         expect((await sessionRepository.current(key, "core:test-renewing"))?.setup).toMatch(
-          /^v2:[0-9a-f]{64}:[0-9a-f]{64}:[0-9a-f]{64}$/,
+          /^v2:[0-9a-f]{64}:[0-9a-f]{64}$/,
         );
       });
 
@@ -3827,7 +3825,7 @@ describe("AgentRunner", () => {
 
           expect(renewed).not.toBe(first);
           const setupAfter = (await sessionRepository.session(renewed!))?.setup;
-          expect(setupAfter).toMatch(/^v2:[0-9a-f]{64}:[0-9a-f]{64}:[0-9a-f]{64}$/);
+          expect(setupAfter).toMatch(/^v2:[0-9a-f]{64}:[0-9a-f]{64}$/);
           expect(setupAfter).not.toBe(setupBefore);
           expect(provider.sessions).toHaveLength(2);
           check(provider.sessions[1]!);
@@ -3914,7 +3912,7 @@ describe("AgentRunner", () => {
         expect([afterInstall, afterAddress]).toEqual([first, first]);
       });
 
-      it("resumes the same thread after a rename, with the new name in its prompt and no notice", async () => {
+      it("resumes the same thread after an identity change, with the new name and the notice", async () => {
         const provider = threadedProvider(2);
         const runner = renewingRunner(provider);
         const first = await turn(runner);
@@ -3924,21 +3922,8 @@ describe("AgentRunner", () => {
         expect(second).toBe(first);
         expect(provider.sessions[1]?.thread).toEqual({ kind: "resume", modelThreadId: "thread-1" });
         expect(provider.sessions[1]?.config.systemPrompt).toContain("**Agent Name:** YoYo");
-        expect(provider.calls[1]?.prompt).not.toContain("<instructions_changed>");
+        expect(provider.calls[1]?.prompt).toContain("<instructions_changed>");
         expect(provider.calls[1]?.prompt).not.toContain("<continuation>");
-      });
-
-      it("closes a live session once it is quiet after a rename, so its next turn reads the new name", async () => {
-        const provider = threadedProvider(2);
-        const runner = renewingRunner(provider);
-        const first = await turn(runner);
-        identity.text = "**Agent Name:** YoYo";
-        managerOf.get(runner)!.refreshPrompts();
-        const second = await turn(runner, { live: true });
-
-        expect(second).toBe(first);
-        expect(provider.sessions).toHaveLength(2);
-        expect(provider.sessions[1]?.config.systemPrompt).toContain("**Agent Name:** YoYo");
       });
 
       it.each([
@@ -4517,10 +4502,9 @@ describe("AgentRunner", () => {
         it.each([
           ["an instruction change", () => (charter.text = "Be kind. Always answer in one line.")],
           ["an identity change", () => (identity.text = "**Agent Name:** YoYo")],
-        ])("renews with a handoff after %s where the provider keeps a thread's first system prompt", async (_change, change) => {
-          const provider = threadedProvider(4, { keepsThreadInstructions: true });
-          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
-          const { handoffs } = fakeHandoffs();
+        ])("opens a fresh session with the recent messages, and no handoff turn, after %s where the provider keeps a thread's first system prompt", async (_change, change) => {
+          const provider = threadedProvider(3, { keepsThreadInstructions: true });
+          const { handoffs, asked } = fakeHandoffs();
           const runner = renewingRunner(provider, undefined, { handoffs });
           const first = await turn(runner);
           change();
@@ -4528,9 +4512,16 @@ describe("AgentRunner", () => {
 
           expect(second).not.toBe(first);
           expect((await sessionRepository.session(first!))?.supersededFor).toBe("setup");
-          expect((await sessionRepository.session(second!))?.handoff).toBe(HANDOFF);
-          expect(provider.sessions.at(-1)?.thread).toEqual({ kind: "new" });
-          expect(provider.calls.at(-1)?.prompt).not.toContain("<instructions_changed>");
+          expect((await sessionRepository.session(second!))?.handoff).toBeNull();
+          expect(provider.sessions.map((params) => params.thread)).toEqual([
+            { kind: "new" },
+            { kind: "new" },
+          ]);
+          expect(asked).toEqual({ tidying: [], fallback: 0, context: 1 });
+          const prompt = provider.calls[1]?.prompt ?? "";
+          expect(prompt).toContain("Guardian: Friday at 7 then");
+          expect(prompt).not.toContain("<handoff>");
+          expect(prompt).not.toContain("<instructions_changed>");
           // Unchanged since, the next cold open resumes the successor.
           expect(await turn(runner)).toBe(second);
         });

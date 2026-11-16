@@ -792,7 +792,6 @@ describe("Webchat API", () => {
       find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
-      refreshPrompts: () => {},
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -902,7 +901,6 @@ describe("Webchat API", () => {
       find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
-      refreshPrompts: () => {},
       shutdown: async () => {},
     };
     const repo = new ConciergeTasksRepository(testDb.db);
@@ -1004,7 +1002,6 @@ describe("Webchat API", () => {
       find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
-      refreshPrompts: () => {},
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -1172,7 +1169,6 @@ describe("Webchat API", () => {
       find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
-      refreshPrompts: () => {},
       shutdown: async () => {},
     };
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
@@ -9777,7 +9773,6 @@ function fakeSessionManager(
     find: () => undefined,
     findWorkingDirBySessionId: () => undefined,
     turn: () => undefined,
-    refreshPrompts: () => {},
     shutdown: async () => undefined,
   };
 }
