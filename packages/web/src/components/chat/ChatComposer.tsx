@@ -39,7 +39,7 @@ import type {
 } from "@/lib/chat-types";
 import { ErrorEventView } from "./entries/ErrorEventView";
 import { AgentMentionChip } from "./composer/AgentMentionChip";
-import { useChatDraftText } from "./composer/use-chat-draft";
+import { useChatDraft } from "./composer/use-chat-draft";
 import { AgentMentionMenu, type AgentMentionMenuHandle } from "./composer/AgentMentionMenu";
 import { ImpersonationMenu } from "./composer/ImpersonationMenu";
 import { ModelSelectorMenu } from "./composer/ModelSelectorMenu";
@@ -253,7 +253,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     const authEpoch = persistNewChatDraft ? currentAuthEpoch() : null;
     return { authEpoch, storedDraft: persistNewChatDraft ? loadNewChatDraft() : null };
   });
-  const [inputText, setInputText, sendEnded] = useChatDraftText(chatId, storedDraft?.text);
+  const draft = useChatDraft(chatId, storedDraft?.text);
+  const { text: inputText, setText: setInputText, sendEnded } = draft;
   const sessionCreatedRef = useRef(false);
   // The send-time clear must not re-save the unchanged context in its effect.
   const skipNextDraftSaveRef = useRef(false);
@@ -385,7 +386,14 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const voice = useVoiceInput({ textareaRef, value: inputText, setValue: setInputText });
+  const voice = useVoiceInput({
+    textareaRef,
+    value: inputText,
+    setValue: setInputText,
+    notice: draft.notice,
+    setNotice: draft.setNotice,
+    keepNotice: draft.keepNotice,
+  });
   const voiceActiveRef = useRef(false);
   voiceActiveRef.current = voice.active;
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
@@ -770,6 +778,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     // whole upload instead: the request is long enough to cancel, and wiping
     // text the user may still be reading (or about to cancel) reads as loss.
     // It clears only once the server has accepted the turn.
+    voice.dismissNotice();
     const clearsOptimistically = uploads.length === 0;
     if (persistNewChatDraft) {
       clearNewChatDraft();
@@ -887,6 +896,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
     const value = event.target.value;
+    voice.noticeEdited();
     setInputText(value);
     const cursor = event.target.selectionEnd ?? value.length;
     reevaluateMentionContext(value, cursor);

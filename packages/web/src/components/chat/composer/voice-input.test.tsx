@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createRef, type Ref } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -99,6 +100,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  localStorage.clear();
   microphone.refuse = false;
   microphone.pending = false;
   microphone.tail = null;
@@ -135,28 +137,35 @@ const SONIOX: VoiceInputInfo = {
 };
 
 const composers = {
-  chat: (onSend: () => void, ref?: Ref<ChatComposerHandle>) => (
-    <ChatComposer ref={ref} onSend={onSend} />
+  chat: (onSend: () => void, chatId?: string, ref?: Ref<ChatComposerHandle>) => (
+    <ChatComposer ref={ref} chatId={chatId} onSend={onSend} />
   ),
-  concierge: (onSend: () => void, ref?: Ref<ChatComposerHandle>) => (
+  concierge: (onSend: () => void, chatId?: string, ref?: Ref<ChatComposerHandle>) => (
     <ReplyDraftHarness>
-      <ConciergeComposer ref={ref} onSend={onSend} />
+      <ConciergeComposer ref={ref} chatId={chatId} onSend={onSend} />
     </ReplyDraftHarness>
   ),
 };
 
-function renderComposer(kind: keyof typeof composers, info: VoiceInputInfo = SONIOX) {
+/** Opens a message field; with `chatId`, the field of that chat, which keeps a draft. */
+function renderComposer(
+  kind: keyof typeof composers,
+  info: VoiceInputInfo = SONIOX,
+  chatId?: string,
+) {
   mockFetch(info);
   const onSend = rs.fn();
   const handle = createRef<ChatComposerHandle>();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const view = render(
     <MemoryRouter>
-      <QueryClientProvider client={client}>{composers[kind](onSend, handle)}</QueryClientProvider>
+      <QueryClientProvider client={client}>
+        {composers[kind](onSend, chatId, handle)}
+      </QueryClientProvider>
     </MemoryRouter>,
   );
   const field = () => document.querySelector("form textarea") as HTMLTextAreaElement;
-  return { onSend, field, client, handle };
+  return { onSend, field, client, handle, leave: view.unmount };
 }
 
 async function startListening() {
@@ -170,6 +179,62 @@ async function startListening() {
 }
 
 describe.each(["chat", "concierge"] as const)("voice input in the %s message field", (kind) => {
+  it("keeps the words heard and says why after leaving the chat mid-message", async () => {
+    const first = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+    first.leave();
+    expect(microphone.closed).toBe(1);
+
+    const back = renderComposer(kind, SONIOX, "chat-a");
+    expect(back.field().value).toBe("hello the");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Listening stopped when you left this chat",
+    );
+
+    fireEvent.input(back.field(), { target: { value: "hello there" } });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("keeps the words heard and says why after the page reloads mid-message", async () => {
+    const first = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "你好", pending: "" });
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(microphone.closed).toBe(1);
+    first.leave();
+
+    const back = renderComposer(kind, SONIOX, "chat-a");
+    expect(back.field().value).toBe("你好");
+    expect(screen.getByRole("status").textContent).toBe("Listening stopped when the page reloaded");
+
+    fireEvent.keyDown(back.field(), { key: "Enter" });
+    await waitFor(() => expect(back.onSend).toHaveBeenCalled());
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("gives the field back when the page comes back from the back/forward cache", async () => {
+    const { field } = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+
+    expect(microphone.closed).toBe(1);
+    expect(field().value).toBe("hello");
+    expect(field().readOnly).toBe(false);
+    expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(
+      "Listening stopped when you left this chat",
+    );
+  });
+
   it("has no voice control while Rome Cloud provides no voice input", async () => {
     renderComposer(kind, { available: false, place: null });
     await waitFor(() =>
@@ -516,6 +581,21 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
       ),
     );
     expect(FakeSocket.last).toBeNull();
+  });
+
+  it("lets the first typed character through while it clears a notice", async () => {
+    microphone.refuse = true;
+    const { field, onSend } = renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    await screen.findByRole("status");
+
+    const user = userEvent.setup();
+    await user.type(field(), "A");
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.type(field(), "bc{Enter}");
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "Abc" });
   });
 });
 

@@ -6,7 +6,12 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { deleteSession } from "@/lib/chat-api";
-import { clearAllChatDrafts, loadChatDraft, saveChatDraft } from "@/lib/chat-draft-storage";
+import {
+  clearAllChatDrafts,
+  loadChatDraft,
+  restoreUnsentChatDraft,
+  saveChatDraft,
+} from "@/lib/chat-draft-storage";
 import { currentAuthEpoch, invalidateNewChatDrafts } from "@/lib/new-chat-draft-storage";
 import { ChatComposer, type ChatComposerHandle } from "../ChatComposer";
 import { ConciergeComposer } from "./ConciergeComposer";
@@ -192,13 +197,36 @@ describe("the new chat page's draft", () => {
 });
 
 describe("the stored chat draft", () => {
+  it("keeps its text when its listening reason is one this release does not know", () => {
+    localStorage.setItem(
+      "rome:chat-draft:chat-a",
+      JSON.stringify({
+        version: 1,
+        text: "half a thought",
+        stop: { reason: "a-reason-from-elsewhere" },
+        authEpoch: currentAuthEpoch(),
+      }),
+    );
+
+    expect(loadChatDraft("chat-a")).toEqual({ text: "half a thought", stop: null });
+  });
+
+  it("takes back a failed send's text beside a saved reason", () => {
+    const stop = { reason: "left-chat" } as const;
+    saveChatDraft("chat-a", { text: "", stop }, currentAuthEpoch());
+
+    restoreUnsentChatDraft("chat-a", "send me", currentAuthEpoch());
+
+    expect(loadChatDraft("chat-a")).toEqual({ text: "send me", stop });
+  });
+
   it("is not cleared by a tab still open from before a logout", () => {
     const before = currentAuthEpoch();
     invalidateNewChatDrafts();
     clearAllChatDrafts();
-    saveChatDraft("chat-a", { text: "after logging in again" }, currentAuthEpoch());
+    saveChatDraft("chat-a", { text: "after logging in again", stop: null }, currentAuthEpoch());
 
-    saveChatDraft("chat-a", { text: "" }, before);
+    saveChatDraft("chat-a", { text: "", stop: null }, before);
 
     expect(loadChatDraft("chat-a")?.text).toBe("after logging in again");
   });
