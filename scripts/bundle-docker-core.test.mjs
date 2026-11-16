@@ -11,6 +11,7 @@ import {
   cliCommandFiles,
   cliCommandsBundleOptions,
   dockerBundleOptions,
+  entrypoints,
   splitBundleOptions,
 } from "./bundle-docker-core.mjs";
 
@@ -200,4 +201,27 @@ test("the app CLI runs every command from the bundle when src/ is absent", async
     });
     assert.match(help, /USAGE/, `${command} --help`);
   }
+});
+
+test("app:list:required runs from the bundle when src/ is absent", async (t) => {
+  const core = join(root, "packages/core");
+  const pkg = await mkdtemp(join(tmpdir(), "rome-compiled-required-"));
+  t.after(() => rm(pkg, { recursive: true, force: true }));
+  await cp(join(core, "bin"), join(pkg, "bin"), { recursive: true });
+  await symlink(join(core, "node_modules"), join(pkg, "node_modules"));
+  const [entry, outfile, format] = entrypoints.find(([source]) =>
+    source.endsWith("src/bin/list-required-apps.ts"),
+  );
+  await build({
+    ...dockerBundleOptions(format),
+    entryPoints: [join(root, entry)],
+    outfile: join(pkg, relative("packages/core", outfile)),
+    logLevel: "silent",
+  });
+
+  const output = execFileSync(process.execPath, [join(pkg, "bin/list-required-apps.js")], {
+    encoding: "utf8",
+    env: { ...process.env, ROME_PROJECT_ROOT: root },
+  });
+  assert.ok(output.split("\n").includes("system"), output);
 });

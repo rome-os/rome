@@ -118,6 +118,12 @@ export function splitBundleOptions(entry, outdir, entryName = "index") {
 export const entrypoints = [
   ["packages/core/src/index.ts", "packages/core/dist/index.js", "esm"],
   ["packages/core/src/db/migrate.ts", "packages/core/dist/db/migrate.js", "esm"],
+  // Run by bin/list-required-apps.js when src/ is gone.
+  [
+    "packages/core/src/bin/list-required-apps.ts",
+    "packages/core/dist/bin/list-required-apps.js",
+    "esm",
+  ],
   ["scripts/generate-caddyfile.ts", "dist/scripts/generate-caddyfile.js", "cjs"],
 ];
 
