@@ -27,9 +27,10 @@ import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import {
-  accountAllowsModel,
-  CODEX_LUNA_MODEL,
+  codexStrongSelection,
   MODEL_SELECTIONS,
+  selectionOfStrength,
+  type ModelStrength,
   sameProviderTarget,
   soleProviderAtUsageLimit,
   usageSwitchTarget,
@@ -64,6 +65,13 @@ import {
 import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
 
 import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
+
+/** The models a Concierge chat started on before it ran on the strongest. */
+const OLD_DEFAULTS: ReadonlySet<ModelSelectionId> = new Set([
+  "claude-sonnet",
+  "gpt-6-luna",
+  "gpt-5-6-terra",
+]);
 
 const log = createLogger("concierge");
 
@@ -163,7 +171,17 @@ export function conciergeOwnerLine(owner: OwnerProfile): string {
  */
 export interface TaskChats {
   /** Starts a dashboard chat owned by `ownerKey`. */
-  startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
+  startChat(
+    input: {
+      agentName?: string;
+      projectPath?: string;
+      /** The chat's model, whatever the dashboard's model selector says. */
+      model?: ModelSelectionId;
+      /** The effort its messages run at when they name none. */
+      reasoningEffort?: "low" | "high";
+    },
+    ownerKey: string,
+  ): Promise<string>;
   /**
    * Opens the runtime session of a chat that has had no turn yet, as its
    * first message would, and answers its id.
@@ -429,7 +447,9 @@ export class ConciergeService {
     if (existing) {
       if (!existing.largeModelSelection) {
         const picked = this.pickModel();
-        if (picked) await this.deps.webchatRepo.updateSessionLargeModelSelection(id, picked);
+        if (picked) {
+          await this.deps.webchatRepo.updateSessionLargeModelSelection(id, picked, "auto");
+        }
       }
       return id;
     }
@@ -455,6 +475,8 @@ export class ConciergeService {
       null,
       // The guardian's chat keeps no owner, as before; a visitor's names them.
       owner === GUARDIAN_OWNER ? {} : { ownerKey: owner },
+      null,
+      "auto",
     );
     log.info("concierge chat created", { chatId: id });
     return id;
@@ -589,6 +611,9 @@ export class ConciergeService {
       "webchat",
       null,
       { ownerKey: owner },
+      null,
+      // A topic chat takes the main chat's model as its owner or Rome chose it.
+      main?.largeModelSelection ? (main.largeModelSelectionBy ?? null) : "auto",
     );
     log.info("concierge topic chat started", { chatId: id });
     return { id, name: trimmed, main: false };
@@ -727,24 +752,62 @@ export class ConciergeService {
   }
 
   // The YAML tier prefers Codex whenever it is signed in, so the choice is
-  // stored on the chat: Sonnet answers fastest and calls tools most reliably,
-  // and Codex's small model is next. An Anthropic-compatible provider serves
-  // its own models through the tier mappings, so it keeps the tier's choice,
-  // as does a chat that neither provider can serve.
+  // stored on the chat: the strongest model of Claude, else of Codex. Opus
+  // answers a simple turn as fast as Sonnet, since its thinking adapts to the
+  // question (docs/concierge-eval.md#baseline). An Anthropic-compatible
+  // provider serves its own models through the tier mappings, so it keeps the
+  // tier's choice, as does a chat that neither provider can serve.
   private pickModel(): ModelSelectionId | null {
     const { anthropic: claude, openai: codex } = this.deps.accounts.read();
     if (claude?.state === "available" && claude.account.authMethod !== "stored-compatible") {
-      return "claude-sonnet";
+      return "claude-opus-5-5";
     }
-    if (codex?.state === "available") {
-      return accountAllowsModel(codex.account, CODEX_LUNA_MODEL) ? "gpt-6-luna" : "gpt-5-6-terra";
-    }
+    if (codex?.state === "available") return codexStrongSelection(codex.account);
     return null;
+  }
+
+  /**
+   * The model of `strength` for a task chat that Concierge chat `chatId`
+   * starts: on the Concierge chat's own provider, so the task runs on the
+   * account the Concierge does. Null when that chat has no provider of its own.
+   */
+  async taskModel(chatId: string, strength: ModelStrength): Promise<ModelSelectionId | null> {
+    const stored = (await this.deps.webchatRepo.getSession(chatId))?.largeModelSelection;
+    const own = stored ? MODEL_SELECTIONS[stored as ModelSelectionId]?.providerId : undefined;
+    const picked = own === "anthropic" || own === "openai" ? null : this.pickModel();
+    const provider = picked ? MODEL_SELECTIONS[picked].providerId : own;
+    if (provider !== "anthropic" && provider !== "openai") return null;
+    return selectionOfStrength(provider, strength, this.deps.accounts.read().openai?.account);
   }
 
   /** Checks raw subscription availability before a turn in any Concierge chat. */
   async switchIfExhausted(chatId: string) {
+    await this.adoptStrongDefault(chatId);
     return this.move(chatId);
+  }
+
+  /**
+   * Moves a chat Rome put on an older default (Sonnet, Luna or Terra) before
+   * it kept who chose a chat's model to the strong model of the same
+   * provider, once. A model its owner picked, or one Rome chose since, stays.
+   */
+  private async adoptStrongDefault(chatId: string): Promise<void> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    const stored = chat?.largeModelSelection as ModelSelectionId | null | undefined;
+    // Only a Concierge chat: in any other chat, task chats included, a
+    // stored Sonnet or Luna may be its owner's pick or a task's fast model.
+    if (!chat || !isConciergeChat(chat)) return;
+    if (!stored || chat.largeModelSelectionBy || !OLD_DEFAULTS.has(stored)) return;
+    const provider = MODEL_SELECTIONS[stored].providerId;
+    if (provider !== "anthropic" && provider !== "openai") return;
+    const strong = selectionOfStrength(
+      provider,
+      "strong",
+      this.deps.accounts.read().openai?.account,
+    );
+    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, strong, "auto");
+    if (strong !== stored)
+      log.info("concierge chat moved to its strong model", { chatId, from: stored, to: strong });
   }
 
   async switchForFailure(
@@ -806,7 +869,11 @@ export class ConciergeService {
           Date.now(),
     );
     if (!target) return null;
-    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
+    await this.deps.webchatRepo.updateSessionLargeModelSelection(
+      chatId,
+      target.selectionId,
+      "auto",
+    );
     this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [

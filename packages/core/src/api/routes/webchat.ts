@@ -86,7 +86,11 @@ import {
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
-import { resolveAgentPolicy, type ModelSelection } from "../../agent/index.js";
+import {
+  resolveAgentPolicy,
+  type ModelSelection,
+  type ModelSelectionId,
+} from "../../agent/index.js";
 import { toModelResolutionErrorPayload } from "../../agent/index.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
@@ -296,6 +300,16 @@ function routeError(refused: RouteAnswer): string {
 }
 
 /** What `POST /chat/sessions` takes. */
+/** A chat Rome starts for an owner, such as a task chat the Concierge hands work to. */
+export interface ChatStart {
+  agentName?: string;
+  projectPath?: string;
+  /** The chat's model, stored as a model menu pick is, whatever the model selector says. */
+  model?: ModelSelectionId;
+  /** The effort its messages run at when they name none. */
+  reasoningEffort?: ModelReasoningEffort;
+}
+
 export interface NewChatBody {
   name?: string;
   personaId?: string;
@@ -1037,7 +1051,7 @@ export interface WebchatRuntime {
   post: DashboardInbox["post"];
   /** Start a chat owned by `ownerKey`, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */
-  startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
+  startChat(input: ChatStart, ownerKey: string): Promise<string>;
   /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
   openSession(chatId: string): Promise<string>;
   /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
@@ -2336,7 +2350,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!initialSelection) {
       return null;
     }
-    await deps.webchatRepo.updateSessionLargeModelSelection(session.id, initialSelection.id);
+    await deps.webchatRepo.updateSessionLargeModelSelection(
+      session.id,
+      initialSelection.id,
+      "owner",
+    );
     return initialSelection;
   };
 
@@ -3310,7 +3328,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "The model selector is turned off" }, 409);
     }
     const selection = resolveWebchatLargeModelSelection(requested);
-    await deps.webchatRepo.updateSessionLargeModelSelection(sessionId, selection?.id ?? null);
+    await deps.webchatRepo.updateSessionLargeModelSelection(
+      sessionId,
+      selection?.id ?? null,
+      "owner",
+    );
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
@@ -4500,7 +4522,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             messageCount,
             body.largeModelSelection,
           );
-    const reasoningEffort = await resolveRequestedReasoningEffort(body.reasoningEffort);
+    // A message that names no effort runs at the chat's own, as a task chat's do.
+    const reasoningEffort = await resolveRequestedReasoningEffort(
+      body.reasoningEffort ?? session.reasoningEffort ?? undefined,
+    );
     const channelThreadKey = webchatSessionKey(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we
@@ -5547,11 +5572,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       return { ok: true, messageId: inputId, at: new Date() };
     },
-    async startChat(input, ownerKey) {
+    async startChat({ model, reasoningEffort, ...input }, ownerKey) {
       // A task chat is the owner's whose Concierge started it.
       const started = await startChat(input, ownerKey);
       const id = started.body.id;
       if (started.status >= 400 || typeof id !== "string") throw new Error(routeError(started));
+      // The model and effort Rome picked for the chat hold whatever the
+      // dashboard's model selector says, as a Concierge chat's model does.
+      if (model) await deps.webchatRepo.updateSessionLargeModelSelection(id, model, "auto");
+      if (reasoningEffort) await deps.webchatRepo.updateSessionReasoningEffort(id, reasoningEffort);
       return id;
     },
     async openSession(chatId) {

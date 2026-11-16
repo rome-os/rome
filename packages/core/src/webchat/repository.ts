@@ -357,6 +357,8 @@ const sessionSelectFields = {
   name: romeSessions.name,
   personaId: romeSessions.personaId,
   largeModelSelection: romeSessions.largeModelSelection,
+  largeModelSelectionBy: romeSessions.largeModelSelectionBy,
+  reasoningEffort: romeSessions.reasoningEffort,
   projectName: romeSessions.projectName,
   projectPath: romeSessions.projectPath,
   // The sidebar groups a device-folder chat under its folder, not its project.
@@ -1093,6 +1095,8 @@ export class WebChatRepository {
     ownership: { ownerKey?: string | null; inheritOwnerFrom?: string } = {},
     // Set only here: a chat's device folder never changes after creation.
     deviceFolder: DeviceFolder | null = null,
+    // Who chose largeModelSelection: its owner, or Rome; null when unknown.
+    largeModelSelectionBy: "owner" | "auto" | null = "owner",
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -1111,6 +1115,7 @@ export class WebChatRepository {
       projectPath,
       deviceFolder,
       largeModelSelection: largeModelSelection ?? null,
+      largeModelSelectionBy: largeModelSelection ? largeModelSelectionBy : null,
       agentName,
       type: storedSessionType(type),
       sourceChannel: "webchat",
@@ -1863,8 +1868,21 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id));
   }
 
-  async updateSessionLargeModelSelection(id: string, largeModelSelection: string | null) {
-    await this.db.update(romeSessions).set({ largeModelSelection }).where(eq(romeSessions.id, id));
+  /** Stores the chat's model, with who chose it: its owner, or Rome. */
+  async updateSessionLargeModelSelection(
+    id: string,
+    largeModelSelection: string | null,
+    by: "owner" | "auto",
+  ) {
+    await this.db
+      .update(romeSessions)
+      .set({ largeModelSelection, largeModelSelectionBy: largeModelSelection ? by : null })
+      .where(eq(romeSessions.id, id));
+  }
+
+  /** The effort a message to the chat runs at when it names none; null takes the dashboard's. */
+  async updateSessionReasoningEffort(id: string, reasoningEffort: string | null) {
+    await this.db.update(romeSessions).set({ reasoningEffort }).where(eq(romeSessions.id, id));
   }
 
   async getMessageCount(sessionId: string) {

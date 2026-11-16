@@ -153,6 +153,11 @@ export {
   type ProviderAvailabilityState,
 } from "./domain/model-account-report.js";
 export {
+  codexStrongSelection,
+  selectionOfStrength,
+  type ModelStrength,
+} from "./domain/model-strength.js";
+export {
   sameProviderTarget,
   soleProviderAtUsageLimit,
   usageSwitchTarget,

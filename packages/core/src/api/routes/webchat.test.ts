@@ -2671,7 +2671,7 @@ describe("Webchat API", () => {
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
 
       // A stored selection does not change the key the runtime session is under.
-      await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol");
+      await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol", "owner");
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
     });
   });
@@ -4855,7 +4855,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         switchIfExhausted: async (chatId: string) => {
-          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna");
+          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna", "owner");
           return null;
         },
         conciergeChat: async () => null,
@@ -4927,12 +4927,12 @@ describe("Webchat API", () => {
         const stream = await (await app.request(`/chat/turns/${turnId}/stream`)).text();
         if (id === "ordinary-quota") expect(stream).toContain("quota_exhausted");
         expect((await deps.webchatRepo.getSession(id))?.largeModelSelection).toBe(
-          id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
+          id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
         );
         expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
           expect.anything(),
           expect.objectContaining({
-            selectionId: id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
+            selectionId: id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
           }),
         );
       }

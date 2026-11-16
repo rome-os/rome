@@ -74,6 +74,20 @@ function optionalString(args: Record<string, unknown>, field: string): string | 
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/** One of `allowed`, or undefined when left out; anything else is refused. */
+function optionalEnum<const T extends string>(
+  args: Record<string, unknown>,
+  field: string,
+  allowed: readonly T[],
+): T | undefined {
+  const value = optionalString(args, field);
+  if (value === undefined) return undefined;
+  if (!(allowed as readonly string[]).includes(value)) {
+    throw new Error(`${field} must be one of ${allowed.join(", ")}`);
+  }
+  return value as T;
+}
+
 /** A chat whose latest turn ended in an error, such as on a model it could not use, is failed. */
 function statusOf(
   running: boolean,
@@ -1098,6 +1112,18 @@ export async function buildConciergeTools(
               "Exact catalog skill name to invoke on the first turn, with brief as its task.",
           },
           agent: { type: "string", description: 'Agent id. Defaults to "main".' },
+          model: {
+            type: "string",
+            enum: ["fast", "strong"],
+            description:
+              "How strong a model the task runs on. fast for a lookup, fetching and summarizing, or a reminder; strong for research, analysis, a plan or code. Defaults to strong.",
+          },
+          effort: {
+            type: "string",
+            enum: ["low", "high"],
+            description:
+              "How hard the task thinks. low with fast work, high with strong work. Defaults to high.",
+          },
           project: {
             type: "string",
             description: `Project the chat works in, as a path relative to the projects root ${getWebchatProjectsRoot()}, such as "website" or "apps/notes". Defaults to "default".`,
@@ -1188,10 +1214,19 @@ export async function buildConciergeTools(
             );
           }
           // The task chat is the owner's, private to them as their Concierge is.
+          const strength = optionalEnum(args, "model", ["fast", "strong"] as const);
+          const effort = optionalEnum(args, "effort", ["low", "high"] as const);
+          // Left out, the task runs as a task chat always has: on its agent's
+          // tier, at the dashboard's effort.
+          const model = strength
+            ? ((await service.taskModel(conciergeChatId, strength)) ?? undefined)
+            : undefined;
           const chatId = await service.dashboard.chats.startChat(
             {
               agentName: optionalString(args, "agent"),
               projectPath: await taskProjectPath(optionalString(args, "project")),
+              ...(model ? { model } : {}),
+              ...(effort ? { reasoningEffort: effort } : {}),
             },
             await ownerHere(),
           );
