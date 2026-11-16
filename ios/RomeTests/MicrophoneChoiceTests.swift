@@ -14,10 +14,12 @@ import Testing
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         defer { try? session.setCategory(.soloAmbient) }
+        // iOS adds options of its own, such as mixing with others when ducking.
+        let options = session.categoryOptions
         _ = MicrophoneChoice.available(session)
         #expect(session.category == .playback)
         #expect(session.mode == .spokenAudio)
-        #expect(session.categoryOptions == [.duckOthers])
+        #expect(session.categoryOptions == options)
     }
 
     @Test func isTheSystemDefaultUntilOneIsChosenAndAgainAfterItIsCleared() {
