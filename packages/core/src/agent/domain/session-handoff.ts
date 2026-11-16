@@ -30,6 +30,14 @@ export const HANDOFF_REQUEST = [
   "</handoff_request>",
 ].join("\n");
 
+/**
+ * The handoff a renewal for a setup change stores: no note, since no turn
+ * writes one. The successor reads what its predecessor held instead: the
+ * handoff that one started from and the chat's messages since it opened.
+ * docs/concepts/sessions.md#renewal
+ */
+export const LIGHT_HANDOFF = "";
+
 /** One message said in the chat, as the handoff reads it. */
 export interface RecentMessage {
   readonly senderName: string | null;
@@ -69,6 +77,13 @@ export interface RenewalHandoffs {
    * reset renews it.
    */
   readonly contextLimitTokens?: number;
+  /**
+   * The context size, in tokens, past which a message that comes while that
+   * renewal's handoff is written waits for the renewal, and is answered by
+   * the successor. Under it, the retired session answers the message at
+   * once. Absent, no message waits.
+   */
+  readonly hardContextLimitTokens?: number;
   /** Runs `work` while chat `chatId` says it is tidying up its context. */
   tidying<T>(chatId: string | undefined, work: () => Promise<T>): Promise<T>;
   /**
@@ -76,8 +91,11 @@ export interface RenewalHandoffs {
    * model, after the retired session could not. Null when that fails too.
    */
   fallback(chatId: string | undefined, agentName: string): Promise<string | null>;
-  /** What turn `turnId` of chat `chatId` shows beside the handoff. */
-  context(chatId: string, turnId: string): Promise<HandoffContext>;
+  /**
+   * What turn `turnId` of chat `chatId` shows beside the handoff: with
+   * `since`, every message said since then, else the latest ones.
+   */
+  context(chatId: string, turnId: string, since?: Date): Promise<HandoffContext>;
 }
 
 /**
@@ -92,6 +110,27 @@ export function estimateTokens(text: string): number {
     else other += 1;
   }
   return Math.ceil(ascii / 4) + other;
+}
+
+/**
+ * About how many tokens a light handoff carries into a successor's first
+ * turn: the handoff it passes on, if any, and every message with its line.
+ */
+export function replayTokens(handoff: string | null, messages: readonly RecentMessage[]): number {
+  return messages.reduce(
+    (total, message) => total + estimateTokens(message.text) + LINE_TOKENS,
+    handoff ? estimateTokens(handoff) : 0,
+  );
+}
+
+/**
+ * The most a light handoff may carry, as a share of the context limit: a
+ * provider that compacted the retired session mid-turn left it holding less
+ * than the chat's text since it opened, so that text can outgrow the window.
+ * Past this, the renewal writes a handoff instead.
+ */
+export function lightHandoffCap(contextLimitTokens: number): number {
+  return Math.floor(contextLimitTokens / 2);
 }
 
 /**
@@ -126,21 +165,32 @@ export function recentWithin(
 
 /**
  * The sections a successor's first turn carries inside its `<continuation>`
- * notice: the handoff its predecessor wrote, the chat's open tasks as Rome
- * holds them, and the chat's latest messages up to {@link HANDOFF_RECENT_TOKENS}.
+ * notice: the handoff its predecessor wrote, when it wrote one, the chat's
+ * open tasks as Rome holds them, and the chat's messages: with `all`, every
+ * one the context holds, else the latest up to {@link HANDOFF_RECENT_TOKENS}.
  */
-export function handoffSections(handoff: string, context: HandoffContext): string[] {
-  const sections = [
-    "Your previous session wrote this handoff for you before it was replaced. The chat's owner can open it from the chat, but has not been told about it.",
-    `<handoff>\n${handoff.trim()}\n</handoff>`,
-  ];
+export function handoffSections(
+  handoff: string | null,
+  context: HandoffContext,
+  options: { all?: boolean } = {},
+): string[] {
+  const sections = handoff
+    ? [
+        "Your previous session wrote this handoff for you before it was replaced. The chat's owner can open it from the chat, but has not been told about it.",
+        `<handoff>\n${handoff.trim()}\n</handoff>`,
+      ]
+    : [];
   if (context.openTasks) {
     sections.push(
-      "The open tasks, as Rome holds them now. They are newer than the handoff where the two differ.",
+      handoff
+        ? "The open tasks, as Rome holds them now. They are newer than the handoff where the two differ."
+        : "The open tasks, as Rome holds them now.",
       `<open_tasks>\n${context.openTasks.trim()}\n</open_tasks>`,
     );
   }
-  const { shown, omitted } = recentWithin(context.recent, HANDOFF_RECENT_TOKENS);
+  const { shown, omitted } = options.all
+    ? { shown: [...context.recent], omitted: 0 }
+    : recentWithin(context.recent, HANDOFF_RECENT_TOKENS);
   if (shown.length > 0) {
     sections.push(
       "<recent_messages>",
