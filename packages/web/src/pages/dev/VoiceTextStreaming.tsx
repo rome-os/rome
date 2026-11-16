@@ -123,9 +123,31 @@ interface Fade {
   refadeCorrections: boolean;
   /** Extra delay per word within one update. 0 fades the update's words together. */
   staggerMs: number;
+  /**
+   * Characters revealed per second, one at a time, whatever pace the text
+   * arrives at. 0 shows each update at once, a word at a time.
+   */
+  charsPerSecond: number;
+  /** Whether all the text sits grey while listening and darkens once listening ends. */
+  greyWhileListening: boolean;
 }
 
 const PRESETS: { name: string; description: string; fade: Fade }[] = [
+  {
+    name: "Reference",
+    description:
+      "Estimated from the recording you shared: characters revealed one at a time at 14 a second, each fading in over 0.28 s with no blur, so the last few form a soft gradient. All the text sits grey while listening and darkens when listening ends. Corrections swap in place.",
+    fade: {
+      durationMs: 280,
+      fromOpacity: 0,
+      blurPx: 0,
+      pending: "same",
+      refadeCorrections: false,
+      staggerMs: 0,
+      charsPerSecond: 14,
+      greyWhileListening: true,
+    },
+  },
   {
     name: "Mist",
     description: "Last round's A2, for reference. Corrections fade in again.",
@@ -136,6 +158,8 @@ const PRESETS: { name: string; description: string; fade: Fade }[] = [
       pending: "same",
       refadeCorrections: true,
       staggerMs: 0,
+      charsPerSecond: 0,
+      greyWhileListening: false,
     },
   },
   {
@@ -149,6 +173,8 @@ const PRESETS: { name: string; description: string; fade: Fade }[] = [
       pending: "dim",
       refadeCorrections: false,
       staggerMs: 0,
+      charsPerSecond: 0,
+      greyWhileListening: false,
     },
   },
   {
@@ -162,6 +188,8 @@ const PRESETS: { name: string; description: string; fade: Fade }[] = [
       pending: "hide",
       refadeCorrections: false,
       staggerMs: 0,
+      charsPerSecond: 0,
+      greyWhileListening: false,
     },
   },
   {
@@ -174,6 +202,8 @@ const PRESETS: { name: string; description: string; fade: Fade }[] = [
       pending: "dim",
       refadeCorrections: false,
       staggerMs: 0,
+      charsPerSecond: 0,
+      greyWhileListening: false,
     },
   },
   {
@@ -186,21 +216,71 @@ const PRESETS: { name: string; description: string; fade: Fade }[] = [
       pending: "same",
       refadeCorrections: false,
       staggerMs: 40,
+      charsPerSecond: 0,
+      greyWhileListening: false,
     },
   },
 ];
 
-function Tuned({ heard, language, fade }: { heard: Heard; language: Language; fade: Fade }) {
-  const settled = units(heard.settled, language);
-  const pending = fade.pending === "hide" ? [] : units(heard.pending, language);
+/** The first `length` characters of `target`, growing at `perSecond`. A correction takes back what no longer matches. */
+function useReveal(target: string, perSecond: number): string {
+  const [shown, setShown] = useState(perSecond > 0 ? "" : target);
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  useEffect(() => {
+    if (perSecond <= 0) return;
+    let frame = 0;
+    let last = performance.now();
+    let budget = 0;
+    const tick = (now: number) => {
+      budget += ((now - last) / 1000) * perSecond;
+      last = now;
+      setShown((current) => {
+        const goal = targetRef.current;
+        let common = 0;
+        while (common < current.length && current[common] === goal[common]) common += 1;
+        const take = Math.floor(budget);
+        budget -= take;
+        // Never more than a second behind, so a long burst does not leave the text far back.
+        const behind = goal.length - common;
+        const step = behind > perSecond ? behind - perSecond + take : take;
+        return goal.slice(0, Math.min(goal.length, common + step));
+      });
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [perSecond]);
+  return perSecond > 0 ? shown : target;
+}
+
+function Tuned({
+  heard,
+  language,
+  fade,
+  listening,
+}: {
+  heard: Heard;
+  language: Language;
+  fade: Fade;
+  listening: boolean;
+}) {
+  const settledText = heard.settled;
+  const visibleText = settledText + (fade.pending === "hide" ? "" : heard.pending);
+  const revealing = fade.charsPerSecond > 0;
+  const shownText = useReveal(visibleText, fade.charsPerSecond);
+  const all = revealing ? Array.from(shownText) : units(shownText, language);
+  const settledCount = revealing
+    ? Array.from(settledText).length
+    : units(settledText, language).length;
   // The delay each word got when it first showed, so a later update never
   // restarts a fade that is under way.
   const delays = useRef(new Map<string, number>());
   const shownBefore = useRef(0);
   const firstNew = shownBefore.current;
-  const all = [...settled, ...pending];
   const keyOf = (unit: string, i: number) =>
     fade.refadeCorrections ? `${i}:${unit.trim()}` : String(i);
+  const grey = "color-mix(in oklch, var(--color-foreground) 60%, var(--color-muted))";
   const view = all.map((unit, i) => {
     const key = keyOf(unit, i);
     let delay = delays.current.get(key);
@@ -208,17 +288,22 @@ function Tuned({ heard, language, fade }: { heard: Heard; language: Language; fa
       delay = Math.max(0, i - firstNew) * fade.staggerMs;
       delays.current.set(key, delay);
     }
-    const isPending = i >= settled.length;
+    const isPending = i >= settledCount;
+    const color =
+      fade.greyWhileListening && listening
+        ? grey
+        : isPending && fade.pending === "dim"
+          ? "var(--color-subtle-foreground)"
+          : "var(--color-foreground)";
     return (
       <span
         key={key}
         className="transition-colors"
         style={{
-          transitionDuration: `${Math.max(fade.durationMs, 200)}ms`,
-          color:
-            isPending && fade.pending === "dim"
-              ? "var(--color-subtle-foreground)"
-              : "var(--color-foreground)",
+          transitionDuration: fade.greyWhileListening
+            ? "600ms"
+            : `${Math.max(fade.durationMs, 200)}ms`,
+          color,
           animation:
             fade.durationMs > 0
               ? `voice-text-tuned-in ${fade.durationMs}ms cubic-bezier(0.25, 0.1, 0.25, 1) ${delay}ms both`
@@ -275,7 +360,7 @@ function Slider({
         onChange={(event) => onChange(Number(event.target.value))}
         className="min-w-0 flex-1 accent-[var(--color-primary)]"
       />
-      <span className="w-16 shrink-0 text-right tabular-nums text-foreground">
+      <span className="w-24 shrink-0 text-right tabular-nums text-foreground">
         {value}
         {unit}
       </span>
@@ -325,8 +410,8 @@ export function VoiceTextStreaming() {
   const [language, setLanguage] = useState<Language>("en");
   const transcriber = useSimulatedTranscriber(language);
   const { play } = transcriber;
-  const [fade, setFade] = useState<Fade>(PRESETS[1]!.fade);
-  const [preset, setPreset] = useState<string | null>(PRESETS[1]!.name);
+  const [fade, setFade] = useState<Fade>(PRESETS[0]!.fade);
+  const [preset, setPreset] = useState<string | null>(PRESETS[0]!.name);
   const tune = (next: Partial<Fade>) => {
     setFade((current) => ({ ...current, ...next }));
     setPreset(null);
@@ -398,6 +483,7 @@ export function VoiceTextStreaming() {
           heard={transcriber.heard}
           language={language}
           fade={fade}
+          listening={transcriber.running}
         />
       </Field>
 
@@ -437,6 +523,24 @@ export function VoiceTextStreaming() {
           step={10}
           unit=" ms"
           onChange={(staggerMs) => tune({ staggerMs })}
+        />
+        <Slider
+          label="Reveal speed"
+          value={fade.charsPerSecond}
+          min={0}
+          max={40}
+          step={1}
+          unit=" chars/s"
+          onChange={(charsPerSecond) => tune({ charsPerSecond })}
+        />
+        <Choice
+          label="While listening"
+          value={fade.greyWhileListening}
+          options={[
+            { value: false, label: "Normal color" },
+            { value: true, label: "Grey, darkens when done" },
+          ]}
+          onChange={(greyWhileListening) => tune({ greyWhileListening })}
         />
         <Choice
           label="Words that may change"
