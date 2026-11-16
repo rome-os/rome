@@ -47,7 +47,8 @@ import { SlotContent, SlotOutlet } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
 import { usePresentationMode } from "@/lib/presentation-mode";
-import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
+import { extractFilesFromDataTransfer } from "@/lib/clipboard-files";
+import { useFileDropArea } from "@/hooks/use-file-drop-area";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
@@ -709,7 +710,6 @@ export function Chat({
   const ownComposerRef = useRef<ChatComposerHandle>(null);
   const composerRef = hostComposerRef ?? ownComposerRef;
   const creatingSessionRef = useRef(false);
-  const dragDepthRef = useRef(0);
   const loadedSessionsRef = useRef<Set<string>>(new Set());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
@@ -2340,49 +2340,18 @@ export function Chat({
   useEffect(() => {
     if (composerHidden) composerRef.current?.stopVoiceInput();
   }, [composerHidden, composerRef]);
-  const refuseDrop = (event: React.DragEvent<HTMLDivElement>): boolean => {
-    if (!sharingRef.current) return false;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "none";
-    return true;
-  };
-
-  const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    if (refuseDrop(event)) return;
-    event.preventDefault();
-    dragDepthRef.current += 1;
-    event.dataTransfer.dropEffect = "copy";
-    setIsDraggingFiles(true);
-  }, []);
-
-  const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    if (refuseDrop(event)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-  }, []);
-
-  const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) {
-      setIsDraggingFiles(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current = 0;
-    setIsDraggingFiles(false);
-    if (sharingRef.current) return;
-    const files = extractFilesFromDataTransfer(event.dataTransfer);
-    if (files.length === 0) return;
-    composerRef.current?.addFiles(files);
-    composerRef.current?.focus();
-  }, []);
+  // A shared chat takes no files: the composer is hidden while sharing.
+  const fileDrop = useFileDropArea({
+    onActiveChange: setIsDraggingFiles,
+    refuse: () => sharingRef.current,
+    onDrop: (event) => {
+      event.stopPropagation();
+      const files = extractFilesFromDataTransfer(event.dataTransfer);
+      if (files.length === 0) return;
+      composerRef.current?.addFiles(files);
+      composerRef.current?.focus();
+    },
+  });
 
   const refreshActiveSession = useCallback(() => {
     if (mainSessionId) {
@@ -2742,10 +2711,7 @@ export function Chat({
         ))}
         <div
           className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
-          onDragEnter={handleDragEnter}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
+          {...fileDrop.dropAreaProps}
         >
           {/* ---- Main Chat Area ---- */}
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">

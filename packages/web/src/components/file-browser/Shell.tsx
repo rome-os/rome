@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   type ChangeEvent,
-  type DragEvent,
   type InputHTMLAttributes,
   type ReactNode,
 } from "react";
@@ -33,10 +32,7 @@ import {
   getUploadEntriesFromDataTransfer,
   getUploadEntriesFromFileList,
 } from "@/lib/file-browser-upload";
-
-function eventHasFiles(dataTransfer: DataTransfer | null): boolean {
-  return Boolean(dataTransfer && Array.from(dataTransfer.types).includes("Files"));
-}
+import { useFileDropArea } from "@/hooks/use-file-drop-area";
 
 interface ShellProps {
   embedded: boolean;
@@ -145,41 +141,14 @@ export function Shell({
     [store],
   );
 
-  const handleDragEnter = (event: DragEvent<HTMLElement>) => {
-    if (!eventHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    store.getState().refs.dragDepth += 1;
-    store.getState().ui.setIsDragActive(true);
-  };
-
-  const handleDragOver = (event: DragEvent<HTMLElement>) => {
-    if (!eventHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    if (!store.getState().ui.isDragActive) {
-      store.getState().ui.setIsDragActive(true);
-    }
-  };
-
-  const handleDragLeave = (event: DragEvent<HTMLElement>) => {
-    if (!eventHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    const refs = store.getState().refs;
-    refs.dragDepth = Math.max(refs.dragDepth - 1, 0);
-    if (refs.dragDepth === 0) {
-      store.getState().ui.setIsDragActive(false);
-    }
-  };
-
-  const handleDrop = async (event: DragEvent<HTMLElement>) => {
-    if (!eventHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    store.getState().refs.dragDepth = 0;
-    store.getState().ui.setIsDragActive(false);
-    await store
-      .getState()
-      .ui.uploadFiles(await getUploadEntriesFromDataTransfer(event.dataTransfer));
-  };
+  const fileDrop = useFileDropArea({
+    onActiveChange: (active) => store.getState().ui.setIsDragActive(active),
+    onDrop: (event) => {
+      void getUploadEntriesFromDataTransfer(event.dataTransfer).then((entries) =>
+        store.getState().ui.uploadFiles(entries),
+      );
+    },
+  });
 
   const hasFolderDashboard = Boolean(folderPanel);
   // On sm, Content overlays the navigator (FilesPane) when any of these is set.
@@ -199,10 +168,7 @@ export function Shell({
           ? "h-full"
           : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]"
       }`}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+      {...fileDrop.dropAreaProps}
     >
       <input
         ref={fileInputRef}

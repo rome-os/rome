@@ -141,8 +141,6 @@ function TreeRow({
     event.preventDefault();
     event.stopPropagation();
     setIsDragOver(false);
-    store.getState().refs.dragDepth = 0;
-    store.getState().ui.setIsDragActive(false);
     const draggedNode = getDraggedTreeNode(event.dataTransfer);
     if (draggedNode) {
       await store.getState().ui.movePathToFolder(draggedNode.path, path);

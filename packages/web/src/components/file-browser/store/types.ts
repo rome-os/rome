@@ -318,6 +318,5 @@ export interface FileBrowserState {
     discardChangesResolver: ((discard: boolean) => void) | null;
     acceptedBrowserPath: string;
     sidebarResize: { startWidth: number; startX: number } | null;
-    dragDepth: number;
   };
 }
