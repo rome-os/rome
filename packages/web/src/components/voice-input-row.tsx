@@ -103,10 +103,14 @@ function MicrophoneRow() {
     );
   };
 
-  // A chosen microphone that is not connected shows as the system default,
-  // which voice input then records from. The choice itself is kept, so the
-  // microphone is chosen again once it is back.
+  // An unplugged microphone leaves the list, and the choice switches to the
+  // system default, which voice input then records from. Only a list that
+  // names some microphone counts: an empty one may be the browser not answering.
   const found = options ? findMicrophone(chosen, options) : null;
+  const unplugged = chosen !== null && !!options?.length && found === null;
+  useEffect(() => {
+    if (unplugged) setChosen(chooseMicrophone(null));
+  }, [unplugged]);
   const description = refused
     ? t("system.voiceInput.microphone.refused")
     : t("system.voiceInput.microphone.description");

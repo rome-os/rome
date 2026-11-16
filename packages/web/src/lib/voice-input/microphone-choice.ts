@@ -1,8 +1,8 @@
 // Which microphone voice input records from, kept in this browser. Device ids
 // belong to one browser profile and one origin, so the choice cannot follow
-// the guardian to another device. The choice changes only when the guardian
-// picks another one: a chosen microphone that is not connected now leaves
-// voice input on the system default, and is used again once it is back.
+// the guardian to another device. Voice input records from the chosen
+// microphone while it is connected; once the browser lists the microphones
+// without it, the choice is cleared and voice input uses the system default.
 
 import { readStored, writeStored } from "@/lib/stored-preference";
 

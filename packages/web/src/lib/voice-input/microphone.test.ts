@@ -46,7 +46,7 @@ describe("opening the microphone", () => {
     expect(getUserMedia).toHaveBeenCalledTimes(1);
   });
 
-  it("records from the system default while the chosen microphone is unplugged, and keeps the choice", async () => {
+  it("records from the system default, and clears the choice, when the chosen microphone is unplugged", async () => {
     chooseMicrophone({ id: "usb", label: "USB Microphone" });
     const fallback = streamFrom("mbp").stream;
     const getUserMedia = browser(
@@ -55,7 +55,7 @@ describe("opening the microphone", () => {
     );
     expect(await openMicrophoneStream()).toBe(fallback);
     expect(getUserMedia).toHaveBeenCalledTimes(1);
-    expect(chosenMicrophone()).toEqual({ id: "usb", label: "USB Microphone" });
+    expect(chosenMicrophone()).toBeNull();
   });
 
   it("finds the chosen microphone by name when the browser gave it a new id on this page load", async () => {
@@ -75,7 +75,7 @@ describe("opening the microphone", () => {
     expect(chosenMicrophone()).toEqual({ id: "old-id", label: "USB Microphone" });
   });
 
-  it("records from the system default when the browser fails to list the microphones", async () => {
+  it("records from the system default, and keeps the choice, when the browser fails to list the microphones", async () => {
     chooseMicrophone({ id: "old-id", label: "USB Microphone" });
     const fallback = streamFrom("mbp").stream;
     browser(async () => fallback);
@@ -84,6 +84,14 @@ describe("opening the microphone", () => {
     });
     expect(await openMicrophoneStream()).toBe(fallback);
     expect(chosenMicrophone()).toEqual({ id: "old-id", label: "USB Microphone" });
+  });
+
+  it("keeps the choice when the browser lists no microphones", async () => {
+    chooseMicrophone({ id: "usb", label: "USB Microphone" });
+    const fallback = streamFrom("default").stream;
+    browser(async () => fallback, []);
+    expect(await openMicrophoneStream()).toBe(fallback);
+    expect(chosenMicrophone()).toEqual({ id: "usb", label: "USB Microphone" });
   });
 
   it("still reports a refused microphone rather than trying another", async () => {

@@ -94,14 +94,14 @@ describe("choosing the microphone in Settings", () => {
     await waitFor(() => expect(select.textContent).toContain("System default"));
   });
 
-  it("shows the system default while the chosen microphone is unplugged, and keeps the choice", async () => {
+  it("switches to the system default and clears a chosen microphone that is unplugged", async () => {
     localStorage.setItem("rome.voiceInput.microphone", "gone");
     devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
     await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
     const user = userEvent.setup();
     const select = await screen.findByRole("combobox", { name: "Microphone" });
-    await waitFor(() => expect(select.textContent).toContain("System default"));
-    expect(localStorage.getItem("rome.voiceInput.microphone")).toBe("gone");
+    await waitFor(() => expect(localStorage.getItem("rome.voiceInput.microphone")).toBeNull());
+    expect(select.textContent).toContain("System default");
 
     await user.click(select);
     expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual([
