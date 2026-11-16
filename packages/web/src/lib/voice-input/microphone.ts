@@ -4,6 +4,7 @@
 // rate, and the worklet brings the audio down to 16 kHz.
 
 import { VOICE_INPUT_SAMPLE_RATE } from "@rome/api-types/voice-input";
+import { chosenMicrophone } from "./microphone-choice";
 
 // Runs on the audio thread. Each output sample is the mean of the input
 // samples it covers, which also filters out most content above the new
@@ -56,6 +57,27 @@ class PcmCapture extends AudioWorkletProcessor {
 registerProcessor("rome-pcm-capture", PcmCapture);
 `;
 
+const AUDIO = { channelCount: 1, echoCancellation: true, noiseSuppression: true };
+
+/**
+ * Opens `device`, or the system default when it is null. A chosen microphone
+ * that is no longer connected falls back to the default rather than failing.
+ */
+export async function openMicrophoneStream(device: string | null): Promise<MediaStream> {
+  if (!device) return navigator.mediaDevices.getUserMedia({ audio: AUDIO });
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: { ...AUDIO, deviceId: { exact: device } },
+    });
+  } catch (error) {
+    const gone =
+      error instanceof Error &&
+      (error.name === "OverconstrainedError" || error.name === "NotFoundError");
+    if (!gone) throw error;
+    return navigator.mediaDevices.getUserMedia({ audio: AUDIO });
+  }
+}
+
 export interface Microphone {
   readonly sampleRate: number;
   /**
@@ -90,9 +112,7 @@ export async function openMicrophone(
     });
   let stream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-    });
+    stream = await openMicrophoneStream(chosenMicrophone());
   } finally {
     answered = true;
   }

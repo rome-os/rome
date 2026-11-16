@@ -64,3 +64,45 @@ describe("the voice input row in Settings", () => {
     expect(await rowText({ available: false, place: null })).toBe("");
   });
 });
+
+describe("choosing the microphone in Settings", () => {
+  afterEach(() => localStorage.clear());
+
+  function devices(list: Array<Partial<MediaDeviceInfo>>, getUserMedia = rs.fn()) {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        enumerateDevices: rs.fn(async () => list),
+        getUserMedia,
+        addEventListener: rs.fn(),
+        removeEventListener: rs.fn(),
+      },
+    });
+  }
+
+  it("offers to show the microphones while the browser hides their names", async () => {
+    devices([{ kind: "audioinput", deviceId: "x", label: "" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    expect(await screen.findByRole("button", { name: "Show microphones" })).toBeTruthy();
+  });
+
+  it("shows the system default when no microphone is chosen", async () => {
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(select.textContent).toContain("System default"));
+  });
+
+  it("says when the chosen microphone is not connected", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "gone");
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    const text = await rowText({
+      available: true,
+      place: { provider: "Soniox", host: "stt-rt.soniox.com" },
+    });
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("The chosen microphone isn't connected"),
+    );
+    expect(text).toContain("Microphone");
+  });
+});

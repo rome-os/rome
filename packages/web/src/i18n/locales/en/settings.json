@@ -953,7 +953,15 @@
       "placeViaRomeCloud": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, provided through Rome Cloud. Rome keeps no audio.",
       "romeCloudUnreachable": "Voice input is provided through Rome Cloud, which cannot be reached right now, so Rome cannot name the transcription service.",
       "romeCloudNotConfigured": "Voice input is provided through Rome Cloud, which has not set up a transcription service yet.",
-      "romeCloudSignedOut": "Voice input is provided through Rome Cloud, which does not accept this Rome's sign-in. Sign in to Rome Cloud again to use it."
+      "romeCloudSignedOut": "Voice input is provided through Rome Cloud, which does not accept this Rome's sign-in. Sign in to Rome Cloud again to use it.",
+      "microphone": {
+        "title": "Microphone",
+        "description": "Voice input in this browser records from this microphone.",
+        "systemDefault": "System default",
+        "show": "Show microphones",
+        "refused": "The browser blocked the microphone, so it won't list them. Allow it in the browser's site settings.",
+        "missing": "The chosen microphone isn't connected, so voice input uses the system default."
+      }
     }
   },
   "easterEgg": {
