@@ -511,17 +511,42 @@ enum SnapshotRunner {
             await capture("36-update-ax3", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
             model.dynamicTypeOverride = nil
             await capture("20-update-required", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
-            // Behind but new enough: the pill above the composer, the drawer's
-            // line, and the page it opens; then the pill after an upgrade.
+            // Behind but new enough: Chat, and the drawer's line.
             await capture("48-update-pill", style: styleName, in: directory, wait: 4) { model.openDemo(.updateOffered) }
             await capture("49-update-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("50-update-offered-page", style: styleName, in: directory, wait: 1.2) { model.update.openPage() }
             model.update.closePage()
-            await capture("48b-update-done", style: styleName, in: directory, wait: 1) {
-                model.update.debugShow(.upToDate)
-                model.update.debugShowUpdated(DemoBackend.releasedVersion)
+            // A background upgrade from the drawer: its row while it runs and
+            // when it fails, then the line above the composer once it lands.
+            let target = DemoBackend.releasedVersion
+            let rows: [(String, InstanceUpdater.State, UpdateGate.Progress)] = [
+                ("49b-update-drawer-starting", .starting(current: nil, latest: target), .downloading),
+                ("49c-update-drawer-updating", .updating(target: target, since: .now), .downloading),
+                ("49d-update-drawer-restarting", .updating(target: target, since: .now), .restarting),
+                ("49e-update-drawer-failed", .failed(.rolledBack(target: target, from: DemoBackend.offeredFromVersion)), .downloading),
+                ("49f-update-drawer-start-failed", .failed(.start(current: nil, latest: target, message: "")), .downloading),
+            ]
+            for (name, state, progress) in rows {
+                await capture(name, style: styleName, in: directory, wait: 2.4) {
+                    model.openDemo(.updateOffered)
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        model.update.debugShow(state, progress: progress, background: true)
+                        model.debugCommand = .drawer(true)
+                    }
+                }
+                model.debugCommand = .drawer(false)
+                try? await Task.sleep(for: .seconds(0.6))
+            }
+            await capture("48b-update-done", style: styleName, in: directory, wait: 2.4) {
+                model.openDemo(.updateOffered)
+                Task {
+                    try? await Task.sleep(for: .seconds(1.2))
+                    model.update.debugShow(.upToDate)
+                    model.update.debugShowUpdated(target)
+                }
             }
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))

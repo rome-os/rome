@@ -101,6 +101,16 @@
         }
       }
     },
+    "%@ restarts to finish the update and cannot answer for a few minutes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 会重启以完成更新，几分钟内无法回复。"
+          }
+        }
+      }
+    },
     "%@ sign-in failed, switched to %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2165,6 +2175,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "我的手机是不是太热了？"
+          }
+        }
+      }
+    },
+    "It opens here once the update finishes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新完成后会在这里打开。"
           }
         }
       }
@@ -4473,6 +4493,16 @@
         }
       }
     },
+    "Starting the update…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开始更新…"
+          }
+        }
+      }
+    },
     "Steps" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4809,6 +4839,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "最新版本是 %@。App 需要更新的 Rome。"
+          }
+        }
+      }
+    },
+    "The update did not finish" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新没有完成"
           }
         }
       }
@@ -5289,6 +5329,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新"
+          }
+        }
+      }
+    },
+    "Update %@ to %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将 %@ 更新到 %@？"
+          }
+        }
+      }
+    },
+    "Update did not finish" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新没有完成"
+          }
+        }
+      }
+    },
+    "Update did not start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新没有开始"
+          }
+        }
+      }
+    },
+    "Update is taking too long" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新耗时过长"
           }
         }
       }
@@ -5821,12 +5901,32 @@
         }
       }
     },
+    "Your Rome is still on %@. Check it in Rome Cloud, or try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 仍在 %@。请在 Rome Cloud 中查看，或重试。"
+          }
+        }
+      }
+    },
     "Your Rome is stopped" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 已停止"
+          }
+        }
+      }
+    },
+    "Your Rome is updating" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 正在更新"
           }
         }
       }

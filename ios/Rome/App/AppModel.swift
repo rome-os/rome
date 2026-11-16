@@ -782,6 +782,12 @@ final class AppModel {
             if action.hasPrefix("health.") { health?.foreground() }
         }
         connections.originId = { [weak health] in health?.originId() }
+        // Rome Cloud's word on an instance an upgrade waits on: one it no
+        // longer holds as upgrading, still on the old release, did not update.
+        update.cloudStatus = { [weak self] id in
+            guard let list = try? await self?.cloud.listInstances() else { return nil }
+            return list.first { $0.id == id }?.status
+        }
         connections.device = { [weak self] in
             guard let id = self?.cloud.deviceCredential?.deviceSessionId else { return nil }
             return (id.lowercased(), UIDevice.current.name)
@@ -883,7 +889,7 @@ final class AppModel {
         sessionExpired = false
         self.workspace = workspace
         syncLanguage()
-        update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
+        update.onFinished = { [weak self] background in Task { await self?.upgradeFinished(background: background) } }
         phase = .ready
         Task { await catchUp(instance, session: session, box: box, workspace: workspace) }
     }
@@ -937,6 +943,11 @@ final class AppModel {
                 leaveWorkspace()
                 phase = .signedOut
                 return
+            case .instanceNotReady where update.backgroundUpgradePending(for: instance.id):
+                // Restarting into the upgrade this phone started in the
+                // background: the cached workspace stays, and the drawer's
+                // row shows the upgrade. Its requests renew once it is back.
+                break
             case .instanceNotReady:
                 leaveWorkspace()
                 await failedToConnect(to: instance, error: error)
@@ -1009,12 +1020,18 @@ final class AppModel {
             await openInstance(preferring: nil)
             return
         }
-        if !current.isRunning {
+        // Not running because of the upgrade this phone started in the
+        // background: the cached workspace stays while it runs.
+        if !current.isRunning, !update.backgroundUpgradePending(for: current.id) {
             leaveWorkspace()
             await failedToConnect(to: current, error: AuthError.instanceNotReady)
             return
         }
-        UserDefaults.standard.set(try? JSONEncoder().encode(current), forKey: Defaults.lastInstanceRecord)
+        // Mid-upgrade the record keeps its running status: a session is
+        // asked for only of an instance recorded as running.
+        if current.isRunning {
+            UserDefaults.standard.set(try? JSONEncoder().encode(current), forKey: Defaults.lastInstanceRecord)
+        }
         if current.origin != instance.origin || current.isVisitor != instance.isVisitor {
             leaveWorkspace()
             await connect(to: current)
@@ -1345,7 +1362,10 @@ final class AppModel {
         case .success:
             return box === tokenBox
         case .failure:
-            if box === tokenBox { sessionExpired = true }
+            // Mid-upgrade the instance restarts and Rome Cloud reports it as
+            // not ready: that is no expired session, and the requests go
+            // again once it is back.
+            if box === tokenBox, !update.isUnderway { sessionExpired = true }
             return false
         }
     }
@@ -1472,7 +1492,7 @@ final class AppModel {
         syncLanguage()
         // Its own task: the poll that reports the finish is cancelled when the
         // reopened workspace attaches, and would cancel the reopen with it.
-        update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
+        update.onFinished = { [weak self] background in Task { await self?.upgradeFinished(background: background) } }
         let instanceID = currentInstanceID
         // The role first, so the screens know a visitor from the start. Both
         // get the same update flow: the instance lets a visitor on its
@@ -1745,6 +1765,34 @@ final class AppModel {
             topics = TopicChatsStore.topics(in: all)
         }
         return PushRoute.topicChat(for: target, topics: topics)
+    }
+
+    /// The instance restarted on its new release. An upgrade from the page
+    /// opens it fresh behind the page; one in the background refreshes what
+    /// shows, in place.
+    private func upgradeFinished(background: Bool) async {
+        if background {
+            await refreshAfterUpgrade()
+        } else {
+            await reopenAfterUpgrade()
+        }
+    }
+
+    /// The guardian may be mid-chat: the screens and the navigation stay,
+    /// and every store reads again from the new process. The live socket
+    /// starts over, the role and the running release are read again, and a
+    /// report the restart refused goes again.
+    private func refreshAfterUpgrade() async {
+        guard let workspace else { return }
+        // A 401 from a restarting instance is not an expired session.
+        sessionExpired = false
+        workspace.backend.events.resume()
+        if workspace.conciergeState != .ready { await workspace.openConcierge() }
+        await workspace.readRole()
+        guard self.workspace === workspace else { return }
+        if let id = currentInstanceID { KeptIdentity.save(workspace.kept, for: id) }
+        connections.reportIfUnsent()
+        await update.check()
     }
 
     /// The instance restarted on its new release: open it fresh, so the chat,

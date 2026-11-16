@@ -130,10 +130,6 @@ struct MainShell: View {
                     onSettings: {
                         settingsPath = []
                         showSettings = true
-                    },
-                    onUpdate: {
-                        closeDrawer()
-                        model.update.openPage()
                     }
                 )
                 .frame(width: width, height: geometry.size.height)

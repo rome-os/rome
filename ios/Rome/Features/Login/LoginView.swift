@@ -68,6 +68,17 @@ struct LoginView: View {
     @ViewBuilder
     private var center: some View {
         switch model.phase {
+        case .stopped where model.update.waitingInstanceID != nil:
+            // Down for the upgrade this phone started in the background.
+            VStack(spacing: 6) {
+                Text("Your Rome is updating")
+                    .romeFont(20, .semibold)
+                Text("It opens here once the update finishes.")
+                    .romeFont(15)
+                    .foregroundStyle(Palette.sub)
+            }
+            .multilineTextAlignment(.center)
+            .transition(.opacity)
         case .stopped, .noInstance:
             VStack(spacing: 6) {
                 Text(model.phase == .noInstance ? "No Rome to open yet" : "Your Rome is stopped")
