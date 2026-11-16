@@ -1,7 +1,7 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, Ellipsis, Pencil, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
-import { findScrollableYAncestor } from "@/lib/scroll-container";
 import { Badge } from "@/components/ui/badge";
 import { RomeLogo } from "@/components/logo";
 import {
