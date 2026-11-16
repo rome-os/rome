@@ -521,6 +521,7 @@ struct TaskCard: View {
         .buttonStyle(PressScaleStyle(scale: 0.98))
         .bubbleWidth()
         .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
+        .accessibilityIdentifier("task-card")
     }
 }
 
@@ -680,6 +681,7 @@ struct Composer: View {
                         }
                         .disabled(!canSend)
                         .accessibilityLabel("Send")
+                        .accessibilityIdentifier("send")
                         .transition(.scale.combined(with: .opacity))
                     }
                 }
