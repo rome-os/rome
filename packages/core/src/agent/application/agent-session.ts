@@ -438,10 +438,36 @@ interface ManagerOptions {
   isSubagent?: boolean;
   /** The turns of the manager that opened this one, so one lookup finds both. */
   turns?: TurnsById;
+  /**
+   * How long a chat must be quiet before a context handoff that a message
+   * dropped is written again. Defaults to a minute.
+   */
+  contextRetryQuietMs?: number;
 }
 
 /** How long a context renewal waits for the ending turn's own cleanup. */
 const CONTEXT_RENEWAL_SETTLE_MS = 5_000;
+
+/**
+ * How long a chat must be quiet before a dropped context handoff is written
+ * again. Each attempt is a full-context model call that a message throws
+ * away, so a chat in a back-and-forth does not pay for one per exchange.
+ */
+const CONTEXT_RETRY_QUIET_MS = 60_000;
+
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+function quietFor(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
 
 async function waitUntilQuiescent(session: AgentSessionImpl, timeoutMs?: number): Promise<void> {
   if (session.status === "closed" || session.isQuiescentForRotation) return;
@@ -531,9 +557,19 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   // the same key waits for that commit, and opens the successor.
   const contextHandoffs = new Map<
     string,
-    { session: AgentSessionImpl; abort: AbortController; done: Promise<void> }
+    {
+      session: AgentSessionImpl;
+      abort: AbortController;
+      /** Ends the quiet wait before a retry, for a message that waits for it. */
+      hurry: AbortController;
+      done: Promise<void>;
+    }
   >();
   const contextRenewals = new Map<string, Promise<void>>();
+  // Sessions whose context handoff a message dropped: the next one waits for
+  // the chat to be quiet a while.
+  const droppedHandoffs = new WeakSet<AgentSessionImpl>();
+  const retryQuietMs = options.contextRetryQuietMs ?? CONTEXT_RETRY_QUIET_MS;
   const onContextFull = (sess: AgentSessionImpl) => {
     const k = keyOf(sess.key);
     const handoffs = deps.handoffs;
@@ -542,6 +578,8 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     if (!handoffs || (writing && !writing.abort.signal.aborted) || contextRenewals.has(k)) return;
     if (shutDown) return;
     const abort = new AbortController();
+    const hurry = new AbortController();
+    abort.signal.addEventListener("abort", () => hurry.abort(), { once: true });
     const stillCurrent = () =>
       !abort.signal.aborted &&
       sessions.get(k) === sess &&
@@ -553,6 +591,10 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         // use after it (a caller, a queued input, an approval) is left alone,
         // and the next turn end past the limit tries again.
         await waitUntilQuiescent(sess, CONTEXT_RENEWAL_SETTLE_MS);
+        if (!stillCurrent() || !sess.isQuiescentForRotation) return;
+        // A message dropped the last one: wait until the chat is quiet, and a
+        // message meanwhile drops this wait, at no model call's cost.
+        if (droppedHandoffs.has(sess)) await quietFor(retryQuietMs, hurry.signal);
         if (!stillCurrent() || !sess.isQuiescentForRotation) return;
         if (await deps.heldMidTurn?.(sess.sessionId)) return;
         if (!stillCurrent()) return;
@@ -582,7 +624,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         if (contextHandoffs.get(k)?.abort === abort) contextHandoffs.delete(k);
       }
     })();
-    contextHandoffs.set(k, { session: sess, abort, done });
+    contextHandoffs.set(k, { session: sess, abort, hurry, done });
   };
 
   /**
@@ -597,9 +639,11 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       const hard = deps.handoffs?.hardContextLimitTokens;
       const used = writing.session.contextTokens;
       if (deps.handoffs && hard !== undefined && used !== undefined && used >= hard) {
+        writing.hurry.abort();
         await deps.handoffs.tidying(writing.session.chatId, () => writing.done);
       } else {
         writing.abort.abort();
+        droppedHandoffs.add(writing.session);
         log.info("session_handoff.dropped", {
           agentName: writing.session.key.agentName,
           sessionId: writing.session.sessionId,
@@ -930,9 +974,6 @@ async function reachableRecordedWorkingDir(
   );
   return isDirectory ? recorded : undefined;
 }
-
-/** How many light renewals back a successor looks for what its predecessor held. */
-const HELD_READS = 20;
 
 /** How many renewals a resume follows that land while it resolves. */
 const SUCCESSOR_READS = 8;
@@ -1334,17 +1375,18 @@ async function openSession(
     resumed.adoptSetup(setupNow!);
     await deps.sessionRepository.save(resumed);
   } else if (resumed && !init.resumeSessionId && !opts.isSubagent) {
-    // A setup change renews with a light handoff: no turn writes a note, and
-    // the successor reads what the retired session held, its handoff and the
-    // chat's messages since. A reset its chat's policy says is due renews
-    // with a handoff the retired session writes.
+    // A reset its chat's policy says is due renews with a handoff the retired
+    // session writes. Otherwise a setup change renews with a light handoff: no
+    // turn writes a note, and the successor reads what the retired session
+    // held, its handoff and the chat's messages since.
+    // A due reset goes first: its fresh session takes the new setup anyway,
+    // and a light handoff would carry over what the reset is meant to drop.
     let reason: string | undefined;
-    if (changed) {
-      reason = "setup";
-    } else if (init.resetPolicy) {
+    if (init.resetPolicy) {
       const decision = evaluateProviderSessionReset(init.resetPolicy, resumed, new Date());
       if (decision.due) reason = decision.reason;
     }
+    if (!reason && changed) reason = "setup";
     if (reason && (await deps.heldMidTurn?.(resumed.id))) {
       log.info("provider_session.reset_held", {
         agentName: key.agentName,
@@ -2965,7 +3007,9 @@ class AgentSessionImpl implements AgentSession {
     // A predecessor renewed lightly itself held what its own predecessor did,
     // and everything said since.
     let held = await repository.predecessorOf(this.sessionId);
-    for (let read = 0; held && held.handoff === LIGHT_HANDOFF && read < HELD_READS; read += 1) {
+    const seen = new Set<string>([this.sessionId]);
+    while (held && held.handoff === LIGHT_HANDOFF && !seen.has(held.id)) {
+      seen.add(held.id);
       const before = await repository.predecessorOf(held.id);
       if (!before) break;
       held = before;

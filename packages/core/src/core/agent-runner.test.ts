@@ -3559,8 +3559,9 @@ describe("AgentRunner", () => {
             ...extraDeps,
           },
           // As in production, a session stays open between turns until it
-          // is evicted (`evict`).
-          { keepAliveAcrossTurns: true },
+          // is evicted (`evict`). A dropped context handoff is retried after
+          // a short quiet.
+          { keepAliveAcrossTurns: true, contextRetryQuietMs: retryQuiet.ms },
         );
         managers.push(manager);
         const open = manager.open.bind(manager);
@@ -3589,6 +3590,9 @@ describe("AgentRunner", () => {
         inputSchema: { type: "object", properties: { text: { type: "string" } } },
         handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
       });
+
+      /** How long the chat must be quiet before a dropped context handoff is retried. */
+      const retryQuiet = { ms: 50 };
 
       /** Makes the next open of the chat's session find a reset due, which renews it with a handoff. */
       let resetNext = false;
@@ -3629,6 +3633,7 @@ describe("AgentRunner", () => {
 
       beforeEach(() => {
         resetNext = false;
+        retryQuiet.ms = 50;
         identity.text = "**Agent Name:** Yo";
         charter.text = "Be kind.";
         instance.apps = [];
@@ -4492,6 +4497,38 @@ describe("AgentRunner", () => {
           );
         });
 
+        it("follows a long run of light renewals to where it started", async () => {
+          const provider = threadedProvider(30);
+          const { handoffs, since } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner);
+          for (let change = 1; change <= 25; change++) {
+            charter.text = `Be kind. Version ${change}.`;
+            await turn(runner);
+          }
+
+          const firstOpened = (await sessionRepository.session(first!))?.createdAt;
+          expect(since).toHaveLength(25);
+          expect(since.at(-1)).toEqual(firstOpened);
+        });
+
+        it("takes a due reset with its handoff when a setup change lands on the same open", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const { handoffs } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner);
+          charter.text = "Be kind. Always answer in one line.";
+          await resetDue();
+          const second = await turn(runner);
+
+          expect((await sessionRepository.session(first!))?.supersededFor).toBe("idle");
+          expect((await sessionRepository.session(second!))?.handoff).toBe(HANDOFF);
+          expect(provider.sessions.at(-1)?.config.systemPrompt).toContain(
+            "Always answer in one line.",
+          );
+        });
+
         it("counts a run of light renewals as one session: the next one carries what the first held", async () => {
           const provider = threadedProvider(3);
           const { handoffs, since } = fakeHandoffs();
@@ -4613,6 +4650,33 @@ describe("AgentRunner", () => {
           );
           expect(asked.tidying).toEqual([]);
           expect(asked.fallback).toBe(0);
+        });
+
+        it("retries a dropped handoff only once the chat has been quiet, and a message meanwhile costs no model call", async () => {
+          retryQuiet.ms = 300;
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(900);
+          provider["responses"][1] = fullResult(950, "answered", "c-2");
+          provider["responses"][2] = fullResult(960, "again", "c-3");
+          const branches = gatedBranches(provider);
+          const { handoffs } = fakeHandoffs({
+            contextLimitTokens: 500,
+            hardContextLimitTokens: 2_000,
+          });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          await rs.waitFor(() => expect(branches).toHaveLength(1));
+          // Dropped by a message.
+          expect(await turn(runner, { live: true })).toBe(first);
+          // That turn's end waits for the quiet, and a message within it drops the wait.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          expect(branches).toHaveLength(1);
+          expect(await turn(runner, { live: true })).toBe(first);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          expect(branches).toHaveLength(1);
+          // Quiet long enough: written again, at the latest turn.
+          await rs.waitFor(() => expect(branches).toHaveLength(2), { timeout: 2_000 });
+          expect(branches[1]!.params.thread).toMatchObject({ at: { checkpointId: "c-3" } });
         });
 
         it("makes a message wait for the renewal only when the context is past the hard limit", async () => {
