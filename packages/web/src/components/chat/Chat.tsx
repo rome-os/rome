@@ -2735,7 +2735,7 @@ export function Chat({
             ) : (
               <div className="pointer-events-none absolute inset-x-0 top-0 h-12 max-md:hidden">
                 <ChatEdgeBlur edge="top" className="z-10" />
-                <div className="pointer-events-auto relative z-20 flex h-full items-center gap-1 pl-4 pr-2">
+                <div className="pointer-events-none relative z-20 flex h-full items-center gap-1 [&>*]:pointer-events-auto pl-4 pr-2">
                   {navbar}
                 </div>
               </div>

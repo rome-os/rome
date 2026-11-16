@@ -66,10 +66,10 @@ async function measureFloor(page: Page) {
       const beside = { x: box.left / 2, y: (box.top + box.bottom) / 2 };
       const hitsFloor = ({ x, y }: { x: number; y: number }) =>
         floor.contains(document.elementFromPoint(x, y));
+      const blur = floor.querySelector("[data-slot=progressive-blur]")!;
       return {
-        blurInset:
-          floor.querySelector("[data-slot=progressive-blur]")!.getBoundingClientRect().top -
-          box.top,
+        blurDisplay: getComputedStyle(blur).display,
+        blurInset: blur.getBoundingClientRect().top - box.top,
         floorBackground: getComputedStyle(floor).backgroundColor,
         canvas,
         tableUnderGap: table.top < box.bottom && table.bottom > below.y,
@@ -84,7 +84,7 @@ async function measureFloor(page: Page) {
 }
 
 function expectOpaqueFloor(geometry: Awaited<ReturnType<typeof measureFloor>>) {
-  expect(geometry.blurInset).toBeGreaterThanOrEqual(0);
+  expect(geometry.blurDisplay).toBe("none");
   expect(geometry.gapHeight).toBeGreaterThan(0);
   expect(geometry.gutterWidth).toBeGreaterThan(0);
   expect(geometry.floorBackground).toBe(geometry.canvas);
@@ -139,6 +139,8 @@ test.describe("on a desktop", () => {
     const floor = page.locator(FLOOR);
     await expect(floor).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(floor).toHaveCSS("pointer-events", "none");
-    expect((await measureFloor(page)).blurInset).toBeGreaterThanOrEqual(0);
+    const geometry = await measureFloor(page);
+    expect(geometry.blurDisplay).not.toBe("none");
+    expect(geometry.blurInset).toBeGreaterThanOrEqual(0);
   });
 });

@@ -6,7 +6,7 @@ export function ChatEdgeBlur({ edge, className }: { edge: "top" | "bottom"; clas
     <ProgressiveBlur
       direction={edge}
       tint="color-mix(in srgb, var(--chat-canvas) 92%, transparent)"
-      className={cn("-z-10", edge === "top" ? "-bottom-8" : "top-4", className)}
+      className={cn("-z-10", edge === "bottom" && "top-4 max-md:hidden", className)}
     />
   );
 }

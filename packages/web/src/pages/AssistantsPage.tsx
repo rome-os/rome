@@ -206,7 +206,7 @@ function AssistantChat({
     <>
       <div className="pointer-events-none absolute inset-x-0 top-0 h-12">
         <ChatEdgeBlur edge="top" className="z-10" />
-        <div className="pointer-events-auto relative z-20 flex h-full items-center gap-1 pl-2 pr-2">
+        <div className="pointer-events-none relative z-20 flex h-full items-center gap-1 [&>*]:pointer-events-auto pl-2 pr-2">
           <AssistantSwitcher assistant={assistant} assistants={assistants} onSwitch={onSwitch} />
         </div>
       </div>
