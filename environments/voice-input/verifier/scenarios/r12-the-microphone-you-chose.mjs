@@ -17,6 +17,9 @@ import { micState, watchPage } from "../lib/watch.mjs";
 /** The microphone control's accessible name on the Settings page, in English and Chinese. */
 export const MICROPHONE_CONTROL = /^(Microphone|麦克风)$/;
 
+/** The button that shows the microphones' names, before the page may use the microphone. */
+const SHOW_MICROPHONES = /^(Show microphones|显示麦克风)$/;
+
 /** Browser ids that stand for another device rather than being one. */
 const ALIASES = new Set(["default", "communications"]);
 
@@ -90,8 +93,17 @@ export default {
 /** The Settings page's Microphone control, or null when the page shows none within 15 s. */
 async function findPicker(page) {
   const picker = page.getByRole("combobox", { name: MICROPHONE_CONTROL }).first();
-  return picker
+  const reveal = page.getByRole("button", { name: SHOW_MICROPHONES }).first();
+  // Until the page may use the microphone, the browser hides the microphones' names, and
+  // Settings offers a button to show them in the combobox's place.
+  await picker
+    .or(reveal)
+    .first()
     .waitFor({ state: "visible", timeout: 15000 })
+    .catch(() => {});
+  if (await reveal.isVisible().catch(() => false)) await reveal.click();
+  return picker
+    .waitFor({ state: "visible", timeout: 5000 })
     .then(() => picker)
     .catch(() => null);
 }
