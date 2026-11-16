@@ -193,7 +193,7 @@ final class PastingTextView: UITextView {
         return (super.keyCommands ?? []) + [command]
     }
 
-    @objc private func returnPressed() { onReturn?() }
+    @objc func returnPressed() { onReturn?() }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), onPasteImages != nil, pasteboard.hasImages { return true }
