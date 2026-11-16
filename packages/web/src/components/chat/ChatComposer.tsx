@@ -51,7 +51,11 @@ import { SlashSkillMenu } from "./composer/SlashSkillMenu";
 import { useSlashSkill } from "./composer/use-slash-skill";
 import { findMentionToken, useTokenPicker } from "./composer/use-token-picker";
 import { useVoiceInput } from "./composer/use-voice-input";
-import { VoiceInputButton, VoiceInputNotice } from "./composer/VoiceInputControl";
+import {
+  VoiceInputButton,
+  VoiceInputNotice,
+  VoiceInputWaveform,
+} from "./composer/VoiceInputControl";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { ReplyBar } from "./reply/ReplyBar";
 import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
@@ -402,7 +406,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     notice: draft.notice,
     setNotice: draft.setNotice,
     keepNotice: draft.keepNotice,
+    onSend: () => void runSendRef.current(),
   });
+  const runSendRef = useRef<() => Promise<void>>(async () => {});
   const voiceActiveRef = useRef(false);
   voiceActiveRef.current = voice.active;
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
@@ -812,6 +818,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     replyDraft,
     voice.active,
   ]);
+  runSendRef.current = runSend;
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
@@ -881,7 +888,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }
     if (shouldSubmitOnEnter(e, { enterSends: !coarsePointer })) {
       e.preventDefault();
-      void runSend();
+      // While listening, Enter ends voice input and sends what it heard.
+      if (voice.active) voice.stopAndSend();
+      else void runSend();
     }
   };
 
@@ -1174,6 +1183,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                 disabled={uploadInFlight}
               />
             )}
+            {voice.state === "listening" ? (
+              <VoiceInputWaveform level={voice.level} className="min-w-24 flex-1" />
+            ) : null}
           </div>
           {/* Stop sits just left of Send. */}
           <div className="flex items-center gap-2 self-end [grid-area:send]">

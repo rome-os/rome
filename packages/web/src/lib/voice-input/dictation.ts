@@ -49,6 +49,8 @@ export interface Dictation {
   stop(): void;
   /** Drops the dictation. No handler is called after it. */
   cancel(): void;
+  /** The microphone's loudness from 0 to 1, or 0 while it is not open. */
+  level(): number;
 }
 
 /** The parts of a browser `WebSocket` a dictation uses, so tests can stand one in. */
@@ -242,6 +244,9 @@ export function startDictation(
     },
     cancel() {
       if (!done) teardown();
+    },
+    level() {
+      return done || !microphone ? 0 : microphone.level();
     },
   };
 }
