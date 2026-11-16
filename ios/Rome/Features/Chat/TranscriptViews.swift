@@ -623,11 +623,13 @@ struct Composer: View {
     var onStop: () -> Void = {}
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expanded = false
+    @State private var multiline = false
+    @State private var composerWidth: CGFloat = 300
+    @State private var editorHeight: CGFloat?
+    @State private var overflows = false
     @State private var voice = VoiceInputController()
-    /// The voice control moves between rows as listening starts and stops,
-    /// so VoiceOver focus that was on it is put back on the new one.
-    @AccessibilityFocusState private var voiceFocused: Bool
-    @State private var refocusVoice = false
     @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
@@ -648,6 +650,24 @@ struct Composer: View {
         return !committedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
     }
 
+    private var usesRows: Bool {
+        focused || multiline || text.contains("\n") || expanded || hasPhotos || voice.active || dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var shapeAnimation: Animation? {
+        reduceMotion ? nil : .smooth(duration: 0.32, extraBounce: 0)
+    }
+
+    private var compactWidth: CGFloat {
+        composerWidth - compactGutter * 2 - leadingInset(rows: false) - trailingInset(rows: false)
+    }
+
+    private var compactGutter: CGFloat { composerWidth >= 340 ? 24 : 0 }
+    private var showsExpansion: Bool { (overflows || expanded) && !voice.active }
+
+    private func leadingInset(rows: Bool) -> CGFloat { rows || attachments == nil ? 18 : 51 }
+    private func trailingInset(rows: Bool) -> CGFloat { rows ? 18 : (voiceInput?.available ?? false) ? 95 : 51 }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let notice = voice.notice {
@@ -661,76 +681,100 @@ struct Composer: View {
                     .padding(.leading, 12)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            // While listening, the text takes the whole first row and the
-            // controls move below it, beside the waveform. The text view keeps
-            // its place in the tree, so the words shown so far stay.
-            HStack(alignment: .bottom, spacing: 8) {
-                if let attachments, !voice.active {
-                    plusMenu(attachments)
-                        .padding(.bottom, controlPadding)
+            // One editor and one set of controls retain focus and move through the morph.
+            ComposerTextView(
+                text: $text,
+                focused: $focused,
+                placeholder: placeholder,
+                named: named,
+                onPasteImages: attachments.map { attachments in
+                    { providers in Task { await attachments.add(providers: providers) } }
+                },
+                committedText: $committedText,
+                handle: textHandle,
+                editable: !voice.active,
+                onReturn: returnSends,
+                onEdit: { voice.edited(service: voiceInput, chat: voiceKey) },
+                expanded: expanded,
+                compactWidth: compactWidth,
+                onMeasure: { multiple, height, overflow in
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = editorHeight == nil || !onScreen
+                    withTransaction(transaction) {
+                        if multiline != multiple { multiline = multiple }
+                        if editorHeight == nil || abs((editorHeight ?? 0) - height) > 0.5 { editorHeight = height }
+                        if overflows != overflow { overflows = overflow }
+                        if !overflow { expanded = false }
+                    }
                 }
-                ComposerTextView(
-                    text: $text,
-                    focused: $focused,
-                    placeholder: placeholder,
-                    named: named,
-                    onPasteImages: attachments.map { attachments in
-                        { providers in Task { await attachments.add(providers: providers) } }
-                    },
-                    committedText: $committedText,
-                    handle: textHandle,
-                    editable: !voice.active,
-                    onReturn: returnSends,
-                    onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
-                )
-                if !voice.active {
-                    controls
-                        .padding(.bottom, controlPadding)
+            )
+            .frame(height: editorHeight)
+            .padding(.leading, leadingInset(rows: usesRows))
+            .padding(.trailing, trailingInset(rows: usesRows))
+            .padding(.bottom, usesRows ? 44 : 0)
+            .overlay(alignment: .bottomLeading) {
+                if let attachments {
+                    plusMenu(attachments)
+                        .padding(.leading, 7)
+                        .padding(.bottom, usesRows ? 7 : controlPadding)
                 }
             }
-            .padding(.leading, attachments == nil || voice.active ? 18 : 7)
-            .padding(.trailing, voice.active ? 18 : 7)
-            if voice.active {
-                HStack(spacing: 8) {
-                    if let attachments { plusMenu(attachments) }
-                    Group {
-                        if voice.state == .listening {
-                            VoiceInputWaveform(meter: voice.meter)
-                        } else {
-                            Color.clear.frame(height: VoiceInputWaveform.height)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    controls
+            .overlay(alignment: .bottom) {
+                if voice.state == .listening {
+                    VoiceInputWaveform(meter: voice.meter)
+                        .padding(.horizontal, 96)
+                        .padding(.bottom, 7 + (36 - VoiceInputWaveform.height) / 2)
+                        .allowsHitTesting(false)
                 }
-                .padding(.leading, attachments == nil ? 18 : 7)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                HStack(spacing: 0) {
+                    Button {
+                        expanded.toggle()
+                    } label: {
+                        Image(systemName: expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            .romeFont(15, .medium)
+                            .foregroundStyle(Palette.sub)
+                            .frame(width: 36, height: 36)
+                    }
+                    .accessibilityLabel(expanded ? String(localized: "Collapse input") : String(localized: "Expand input"))
+                    .accessibilityIdentifier("composer-expand")
+                    .opacity(showsExpansion ? 1 : 0)
+                    .frame(width: showsExpansion ? 44 : 0)
+                    .clipped()
+                    .allowsHitTesting(showsExpansion)
+                    .accessibilityHidden(!showsExpansion)
+                    HStack(spacing: 8) { controls }
+                }
                 .padding(.trailing, 7)
-                .padding(.bottom, 7)
+                .padding(.bottom, usesRows ? 7 : controlPadding)
             }
         }
         .frame(minHeight: ComposerTextView.minHeight)
+        .onChange(of: text.isEmpty) { _, empty in if empty { expanded = false } }
         // Frosted glass: the transcript behind blurs out so the placeholder
         // reads. In light the glass alone barely parts from the page, so it
         // keeps an edge.
         .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true, frost: Frost.composer)
         .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
         .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+        .padding(.horizontal, usesRows ? 0 : compactGutter)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { composerWidth = $0 }
+        .animation(shapeAnimation, value: usesRows)
+        .animation(shapeAnimation, value: showsExpansion)
+        .animation(shapeAnimation, value: expanded)
+        .animation(shapeAnimation, value: editorHeight)
         // The main Chat stays mounted under other sections, so it asks again on each return.
         .task(id: onScreen) { if onScreen { await voiceInput?.refresh() } }
         .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
         .onChange(of: voice.state) { voice.stateShown() }
-        .onChange(of: voice.active) {
-            guard refocusVoice else { return }
-            refocusVoice = false
-            // A turn later, once the control in its new row exists.
-            DispatchQueue.main.async { voiceFocused = true }
-        }
         .onChange(of: onScreen) { _, now in
             if now {
                 voice.arrive(service: voiceInput, chat: voiceKey)
             } else {
                 voice.leave(service: voiceInput, chat: voiceKey)
+                expanded = false
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
@@ -787,10 +831,8 @@ struct Composer: View {
     @ViewBuilder private var controls: some View {
         if let voiceInput, voiceInput.available {
             VoiceInputButton(state: voice.state) {
-                refocusVoice = voiceFocused
                 voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
             }
-            .accessibilityFocused($voiceFocused)
         }
         Group {
             // While listening, the field's stop is the voice control's.
