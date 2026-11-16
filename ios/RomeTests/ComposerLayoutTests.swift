@@ -79,15 +79,19 @@ import UIKit
         var focused = false
     }
 
+    final class Heights { var values: [CGFloat] = [] }
+
     private struct Host: View {
         @Bindable var draft: Draft
         let attachments: ComposerAttachments
+        var heights: Heights? = nil
 
         var body: some View {
             VStack {
                 Spacer()
                 Composer(text: $draft.text, placeholder: "Message", focused: $draft.focused,
                     attachments: attachments, onSend: {})
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights?.values.append($0) }
             }
             .padding(16)
         }
@@ -95,6 +99,14 @@ import UIKit
 
     private func editors(in view: UIView) -> [PastingTextView] {
         (view as? PastingTextView).map { [$0] } ?? view.subviews.flatMap { editors(in: $0) }
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !condition() {
+            try #require(ContinuousClock.now < deadline, "Composer layout did not settle")
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     @Test func morphKeepsTheEditorAndSelection() async throws {
@@ -110,24 +122,79 @@ import UIKit
             window.rootViewController = nil
             window.windowScene = nil
         }
-        try await Task.sleep(for: .milliseconds(500))
+        try await waitUntil { editors(in: host.view).first.map { $0.bounds.width > 0 } ?? false }
         let editor = try #require(editors(in: host.view).first)
         editor.selectedRange = NSRange(location: 15, length: 8)
         let selection = editor.selectedRange
         let compactWidth = editor.bounds.width
 
         draft.focused = true
-        try await Task.sleep(for: .milliseconds(600))
+        try await waitUntil { editor.isFirstResponder && editor.bounds.width > compactWidth + 1 }
         #expect(editors(in: host.view).count == 1)
         #expect(editors(in: host.view).first === editor)
         #expect(editor.selectedRange == selection)
         #expect(editor.bounds.width > compactWidth)
 
         draft.focused = false
-        try await Task.sleep(for: .milliseconds(600))
+        try await waitUntil { !editor.isFirstResponder && abs(editor.bounds.width - compactWidth) < 1 }
         #expect(editors(in: host.view).first === editor)
         #expect(editor.selectedRange == selection)
         #expect(editor.text == draft.text)
         #expect(abs(editor.bounds.width - compactWidth) < 1)
     }
+
+    @Test func restoredMultilineDraftStartsAtItsMeasuredHeight() async throws {
+        let draft = Draft()
+        draft.text = Array(repeating: "Restored draft", count: 8).joined(separator: "\n")
+        let heights = Heights()
+        let host = UIHostingController(rootView: Host(draft: draft, attachments: ComposerAttachments(), heights: heights))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { !heights.values.isEmpty }
+        #expect(try #require(heights.values.first) > 100)
+    }
+
+    @Test func measurementReportsExpansionOnlyForOverflowingDrafts() async throws {
+        let draft = Draft()
+        let reports = Reports()
+        let host = UIHostingController(rootView: MeasuredHost(draft: draft, reports: reports))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { reports.overflow != nil }
+        #expect(reports.overflow == false)
+        draft.text = Array(repeating: "A line of the long draft", count: 20).joined(separator: "\n")
+        try await waitUntil { reports.overflow == true }
+        draft.text = "Short again"
+        try await waitUntil { reports.overflow == false }
+    }
+
+    final class Reports { var overflow: Bool? }
+
+    private struct MeasuredHost: View {
+        @Bindable var draft: Draft
+        let reports: Reports
+
+        var body: some View {
+            ComposerTextView(text: $draft.text, focused: $draft.focused, placeholder: "Message",
+                compactWidth: 300, onMeasure: { _, _, overflow in reports.overflow = overflow })
+                .frame(width: 300)
+        }
+    }
+
 }

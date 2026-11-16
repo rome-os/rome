@@ -27,7 +27,7 @@ struct ComposerTextView: UIViewRepresentable {
 
     var expanded = false
     var compactWidth: CGFloat = 240
-    var onMeasure: (Bool, CGFloat) -> Void = { _, _ in }
+    var onMeasure: (Bool, CGFloat, Bool) -> Void = { _, _, _ in }
 
     static let maxLines = 6
 
@@ -102,10 +102,12 @@ struct ComposerTextView: UIViewRepresentable {
         let fitting = view.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         let lineHeight = (view.font ?? Self.font(for: context.environment.dynamicTypeSize)).lineHeight
         let cap = Self.heightLimit(lineHeight: lineHeight, inset: view.textContainerInset.top, expanded: expanded)
-        let compact = view.sizeThatFits(CGSize(width: max(1, compactWidth), height: .greatestFiniteMagnitude))
+        let compact = width == compactWidth ? fitting
+            : view.sizeThatFits(CGSize(width: max(1, compactWidth), height: .greatestFiniteMagnitude))
         let multiline = compact.height > lineHeight + view.textContainerInset.top * 2 + lineHeight / 2
         let height = min(fitting.height, cap)
-        DispatchQueue.main.async { onMeasure(multiline, height) }
+        let foldedCap = Self.heightLimit(lineHeight: lineHeight, inset: view.textContainerInset.top, expanded: false)
+        DispatchQueue.main.async { onMeasure(multiline, height, fitting.height > foldedCap + 0.5) }
         let scrolls = fitting.height > cap
         if view.isScrollEnabled != scrolls {
             DispatchQueue.main.async {

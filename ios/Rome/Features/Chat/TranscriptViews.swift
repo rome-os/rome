@@ -627,12 +627,9 @@ struct Composer: View {
     @State private var expanded = false
     @State private var multiline = false
     @State private var composerWidth: CGFloat = 300
-    @State private var editorHeight: CGFloat = 50
+    @State private var editorHeight: CGFloat?
+    @State private var overflows = false
     @State private var voice = VoiceInputController()
-    /// The voice control moves between rows as listening starts and stops,
-    /// so VoiceOver focus that was on it is put back on the new one.
-    @AccessibilityFocusState private var voiceFocused: Bool
-    @State private var refocusVoice = false
     @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
@@ -654,7 +651,7 @@ struct Composer: View {
     }
 
     private var usesRows: Bool {
-        focused || multiline || expanded || hasPhotos || voice.active || dynamicTypeSize.isAccessibilitySize
+        focused || multiline || text.contains("\n") || expanded || hasPhotos || voice.active || dynamicTypeSize.isAccessibilitySize
     }
 
     private var shapeAnimation: Animation? {
@@ -662,11 +659,14 @@ struct Composer: View {
     }
 
     private var compactWidth: CGFloat {
-        composerWidth - compactGutter * 2 - (attachments == nil ? 18 : 51) - 51
-            - ((voiceInput?.available ?? false) ? 44 : 0)
+        composerWidth - compactGutter * 2 - leadingInset(rows: false) - trailingInset(rows: false)
     }
 
     private var compactGutter: CGFloat { composerWidth >= 340 ? 24 : 0 }
+    private var showsExpansion: Bool { (overflows || expanded) && !voice.active }
+
+    private func leadingInset(rows: Bool) -> CGFloat { rows || attachments == nil ? 18 : 51 }
+    private func trailingInset(rows: Bool) -> CGFloat { rows ? 18 : (voiceInput?.available ?? false) ? 95 : 51 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -697,14 +697,20 @@ struct Composer: View {
                 onEdit: { voice.edited(service: voiceInput, chat: voiceKey) },
                 expanded: expanded,
                 compactWidth: compactWidth,
-                onMeasure: { multiple, height in
-                    if multiline != multiple { multiline = multiple }
-                    if abs(editorHeight - height) > 0.5 { editorHeight = height }
+                onMeasure: { multiple, height, overflow in
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = editorHeight == nil || !onScreen
+                    withTransaction(transaction) {
+                        if multiline != multiple { multiline = multiple }
+                        if editorHeight == nil || abs((editorHeight ?? 0) - height) > 0.5 { editorHeight = height }
+                        if overflows != overflow { overflows = overflow }
+                        if !overflow { expanded = false }
+                    }
                 }
             )
             .frame(height: editorHeight)
-            .padding(.leading, usesRows || attachments == nil ? 18 : 51)
-            .padding(.trailing, usesRows ? 18 : (voiceInput?.available ?? false) ? 95 : 51)
+            .padding(.leading, leadingInset(rows: usesRows))
+            .padding(.trailing, trailingInset(rows: usesRows))
             .padding(.bottom, usesRows ? 44 : 0)
             .overlay(alignment: .bottomLeading) {
                 if let attachments {
@@ -717,7 +723,7 @@ struct Composer: View {
                 if voice.state == .listening {
                     VoiceInputWaveform(meter: voice.meter)
                         .padding(.horizontal, 96)
-                        .padding(.bottom, 7)
+                        .padding(.bottom, 7 + (36 - VoiceInputWaveform.height) / 2)
                         .allowsHitTesting(false)
                 }
             }
@@ -733,11 +739,11 @@ struct Composer: View {
                     }
                     .accessibilityLabel(expanded ? String(localized: "Collapse input") : String(localized: "Expand input"))
                     .accessibilityIdentifier("composer-expand")
-                    .opacity(usesRows && !voice.active ? 1 : 0)
-                    .frame(width: usesRows && !voice.active ? 44 : 0)
+                    .opacity(showsExpansion ? 1 : 0)
+                    .frame(width: showsExpansion ? 44 : 0)
                     .clipped()
-                    .allowsHitTesting(usesRows && !voice.active)
-                    .accessibilityHidden(!usesRows || voice.active)
+                    .allowsHitTesting(showsExpansion)
+                    .accessibilityHidden(!showsExpansion)
                     HStack(spacing: 8) { controls }
                 }
                 .padding(.trailing, 7)
@@ -755,6 +761,7 @@ struct Composer: View {
         .padding(.horizontal, usesRows ? 0 : compactGutter)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { composerWidth = $0 }
         .animation(shapeAnimation, value: usesRows)
+        .animation(shapeAnimation, value: showsExpansion)
         .animation(shapeAnimation, value: expanded)
         .animation(shapeAnimation, value: editorHeight)
         // The main Chat stays mounted under other sections, so it asks again on each return.
@@ -762,12 +769,6 @@ struct Composer: View {
         .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
         .onChange(of: voice.state) { voice.stateShown() }
-        .onChange(of: voice.active) {
-            guard refocusVoice else { return }
-            refocusVoice = false
-            // A turn later, once the control in its new row exists.
-            DispatchQueue.main.async { voiceFocused = true }
-        }
         .onChange(of: onScreen) { _, now in
             if now {
                 voice.arrive(service: voiceInput, chat: voiceKey)
@@ -830,10 +831,8 @@ struct Composer: View {
     @ViewBuilder private var controls: some View {
         if let voiceInput, voiceInput.available {
             VoiceInputButton(state: voice.state) {
-                refocusVoice = voiceFocused
                 voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
             }
-            .accessibilityFocused($voiceFocused)
         }
         Group {
             // While listening, the field's stop is the voice control's.
