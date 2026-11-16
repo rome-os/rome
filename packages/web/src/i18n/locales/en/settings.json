@@ -959,9 +959,7 @@
         "description": "Voice input in this browser records from this microphone.",
         "systemDefault": "System default",
         "show": "Show microphones",
-        "refused": "The browser blocked the microphone, so it won't list them. Allow it in the browser's site settings.",
-        "notConnected": "Chosen microphone (not connected)",
-        "missing": "The chosen microphone isn't connected, so voice input uses the system default."
+        "refused": "The browser blocked the microphone, so it won't list them. Allow it in the browser's site settings."
       }
     }
   },

@@ -100,12 +100,15 @@ function MicrophoneRow() {
     );
   };
 
+  // An unplugged microphone leaves the list, and Settings switches to the
+  // system default, which voice input then records from.
   const missing = chosen !== null && options != null && !options.some((o) => o.id === chosen);
+  useEffect(() => {
+    if (missing) setChosen(chooseMicrophone(null));
+  }, [missing]);
   const description = refused
     ? t("system.voiceInput.microphone.refused")
-    : missing
-      ? t("system.voiceInput.microphone.missing")
-      : t("system.voiceInput.microphone.description");
+    : t("system.voiceInput.microphone.description");
 
   return (
     <FormRow>
@@ -123,7 +126,7 @@ function MicrophoneRow() {
           </Button>
         ) : (
           <Select
-            value={chosen ?? SYSTEM_DEFAULT}
+            value={chosen && !missing ? chosen : SYSTEM_DEFAULT}
             disabled={options === undefined}
             onValueChange={(value) =>
               setChosen(chooseMicrophone(value === SYSTEM_DEFAULT ? null : value))
@@ -139,12 +142,6 @@ function MicrophoneRow() {
               <SelectItem value={SYSTEM_DEFAULT}>
                 {t("system.voiceInput.microphone.systemDefault")}
               </SelectItem>
-              {/* Kept as its own item so picking System default clears it. */}
-              {missing && chosen && (
-                <SelectItem value={chosen} disabled>
-                  {t("system.voiceInput.microphone.notConnected")}
-                </SelectItem>
-              )}
               {options?.map((option) => (
                 <SelectItem key={option.id} value={option.id}>
                   {option.label}
