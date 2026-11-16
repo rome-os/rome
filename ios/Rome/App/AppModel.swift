@@ -1291,7 +1291,8 @@ final class AppModel {
 
     /// What this phone keeps for the signed-in account: drafts, kept chats,
     /// pictures, recent apps, closed update banners, the language last seen,
-    /// the last instance, and this phone's device switches and activity log. Gone on
+    /// voice input's notices, the last instance, and this phone's device
+    /// switches and activity log. Gone on
     /// sign-out, and before a new Cloud sign-in, which may be another
     /// account's. The account has ended first, so no late write follows.
     private func forgetAccountData() {
@@ -1306,6 +1307,7 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
         KeptIdentity.removeAll()
+        VoiceInputMarks.removeAll()
         // The device's switches and its Recent activity.
         node.forgetAccount()
         connections.forgetAccount()

@@ -18,8 +18,6 @@ final class VoiceInputService {
     private var checkedAt: Date?
     /// Why listening stopped in a chat the guardian left, shown on return.
     private var leftNotices: [String: VoiceInputStop] = [:]
-    /// The field's text as it stood when the app closed while listening.
-    private var keptWords: [String: String] = [:]
     /// Each chat listening now, or whose notice still shows, kept on this phone
     /// so that a closed app tells why on its next launch.
     private let marks: VoiceInputMarks
@@ -28,10 +26,7 @@ final class VoiceInputService {
         self.backend = backend
         marks = VoiceInputMarks(instance: instance, defaults: defaults)
         // The app closed while these chats listened, or before their notice went.
-        for (chat, kept) in marks.takeLaunchNotices() {
-            leftNotices[chat] = kept.stop
-            if let words = kept.words { keptWords[chat] = words }
-        }
+        for (chat, stop) in marks.takeLaunchNotices() { leftNotices[chat] = stop }
     }
 
     /// Asks the instance again, at most once a minute unless `now`: Rome Cloud
@@ -47,13 +42,9 @@ final class VoiceInputService {
 
     func keep(_ stop: VoiceInputStop, for chat: String) { leftNotices[chat] = stop }
     func takeNotice(for chat: String) -> VoiceInputStop? { leftNotices.removeValue(forKey: chat) }
-    func takeKeptWords(for chat: String) -> String? { keptWords.removeValue(forKey: chat) }
 
     /// Listening started in `chat`.
-    func listening(in chat: String) { marks.set(chat, .listening(words: nil)) }
-    /// The field shows `words` while listening in `chat`. Kept at once, so a
-    /// killed app still has every word it showed.
-    func heard(_ words: String, in chat: String) { marks.set(chat, .listening(words: words)) }
+    func listening(in chat: String) { marks.set(chat, .listening) }
     /// Listening in `chat` stopped; a stop's notice is kept until an edit or a send.
     func stopped(in chat: String, _ stop: VoiceInputStop?) { marks.set(chat, stop.map(VoiceInputMarks.Mark.notice)) }
     /// The guardian edited or sent in `chat`: its notice is gone.
@@ -64,11 +55,12 @@ final class VoiceInputService {
 }
 
 /// Which chats of an instance listen now, or still show a notice, in the
-/// phone's defaults: the only voice input state that outlives the app.
+/// phone's defaults: the only voice input state that outlives the app. The
+/// words heard live in the chat's draft, never here.
 @MainActor
 struct VoiceInputMarks {
     enum Mark: Equatable {
-        case listening(words: String?)
+        case listening
         case notice(VoiceInputStop)
     }
 
@@ -76,14 +68,14 @@ struct VoiceInputMarks {
     private let defaults: UserDefaults
 
     init(instance: String, defaults: UserDefaults) {
-        key = "voiceInput.marks.\(instance)"
+        key = Self.prefix + instance
         self.defaults = defaults
     }
 
     func set(_ chat: String, _ mark: Mark?) {
         var all = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
         switch mark {
-        case .listening(let words): all[chat] = Self.listening + (words ?? "")
+        case .listening: all[chat] = Self.listening
         case .notice(let stop): all[chat] = [stop.reason.rawValue, stop.detail].compactMap(\.self).joined(separator: " ")
         case nil: all[chat] = nil
         }
@@ -92,24 +84,31 @@ struct VoiceInputMarks {
 
     /// On launch: a chat still listening says the app closed; a chat with a
     /// notice says it again. Marks stay until the notice is seen.
-    func takeLaunchNotices() -> [String: (stop: VoiceInputStop, words: String?)] {
+    func takeLaunchNotices() -> [String: VoiceInputStop] {
         let all = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
-        var notices: [String: (stop: VoiceInputStop, words: String?)] = [:]
+        var notices: [String: VoiceInputStop] = [:]
         for (chat, value) in all {
+            // A build that kept the words wrote them after the prefix.
             if value.hasPrefix(Self.listening) {
-                let words = String(value.dropFirst(Self.listening.count))
-                notices[chat] = (VoiceInputStop(reason: .appClosed), words.isEmpty ? nil : words)
+                notices[chat] = VoiceInputStop(reason: .appClosed)
                 set(chat, .notice(VoiceInputStop(reason: .appClosed)))
             } else {
                 let parts = value.split(separator: " ", maxSplits: 1).map(String.init)
                 guard let reason = parts.first.flatMap(VoiceInputStopReason.init(rawValue:)) else { set(chat, nil); continue }
-                notices[chat] = (VoiceInputStop(reason: reason, detail: parts.count > 1 ? parts[1] : nil), nil)
+                notices[chat] = VoiceInputStop(reason: reason, detail: parts.count > 1 ? parts[1] : nil)
             }
         }
         return notices
     }
 
-    /// Then the words shown, if any.
+    /// Every instance's marks, on sign-out.
+    static func removeAll(defaults: UserDefaults = .standard) {
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    private static let prefix = "voiceInput.marks."
     private static let listening = "listening:"
 }
 
@@ -188,7 +187,6 @@ final class VoiceInputController {
             handlers: .init(
                 onText: { [weak self] heard in
                     let words = before + SpokenText.insertion(before: before, heard: heard, after: after) + after
-                    if let chat { service.heard(words, in: chat) }
                     self?.show(words, text: text, handle: handle)
                 },
                 onDone: { [weak self] heard, stop in
@@ -230,14 +228,8 @@ final class VoiceInputController {
     }
 
     /// The field opened: a chat left while listening says why.
-    /// After a relaunch, the field gets back every word it showed, which the
-    /// draft may have missed.
-    func arrive(service: VoiceInputService?, chat: String?, text: Binding<String>) {
-        guard let service, let chat else { return }
-        if let words = service.takeKeptWords(for: chat), text.wrappedValue.isEmpty || words.hasPrefix(text.wrappedValue) {
-            text.wrappedValue = words
-        }
-        guard let stop = service.takeNotice(for: chat) else { return }
+    func arrive(service: VoiceInputService?, chat: String?) {
+        guard let service, let chat, let stop = service.takeNotice(for: chat) else { return }
         show(stop)
     }
 
