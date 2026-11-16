@@ -267,6 +267,7 @@ export async function renderTaskEvents(
     const attrs = [
       `id="${attr(row.id)}"`,
       row.sessionId ? `chat_id="${attr(row.sessionId)}"` : null,
+      found.sourceMessageId ? `start_message_id="${attr(found.sourceMessageId)}"` : null,
       `title="${attr(row.title)}"`,
       status ? `status="${status.status}"` : null,
       status?.endReason ? `end_reason="${status.endReason}"` : null,

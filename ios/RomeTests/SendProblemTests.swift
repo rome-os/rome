@@ -29,8 +29,8 @@ import UIKit
         return message
     }
 
-    /// A resend goes where the message went: its task thread, replying to the
-    /// message it quoted.
+    /// A resend goes where the message went: replying to the message it
+    /// quoted, in that message's thread.
     @Test func aResendKeepsItsThreadAndReply() async {
         let backend = FakeBackend()
         backend.sendSucceeds = true
@@ -45,12 +45,15 @@ import UIKit
         #expect(store.pending.first?.thread == target)
     }
 
-    /// A message in a thread with no quote goes back to the thread alone; one
-    /// in neither goes to the chat.
-    @Test func aResendTargetFollowsTheStoredMessage() {
-        let inThread = TranscriptStore.resendTarget(of: stored("a", inputState: "failed", thread: "root-1"))
-        #expect(inThread?.body == ["chatThread": .string("root-1")])
+    /// A message replied to nothing, which no quote says, goes back as one
+    /// that replies to nothing, whatever thread it has since been put in.
+    @Test func aResendTargetFollowsTheQuote() {
+        #expect(TranscriptStore.resendTarget(of: stored("a", inputState: "failed", thread: "root-1")) == nil)
         #expect(TranscriptStore.resendTarget(of: stored("b", inputState: "failed")) == nil)
+        let quote = #"{"type":"reply_to","messageId":"m-9","text":"Which day?"},"#
+        let replied = TranscriptStore.resendTarget(of: stored("c", inputState: "failed", extra: quote, thread: "c"))
+        // Its own root names no thread to send into.
+        #expect(replied?.body == ["replyToMessageId": .string("m-9")])
     }
 
     /// A resend hides only its own original, by the pair recorded when it

@@ -50,7 +50,7 @@ export interface SaidMessage {
   readonly replyTo?: string;
   readonly at: Date;
   readonly turnId?: string;
-  /** The chat thread the message is in (docs/domains/chats.md#chat-thread),
-   *  or absent when it is in none. */
+  /** The chat thread the message is in (docs/domains/chats.md#chat-thread):
+   *  the key of its root, its own key when it replies to nothing. */
   readonly chatThread?: string;
 }

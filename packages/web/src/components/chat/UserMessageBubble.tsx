@@ -22,6 +22,7 @@ export function UserMessageBubble({
   own,
   className,
   badge,
+  quoted = true,
 }: {
   msg: ChatMessage;
   text: string;
@@ -29,6 +30,8 @@ export function UserMessageBubble({
   className?: string;
   /** Sits on the bubble's own surface, positioned against it, as a reaction does. Pass it, null included, to keep the bubble its anchor. */
   badge?: ReactNode;
+  /** Draws the quote the message carries. False where a connector stands in for it. */
+  quoted?: boolean;
 }) {
   const { t } = useTranslation("chat");
   const undelivered =
@@ -70,7 +73,7 @@ export function UserMessageBubble({
           <CircleSlash className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         ) : null}
         <div className="min-w-0">
-          {quote ? <QuotedReply part={quote} hostId={msg.id} /> : null}
+          {quote && quoted ? <QuotedReply part={quote} hostId={msg.id} /> : null}
           {body ? (
             <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
               {body}

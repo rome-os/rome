@@ -97,6 +97,19 @@ enum MessagePart: Hashable, Sendable {
         /// An automated sender's name.
         let name: String?
         let text: String
+
+        /// The line a quote shows: the first line of the quoted message with
+        /// words in it, as plain reading text. A fence line holds none, so the
+        /// first line inside it counts. The rest of the message is not quoted.
+        var line: String {
+            for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty || trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { continue }
+                let plain = MarkdownParser.plain(String(raw)).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !plain.isEmpty { return plain }
+            }
+            return ""
+        }
     }
 
     /// `routine_draft_card`: a routine Chat proposed, and the key it is created with.

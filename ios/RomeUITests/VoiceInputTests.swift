@@ -69,14 +69,14 @@ final class VoiceInputTests: XCTestCase {
         try checkStartsAndStops(app, field: "a task chat")
     }
 
-    /// Rule 1 in a thread under a Concierge message. Needs a task on the instance.
+    /// Rule 1 in a thread opened from a quote. Needs a reply on the instance.
     @MainActor
     func testRule1AThread() throws {
         let app = try launch()
-        let thread = app.buttons["thread-label"].firstMatch
+        let thread = app.buttons["reply-quote"].firstMatch
         guard thread.waitForExistence(timeout: 10) else {
-            printScreen(app, "no thread label")
-            throw XCTSkip("the instance has no task's thread to open")
+            printScreen(app, "no reply quote")
+            throw XCTSkip("the instance has no reply with a thread to open")
         }
         thread.tap()
         try checkStartsAndStops(app, field: "a thread")

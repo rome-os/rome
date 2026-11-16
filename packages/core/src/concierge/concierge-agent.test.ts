@@ -88,11 +88,23 @@ describe("the Concierge agent", () => {
     expect(prompt).toContain("The brief says what to do, never where to send it");
   });
 
-  it("never tells the Concierge a forward needs `answers` or passes the guardian's words on", () => {
+  it("tells the Concierge a message can reply to one earlier message, and that routing changes no thread", () => {
     const prompt = concierge.systemPromptPrefix;
-    expect(prompt).not.toMatch(/`chat_forward` (?:are|is) refused/);
-    expect(prompt).not.toContain("with `chat_send` or `chat_forward`");
-    expect(prompt).toContain("`chat_forward` passes nothing on");
+    expect(prompt).toContain('`<chat_thread message_id="…" root="…"/>`');
+    expect(prompt).toContain("set `replyTo` on `say`");
+    expect(prompt).toContain("a task's `start_message_id`");
+    expect(prompt).toContain("A `say` without `replyTo` replies to nothing");
+    expect(prompt).toContain("Sending a message to a task changes no thread");
+    // Rome sets threads from replies, so no rule asks the Concierge to place a message.
+    for (const removed of [
+      "never place a message",
+      "never send it to another task",
+      "joins that thread",
+      "`answers`",
+      "task_title",
+    ]) {
+      expect(prompt).not.toContain(removed);
+    }
   });
 
   it("reports a finished task by forwarding its conclusion, never its whole report", () => {
@@ -105,7 +117,7 @@ describe("the Concierge agent", () => {
       "never tell the guardian to open the task chat for details",
       "refuses because the answer has no conclusion or it is too long",
       "a few sentences with the key specifics",
-      "with `task` set to the task's id so it joins the task's thread",
+      "with `replyTo` set to the task's `start_message_id`",
       "deliver the result in ONE message",
       "(`full: true`) only when the guardian explicitly asked for the full text in a message they sent this turn",
       "A failed or stopped task: say so plainly",

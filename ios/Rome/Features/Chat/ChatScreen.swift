@@ -318,13 +318,12 @@ struct ConciergeRow: View, Equatable {
             let onQuote: (() -> Void)? = inThread || !info.quoteLeads ? nil : info.quote.map { quote in { actions.quote(reply: replyId, original: quote.messageId) } }
             UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu(reply: Self.offersReply(row)),
                        mark: info.mark,
-                       quote: info.quote, onQuote: onQuote)
+                       quote: info.quote, rail: info.rail, onQuote: onQuote)
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)))
-        case .threadLabel(_, let messageId, let title):
-            if !inThread {
-                ThreadLabelLine(title: title) { actions.openThread(at: messageId) }
-            }
+            let replyId = row.messageId ?? ""
+            let onQuote: (() -> Void)? = inThread || !info.quoteLeads ? nil : info.quote.map { quote in { actions.quote(reply: replyId, original: quote.messageId) } }
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)),
+                        quote: info.quote, rail: info.rail, onQuote: onQuote)
         case .sourceLabel(_, let text):
             if !inThread { SourceLabelLine(text: text) }
         case .taskCard(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):

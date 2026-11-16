@@ -92,25 +92,27 @@ import Testing
         return (store, backend)
     }
 
-    /// Opened from its label, the thread shows no reply bar, and a send names the thread only.
+    /// Opened from its label, the thread shows no reply bar, and a send names the thread's root only.
     @Test func aThreadOpenedFromItsLabelHasNoReplyBar() async {
         let (store, _) = await chat()
         store.openThread(at: "a2")
         #expect(store.thread != nil)
         #expect(!store.showsQuoteBar)
-        #expect(store.composerThread?.body == ["chatThread": .string("a2")])
+        // The send names the thread by its root.
+        #expect(store.composerThread?.body == ["chatThread": .string("a1")])
         store.closeThread()
     }
 
     /// Reply on a message inside the open view shows the bar, naming the
-    /// task, and sends to the thread without quoting the message.
+    /// thread, and sends to the thread without quoting the message.
     @Test func replyInsideTheViewShowsTheBar() async {
         let (store, _) = await chat()
         store.openThread(at: "a2")
         #expect(store.thread != nil)
         store.reply(to: "a2")
         #expect(store.showsQuoteBar && store.threadReplyTitle == "Book flights")
-        #expect(store.composerThread?.body == ["chatThread": .string("a2")])
+        // The send names the thread by its root.
+        #expect(store.composerThread?.body == ["chatThread": .string("a1")])
         store.closeThread()
     }
 

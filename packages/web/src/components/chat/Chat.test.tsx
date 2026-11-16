@@ -221,6 +221,17 @@ function ReplyJump() {
       >
         open other thread
       </button>
+      {/* Picks a reply to a message, as the Reply button does. */}
+      {["a-1", "u-3"].map((id) => (
+        <button
+          key={id}
+          type="button"
+          data-testid={`reply-to-${id}`}
+          onClick={() => reply?.set({ messageId: id, author: "agent", preview: "quoted" })}
+        >
+          reply
+        </button>
+      ))}
       {/* Whether a quote of the message could go to it. */}
       <span data-testid="has-u2">{String(reply?.has("u-2"))}</span>
       {/* An older message the timeline has not loaded. */}
@@ -475,8 +486,9 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
                   reasoningEffort: "medium",
                   projectPath: "",
                   inputId: "11111111-1111-4111-8111-111111111111",
-                  // As the real composer does: the thread the draft sends into.
+                  // As the real composer does: the thread the draft sends into, and its reply.
                   ...(thread ? { chatThread: thread } : {}),
+                  ...(draft?.target ? { replyTo: draft.target } : {}),
                 },
                 { onUploadProgress: () => {}, signal: new AbortController().signal },
               )
@@ -2988,20 +3000,23 @@ describe("Chat Concierge empty state", () => {
   };
 
   describe("Chat thread in focus", () => {
-    // Two task threads, each started by the owner's message that names it.
+    // Two threads, each started by the owner's message and answered, so each
+    // holds more than one message. A task started in each names it.
     const threaded = () =>
       rs.mocked(listSessionMessages).mockResolvedValueOnce(
         [
-          ["u-1", "turn-a", "First", "Task one"],
-          ["u-2", "turn-b", "Second", "Task two"],
-        ].map(([id, turnId, text, title]) => ({
+          ["u-1", "user", "turn-a", "First", "Task one", "u-1"],
+          ["u-2", "user", "turn-b", "Second", "Task two", "u-2"],
+          ["ar-1", "assistant", "turn-a", "On it", "Task one", "u-1"],
+          ["ar-2", "assistant", "turn-b", "On it too", "Task two", "u-2"],
+        ].map(([id, role, turnId, text, title, thread]) => ({
           id: id!,
           sessionId: "session-1",
           turnId: turnId!,
-          role: "user",
+          role: role as "user" | "assistant",
           content: JSON.stringify([{ type: "text", content: text }]),
           createdAt: "2026-11-10T10:00:00Z",
-          chatThreadId: id!,
+          chatThreadId: thread!,
           chatThreadTitle: title!,
         })),
       );
@@ -3064,6 +3079,58 @@ describe("Chat Concierge empty state", () => {
       expect(composer().dataset.thread).toBe("u-2");
     });
 
+    describe("a reply sent from the timeline", () => {
+      // u-1 started a thread that a-1 answers; u-3 is alone.
+      const replied = () =>
+        rs.mocked(listSessionMessages).mockResolvedValueOnce(
+          (
+            [
+              ["u-1", "user", null, "turn-a"],
+              ["a-1", "assistant", "u-1", "turn-a"],
+              ["u-3", "user", null, "turn-c"],
+            ] as const
+          ).map(([id, role, thread, turnId]) => ({
+            id,
+            sessionId: "session-1",
+            turnId,
+            role,
+            content: JSON.stringify([{ type: "text", content: id }]),
+            createdAt: "2026-11-10T10:00:00Z",
+            chatThreadId: thread,
+          })),
+        );
+      const sentRow = async () =>
+        (await screen.findAllByTestId("user-row")).find((row) =>
+          row.textContent?.includes("sent at once"),
+        );
+
+      it("is in its replied message's thread at once, so no label flashes before the answer", async () => {
+        replied();
+        rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("reply-to-a-1"));
+
+        fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+        await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+        expect((await sentRow())?.dataset.chatThread).toBe("u-1");
+      });
+
+      it("starts a thread at a replied message that is alone", async () => {
+        replied();
+        rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("reply-to-u-3"));
+
+        fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+        await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+        expect((await sentRow())?.dataset.chatThread).toBe("u-3");
+      });
+    });
+
     it("sends to the whole chat once the focus is closed", async () => {
       threaded();
       rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
@@ -3082,13 +3149,12 @@ describe("Chat Concierge empty state", () => {
       );
     });
 
-    it("closes from the back control, from the same label again, and from Esc", async () => {
+    it("closes from the back control and from Esc", async () => {
       threaded();
       renderChat(concierge());
       await screen.findAllByTestId("user-row");
       const closers = [
         () => fireEvent.click(back()!),
-        () => fireEvent.click(screen.getByTestId("open-thread")),
         () => fireEvent.keyDown(document.body, { key: "Escape" }),
       ];
       for (const close of closers) {
@@ -3116,7 +3182,7 @@ describe("Chat Concierge empty state", () => {
       expect(composer().dataset.thread).toBe("u-1");
     });
 
-    it("opens no focus for a message that is in no task's thread", async () => {
+    it("opens no focus for a message alone in its thread", async () => {
       twoTurns();
       renderChat(concierge());
       await screen.findAllByTestId("user-row");
@@ -3125,6 +3191,96 @@ describe("Chat Concierge empty state", () => {
 
       expect(back()).toBeNull();
       expect(composer().dataset.thread).toBe("");
+    });
+
+    it("puts a root the server sent with no thread into it once a reply arrives live, so it can be focused", async () => {
+      rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+      twoTurns();
+      renderChat(concierge());
+      await screen.findAllByTestId("user-row");
+      await waitFor(() => expect(chatEvents()).toBeTruthy());
+      // Alone, u-1 is in no thread, so there is nothing to focus.
+      fireEvent.click(screen.getByTestId("open-thread"));
+      expect(back()).toBeNull();
+
+      act(() => {
+        chatEvents()?.emit("message_insert", {
+          id: "u-3",
+          sessionId: "session-1",
+          turnId: "turn-c",
+          role: "user",
+          content: JSON.stringify([{ type: "text", content: "More" }]),
+          createdAt: "2026-11-10T10:05:00Z",
+          chatThreadId: "u-1",
+          chatThreadTitle: "First",
+        });
+      });
+      await waitFor(() => expect(screen.getAllByTestId("user-row")).toHaveLength(3));
+
+      // The reply carries the thread and its name; the root is in it with no event of its own.
+      fireEvent.click(screen.getByTestId("open-thread"));
+      await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+      expect(back()?.textContent).toBe("First");
+    });
+
+    describe("a jump that focuses the thread of its message", () => {
+      const originalScrollTo = Element.prototype.scrollTo;
+      beforeEach(() => {
+        Element.prototype.scrollTo = rs.fn() as typeof Element.prototype.scrollTo;
+      });
+      afterEach(() => {
+        Element.prototype.scrollTo = originalScrollTo;
+      });
+
+      it("lands on the message and focuses its thread, the way the Tasks panel's Respond asks", async () => {
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        act(() => void requestConciergeJump("u-2", { focusThread: true }));
+
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+        expect(back()?.textContent).toBe("Task two");
+      });
+
+      it("closes the thread in focus first when the message is in another", async () => {
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+
+        act(() => void requestConciergeJump("u-2", { focusThread: true }));
+
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+      });
+
+      it("keeps the thread in focus when the message is in it, and focuses nothing without the ask", async () => {
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        act(() => void requestConciergeJump("u-2"));
+        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
+        expect(composer().dataset.thread).toBe("");
+
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+        act(() => void requestConciergeJump("u-1", { focusThread: true }));
+        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalledTimes(2));
+        expect(composer().dataset.thread).toBe("u-1");
+      });
+
+      it("focuses no thread for a message alone in its own", async () => {
+        twoTurns();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        act(() => void requestConciergeJump("u-1", { focusThread: true }));
+
+        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
+        expect(composer().dataset.thread).toBe("");
+      });
     });
 
     it("brings the whole chat back before a jump to a message the focus hides, and jumps at once to one it shows", async () => {

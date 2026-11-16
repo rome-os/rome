@@ -28,7 +28,6 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   sender?: { kind?: string };
-  chatThreadId?: string | null;
 }
 
 export interface TaskCard {

@@ -43,6 +43,7 @@ import type {
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
 import {
+  chatMessages,
   conciergeMessageTurns,
   conciergeTasks,
   guardianAuth,
@@ -300,7 +301,6 @@ describe("Webchat API", () => {
         tasks: {
           repo: {
             threadTasks: async () => new Map(),
-            onThreadRetired: () => () => {},
           },
         },
       },
@@ -4759,49 +4759,83 @@ describe("Webchat API", () => {
         expect(sent.status).toBe(200);
         await drainTurn(app, sent);
       }
-      // The Concierge reads which message it is: one sent from the composer is in no thread.
+      // The Concierge reads which message it is, and its thread's root: a
+      // message sent from the composer replies to nothing, so it is its own.
       const first = sentTurns[0]?.prompt.match(
-        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)"\/>\n\nhello$/,
-      )?.[1];
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" root="\1"\/>\n\nhello$/,
+      )?.[1] as string;
       expect(first).toBeTruthy();
       expect(sentTurns[1]?.prompt).toBe("hello");
+      const lines = () =>
+        testDb.db
+          .select({
+            key: chatMessages.key,
+            id: chatMessages.id,
+            replyTo: chatMessages.replyToMessageId,
+            root: chatMessages.rootMessageId,
+            parts: chatMessages.parts,
+          })
+          .from(chatMessages)
+          .all();
+      const send = async (body: Record<string, unknown>) =>
+        drainTurn(
+          app,
+          await app.request(`/chat/sessions/topic-1/turns`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+        );
+      const lineOf = (prompt: string | undefined) =>
+        lines().find((row) => row.key === prompt?.match(/message_id="([^"]+)"/)?.[1])!;
+      const firstLine = lines().find((row) => row.key === first)!;
+      expect(firstLine).toMatchObject({ replyTo: null, root: null });
 
-      // A reply to a message in no task is only a quote: it is in no thread.
-      const quoted = await app.request(`/chat/sessions/topic-1/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "about that", replyToMessageId: first }),
-      });
-      await drainTurn(app, quoted);
-      expect(sentTurns[2]?.prompt).toMatch(/<chat_thread message_id="[^"]+"\/>/);
-      const quotedId = sentTurns[2]?.prompt.match(/message_id="([^"]+)"/)?.[1] as string;
-      expect(await deps.webchatRepo.chatThreadOf("topic-1", quotedId)).toBe(quotedId);
-      expect((await deps.webchatRepo.getReplyTarget("topic-1", quotedId))?.chatThreadId).toBeNull();
-
-      // Once a task's thread starts at it, a message sent there reads the task.
-      const [task] = await repo.upsertMany([
-        { title: 'Book "dinner"', state: "doing", chatId: "topic-1" },
+      // The dashboard's Reply replies to that message and shows its quote.
+      await send({ text: "about that", replyToMessageId: first });
+      expect(sentTurns[2]?.prompt).toMatch(
+        new RegExp(`<chat_thread message_id="[^"]+" root="${first}"/>`),
+      );
+      const replied = lineOf(sentTurns[2]?.prompt);
+      expect(replied).toMatchObject({ replyTo: firstLine.id, root: firstLine.id });
+      expect(JSON.parse(replied.parts)).toEqual([
+        expect.objectContaining({ type: "reply_to", messageId: first }),
+        { type: "text", content: "about that" },
       ]);
-      await repo.setThreadRoot(task.id, first as string);
-      await deps.webchatRepo.placeInChatThread("topic-1", first as string, {
-        starts: true,
-        settle: true,
-      });
-      const next = await app.request(`/chat/sessions/topic-1/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "and later?", chatThread: first }),
-      });
-      await drainTurn(app, next);
-      expect(sentTurns[3]?.prompt).toMatch(
-        new RegExp(
-          `<chat_thread message_id="[^"]+" thread="${first}" task="${task.id}" task_title="Book &quot;dinner&quot;"/>`,
-        ),
+
+      // A task started in the thread adds nothing to the line: it names the message and its root.
+      await repo.upsertMany([
+        { title: 'Book "dinner"', state: "doing", chatId: "topic-1", sourceMessageId: first },
+      ]);
+      // A composer focused on the thread replies to its last message, and shows its quote.
+      await send({ text: "and later?", chatThread: first });
+      expect(sentTurns[3]?.prompt).toContain(
+        `<chat_thread message_id="${lineOf(sentTurns[3]?.prompt).key}" root="${first}"/>`,
       );
-      const threaded = sentTurns[3]?.prompt.match(/message_id="([^"]+)"/)?.[1] as string;
-      expect((await deps.webchatRepo.getReplyTarget("topic-1", threaded))?.chatThreadId).toBe(
-        first,
-      );
+      const focused = lineOf(sentTurns[3]?.prompt);
+      expect(focused).toMatchObject({ replyTo: replied.id, root: firstLine.id });
+      expect(JSON.parse(focused.parts)).toEqual([
+        expect.objectContaining({ type: "reply_to", messageId: replied.key, text: "about that" }),
+        { type: "text", content: "and later?" },
+      ]);
+
+      // A Reply wins over the focus.
+      await send({ text: "no, that one", chatThread: first, replyToMessageId: first });
+      expect(lineOf(sentTurns[4]?.prompt)).toMatchObject({
+        replyTo: firstLine.id,
+        root: firstLine.id,
+      });
+
+      // A client that sends the message it tapped, not the root, gets the same thread.
+      await send({ text: "from an older build", chatThread: lineOf(sentTurns[3]?.prompt).key });
+      expect(lineOf(sentTurns[5]?.prompt)).toMatchObject({
+        replyTo: lineOf(sentTurns[4]?.prompt).id,
+        root: firstLine.id,
+      });
+
+      // A focus on no thread of the chat replies to nothing.
+      await send({ text: "hello again", chatThread: "elsewhere" });
+      expect(lineOf(sentTurns[6]?.prompt)).toMatchObject({ replyTo: null, root: null });
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
@@ -4848,6 +4882,7 @@ describe("Webchat API", () => {
       deps.concierge = new ConciergeService({
         ...deps,
         accounts: deps.modelAccounts,
+        tasks: { repo: { threadTasks: async () => new Map() } },
       } as unknown as ConciergeDeps);
       const open = deps.agentSessionManager.open;
       deps.agentSessionManager.open = rs.fn(async (key: AgentSessionKey, init?: SessionOpening) => {
@@ -7694,7 +7729,7 @@ describe("Webchat API", () => {
       await events.cancel();
     });
 
-    it("names a task's chat thread on its messages and on a live placement, and no other thread", async () => {
+    it("names a chat thread on its messages when they arrive, and leaves a thread no task started in unnamed", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
       deps.concierge = {
         deps: { tasks: new ConciergeTasks(repo) },
@@ -7710,23 +7745,29 @@ describe("Webchat API", () => {
         "core:concierge",
       );
       const text = (content: string) => JSON.stringify([{ type: "text", content }]);
+      const reply = async (to: string, content: string) =>
+        (
+          await deps.webchatRepo.addBackendMessage("topic", "turn-1", [{ type: "text", content }], {
+            replyTo: to,
+          })
+        ).id;
       await deps.webchatRepo.addMessage("g1", "topic", "user", text("Weather?"), "turn-1");
-      await deps.webchatRepo.addMessage("g2", "topic", "user", text("Thanks"), "turn-2");
+      const answer = await reply("g1", "Looking it up");
       await deps.webchatRepo.addMessage("g3", "topic", "user", text("And this?"), "turn-3");
-      await deps.webchatRepo.placeInChatThread("topic", "g1", { starts: true, settle: true });
-      await deps.webchatRepo.placeInChatThread("topic", "g3", { starts: true, settle: true });
-      await deps.webchatRepo.createSession("tokyo-chat", "Tokyo weather");
-      const [task] = await repo.upsertMany([
-        { title: "Tokyo weather", state: "doing", chatId: "topic", sessionId: "tokyo-chat" },
-      ]);
-      await repo.setThreadRoot(task.id, "g1");
-      // Rows from before one thread per task may share a root: the thread
-      // keeps its first task's name.
-      const [later] = await repo.upsertMany(
-        [{ title: "London weather", state: "doing", chatId: "topic" }],
-        new Date(Date.now() + 1_000),
+      // A thread no task started in has a thread, and no title: a client names it.
+      const long = "Tell me a long story about a lighthouse keeper and the sea, in detail.";
+      await deps.webchatRepo.addMessage("g4", "topic", "user", text(long), "turn-4");
+      const story = await reply("g4", "Once upon a time");
+      const [tokyo] = await repo.upsertMany(
+        [{ title: "Tokyo weather", state: "doing", chatId: "topic", sourceMessageId: "g1" }],
+        new Date(1_000),
       );
-      await repo.setThreadRoot(later.id, "g1");
+      // Several tasks started in one thread: it takes the newest one's title.
+      await repo.upsertMany(
+        [{ title: "London weather", state: "doing", chatId: "topic", sourceMessageId: answer }],
+        new Date(2_000),
+      );
+      expect(tokyo).toBeDefined();
       const app = createWebchatRuntime(deps).routes;
 
       const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
@@ -7734,40 +7775,47 @@ describe("Webchat API", () => {
         chatThreadId?: string | null;
         chatThreadTitle?: string;
       }[];
-      expect(listed.find((m) => m.id === "g1")).toMatchObject({
+      const named = (id: string) => listed.find((m) => m.id === id);
+      expect(named("g1")).toMatchObject({ chatThreadId: "g1", chatThreadTitle: "London weather" });
+      expect(named(answer)).toMatchObject({
         chatThreadId: "g1",
-        chatThreadTitle: "Tokyo weather",
-        // Its task chat, so the thread view opens it with no card in the thread.
-        chatThreadTaskChatId: "tokyo-chat",
+        chatThreadTitle: "London weather",
       });
-      // Only a task has a thread: one from before that no task has is sent as
-      // none, so every client shows it as none.
-      expect(listed.find((m) => m.id === "g3")?.chatThreadId ?? null).toBeNull();
-      expect(listed.find((m) => m.id === "g3")).not.toHaveProperty("chatThreadTitle");
-      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("chatThreadTitle");
-      const thread = (await (
-        await app.request("/chat/sessions/topic/messages?thread=g3")
-      ).json()) as { messages: { id: string; chatThreadId?: string | null }[] };
-      expect(thread.messages.map((m) => m.chatThreadId ?? null)).toEqual([null]);
+      for (const id of ["g4", story]) {
+        expect(named(id)).toMatchObject({ chatThreadId: "g4" });
+        expect(named(id)).not.toHaveProperty("chatThreadTitle");
+      }
+      // A message alone is the root of its own thread, which no task started in.
+      expect(named("g3")).toMatchObject({ chatThreadId: "g3" });
+      expect(named("g3")).not.toHaveProperty("chatThreadTitle");
+      // The thread reads whole by its root or by any message of it, as shipped apps send the one tapped.
+      for (const key of ["g1", answer]) {
+        const thread = (await (
+          await app.request(`/chat/sessions/topic/messages?thread=${key}`)
+        ).json()) as { messages: { id: string; chatThreadId?: string | null }[] };
+        expect(thread.messages.map((m) => [m.id, m.chatThreadId])).toEqual([
+          ["g1", "g1"],
+          [answer, "g1"],
+        ]);
+      }
 
+      // A message that arrives live carries its thread and the thread's name.
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
-      const placed = readSseUntil(events, "event: message_chat_thread");
-      // A placement in a thread no task has is not told; the task's next is.
-      await deps.webchatRepo.addMessage("g4", "topic", "user", text("Old"), "turn-4");
-      await deps.webchatRepo.placeInChatThread("topic", "g4", { in: "g3", settle: true });
-      await deps.webchatRepo.placeInChatThread("topic", "g2", { in: "g1", settle: true });
-      const told = await placed;
-      expect(told).toContain(
-        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g2", chatThreadId: "g1", chatThreadTitle: "Tokyo weather", chatThreadTaskChatId: "tokyo-chat" })}`,
-      );
-      expect(told).not.toContain('"messageId":"g4"');
-
-      // A task that leaves the chat takes its thread's label with it.
-      const retired = readSseUntil(events, "event: chat_thread_retired");
-      await repo.upsertMany([{ id: task.id, chatId: null }]);
-      expect(await retired).toContain(
-        `data: ${JSON.stringify({ sessionId: "topic", chatThreadId: "g1" })}`,
-      );
+      const arrived = readSseUntil(events, "Same thread");
+      const live = await reply("g1", "Same thread");
+      const told = await arrived;
+      expect(told).toContain("event: message_insert");
+      expect(told).toContain(`"id":"${live}"`);
+      expect(told).toContain('"chatThreadId":"g1"');
+      expect(told).toContain('"chatThreadTitle":"London weather"');
+      // One that replies to nothing is the root of its own thread, which has no name.
+      const fresh = readSseUntil(events, "Fresh start");
+      const { id: freshId } = await deps.webchatRepo.addBackendMessage("topic", "turn-5", [
+        { type: "text", content: "Fresh start" },
+      ]);
+      const freshTold = await fresh;
+      expect(freshTold).toContain(`"chatThreadId":"${freshId}"`);
+      expect(freshTold).not.toContain("chatThreadTitle");
       await events.cancel();
     });
 
