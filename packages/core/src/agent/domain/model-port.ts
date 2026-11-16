@@ -116,18 +116,6 @@ export interface ModelProvider {
    */
   readonly builtinTools: ReadonlySet<string>;
   /**
-   * The provider keeps the tools a thread started with when the thread is
-   * resumed, whatever the resume passes. Absent, a resume takes the tools it
-   * is given. docs/concepts/sessions.md#renewal
-   */
-  readonly keepsThreadTools?: boolean;
-  /**
-   * The provider keeps the system prompt a thread started with when the
-   * thread is resumed, whatever the resume passes. Absent, a resume reads the
-   * system prompt it is given. docs/concepts/sessions.md#renewal
-   */
-  readonly keepsThreadInstructions?: boolean;
-  /**
    * Open a long-lived model session. The returned handle owns the underlying
    * SDK / HTTP client and the input queue. Multiple turns are driven by
    * repeated `sendUserInput()` calls; the consumer drains `events()` for as

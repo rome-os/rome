@@ -83,8 +83,11 @@ export interface RenewalHandoffs {
    * model, after the retired session could not. Null when that fails too.
    */
   fallback(chatId: string | undefined, agentName: string): Promise<string | null>;
-  /** What turn `turnId` of chat `chatId` shows beside the handoff. */
-  context(chatId: string, turnId: string): Promise<HandoffContext>;
+  /**
+   * What turn `turnId` of chat `chatId` shows beside the handoff: with
+   * `since`, every message said since then, else the latest ones.
+   */
+  context(chatId: string, turnId: string, since?: Date): Promise<HandoffContext>;
 }
 
 /**
@@ -134,10 +137,14 @@ export function recentWithin(
 /**
  * The sections a successor's first turn carries inside its `<continuation>`
  * notice: the handoff its predecessor wrote, when it wrote one, the chat's
- * open tasks as Rome holds them, and the chat's latest messages up to
- * {@link HANDOFF_RECENT_TOKENS}.
+ * open tasks as Rome holds them, and the chat's messages: with `all`, every
+ * one the context holds, else the latest up to {@link HANDOFF_RECENT_TOKENS}.
  */
-export function handoffSections(handoff: string | null, context: HandoffContext): string[] {
+export function handoffSections(
+  handoff: string | null,
+  context: HandoffContext,
+  options: { all?: boolean } = {},
+): string[] {
   const sections = handoff
     ? [
         "Your previous session wrote this handoff for you before it was replaced. The chat's owner can open it from the chat, but has not been told about it.",
@@ -152,7 +159,9 @@ export function handoffSections(handoff: string | null, context: HandoffContext)
       `<open_tasks>\n${context.openTasks.trim()}\n</open_tasks>`,
     );
   }
-  const { shown, omitted } = recentWithin(context.recent, HANDOFF_RECENT_TOKENS);
+  const { shown, omitted } = options.all
+    ? { shown: [...context.recent], omitted: 0 }
+    : recentWithin(context.recent, HANDOFF_RECENT_TOKENS);
   if (shown.length > 0) {
     sections.push(
       "<recent_messages>",

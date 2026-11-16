@@ -46,6 +46,7 @@ export interface RuntimeFacts {
 /** Value object. What a core agent's fixed part quotes from outside the agent. */
 export interface PromptMaterial {
   charter: string | null;
+  identity: string | null;
   runtime: RuntimeFacts;
   installedApps: readonly { appId: string; description: string }[];
 }
@@ -60,8 +61,6 @@ export interface PromptMemory {
 export interface PromptSources {
   material(): PromptMaterial;
   memory(): PromptMemory;
-  /** The agent's identity (`IDENTITY.md`), read each time a system prompt is built. */
-  identity(): string | null;
   /** The fixed part may be stale: the installed apps changed. */
   onChanged(listener: () => void): void;
 }
@@ -69,10 +68,9 @@ export interface PromptSources {
 /**
  * The fixed part of a system prompt, the same for every session of the
  * agent. With `setup`, only what a session's setup counts
- * (docs/concepts/sessions.md#setup): the agent's own instructions and the
- * charter, without the runtime facts and the installed apps, which change
- * with the instance rather than with the agent. The identity is no part of
- * it: each build reads it, as it reads memory.
+ * (docs/concepts/sessions.md#setup): the agent's own instructions, the
+ * charter and the identity, without the runtime facts and the installed
+ * apps, which change with the instance rather than with the agent.
  */
 export function buildPromptPrefix(
   agent: PromptAgent,
@@ -96,6 +94,7 @@ export function buildPromptPrefix(
   if (ownBlock.length > 0) sections.push(ownBlock.join("\n\n"));
 
   if (material.charter) sections.push(`# Charter\n\n${material.charter}`);
+  if (material.identity) sections.push(markdownSection("Identity", material.identity));
   const policy = resolveAgentPolicy(agent);
   if (policy.loadMemory && !options.setup) {
     sections.push(
@@ -125,8 +124,6 @@ export function carriesMemory(agent: PromptAgent): boolean {
 export function buildSystemPrompt(input: {
   prefix: string;
   owner: PromptAgent["owner"];
-  /** The agent's identity (`IDENTITY.md`) as it is now. Only a core agent's prompt carries it. */
-  identity?: string | null;
   memory: PromptMemory | null;
   contextSuffix?: string;
   widgets: WidgetDrawing;
@@ -134,9 +131,6 @@ export function buildSystemPrompt(input: {
   delegatesWork?: boolean;
 }): string {
   const sections = [input.prefix];
-  if (input.owner === "core" && input.identity) {
-    sections.push(markdownSection("Identity", input.identity));
-  }
   if (input.memory?.index) sections.push(markdownSection("Memory", input.memory.index));
   if (input.memory && input.memory.projects.length > 0) {
     sections.push(projectsSection(input.memory.projects));

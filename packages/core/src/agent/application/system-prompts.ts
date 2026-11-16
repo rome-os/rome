@@ -18,18 +18,17 @@ export interface SystemPrompts {
   build(agent: PromptAgent, options: PromptOptions): string;
   /**
    * What a session's setup holds of its prompt, from the sources as they are
-   * now: the system prompt without memory, the identity, the runtime facts or
-   * the installed apps (docs/concepts/sessions.md#setup). The caller leaves
-   * out the opener's context suffix when it is living context, such as the
-   * guardian's profile. When the fixed part changed since it was held, the
-   * new one is held, so the next `build` uses it too.
+   * now: the system prompt without memory, the runtime facts or the
+   * installed apps (docs/concepts/sessions.md#setup). The caller leaves out
+   * the opener's context suffix when it is living context, such as the
+   * guardian's profile. When the fixed part
+   * changed since it was held, the new one is held, so the next `build` uses
+   * it too.
    */
   setup(agent: PromptAgent, options: PromptOptions): string;
-  /** The identity a core agent's prompt carries now, or null. */
-  identity(agent: PromptAgent): string | null;
 }
 
-/** Holds each agent's fixed part until the sources change, and reads memory and the identity on every build. */
+/** Holds each agent's fixed part until the sources change, and reads memory on every build. */
 export function createSystemPrompts(options: { sources: PromptSources }): SystemPrompts {
   const { sources } = options;
   const prefixes = new Map<string, string>();
@@ -44,21 +43,15 @@ export function createSystemPrompts(options: { sources: PromptSources }): System
       return buildSystemPrompt({
         prefix,
         owner: agent.owner,
-        // Read on every build: the identity is living memory, which dream and
-        // a rename change while sessions run (docs/concepts/sessions.md#setup).
-        identity: agent.owner === "core" ? sources.identity() : null,
         memory: carriesMemory(agent) ? sources.memory() : null,
         contextSuffix,
         widgets,
         delegatesWork: resolveAgentPolicy(agent).delegatesWork,
       });
     },
-    identity(agent) {
-      return agent.owner === "core" ? sources.identity() : null;
-    },
     setup(agent, { contextSuffix, widgets }) {
       // Read again, since a file the fixed part quotes, such as the
-      // charter, changes without telling the sources.
+      // identity, changes without telling the sources.
       const material = sources.material();
       prefixes.set(keyOf(agent), buildPromptPrefix(agent, material));
       return buildSystemPrompt({

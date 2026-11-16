@@ -44,49 +44,51 @@ A continuity key is the value that whatever opens a session, and comes back to i
 
 ## Setup
 
-A session's setup is what its thread was opened or last resumed with. It has two parts:
+A session's setup is what it takes when it opens and keeps for its life. It counts exactly these:
 
-- its text: the agent's own instructions, the charter (`CHARTER.md`), the guardian's rules for every agent, and its identity (`IDENTITY.md`), which holds its name
+- the agent's own instructions and the charter (`CHARTER.md`), the guardian's rules for every agent
+- its identity (`IDENTITY.md`), which holds its name
 - its tools: Rome's tools with their schemas, the provider's tools it declares, the MCP servers it declares, and the shape its answer must take.
 
-Memory, follows and tasks are not part of it, since a session reads them while it runs. Nor is the guardian's profile (`GUARDIAN.md`), which the agent writes down as it learns about the guardian. Each cold open reads them as they are then, though a provider that keeps a thread's first system prompt (Claude) shows a resumed thread none of the change until the session renews. Nor are the instance's runtime facts (its folders, address and mailbox) or the list of installed apps, which change with the instance rather than with the agent. A change to any of these does not replace a session. Which actions the agent may call is read on every turn, so a grant or a revoke applies on the next turn without a new session.
+Memory, follows and tasks are not part of it, since a session reads them while it runs. Nor is the guardian's profile (`GUARDIAN.md`), which the agent writes down as it learns about the guardian. Nor are the instance's runtime facts (its folders, address and mailbox) or the list of installed apps, which change with the instance rather than with the agent. A change to any of these does not replace a session. Which actions the agent may call is read on every turn, so a grant or a revoke applies on the next turn without a new session.
 
 **Contracts:**
 
-- A change to an agent's setup reaches a session only on its next cold open.
-- For an agent whose policy asks for it, the part that changed decides what that cold open does. The Concierge's chats work this way, since one of them could otherwise run on one session for days.
-  - A change of text, on a provider whose resume reads the system prompt it is given (Codex), resumes the same thread with the new prompt. Its next turn starts with one line: the instructions changed since earlier in the conversation, and the current ones win. No handoff is written.
-  - A change of tools on a provider whose resume takes the tools it is given (Claude) resumes the same thread, with the new tools.
-  - A change the provider's resume cannot take [renews](#renewal) the session, without a [handoff](#handoff): text on a provider that keeps a thread's first system prompt (Claude, whose resume ignores the prompt it is given), and tools on one that keeps a thread's first tools (Codex, #1301).
-- A thread resumed on a changed setup records it once a turn on it succeeds. A turn that fails leaves the change, and its line, to the next turn.
-- A session that recorded no setup, or one fingerprinted before setups had two parts, cannot say which part changed. Under such a policy, its next cold open renews it with a handoff.
+- A change to an agent's setup reaches a session only when a fresh session opens. A resumed thread is not one: Claude answers from the system prompt a thread started with, whatever its resume passes.
+- An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its stored session opened, the next time the chat opens it cold ([Renewal](#renewal)). The Concierge's chats work this way, since one of them could otherwise run on one session for days.
+- A session that recorded no setup opened before setups were recorded, and is replaced on its next cold open under such a policy.
 - A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds.
+- Memory and the guardian's profile are read on each cold open, but a resumed Claude thread reads them only once its session renews.
 
 ## Renewal
 
-A renewal replaces a chat's session with a fresh one, on a new provider thread, for a [setup](#setup) change its thread cannot take, a reset its chat's policy says is due, or a [full context](#handoff). A setup change or a reset renews only when a session is opened cold: opened by continuity key while it is not live in memory.
+A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup), a reset its chat's policy says is due, or a [full context](#handoff). A setup change or a reset renews only when a session is opened cold: opened by continuity key while it is not live in memory.
 
 **Contracts:**
 
 - A live session is never renewed on a setup change or a reset. Until its idle eviction it keeps the prompt, tools, MCP servers, answer shape and model it opened with, and every turn sent to it meanwhile runs on it. The next cold open after the eviction compares the stored setup with the agent's current one.
-- A resume by id, such as a wake-up, resumes the session it names, or the chat's current session when a reset superseded it. It never renews. It takes a change of text, or of tools its provider's resume takes, as a cold open by key does.
+- A resume by id, such as a wake-up, resumes the session it names as it is, or the chat's current session when a reset superseded it. It never renews.
 - While an approval holds a session, a cold open resumes it instead of renewing it. The first cold open after the hold ends renews it.
 - A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then. Its model comes from the agent's tier or model as they map now, never the retired session's [model pin](#model-pin). A model the guardian picked for the chat still applies.
 - The successor is written, with its setup, its reason and the working folder, and the retired session marked superseded, only once the fresh thread has opened. If that open fails, nothing is written, and the next cold open tries again on a fresh thread, never the retired one.
-- An agent whose policy asks for it starts the successor from a [handoff](#handoff), except for a setup change its provider's resume cannot take. The Concierge's chats work this way.
-- Every successor of such an agent carries, inside its continuation notice, the chat's open tasks as Rome holds them when the turn runs and the chat's latest messages up to about 8,000 tokens, with the handoff when one was written. It stops carrying them once a turn of its own succeeds.
+- An agent whose policy asks for it carries the chat over to the successor. The Concierge's chats work this way.
+  - A setup change takes a light handoff: no turn writes a note and no model is asked, so the message that caused the cold open does not wait. The successor reads what the retired session held: the handoff that session started from, if any, and the chat's text messages since it opened. A run of setup renewals counts as one session.
+  - A reset writes a [handoff](#handoff), and the successor reads it with the chat's latest messages up to about 8,000 tokens.
+  - A full context writes a handoff ahead of time ([Handoff](#handoff)), which the successor reads the same way.
+- Every successor of such an agent carries what it reads inside its continuation notice, with the chat's open tasks as Rome holds them when the turn runs. Messages are the guardian's and the agent's text, never tool traces. It stops carrying them once a turn of its own succeeds.
+- What a light handoff carries is no larger than what the retired session held, which was under the context limit. A successor that still ends a turn past the limit renews for a full context like any session.
 
 ## Handoff
 
-A handoff is the note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. A cold open that renews writes it at send time. A full context writes it in the background, while the chat goes on.
+A handoff is the note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. A reset writes it at send time, when a cold open decides to renew. A full context writes it in the background, while the chat goes on. A setup change writes none ([Renewal](#renewal)).
 
 **Contracts:**
 
-- Only an agent whose policy asks for it gets a handoff. Every other renewal starts with the [continuation](#continuation) notice alone. A renewal for a setup change writes none when its part is known: agreements older than the recent messages are lost, which is the price of not waiting.
+- Only an agent whose policy asks for it gets a handoff. Every other renewal starts with the [continuation](#continuation) notice alone.
 - The retired session writes it, in one turn with no tools, asked for the note alone. Nothing of that turn reaches the chat or the guardian's phone: it has no turn of its own in the chat, marks no message, and consumes no task event.
 - At send time, that turn runs on the retired thread, which is not resumed after it. While it is written, a Concierge chat's header says it is tidying up its context ([Concierge activity](../architecture/concierge-activity.md)). The message that caused the cold open waits, and the successor answers it.
 - When the retired session has not written it within 30 seconds (`SESSION_HANDOFF_TIMEOUT_SECONDS`), or cannot, a small model writes it from the chat's recent messages and open tasks, within another 30 seconds (`SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS`). When that fails too, the renewal goes on without one.
-- The handoff is stored with the successor and does not change. The successor's first turns carry it inside the continuation notice ([Renewal](#renewal)).
+- The handoff is stored with the successor and does not change. The successor's first turns carry it inside the continuation notice ([Renewal](#renewal)), and so does a successor that a setup change renewed later in the same run.
 - The handoff is the successor's and is not shown in the chat. The model writing it is still told the chat's owner, who may be a visitor, could read it, and writes only what may be shown to them.
 - An approval that holds a session still defers its renewal, so no handoff is written while it holds.
 - A session whose policy asks for a handoff is also renewed when a turn of it ends with its context past a limit (`SESSION_HANDOFF_CONTEXT_TOKENS`, 150,000 tokens by default, at least 50,000):
@@ -143,7 +145,7 @@ Rome's transcript is the conversation, and a model thread is a cache of it. When
 - The notice goes on the first turn of a thread that replaced one holding the chat: a pick on another provider in an open chat, or a session reopened on another provider than its recorded thread. It rides on that thread's turns until one returns a result, since a turn that fails may never have reached the thread.
 - A thread that starts in a session also gets the `<thread_context>` block on its first turn.
 - The notice names no channel. The thread's channel and thread id are in its thread context.
-- A session that replaced another of an agent renewed on [setup](#setup) changes carries the notice until a turn of its own succeeds, like a thread on another provider. A thread resumed on changed instructions carries no continuation notice, only the line that its instructions changed.
+- A session that replaced another of an agent renewed on [setup](#setup) changes carries the notice until a turn of its own succeeds, like a thread on another provider.
 - A new chat, a new generation (the chat-settings reset policy), and a thread that resumes add no notice. Subagent sessions carry none.
 
 ## Turn

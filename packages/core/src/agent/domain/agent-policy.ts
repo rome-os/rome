@@ -17,17 +17,16 @@ export interface AgentPolicy {
   /** Whether the system prompt carries the memory index, project summaries, and runtime paths. */
   loadMemory: boolean;
   /**
-   * Whether a session opened cold takes a change of the agent's setup since
-   * it opened (its instructions, identity or tools): on the same thread where its
-   * provider's resume can take the change, else on a fresh session in the
-   * same chat. A session resumed by id is never replaced.
-   * docs/concepts/sessions.md#setup
+   * Whether a session opened by continuity key is replaced by a fresh one in
+   * the same chat when the agent's setup changed since it opened: its
+   * instructions, its identity, or its tools. A session resumed by id is
+   * never replaced. docs/concepts/sessions.md#setup
    */
   freshSessionOnSetupChange: boolean;
   /**
    * Whether a renewal starts the fresh session from a handoff: a note the
-   * retired session writes of what was in progress, agreed and still open,
-   * with the chat's open tasks and its recent messages beside it.
+   * retired session writes, at send time, of what was in progress, agreed and
+   * still open, with the chat's open tasks and its recent messages beside it.
    * docs/concepts/sessions.md#handoff
    */
   handoffOnRenewal: boolean;

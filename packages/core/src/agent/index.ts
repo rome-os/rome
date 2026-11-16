@@ -124,7 +124,6 @@ export {
   buildThreadContextBlock,
   buildWorkspaceContextSection,
   FETCH_CHANNEL_HISTORY_ACTION,
-  INSTRUCTIONS_CHANGED_NOTICE,
   type WorkspaceContextSnapshot,
 } from "./domain/prompt.js";
 export {

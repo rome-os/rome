@@ -22,6 +22,9 @@ const log = createLogger("renewal-handoffs");
 /** How many of a chat's latest turns are read for its recent messages. */
 const RECENT_TURNS = 60;
 
+/** How many turns are read for every message since a time: past any chat's length. */
+const ALL_TURNS = 100_000;
+
 const FALLBACK_SYSTEM_PROMPT = [
   "You write a handoff note for an assistant whose session is being replaced by a fresh one that has not seen the conversation. The person the assistant serves can read the note, so write only what may be shown to them.",
   "You get the conversation's latest messages and, when there are any, its open tasks.",
@@ -96,12 +99,13 @@ export function recentMessagesOf(
 }
 
 export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHandoffs {
-  const recent = async (chatId: string, exceptTurnId?: string) => {
+  const recent = async (chatId: string, exceptTurnId?: string, since?: Date) => {
     const [rows, owner] = await Promise.all([
-      sources.rows(chatId, RECENT_TURNS),
+      sources.rows(chatId, since ? ALL_TURNS : RECENT_TURNS),
       sources.ownerLabel ? sources.ownerLabel(chatId).catch(() => null) : null,
     ]);
-    return recentMessagesOf(rows, exceptTurnId, owner);
+    const messages = recentMessagesOf(rows, exceptTurnId, owner);
+    return since ? messages.filter((message) => message.at >= since) : messages;
   };
   return {
     timeoutMs: sources.timeoutMs,
@@ -132,9 +136,9 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
         sources.fallbackTimeoutMs,
       );
     },
-    async context(chatId, turnId) {
+    async context(chatId, turnId, since) {
       const [messages, openTasks] = await Promise.all([
-        recent(chatId, turnId),
+        recent(chatId, turnId, since),
         sources.openTasks(chatId).catch((err: unknown) => {
           log.warn("open tasks read failed", {
             chatId,

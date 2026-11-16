@@ -25,12 +25,7 @@ import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/
 import { type TurnAttribution, type TurnUsageReporting } from "../domain/turn-usage-reporting.js";
 import { type SessionSettings, restoresSavedSelection } from "../domain/session-settings.js";
 import { evaluateProviderSessionReset } from "../domain/session-reset.js";
-import {
-  type SetupChange,
-  setupChange,
-  setupChanged,
-  setupFingerprint,
-} from "../domain/session-setup.js";
+import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
@@ -73,7 +68,6 @@ import { type Skill, type SkillCatalog } from "../domain/skill.js";
 import { type SystemPrompts } from "./system-prompts.js";
 import {
   buildContinuationBlock,
-  INSTRUCTIONS_CHANGED_NOTICE,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
@@ -937,6 +931,9 @@ async function reachableRecordedWorkingDir(
   return isDirectory ? recorded : undefined;
 }
 
+/** How many setup renewals back a successor looks for what its predecessor held. */
+const HELD_READS = 20;
+
 /** How many renewals a resume follows that land while it resolves. */
 const SUCCESSOR_READS = 8;
 
@@ -1127,7 +1124,6 @@ function sessionSetupOf(
       );
       return setupFingerprint({
         systemPrompt: deps.systemPrompts.setup(promptAgent, { widgets }),
-        identity: deps.systemPrompts.identity(promptAgent),
         builtinTools: config.tools,
         // Each declared server's whole config, by name: a changed command or
         // argument is a changed tool. Only the fingerprint's hash is kept,
@@ -1226,35 +1222,6 @@ async function storeContextSuccessor(
 }
 
 /**
- * What the provider of a session's thread keeps from its start when the
- * thread is resumed: its tools, its system prompt. A provider that cannot run
- * now is taken to keep both, so a change never leaves a thread on tools or
- * instructions that are gone.
- */
-async function threadKeeps(
-  deps: ManagerDeps,
-  session: Session,
-): Promise<{ tools: boolean; instructions: boolean }> {
-  if (!session.modelThreadId || !session.provider || !session.model) {
-    return { tools: false, instructions: false };
-  }
-  try {
-    const { modelProvider } = await deps.modelResolver.resolve({
-      kind: "exact",
-      providerId: session.provider as ProviderId,
-      model: session.model,
-    });
-    if (modelProvider.id !== session.provider) return { tools: true, instructions: true };
-    return {
-      tools: modelProvider.keepsThreadTools === true,
-      instructions: modelProvider.keepsThreadInstructions === true,
-    };
-  } catch {
-    return { tools: true, instructions: true };
-  }
-}
-
-/**
  * Where an agent's session tools come from: an agent that hands its work to
  * other chats proposes no routine, so its sessions carry no `propose_routine`.
  */
@@ -1346,54 +1313,37 @@ async function openSession(
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultWorkingDir(deps.folders));
 
   // The one place a session is renewed (docs/concepts/sessions.md#renewal):
-  // a cold open by continuity key, when the setup changed in a way its thread
-  // cannot take on a resume, or the chat's reset policy says a reset is due,
-  // and no approval holds it. A live session is never renewed; it takes the
-  // new setup on its next cold open. A resume by id resumes what it names.
-  const change: SetupChange =
-    resumed && setupNow !== undefined
-      ? setupChange(resumed.setup, setupNow)
-      : { text: false, tools: false };
+  // a cold open by continuity key, when the setup changed since the stored
+  // session opened or the chat's reset policy says a reset is due, and no
+  // approval holds it. A live session is never renewed; it takes the new
+  // setup on its next cold open. A resume by id resumes what it names.
+  const changed =
+    resumed !== undefined && setupNow !== undefined && setupChanged(resumed.setup, setupNow);
   let renewing: { retired: Session; successor: Session; reason: string } | undefined;
-  // The setup a resumed thread takes, recorded once a turn on it succeeds.
-  let resumedOn: { setup: string; notice: boolean } | undefined;
   if (
     resumed &&
     !init.resumeSessionId &&
     !opts.isSubagent &&
     resumed.handoff !== null &&
     !resumed.modelThreadId &&
-    setupNow !== undefined &&
-    setupChanged(change)
+    changed
   ) {
     // It started from a handoff and no turn ran on it yet, so there is no
     // thread to hand off from: it takes the new setup in place, and keeps the
     // handoff and the renewal it came from.
-    resumed.adoptSetup(setupNow);
+    resumed.adoptSetup(setupNow!);
     await deps.sessionRepository.save(resumed);
-  } else if (resumed && !opts.isSubagent) {
-    // A change the thread's provider takes on a resume resumes the same
-    // thread on the new setup. A change it keeps the thread's first version
-    // of (tools on Codex, the system prompt on Claude) needs a new thread,
-    // which reads the chat's recent messages and writes no handoff. A session
-    // that recorded no setup, or one without parts, renews with a handoff,
-    // since nothing says which part changed.
+  } else if (resumed && !init.resumeSessionId && !opts.isSubagent) {
+    // A setup change renews with a light handoff: no turn writes a note, and
+    // the successor reads what the retired session held, its handoff and the
+    // chat's messages since. A reset its chat's policy says is due renews
+    // with a handoff the retired session writes.
     let reason: string | undefined;
-    const kept =
-      change !== "unknown" && setupChanged(change)
-        ? await threadKeeps(deps, resumed)
-        : { tools: false, instructions: false };
-    const toolsKept = change !== "unknown" && change.tools && kept.tools;
-    const instructionsKept = change !== "unknown" && change.text && kept.instructions;
-    // A new thread for a change the old one cannot take starts from the
-    // chat's recent messages alone: the wait is not worth it.
-    const handoffDue = !toolsKept && !instructionsKept;
-    if (!init.resumeSessionId) {
-      if (change === "unknown" || toolsKept || instructionsKept) reason = "setup";
-      if (!reason && init.resetPolicy) {
-        const decision = evaluateProviderSessionReset(init.resetPolicy, resumed, new Date());
-        if (decision.due) reason = decision.reason;
-      }
+    if (changed) {
+      reason = "setup";
+    } else if (init.resetPolicy) {
+      const decision = evaluateProviderSessionReset(init.resetPolicy, resumed, new Date());
+      if (decision.due) reason = decision.reason;
     }
     if (reason && (await deps.heldMidTurn?.(resumed.id))) {
       log.info("provider_session.reset_held", {
@@ -1403,24 +1353,13 @@ async function openSession(
       });
       reason = undefined;
     }
-    if (
-      !reason &&
-      setupNow !== undefined &&
-      change !== "unknown" &&
-      setupChanged(change) &&
-      !toolsKept &&
-      !instructionsKept
-    ) {
-      // A thread that has read the earlier instructions is told they changed.
-      resumedOn = { setup: setupNow, notice: change.text && !!resumed.modelThreadId };
-    }
     if (reason) {
       // Written at send time, before the fresh session opens, so the message
       // that caused the cold open is answered by a session that has read it.
       const written = opts.writtenHandoffs?.get(resumed.id);
       const handoff =
         written ??
-        (handoffDue &&
+        (reason !== "setup" &&
         deps.handoffs &&
         !config.codeBacked &&
         resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
@@ -1999,13 +1938,17 @@ async function openSession(
     // Shown with the continuation notice until a turn of this session succeeds.
     handoff: continuesChat ? (session.handoff ?? undefined) : undefined,
     // A successor of an agent that renews with a handoff reads the chat's
-    // open tasks and recent messages, whether or not a handoff was written.
-    carriesRecent:
+    // open tasks and its messages, whether or not a handoff was written: all
+    // its predecessor held after a setup change, else the recent ones.
+    carriesMessages:
       continuesChat &&
       !opts.isSubagent &&
       !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal,
-    resumedOn,
+      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+        ? predecessor?.supersededFor === "setup" && session.handoff === null
+          ? "held"
+          : "recent"
+        : undefined,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     modelProvider: initialResolution?.modelProvider,
@@ -2084,14 +2027,12 @@ interface ImplArgs {
   renewal?: SessionRenewal;
   /** The handoff the session started from, while no turn of it has succeeded. */
   handoff?: string;
-  /** Its first turns carry the chat's open tasks and recent messages, with the handoff if any. */
-  carriesRecent?: boolean;
   /**
-   * The setup the resumed thread takes, which the row records once a turn
-   * on it succeeds, and whether that turn opens with the notice that the
-   * instructions changed.
+   * Its first turns carry the chat's open tasks and messages, with the
+   * handoff if any: what the session it replaced held (`held`), or the
+   * latest ones (`recent`).
    */
-  resumedOn?: { setup: string; notice: boolean };
+  carriesMessages?: "held" | "recent";
   /** The model the row's thread ran on. */
   previousModel?: string;
   openModelSession: (
@@ -2118,8 +2059,6 @@ interface TurnSink {
   carriesContinuation?: boolean;
   /** The notice carries the session's handoff, which goes with it. */
   carriesHandoff?: boolean;
-  /** The turn opens with the notice that the instructions changed. */
-  carriesSetupNotice?: boolean;
   /** The headers the thread has read once this turn returns a result. */
   sentHeaders?: Map<string, string>;
   /** The provider compacted the thread while the turn ran. */
@@ -2382,12 +2321,8 @@ class AgentSessionImpl implements AgentSession {
   private renewalPending?: SessionRenewal;
   /** The renewal's handoff, carried by the continuation notice until a turn succeeds. */
   private handoff?: string;
-  /** The continuation notice carries the chat's open tasks and recent messages until a turn succeeds. */
-  private carriesRecent: boolean;
-  /** The setup the resumed thread took, recorded on the row once a turn succeeds. */
-  private pendingSetup?: string;
-  /** Turns open with the notice that the instructions changed until one succeeds. */
-  private setupNoticePending: boolean;
+  /** The continuation notice carries the chat's open tasks and messages until a turn succeeds. */
+  private carriesMessages?: "held" | "recent";
   /** The header blocks the current thread has read, by name (`stickyHeaders`). */
   private sentHeaders: SentHeaders = new Map();
   /** The context the last turn that reported one left the thread at. */
@@ -2458,9 +2393,7 @@ class AgentSessionImpl implements AgentSession {
     this.continuationPending = args.replacedThread;
     this.renewalPending = args.renewal;
     this.handoff = args.handoff;
-    this.carriesRecent = args.carriesRecent === true;
-    this.pendingSetup = args.resumedOn?.setup;
-    this.setupNoticePending = args.resumedOn?.notice === true;
+    this.carriesMessages = args.carriesMessages;
     this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
@@ -2889,13 +2822,6 @@ class AgentSessionImpl implements AgentSession {
               turnStatus({ terminal: outbound, stoppedByRome: sink.lifecycleInterrupted }) ===
               "interrupted";
             if (!interrupted) this.lastPosition = position;
-            // The thread has run on the setup it was resumed with, so the
-            // next cold open compares with it.
-            if (this.pendingSetup !== undefined) {
-              this.session.ranOnSetup(this.pendingSetup);
-              this.pendingSetup = undefined;
-            }
-            if (sink.carriesSetupNotice) this.setupNoticePending = false;
             await this.persistTurn(
               session,
               sink.turnId,
@@ -2906,7 +2832,7 @@ class AgentSessionImpl implements AgentSession {
             if (sink.carriesContinuation) this.continuationPending = false;
             if (sink.carriesHandoff) {
               this.handoff = undefined;
-              this.carriesRecent = false;
+              this.carriesMessages = undefined;
             }
             if (sink.sentHeaders) this.sentHeaders = sink.sentHeaders;
             const used = outbound.accounting?.context?.usedTokens;
@@ -3004,18 +2930,44 @@ class AgentSessionImpl implements AgentSession {
    * leaves out what it would add.
    */
   private async handoffSectionsFor(sink: TurnSink): Promise<string[] | undefined> {
-    const handoff = this.handoff;
     const handoffs = this.deps.handoffs;
-    if ((!handoff && !this.carriesRecent) || !handoffs || !sink.romeSessionId) return undefined;
+    if ((!this.handoff && !this.carriesMessages) || !handoffs || !sink.romeSessionId) {
+      return undefined;
+    }
     sink.carriesHandoff = true;
-    const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch((err) => {
+    const failed = (err: unknown) => {
       this.log.warn("session_handoff.context_failed", {
         sessionId: this.sessionId,
         error: err instanceof Error ? err.message : String(err),
       });
       return { openTasks: null, recent: [] };
-    });
-    return handoffSections(handoff ?? null, context);
+    };
+    if (this.carriesMessages === "held") {
+      const held = await this.heldByPredecessor().catch(() => null);
+      if (held) {
+        const context = await handoffs
+          .context(sink.romeSessionId, sink.turnId, held.since)
+          .catch(failed);
+        return handoffSections(held.handoff, context, { all: true });
+      }
+    }
+    const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch(failed);
+    return handoffSections(this.handoff ?? null, context);
+  }
+
+  /**
+   * What the session this one replaced on a setup change held: the handoff
+   * the earliest session of that run of setup renewals started from, if any,
+   * and the chat's messages since that session opened.
+   */
+  private async heldByPredecessor(): Promise<{ handoff: string | null; since: Date }> {
+    let held: Session = this.session;
+    for (let read = 0; read < HELD_READS && held.handoff === null; read += 1) {
+      const predecessor = await this.deps.sessionRepository.predecessorOf(held.id);
+      if (predecessor?.supersededFor !== "setup") break;
+      held = predecessor;
+    }
+    return { handoff: held.handoff, since: held.createdAt };
   }
 
   /**
@@ -4073,10 +4025,6 @@ class AgentSessionImpl implements AgentSession {
           ...(handoff ? { handoff } : {}),
         });
         userPrompt = `${block}\n\n${userPrompt}`;
-      }
-      if (!this.isSubagent && this.setupNoticePending) {
-        sink.carriesSetupNotice = true;
-        userPrompt = `${INSTRUCTIONS_CHANGED_NOTICE}\n\n${userPrompt}`;
       }
       // A thread that starts in this session, the first one or one that
       // replaced it on another provider, has not seen the block yet.

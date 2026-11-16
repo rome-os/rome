@@ -6,11 +6,9 @@ import { ROME_TOOL_GROUPS, type RomeToolDefinition, type RomeToolGroup } from ".
 
 /** Value object. What a session opens with that a later change cannot reach. */
 export interface SessionSetup {
-  /** The system prompt without memory, identity or the opener's context
-   *  suffix: the agent's instructions and the charter. */
+  /** The system prompt without memory or the opener's context suffix: the
+   *  agent's instructions and identity. */
   systemPrompt: string;
-  /** The agent's identity (`IDENTITY.md`), which the system prompt quotes. */
-  identity: string | null;
   /** The provider's own tools the agent declares. */
   builtinTools: readonly string[];
   /** The MCP servers the agent declares, each with its whole config, by name. */
@@ -21,18 +19,9 @@ export interface SessionSetup {
   tools: Readonly<Record<RomeToolGroup, readonly RomeToolDefinition[]>>;
 }
 
-/** What tells a fingerprint of parts from one recorded before setups had parts. */
-const PREFIX = "v2";
-
-function hash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
-
 /**
- * A fingerprint of a setup, in two parts: one for its text (the instructions,
- * the charter and the identity) and one for its tools (Rome's tools, the
- * provider's tools, the MCP servers and the answer's shape). Each part is
- * equal for two setups the model would read the same way.
+ * A fingerprint of a setup: equal for two setups the model would read the
+ * same way, different when the instructions, the identity or a tool changed.
  */
 export function setupFingerprint(setup: SessionSetup): string {
   const tools = ROME_TOOL_GROUPS.map((group) => [
@@ -43,36 +32,21 @@ export function setupFingerprint(setup: SessionSetup): string {
       inputSchema,
     ]),
   ]);
-  const text = hash([setup.systemPrompt, setup.identity]);
-  const toolsPart = hash([
+  const canonical = JSON.stringify([
+    setup.systemPrompt,
     [...setup.builtinTools],
     [...setup.mcpServers],
     setup.outputSchema,
     tools,
   ]);
-  return `${PREFIX}:${text}:${toolsPart}`;
+  return createHash("sha256").update(canonical).digest("hex");
 }
 
 /**
- * Which parts changed between the setup a session recorded and the current
- * one, or `unknown` for a session that recorded no setup or one fingerprinted
- * before setups had parts, so nothing says which part changed.
+ * Whether a session that opened with `recorded` is due to be replaced by one
+ * that opens with `current`. A session that recorded none opened before
+ * setups were recorded, so nothing says it holds the current one.
  */
-export type SetupChange = { text: boolean; tools: boolean } | "unknown";
-
-export function setupChange(recorded: string | null, current: string): SetupChange {
-  const before = parts(recorded);
-  const now = parts(current);
-  if (!before || !now) return "unknown";
-  return { text: before.text !== now.text, tools: before.tools !== now.tools };
-}
-
-/** Whether `change` changed any part. */
-export function setupChanged(change: SetupChange): boolean {
-  return change === "unknown" || change.text || change.tools;
-}
-
-function parts(fingerprint: string | null): { text: string; tools: string } | null {
-  const [prefix, text, tools, ...rest] = fingerprint?.split(":") ?? [];
-  return prefix === PREFIX && text && tools && rest.length === 0 ? { text, tools } : null;
+export function setupChanged(recorded: string | null, current: string): boolean {
+  return recorded !== current;
 }
