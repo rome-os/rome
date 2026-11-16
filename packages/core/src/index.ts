@@ -329,14 +329,8 @@ import {
   getProfileInstalledAppsDir,
   getProjectRoot,
 } from "./paths.js";
-import {
-  createAppActionsSubscriber,
-  createNoopChannelMessageHook,
-  createChannelMessageHookFromCatalog,
-  createChannelMessageHookReloader,
-  registerAppActions,
-} from "./app-host/app-actions-wiring.js";
-import type { ChannelMessageHook } from "./apps/hooks/types.js";
+import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
+import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
@@ -1807,15 +1801,14 @@ async function main() {
     appStartedDispatcher.flush(appCatalog);
   });
 
-  const messageHandlerRegistered = actionRegistry.has("message_handler");
-  if (!messageHandlerRegistered) {
-    const ownerId =
-      appCatalog
-        .listArtifacts("action")
-        .find((artifact) => artifact.publicName === "message_handler")?.ownerId ?? "inbox";
+  /** The app that declares `message_handler`: Inbox. */
+  const messageHandlerOwner = () =>
+    appCatalog.listArtifacts("action").find((artifact) => artifact.publicName === "message_handler")
+      ?.ownerId ?? "inbox";
+  if (!actionRegistry.has("message_handler")) {
     markAppFailed(
       "message-handler:missing",
-      ownerId,
+      messageHandlerOwner(),
       'Required action "message_handler" is not registered',
     );
     log.warn("message_handler action is unavailable; inbound channel messages will be ignored");
@@ -1954,72 +1947,57 @@ async function main() {
     wakes: chatsWired.links,
   });
   const hookChatStop = legacyChatIdStop(chatStop);
-  let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
-  const channelMessageHookArtifact = appCatalog
-    .listArtifacts("hook")
-    .find((artifact) => artifact.publicName === "channel-message");
-  if (messageHandlerRegistered) {
-    try {
-      const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
-        actionEngine,
-        chatSettings: appChatSettings,
-        conversationSettings: appChatSettings,
-        chatStop: hookChatStop,
-        channels: hookChannels,
-        messagesSaid: hookMessagesSaid,
-        accountAgentOf: hookAgentOf,
-        linkedAgentOf: hookAgentOf,
-      });
-      if (loadedHook) {
-        messageHook = loadedHook;
-      } else {
-        log.warn("channel-message hook is unavailable; inbound channel messages will be ignored");
-        if (channelMessageHookArtifact?.ownerType === "app") {
-          markAppFailed(
-            "channel-message:missing",
-            channelMessageHookArtifact.ownerId,
-            'Required hook "channel-message" is not registered',
-          );
-        }
-      }
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      log.warn("channel-message hook failed to initialize; using noop hook", { error });
-      if (channelMessageHookArtifact?.ownerType === "app") {
-        markAppFailed("channel-message:init", channelMessageHookArtifact.ownerId, error);
-      }
-    }
-  }
-  // The hook subscribes to every channel that can receive, and a channel's
+  // Every app that declares a channel-message hook hears through its own,
+  // each created with the same deps. The app that owns `message_handler`
+  // (Inbox) loads its hook only while that action is registered, as its hook
+  // dispatches turns to it.
+  const clearHookFailure = (appId: string) => {
+    runtimeStatusFailures.clearSources((source) => source === `channel-message:init:${appId}`);
+    refreshRuntimeAppStatus();
+  };
+  const messageHooks = new ChannelMessageHooks({
+    catalog: appCatalog,
+    deps: {
+      actionEngine,
+      chatSettings: appChatSettings,
+      conversationSettings: appChatSettings,
+      chatStop: hookChatStop,
+      channels: hookChannels,
+      messagesSaid: hookMessagesSaid,
+      accountAgentOf: hookAgentOf,
+      linkedAgentOf: hookAgentOf,
+    },
+    mayLoad: (appId) => appId !== messageHandlerOwner() || actionRegistry.has("message_handler"),
+    onFailed: (appId, error) => markAppFailed(`channel-message:init:${appId}`, appId, error),
+    onLoaded: (appId) => clearHookFailure(appId),
+    onReset: (appId) => clearHookFailure(appId),
+  });
+  // A hook subscribes to every channel that can receive, and a channel's
   // subscription follows whatever backs it. Only a channel added later, when a
-  // new account first unlocks Talk, reaches the hook again, through
+  // new account first unlocks Talk, reaches the hooks again, through
   // `addChannels`.
-  await messageHook.register();
-  // App-keys refreshes recreate this hook: it is instantiated once and held by
-  // the channels' subscriptions, so an env value captured in its module graph
-  // would otherwise outlive the key edit. The let-binding is the single handle,
-  // and register() on the fresh instance re-subscribes every channel that can
-  // receive.
-  const reloadChannelMessageHook = messageHandlerRegistered
-    ? createChannelMessageHookReloader({
-        catalog: appCatalog,
-        deps: {
-          actionEngine,
-          chatSettings: appChatSettings,
-          conversationSettings: appChatSettings,
-          chatStop: hookChatStop,
-          channels: hookChannels,
-          messagesSaid: hookMessagesSaid,
-          accountAgentOf: hookAgentOf,
-          linkedAgentOf: hookAgentOf,
-        },
-        getCurrent: () => messageHook,
-        setCurrent: (hook) => {
-          messageHook = hook;
-        },
-        onSkip: (reason) => log.warn(reason),
-      })
-    : null;
+  await messageHooks.start();
+  if (messageHooks.size === 0) {
+    log.warn("channel-message hook is unavailable; inbound channel messages will be ignored");
+  }
+  // Installing, removing, enabling or disabling an app starts or stops its
+  // hook alone. Runs after the action loader's subscriber, so Inbox's
+  // `message_handler` is registered by the time its hook asks.
+  // The status file was written earlier in the same change, so what a hook
+  // change reports is written after it.
+  const persistHookStatus = async () => {
+    try {
+      await writeAppRuntimeStatus(refreshRuntimeAppStatus());
+    } catch (err) {
+      log.warn("failed to persist channel-message runtime status", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  appCatalog.subscribe(async function channelMessageHooksSubscriber(event) {
+    await messageHooks.follow(event.appId);
+    await persistHookStatus();
+  });
 
   // A later channel minted at runtime (a second Feishu bot) joins the channel
   // list when its Connection first unlocks Talk, before its stream starts, and
@@ -2044,37 +2022,8 @@ async function main() {
     );
     hookChannels.push(...added);
     inboundRecorder.addChannels(added);
-    const hook = messageHook;
-    // A hook without `addChannels` re-registers, as the app-keys reloader
-    // does, and its register() reads the grown channel list. Events waiting
-    // on its other subscriptions are dropped, which beats never hearing the
-    // new account until the next reload. A hook that cannot unregister is
-    // left alone, as the reloader leaves it, since registering it again would
-    // double its existing subscriptions.
-    const subscribe = hook.addChannels
-      ? () => hook.addChannels?.(added)
-      : hook.unregister
-        ? () => {
-            hook.unregister?.();
-            return hook.register();
-          }
-        : () =>
-            log.warn("channel-message hook can neither add channels nor unregister", {
-              channel: channel.name,
-            });
-    // Subscribe before the new talker starts. A hook built outside this repo
-    // may throw synchronously or return no promise.
-    const failed = (error: unknown) => {
-      log.error("channel-message hook did not subscribe to a later channel", {
-        channel: channel.name,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    };
-    try {
-      Promise.resolve(subscribe()).catch(failed);
-    } catch (error) {
-      failed(error);
-    }
+    // Subscribe before the new talker starts.
+    void messageHooks.addChannels(added);
   });
 
   // Hydrate connection/grant state without starting provider transports, so
@@ -2226,15 +2175,8 @@ async function main() {
     await actionEngine.restartWorkerWarmPool();
     await reloadLifecycleHooks("app-keys-change");
     await reloadTurnMiddlewareHooks("app-keys-change");
-    if (reloadChannelMessageHook) {
-      try {
-        await reloadChannelMessageHook();
-      } catch (err) {
-        log.warn("channel-message hook reload failed; keeping the previous instance", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    await messageHooks.reload();
+    await persistHookStatus();
   };
   const permissions = new Permissions();
   try {
