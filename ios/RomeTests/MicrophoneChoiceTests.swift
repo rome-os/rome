@@ -120,5 +120,43 @@ import Testing
         let expected = VoiceInputWire.sampleRate * 2
         #expect(abs(chunks.bytes - expected) <= expected / 20, "\(chunks.bytes) bytes from one second at \(rate) Hz")
     }
+
+    private final class Samples: @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [Int16] = []
+        func add(_ chunk: Data) {
+            let samples = chunk.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
+            lock.withLock { all += samples }
+        }
+        var values: [Int16] { lock.withLock { all } }
+    }
+
+    @Test func audioGoesOutInOrderWhileListeningStops() async throws {
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
+        let out = Samples()
+        let made = PCMChunker(from: format, onChunk: { out.add($0) })
+        let chunker = try #require(made)
+        // Each buffer is 10 ms at a level one step above the last.
+        var buffers: [AVAudioPCMBuffer] = []
+        for level in 1...200 {
+            let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160))
+            buffer.frameLength = 160
+            let samples = try #require(buffer.floatChannelData)
+            for i in 0..<160 { samples[0][i] = Float(level * 64) / 32768 }
+            buffers.append(buffer)
+        }
+        nonisolated(unsafe) let feed = buffers
+        // The audio thread keeps delivering while main flushes, as when listening stops.
+        let tapping = Task.detached { for buffer in feed { chunker.take(buffer) } }
+        for _ in 0..<20 {
+            chunker.flush()
+            await Task.yield()
+        }
+        await tapping.value
+        chunker.flush()
+        let values = out.values
+        #expect(values.count == 200 * 160)
+        #expect(zip(values, values.dropFirst()).allSatisfy { $0 <= $1 }, "audio went out of order")
+    }
 }
 

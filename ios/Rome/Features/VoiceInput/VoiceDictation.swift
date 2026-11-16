@@ -53,7 +53,9 @@ final class VoiceDictation {
             sender.send(text: VoiceInputWire.start(sampleRate: VoiceInputWire.sampleRate))
             do {
                 let sender = sender
-                try source.start { chunk in sender.send(audio: chunk) }
+                try source.start(onChunk: { chunk in sender.send(audio: chunk) }, onLost: { [weak self] in
+                    self?.finish(VoiceInputStop(reason: .microphoneFailed))
+                })
             } catch {
                 return finish(VoiceInputStop(reason: .microphoneFailed))
             }
