@@ -15,6 +15,7 @@ import {
   type ThemeName,
   type ThemePreference,
 } from "../lib/theme";
+import { writeStored } from "@/lib/stored-preference";
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const scale = useUiScale();
@@ -63,18 +64,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setPreference = useCallback((next: ThemePreference) => {
     setPreferenceState(next);
-    if (typeof window === "undefined") return;
-    if (next === "system") {
-      window.localStorage.removeItem(THEME_STORAGE_KEY);
-    } else {
-      window.localStorage.setItem(THEME_STORAGE_KEY, next);
-    }
+    writeStored(THEME_STORAGE_KEY, next === "system" ? null : next);
   }, []);
 
   const setTheme = useCallback((next: ThemeName) => {
     setThemeState(next);
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(THEME_NAME_STORAGE_KEY, next);
+    writeStored(THEME_NAME_STORAGE_KEY, next);
   }, []);
 
   const value = useMemo<ThemeContextValue>(
