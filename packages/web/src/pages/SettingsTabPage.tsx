@@ -115,6 +115,7 @@ import {
   fetchConnections,
   type ApiConnection,
 } from "@/lib/connections-api";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -1277,24 +1278,16 @@ function RelayHealthRow({ label, children }: { label: string; children: ReactNod
 
 function CopyValueButton({ value }: { value: string }) {
   const { t } = useTranslation("settings");
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1_500);
-    } catch {
-      // Clipboard unavailable (e.g. non-secure context); the value is selectable text.
-    }
-  }
+  // When the clipboard is unavailable, the value is still selectable text.
+  const { copiedText, copy } = useCopyFeedback();
+  const copied = copiedText !== null;
 
   return (
     <IconButton
       size="sm"
       label={copied ? t("advanced.relayHealth.copied") : t("advanced.relayHealth.copy")}
       icon={copied ? <Check className="text-success-fg" /> : <Copy />}
-      onClick={() => void copy()}
+      onClick={() => void copy(value)}
     />
   );
 }
