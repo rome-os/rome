@@ -76,9 +76,20 @@ function MicrophoneRow() {
   const [options, setOptions] = useState<MicrophoneOption[] | null | undefined>(undefined);
   const [chosen, setChosen] = useState(chosenMicrophone);
   const [refused, setRefused] = useState(false);
+  // The browser failed to list the microphones: nothing was unplugged.
+  const [listFailed, setListFailed] = useState(false);
 
   const refresh = useCallback(() => {
-    listMicrophones().then(setOptions, () => setOptions([]));
+    listMicrophones().then(
+      (listed) => {
+        setListFailed(false);
+        setOptions(listed);
+      },
+      () => {
+        setListFailed(true);
+        setOptions([]);
+      },
+    );
   }, []);
 
   useEffect(() => {
@@ -105,7 +116,7 @@ function MicrophoneRow() {
   // system default, which voice input then records from.
   // A choice found by name after a reload gets the device's new id.
   const found = chosen !== null && options ? findChosenMicrophone(options) : null;
-  const missing = chosen !== null && options != null && !found;
+  const missing = chosen !== null && options != null && !found && !listFailed;
   useEffect(() => {
     if (missing) setChosen(chooseMicrophone(null));
     else if (found && found.id !== chosen) setChosen(chooseMicrophone(found));

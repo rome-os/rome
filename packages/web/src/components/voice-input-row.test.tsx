@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
@@ -108,6 +108,19 @@ describe("choosing the microphone in Settings", () => {
       "System default",
       "USB Microphone",
     ]);
+  });
+
+  it("keeps the chosen microphone when the browser fails to list the microphones", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "usb");
+    devices([]);
+    navigator.mediaDevices.enumerateDevices = rs.fn(async () => {
+      throw new Error("NotReadableError");
+    });
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(navigator.mediaDevices.enumerateDevices).toHaveBeenCalled());
+    await act(async () => {});
+    expect(localStorage.getItem("rome.voiceInput.microphone")).toBe("usb");
   });
 
   it("keeps the chosen microphone when the browser gives it a new id after a reload", async () => {
