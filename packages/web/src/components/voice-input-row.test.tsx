@@ -94,33 +94,20 @@ describe("choosing the microphone in Settings", () => {
     await waitFor(() => expect(select.textContent).toContain("System default"));
   });
 
-  it("says when the chosen microphone is not connected", async () => {
-    localStorage.setItem("rome.voiceInput.microphone", "gone");
-    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
-    const text = await rowText({
-      available: true,
-      place: { provider: "Soniox", host: "stt-rt.soniox.com" },
-    });
-    await waitFor(() =>
-      expect(document.body.textContent).toContain("The chosen microphone isn't connected"),
-    );
-    expect(text).toContain("Microphone");
-  });
-
-  it("goes back to the system default when it is picked while the chosen microphone is not connected", async () => {
+  it("switches to the system default and drops a chosen microphone that is unplugged", async () => {
     localStorage.setItem("rome.voiceInput.microphone", "gone");
     devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
     await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
     const user = userEvent.setup();
     const select = await screen.findByRole("combobox", { name: "Microphone" });
-    await waitFor(() => expect(select.textContent).toContain("Chosen microphone (not connected)"));
+    await waitFor(() => expect(localStorage.getItem("rome.voiceInput.microphone")).toBeNull());
+    expect(select.textContent).toContain("System default");
 
     await user.click(select);
-    await user.click(await screen.findByRole("option", { name: "System default" }));
-
-    expect(localStorage.getItem("rome.voiceInput.microphone")).toBeNull();
-    await waitFor(() => expect(select.textContent).toContain("System default"));
-    expect(document.body.textContent).not.toContain("isn't connected");
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual([
+      "System default",
+      "USB Microphone",
+    ]);
   });
 
   it("keeps showing the microphone voice input uses when the browser refuses to save a choice", async () => {
