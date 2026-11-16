@@ -30,9 +30,25 @@ final class TopicChatsStore {
     private var lastActive: [String: Date] = [:]
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
+    /// Whether the drawer folds the list away, kept on this phone per instance.
+    private(set) var folded: Bool
+    @ObservationIgnored private let fold: TopicChatsFold?
 
-    init(backend: RomeBackend) {
+    /// Without a `fold`, the folded state lasts only as long as the store.
+    init(backend: RomeBackend, fold: TopicChatsFold? = nil) {
         self.backend = backend
+        self.fold = fold
+        folded = fold?.load() ?? false
+    }
+
+    func setFolded(_ folded: Bool) {
+        self.folded = folded
+        fold?.save(folded)
+    }
+
+    /// Replies waiting unread across every topic chat, for the folded header.
+    var unreadCount: Int {
+        chats.reduce(0) { $0 + max($1.unread ?? 0, 0) }
     }
 
     func start() {
@@ -189,6 +205,11 @@ final class TopicChatsStore {
         min(count, max(limit, (openIndex ?? -1) + 1))
     }
 
+    /// The rows a folded list keeps: only the open chat, so it stays reachable.
+    nonisolated static func foldedRows(_ chats: [ConciergeChat], openId: String?) -> [ConciergeChat] {
+        chats.filter { $0.id == openId }
+    }
+
     /// The topic chats of a `GET /concierge/chats` list, in its order.
     nonisolated static func topics(in all: [ConciergeChat]) -> [ConciergeChat] {
         all.filter { !$0.main && $0.id != conciergeChatID }
@@ -243,5 +264,27 @@ final class TopicChatsStore {
         default:
             break
         }
+    }
+}
+
+/// Whether the drawer's topic chat list is folded, per instance, like the
+/// recent apps. Only a fold is stored; unfolded is the default.
+struct TopicChatsFold {
+    static let prefix = "topicChatsFolded."
+
+    let host: String
+    var defaults: UserDefaults = .standard
+
+    private var key: String { Self.prefix + host }
+
+    func load() -> Bool { defaults.bool(forKey: key) }
+
+    func save(_ folded: Bool) {
+        if folded { defaults.set(true, forKey: key) } else { defaults.removeObject(forKey: key) }
+    }
+
+    /// Sign-out, or another account: every instance's choice.
+    static func removeAll(defaults: UserDefaults = .standard) {
+        defaults.removeKeys(prefix: prefix)
     }
 }

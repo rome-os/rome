@@ -176,6 +176,19 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(0.4))
             await capture("05-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
+            // The topic chats folded: a count while replies wait unread, none once read.
+            await capture("05c-drawer-folded-unread", style: styleName, in: directory) {
+                model.workspace?.topics.setFolded(true)
+                model.debugCommand = .drawer(true)
+            }
+            await capture("05d-drawer-folded", style: styleName, in: directory) {
+                model.workspace?.topics.setFolded(true)
+                for chat in model.workspace?.topics.chats ?? [] { model.workspace?.topics.markRead(chat.id) }
+                model.debugCommand = .drawer(true)
+            }
+            model.debugCommand = .drawer(false)
+            model.workspace?.topics.setFolded(false)
+            model.workspace?.topics.refresh()
             try? await Task.sleep(for: .seconds(0.8))
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
             await capture("06b-agent-task-chat", style: styleName, in: directory, wait: 2) {
@@ -385,7 +398,13 @@ enum SnapshotRunner {
             await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
+            // Folded over a topic chat: its row stays under the header.
+            await capture("05e-drawer-folded-topic", style: styleName, in: directory) {
+                model.workspace?.topics.setFolded(true)
+                model.debugCommand = .drawer(true)
+            }
             model.debugCommand = .drawer(false)
+            model.workspace?.topics.setFolded(false)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("25-topic-blank", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.newTopic(UUID())) }
             await capture("29-topic-photo-long-reply", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
