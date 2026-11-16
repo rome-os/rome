@@ -113,6 +113,27 @@ export function estimateTokens(text: string): number {
 }
 
 /**
+ * About how many tokens a light handoff carries into a successor's first
+ * turn: the handoff it passes on, if any, and every message with its line.
+ */
+export function replayTokens(handoff: string | null, messages: readonly RecentMessage[]): number {
+  return messages.reduce(
+    (total, message) => total + estimateTokens(message.text) + LINE_TOKENS,
+    handoff ? estimateTokens(handoff) : 0,
+  );
+}
+
+/**
+ * The most a light handoff may carry, as a share of the context limit: a
+ * provider that compacted the retired session mid-turn left it holding less
+ * than the chat's text since it opened, so that text can outgrow the window.
+ * Past this, the renewal writes a handoff instead.
+ */
+export function lightHandoffCap(contextLimitTokens: number): number {
+  return Math.floor(contextLimitTokens / 2);
+}
+
+/**
  * The latest of `messages` (oldest first) that fit in `maxTokens`, oldest
  * first, and how many earlier ones were left out. The newest message is kept
  * even when it alone is over the cap, cut to fit.

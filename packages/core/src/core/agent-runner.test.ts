@@ -4512,6 +4512,56 @@ describe("AgentRunner", () => {
           expect(since.at(-1)).toEqual(firstOpened);
         });
 
+        it.each([
+          ["over", "x".repeat(4_000), true],
+          ["under", "Friday at 7 then", false],
+        ])("hands off in full on a setup change when the light replay is %s half the context limit, light otherwise", async (_side, text, full) => {
+          const provider = threadedProvider(4);
+          // The retired session compacted: it ended well under the limit.
+          provider["responses"][0] = fullResult(300);
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const { handoffs, asked } = fakeHandoffs({
+            contextLimitTokens: 1_000,
+            context: async () => {
+              asked.context += 1;
+              return {
+                openTasks: null,
+                recent: [{ senderName: "Guardian", text, at: new Date(0) }],
+              };
+            },
+          });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          // The chat the open names, as a web chat's opener does.
+          const inChat = async () => {
+            await evict(runner);
+            const messages = await collectMessages(
+              runner.run({
+                agentName: "test-renewing",
+                prompt: "Hello",
+                channelThreadKey: key,
+                threadContext: {
+                  channel: "webchat",
+                  threadId: "renewing-chat",
+                  romeSessionId: "renewing-chat",
+                },
+              }),
+            );
+            const init = messages.find((message) => message.type === "session_init");
+            return init?.type === "session_init" ? init.sessionId : undefined;
+          };
+          const first = await inChat();
+          charter.text = "Be kind. Always answer in one line.";
+          const second = await inChat();
+
+          expect(second).not.toBe(first);
+          expect((await sessionRepository.session(first!))?.supersededFor).toBe("setup");
+          expect((await sessionRepository.session(second!))?.handoff).toBe(full ? HANDOFF : "");
+          expect(provider.calls.some((call) => call.prompt.includes("<handoff_request>"))).toBe(
+            full,
+          );
+          expect(asked.tidying).toHaveLength(full ? 1 : 0);
+        });
+
         it("takes a due reset with its handoff when a setup change lands on the same open", async () => {
           const provider = threadedProvider(4);
           provider["responses"][1] = [{ type: "result", content: HANDOFF }];

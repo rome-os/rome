@@ -76,11 +76,11 @@ A renewal replaces a chat's session with a fresh one, on a new provider thread, 
   - A reset writes a [handoff](#handoff), and the successor reads it with the chat's latest messages up to about 8,000 tokens. A reset that is due when the setup changed too takes this path, since a light handoff would carry over what the reset drops.
   - A full context writes a handoff ahead of time ([Handoff](#handoff)), which the successor reads the same way.
 - Every successor of such an agent carries what it reads inside its continuation notice, with the chat's open tasks as Rome holds them when the turn runs. Messages are the guardian's and the agent's text, never tool traces. It stops carrying them once a turn of its own succeeds.
-- A light handoff carries every such message, with no cap: it is no larger than what the retired session held, which was under the context limit. A successor that still ends a turn past the limit renews for a full context like any session.
+- A light handoff carries every such message, up to half the context limit (`SESSION_HANDOFF_CONTEXT_TOKENS`). A provider that compacted the retired session mid-turn left it holding less than that text, so the text can outgrow the window. When it is over half, the renewal writes a [handoff](#handoff) instead, at send time, and only then does the message wait. A successor that still ends a turn past the limit renews for a full context like any session.
 
 ## Handoff
 
-A handoff is the note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. A reset writes it at send time, when a cold open decides to renew. A full context writes it in the background, while the chat goes on. A setup change writes none ([Renewal](#renewal)).
+A handoff is the note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. A reset writes it at send time, when a cold open decides to renew, and so does a setup change whose light handoff would be too large. A full context writes it in the background, while the chat goes on. Any other setup change writes none ([Renewal](#renewal)).
 
 **Contracts:**
 

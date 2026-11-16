@@ -29,7 +29,13 @@ import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
-import { handoffSections, LIGHT_HANDOFF, type RenewalHandoffs } from "../domain/session-handoff.js";
+import {
+  handoffSections,
+  LIGHT_HANDOFF,
+  lightHandoffCap,
+  type RenewalHandoffs,
+  replayTokens,
+} from "../domain/session-handoff.js";
 import { writeRenewalHandoff } from "./session-handoff.js";
 import type { PromptFacts } from "../domain/prompt-facts.js";
 import { type AgentLog } from "../domain/agent-log.js";
@@ -1228,6 +1234,57 @@ async function prepareSetup(
 }
 
 /**
+ * What session `retired` held: the handoff it started from, if any, and the
+ * chat's messages since it opened. One renewed lightly held what its own
+ * predecessor did, so a run of light renewals counts as one session.
+ */
+async function heldBy(
+  repository: SessionRepository,
+  retired: Session,
+): Promise<{ handoff: string | null; since: Date }> {
+  let held = retired;
+  const seen = new Set<string>();
+  while (held.handoff === LIGHT_HANDOFF && !seen.has(held.id)) {
+    seen.add(held.id);
+    const before = await repository.predecessorOf(held.id);
+    if (!before) break;
+    held = before;
+  }
+  return {
+    handoff: held.handoff === LIGHT_HANDOFF ? null : held.handoff,
+    since: held.createdAt,
+  };
+}
+
+/**
+ * Whether what a light handoff from `retired` would carry is past its cap. A
+ * read that fails says no, as a light handoff is still the better guess.
+ */
+async function lightReplayTooLarge(
+  deps: ManagerDeps,
+  retired: Session,
+  chatId: string | undefined,
+): Promise<boolean> {
+  const limit = deps.handoffs?.contextLimitTokens;
+  if (!deps.handoffs || !limit || !chatId) return false;
+  try {
+    const held = await heldBy(deps.sessionRepository, retired);
+    const context = await deps.handoffs.context(chatId, "", held.since);
+    const tokens = replayTokens(held.handoff, context.recent);
+    const cap = lightHandoffCap(limit);
+    if (tokens <= cap) return false;
+    deps.log.info("session_handoff.light_too_large", {
+      oldSessionId: retired.id,
+      tokens,
+      cap,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Renews the chat of a session just closed for a full context, with the
  * handoff it wrote while live: its successor is stored with it, on no thread
  * yet, for the chat's next open to start (docs/concepts/sessions.md#handoff).
@@ -1395,16 +1452,22 @@ async function openSession(
       });
       reason = undefined;
     }
+    const handsOff =
+      !!deps.handoffs &&
+      !config.codeBacked &&
+      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal;
+    // A setup change hands off lightly, unless what the successor would read
+    // is too large for its first turn.
+    const light =
+      reason === "setup" &&
+      !(handsOff && (await lightReplayTooLarge(deps, resumed, init.threadContext?.romeSessionId)));
     if (reason) {
       // Written at send time, before the fresh session opens, so the message
       // that caused the cold open is answered by a session that has read it.
       const written = opts.writtenHandoffs?.get(resumed.id);
       const handoff =
         written ??
-        (reason !== "setup" &&
-        deps.handoffs &&
-        !config.codeBacked &&
-        resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+        (!light && handsOff && deps.handoffs
           ? await writeRenewalHandoff(
               {
                 retired: resumed,
@@ -1432,7 +1495,7 @@ async function openSession(
         setup: setupNow ?? resumed.setup ?? undefined,
         reason,
         workingDir,
-        handoff: reason === "setup" ? LIGHT_HANDOFF : (handoff ?? undefined),
+        handoff: light ? LIGHT_HANDOFF : (handoff ?? undefined),
       });
       renewing = { retired: resumed, successor, reason };
       resumed = undefined;
@@ -3003,22 +3066,8 @@ class AgentSessionImpl implements AgentSession {
    * of light renewals counts as one session.
    */
   private async heldByPredecessor(): Promise<{ handoff: string | null; since: Date } | null> {
-    const repository = this.deps.sessionRepository;
-    // A predecessor renewed lightly itself held what its own predecessor did,
-    // and everything said since.
-    let held = await repository.predecessorOf(this.sessionId);
-    const seen = new Set<string>([this.sessionId]);
-    while (held && held.handoff === LIGHT_HANDOFF && !seen.has(held.id)) {
-      seen.add(held.id);
-      const before = await repository.predecessorOf(held.id);
-      if (!before) break;
-      held = before;
-    }
-    if (!held) return null;
-    return {
-      handoff: held.handoff === LIGHT_HANDOFF ? null : held.handoff,
-      since: held.createdAt,
-    };
+    const retired = await this.deps.sessionRepository.predecessorOf(this.sessionId);
+    return retired ? await heldBy(this.deps.sessionRepository, retired) : null;
   }
 
   /**
