@@ -93,7 +93,7 @@ function Harness({
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLElement | null>(null);
   const threadFocus = useThreadFocus({ scroller, content, resetKey: chatId });
-  const threads = useChatThreadsValue(messages, new Map(), new Map(), threadFocus.shown);
+  const threads = useChatThreadsValue(messages, threadFocus.shown);
   const draft = useReplyDraftState({
     chatId: "concierge",
     sessionId: "concierge",
@@ -102,7 +102,7 @@ function Harness({
     focusComposer: () => {},
     onOpenThread: (next) => {
       if (threadFocus.focus) return void threadFocus.close();
-      const root = threads.taskThreads.get(next.thread);
+      const root = threads.roots.get(next.thread);
       if (root) void threadFocus.open({ ...next, root });
     },
     thread: threadFocus.focus,
@@ -273,6 +273,29 @@ describe("focusing a thread", () => {
 
     expect(hidden()).toEqual(["f1", "f2", "f3", "free"]);
     expect(entry("k4")).toBeTruthy();
+  });
+
+  it("focuses the thread of a root the server delivered with no thread, keeping the root in view", async () => {
+    reduced = true;
+    // r1 arrived alone, so it says no thread; the replies that came later name it.
+    const plan = [
+      say("r1", "user", null, 0),
+      say("x1", "assistant", null, 1),
+      say("r2", "assistant", "r1", 2, "Plan"),
+      say("x2", "user", null, 3),
+      say("r3", "assistant", "r1", 4, "Plan"),
+    ];
+    render(<Harness messages={plan} />);
+    // The root is in the thread, whose replies the other messages split.
+    const labels = screen.getAllByRole("button", { name: "Plan" });
+    expect(labels).toHaveLength(2);
+
+    fireEvent.click(labels[1]!);
+    await settled();
+
+    expect(hidden()).toEqual(["x1", "x2"]);
+    expect(screen.getByTestId("focus").textContent).toBe("Plan");
+    expect(entry("r1")).toBeTruthy();
   });
 
   it("ends at once, with no motion, when another chat opens", async () => {

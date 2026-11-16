@@ -204,7 +204,7 @@ final class FakeBackend: RomeBackend {
 
     /// What each send asked for its chat thread, in order.
     var sentThreads: [ThreadTarget?] = []
-    /// A thread read's answer, by the message asked for; missing ones fail.
+    /// A thread read's answer, by the root asked for; missing ones fail.
     var threads: [String: [ChatMessage]] = [:]
     var threadReads: [String] = []
 
@@ -214,11 +214,11 @@ final class FakeBackend: RomeBackend {
     var duringThreadRead: (() async -> Void)?
 
 
-    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
-        threadReads.append(messageId)
+    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
+        threadReads.append(root)
         await duringThreadRead?()
         if let threadError { throw threadError }
-        guard let thread = threads[messageId] else { throw APIError.notFound }
+        guard let thread = threads[root] else { throw APIError.notFound }
         return thread
     }
 

@@ -85,8 +85,6 @@ final class TranscriptStore {
     /// Tool calls fetched for an expanded tool summary, by trace message id.
     private(set) var toolCalls: [String: [ToolCall]] = [:]
 
-    /// Thread placements (`message_chat_thread`) of messages not held yet, by message id.
-    private var parkedPlacements: [String: (root: String?, title: String?)] = [:]
     private var cursor: String?
     /// The order each message id was first received in.
     private var seen: [String: Int] = [:]
@@ -568,7 +566,7 @@ final class TranscriptStore {
     }
 
     /// An incoming copy with what the chat already knows about it: its
-    /// thread, the thread's title, a placement that came before it.
+    /// thread and the thread's title.
     private func completed(_ incoming: ChatMessage, held: ChatMessage?, threadTitle: (String) -> String?) -> ChatMessage {
         var message = incoming
         if message.knowsThreads {
@@ -587,12 +585,6 @@ final class TranscriptStore {
             } else {
                 message.chatThreadTitle = threadTitle(root)
             }
-        }
-        // A placement that came before its message lands with it.
-        if let placed = parkedPlacements.removeValue(forKey: message.id) {
-            message.chatThreadId = placed.root
-            message.chatThreadTitle = placed.title
-            message.knowsThreads = true
         }
         return message
     }
@@ -668,27 +660,8 @@ final class TranscriptStore {
             if let index = messages.firstIndex(where: { $0.id == messageId }) {
                 messages[index].status = status
             }
-        case .messageThread(let id, let messageId, let root, let title) where id == sessionId:
-            if messages.contains(where: { $0.id == messageId }) {
-                editMessages { messages in
-                    guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
-                    messages[index].chatThreadId = root
-                    messages[index].chatThreadTitle = title
-                    messages[index].knowsThreads = true
-                }
-            } else {
-                parkedPlacements[messageId] = (root, title)
-            }
         case .cardSettled(let id, let card) where id == sessionId:
             settle(card)
-        case .threadRetired(let id, let root) where id == sessionId:
-            // Its task left the chat: the thread's messages lose their label.
-            editMessages { messages in
-                for index in messages.indices where messages[index].chatThreadId == root {
-                    messages[index].chatThreadId = nil
-                    messages[index].chatThreadTitle = nil
-                }
-            }
         case .reconnected:
             resync()
         default:
@@ -732,7 +705,7 @@ final class TranscriptStore {
     /// The chat thread shown over the chat, if one is open.
     private(set) var thread: ThreadStore?
     /// The instance has chat threads: a read showed `chatThreadId`, on any
-    /// message. Live inserts leave the field out, so one message cannot tell.
+    /// message.
     private(set) var instanceKnowsThreads = false
     /// A thread a restored draft was written in, being looked up because its
     /// message is not in the pages held.
@@ -762,10 +735,10 @@ final class TranscriptStore {
     /// the send goes to the thread, quoting no message.
     private(set) var repliesToThread = false
 
-    /// The task the reply bar names for a reply inside a thread view.
+    /// The thread the reply bar names for a reply inside a thread view.
     var threadReplyTitle: String? {
         guard repliesToThread, let thread else { return nil }
-        return thread.title ?? taskThreadTitle(of: thread.anchor)
+        return thread.title ?? threadTitle(of: thread.anchor)
     }
 
     /// The quoted message, when it is held.
@@ -774,16 +747,22 @@ final class TranscriptStore {
         return quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
     }
 
-    /// The title of the task whose chat thread `message` is in, or nil when
-    /// it is in no task's thread.
-    func taskThreadTitle(of message: ChatMessage) -> String? {
-        Self.taskThreadTitle(of: message, in: messages)
+    /// The name of the chat thread `message` is in, or nil when it is in none
+    /// or the thread has no name.
+    func threadTitle(of message: ChatMessage) -> String? {
+        Self.threadTitle(of: message, in: messages)
     }
 
-    static func taskThreadTitle(of message: ChatMessage, in messages: [ChatMessage]) -> String? {
-        guard let root = message.chatThreadId else { return nil }
+    static func threadTitle(of message: ChatMessage, in messages: [ChatMessage]) -> String? {
         if let title = message.chatThreadTitle { return title }
+        let root = message.threadRoot
         return messages.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
+    }
+
+    /// Whether `message` is in a chat thread of more than one message: its
+    /// `chatThreadId` says so, or a held message replies in a thread it roots.
+    func isInThread(_ message: ChatMessage) -> Bool {
+        message.chatThreadId != nil || messages.contains { $0.chatThreadId == message.id }
     }
 
     /// Reply on a message: the reply bar quotes it. An open thread view
@@ -792,7 +771,7 @@ final class TranscriptStore {
         guard kind == .concierge, message(messageId) != nil || thread != nil else { return }
         if let thread {
             // Inside a thread view a reply goes to the thread, not to a message.
-            quote = ThreadTarget(messageId: thread.anchor.id, instanceKnowsThreads: true, quote: true, thread: thread.anchor.id, bare: true)
+            quote = ThreadTarget(messageId: thread.anchor.id, instanceKnowsThreads: true, quote: true, thread: thread.root, bare: true)
             repliesToThread = true
         } else {
             quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true)
@@ -808,19 +787,19 @@ final class TranscriptStore {
         closeThread()
     }
 
-    /// Opens the thread view of the task thread `messageId` is in, from its
-    /// label: the message is tinted, and a send replies to it.
+    /// Opens the thread view of the chat thread `messageId` is in, from its
+    /// label: the message is tinted, and a send goes into the thread.
     func openThread(at messageId: String) {
         guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
         open(anchor: anchor, older: [], replyTo: messageId, bare: true)
     }
 
-    /// The quote in a reply was tapped. A reply in a task's thread opens
-    /// that thread's view, replying to the original; any other goes to the
-    /// original in the chat and tints it. Nil when the quote leads nowhere.
+    /// The quote in a reply was tapped. A reply, which is in a chat thread,
+    /// opens that thread's view, replying to the original. Nil when the
+    /// quote leads nowhere.
     func quoteAction(reply replyId: String, original: String) -> (() -> Void)? {
         guard kind == .concierge else { return nil }
-        if let host = message(replyId), taskThreadTitle(of: host) != nil {
+        if let host = message(replyId), isInThread(host) {
             // A reply in the thread view goes to the thread, quoting nothing.
             return { [weak self] in self?.open(anchor: host, older: [], tint: original, bare: true) }
         }
@@ -871,7 +850,7 @@ final class TranscriptStore {
         reopening = nil
         let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, older: older)
         thread = opened
-        quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: anchor.id, bare: bare ? true : nil)
+        quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: opened.root, bare: bare ? true : nil)
         repliesToThread = false
         tint(target ?? anchor.id)
         opened.start()
@@ -903,9 +882,9 @@ final class TranscriptStore {
     /// server no longer has leaves the text to the chat.
     func reopenThread(_ target: ThreadTarget) {
         guard kind == .concierge, thread == nil else { return }
-        // A draft from before quotes was written in a thread view. With no task's
+        // A draft from before quotes was written in a thread view. With no
         // thread under its message there is none to open: it is a plain reply.
-        if target.quote == nil, let held = message(target.messageId), taskThreadTitle(of: held) == nil {
+        if target.quote == nil, let held = message(target.messageId), !isInThread(held) {
             quote = ThreadTarget(messageId: target.messageId, instanceKnowsThreads: true, quote: true)
             return
         }
@@ -927,7 +906,7 @@ final class TranscriptStore {
         guard let target = reopening, thread == nil else { return }
         do {
             let root = target.threadMessage ?? target.messageId
-            let found = try await backend.thread(sessionId: sessionId, messageId: root)
+            let found = try await backend.thread(sessionId: sessionId, root: root)
             guard reopening == target, thread == nil else { return }
             guard let anchor = found.first(where: { $0.id == root }) ?? found.last else {
                 reopening = nil
@@ -1175,7 +1154,7 @@ final class TranscriptStore {
         }
     }
 
-    /// Where a stored message went: its task thread, and the message it replied to.
+    /// Where a stored message went: its chat thread, and the message it replied to.
     static func resendTarget(of message: ChatMessage) -> ThreadTarget? {
         let replyTo = message.parts.lazy.compactMap(\.replyQuote).first?.messageId
         guard replyTo != nil || message.chatThreadId != nil else { return nil }

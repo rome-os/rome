@@ -34,9 +34,6 @@ struct RowInfo: Hashable {
         var byID: [String: ChatMessage] = [:]
         for message in messages { byID[message.id] = message }
         let pendingIDs = Set(pending.map(\.id))
-        // The threads a task has, found once: a lookup per quoted row would
-        // scan every message for each (`TranscriptStore.taskThreadTitle`).
-        let titledThreads = Set(messages.compactMap { $0.chatThreadTitle == nil ? nil : $0.chatThreadId })
         var infos: [String: RowInfo] = [:]
         for row in rows {
             var info = RowInfo()
@@ -59,8 +56,7 @@ struct RowInfo: Hashable {
                 // The quote leads where `TranscriptStore.quoteAction` would take it.
                 if case .userText = row, let quote = Self.quote(of: message, row: row) {
                     info.quote = quote
-                    let inThread = message.chatThreadId.map(titledThreads.contains) ?? false
-                    info.quoteLeads = kind == .concierge && (inThread || byID[quote.messageId] != nil)
+                    info.quoteLeads = kind == .concierge && (message.chatThreadId != nil || byID[quote.messageId] != nil)
                 }
             }
             infos[row.id] = info

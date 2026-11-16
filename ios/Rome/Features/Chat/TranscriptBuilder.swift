@@ -171,7 +171,7 @@ enum TranscriptBuilder {
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
         let labels = options.showThreads ? threadLabels(messages) : [:]
-        let taskThreads = options.showThreads ? taskThreadTitles(messages) : [:]
+        let threads = options.showThreads ? threadRoots(messages) : [:]
         // Each message's parts, read once.
         let parsed = messages.map(\.parts)
         // The turns whose reply is an error part.
@@ -305,10 +305,10 @@ enum TranscriptBuilder {
             }
             if !rows.isEmpty, let title = labels[message.id] {
                 rows.append(.threadLabel(id: "label-\(message.id)", messageId: message.id, title: title))
-            } else if !rows.isEmpty, !message.isUser, message.chatThreadId.flatMap({ taskThreads[$0] }) == nil,
+            } else if !rows.isEmpty, !message.isUser, threads[message.id] == nil,
                       let turn = message.turnId, let source = unprompted[turn] {
-                // One label a message at most: a message in a task's thread
-                // shows only its thread's label, or none in the middle of a run.
+                // One label a message at most: a message in a thread shows
+                // only its thread's label, or none in the middle of a run.
                 rows.append(.sourceLabel(id: "source-\(message.id)", text: SourceCopy.label(source)))
             }
             if !rows.isEmpty {
@@ -429,9 +429,25 @@ enum TranscriptBuilder {
         return TurnError(text: text, code: summary?.terminalErrorCode, provider: summary?.terminalErrorProvider, reason: summary?.terminalErrorReason, didntFinish: true)
     }
 
-    /// The task title of each chat thread a task has, by the thread's first
-    /// message. The server sends a title only for a thread a task has.
-    static func taskThreadTitles(_ messages: [ChatMessage]) -> [String: String] {
+    /// The thread each message of `messages` is in, by message id, as the
+    /// root's key. The server sends `chatThreadId` for a message in a thread
+    /// of more than one, and not again for a root that gains its first reply:
+    /// a message is in thread R when its `chatThreadId` is R, or when its own
+    /// id is R and a loaded message says it is in R. A message alone in its
+    /// thread is in none.
+    static func threadRoots(_ messages: [ChatMessage]) -> [String: String] {
+        let named = Set(messages.compactMap(\.chatThreadId))
+        var roots: [String: String] = [:]
+        for message in messages {
+            if let root = message.chatThreadId ?? (named.contains(message.id) ? message.id : nil) {
+                roots[message.id] = root
+            }
+        }
+        return roots
+    }
+
+    /// The name of each chat thread, by its root, as any of its messages carries it.
+    static func threadTitles(_ messages: [ChatMessage]) -> [String: String] {
         var titles: [String: String] = [:]
         for message in messages {
             if let root = message.chatThreadId, let title = message.chatThreadTitle, !title.isEmpty {
@@ -441,16 +457,29 @@ enum TranscriptBuilder {
         return titles
     }
 
-    /// The label under Concierge messages in a task's chat thread, by message
-    /// id: the task's title. The guardian's messages get none, and neither
-    /// does a message showing a task card, which names its task itself. A
-    /// task's question or approval shown alone does get one. Of a run of one
-    /// thread's messages with nothing else between them, only the first and
-    /// the last show it, so a run of one or two shows it on each. An Agent
-    /// message from another thread or none, or a task card, ends the run;
-    /// the guardian's messages are skipped (docs/domains/chats.md#chat-thread).
+    /// The label under Concierge messages in a chat thread that other messages
+    /// split up, by message id: the thread's name. A thread is split when a
+    /// message outside it sits between its first and last loaded message, so
+    /// a plain back-and-forth has no label. The guardian's messages get none,
+    /// and neither does a message showing a task card, which names its task
+    /// itself. A task's question or approval shown alone does get one. Of a
+    /// run of one thread's messages with nothing else between them, only the
+    /// first and the last show it, so a run of one or two shows it on each. An
+    /// agent message from another thread or none, or a task card, ends the
+    /// run; the guardian's messages are skipped (docs/domains/chats.md#chat-thread).
     static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
-        let titles = taskThreadTitles(messages)
+        let roots = threadRoots(messages)
+        let titles = threadTitles(messages)
+        // The threads a message outside them sits inside, between their
+        // first and last message.
+        var split = Set<String>()
+        var outside: [String: Bool] = [:]
+        for message in messages where !message.isTrace {
+            let root = roots[message.id]
+            if let root, outside[root] == true { split.insert(root) }
+            for other in outside.keys where other != root { outside[other] = true }
+            if let root { outside[root] = false }
+        }
         var runs: [(title: String, root: String, ids: [String])] = []
         var open = false
         // The owner's messages neither join a run nor end it.
@@ -459,7 +488,7 @@ enum TranscriptBuilder {
                 if case .taskChat(_, _, let show, _) = $0 { return show != .ask }
                 return false
             }
-            guard !showsTaskCard, let root = message.chatThreadId, let title = titles[root] else {
+            guard !showsTaskCard, let root = roots[message.id], split.contains(root), let title = titles[root] else {
                 open = false
                 continue
             }

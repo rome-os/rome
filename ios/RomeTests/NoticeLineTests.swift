@@ -86,34 +86,45 @@ private func rows(_ messages: [ChatMessage], notices: Bool = true) -> [Transcrip
         #expect(labels(rows([text("old", role: "user", turn: "t0", at: 0, sender: follow), text("a", turn: "t0", at: 5)])).isEmpty)
     }
 
-    /// In the middle of a thread's run, a task reply shows no label at all,
-    /// not its source.
+    /// In the middle of a thread's run, a reply shows no label at all, not its
+    /// source. Another message between the thread's own makes the thread show labels.
     @Test func theMiddleOfARunShowsNoSourceEither() {
         let summary = TraceSummary(automatedInput: .init(type: "agent", name: "Flint"))
-        let run = (0..<3).map { index -> ChatMessage in
+        var run = (0..<3).map { index -> ChatMessage in
             var message = text("m\(index)", turn: "t1", at: 60 + Double(index))
             message.chatThreadId = "r"
             message.chatThreadTitle = "Book flights"
             message.knowsThreads = true
             return message
         }
+        // The owner's message of another turn, between the thread's messages.
+        run.insert(text("f", role: "user", turn: "t0", at: 60.5), at: 1)
         let options = TranscriptBuilder.Options(showThreads: true, showNotices: true)
         let built = TranscriptBuilder.rows(messages: run + [trace(turn: "t1", at: 70, summary)], pending: [], answers: [:], options: options)
         #expect(labels(built).isEmpty)
         #expect(built.filter { if case .threadLabel = $0 { true } else { false } }.map(\.id) == ["label-m0", "label-m2"])
     }
 
-    /// In a task's thread only its own label shows.
-    @Test func aTaskThreadMessageKeepsOnlyItsThreadLabel() {
+    /// In a thread only its own label shows, or none.
+    @Test func aThreadMessageKeepsOnlyItsThreadLabel() {
         let summary = TraceSummary(automatedInput: .init(type: "agent", name: "Flint"))
         var inThread = text("a", turn: "t1", at: 60)
         inThread.chatThreadId = "r"
         inThread.chatThreadTitle = "Book flights"
         inThread.knowsThreads = true
         let options = TranscriptBuilder.Options(showThreads: true, showNotices: true)
-        let built = TranscriptBuilder.rows(messages: [inThread, trace(turn: "t1", at: 61, summary)], pending: [], answers: [:], options: options)
-        #expect(labels(built).isEmpty)
-        #expect(built.contains { if case .threadLabel = $0 { true } else { false } })
+        // Alone in its thread, it shows no label, and not its source either.
+        let alone = TranscriptBuilder.rows(messages: [inThread, trace(turn: "t1", at: 61, summary)], pending: [], answers: [:], options: options)
+        #expect(labels(alone).isEmpty)
+        #expect(!alone.contains { if case .threadLabel = $0 { true } else { false } })
+        // In a split thread it shows its thread's label.
+        var later = text("b", turn: "t2", at: 80)
+        later.chatThreadId = "r"
+        later.chatThreadTitle = "Book flights"
+        later.knowsThreads = true
+        let split = TranscriptBuilder.rows(messages: [inThread, text("x", role: "user", turn: "t0", at: 70), later], pending: [], answers: [:], options: options)
+        #expect(labels(split).isEmpty)
+        #expect(split.contains { if case .threadLabel = $0 { true } else { false } })
     }
 
     /// An automated message from before marks its turn, and is not drawn.
