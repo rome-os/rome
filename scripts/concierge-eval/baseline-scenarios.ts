@@ -188,7 +188,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
       },
     ],
     check: (i) => [...answeredInline(i, 0), ...noFiller(i.said)],
-    rubric: `A valid schedule: B is before A, C is not directly after B, 15-minute gaps between meetings, all within 13:00-17:00. The only valid order is C, B, A (B before A, C not right after B, so C can't sit between B and A): for example C 13:00-13:45, B 14:00-15:00, A 15:15-16:45. Check the answer yourself: score 1 for a schedule that breaks a rule, 5 for a valid one stated briefly. ${VOICE}`,
+    rubric: `A valid schedule: B is before A, C is not directly after B, 15-minute gaps between meetings, all within 13:00-17:00. Two orders work: C, B, A (e.g. C 13:00-13:45, B 14:00-15:00, A 15:15-16:45) and B, A, C (e.g. B 13:00-14:00, A 14:15-15:45, C 16:00-16:45). Check the answer yourself: score 1 for a schedule that breaks a rule, 5 for a valid one stated briefly. ${VOICE}`,
   },
   {
     id: "reason-schedule-task",
@@ -202,7 +202,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
       },
     ],
     check: (i) => [...delegated(i), ...noFiller(i.said)],
-    rubric: `A valid schedule: B is before A, C is not directly after B, 15-minute gaps between meetings, all within 13:00-17:00. The only valid order is C, B, A: for example C 13:00-13:45, B 14:00-15:00, A 15:15-16:45. Score the relayed result: 1 for a schedule that breaks a rule, 5 for a valid one stated briefly. ${VOICE}`,
+    rubric: `A valid schedule: B is before A, C is not directly after B, 15-minute gaps between meetings, all within 13:00-17:00. Two orders work: C, B, A (e.g. C 13:00-13:45, B 14:00-15:00, A 15:15-16:45) and B, A, C (e.g. B 13:00-14:00, A 14:15-15:45, C 16:00-16:45). Score the relayed result: 1 for a schedule that breaks a rule, 5 for a valid one stated briefly. ${VOICE}`,
   },
   {
     id: "task-simple",
