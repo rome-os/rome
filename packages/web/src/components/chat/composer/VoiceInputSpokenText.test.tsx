@@ -23,6 +23,11 @@ describe("revealing spoken text", () => {
     expect(nextReveal("", goal, 1)).toHaveLength(30);
   });
 
+  it("never takes characters back for a negative budget", () => {
+    expect(nextReveal("", "buy milk", -1)).toBe("");
+    expect(nextReveal("buy", "buy milk", -1)).toBe("buy");
+  });
+
   it("never splits an emoji", () => {
     expect(nextReveal("ok ", "ok 😀!", 1)).toBe("ok 😀");
   });
@@ -61,6 +66,8 @@ describe("the spoken text over the field", () => {
       </div>
     );
     const { container, rerender } = render(field("buy silk"));
+    // The first frame starts the clock; the next has a second's budget.
+    frame();
     frame();
     const copy = () => container.querySelector("[data-voice-input-spoken-text]");
     expect(copy()?.textContent).toBe("buy silk");

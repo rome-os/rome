@@ -22,7 +22,7 @@ export function nextReveal(current: string, goal: string, budget: number): strin
   const goalChars = Array.from(goal);
   const shownCount = Math.min(Array.from(current).length, goalChars.length);
   const behind = goalChars.length - shownCount;
-  const step = Math.max(budget, behind - REVEAL_CHARS_PER_SECOND);
+  const step = Math.max(budget, behind - REVEAL_CHARS_PER_SECOND, 0);
   return goalChars.slice(0, shownCount + Math.min(behind, step)).join("");
 }
 
@@ -36,10 +36,12 @@ function useReveal(goal: string): string {
   useEffect(() => {
     if (reduce) return;
     let frame = 0;
-    let last = performance.now();
+    // From the first frame's own time: a frame's time can be earlier than a
+    // `performance.now()` read before it.
+    let last: number | null = null;
     let budget = 0;
     const tick = (now: number) => {
-      budget += ((now - last) / 1000) * REVEAL_CHARS_PER_SECOND;
+      budget += (Math.max(0, now - (last ?? now)) / 1000) * REVEAL_CHARS_PER_SECOND;
       last = now;
       const whole = Math.floor(budget);
       budget -= whole;
@@ -151,6 +153,14 @@ function SpokenOverlay({
       el.removeEventListener("scroll", scrolled);
     };
   }, [textareaRef]);
+
+  // Each revealed character makes the copy taller, which no scroll or resize
+  // of the field reports, so the copy takes the field's scroll position again.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    const overlay = overlayRef.current;
+    if (el && overlay) overlay.scrollTop = el.scrollTop;
+  }, [textareaRef, shown]);
 
   const chars = Array.from(shown);
   return (
