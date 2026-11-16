@@ -73,7 +73,7 @@ import UIKit
 }
 
 @MainActor
-@Suite struct ComposerMorphTests {
+@Suite(.serialized) struct ComposerMorphTests {
     @Observable final class Draft {
         var text = "A draft with a selected word"
         var focused = false
@@ -103,11 +103,12 @@ import UIKit
     }
 
     private func waitUntil(_ message: String = "Composer layout did not settle", _ condition: () -> Bool) async throws {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while !condition() {
-            try #require(ContinuousClock.now < deadline, Comment(rawValue: message))
+        // Time queued behind other main-actor tests is not a layout opportunity.
+        for _ in 0..<300 {
+            if condition() { return }
             try await Task.sleep(for: .milliseconds(10))
         }
+        try #require(condition(), Comment(rawValue: message))
     }
 
     @Test func morphKeepsTheEditorAndSelection() async throws {
