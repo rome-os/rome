@@ -101,16 +101,17 @@ describe("the Concierge agent", () => {
     const finished = rule("- A turn that ended `by=concierge`");
     for (const text of [
       "forward the conclusion with `chat_forward`",
-      "the forwarded message shows its source chat, which opens the details",
       "Never paste or retell the rest of the answer",
+      "never tell the guardian to open the task chat for details",
       "refuses because the answer has no conclusion or it is too long",
-      "at most two short sentences",
+      "a few sentences with the key specifics",
       "with `task` set to the task's id so it joins the task's thread",
       "deliver the result in ONE message",
       "(`full: true`) only when the guardian explicitly asked for the full text in a message they sent this turn",
       "A failed or stopped task: say so plainly",
     ])
       expect(finished).toContain(text);
+    expect(finished).not.toContain("opens the details");
     expect(rule("- In a task event, `conclusion:`")).toContain(
       "the task chat's own conclusion, whole",
     );
