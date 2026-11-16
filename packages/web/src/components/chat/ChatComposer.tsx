@@ -56,6 +56,7 @@ import {
   VoiceInputNotice,
   VoiceInputWaveform,
 } from "./composer/VoiceInputControl";
+import { VoiceInputSpokenText } from "./composer/VoiceInputSpokenText";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { ReplyBar } from "./reply/ReplyBar";
 import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
@@ -1025,7 +1026,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
               query={skillPicker.query}
               onSelect={skillPicker.accept}
               anchor={
-                <div>
+                <div className="relative">
                   <AgentMentionMenu
                     ref={mentionPicker.menuRef}
                     open={mentionPicker.open && !agentMentionLocked && !uploadInFlight}
@@ -1064,6 +1065,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                         readOnly={voice.active}
                       />
                     }
+                  />
+                  <VoiceInputSpokenText
+                    textareaRef={textareaRef}
+                    value={inputText}
+                    spoken={voice.spoken}
                   />
                 </div>
               }

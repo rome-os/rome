@@ -139,6 +139,24 @@
   animation: rome-mascot-poke-blink 420ms ease-out;
 }
 
+/* A spoken character arriving in the message field (VoiceInputSpokenText). */
+@keyframes voice-input-char-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.voice-input-char-in {
+  animation: voice-input-char-in 280ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-input-char-in {
+    animation: none;
+  }
+}
+
 @keyframes rome-mascot-squash {
   0%,
   100% {

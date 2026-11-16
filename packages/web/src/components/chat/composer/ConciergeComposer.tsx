@@ -66,6 +66,7 @@ import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
+import { VoiceInputSpokenText } from "./VoiceInputSpokenText";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -563,7 +564,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 floor where `touch-target` applies it. */}
             <div
               className={cn(
-                "flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]",
+                "relative flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]",
                 voice.active && "order-first basis-full",
               )}
               style={{ minHeight: "var(--row-h)" }}
@@ -630,6 +631,11 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     readOnly={voice.active}
                   />
                 }
+              />
+              <VoiceInputSpokenText
+                textareaRef={textareaRef}
+                value={inputText}
+                spoken={voice.spoken}
               />
             </div>
             {voice.state === "listening" ? (
