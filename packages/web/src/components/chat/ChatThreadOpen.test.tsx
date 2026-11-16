@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ChatMessage } from "@/lib/chat-types";
@@ -23,8 +24,9 @@ import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
 
 // The thread label under the agent's messages in a Concierge chat's
-// transcript: where it shows, what it names, and that it opens the thread. A
-// tap on a message itself opens nothing.
+// transcript: where it shows, what it names, and that it focuses the chat on
+// the thread. A tap on a message itself opens nothing. With a thread in focus,
+// the transcript marks what is outside it.
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
@@ -305,7 +307,12 @@ const idle = {
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
-function renderTranscript(shown: ChatMessage[] = messages) {
+/** `focused` is the thread in focus: a message of it, and its task's title. */
+function renderTranscript(
+  shown: ChatMessage[] = messages,
+  focused?: { thread: string; title: string },
+  selection?: ComponentProps<typeof ConciergeTranscript>["selection"],
+) {
   const box: { thread: string | null } = { thread: null };
   const rows = buildRows(shown, new Map(), idle.identity, {
     runningTurnId: null,
@@ -321,6 +328,7 @@ function renderTranscript(shown: ChatMessage[] = messages) {
       onOpenThread: (next) => {
         box.thread = next.thread;
       },
+      thread: focused ?? null,
     });
     return (
       <MemoryRouter>
@@ -331,6 +339,7 @@ function renderTranscript(shown: ChatMessage[] = messages) {
                 labels: threadLabels(shown),
                 taskThreads: taskThreads(shown).threads,
                 titles: taskThreads(shown).titles,
+                focus: focused ? (taskThreads(shown).threads.get(focused.thread) ?? null) : null,
               }}
             >
               <ReplyBar />
@@ -339,6 +348,7 @@ function renderTranscript(shown: ChatMessage[] = messages) {
                 live={idle}
                 actions={actions}
                 contentRef={() => {}}
+                selection={selection}
               />
             </ChatThreadsProvider>
           </ThemeProvider>
@@ -362,7 +372,7 @@ describe("the thread label in the transcript", () => {
     const labels = screen.getAllByRole("button", { name: "Kyoto trip" });
     expect(labels).toHaveLength(2);
     expect(labels[0]?.getAttribute("title")).toBe("Kyoto trip");
-    // The thread tab loads a thread named by any of its messages.
+    // The focus is held on the message whose label was clicked.
     fireEvent.click(labels[1]!);
     expect(thread()).toBe("a2");
   });
@@ -416,7 +426,7 @@ describe("the thread label in the transcript", () => {
     expect(classes).toContain("focus-visible:outline-solid");
   });
 
-  it("offers no Reply on a card, and its label opens the thread tab", () => {
+  it("offers no Reply on a card, and its label focuses the thread", () => {
     const card = {
       ...message("c1", "assistant", "", "m1", 4),
       content: JSON.stringify([
@@ -436,7 +446,7 @@ describe("the thread label in the transcript", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Kyoto trip" }).at(-1)!);
     expect(thread()).toBe("c1");
-    // The thread tab has its own composer: the chat's reply bar stays closed.
+    // A focus quotes nothing: the reply bar stays closed.
     expect(document.querySelector("[data-reply-bar]")).toBeNull();
   });
 
@@ -447,6 +457,19 @@ describe("the thread label in the transcript", () => {
       .map((label) => label.previousElementSibling?.textContent ?? "");
     expect(labelled.some((text) => text.includes("Plan Kyoto in April"))).toBe(false);
     expect(labelled.some((text) => text.includes("Which one is closest?"))).toBe(false);
+  });
+
+  it("reads as pressed while its thread is in focus, and not before", () => {
+    renderTranscript();
+    for (const label of screen.getAllByRole("button", { name: "Kyoto trip" })) {
+      expect(label.getAttribute("aria-pressed")).toBe("false");
+    }
+    cleanup();
+    renderTranscript(messages, { thread: "a2", title: "Kyoto trip" });
+    for (const label of screen.getAllByRole("button", { name: "Kyoto trip" })) {
+      expect(label.getAttribute("aria-pressed")).toBe("true");
+      expect(label.className).toContain("aria-pressed:text-muted-foreground");
+    }
   });
 
   it("is the way in from the transcript: a tap on a message opens nothing", () => {
@@ -521,5 +544,109 @@ describe("the source label in the transcript", () => {
     ]);
     expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(2);
     expect(screen.queryByText("Routine · Check-in")).toBeNull();
+  });
+});
+
+describe("the transcript with a thread in focus", () => {
+  // Two threads and a message in none, over two stretches of the day.
+  const other = (
+    id: string,
+    role: "user" | "assistant",
+    chatThreadId: string | null,
+    minute: number,
+  ) =>
+    ({
+      ...message(id, role, `said ${id}`, chatThreadId ?? "", minute),
+      chatThreadId,
+    }) as ChatMessage;
+  const day = [
+    ...messages,
+    // Said right after a2, so they share its group.
+    other("nx", "assistant", "n1", 4),
+    { ...other("n1", "user", "n1", 5), chatThreadTitle: "Flights" },
+    other("n2", "assistant", "n1", 6),
+    other("free1", "assistant", null, 7),
+    // A later stretch with nothing of the Kyoto thread in it.
+    other("n3", "assistant", "n1", 40),
+  ];
+  const marked = () =>
+    [...document.querySelectorAll<HTMLElement>("[data-thread-out]")].map(
+      (element) => element.dataset.threadEntry ?? element.tagName.toLowerCase(),
+    );
+  const entry = (id: string) => document.querySelector<HTMLElement>(`[data-thread-entry="${id}"]`)!;
+  const focusKyoto = { thread: "a2", title: "Kyoto trip" };
+
+  it("marks nothing without a focus", () => {
+    renderTranscript(day);
+    expect(marked()).toEqual([]);
+    expect(entry("n2")).toBeTruthy();
+  });
+
+  it("marks the messages of other threads and of none, and keeps the thread's, the guardian's among them", () => {
+    renderTranscript(day, focusKyoto);
+    const out = (id: string) => entry(id).closest("[data-thread-out]") !== null;
+    // The thread: m1 and m2 (the guardian's), a1 and a2.
+    expect(["m1", "a1", "m2", "a2"].map(out)).toEqual([false, false, false, false]);
+    // The other thread's, the guardian's included, and the message in none.
+    expect(["nx", "n1", "n2", "free1", "n3"].map(out)).toEqual([true, true, true, true, true]);
+  });
+
+  it("folds a group whose messages are all hidden whole, and a mixed one message by message", () => {
+    renderTranscript(day, focusKyoto);
+    // n2 and free1 share a group, and n3 stands alone in one: each folds whole.
+    for (const id of ["n2", "n3"]) {
+      expect(entry(id).parentElement?.hasAttribute("data-thread-out")).toBe(true);
+      expect(entry(id).hasAttribute("data-thread-out")).toBe(false);
+    }
+    // a2's group also holds nx: only nx folds.
+    expect(entry("a2").parentElement?.hasAttribute("data-thread-out")).toBe(false);
+    expect(entry("nx").hasAttribute("data-thread-out")).toBe(true);
+  });
+
+  it("folds the time line with nothing of the thread under it, and keeps the other", () => {
+    renderTranscript(day, focusKyoto);
+    const lines = [...document.querySelectorAll<HTMLElement>("time")].map(
+      (time) => time.parentElement!,
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines.map((line) => line.hasAttribute("data-thread-out"))).toEqual([false, true]);
+  });
+
+  it("keeps a group of the thread and its label as they are, with the label pressed", () => {
+    renderTranscript(day, focusKyoto);
+    const label = screen.getAllByRole("button", { name: "Kyoto trip" })[0]!;
+    expect(label.closest("[data-thread-out]")).toBeNull();
+    expect(label.getAttribute("aria-pressed")).toBe("true");
+    // The other thread's label is folded away with its message.
+    expect(
+      screen.getAllByRole("button", { name: "Flights" })[0]!.closest("[data-thread-out]"),
+    ).toBeTruthy();
+  });
+
+  it("hides nothing while share selection runs, so a turn of messages in several threads shows whole", () => {
+    // One turn holds a Kyoto message and a Flights one.
+    const mixed = [
+      ...messages,
+      {
+        ...message("ax", "assistant", "said ax", "n1", 4),
+        turnId: "t-a2",
+        chatThreadTitle: "Flights",
+      } as ChatMessage,
+    ];
+    const selection = {
+      selectedTurns: new Set(["t-a2"]),
+      selectableSessionId: "concierge",
+      onToggleTurn: () => {},
+    };
+    renderTranscript(mixed, focusKyoto, selection);
+
+    expect(marked()).toEqual([]);
+    expect(entry("ax").closest("[data-thread-out]")).toBeNull();
+    // The labels stay reachable under the overlay: they focus nothing here.
+    cleanup();
+
+    // Without the selection the same focus hides the Flights message.
+    renderTranscript(mixed, focusKyoto);
+    expect(entry("ax").closest("[data-thread-out]")).not.toBeNull();
   });
 });

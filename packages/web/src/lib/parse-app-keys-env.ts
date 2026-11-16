@@ -14,9 +14,11 @@ type EnvError = {
 
 /** Parses literal .env values without variable expansion or shell evaluation.
  * Rejects the entire input on invalid app keys or ambiguous duplicate names.
+ * `nameError` is the store's own name rule: App keys by default, the Vault's when it passes one.
  * Sources preserve quoting so failed saves can be retried without changing values. */
 export function parseAppKeysEnv(
   input: string,
+  nameError: (name: string) => string | null = appKeyNameError,
 ): { entries: EnvAppKey[]; error?: never } | { entries?: never; error: EnvError } {
   const lines = input.replace(/\r\n?/g, "\n").split("\n");
   const entries: EnvAppKey[] = [];
@@ -34,8 +36,8 @@ export function parseAppKeysEnv(
     if (!assignment) return fail("assignment");
 
     const [, name, raw] = assignment;
-    const nameError = appKeyNameError(name);
-    if (nameError) return fail("name", nameError);
+    const invalidName = nameError(name);
+    if (invalidName) return fail("name", invalidName);
     if (names.has(name)) return fail("duplicate");
 
     let value = raw;

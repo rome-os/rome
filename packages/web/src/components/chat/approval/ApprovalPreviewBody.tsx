@@ -21,13 +21,15 @@ export function ApprovalPreviewBody({ preview }: { preview: PreviewPayload }) {
       </div>
     );
   }
+  // A secret-access request has its own card; any other caller reads its title and summary.
+  const fields = preview.kind === "generic" ? preview.fields : undefined;
   return (
     <div className="space-y-2">
       <div className="text-ui text-foreground">{preview.title}</div>
       <div className="whitespace-pre-wrap text-ui text-foreground">{preview.summary}</div>
-      {preview.fields && preview.fields.length > 0 && (
+      {fields && fields.length > 0 && (
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-aux">
-          {preview.fields.map((field, idx) => (
+          {fields.map((field, idx) => (
             <div key={idx} className="contents">
               <dt className="text-muted-foreground">{field.label}</dt>
               <dd className="whitespace-pre-wrap text-foreground">{field.value}</dd>

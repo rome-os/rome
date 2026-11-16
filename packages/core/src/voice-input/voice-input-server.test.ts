@@ -273,6 +273,57 @@ describe("voice input socket", () => {
     expect(audioReceived()).toBe(8);
   });
 
+  it("does not count a withdrawn guess as speech", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      quietLimitMs: 300,
+    });
+    const frame = new Uint8Array(1600); // 50 ms at 16 kHz
+    const audioReceived = () => fake.received.filter((r) => r.kind === "audio").length;
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    for (let i = 0; i < 4; i++) client.send(frame);
+    await until(() => audioReceived() === 4);
+    // A guess that ended at 50 ms, withdrawn at 200 ms of audio.
+    fake.say({ tokens: [{ text: "hel", is_final: false, end_ms: 50 }] });
+    fake.say({ tokens: [] });
+    await until(() => messages.length === 2);
+    while (messages.length < 3) {
+      client.send(frame);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "", pending: "hel" },
+      { type: "text", settled: "", pending: "" },
+      { type: "error", reason: "no-speech" },
+    ]);
+    // 50 ms + 300 ms of quiet is 7 frames; counting the withdrawal would be 10.
+    expect(audioReceived()).toBe(7);
+  });
+
+  it("stops on time when audio stalls near the end of the quiet", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      quietLimitMs: 400,
+    });
+    const audioReceived = () => fake.received.filter((r) => r.kind === "audio").length;
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    // 350 ms of audio with nothing heard, then the audio stops coming.
+    for (let i = 0; i < 7; i++) client.send(new Uint8Array(1600));
+    await until(() => audioReceived() === 7);
+    const stalledAt = Date.now();
+    await closed;
+
+    expect(messages).toEqual([{ type: "error", reason: "no-speech" }]);
+    // 50 ms of quiet were left; a fresh full limit would take 400 ms.
+    expect(Date.now() - stalledAt).toBeLessThan(250);
+  });
+
   it("closes a dictation whose provider never finishes after the length limit", async () => {
     const fake = await fakeSoniox();
     fake.onText = () => [];

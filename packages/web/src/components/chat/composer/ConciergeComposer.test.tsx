@@ -75,7 +75,10 @@ function renderComposer(
   });
   const tree = (next: Partial<ConciergeComposerProps>) => (
     <QueryClientProvider client={client}>
-      <ReplyDraftHarness initial={reply} thread={threads ? "a1" : undefined}>
+      <ReplyDraftHarness
+        initial={reply}
+        thread={threads ? { thread: "a1", title: "Kyoto trip" } : undefined}
+      >
         <ConciergeComposer ref={ref} onSend={onSend} {...next} />
       </ReplyDraftHarness>
     </QueryClientProvider>
@@ -276,18 +279,27 @@ describe("ConciergeComposer reply", () => {
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
   });
 
-  it("leaves the thread reply's own placeholder alone in a named topic chat", async () => {
+  it("names the thread in its placeholder, which a topic chat's name does not replace", async () => {
     renderComposer({ chatName: "Trip to Lisbon" }, undefined, true, undefined, true);
-    expect(await screen.findByPlaceholderText("Reply")).toBeTruthy();
+    expect(await screen.findByPlaceholderText("Reply: Kyoto trip")).toBeTruthy();
+  });
+
+  it("names the thread the same way in Chinese, in the placeholder and the back control", () => {
+    const t = (key: string) => i18n.t(key, { ns: "chat", lng: "zh-CN", title: "京都行程" });
+    expect(t("thread.replyPlaceholder")).toBe("回复：京都行程");
+    expect(t("thread.back")).toBe("返回对话：京都行程");
   });
 
   it("sends every message into its thread, quoting a message only when one is picked", async () => {
     const { onSend } = renderComposer({}, reply, true, undefined, true);
 
-    // The thread tab's composer reads as a reply into the thread.
-    await userEvent.type(await screen.findByPlaceholderText("Reply"), "why there?{Enter}");
+    // With a thread in focus the composer reads as a reply into it.
+    await userEvent.type(
+      await screen.findByPlaceholderText("Reply: Kyoto trip"),
+      "why there?{Enter}",
+    );
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    await userEvent.type(screen.getByPlaceholderText("Reply"), "and the hotel?{Enter}");
+    await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "and the hotel?{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
 
     expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "a1", replyTo: reply });
@@ -295,17 +307,20 @@ describe("ConciergeComposer reply", () => {
     expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "a1" });
     expect(onSend.mock.calls[1][0].replyTo).toBeUndefined();
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
-    expect(screen.getByPlaceholderText("Reply")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Reply: Kyoto trip")).toBeTruthy();
   });
 
   it("keeps sending into its thread, with its reply back, when a send fails", async () => {
     const { onSend } = renderComposer({}, reply, true, undefined, true);
     onSend.mockRejectedValueOnce(new Error("offline"));
 
-    await userEvent.type(await screen.findByPlaceholderText("Reply"), "why there?{Enter}");
+    await userEvent.type(
+      await screen.findByPlaceholderText("Reply: Kyoto trip"),
+      "why there?{Enter}",
+    );
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("button", { name: "Cancel reply" })).toBeTruthy();
-    await userEvent.type(screen.getByPlaceholderText("Reply"), "{Enter}");
+    await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
 
     expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "a1", replyTo: reply });
@@ -315,9 +330,9 @@ describe("ConciergeComposer reply", () => {
     const { onSend } = renderComposer({}, reply, true, undefined, true);
     await screen.findByRole("button", { name: "Cancel reply" });
 
-    await userEvent.type(screen.getByPlaceholderText("Reply"), "{Escape}");
+    await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "{Escape}");
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
-    await userEvent.type(screen.getByPlaceholderText("Reply"), "ok{Enter}");
+    await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "ok{Enter}");
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "a1" });

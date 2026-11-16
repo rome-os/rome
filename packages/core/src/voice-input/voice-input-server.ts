@@ -220,9 +220,12 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       {
         onText: (settled, pending, spokeUntilMs) => {
           if (closed) return;
-          // Without the provider's timing, the words count as heard now.
-          if (settled || pending !== lastPending)
+          // Only new words are speech: a withdrawn guess is not. Without the
+          // provider's timing, the words count as heard now.
+          if (settled.trim() || (pending.trim() && pending !== lastPending)) {
             spokeUntil = Math.max(spokeUntil, spokeUntilMs ?? audioMs());
+            audioArrived();
+          }
           lastPending = pending;
           reply({ type: "text", settled, pending });
         },
@@ -250,7 +253,8 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (finishAsked || !stream) return;
     if (audioMs() - spokeUntil >= quietLimitMs) return stopFor("no-speech");
     if (quiet) clearTimeout(quiet);
-    quiet = setTimeout(() => stopFor("no-speech"), quietLimitMs);
+    // Audio that stalls now still stops on time: only the rest of the quiet is left.
+    quiet = setTimeout(() => stopFor("no-speech"), quietLimitMs - (audioMs() - spokeUntil));
   }
 
   function stopFor(reason: VoiceInputStopReason) {
