@@ -112,6 +112,14 @@ const previewSchema = z
       fields: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
     }),
     z.object({
+      kind: z.literal("secret_access"),
+      name: z.string(),
+      ttlMinutes: z.number(),
+      reason: z.string(),
+      title: z.string(),
+      summary: z.string(),
+    }),
+    z.object({
       kind: z.literal("sensitive_message"),
       channel: z.string(),
       threadId: z.string(),

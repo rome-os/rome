@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "vault": "./bin/vault.js"
+  },
   "files": [
+    "bin",
     "dist"
   ],
   "scripts": {

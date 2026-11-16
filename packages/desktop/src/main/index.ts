@@ -46,7 +46,7 @@ import { KeepAwake } from "./keep-awake";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
 import { openAudit, registerAuditHandlers } from "./audit";
 import { createAuditWindow } from "./window";
-import { installMicrophonePermission } from "./microphone-permission";
+import { dashboardOrigin, installMicrophonePermission } from "./microphone-permission";
 
 const log = createLogger("main");
 
@@ -178,12 +178,8 @@ async function bootstrap() {
       device,
     });
 
-    // The same Rome the device bridge trusts; a dev window trusts its own URL.
-    installMicrophonePermission(
-      session.defaultSession,
-      () =>
-        controller.activeTarget().instance?.origin ??
-        (devDashboardUrl ? new URL(devDashboardUrl).origin : null),
+    installMicrophonePermission(session.defaultSession, () =>
+      dashboardOrigin(devDashboardUrl, controller.activeTarget().instance?.origin),
     );
     mainWindow = await createMainWindow(runtime);
     log.info("Main window created");

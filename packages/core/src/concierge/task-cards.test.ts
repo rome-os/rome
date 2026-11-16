@@ -94,6 +94,35 @@ describe("cardAt", () => {
     });
   });
 
+  it("titles a secret-access approval by its preview, like a generic one", () => {
+    const preview = {
+      kind: "secret_access",
+      name: "GITHUB_TOKEN",
+      ttlMinutes: 15,
+      reason: "Push the tag",
+      title: "Use GITHUB_TOKEN for 15 min",
+      summary: "Push the tag",
+    };
+    const cards: TaskChatCards = {
+      questions: [],
+      approvals: [
+        {
+          id: "a9",
+          status: "pending",
+          description: "Run vault_apply",
+          payload: { actionName: "system:vault_apply", preview },
+          since: T,
+        },
+      ],
+    } as unknown as TaskChatCards;
+    expect(cardAt(cards, T + 60_000, undefined, DAY)).toMatchObject({
+      kind: "approval",
+      id: "a9",
+      title: "Use GITHUB_TOKEN for 15 min",
+      preview,
+    });
+  });
+
   it("marks a question nobody answered within its wait expired", () => {
     const row = { sessionId: "task-1", expiredWaitAt: new Date(T + 2 * DAY) } as ConciergeTaskRow;
     expect(cardAt(asked(), T + 3 * DAY, row, DAY)).toMatchObject({ id: "q2", expired: true });
