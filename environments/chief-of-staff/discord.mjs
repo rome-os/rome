@@ -273,6 +273,33 @@ async function deleteAsAuthor(s, bot, channelId, parent, message) {
   return false;
 }
 
+// Posts one message as a member, through the member's webhook in the chat, or
+// in a thread of it. Answers the message Discord made.
+async function send(s, bot, member, chat, thread, mention, text) {
+  let threadId = "";
+  let chatName = chat;
+  if (thread) {
+    const found = await threadFor(s, bot, thread, chat);
+    threadId = found.id;
+    chatName = found.chat;
+  } else {
+    chatByName(s, chat);
+  }
+  const hook = webhookOf(s, chatName, member);
+  return await discord(
+    null,
+    "POST",
+    `/webhooks/${hook.id}/${hook.token}?wait=true${threadId ? `&thread_id=${threadId}` : ""}`,
+    {
+      content: mention ? `<@${s.agent.id}> ${text}` : text,
+      username: s.members?.[member]?.name ?? member,
+      allowed_mentions: mention ? { parse: [], users: [s.agent.id] } : { parse: [] },
+    },
+  );
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const commands = {
   // Prints the bot's user id and username, which also checks the token.
   async whoami() {
@@ -336,28 +363,31 @@ const commands = {
   async post(member, chat, thread, mentionAgent, text) {
     const s = state();
     const bot = token("COS_TOKEN");
-    let threadId = "";
-    let chatName = chat;
-    if (thread) {
-      const found = await threadFor(s, bot, thread, chat);
-      threadId = found.id;
-      chatName = found.chat;
-    } else {
-      chatByName(s, chat);
-    }
-    const hook = webhookOf(s, chatName, member);
-    const mention = mentionAgent === "1";
-    const sent = await discord(
-      null,
-      "POST",
-      `/webhooks/${hook.id}/${hook.token}?wait=true${threadId ? `&thread_id=${threadId}` : ""}`,
-      {
-        content: mention ? `<@${s.agent.id}> ${text}` : text,
-        username: s.members?.[member]?.name ?? member,
-        allowed_mentions: mention ? { parse: [], users: [s.agent.id] } : { parse: [] },
-      },
-    );
+    const sent = await send(s, bot, member, chat, thread, mentionAgent === "1", text);
     process.stdout.write(`${sent.id}\n`);
+  },
+
+  // Posts the messages a script file lists, in order, one every `gap`
+  // seconds, then waits out the rest of `span` seconds when it is longer.
+  // Prints one JSON line per message: its place in the script, its id, who
+  // said it, where, and when.
+  async replay(file, gap, span) {
+    const s = state();
+    const bot = token("COS_TOKEN");
+    const script = JSON.parse(readFileSync(file, "utf8"));
+    const messages = Array.isArray(script) ? script : script.messages;
+    if (!Array.isArray(messages)) die(`${file} lists no messages`);
+    const started = Date.now();
+    for (const [i, m] of messages.entries()) {
+      if (i > 0) await sleep(Number(gap) * 1000);
+      if (!m.as || !m.chat || !m.text) die(`message ${i} of ${file} needs as, chat and text`);
+      const sent = await send(s, bot, m.as, m.chat, m.thread ?? "", m.mention === true, m.text);
+      process.stdout.write(
+        `${JSON.stringify({ index: i, id: sent.id, as: m.as, chat: m.chat, mention: m.mention === true, at: sent.timestamp })}\n`,
+      );
+    }
+    const left = Number(span) * 1000 - (Date.now() - started);
+    if (left > 0) await sleep(left);
   },
 
   // Prints messages oldest first as JSON. Without a thread, every message in the

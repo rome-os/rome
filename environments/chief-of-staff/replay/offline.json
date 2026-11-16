@@ -1,0 +1,65 @@
+{
+  "about": "An hour of talk while Rome is offline (A8). The facts a question after Rome is back can ask about: the boat crew wants everyone at the slip at seven on Tuesday; the June gap was the logger battery (dm-member3 only); buoys go back at B, C and E first, A, D and F the week after.",
+  "messages": [
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Quick one while I remember: the boat crew wants us at the slip by seven on Tuesday, not eight."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Seven, got it."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "May backfill is done. June has a two-week gap from the 9th."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "The battery packs came a day early. Fitting them this afternoon."
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "Then we could redeploy Monday after all? No, the slip is closed. Tuesday stays."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "I've put the summary table draft in the shared drive, under salinity."
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "Packs fitted on 14 to 16. 17 to 19 tomorrow morning."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "The survey team asked for the route maps by email. Sending now."
+    },
+    {
+      "as": "member3",
+      "chat": "dm-member3",
+      "text": "Note: the June gap was the logger battery, not the network."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "New label printer arrived. It's on the shelf by the door."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Decision from the call with the harbour master: buoys go back in at positions B, C and E first, A, D and F the week after."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Makes sense."
+    }
+  ]
+}

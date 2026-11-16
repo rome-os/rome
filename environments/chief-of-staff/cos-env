@@ -17,11 +17,15 @@ usage() {
   cos-env rome stop|start|restart|renew-session --chat <name>
   cos-env rome held [--since <time>]
   cos-env logs <dir> [--since <time>]
+  cos-env replay <script> [--gap <seconds>]
+  cos-env offline <script> [--for <minutes>]
+  cos-env clock [forward <hours> | reset]
+  cos-env usage [--since <time>]
   cos-env reset
   cos-env version"
 }
 
-as="" chat="" dm="" thread="" since="" mention=0
+as="" chat="" dm="" thread="" since="" mention=0 gap=1 minutes=60
 args=()
 command="${1:-}"
 [ -n "$command" ] || usage
@@ -34,6 +38,8 @@ while [ $# -gt 0 ]; do
     --thread) thread="${2:?--thread needs a thread id}" && shift 2 ;;
     --since) since="${2:?--since needs a message id or, for logs, a time}" && shift 2 ;;
     --mention-agent) mention=1 && shift ;;
+    --gap) gap="${2:?--gap needs seconds}" && shift 2 ;;
+    --for) minutes="${2:?--for needs minutes}" && shift 2 ;;
     --) shift && args+=("$@") && break ;;
     *) args+=("$1") && shift ;;
   esac
@@ -85,6 +91,18 @@ case "$command" in
     [ ${#args[@]} -eq 1 ] || usage
     cos_logs "${args[0]}" "$since"
     ;;
+  replay)
+    [ ${#args[@]} -eq 1 ] || usage
+    load_secrets
+    discord replay "${args[0]}" "$gap" 0
+    ;;
+  offline)
+    [ ${#args[@]} -eq 1 ] || usage
+    load_secrets
+    cos_offline "${args[0]}" "$minutes"
+    ;;
+  clock) cos_clock "${args[@]}" ;;
+  usage) cos_usage "$since" ;;
   reset) cmd_reset ;;
   version) cos_version ;;
   *) usage ;;

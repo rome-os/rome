@@ -32,6 +32,10 @@ STATE_FILE="$RUN_DIR/state.json"
 BUILD_FILE="$RUN_DIR/build.json"
 ROME_ENV_FILE="$RUN_DIR/rome.env"
 OWNER_FILE="$RUN_DIR/owner"
+# How many days ahead of the devbox Rome's clock runs, when `cos-env clock`
+# moved it. Absent means Rome runs on the real time.
+CLOCK_FILE="$RUN_DIR/clock"
+FAKETIME_LIB=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
 
 IMAGE="rome-env-${NAME}:latest"
 ROME="rome-env-${NAME}-rome"
@@ -290,6 +294,9 @@ build_rome_image() {
       --build-arg "ROME_BUILD_TIME=$(date -u +%FT%TZ)" \
       .docker/rome-runtime-workspace >/dev/null
   )
+  # libfaketime, for `cos-env clock`. It does nothing until start_rome preloads it.
+  printf 'FROM %s\nRUN apt-get update -qq && apt-get install -y -qq --no-install-recommends libfaketime >/dev/null && rm -rf /var/lib/apt/lists/*\n' "$IMAGE" |
+    docker build --quiet --tag "$IMAGE" - >/dev/null
   git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
   # agent.commit is the first ref, the agent's own; merged lists every ref in
   # the build, and tree the commit the image was built from.
@@ -356,6 +363,13 @@ start_rome() {
   save_rome_logs
   stop_watch
   docker rm -f "$ROME" >/dev/null 2>&1 || true
+  local clock=()
+  if [ -s "$CLOCK_FILE" ]; then
+    # Only the wall clock moves. The monotonic clock stays real, so timers run
+    # at their normal pace.
+    clock=(-e "LD_PRELOAD=$FAKETIME_LIB" -e "FAKETIME=+$(cat "$CLOCK_FILE")h"
+      -e FAKETIME_DONT_FAKE_MONOTONIC=1 -e FAKETIME_DONT_RESET=1)
+  fi
   # The devbox runs many Romes at once. The cap keeps this one, and the Chrome
   # the image runs inside it, from taking the box down; Chrome dies with the
   # container on reset and down.
@@ -363,7 +377,7 @@ start_rome() {
   # rather than the host journal, which drops old entries.
   docker run -d --name "$ROME" --restart unless-stopped --memory 6g \
     --log-driver json-file --log-opt max-size=100m --log-opt max-file=10 \
-    --env-file "$ROME_ENV_FILE" \
+    --env-file "$ROME_ENV_FILE" "${clock[@]}" \
     -v "$HOME_VOLUME:/home/rome" -v "$MEMORY_VOLUME:/app/memory" -v "$USER_VOLUME:/home/user" \
     --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor=unconfined \
     "$IMAGE" >/dev/null
@@ -554,6 +568,7 @@ cmd_up() {
   claim_ownership
   load_secrets
   if [ "$build" = 1 ] || [ -z "$(image_sha)" ]; then build_rome_image; fi
+  rm -f "$CLOCK_FILE"
   log "reading the bots and chats on Discord ..."
   write_discord_state
   write_rome_env
@@ -743,9 +758,103 @@ bring_rome_back() {
   local attempts=0
   until docker logs --since "$since" "$ROME" 2>&1 | grep -q '"discord client ready"'; do
     attempts=$((attempts + 1))
-    [ "$attempts" -lt 60 ] || die "Rome's Discord client never became ready. Inspect: docker logs $ROME"
+    [ "$attempts" -lt 180 ] || die "Rome's Discord client never became ready. Inspect: docker logs $ROME"
     sleep 1
   done
+}
+
+# `cos-env clock forward <hours>` moves Rome's wall clock that many hours
+# further ahead of the devbox's, `cos-env clock reset` back to the real time,
+# and `cos-env clock` prints how far ahead it is and Rome's time. A move starts
+# Rome again with libfaketime preloaded. Discord stamps messages with the real
+# time, so a message said before a move of 24 hours reads to Rome as said
+# yesterday.
+# shellcheck disable=SC2120 # cos-env passes the arguments.
+cos_clock() {
+  local hours
+  case "${1:-}" in
+    "")
+      printf '{"hoursAhead":%s,"romeNow":"%s"}\n' "$(cat "$CLOCK_FILE" 2>/dev/null || echo 0)" \
+        "$(docker exec "$ROME" node -e 'process.stdout.write(new Date().toISOString())')"
+      return
+      ;;
+    forward)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || die "usage: cos-env clock forward <hours>"
+      hours=$(($(cat "$CLOCK_FILE" 2>/dev/null || echo 0) + $2))
+      ;;
+    reset) hours=0 ;;
+    *) die "usage: cos-env clock [forward <hours> | reset]" ;;
+  esac
+  docker run --rm --entrypoint test "$IMAGE" -f "$FAKETIME_LIB" ||
+    die "this image has no libfaketime. Run env.sh up to rebuild it."
+  claim_ownership
+  load_secrets
+  if [ "$hours" = 0 ]; then rm -f "$CLOCK_FILE"; else echo "$hours" >"$CLOCK_FILE"; fi
+  log "starting Rome again with its clock $hours hours ahead ..."
+  local since attempts=0
+  since="$(date -u +%FT%T.%NZ)"
+  start_rome
+  until docker logs --since "$since" "$ROME" 2>&1 | grep -q '"discord client ready"'; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 180 ] || die "Rome's Discord client never became ready. Inspect: docker logs $ROME"
+    sleep 1
+  done
+  cos_clock
+}
+
+# Prints one JSON line per agent turn Rome ran since the given time, with the
+# tokens its model calls took, from Rome's own record of the session's messages.
+cos_usage() {
+  docker exec -i "$ROME" node - "${1:-}" <<'JS'
+const Database = require("/app/node_modules/better-sqlite3");
+const db = new Database("/home/rome/.rome/default/rome.db", { readonly: true });
+const since = process.argv[2] ? Math.floor(Date.parse(process.argv[2]) / 1000) : 0;
+if (Number.isNaN(since)) throw new Error(`not a time: ${process.argv[2]}`);
+const rows = db
+  .prepare(
+    `select m.turn_id, m.session_id, s.name, min(m.created_at) as start,
+       sum(m.input_tokens) as input, sum(m.output_tokens) as output,
+       sum(m.cache_read_tokens) as cache_read, sum(m.cache_write_tokens) as cache_write,
+       sum(m.cost_usd) as cost
+     from rome_agent_messages m left join rome_sessions s on s.id = m.session_id
+     where m.turn_id is not null and m.created_at >= ?
+     group by m.turn_id order by start`,
+  )
+  .all(since);
+for (const r of rows) {
+  process.stdout.write(
+    `${JSON.stringify({
+      start: new Date(r.start * 1000).toISOString(),
+      turnId: r.turn_id,
+      sessionId: r.session_id,
+      session: r.name ?? null,
+      inputTokens: r.input ?? 0,
+      outputTokens: r.output ?? 0,
+      cacheReadTokens: r.cache_read ?? 0,
+      cacheWriteTokens: r.cache_write ?? 0,
+      costUsd: r.cost ?? null,
+    })}\n`,
+  );
+}
+JS
+}
+
+# Stops Rome, posts the script's messages spread over the given minutes while
+# it is down, then starts it again.
+cos_offline() {
+  local file="$1" minutes="${2:-60}" count gap
+  [ -f "$file" ] || die "no script file $file"
+  [[ "$minutes" =~ ^[0-9]+$ ]] || die "--for takes whole minutes"
+  count="$(node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String((Array.isArray(s)?s:s.messages).length))' "$file")"
+  gap=$((minutes * 60 / (count > 1 ? count : 1)))
+  log "stopping Rome for $minutes minutes, with $count messages said meanwhile ..."
+  docker stop "$ROME" >/dev/null
+  # Rome comes back even when posting fails partway.
+  trap 'bring_rome_back start' EXIT
+  discord replay "$file" "$gap" "$((minutes * 60))"
+  trap - EXIT
+  log "starting Rome again ..."
+  bring_rome_back start
 }
 
 cos_rome() {

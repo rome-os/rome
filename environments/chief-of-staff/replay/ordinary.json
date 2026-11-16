@@ -1,0 +1,577 @@
+{
+  "about": "100 ordinary team messages in the shared places (general, standup, leads), none addressed to the agent, with 3 mentions mixed in (A3, A1). Messages marked extra are private-chat notes (dm-*) that A3 does not count. Facts said here that a later question can ask about: the logger manual is in the grey cabinet, second drawer; buoy 14's real serial is K7-0148 (said only in dm-member2); Peedie Marine quoted 160 pounds for the boat on the 21st (said only in dm-member1); the redeploy moved to Tuesday because the battery packs arrive Monday; the cable walk moved from Thursday to next Tuesday; logger gaps are marked null, never interpolated; the Hoy ingest stopped because its service account expired, and Teodor rotated it.",
+  "messages": [
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Morning all. Ferry from Houton was late again, so I'm in a bit after nine."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Same boat, literally. Coffee's on in the hut."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "I'm already in. The heating in the lab is finally fixed."
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "Yesterday: finished the bootloader image for the Kelpie-7 buoys. Today: bench test on buoy 14. No blockers."
+    },
+    {
+      "as": "member3",
+      "chat": "standup",
+      "text": "Yesterday: cleaned the Scapa Flow salinity export. Today: start the backfill for March. Blocker: the old logger files are in a format I haven't seen."
+    },
+    {
+      "as": "member1",
+      "chat": "standup",
+      "text": "Yesterday: route notes for Rackwick. Today: call the survey team about the cable walk. No blockers."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Priya, which logger format is it? I might have the old manual somewhere."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "The files end in .slf. Header says Saltmarsh v2."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "I do have that manual. It's in the grey cabinet, second drawer, labelled SLF."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Found it, thank you."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "Marisol, do we have budget left for a second spare battery pack per buoy?"
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "About two thousand left in field kit. A second pack each for six buoys fits."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "Great, I'll order them from Northlink Marine Supply."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Has anyone seen the long USB-C cable? The red one."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "It was on the bench by the window yesterday."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Got it."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Reminder that the fire alarm test is at eleven."
+    },
+    {
+      "as": "member3",
+      "chat": "dm-member3",
+      "text": "Note to self: check the March salinity values against the tide tables before loading.",
+      "extra": true
+    },
+    {
+      "as": "member2",
+      "chat": "dm-member2",
+      "text": "Note: buoy 14 serial is K7-0148, not K7-0141 like the label says.",
+      "extra": true
+    },
+    {
+      "as": "member1",
+      "chat": "dm-member1",
+      "text": "Need to book the boat for the cable walk. Ask Peedie Marine about the 21st.",
+      "extra": true
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Bench test on 14 passed. Bootloader flashed in under four minutes."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Nice one."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Lunch at the Pier Arts cafe? They've got soup on."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "In."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "I'll join after my call."
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "Teodor, can you take the harbour-master meeting on Wednesday? I'm on the cable walk."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "Yes, what time?"
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "Two o'clock, at the Stromness harbour office."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "Booked in."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "The .slf files decode fine with the manual's table. March is loading now."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "mention": true,
+      "text": "what is Teodor working on this week?"
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "Update: buoy 15 also passed. Moving to 16 after lunch."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Survey team confirmed the cable walk for Thursday morning, meeting at Rackwick car park at eight."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Bring wellies, the path past the bothy floods."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Noted."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Buoy 16 failed the flash. Watchdog reset halfway through."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Power or firmware?"
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Looks like power. The bench supply sagged. Trying the other supply."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Other supply works. 16 is flashed."
+    },
+    {
+      "as": "member1",
+      "chat": "dm-member1",
+      "text": "Peedie Marine can do the boat on the 21st, 160 pounds for the day.",
+      "extra": true
+    },
+    {
+      "as": "member3",
+      "chat": "dm-member3",
+      "text": "March backfill done. April next.",
+      "extra": true
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "The battery packs ship Friday, arriving Monday."
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "Good. Put the invoice in the field kit folder."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Did anyone change the shared drive password? I'm locked out."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "IT rotated it this morning. New one is in the vault."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Got in, thanks."
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "Buoys 17 and 18 done. 19 tomorrow, then all six are on the new bootloader."
+    },
+    {
+      "as": "member3",
+      "chat": "standup",
+      "text": "April backfill is half done. Some April days have gaps where the logger was down."
+    },
+    {
+      "as": "member1",
+      "chat": "standup",
+      "text": "Cable walk prep done. Printed the route maps."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Is the van free tomorrow? I need to take two buoys to the slip."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "I have it until ten, then it's yours."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Perfect."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Question for whoever knows: do we mark logger gaps as null or interpolate?"
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Null. We decided last year not to interpolate in the published tables."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Null it is."
+    },
+    {
+      "as": "member2",
+      "chat": "dm-member2",
+      "text": "Remember to log the K7-0148 serial in the asset sheet.",
+      "extra": true
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Weather looks rough for Thursday. Forty knot gusts forecast."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Ugh. Is the walk still on?"
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Survey team says they'll decide at seven on Thursday."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "Harbour master asked if we can share the buoy positions before redeploy."
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "Yes, send them the planned positions list. Not the raw GPS logs."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "Will do."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Anyone want the last of the shortbread? It's in the kitchen."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Already gone, sorry."
+    },
+    {
+      "as": "member1",
+      "chat": "standup",
+      "text": "Small change: I'm out Friday afternoon, dentist."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Buoy 19 flashed. All six on the new bootloader."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "mention": true,
+      "text": "which goals do I own, and when are they due?"
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Great work."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Brilliant. That's the Kelpie-7 flashing done."
+    },
+    {
+      "as": "member3",
+      "chat": "dm-member3",
+      "text": "April backfill done. Gaps marked null on the 3rd, 4th and 17th.",
+      "extra": true
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Runbook for the flashing is a draft in the shared drive, under field ops."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "I'll read it tonight."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "The salinity on 12 April looks too high. Checking against the tide table."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "It was a spring tide. The value is real."
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "Teodor, for the redeploy: Monday or Tuesday?"
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "Tuesday. The packs arrive Monday and I want a day to fit them."
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "Tuesday it is. I'll tell the boat crew."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Heads up, the slip at Stromness is closed Monday for repairs."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Good thing we picked Tuesday."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Does anyone know who owns the station account for Hoy?"
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "That's mine. Why?"
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "The ingest from Hoy stopped at six this morning."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Probably the service account expiry. I'll rotate it today."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Rotated. Hoy ingest is back."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Confirmed, data is flowing."
+    },
+    {
+      "as": "member1",
+      "chat": "dm-member1",
+      "text": "Tell the survey team about the boat on the 21st.",
+      "extra": true
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "Next: fit the battery packs Monday, redeploy Tuesday."
+    },
+    {
+      "as": "member3",
+      "chat": "standup",
+      "text": "Next: May backfill, then the summary table."
+    },
+    {
+      "as": "member1",
+      "chat": "standup",
+      "text": "Next: cable walk if the weather allows, then write up."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Cable walk is off for Thursday, moved to next Tuesday."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "That clashes with the redeploy."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Different boats, different people. It's fine."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Who's covering the lab Tuesday then?"
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "I'll be here all day, so me."
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "Harbour master has the positions list. They're happy."
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "Thanks."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "May backfill started. First week looks clean."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "mention": true,
+      "text": "who is on the team, and what is each person doing?"
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Has the new label printer arrived?"
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Tomorrow, apparently."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Label printer is here. Printing the buoy tags now."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "May backfill is at the 20th. Clean so far."
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Survey team sent the revised route for Tuesday. It skips the bothy path."
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "Packs fitted on two buoys so far. The rest after lunch."
+    },
+    {
+      "as": "member3",
+      "chat": "standup",
+      "text": "Summary table has its first week of rows."
+    },
+    {
+      "as": "member1",
+      "chat": "standup",
+      "text": "Wrote up the cable route notes. Draft in the shared drive."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Does anyone have the torque settings for the buoy housings?"
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Eight newton metres. It's on the sticker inside the lid."
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Found it, thanks."
+    },
+    {
+      "as": "member3",
+      "chat": "dm-member3",
+      "text": "Draft summary table: one row per day, columns for mean, min and max salinity.",
+      "extra": true
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Heading off. See you tomorrow."
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Night."
+    }
+  ]
+}
