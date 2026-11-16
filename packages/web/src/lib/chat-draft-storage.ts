@@ -12,11 +12,13 @@ const PREFIX = "rome:chat-draft:";
 const recordSchema = z.object({
   version: z.literal(1),
   text: z.string(),
-  // Optional, so drafts saved before stops were kept still load.
+  // Optional, so drafts saved before stops were kept still load. A reason a
+  // later release no longer knows drops only the notice, never the text.
   stop: z
     .object({ reason: dictationStopReasonSchema, detail: z.string().optional() })
     .nullable()
-    .optional(),
+    .optional()
+    .catch(null),
   authEpoch: z.string(),
 });
 export interface ChatDraft {
