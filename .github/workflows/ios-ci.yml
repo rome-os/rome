@@ -44,6 +44,13 @@ jobs:
           xcode=$(ls -d /Applications/Xcode_26.6*.app | sort -V | tail -1)
           sudo xcode-select -s "$xcode"
           xcodebuild -version
+      # The Swift packages (A2UI and its plugin and macros) are fetched once per
+      # Package.resolved, not on every run.
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/SourcePackages
+          key: spm-${{ runner.os }}-xcode26.6-${{ hashFiles('ios/Rome.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Pick a simulator
         id: sim
         run: |
@@ -57,6 +64,8 @@ jobs:
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
             -skipPackagePluginValidation \
             -skipMacroValidation \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO
 
   # Debug builds can play a recording as the microphone for UI tests. Release
@@ -74,6 +83,13 @@ jobs:
         run: |
           xcode=$(ls -d /Applications/Xcode_26.6*.app | sort -V | tail -1)
           sudo xcode-select -s "$xcode"
+      # The Swift packages (A2UI and its plugin and macros) are fetched once per
+      # Package.resolved, not on every run.
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/SourcePackages
+          key: spm-${{ runner.os }}-xcode26.6-${{ hashFiles('ios/Rome.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Build Release
         run: |
           xcodebuild build \
@@ -84,6 +100,8 @@ jobs:
             -derivedDataPath /tmp/rome-release \
             -skipPackagePluginValidation \
             -skipMacroValidation \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO
       - name: Look for the test audio source
         run: |
@@ -112,11 +130,39 @@ jobs:
         run: |
           xcode=$(ls -d /Applications/Xcode_26.6*.app | sort -V | tail -1)
           sudo xcode-select -s "$xcode"
+      # The Swift packages (A2UI and its plugin and macros) are fetched once per
+      # Package.resolved, not on every run.
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/SourcePackages
+          key: spm-${{ runner.os }}-xcode26.6-${{ hashFiles('ios/Rome.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Pick a simulator
         id: sim
         run: |
           name=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9]+( Pro)?' | sort -V | tail -1)
-          echo "name=$name" >> "$GITHUB_OUTPUT"
+          udid=$(xcrun simctl list devices available | grep -E "^ +$name \(" | tail -1 | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
+          test -n "$udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Build for testing
+        run: |
+          xcodebuild build-for-testing \
+            -project Rome.xcodeproj \
+            -scheme RomeUITests \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/ui-dd" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO
+      # The app timed out launching on a simulator still booting, so the tests
+      # start only once it has booted. Booting during the build slowed the
+      # build by about four minutes, so it boots after.
+      - name: Boot the simulator
+        # A hung boot fails here, readably, not at the job's limit.
+        timeout-minutes: 10
+        run: xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
       # The voice input suite takes about 20 minutes, so a PR or push runs it only when it
       # changes voice input; nightly runs it whole, with rules 4 and 5, whose three minutes
       # of dictation and 60 s wait are too long for every change.
@@ -187,15 +233,18 @@ jobs:
                      -skip-testing:RomeUITests/VoiceInputTests/testRule5OnlyTheGuardianSends)
             fi
           else
-            extra=(-only-testing:RomeUITests/LaunchTests)
+            # The launch test alone gets a second try, so a simulator hiccup does
+            # not fail the job. The voice input suite gets none: its rules exist to
+            # catch a start that misses now and then.
+            extra=(-only-testing:RomeUITests/LaunchTests -retry-tests-on-failure -test-iterations 2)
           fi
-          xcodebuild test \
+          xcodebuild test-without-building \
             -project Rome.xcodeproj \
             -scheme RomeUITests \
-            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
-            -skipPackagePluginValidation \
-            -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/ui-dd" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            -disableAutomaticPackageResolution \
             -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             "${extra[@]}"
       # Rule 1: the field shows listening within 0.5 s of the start action. The app marks each

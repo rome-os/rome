@@ -262,6 +262,8 @@ export function useVoiceInput({
     return () => watching.disconnect();
   }, [state, stop, textareaRef]);
 
+  const level = useCallback(() => dictationRef.current?.level() ?? 0, []);
+
   return {
     /**
      * False hides the voice control: the instance is not signed in to Rome
@@ -286,5 +288,7 @@ export function useVoiceInput({
     stop,
     /** Stops listening, then sends once the last words are in the field. Does nothing while idle. */
     stopAndSend,
+    /** The microphone's loudness from 0 to 1 right now, or 0 while it is not open. */
+    level,
   };
 }
