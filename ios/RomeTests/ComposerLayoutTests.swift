@@ -53,3 +53,81 @@ import UIKit
         #expect(!AgentBubble.capped(measured: 40, expanded: false, size: .large))
     }
 }
+
+@Suite struct ComposerHeightTests {
+    @Test func expandingGivesLongDraftsMoreRoomWithoutExceedingTheCap() {
+        for size in DynamicTypeSize.allCases {
+            let line = ComposerTextView.font(for: size).lineHeight
+            let inset = ComposerTextView.verticalInset(lineHeight: line)
+            let folded = ComposerTextView.heightLimit(lineHeight: line, inset: inset, expanded: false)
+            let expanded = ComposerTextView.heightLimit(lineHeight: line, inset: inset, expanded: true)
+            #expect(expanded >= folded)
+            #expect(folded >= line + inset * 2)
+            #expect(expanded <= max(280, line + inset * 2))
+        }
+        let line = ComposerTextView.font(for: .large).lineHeight
+        let inset = ComposerTextView.verticalInset(lineHeight: line)
+        #expect(ComposerTextView.heightLimit(lineHeight: line, inset: inset, expanded: true)
+            > ComposerTextView.heightLimit(lineHeight: line, inset: inset, expanded: false))
+    }
+}
+
+@MainActor
+@Suite struct ComposerMorphTests {
+    @Observable final class Draft {
+        var text = "A draft with a selected word"
+        var focused = false
+    }
+
+    private struct Host: View {
+        @Bindable var draft: Draft
+        let attachments: ComposerAttachments
+
+        var body: some View {
+            VStack {
+                Spacer()
+                Composer(text: $draft.text, placeholder: "Message", focused: $draft.focused,
+                    attachments: attachments, onSend: {})
+            }
+            .padding(16)
+        }
+    }
+
+    private func editors(in view: UIView) -> [PastingTextView] {
+        (view as? PastingTextView).map { [$0] } ?? view.subviews.flatMap { editors(in: $0) }
+    }
+
+    @Test func morphKeepsTheEditorAndSelection() async throws {
+        let draft = Draft()
+        let host = UIHostingController(rootView: Host(draft: draft, attachments: ComposerAttachments()))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        let editor = try #require(editors(in: host.view).first)
+        editor.selectedRange = NSRange(location: 15, length: 8)
+        let selection = editor.selectedRange
+        let compactWidth = editor.bounds.width
+
+        draft.focused = true
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(editors(in: host.view).count == 1)
+        #expect(editors(in: host.view).first === editor)
+        #expect(editor.selectedRange == selection)
+        #expect(editor.bounds.width > compactWidth)
+
+        draft.focused = false
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(editors(in: host.view).first === editor)
+        #expect(editor.selectedRange == selection)
+        #expect(editor.text == draft.text)
+        #expect(abs(editor.bounds.width - compactWidth) < 1)
+    }
+}

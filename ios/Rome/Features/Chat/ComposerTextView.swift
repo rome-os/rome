@@ -25,7 +25,16 @@ struct ComposerTextView: UIViewRepresentable {
     /// the app sets (a restored draft, a send clearing the field) is not one.
     var onEdit: () -> Void = {}
 
+    var expanded = false
+    var compactWidth: CGFloat = 240
+    var onMeasure: (Bool, CGFloat) -> Void = { _, _ in }
+
     static let maxLines = 6
+
+    static func heightLimit(lineHeight: CGFloat, inset: CGFloat, expanded: Bool) -> CGFloat {
+        max(lineHeight + inset * 2, min(expanded ? 280 : 160,
+            lineHeight * CGFloat(expanded ? 12 : maxLines) + inset * 2))
+    }
 
     func makeUIView(context: Context) -> PastingTextView {
         let view = PastingTextView()
@@ -92,10 +101,18 @@ struct ComposerTextView: UIViewRepresentable {
         let width = proposal.width ?? 240
         let fitting = view.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         let lineHeight = (view.font ?? Self.font(for: context.environment.dynamicTypeSize)).lineHeight
-        let cap = lineHeight * CGFloat(Self.maxLines) + view.textContainerInset.top + view.textContainerInset.bottom
+        let cap = Self.heightLimit(lineHeight: lineHeight, inset: view.textContainerInset.top, expanded: expanded)
+        let compact = view.sizeThatFits(CGSize(width: max(1, compactWidth), height: .greatestFiniteMagnitude))
+        let multiline = compact.height > lineHeight + view.textContainerInset.top * 2 + lineHeight / 2
+        let height = min(fitting.height, cap)
+        DispatchQueue.main.async { onMeasure(multiline, height) }
         let scrolls = fitting.height > cap
         if view.isScrollEnabled != scrolls {
-            DispatchQueue.main.async { view.isScrollEnabled = scrolls }
+            DispatchQueue.main.async {
+                view.isScrollEnabled = scrolls
+                if scrolls { view.scrollRangeToVisible(view.selectedRange) }
+                else { view.setContentOffset(.zero, animated: false) }
+            }
         }
         return CGSize(width: width, height: min(fitting.height, cap))
     }
