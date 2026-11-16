@@ -372,7 +372,8 @@ final class VoiceInputTests: XCTestCase {
     // MARK: Rule 10
 
     /// Rule 10 on the phone: while Rome Cloud serves voice input, Settings names no transcription
-    /// provider or host anywhere, and shows no "Voice input" status row.
+    /// provider or host anywhere, and shows no "Voice input" status row. The Microphone row
+    /// still shows.
     @MainActor
     func testRule10TheAppNamesNoProvider() throws {
         let place = try voiceInputPlace()
@@ -387,6 +388,7 @@ final class VoiceInputTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Version"].waitForExistence(timeout: 10), "Settings never opened")
         // A row that shows up late still fails.
         XCTAssertFalse(app.descendants(matching: .any)["voice-input-place"].waitForExistence(timeout: 3), "Settings shows a \"Voice input\" status row")
+        XCTAssertTrue(app.descendants(matching: .any)["voice-input-microphone"].waitForExistence(timeout: 3), "Settings has no Microphone row while voice input works")
         for name in [place.provider, place.host] {
             let shown = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", name, name))
             if shown.count > 0 {
