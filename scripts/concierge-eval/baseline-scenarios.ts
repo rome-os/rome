@@ -17,7 +17,6 @@ export type PolicyRow =
   | "reasoning"
   | "simple-task"
   | "heavy-task"
-  | "relay"
   | "recall";
 
 /** What a scenario's checks read: the guardian turns by step, every turn, and what was said. */
@@ -259,6 +258,3 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
     rubric: `The last answer must say Porto and a job at a design studio, in one line. The first reply should acknowledge the news briefly (a reaction or one line), and the gift answer should be short and practical. ${VOICE}`,
   },
 ];
-
-/** Scenarios whose relay turn is the measurement of the relay row. */
-export const RELAY_FROM = ["task-simple", "task-heavy"];

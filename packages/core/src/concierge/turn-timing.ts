@@ -27,6 +27,8 @@ export interface TurnTimingStart {
   chatId: string;
   turnId: string;
   trigger: TurnTrigger;
+  /** The owner's message the turn took, whose 👀 or reaction is its first sign. */
+  messageKey?: string;
   /** When the owner's send reached Rome, or when Rome started the turn, epoch ms. */
   startedAtMs: number;
   /** The effort the turn asked for, when it asked for one. */

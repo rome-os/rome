@@ -3,6 +3,9 @@
 // The judge may search the web to check a fact. docs/concierge-eval.md#baseline
 
 import { execFile } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export interface Verdict {
   /** 1 (wrong or useless) to 5 (correct, concise, in voice). */
@@ -58,11 +61,13 @@ export function judge(rubric: string, transcript: string, options: JudgeOptions)
     "--max-turns",
     "8",
   ];
-  return new Promise((resolve, reject) => {
+  // An empty folder, so no project's instructions or settings sway the score.
+  const cwd = mkdtempSync(join(tmpdir(), "rome-concierge-judge-"));
+  return new Promise<Verdict>((resolve, reject) => {
     const child = execFile(
       "claude",
       args,
-      { maxBuffer: 16 * 1024 * 1024, timeout: 10 * 60_000 },
+      { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 10 * 60_000 },
       (error, stdout) => {
         if (error) return reject(error);
         let text = stdout;
@@ -77,5 +82,5 @@ export function judge(rubric: string, transcript: string, options: JudgeOptions)
       },
     );
     child.stdin?.end(judgePrompt(rubric, transcript));
-  });
+  }).finally(() => rmSync(cwd, { recursive: true, force: true }));
 }

@@ -14,6 +14,8 @@ export interface ScenarioRun {
   model: string;
   effort: string;
   run: number;
+  /** The scenario version the run was played at (BASELINE_VERSION). */
+  version?: number;
   chatId: string;
   seconds: number;
   /** From the send to the last relayed result landing, for a task. */
@@ -103,9 +105,26 @@ export function baselineMarkdown(runs: ScenarioRun[]): string {
     const ofScenario = runs.filter((r) => r.id === id);
     out.push(`## ${id} (${ofScenario[0]?.row})`, "");
     out.push(`| ${HEADER.join(" | ")} |`, `|${HEADER.map(() => "---").join("|")}|`);
-    const configs = [...new Set(ofScenario.map((r) => r.config))].sort();
-    for (const config of configs)
-      out.push(configRow(ofScenario.filter((r) => r.config === config)));
+    // Runs of one scenario at different versions are never pooled: each
+    // version gets its own rows, labelled, and the table says so.
+    const versions = [...new Set(ofScenario.map((r) => r.version ?? 1))].sort((a, b) => a - b);
+    const groups = [...new Set(ofScenario.map((r) => `${r.config}\u0000${r.version ?? 1}`))].sort();
+    for (const group of groups) {
+      const [config, version] = group.split("\u0000");
+      const rows = ofScenario.filter(
+        (r) => r.config === config && String(r.version ?? 1) === version,
+      );
+      const row = configRow(rows);
+      out.push(
+        versions.length > 1 ? row.replace(`| ${config} |`, `| ${config} (v${version}) |`) : row,
+      );
+    }
+    if (versions.length > 1) {
+      out.push(
+        "",
+        `⚠️ This scenario changed between runs (versions ${versions.join(", ")}): compare rows of one version only.`,
+      );
+    }
     const paths = ofScenario.filter((r) => r.taskPath);
     if (paths.length) out.push("", ...taskPathTable(paths));
     const failed = ofScenario.filter((r) => r.notes.length);

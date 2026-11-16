@@ -95,12 +95,18 @@ export function taskPath(
   const taskTraces = new Set(taskAgentSpans.map((r) => r.trace));
   const first = taskAgentSpans[0];
   const firstTrace = first?.trace;
-  const opening = rows.filter(
-    (r) =>
-      r.trace === firstTrace &&
-      (r.name === "session.acquire" || r.name === "model.session.open") &&
-      r.subagent !== "true",
-  );
+  // The task's own session start: its acquire, which encloses a cold model
+  // session open, so the open alone only when no acquire was traced.
+  const own = (name: string) =>
+    rows.filter(
+      (r) =>
+        r.trace === firstTrace &&
+        r.name === name &&
+        r.subagent !== "true" &&
+        (r.agent === "" || r.agent === first?.agent),
+    );
+  const acquires = own("session.acquire");
+  const opening = acquires.length ? acquires.slice(0, 1) : own("model.session.open").slice(0, 1);
   const inTask = rows.filter((r) => taskTraces.has(r.trace));
   const taskTools = inTask.filter((r) => r.name === "tool" && r.thread === taskKey);
   const toolCounts: Record<string, number> = {};

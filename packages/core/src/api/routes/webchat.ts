@@ -1188,12 +1188,27 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     (activeStreams.get(sessionId) ?? []).some(
       (stream) => !stream.finished && (!stream.quiet || stream.spoke),
     ) || deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
+  // The unfinished streams of a chat whose turn is `turnId`, by either id it goes by.
+  const streamsOfTurn = (sessionId: string, turnId: string | null | undefined) =>
+    turnId
+      ? (activeStreams.get(sessionId) ?? []).filter(
+          (stream) =>
+            !stream.finished && (stream.turnId === turnId || stream.agentTurnId === turnId),
+        )
+      : [];
+  // The unfinished stream timing the turn that took owner message `messageKey`.
+  const streamOfMessage = (sessionId: string, messageKey: string) =>
+    (activeStreams.get(sessionId) ?? []).find(
+      (stream) => !stream.finished && stream.timing?.start.messageKey === messageKey,
+    );
   // A quiet turn shows once it says something.
   deps.webchatRepo.onMessageInserted((message) => {
     if (message.role !== "assistant") return;
+    // A message times only the turn that said it: another turn may be queued
+    // or still finishing in the same chat.
     if (carriesText(message.content)) {
-      for (const stream of activeStreams.get(message.sessionId) ?? []) {
-        if (!stream.finished) stream.timing?.said();
+      for (const stream of streamsOfTurn(message.sessionId, message.turnId)) {
+        stream.timing?.said();
       }
     }
     let changed = false;
@@ -1207,14 +1222,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     if (changed) notifyTurn(message.sessionId);
   });
-  // 👀 and reactions on a Concierge chat's messages time its running turn.
-  deps.concierge?.messageStatus?.onSign?.((chatId, sign) => {
-    for (const stream of activeStreams.get(chatId) ?? []) {
-      if (stream.finished || !stream.timing) continue;
-      if (sign === "working") stream.timing.working();
-      else stream.timing.reacted();
-    }
-  });
+  // 👀 and a reaction on the owner's message time the turn that took it, as
+  // the owner sees them, whatever set them: a long tool call, a task made
+  // for the message, or the Concierge's own reaction. Watched from the first
+  // timed turn on.
+  let watchingSigns = false;
+  const timeTurn = (stream: ActiveWebchatStream, timing: ConciergeTurnTiming): void => {
+    stream.timing = timing;
+    if (watchingSigns) return;
+    watchingSigns = true;
+    deps.concierge?.onMessageStatus?.((event) => {
+      if (event.status !== "working") return;
+      streamOfMessage(event.sessionId, event.messageId)?.timing?.working();
+    });
+    deps.webchatRepo.onMessageReaction((event) => {
+      if (event.reaction) streamOfMessage(event.sessionId, event.messageId)?.timing?.reacted();
+    });
+  };
   const openTool = (sessionId: string): string | null =>
     openToolOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
@@ -2474,7 +2498,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (stream.finished) return;
     stream.finished = true;
     const timed = stream.timing?.finish(stream.agentTurnId ?? stream.turnId);
-    if (timed) reportConciergeTurn(timed);
+    // A quiet turn that said nothing was housekeeping: nobody waited on it.
+    if (timed && (!stream.quiet || stream.spoke)) reportConciergeTurn(timed);
     // The live preview is over — the durable reply lives in the DB now. Drop
     // the assistant_text replay frame so a late reattach doesn't flash a
     // transient bubble before swapping to the persisted message. Subscribers
@@ -4683,16 +4708,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         await handle.stop(reason);
       };
       if (isConciergeChat(session)) {
-        stream.timing = new ConciergeTurnTiming(
-          {
-            chatId: sessionId,
-            turnId,
-            trigger: said.taskInput || saidBy ? "system" : "guardian",
-            startedAtMs: receivedAtMs,
-            ...(reasoningEffort ? { effort: reasoningEffort } : {}),
-            ...(sessionWarmth ? { session: sessionWarmth } : {}),
-          },
-          agentName,
+        timeTurn(
+          stream,
+          new ConciergeTurnTiming(
+            {
+              chatId: sessionId,
+              turnId,
+              trigger: said.taskInput || saidBy ? "system" : "guardian",
+              messageKey: inputId,
+              startedAtMs: receivedAtMs,
+              ...(reasoningEffort ? { effort: reasoningEffort } : {}),
+              ...(sessionWarmth ? { session: sessionWarmth } : {}),
+            },
+            agentName,
+          ),
         );
       }
       enqueueStream(sessionId, stream);
@@ -5261,23 +5290,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       session.agentName ?? "main",
     );
     if (options?.quiet) stream.quiet = true;
-    // Housekeeping turns say nothing to wait for, so only the others are timed.
-    if (isConciergeChat(session) && !options?.quiet) {
-      stream.timing = new ConciergeTurnTiming(
-        {
-          chatId: sessionId,
-          turnId: syntheticTurnId,
-          trigger: "system",
-          startedAtMs: Date.now(),
-          session:
-            deps.agentSessionManager.find({
-              agentName: session.agentName ?? "main",
-              channelThreadKey: webchatSessionKey(sessionId),
-            }) === undefined
-              ? "cold"
-              : "warm",
-        },
-        session.agentName ?? "main",
+    // A quiet turn is timed too, and reported only once it said something.
+    if (isConciergeChat(session)) {
+      timeTurn(
+        stream,
+        new ConciergeTurnTiming(
+          {
+            chatId: sessionId,
+            turnId: syntheticTurnId,
+            trigger: "system",
+            startedAtMs: Date.now(),
+            session:
+              deps.agentSessionManager.find({
+                agentName: session.agentName ?? "main",
+                channelThreadKey: webchatSessionKey(sessionId),
+              }) === undefined
+                ? "cold"
+                : "warm",
+          },
+          session.agentName ?? "main",
+        ),
       );
     }
     enqueueStream(sessionId, stream);

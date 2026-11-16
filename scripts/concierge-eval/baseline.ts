@@ -101,12 +101,13 @@ async function playScenario(
   run: number,
 ): Promise<ScenarioRun> {
   const config = args.config as string;
-  const startedAtIso = new Date(Date.now() - 1000).toISOString();
-  const startedAt = Date.now();
   const log = (line: string) => console.log(`[${config} r${run} ${scenario.id}] ${line}`);
   const chat = await api.createTopicChat(`baseline ${config} r${run} ${scenario.id}`);
   await api.setModel(chat.id, args.model as string);
   log(`chat ${chat.id}`);
+  // From here the owner sends: the chat's setup is no time they wait.
+  const startedAtIso = new Date(Date.now() - 1000).toISOString();
+  const startedAt = Date.now();
   let failure: string | null = null;
   const driven = await drive(
     api,
@@ -248,9 +249,12 @@ function readRuns(): ScenarioRun[] {
     if (!config.match(/^[\w.-]+$/) || !statSync(dir).isDirectory()) continue;
     for (const file of readdirSync(dir).filter((f) => /^run-\d+\.json$/.test(f))) {
       const saved = JSON.parse(readFileSync(join(dir, file), "utf8")) as {
+        version?: number;
         scenarios: ScenarioRun[];
       };
-      runs.push(...saved.scenarios);
+      // Each run keeps the scenario version it was played at, so the report
+      // never pools runs of a scenario that changed in between.
+      runs.push(...saved.scenarios.map((s) => ({ ...s, version: saved.version ?? 1 })));
     }
   }
   return runs;
@@ -270,7 +274,13 @@ async function rejudge(ids: string[]): Promise<void> {
         run.verdict = await judge(scenario.rubric, run.transcript.join("\n\n"), {
           model: args["judge-model"] as string,
           effort: args["judge-effort"] as string,
-        }).catch(() => null);
+        }).catch((error: unknown) => {
+          // A failed judge keeps the score the run had.
+          console.warn(
+            `${config} ${file} ${run.id}: judge failed, score kept: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return run.verdict;
+        });
         console.log(`${config} ${file} ${run.id}: ${run.verdict?.score ?? "-"}`);
       }
       writeFileSync(path, JSON.stringify(saved, null, 2));
