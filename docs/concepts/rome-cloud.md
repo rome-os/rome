@@ -90,7 +90,7 @@ Rome Cloud provides the transcription service behind dictation in message fields
 **Contracts:**
 
 - For each listening session the instance asks `POST /v1/transcription/sessions`, as the instance. Rome Cloud answers the provider, its address, the model, a credential that lives a few minutes, and a session id.
-- Settings and `GET /api/voice-input` name the provider and its host from `GET /v1/transcription/provider`, which mints no credential. When Rome Cloud cannot be reached or has no provider set up, they say so and name none.
+- `GET /api/voice-input` names the provider and its host from `GET /v1/transcription/provider`, which mints no credential. When Rome Cloud cannot be reached or has no provider set up, it says so and names none. Settings never names the provider or its host: it shows a Voice input row only when Rome Cloud cannot serve voice input, saying why.
 - The audio goes from the browser to the guardian's own Rome and from there to the provider. It never passes through Rome Cloud, and Rome keeps none of it.
 - A refusal carries a reason code, such as `voice_input_rate_limited`. The message field shows it and keeps the words heard so far.
 - Rome Cloud allows voice input per account. For an account it does not allow, both routes answer 403 `voice_input_not_allowed`, and the dashboard shows no voice control and no voice input row in Settings.

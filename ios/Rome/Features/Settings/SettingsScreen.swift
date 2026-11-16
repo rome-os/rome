@@ -238,10 +238,10 @@ struct SettingsScreen: View {
                         }
                         .buttonStyle(RowPressStyle())
                     }
-                    // Where dictated speech goes, as the dashboard's Settings names it.
-                    if workspace.voiceInput.available, let info = workspace.voiceInput.info {
+                    // Only while Rome Cloud cannot serve voice input: why.
+                    if workspace.voiceInput.available, let problem = workspace.voiceInput.info?.problemText {
                         SettingsRow(systemImage: "mic", title: "Voice input") {
-                            Text(verbatim: info.placeText)
+                            Text(verbatim: problem)
                                 .romeFont(15)
                                 .foregroundStyle(Palette.sub)
                                 .lineLimit(1)
@@ -249,7 +249,7 @@ struct SettingsScreen: View {
                         }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Voice input")
-                        .accessibilityValue(Text(verbatim: info.placeText))
+                        .accessibilityValue(Text(verbatim: problem))
                         .accessibilityIdentifier("voice-input-place")
                     }
                     SettingsRow(systemImage: "info.circle", title: "Version", last: true) {

@@ -371,28 +371,28 @@ final class VoiceInputTests: XCTestCase {
 
     // MARK: Rule 10
 
-    /// Rule 10 on the phone: before any dictation, Settings has a "Voice input" row whose value
-    /// is "<provider> · <host>", as Rome's `GET /api/voice-input` names them (the stand-in
-    /// instance names itself, at its own address).
+    /// Rule 10 on the phone: while Rome Cloud serves voice input, Settings names no transcription
+    /// provider or host anywhere, and shows no "Voice input" status row.
     @MainActor
-    func testRule10TheAppNamesWhereVoiceGoes() throws {
+    func testRule10TheAppNamesNoProvider() throws {
         let place = try voiceInputPlace()
         let app = try launch()
+        // The voice control shows once the app has read voice input's info, so the checks
+        // below test a loaded Settings, not one still waiting for it.
+        try requireControl(app, onScreen(app.buttons, "voice-input"), "the Chat has no voice control")
         touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
         let settings = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "settings")).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 10), "the navigation has no settings")
         settings.tap()
-        let row = app.descendants(matching: .any)["voice-input-place"]
-        guard row.waitForExistence(timeout: 10) else {
-            printScreen(app, "rule 10: settings")
-            return XCTFail("Settings has no \"Voice input\" row")
-        }
-        let wanted = "\(place.provider) · \(place.host)"
-        let value = row.value as? String ?? ""
-        XCTAssertTrue(row.label.hasPrefix("Voice input"), "the row is labelled \"\(row.label)\", not \"Voice input\"")
-        if value != wanted && !row.label.contains(wanted) {
-            printScreen(app, "rule 10: voice input row")
-            XCTFail("the \"Voice input\" row says \"\(value.isEmpty ? row.label : value)\"; Rome names \"\(wanted)\"")
+        XCTAssertTrue(app.staticTexts["Version"].waitForExistence(timeout: 10), "Settings never opened")
+        // A row that shows up late still fails.
+        XCTAssertFalse(app.descendants(matching: .any)["voice-input-place"].waitForExistence(timeout: 3), "Settings shows a \"Voice input\" status row")
+        for name in [place.provider, place.host] {
+            let shown = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", name, name))
+            if shown.count > 0 {
+                printScreen(app, "rule 10: settings")
+                XCTFail("Settings names \"\(name)\"")
+            }
         }
     }
 

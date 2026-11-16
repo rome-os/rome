@@ -950,10 +950,9 @@
     "voiceInput": {
       "title": "Voice input",
       "loadFailed": "Failed to load voice input",
-      "placeViaRomeCloud": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, provided through Rome Cloud. Rome keeps no audio.",
-      "romeCloudUnreachable": "Voice input is provided through Rome Cloud, which cannot be reached right now, so Rome cannot name the transcription service.",
-      "romeCloudNotConfigured": "Voice input is provided through Rome Cloud, which has not set up a transcription service yet.",
-      "romeCloudSignedOut": "Voice input is provided through Rome Cloud, which does not accept this Rome's sign-in. Sign in to Rome Cloud again to use it.",
+      "romeCloudUnreachable": "Rome Cloud can't be reached right now, so voice input may not work.",
+      "romeCloudNotConfigured": "Voice input isn't set up in Rome Cloud yet, so it won't work.",
+      "romeCloudSignedOut": "Rome Cloud doesn't accept this Rome's sign-in. Sign in to Rome Cloud again to use voice input.",
       "microphone": {
         "title": "Microphone",
         "description": "Voice input in this browser records from this microphone.",

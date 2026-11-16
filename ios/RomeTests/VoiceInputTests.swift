@@ -166,12 +166,17 @@ import Testing
         #expect(handle.cursor(in: "Ty") == NSRange(location: 2, length: 0))
     }
 
-    @Test func settingsNamesTheProviderAndItsHost() {
+    @Test func settingsShowsNoProviderOnlyAProblem() {
         let json = #"{"available":true,"place":{"provider":"Soniox","host":"stt-rt.soniox.com"}}"#
         let info = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(json.utf8))
-        #expect(info?.placeText == "Soniox · stt-rt.soniox.com")
+        #expect(info?.problemText == nil)
+        let signedOut = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true,"place":null,"placeUnknown":"rome-cloud-signed-out"}"#.utf8))
+        #expect(signedOut?.problemText == String(localized: "Sign in to Rome Cloud again"))
         let older = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true}"#.utf8))
         #expect(older?.available == true)
+        #expect(older?.problemText == nil)
+        let unreachable = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true,"place":null,"placeUnknown":"rome-cloud-unreachable"}"#.utf8))
+        #expect(unreachable?.problemText == String(localized: "Rome Cloud can't be reached"))
     }
 
     @Test func standInsOfferNoVoiceInput() async throws {
