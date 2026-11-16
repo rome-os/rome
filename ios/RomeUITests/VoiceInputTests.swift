@@ -370,9 +370,9 @@ final class VoiceInputTests: XCTestCase {
 
     // MARK: Rule 10
 
-    /// Rule 10 on the phone: before any dictation, Settings has a "Voice input" row whose value
-    /// is "<provider> · <host>", as Rome's `GET /api/voice-input` names them (the stand-in
-    /// instance names itself, at its own address).
+    /// Rule 10 on the phone: before any dictation, Settings has a "Voice input" row that says
+    /// Rome Cloud provides it, and never names the transcription provider or its host that
+    /// Rome's `GET /api/voice-input` reports.
     @MainActor
     func testRule10TheAppNamesWhereVoiceGoes() throws {
         let place = try voiceInputPlace()
@@ -386,12 +386,12 @@ final class VoiceInputTests: XCTestCase {
             printScreen(app, "rule 10: settings")
             return XCTFail("Settings has no \"Voice input\" row")
         }
-        let wanted = "\(place.provider) · \(place.host)"
         let value = row.value as? String ?? ""
+        let shown = value + " " + row.label
         XCTAssertTrue(row.label.hasPrefix("Voice input"), "the row is labelled \"\(row.label)\", not \"Voice input\"")
-        if value != wanted && !row.label.contains(wanted) {
+        if !shown.contains("Rome Cloud") || shown.contains(place.provider) || shown.contains(place.host) {
             printScreen(app, "rule 10: voice input row")
-            XCTFail("the \"Voice input\" row says \"\(value.isEmpty ? row.label : value)\"; Rome names \"\(wanted)\"")
+            XCTFail("the \"Voice input\" row says \"\(value.isEmpty ? row.label : value)\"; it should say Rome Cloud and never name \"\(place.provider)\" or \"\(place.host)\"")
         }
     }
 

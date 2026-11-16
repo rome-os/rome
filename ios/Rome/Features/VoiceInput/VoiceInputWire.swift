@@ -18,9 +18,10 @@ struct VoiceInputInfo: Decodable, Equatable, Sendable {
         var host: String
     }
 
-    /// What Settings says about where speech goes.
+    /// What Settings says about where speech goes. It names Rome Cloud, never
+    /// the transcription provider behind it.
     var placeText: String {
-        if let place { return "\(place.provider) · \(place.host)" }
+        if place != nil { return "Rome Cloud" }
         switch placeUnknown {
         case "rome-cloud-not-configured": return String(localized: "Not set up in Rome Cloud")
         case "rome-cloud-signed-out": return String(localized: "Sign in to Rome Cloud again")

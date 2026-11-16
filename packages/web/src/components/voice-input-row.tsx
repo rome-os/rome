@@ -160,8 +160,7 @@ function describe(
   t: (key: string, options?: Record<string, string>) => string,
 ): string {
   const place = info.place;
-  if (place)
-    return t("system.voiceInput.placeViaRomeCloud", { provider: place.provider, host: place.host });
+  if (place) return t("system.voiceInput.placeViaRomeCloud");
   return info.placeUnknown === "rome-cloud-not-configured"
     ? t("system.voiceInput.romeCloudNotConfigured")
     : info.placeUnknown === "rome-cloud-signed-out"

@@ -145,10 +145,10 @@ import Testing
         #expect(handle.cursor(in: "Ty") == NSRange(location: 2, length: 0))
     }
 
-    @Test func settingsNamesTheProviderAndItsHost() {
+    @Test func settingsNamesRomeCloudNeverTheProvider() {
         let json = #"{"available":true,"place":{"provider":"Soniox","host":"stt-rt.soniox.com"}}"#
         let info = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(json.utf8))
-        #expect(info?.placeText == "Soniox · stt-rt.soniox.com")
+        #expect(info?.placeText == "Rome Cloud")
         let older = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true}"#.utf8))
         #expect(older?.available == true)
     }
