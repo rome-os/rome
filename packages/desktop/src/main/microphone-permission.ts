@@ -44,6 +44,17 @@ export function allowsOther(permission: string): boolean {
 type PermissionSession = Pick<Session, "setPermissionRequestHandler" | "setPermissionCheckHandler">;
 
 /**
+ * The origin of the dashboard this launch shows. A dev launch shows its own
+ * URL, whatever Rome was saved before; otherwise it is the open Rome's.
+ */
+export function dashboardOrigin(
+  devDashboardUrl: string | null | undefined,
+  instanceOrigin: string | null | undefined,
+): string | null {
+  return devDashboardUrl ? new URL(devDashboardUrl).origin : (instanceOrigin ?? null);
+}
+
+/**
  * Gives the open Rome's voice input the microphone, and nothing else media.
  * `instanceOrigin` is read at each request, since the Rome the window opens
  * can change; null refuses the microphone to every page.
