@@ -93,8 +93,9 @@ export function chatThreadsOf(
 
 /**
  * The reply a message sent from a composer focused on thread `root` makes: to
- * the last message of the thread that has text, as the server resolves it. Null
- * when the loaded thread has none.
+ * the last message of the thread that has text, so a card is passed over. The
+ * client names it and the server stores it as given. Null when the loaded
+ * thread has none.
  */
 export function threadTail(
   messages: readonly ChatMessage[],

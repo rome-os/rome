@@ -1,6 +1,10 @@
 // The quote a reply stores. docs/domains/chats.md#chat-thread
 
-import { REPLY_TO_TEXT_MAX_LENGTH, type ReplyToPart } from "@rome/api-types/chat";
+import {
+  REPLY_TO_TEXT_MAX_LENGTH,
+  type ReplyToPart,
+  type TaskChatWaitedOn,
+} from "@rome/api-types/chat";
 import { automatedSource } from "./automated-source.js";
 
 /** One span of a stored message's readable text; `commentary` marks an agent's working notes. */
@@ -9,18 +13,27 @@ export interface TextSpan {
   commentary: boolean;
 }
 
-/** The readable text of a stored message: text parts, and a task chat card as one line. */
-export function textSpans(content: string): TextSpan[] {
+/** The parts of a stored message, or none when its content is not a list of them. */
+function partsOf(content: string): Record<string, unknown>[] {
   let parts: unknown;
   try {
     parts = JSON.parse(content);
   } catch {
     return [];
   }
-  if (!Array.isArray(parts)) return [];
-  return parts.flatMap((part): TextSpan[] => {
-    if (!part || typeof part !== "object") return [];
-    const { type, content: text, title, chatId, turnPhase } = part as Record<string, unknown>;
+  return Array.isArray(parts)
+    ? parts.filter((part): part is Record<string, unknown> => !!part && typeof part === "object")
+    : [];
+}
+
+/**
+ * The readable text of a stored message for an agent: text parts, and a task
+ * chat card as one line that names its chat. What the guardian is shown is
+ * {@link quoteSpans}.
+ */
+export function textSpans(content: string): TextSpan[] {
+  return partsOf(content).flatMap((part): TextSpan[] => {
+    const { type, content: text, title, chatId, turnPhase } = part;
     if (type === "text" && typeof text === "string" && text.trim()) {
       return [{ text, commentary: turnPhase === "commentary" }];
     }
@@ -29,6 +42,33 @@ export function textSpans(content: string): TextSpan[] {
     }
     return [];
   });
+}
+
+/** Reads what the question or approval a task card shows says, or null. */
+export type CardLine = (chatId: string, waitedOn: TaskChatWaitedOn) => Promise<string | null>;
+
+/**
+ * The readable text of a stored message for the guardian, which is what a
+ * quote shows: text parts, and a task chat card as its own words, never an
+ * id. A task card reads as its task's title; an `ask` card as its question or
+ * approval, read by `cardLine`, else as the title.
+ */
+export async function quoteSpans(content: string, cardLine?: CardLine): Promise<TextSpan[]> {
+  const spans: TextSpan[] = [];
+  for (const part of partsOf(content)) {
+    const { type, content: text, title, chatId, turnPhase, show, waitedOn } = part;
+    if (type === "text" && typeof text === "string" && text.trim()) {
+      spans.push({ text, commentary: turnPhase === "commentary" });
+    } else if (type === "task_chat" && typeof title === "string" && typeof chatId === "string") {
+      const asked =
+        show === "ask" && waitedOn && cardLine
+          ? await cardLine(chatId, waitedOn as TaskChatWaitedOn)
+          : null;
+      const line = asked?.trim() || title.trim();
+      if (line) spans.push({ text: line, commentary: false });
+    }
+  }
+  return spans;
 }
 
 /** `text` cut to {@link REPLY_TO_TEXT_MAX_LENGTH} characters, ending in an ellipsis when cut. */
@@ -42,18 +82,20 @@ export function truncateQuote(text: string): string {
 
 /**
  * The quote of the whole of one message, which is the part an agent's reply
- * to it stores. Null when the message has no text to quote. An automation's
- * message carries no name here: the client shows its generic one.
+ * to it stores. A card quotes as its own words (see {@link quoteSpans}). Null
+ * when the message has none. An automation's message carries no name here: the
+ * client shows its generic one.
  */
-export function replyQuoteOf(message: {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  senderId?: string | null;
-}): ReplyToPart | null {
-  const text = textSpans(message.content)
-    .map((span) => span.text)
-    .join("\n\n");
+export async function replyQuoteOf(
+  message: {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    senderId?: string | null;
+  },
+  cardLine?: CardLine,
+): Promise<ReplyToPart | null> {
+  const text = (await quoteSpans(message.content, cardLine)).map((span) => span.text).join("\n\n");
   if (!text.trim()) return null;
   const author =
     message.role === "assistant"

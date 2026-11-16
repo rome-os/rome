@@ -2050,7 +2050,8 @@ export function Chat({
             baseOptimisticText.trim() ? ` ${baseOptimisticText}` : ""
           }`
         : baseOptimisticText;
-      // A message sent from a focused composer replies to the thread's last message.
+      // A message sent from a focused composer replies to the last message of
+      // the thread that has text.
       const replyTo =
         snapshot.replyTo ??
         (snapshot.chatThread
@@ -2083,14 +2084,16 @@ export function Chat({
             formData.set("largeModelSelection", snapshot.largeModelSelection);
           formData.set("reasoningEffort", snapshot.reasoningEffort);
           if (concierge) formData.set("priority", "now");
-          // Only the owner's own Reply goes with its form fields: the server
-          // resolves a focus's reply from the thread.
-          if (snapshot.replyTo) {
-            for (const [name, value] of Object.entries(replyFormFields(snapshot.replyTo))) {
+          // The reply names its message, the one the quote above shows, and the
+          // server stores it as given. A focused thread with no message to
+          // quote sends the thread alone, for the server to resolve.
+          if (replyTo) {
+            for (const [name, value] of Object.entries(replyFormFields(replyTo))) {
               formData.set(name, value);
             }
+          } else if (snapshot.chatThread) {
+            formData.set("chatThread", snapshot.chatThread);
           }
-          if (snapshot.chatThread) formData.set("chatThread", snapshot.chatThread);
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
           }

@@ -290,6 +290,13 @@ struct ConciergeRow: View, Equatable {
         return false
     }
 
+    /// The tap of the quote a reply carries: its thread view, or the original it
+    /// answers. Nil in a thread view, or when the quote leads nowhere.
+    private func quoteAction(replyId: String) -> (() -> Void)? {
+        let actions = store.actions
+        return inThread || !info.quoteLeads ? nil : info.quote.map { quote in { actions.quote(reply: replyId, original: quote.messageId) } }
+    }
+
     /// The message's time, and Reply on the Agent's messages: the reply bar,
     /// with an open thread view kept open.
     private func menu(reply: Bool) -> BubbleMenu {
@@ -314,14 +321,12 @@ struct ConciergeRow: View, Equatable {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            let replyId = row.messageId ?? ""
-            let onQuote: (() -> Void)? = inThread || !info.quoteLeads ? nil : info.quote.map { quote in { actions.quote(reply: replyId, original: quote.messageId) } }
+            let onQuote = quoteAction(replyId: row.messageId ?? "")
             UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu(reply: Self.offersReply(row)),
                        mark: info.mark,
                        quote: info.quote, rail: info.rail, onQuote: onQuote)
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            let replyId = row.messageId ?? ""
-            let onQuote: (() -> Void)? = inThread || !info.quoteLeads ? nil : info.quote.map { quote in { actions.quote(reply: replyId, original: quote.messageId) } }
+            let onQuote = quoteAction(replyId: row.messageId ?? "")
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)),
                         quote: info.quote, rail: info.rail, onQuote: onQuote)
         case .sourceLabel(_, let text):
@@ -331,6 +336,7 @@ struct ConciergeRow: View, Equatable {
             EmptyView()
         case .taskCard(_, let chatId, let title, let latest, let ask):
             let name = tasks.title(forChat: chatId, fallback: title)
+            let onQuote = quoteAction(replyId: row.ownMessageId ?? "")
             VStack(alignment: .leading, spacing: 8) {
                 TaskCard(title: name, state: tasks.cardState(forChat: chatId)) {
                     openChat(chatId, name)
@@ -342,12 +348,14 @@ struct ConciergeRow: View, Equatable {
                     TaskAskView(chatId: chatId, card: ask, latest: true, store: store) { openChat(chatId, name) }
                 }
             }
+            .replyMark(quote: info.quote, rail: info.rail, onTap: onQuote)
         case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             EmptyView()
         case .taskAsk(_, let chatId, let title, let card, let latest):
             TaskAskView(chatId: chatId, card: card, latest: latest, store: store) {
                 openChat(chatId, tasks.title(forChat: chatId, fallback: title))
             }
+            .replyMark(quote: info.quote, rail: info.rail, onTap: quoteAction(replyId: row.ownMessageId ?? ""))
             .keepsTaps(inThread)
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)

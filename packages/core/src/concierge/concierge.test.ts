@@ -1743,7 +1743,7 @@ describe("Concierge tools", () => {
           type: "reply_to",
           messageId: "said-1",
           author: "agent",
-          text: "[Task chat] Flights (chat task-1)",
+          text: "Flights",
         },
         { type: "task_chat", chatId: "task-1", title: "Flights", show: "task" },
       ],

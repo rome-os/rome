@@ -417,6 +417,27 @@ describe("ConciergeTasksRepository", () => {
       expect(await repo.threadTasks("concierge", [])).toEqual(new Map());
       expect([...(await repo.threadTasks("topic-1", [inTopic])).keys()]).toEqual([inTopic]);
     });
+
+    it("finds the tasks a message started, in its chat, and no others", async () => {
+      await chats.createSession("concierge", "Concierge");
+      const start = await say("concierge", "Book flights");
+      const other = await say("concierge", "Weather?");
+      const [flights, hotels] = await repo.upsertMany(
+        [
+          { title: "Flights", sourceMessageId: start },
+          { title: "Hotels", sourceMessageId: start },
+          { title: "Weather", sourceMessageId: other },
+        ],
+        new Date(1000),
+      );
+
+      const started = await repo.listStartedAt("concierge", start);
+
+      expect(started.map((task) => task.row.id).sort()).toEqual([flights!.id, hotels!.id].sort());
+      expect(started.every((task) => task.sourceMessageId === start)).toBe(true);
+      expect(await repo.listStartedAt("concierge", "missing")).toEqual([]);
+      expect(await repo.listStartedAt("topic-none", start)).toEqual([]);
+    });
   });
 
   describe("Concierge chat of a row", () => {

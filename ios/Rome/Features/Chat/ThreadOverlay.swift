@@ -247,6 +247,26 @@ struct ReplyRail: View {
     }
 }
 
+extension View {
+    /// What a reply that is a task card carries, as a text reply does: the quote
+    /// above the card, or, where it sits right under what it answers, the mark
+    /// growing out of the card's top corner.
+    @ViewBuilder
+    func replyMark(quote: MessagePart.ReplyQuote?, rail: ReplyRail.Kind?, onTap: (() -> Void)?) -> some View {
+        if let quote {
+            VStack(alignment: .leading, spacing: 6) {
+                if rail == nil { QuotedReply(quote: quote, tone: .received, onTap: onTap) }
+                self
+            }
+            .overlay(alignment: .topLeading) {
+                if let rail { ReplyRail(kind: rail, isUser: false, label: quote.text, onTap: onTap) }
+            }
+        } else {
+            self
+        }
+    }
+}
+
 private struct RailShape: Shape {
     let kind: ReplyRail.Kind
     let stem: CGFloat

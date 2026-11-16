@@ -4836,6 +4836,18 @@ describe("Webchat API", () => {
       // A focus on no thread of the chat replies to nothing.
       await send({ text: "hello again", chatThread: "elsewhere" });
       expect(lineOf(sentTurns[6]?.prompt)).toMatchObject({ replyTo: null, root: null });
+
+      // A client that names the message it quotes gets exactly that one, not
+      // the thread's last: the server does not resolve the thread again.
+      await send({ text: "as shown", chatThread: first, replyToMessageId: replied.key });
+      expect(lineOf(sentTurns[7]?.prompt)).toMatchObject({
+        replyTo: replied.id,
+        root: firstLine.id,
+      });
+      expect(JSON.parse(lineOf(sentTurns[7]?.prompt).parts)).toEqual([
+        expect.objectContaining({ type: "reply_to", messageId: replied.key, text: "about that" }),
+        { type: "text", content: "as shown" },
+      ]);
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
@@ -9749,7 +9761,7 @@ describe("Webchat API", () => {
       });
     });
 
-    it("quotes a task chat card as one line", async () => {
+    it("quotes a task chat card as its title, and tells the agent which chat", async () => {
       const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
       await seed(
         "card1",
@@ -9760,7 +9772,51 @@ describe("Webchat API", () => {
 
       expect((await send({ replyToMessageId: "card1" })).status).toBe(200);
 
-      expect((await lastUser())[0].text).toBe("[Task chat] Trip (chat chat-7)");
+      // The guardian sees the card's own words; the agent's line names the chat.
+      expect((await lastUser())[0].text).toBe("Trip");
+      expect(prompts[0]).toContain("Rome: [Task chat] Trip (chat chat-7)\n</reply_context>");
+    });
+
+    it("quotes a question card as its question", async () => {
+      const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
+      const render = {
+        builtin: true,
+        componentId: "question-card",
+        props: { questions: [{ question: "Which tone?" }] },
+      };
+      deps.concierge = {
+        conciergeChat: async () => null,
+        switchIfExhausted: async () => null,
+        taskCardSources: () => ({
+          taskCardsOf: async () =>
+            new Map([
+              [
+                "chat-7",
+                { questions: [{ id: "q1", messageId: "m9", render, since: 1 }], approvals: [] },
+              ],
+            ]),
+          findBySessions: async () => [],
+          waitExpiry: 24 * 60 * 60 * 1000,
+        }),
+      } as never;
+      await seed(
+        "card2",
+        "assistant",
+        [
+          {
+            type: "task_chat",
+            chatId: "chat-7",
+            title: "Trip",
+            show: "ask",
+            waitedOn: { kind: "question", id: "q1", messageId: "m9" },
+          },
+        ],
+        "t1",
+      );
+
+      expect((await send({ replyToMessageId: "card2" })).status).toBe(200);
+
+      expect((await lastUser())[0].text).toBe("Which tone?");
     });
 
     it("accepts a selection of the message and rejects text that is not in it", async () => {

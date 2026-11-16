@@ -3,9 +3,10 @@
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { replyContextLine } from "../../agent/index.js";
 import type { ApiDeps } from "../deps.js";
+import { taskCardLine } from "../../concierge/task-cards.js";
 import { resolveChatSenders } from "./chat-senders.js";
 import { promptSafeSourceName } from "../../webchat/automated-source.js";
-import { textSpans, truncateQuote } from "../../webchat/reply-quote.js";
+import { quoteSpans, textSpans, truncateQuote, type TextSpan } from "../../webchat/reply-quote.js";
 
 export type ReplyResolution =
   | { ok: true; part: ReplyToPart; promptLine: string }
@@ -24,23 +25,41 @@ const normalizeWhitespace = (value: string) => value.replace(/\s+/g, " ").trim()
  * normalization, is rejected.
  */
 export async function resolveReply(
-  deps: Pick<ApiDeps, "db" | "settingsRepo" | "webchatRepo" | "agentLoader" | "appCatalog">,
+  deps: Pick<
+    ApiDeps,
+    "db" | "settingsRepo" | "webchatRepo" | "agentLoader" | "appCatalog" | "concierge"
+  >,
   input: { sessionId: string; messageId: string; quote?: string; ownRowOnly: boolean },
 ): Promise<ReplyResolution> {
   const { sessionId, messageId } = input;
   const target = await deps.webchatRepo.getReplyTarget(sessionId, messageId);
   if (!target) return { ok: false, error: "replyToMessageId is not a message of this chat" };
 
-  let spans = textSpans(target.content);
+  const { concierge } = deps;
+  // Read only for an `ask` card, which quotes its question or approval.
+  const cardLine = concierge
+    ? (chatId: string, waitedOn: Parameters<typeof taskCardLine>[2]) =>
+        taskCardLine(concierge.taskCardSources(), chatId, waitedOn)
+    : undefined;
+  // The quote the guardian sees, and the text the agent reads, which names a card's chat.
+  const answerOf = (spans: TextSpan[]) => {
+    const answer = spans.filter((span) => !span.commentary);
+    return answer.length > 0 ? answer : spans;
+  };
+  const join = (spans: TextSpan[]) => spans.map((span) => span.text).join("\n\n");
+  let rows: { content: string }[] = [target];
   if (target.role === "assistant" && target.turnId && !input.ownRowOnly) {
-    const rows = await deps.webchatRepo.getTurnChatMessages(sessionId, target.turnId);
-    const turnSpans = rows.flatMap((row) =>
-      row.role === "assistant" ? textSpans(row.content) : [],
+    rows = (await deps.webchatRepo.getTurnChatMessages(sessionId, target.turnId)).filter(
+      (row) => row.role === "assistant",
     );
-    const answer = turnSpans.filter((span) => !span.commentary);
-    spans = answer.length > 0 ? answer : turnSpans;
   }
-  const full = spans.map((span) => span.text).join("\n\n");
+  const whole = rows.length === 1 && rows[0] === target;
+  const shownSpans = (
+    await Promise.all(rows.map((row) => quoteSpans(row.content, cardLine)))
+  ).flat();
+  const readSpans = rows.flatMap((row) => textSpans(row.content));
+  const full = join(whole ? shownSpans : answerOf(shownSpans));
+  const agentFull = join(whole ? readSpans : answerOf(readSpans));
   if (!full.trim()) return { ok: false, error: "The replied-to message has no text to quote" };
 
   let text = full;
@@ -51,6 +70,7 @@ export async function resolveReply(
     }
     text = quote;
   }
+  const agentText = truncateQuote(input.quote !== undefined ? text : agentFull);
   text = truncateQuote(text);
 
   let author: ReplyToPart["author"] = target.role === "user" ? "guardian" : "agent";
@@ -74,7 +94,7 @@ export async function resolveReply(
         author === "automated" && name
           ? promptSafeSourceName(name)
           : (name ?? (author === "guardian" ? "Guardian" : "Rome")),
-      text,
+      text: agentText,
     }),
   };
 }

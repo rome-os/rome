@@ -155,6 +155,21 @@ describe("threadTail", () => {
     });
     expect(threadTail(messages, roots, "nothing")).toBeNull();
   });
+
+  it("passes over a card at the end of the thread, which has no text of its own to quote", () => {
+    const card = {
+      ...said("c1", "assistant", "", "m1"),
+      content: JSON.stringify([{ type: "task_chat", chatId: "t1", title: "Flights", show: "ask" }]),
+    } as ChatMessage;
+    const messages = [
+      said("m1", "user", "Plan Kyoto", "m1"),
+      said("a1", "assistant", "Hotels", "m1"),
+      card,
+    ];
+    const { roots } = threadsOf(messages);
+    expect(threadTail(messages, roots, "m1")).toMatchObject({ messageId: "a1" });
+    expect(threadTail([card], threadsOf([card]).roots, "m1")).toBeNull();
+  });
 });
 
 const at = (minute: number) => new Date(2026, 10, 9, 9, minute).toISOString();
@@ -302,6 +317,29 @@ describe("the quote in a reply", () => {
     expect(
       document.querySelector('[data-timeline-anchor~="f1"]')?.querySelector("[data-reply-quote]"),
     ).toBeNull();
+  });
+
+  it("quotes a task card that replies, as a bubble does, in the words the quote stores", () => {
+    const card = (id: string, minute: number, quote: Quote): ChatMessage =>
+      ({
+        ...message(id, "assistant", "", "m1", minute),
+        content: JSON.stringify([
+          { type: "reply_to", ...quote },
+          { type: "task_chat", chatId: "t1", title: "Flights", show: "task" },
+        ]),
+      }) as ChatMessage;
+    // One card right under its request, and one with another message between.
+    const near = card("c1", 1, {
+      messageId: "m1",
+      author: "guardian",
+      text: "Plan Kyoto in April",
+    });
+    const far = card("c2", 3, { messageId: "m1", author: "guardian", text: "Plan Kyoto in April" });
+    renderTranscript([messages[0]!, near, messages[2]!, far]);
+    expect(quoteIn("c1").querySelector(".rome-reply-hook")).not.toBeNull();
+    expect(quoteIn("c1").getAttribute("aria-label")).toBe("Plan Kyoto in April");
+    expect(within(quoteIn("c2")).getByText("Plan Kyoto in April")).toBeTruthy();
+    expect(quoteIn("c2").querySelector(".rome-reply-hook")).toBeNull();
   });
 
   it("marks a reply under what it answers with a hook, the quoted text its name, and draws no text", () => {

@@ -3069,7 +3069,10 @@ describe("Chat Concierge empty state", () => {
 
       await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
       const form = rs.mocked(postSessionTurn).mock.calls[0]![1] as FormData;
-      expect(form.get("chatThread")).toBe("u-2");
+      // The reply names the thread's last message, the one its quote shows,
+      // and no thread: the server stores it as given.
+      expect(form.get("replyToMessageId")).toBe("ar-2");
+      expect(form.has("chatThread")).toBe(false);
       // The sent row carries the thread's id, so the filter keeps it in view.
       const sent = (await screen.findAllByTestId("user-row")).find((row) =>
         row.textContent?.includes("sent at once"),

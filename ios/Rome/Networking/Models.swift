@@ -133,9 +133,11 @@ extension ChatMessage {
 }
 
 /// What a message the guardian sends replies to: the quoted message, and
-/// the root of the thread view it was sent from, if one was open. The server
-/// replies to the quoted message, else to the thread's last one, so the
-/// message is in that thread (docs/domains/chats.md#chat-thread).
+/// the root of the thread view it was sent from, if one was open. The
+/// instance replies to the message named, so the message is in that thread
+/// (docs/domains/chats.md#chat-thread). A send from a thread view names the
+/// thread's last message with text (`TranscriptStore.wireTarget`); only a
+/// thread with none loaded sends the root alone, which the instance resolves.
 struct ThreadTarget: Codable, Hashable, Sendable {
     /// The message replied to, quoted in the reply bar.
     let messageId: String

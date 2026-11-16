@@ -4205,9 +4205,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return answer({ error: "replyToMessageId must be a string" }, 400);
     }
     // The message the owner's message replies to, which puts it in that
-    // message's chat thread: the one the owner replied to, else, in a
-    // Concierge chat whose composer is focused on a thread, that thread's
-    // last message (docs/domains/chats.md#chat-thread).
+    // message's chat thread (docs/domains/chats.md#chat-thread). The client
+    // names it, for a Reply and for a composer focused on a thread alike, so
+    // the quote it showed and the reply stored are one message. A client from
+    // before sends only `chatThread` for a focused composer: in a Concierge
+    // chat that thread's last message is the reply then.
     const explicitReplyTo = body.replyToMessageId || undefined;
     const repliedTo =
       explicitReplyTo ??

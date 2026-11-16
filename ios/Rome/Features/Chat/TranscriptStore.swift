@@ -1154,6 +1154,28 @@ final class TranscriptStore {
         }
     }
 
+    /// What a send from the open thread view names to the instance. The view
+    /// replies to the thread, and the app picks the message: the thread's
+    /// last with text, which a card has none of. The instance stores the reply
+    /// to that message as given, so the reply is under the message the
+    /// guardian could see. A thread with no such message loaded, or a send
+    /// that is not from the view, goes as it is.
+    func wireTarget(_ target: ThreadTarget?) -> ThreadTarget? {
+        guard let target, target.bare == true, let thread,
+              let tail = thread.messages.last(where: Self.hasQuotableText)
+        else { return target }
+        return ThreadTarget(messageId: tail.id, instanceKnowsThreads: target.instanceKnowsThreads, quote: true, thread: target.thread)
+    }
+
+    /// Whether `message` has words to quote: text, not an upload line or a card.
+    static func hasQuotableText(_ message: ChatMessage) -> Bool {
+        message.parts.contains { part in
+            guard let raw = part.textContent else { return false }
+            return !(message.isUser ? UploadLines.split(raw).text : raw)
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     /// Where a stored message went: its chat thread, and the message it replied to.
     static func resendTarget(of message: ChatMessage) -> ThreadTarget? {
         guard let replyTo = message.parts.lazy.compactMap(\.replyQuote).first?.messageId else { return nil }
@@ -1192,6 +1214,7 @@ final class TranscriptStore {
         // Kept as the chat's draft until the server takes it.
         // Kept with the thread it was for, so a lost send comes back there.
         if keepsDraft, let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
+        let target = wireTarget(thread)
         Task {
             do {
                 let turn = try await backend.send(
@@ -1200,7 +1223,7 @@ final class TranscriptStore {
                     files: OutgoingFile.photos(images) + files,
                     inputId: inputId,
                     priority: kind == .concierge ? .now : .next,
-                    thread: thread
+                    thread: target
                 )
                 if let index = pending.firstIndex(where: { $0.id == inputId }) {
                     pending[index].state = .sent

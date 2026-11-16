@@ -4,7 +4,7 @@
 // `connect_card` shows a card that connects a service.
 
 import { pushBody } from "./push.js";
-import { settledCard } from "./task-cards.js";
+import { taskCardLine } from "./task-cards.js";
 import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
@@ -602,11 +602,8 @@ export async function buildConciergeTools(
   const taskStartedAt = async (startKey: string) => {
     const { chatId } = currentTurn();
     const owner = await ownerHere();
-    const started = (await tasks.repo.listForAgent(true)).filter(
-      (task) =>
-        task.owner === owner &&
-        task.conciergeChat.id === chatId &&
-        task.sourceMessageId === startKey,
+    const started = (await tasks.repo.listStartedAt(chatId, startKey)).filter(
+      (task) => task.owner === owner && task.conciergeChat.id === chatId,
     );
     const reported = context.getTurnReportedTask();
     const own = started.find((task) => task.row.id === reported);
@@ -620,7 +617,11 @@ export async function buildConciergeTools(
     replyTo?: { id: string; role: "user" | "assistant"; content: string; senderId?: string | null },
   ) => {
     const { chatId, turnId } = currentTurn();
-    const quote = replyTo ? replyQuoteOf(replyTo) : null;
+    const quote = replyTo
+      ? await replyQuoteOf(replyTo, (card, waitedOn) =>
+          taskCardLine(service.taskCardSources(), card, waitedOn),
+        )
+      : null;
     const { id } = await webchatRepo.addBackendMessage(
       chatId,
       turnId,
@@ -802,24 +803,17 @@ export async function buildConciergeTools(
     );
     // The push shows what the card asks: its question or approval, else the
     // task's title.
-    said(conciergeChatId, turnId, (await cardLine(chatId, waitedOn)) ?? title);
+    said(
+      conciergeChatId,
+      turnId,
+      (await taskCardLine(service.taskCardSources(), chatId, waitedOn)) ?? title,
+    );
     // A question or approval shown answers the message its task works for
     // (docs/domains/chats.md#status).
     if (show === "ask" && task) {
       await writeStatus("settle", () => tasks.repo.retellMessagesOf(task.id));
     }
     return id;
-  };
-
-  /** What a task's question or approval card asks, in one line, or null. */
-  const cardLine = async (chatId: string, waitedOn: TaskChatWaitedOn | undefined) => {
-    if (!waitedOn) return null;
-    const card = await settledCard(service.taskCardSources(), chatId, waitedOn).catch(() => null);
-    if (!card) return null;
-    if (card.kind === "approval") return card.title || null;
-    const props = (card.render?.props ?? {}) as { questions?: { question?: unknown }[] };
-    const question = props.questions?.[0]?.question;
-    return typeof question === "string" && question.trim() ? question : null;
   };
 
   return [

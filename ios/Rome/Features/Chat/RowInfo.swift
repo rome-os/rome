@@ -1,7 +1,7 @@
 import Foundation
 
-/// What a text row draws from the message it belongs to: its time, the quote
-/// it carries, Rome's mark, whether it is a send the app still holds. The
+/// What a text row or a task card draws from the message it belongs to: its
+/// time, the quote it carries, Rome's mark, whether it is a send the app still holds. The
 /// store reads it once when it builds the rows, so a row's body never
 /// searches the messages, and a row whose message did not change compares equal
 /// and is not drawn again.
@@ -25,7 +25,7 @@ struct RowInfo: Hashable {
     var saidByAgent = false
     var senderName: String?
 
-    /// The info of every text row, by row id. `messages` are the ones the
+    /// The info of every text and task card row, by row id. `messages` are the ones the
     /// rows were built from, and everything the quote may lead to.
     @MainActor
     static func build(
@@ -47,12 +47,12 @@ struct RowInfo: Hashable {
                 if kind == .concierge, state == nil, let id = row.messageId {
                     info.mark = byID[id].flatMap { MessageMark(status: $0.status, reaction: $0.reaction) }
                 }
-            case .agentText:
+            case .agentText, .taskCard, .taskAsk:
                 break
             default:
                 continue
             }
-            if let message = row.messageId.flatMap({ byID[$0] }) {
+            if let message = row.ownMessageId.flatMap({ byID[$0] }) {
                 info.date = message.date
                 info.canShare = message.turnId != nil
                 info.saidByAgent = message.saidByAgent
@@ -84,10 +84,10 @@ struct RowInfo: Hashable {
         }
     }
 
-    /// The quote a reply carries, drawn on the first bubble of its message only.
+    /// The quote a reply carries, drawn on the first bubble or card of its message only.
     private static func quote(of message: ChatMessage, row: TranscriptRow) -> MessagePart.ReplyQuote? {
         let parts = message.parts
-        guard let first = parts.firstIndex(where: { $0.textContent != nil }),
+        guard let first = parts.firstIndex(where: { $0.textContent != nil || $0.isTaskChat }),
               row.id == "\(message.id):\(first)" else { return nil }
         return parts.lazy.compactMap(\.replyQuote).first
     }

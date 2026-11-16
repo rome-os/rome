@@ -434,6 +434,12 @@ extension MessagePart {
         return nil
     }
 
+    /// Whether this is a task card.
+    var isTaskChat: Bool {
+        if case .taskChat = self { return true }
+        return false
+    }
+
     /// The text of a text part.
     var textContent: String? {
         if case .text(let text, _, _) = self { return text }

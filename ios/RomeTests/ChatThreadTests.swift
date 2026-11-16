@@ -128,6 +128,26 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(spaced["a1:1"]?.quote?.author == "guardian" && spaced["a1:1"]?.rail == nil)
     }
 
+    /// A reply that is only a task card carries its quote or rail as a text
+    /// reply does, and leads where it would: the card is the owner's way into
+    /// the thread.
+    @Test func aCardReplyShowsAQuoteOrARail() throws {
+        let card: [[String: Any]] = [["type": "task_chat", "chatId": "t1", "title": "Flights", "show": "ask"]]
+        let adjacent = [
+            message("u", role: "user", "plan", at: 0, thread: "u"),
+            message("c1", at: 1, thread: "u", parts: [["type": "reply_to", "messageId": "u", "author": "guardian", "text": "plan"]] + card),
+        ]
+        let row = try #require(rows(adjacent).first { if case .taskAsk = $0 { true } else { false } })
+        #expect(row.ownMessageId == "c1")
+        let infos = RowInfo.build(rows: rows(adjacent), messages: adjacent, pending: [], kind: .concierge)
+        let near = try #require(infos[row.id])
+        #expect(near.quote?.messageId == "u" && near.rail == .hook && near.quoteLeads)
+        // With a message between, the card shows the quote's words.
+        let apart = [adjacent[0], message("x", at: 1, thread: "x"), adjacent[1]]
+        let spaced = RowInfo.build(rows: rows(apart), messages: apart, pending: [], kind: .concierge)
+        #expect(spaced[row.id]?.quote?.author == "guardian" && spaced[row.id]?.rail == nil)
+    }
+
     /// A reply is adjacent to the message right above it, or to a reply of the
     /// same sender above it that answers the same message, which a line joins.
     @Test func adjacentRepliesAreJoinedByAHookOrALine() {
@@ -305,22 +325,50 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let store = await chat(backend, [message("a1", "sure", at: 10, thread: "r", title: "T")])
         store.openThread(at: "a1")
         let target = store.composerThread!
-        // The send names the thread by its root.
+        // The draft names the thread by its root; the send names the message too.
         #expect(target == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "r", bare: true))
+        let sent = ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "r")
         #expect(store.send("and then?", thread: target))
         await settle { !backend.sentThreads.isEmpty }
-        #expect(backend.sentThreads == [target])
+        #expect(backend.sentThreads == [sent])
         // It failed: Retry goes to the same thread.
         await settle { store.pending.first?.state == .failed(.unreachable) }
         backend.sendSucceeds = true
         store.retry(store.pending[0].id)
         await settle { backend.sentThreads.count == 2 }
-        #expect(backend.sentThreads == [target, target])
+        #expect(backend.sentThreads == [sent, sent])
         // A send from the chat itself names no thread.
         store.closeThread()
         #expect(store.send("new thing"))
         await settle { backend.sentThreads.count == 3 }
         #expect(backend.sentThreads.last == .some(nil))
+    }
+
+    /// The app picks the message a send from the thread view replies to: the
+    /// thread's last with text, so a card on the end is passed over. A thread
+    /// with none sends its root alone, and an instance resolves it.
+    @Test func aSendFromTheThreadNamesItsLastMessageWithText() async {
+        let backend = FakeBackend()
+        let card: [[String: Any]] = [["type": "task_chat", "chatId": "t1", "title": "Flights", "show": "ask"]]
+        let store = await chat(backend, [
+            message("r", role: "user", "plan", at: 0, thread: "r"),
+            message("a1", "sure", at: 1, thread: "r", parts: quoteParts("r") + [["type": "text", "content": "sure"]]),
+            message("c1", at: 2, thread: "r", parts: quoteParts("r") + card),
+        ])
+        store.openThread(at: "a1")
+        let target = store.composerThread!
+        #expect(store.send("and then?", thread: target))
+        await settle { !backend.sentThreads.isEmpty }
+        #expect(backend.sentThreads == [ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "r")])
+        // Only a card in the thread: nothing to quote, so the root goes alone.
+        let lone = await chat(backend, [message("c1", at: 2, thread: "c1", parts: card)])
+        lone.openThread(at: "c1")
+        let bare = lone.composerThread!
+        #expect(lone.wireTarget(bare) == bare)
+    }
+
+    private func quoteParts(_ original: String) -> [[String: Any]] {
+        [["type": "reply_to", "messageId": original, "author": "guardian", "text": "plan"]]
     }
 
     /// The label opens the view for reading and tints its message; Reply

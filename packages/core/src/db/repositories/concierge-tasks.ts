@@ -359,6 +359,19 @@ export class ConciergeTasksRepository {
   }
 
   /**
+   * The rows, not archived, whose start message is the one keyed `messageKey`
+   * in Concierge chat `chatId`, oldest first. One filtered read, not the
+   * whole list.
+   */
+  async listStartedAt(chatId: string, messageKey: string): Promise<ConciergeTaskWithChat[]> {
+    const message = this.sources.idOf(chatId, messageKey);
+    if (message === null) return [];
+    return this.withChat(
+      and(isNull(conciergeTasks.archivedAt), eq(conciergeTasks.sourceMessageId, message)),
+    );
+  }
+
+  /**
    * The newest task started in each chat thread of `roots` in Concierge chat
    * `chatId`: the one whose start message is in the thread. The roots are the
    * keys of the threads' first messages; a thread no task started in is left
