@@ -28,6 +28,8 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   sender?: { kind?: string };
+  /** The reaction on the message, when it has one. */
+  reaction?: string;
 }
 
 export interface TaskCard {

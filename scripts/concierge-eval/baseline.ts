@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { loadavg } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { Api, type ChatMessage, DEV_JWT_SECRET, partsOf } from "./api.js";
+import { Api, DEV_JWT_SECRET } from "./api.js";
 import {
   BASELINE_SCENARIOS,
   BASELINE_VERSION,
@@ -20,6 +20,7 @@ import { judge, type Verdict } from "./judge.js";
 import { Stack, checkSnapshotName, sleep } from "./stack.js";
 import { type TaskPath, readSpans, taskPath } from "./task-path.js";
 import { type TimedTurn, timedTurns } from "./timing.js";
+import { transcriptOf } from "./transcript.js";
 
 const USAGE = `pnpm concierge:baseline --config <label> --model <selection id> --effort <low|high> [--runs N]
 pnpm concierge:baseline --report
@@ -72,17 +73,6 @@ const { values: args } = parseArgs({
 const stack = new Stack({ container: args.container, baseUrl: args["base-url"] });
 
 /** The text parts of a message, joined. */
-function textOf(message: ChatMessage): string {
-  return partsOf(message)
-    .filter((p) => p.type === "text")
-    .map((p) => String(p.content ?? p.text ?? ""))
-    .join("\n")
-    .trim();
-}
-
-const isOwner = (m: ChatMessage) =>
-  m.role === "user" && partsOf(m).some((p) => p.type === "text") && textOf(m) !== "";
-
 function logsSince(sinceIso: string): string {
   return execFileSync("docker", ["logs", "--since", sinceIso, args.container], {
     encoding: "utf8",
@@ -138,20 +128,7 @@ async function playScenario(
   const turns = timedTurns(logsSince(startedAtIso)).filter((t) => t.chatId === chat.id);
   const messages = await api.messages(chat.id);
 
-  // The Concierge's text messages after each owner message.
-  const saidAfter: string[][] = [];
-  const transcript: string[] = [];
-  for (const m of messages) {
-    if (isOwner(m)) {
-      saidAfter.push([]);
-      transcript.push(`OWNER: ${textOf(m)}`);
-    } else if (m.role === "assistant") {
-      const text = textOf(m);
-      if (!text) continue;
-      saidAfter.at(-1)?.push(text);
-      transcript.push(`ASSISTANT: ${text}`);
-    }
-  }
+  const { lines: transcript, saidAfter } = transcriptOf(messages);
   const guardian = turns.filter((t) => t.trigger === "guardian");
   const input: CheckInput = {
     steps: scenario.steps.map((_, i) => guardian[i] ?? null),

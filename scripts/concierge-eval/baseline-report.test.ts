@@ -87,3 +87,45 @@ describe("taskPath", () => {
     expect(path.toChatStartMs).toBe(1_100);
   });
 });
+
+describe("taskPath subagent calls", () => {
+  it("gives each of two overlapping calls its own child and model", () => {
+    const rows = [
+      span({
+        name: "agent:core:main",
+        agent: "core:main",
+        thread: "webchat:task",
+        start: 0,
+        ms: 10_000,
+      }),
+      span({ name: "tool", tool: "sa_explore", thread: "webchat:task", start: 1_000, ms: 4_000 }),
+      span({ name: "tool", tool: "sa_research", thread: "webchat:task", start: 1_200, ms: 5_000 }),
+      span({
+        name: "agent:assistant:explore",
+        agent: "assistant:explore",
+        start: 1_050,
+        ms: 3_000,
+      }),
+      span({
+        name: "model.turn",
+        agent: "assistant:explore",
+        model: "claude-haiku-5-5",
+        start: 1_100,
+        ms: 2_000,
+      }),
+      span({ name: "agent:core:research", agent: "core:research", start: 1_250, ms: 4_000 }),
+      span({
+        name: "model.turn",
+        agent: "core:research",
+        model: "claude-opus-5-5",
+        start: 1_300,
+        ms: 3_000,
+      }),
+    ];
+    const calls = taskPath(rows, "con", "task", 0).subagentCalls;
+    expect(calls).toMatchObject([
+      { tool: "sa_explore", agent: "assistant:explore", model: "claude-haiku-5-5", parallel: true },
+      { tool: "sa_research", agent: "core:research", model: "claude-opus-5-5", parallel: true },
+    ]);
+  });
+});

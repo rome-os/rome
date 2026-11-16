@@ -1224,20 +1224,31 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   });
   // 👀 and a reaction on the owner's message time the turn that took it, as
   // the owner sees them, whatever set them: a long tool call, a task made
-  // for the message, or the Concierge's own reaction. Watched from the first
-  // timed turn on.
-  let watchingSigns = false;
+  // for the message, or the Concierge's own reaction. Watched only while a
+  // timed turn runs: the status watch reads the store on every task change.
+  let timedRunning = 0;
+  let stopSignWatch: (() => void) | null = null;
   const timeTurn = (stream: ActiveWebchatStream, timing: ConciergeTurnTiming): void => {
     stream.timing = timing;
-    if (watchingSigns) return;
-    watchingSigns = true;
-    deps.concierge?.onMessageStatus?.((event) => {
+    timedRunning += 1;
+    if (stopSignWatch) return;
+    const stopStatus = deps.concierge?.onMessageStatus?.((event) => {
       if (event.status !== "working") return;
       streamOfMessage(event.sessionId, event.messageId)?.timing?.working();
     });
-    deps.webchatRepo.onMessageReaction((event) => {
+    const stopReaction = deps.webchatRepo.onMessageReaction((event) => {
       if (event.reaction) streamOfMessage(event.sessionId, event.messageId)?.timing?.reacted();
     });
+    stopSignWatch = () => {
+      stopStatus?.();
+      stopReaction();
+    };
+  };
+  const releaseSignWatch = (): void => {
+    timedRunning = Math.max(0, timedRunning - 1);
+    if (timedRunning > 0 || !stopSignWatch) return;
+    stopSignWatch();
+    stopSignWatch = null;
   };
   const openTool = (sessionId: string): string | null =>
     openToolOf(activeStreams.get(sessionId) ?? []);
@@ -2499,7 +2510,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     stream.finished = true;
     const timed = stream.timing?.finish(stream.agentTurnId ?? stream.turnId);
     // A quiet turn that said nothing was housekeeping: nobody waited on it.
-    if (timed && (!stream.quiet || stream.spoke)) reportConciergeTurn(timed);
+    if (timed && (!stream.quiet || timed.firstSayMs !== null)) reportConciergeTurn(timed);
+    if (stream.timing) releaseSignWatch();
     // The live preview is over — the durable reply lives in the DB now. Drop
     // the assistant_text replay frame so a late reattach doesn't flash a
     // transient bubble before swapping to the persisted message. Subscribers

@@ -114,22 +114,41 @@ export function taskPath(
   const toolCounts: Record<string, number> = {};
   for (const t of taskTools) toolCounts[t.tool] = (toolCounts[t.tool] ?? 0) + 1;
 
+  // Each subagent call is matched to one child turn: the first unclaimed
+  // subagent turn that starts inside it, taking calls in the order they
+  // started, so two calls that overlap never share a child.
+  const mainAgent = taskAgentSpans[0]?.agent;
+  const children = inTask
+    .filter((r) => r.name.startsWith("agent:") && r.agent !== "" && r.agent !== mainAgent)
+    .sort((a, b) => a.start - b.start);
+  const claimed = new Set<SpanRow>();
   const subagentCalls = taskTools
     .filter((t) => t.tool.startsWith("sa_"))
+    .sort((a, b) => a.start - b.start)
     .map((call) => {
-      // The subagent's own spans run inside the call, in the same trace.
-      const inside = inTask.filter(
+      const child = children.find(
         (r) =>
+          !claimed.has(r) &&
           r.trace === call.trace &&
           r.start >= call.start &&
-          r.start <= call.start + call.ms &&
-          r.agent !== "" &&
-          r.agent !== taskAgentSpans[0]?.agent,
+          r.start <= call.start + call.ms,
       );
+      if (child) claimed.add(child);
+      // The child's model: its own model turn, which starts inside the child.
+      const model = child
+        ? inTask.find(
+            (r) =>
+              r.name === "model.turn" &&
+              r.trace === child.trace &&
+              r.agent === child.agent &&
+              r.start >= child.start &&
+              r.start <= child.start + child.ms,
+          )?.model
+        : undefined;
       return {
         tool: call.tool,
-        agent: inside.find((r) => r.name.startsWith("agent:"))?.agent ?? null,
-        model: inside.find((r) => r.name === "model.turn")?.model ?? null,
+        agent: child?.agent ?? null,
+        model: model ?? null,
         ms: call.ms,
         parallel: taskTools.some((o) => o !== call && o.trace === call.trace && overlaps(o, call)),
       };
