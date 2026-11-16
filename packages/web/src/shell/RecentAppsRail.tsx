@@ -32,28 +32,29 @@ export function RailAppIcon({ app }: { app: RecentSidebarApp }) {
   if (BuiltinIcon) {
     return (
       <span
-        className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+        className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-foreground transition-colors"
         aria-hidden
       >
-        <BuiltinIcon className="h-4 w-4 shrink-0" aria-hidden />
+        <BuiltinIcon className="h-5 w-5 shrink-0" aria-hidden />
       </span>
     );
   }
-  if (app.iconUrl) {
-    return (
-      <img
-        src={app.iconUrl}
-        alt=""
-        className="h-4 w-4 shrink-0 rounded-4"
-        onError={(e) => {
-          (e.target as HTMLImageElement).style.display = "none";
-        }}
-      />
-    );
-  }
   return (
-    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
-      {app.displayName.charAt(0).toUpperCase()}
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+      {app.iconUrl ? (
+        <img
+          src={app.iconUrl}
+          alt=""
+          className="h-5 w-5 max-w-none shrink-0 rounded-4 object-contain"
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = "none";
+          }}
+        />
+      ) : (
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
+          {app.displayName.charAt(0).toUpperCase()}
+        </span>
+      )}
     </span>
   );
 }
@@ -98,7 +99,9 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
 
   return (
     <>
-      <Separator className={labelled ? "my-1" : "my-1 w-6"} />
+      <Separator
+        className={`my-1 bg-border-strong ${labelled ? "" : "data-[orientation=horizontal]:w-6"}`}
+      />
       {visible.map((app) => {
         if (!app.href) return null;
         const active = isEntryActive(pathname, app.href);
@@ -110,6 +113,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
                 <Link
                   to={app.href}
                   aria-label={app.displayName}
+                  aria-current={active ? "page" : undefined}
                   className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                 >
                   <RailAppIcon app={app} />
@@ -138,7 +142,9 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
                   aria-label={t("sidebar.moreRecentApps")}
                   className={`${tileClass} ${IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
                 >
-                  <Ellipsis className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+                    <Ellipsis className="h-5 w-5 shrink-0" />
+                  </span>
                   {labelled ? <RailLabel>{t("sidebar.more")}</RailLabel> : null}
                 </button>
               </DropdownMenuTrigger>

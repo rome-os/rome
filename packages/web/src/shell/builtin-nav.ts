@@ -5,9 +5,8 @@ import {
   DashboardIcon,
   GearIcon,
   PersonIcon,
-  Pencil2Icon,
 } from "@radix-ui/react-icons";
-import { Bot, Chrome as ChromeIcon, FolderKanban, Megaphone } from "lucide-react";
+import { Bot, Chrome as ChromeIcon, FolderKanban, Megaphone, MessageSquare } from "lucide-react";
 import type { ComponentType } from "react";
 
 /** Rome's own dashboard destinations. The sidebar, the Apps launcher, page
@@ -63,7 +62,7 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     id: "chat",
     href: "/message",
     labelKey: "nav.chat",
-    Icon: Pencil2Icon,
+    Icon: MessageSquare,
     sidebarIconMotion: "chat",
   },
   { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: GearIcon },

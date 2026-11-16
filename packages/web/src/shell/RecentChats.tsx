@@ -28,6 +28,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { RomeLogo } from "@/components/logo";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -261,8 +262,8 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           to={`/chat/${id}`}
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
-          className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-            nested ? "pl-4" : "pl-2"
+          className={`flex h-full min-w-0 flex-1 items-center rounded-12 pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
+            nested ? "pl-7" : "pl-3"
           }`}
         >
           <span ref={nameRef} className="truncate">
@@ -277,8 +278,8 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
   );
 }
 
-/** The folded Tasks card: its heading row, the card's padding and border. */
-const TASKS_FOLDED_HEIGHT = "h-[calc(max(2rem,var(--control-min-h))_+_0.5rem_+_2px)]";
+/** The folded Tasks card: its heading row and padding. */
+const TASKS_FOLDED_HEIGHT = "h-[calc(max(2.5rem,var(--control-min-h))_+_0.5rem)]";
 
 // Rows fade out over the bottom padding, so a list that runs on under its
 // edge shows it, and the last row clears the fade once scrolled to the end.
@@ -374,10 +375,22 @@ function NewChatRow({
       data-new-chat-row={kind}
       className={`${LINK_CLASS} ${IDLE_CLASS} mb-1`}
     >
-      <Plus className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
+      <span
+        className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
+        aria-hidden
+      >
+        <Plus className="h-5 w-5 shrink-0" />
+      </span>
       <span className="flex-1 truncate">{label}</span>
       {shortcut ? (
-        <kbd className="shrink-0 font-sans text-aux text-subtle-foreground">{shortcut}</kbd>
+        <Badge
+          asChild
+          variant="muted"
+          shape="square"
+          className="shrink-0 border-border font-sans font-normal"
+        >
+          <kbd>{shortcut}</kbd>
+        </Badge>
       ) : null}
     </Link>
   );
@@ -798,13 +811,13 @@ export function RecentChats({
       <div
         key={session.id}
         data-chat-row
-        className={`group flex h-8 items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
+        className={`group flex h-10 items-center gap-1 rounded-12 text-section font-normal transition min-h-[var(--control-min-h)] ${
           session.archivedAt ? "text-subtle-foreground" : "text-foreground"
         } ${
           isActive
             ? onCard
-              ? "bg-surface-hover"
-              : "bg-surface shadow-1 dark:bg-surface-hover"
+              ? "bg-surface-hover font-normal ring-1 ring-inset ring-border/70"
+              : ACTIVE_CLASS
             : onCard
               ? "hover:bg-surface-hover"
               : "hover:bg-surface-hover dark:hover:bg-surface"
@@ -908,11 +921,16 @@ export function RecentChats({
     const remainingCount = Math.max(items.length - visibleCount, 0);
     const projectLabel = (
       <>
-        {collapsed ? (
-          <Folder className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
-        ) : (
-          <FolderOpen className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
-        )}
+        <span
+          className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
+          aria-hidden
+        >
+          {collapsed ? (
+            <Folder className="h-5 w-5 shrink-0" />
+          ) : (
+            <FolderOpen className="h-5 w-5 shrink-0" />
+          )}
+        </span>
         <span className="truncate">{label}</span>
         {/* Where the group works: another computer, or Rome Cloud once any
             chat lives on a device. Only the icon opens the tooltip: on the
@@ -968,14 +986,14 @@ export function RecentChats({
             : undefined
         }
         title={deviceFolder ? undefined : label}
-        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-8 border border-transparent pl-2 pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+        className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-12 pl-3 pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
       >
         {projectLabel}
       </button>
     );
     return (
       <div key={key} className="mb-1" data-project-group={key}>
-        <div className="group/project flex h-8 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
+        <div className="group/project flex h-10 items-center min-h-[var(--control-min-h)] gap-1 rounded-12 text-section font-normal text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           {groupButton}
           {deviceFolder ? (
             <button
@@ -1045,13 +1063,13 @@ export function RecentChats({
         aria-labelledby="recent-chats-tasks-heading"
         data-tasks-section
         data-expanded={tasksExpanded}
-        className={`mx-2 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 border border-border bg-surface p-1 shadow-1 transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:border-border-subtle dark:shadow-none ${
+        className={`mx-3 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 bg-surface p-1 shadow-1 ring-1 ring-inset ring-border-strong transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:shadow-none ${
           tasksExpanded ? "h-1/2" : TASKS_FOLDED_HEIGHT
         }`}
       >
         <h2
           id="recent-chats-tasks-heading"
-          className={`relative shrink-0 after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-border after:transition-opacity ${
+          className={`relative shrink-0 after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-border-strong after:transition-opacity ${
             tasksExpanded && tasksScrolled ? "after:opacity-100" : "after:opacity-0"
           }`}
         >
@@ -1065,9 +1083,9 @@ export function RecentChats({
                 : t("recentChats.sectionTasks")
             }
             onClick={() => setTasksExpanded((open) => !open)}
-            className="flex h-8 w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
+            className="flex h-10 w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 px-2 text-left text-section font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
           >
-            <ListChecks className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
+            <ListChecks className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
             <span className="flex-1 truncate">{t("recentChats.sectionTasks")}</span>
             {running > 0 ? (
               <span
@@ -1079,7 +1097,7 @@ export function RecentChats({
               </span>
             ) : null}
             <ChevronUp
-              className={`h-3.5 w-3.5 shrink-0 text-subtle-foreground transition-transform duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none ${
+              className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none ${
                 tasksExpanded ? "rotate-180" : ""
               }`}
               aria-hidden
@@ -1110,15 +1128,15 @@ export function RecentChats({
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pb-2 pr-3 ${headerLeading ? "pl-2" : "pl-5"} ${belowTitlebar ? "pt-2" : "pt-5"}`}
+          className={`flex shrink-0 items-center justify-between pb-4 pr-3 ${headerLeading ? "pl-2" : "pl-6"} ${belowTitlebar ? "pt-2" : "pt-5"}`}
         >
-          <div className="flex min-w-0 items-center gap-1">
+          <div className="flex min-h-10 min-w-0 items-center gap-1">
             {headerLeading}
             <span className="truncate text-section text-foreground">
               {t(mode === "concierge" ? "recentChats.modeConcierge" : "recentChats.title")}
             </span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex min-h-10 items-center gap-1">
             {hasConcierge ? (
               <ChatModeSwitch
                 mode={mode}
@@ -1132,7 +1150,7 @@ export function RecentChats({
                 <IconButton
                   size="sm"
                   label={t("recentChats.settings")}
-                  icon={<Ellipsis aria-hidden />}
+                  icon={<Ellipsis className="size-5" aria-hidden />}
                   className="text-subtle-foreground hover:text-foreground"
                 />
               </DropdownMenuTrigger>

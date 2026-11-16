@@ -258,15 +258,15 @@ components:
     rounded: "{rounded.16}"
   sidebar-row:
     textColor: "{colors.ink}"
-    typography: "{typography.ui}"
-    rounded: "{rounded.8}"
-    height: "32px"
+    typography: "{typography.section}"
+    rounded: "{rounded.12}"
+    height: "40px"
   sidebar-row-active:
     backgroundColor: "{colors.warm-paper}"
     textColor: "{colors.ink}"
-    typography: "{typography.ui}"
-    rounded: "{rounded.8}"
-    height: "32px"
+    typography: "{typography.section}"
+    rounded: "{rounded.12}"
+    height: "40px"
 ---
 
 # Design System: Rome
@@ -450,7 +450,7 @@ Components are precise and restrained. Each one declares its own typography role
 - **Switch:** A pill track that fills coral when checked. The thumb follows its context canvas color, 16px in the default size, 12px in small, with a 1px inset. The hit area extends 12px horizontally and 8px vertically past the track.
 
 ### Navigation
-- **Sidebar:** Canvas fill with a hairline right border, 256px wide, 64px as a rail. Rows are 32px, 8px radius, `text-ui`. Hover takes `surface-hover`. The current chat is Warm Paper with `shadow-1`. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action. Below the pinned entries, a hairline and an aux "Recent" label introduce up to three unpinned apps the guardian built or opened in the last 14 days, most recent first, with a "Show more" row for the rest. The zone is absent when empty. An installed, never-opened app carries the same 8px `info` dot, which on hover gives way to a Pin action. On touch the Pin action is always visible and the dot sits beside it.
+- **Sidebar:** Canvas fill with 1px region boundaries in `border-strong`. Navigation groups and the footer use the shared Separator with `border-strong`; shell columns and the Tasks card use the same token for their edges. Footer action glyphs are 20px within their existing buttons. Chat rows and navigation rows are 40px tall with 12px corners and regular-weight `text-section`. The New chat row has no separator above it, and its shortcut uses a square muted Badge rendered as `kbd`. The chat-list header aligns with the rail header; new-chat and main-chat rows share the navigation rhythm. Topic rows reserve the same icon slot as the main chat so their text starts on the same vertical line. An unread count uses 4px corners and a 1px `destructive-border` edge and occupies that slot, temporarily replacing the icon until the count clears; it stays visible when the row menu appears. Lists and the Tasks card share a 12px outer inset, and the Tasks heading uses the same row height. The navigation rail's search trigger is a borderless pill with a `surface-muted` fill. Outline glyphs and app artwork are 20px, with a 1.5px stroke for Projects, centered in fixed slots so names stay aligned. Hover takes `surface-hover`. The selected row takes `surface`, `shadow-4`, a 1px inset edge in `border` at 70% alpha, regular-weight text, and a `primary` glyph; dark mode uses `surface-hover`. App artwork keeps its own colors. A selected task inside the Tasks card uses the hover fill without another shadow. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action. Below the pinned entries, a hairline and an aux "Recent" label introduce up to three unpinned apps the guardian built or opened in the last 14 days, most recent first, with a "Show more" row for the rest. The zone is absent when empty. An installed, never-opened app carries the same 8px `info` dot, which on hover gives way to a Pin action. On touch the Pin action is always visible and the dot sits beside it.
 - **Mobile header:** 48px plus the safe-area inset, hairline bottom border, hidden from 768px up.
 - **Chat search:** `Command+K` on Apple platforms and `Ctrl+K` elsewhere open a command dialog. The trigger stays visible beside the list settings, since a shortcut is never the only path. A leading `@` turns the field into an agent picker, and a picked agent pins as a composer chip before the text. From then on the field holds a message, and Enter starts a new chat with that agent in the default project. Backspace in the empty field unpins the agent.
 
