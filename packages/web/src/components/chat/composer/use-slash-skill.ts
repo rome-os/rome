@@ -1,9 +1,9 @@
-import { useCallback, useRef, useState } from "react";
-import type { KeyboardEvent, RefObject } from "react";
+import { useCallback } from "react";
+import type { RefObject } from "react";
 import type { SkillSelection } from "./SkillCommandChip";
-import type { SlashSkillMenuHandle } from "./SlashSkillMenu";
+import { findSkillToken, useTokenPicker } from "./use-token-picker";
 
-/** Shared slash detection, selection and keyboard navigation for chat composers. */
+/** The `/` skill picker shared by chat composers. Accepting a skill makes it the draft's chip. */
 export function useSlashSkill({
   inputText,
   setInputText,
@@ -19,36 +19,10 @@ export function useSlashSkill({
   uploadInFlightRef: RefObject<boolean>;
   enabled?: boolean;
 }) {
-  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-  const [slashQuery, setSlashQuery] = useState("");
-  const slashMenuRef = useRef<SlashSkillMenuHandle>(null);
+  const picker = useTokenPicker({ findToken: findSkillToken, enabled, acceptOnTab: true });
+  const { close } = picker;
 
-  const reevaluateSlashContext = useCallback(
-    (value: string, cursor: number) => {
-      const token = value.slice(1, cursor);
-      const slashCount = token.split("/").length - 1;
-      // Scoped app ids allow one internal slash; file paths are not skill queries.
-      const slashShapeAllowed = slashCount === 0 || (token.startsWith("@") && slashCount === 1);
-      if (
-        enabled &&
-        value.startsWith("/") &&
-        cursor >= 1 &&
-        !/\s/.test(token) &&
-        slashShapeAllowed
-      ) {
-        setSlashQuery(token);
-        setSlashMenuOpen(true);
-        return;
-      }
-      if (slashMenuOpen) {
-        setSlashMenuOpen(false);
-        setSlashQuery("");
-      }
-    },
-    [slashMenuOpen, enabled],
-  );
-
-  const acceptSlashSkill = useCallback(
+  const accept = useCallback(
     (skill: SkillSelection) => {
       if (uploadInFlightRef.current) return;
       const cursor = textareaRef.current?.selectionEnd ?? inputText.length;
@@ -65,62 +39,10 @@ export function useSlashSkill({
         description: skill.description,
         iconUrl: skill.iconUrl,
       });
-      setSlashMenuOpen(false);
-      setSlashQuery("");
+      close();
     },
-    [inputText, setInputText, setDraftSkill, textareaRef, uploadInFlightRef],
+    [inputText, setInputText, setDraftSkill, textareaRef, uploadInFlightRef, close],
   );
 
-  const handleSlashKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
-    if (slashMenuOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        slashMenuRef.current?.move(1);
-        return true;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        slashMenuRef.current?.move(-1);
-        return true;
-      }
-      // Horizontal navigation mirrors the mention menu: the slash menu is the
-      // same two-panel app → item picker, so ArrowRight drills into the
-      // skills panel and ArrowLeft returns to apps instead of moving the
-      // textarea cursor.
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        slashMenuRef.current?.moveHorizontal(1);
-        return true;
-      }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        slashMenuRef.current?.moveHorizontal(-1);
-        return true;
-      }
-      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
-        if (slashMenuRef.current?.acceptSelected()) {
-          e.preventDefault();
-          return true;
-        }
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSlashMenuOpen(false);
-        setSlashQuery("");
-        return true;
-      }
-    }
-    return false;
-  };
-
-  return {
-    slashMenuOpen,
-    setSlashMenuOpen,
-    slashQuery,
-    setSlashQuery,
-    slashMenuRef,
-    reevaluateSlashContext,
-    acceptSlashSkill,
-    handleSlashKeyDown,
-  };
+  return { ...picker, accept };
 }
