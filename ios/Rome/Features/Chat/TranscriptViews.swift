@@ -698,7 +698,8 @@ struct Composer: View {
         .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true, frost: Frost.composer)
         .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
         .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
-        .task { await voiceInput?.refresh() }
+        // The main Chat stays mounted under other sections, so it asks again on each return.
+        .task(id: onScreen) { if onScreen { await voiceInput?.refresh() } }
         .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
         .onChange(of: voice.state) { voice.stateShown() }
