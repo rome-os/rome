@@ -170,7 +170,7 @@ async function playScenario(
   }
   // A delegated task's time, split by where it went, from the stack's traces.
   let path: TaskPath | null = null;
-  if (scenario.row === "simple-task" || scenario.row === "heavy-task") {
+  if (turns.some((t) => (t.tools.chat_start ?? 0) > 0)) {
     path = await taskPathOf(chat.id, startedAt, startedAtIso).catch((error: unknown) => {
       log(`task path failed: ${error instanceof Error ? error.message : String(error)}`);
       return null;

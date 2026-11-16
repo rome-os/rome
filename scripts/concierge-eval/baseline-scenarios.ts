@@ -178,6 +178,19 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
     rubric: `A valid schedule: B is before A, C is not directly after B, 15-minute gaps between meetings, all within 13:00-17:00. The only valid order is C, B, A (B before A, C not right after B, so C can't sit between B and A): for example C 13:00-13:45, B 14:00-15:00, A 15:15-16:45. Check the answer yourself: score 1 for a schedule that breaks a rule, 5 for a valid one stated briefly. ${VOICE}`,
   },
   {
+    id: "reason-schedule-task",
+    row: "reasoning",
+    about: "The same constraint puzzle, delegated, to compare a task's latency with an inline answer",
+    steps: [
+      {
+        text: "Make it a task: three meetings to fit into one afternoon from 13:00 to 17:00: A takes 90 minutes, B takes 60, C takes 45. B must end before A starts, C can't be right after B, and I need a 15-minute break between any two meetings. Give me a schedule that works.",
+        settleS: 20,
+      },
+    ],
+    check: (i) => [...delegated(i), ...noFiller(i.said)],
+    rubric: `A valid schedule: B is before A, C is not directly after B, 15-minute gaps between meetings, all within 13:00-17:00. The only valid order is C, B, A: for example C 13:00-13:45, B 14:00-15:00, A 15:15-16:45. Score the relayed result: 1 for a schedule that breaks a rule, 5 for a valid one stated briefly. ${VOICE}`,
+  },
+  {
     id: "task-simple",
     row: "simple-task",
     about: "A small lookup-and-summary task, delegated, with its result relayed",
