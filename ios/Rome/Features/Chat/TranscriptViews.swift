@@ -98,6 +98,8 @@ struct UserBubble: View {
     var mark: MessageMark? = nil
     /// What the message replies to, quoted at the top of the bubble.
     var quote: MessagePart.ReplyQuote? = nil
+    /// The mark that stands for the quote where the reply sits right under what it answers.
+    var rail: ReplyRail.Kind? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
     @Environment(\.rowTinted) private var tinted
@@ -124,10 +126,10 @@ struct UserBubble: View {
                         UserImageGrid(images: images)
                             .markBadge(mark)
                     }
-                    if !text.isEmpty || quote != nil {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let quote {
-                                QuotedReply(quote: quote, onTap: onQuote)
+                    if !text.isEmpty || (quote != nil && rail == nil) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let quote, rail == nil {
+                                QuotedReply(quote: quote, tone: .sent, onTap: onQuote)
                             }
                             if !text.isEmpty {
                                 Text(text)
@@ -139,6 +141,9 @@ struct UserBubble: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                            .overlay(alignment: .topTrailing) {
+                                if let rail, let quote { ReplyRail(kind: rail, isUser: true, label: quote.text, onTap: onQuote) }
+                            }
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: bubbleMenu)
                             // Photos above the bubble carry the badge instead.
@@ -348,6 +353,12 @@ struct AgentBubble: View {
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     var menu = BubbleMenu()
+    /// What the message replies to, quoted at the top of the bubble.
+    var quote: MessagePart.ReplyQuote? = nil
+    /// The mark that stands for the quote where the reply sits right under what it answers.
+    var rail: ReplyRail.Kind? = nil
+    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    var onQuote: (() -> Void)? = nil
     #if DEBUG
     /// Snapshot runs only: long bubbles open unfolded.
     static var startsExpanded = false
@@ -400,7 +411,9 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // A forwarded result is a plain bubble: the label under it names its task.
+            if let quote, rail == nil {
+                QuotedReply(quote: quote, tone: .received, onTap: onQuote)
+            }
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
@@ -417,6 +430,9 @@ struct AgentBubble: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
+        .overlay(alignment: .topLeading) {
+            if let rail, let quote { ReplyRail(kind: rail, isUser: false, label: quote.text, onTap: onQuote) }
+        }
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
         .bubbleWidth()
@@ -569,9 +585,7 @@ enum TranscriptSpacing {
         default: break
         }
         // Tight under its own message, and apart from the next one.
-        if case .threadLabel = row { return 3 }
         if case .sourceLabel = row { return 3 }
-        if case .threadLabel = previous { return row.isGuardian ? 18 : 14 }
         if case .sourceLabel = previous { return row.isGuardian ? 18 : 14 }
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
@@ -666,6 +680,7 @@ struct Composer: View {
                     committedText: $committedText,
                     handle: textHandle,
                     editable: !voice.active,
+                    onReturn: returnSends,
                     onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
                 )
                 if !voice.active {
@@ -748,6 +763,23 @@ struct Composer: View {
                 Task { await attachments.add(images: [image]) }
             }
             .ignoresSafeArea()
+        }
+    }
+
+    /// Return on a hardware keyboard while listening: listening ends, and the
+    /// message is sent once the last words are in. Shift-Return does nothing.
+    private var returnSends: (() -> Void)? {
+        guard voice.active else { return nil }
+        return sendWhenHeard
+    }
+
+    private func sendWhenHeard() {
+        voice.stopAndSend {
+            guard !(attachments?.isPreparing ?? false),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
+            else { return }
+            voice.edited(service: voiceInput, chat: voiceKey)
+            onSend()
         }
     }
 

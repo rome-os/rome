@@ -23,6 +23,7 @@ import { MessageRepository } from "../../chats/storage/message-repository.js";
 import { MAIN_CHAT_NAME, mainChatIdOf } from "../../concierge/main-chat.js";
 import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
 import { createLogger } from "../../logger.js";
+import { CHAT_MESSAGES } from "../../chats/storage/messages-sql.js";
 import {
   conciergeMessageTasks,
   conciergeMessageTurns,
@@ -66,9 +67,6 @@ export interface ConciergeTaskWrite {
   /** A message of the row's Concierge chat, by its key there; the caller has
    *  checked it. */
   sourceMessageId?: string | null;
-  /** The key of the message that names the row's chat thread. Written only
-   *  while the row has none; a move to another Concierge chat clears it. */
-  threadRoot?: string | null;
   archived?: boolean;
 }
 
@@ -114,12 +112,6 @@ export interface MessageMarkRow {
   endedAs: string[];
 }
 
-/** A task's chat thread in Concierge chat `chatId`, rooted at `root`, ended: its task left the chat. */
-export interface ChatThreadRetired {
-  chatId: string;
-  root: string;
-}
-
 /**
  * The Concierge's todo list. Only the Concierge's tools write it; every write
  * tells the change listeners, which push the row to the panel and settle the
@@ -128,7 +120,6 @@ export interface ChatThreadRetired {
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
   private messageListeners = new Set<(target: MessageTarget) => void>();
-  private threadListeners = new Set<(retired: ChatThreadRetired) => void>();
 
   /** Where a task's source message is looked up: its Concierge chat's
    *  lines in Chats. */
@@ -143,17 +134,12 @@ export class ConciergeTasksRepository {
 
   /**
    * Concierge chat `chatId` is archived or deleted. Its rows stay its own,
-   * and read as its owner's main chat's from now on, so none is moved. Its
-   * rows that `isOpen` keeps let go of their chat thread there, so their next
-   * report starts one in the main chat; an ended row keeps its thread, unless
-   * the chat is `deleted` and its messages with it.
+   * and read as its owner's main chat's from now on, so none is moved.
    * Answers how many rows are open.
    */
   async leaveChat(
     chatId: string,
     isOpen: (rows: ConciergeTaskRow[]) => Promise<Set<string>>,
-    options: { deleted?: boolean } = {},
-    now = new Date(),
   ): Promise<number> {
     const rows = await this.db
       .select()
@@ -161,23 +147,7 @@ export class ConciergeTasksRepository {
       .where(and(eq(conciergeTasks.chatId, chatId), isNull(conciergeTasks.archivedAt)));
     const openIds = await isOpen(rows);
     const open = rows.filter((row) => openIds.has(row.id));
-    // A deleted chat's messages are gone, so no row keeps a root among them.
-    const rooted = (options.deleted ? rows : open).filter((row) => row.threadRoot);
-    if (rooted.length > 0) {
-      await this.db
-        .update(conciergeTasks)
-        .set({ threadRoot: null, updatedAt: now })
-        .where(
-          inArray(
-            conciergeTasks.id,
-            rooted.map((row) => row.id),
-          ),
-        );
-    }
     for (const { id } of open) await this.announce(id, "refresh");
-    for (const root of new Set(rooted.map((row) => row.threadRoot))) {
-      if (root) this.retireThread({ chatId }, root);
-    }
     return open.length;
   }
 
@@ -332,26 +302,6 @@ export class ConciergeTasksRepository {
     await this.announce(id, "refresh");
   }
 
-  /**
-   * Tells the listeners that task chat thread `root` ended in the chat `row`
-   * was in: its own, or with none, its owner's main chat.
-   */
-  private retireThread(
-    row: { chatId: string | null; ownerKey?: string | null },
-    root: string,
-  ): void {
-    const chatId = row.chatId ?? mainChatIdOf(ownerOf(row));
-    for (const listener of this.threadListeners) listener({ chatId, root });
-  }
-
-  /** Listens for task chat threads that end, as when their task moves to another chat. */
-  onThreadRetired(listener: (retired: ChatThreadRetired) => void): () => void {
-    this.threadListeners.add(listener);
-    return () => {
-      this.threadListeners.delete(listener);
-    };
-  }
-
   onChange(listener: ChangeListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -401,81 +351,51 @@ export class ConciergeTasksRepository {
    */
   async setSourceMessage(id: string, chatId: string, messageId: string): Promise<void> {
     const stored = chatId === CONCIERGE_CHAT_ID ? null : chatId;
-    const existing = await this.get(id);
     await this.db
       .update(conciergeTasks)
-      .set({
-        chatId: stored,
-        sourceMessageId: this.sources.idOf(chatId, messageId),
-        // A chat thread stays in its chat: a row moved to another has none.
-        ...(existing && existing.chatId !== stored ? { threadRoot: null } : {}),
-      })
+      .set({ chatId: stored, sourceMessageId: this.sources.idOf(chatId, messageId) })
       .where(eq(conciergeTasks.id, id));
     await this.announce(id, "refresh");
-    if (existing?.threadRoot && existing.chatId !== stored) {
-      this.retireThread(existing, existing.threadRoot);
-    }
   }
 
   /**
-   * The task whose chat thread each of `roots` names in Concierge chat
-   * `chatId`, for the roots a task's thread has: its title, and its task
-   * chat, or null while it has none. A task has its own thread; rows from
-   * before that share a root keep the oldest.
+   * The rows, not archived, whose start message is the one keyed `messageKey`
+   * in Concierge chat `chatId`, oldest first. One filtered read, not the
+   * whole list.
+   */
+  async listStartedAt(chatId: string, messageKey: string): Promise<ConciergeTaskWithChat[]> {
+    const message = this.sources.idOf(chatId, messageKey);
+    if (message === null) return [];
+    return this.withChat(
+      and(isNull(conciergeTasks.archivedAt), eq(conciergeTasks.sourceMessageId, message)),
+    );
+  }
+
+  /**
+   * The newest task started in each chat thread of `roots` in Concierge chat
+   * `chatId`: the one whose start message is in the thread. The roots are the
+   * keys of the threads' first messages; a thread no task started in is left
+   * out.
    */
   async threadTasks(
     chatId: string,
     roots: readonly string[],
-  ): Promise<Map<string, { title: string; taskChatId: string | null }>> {
-    const tasks = new Map<string, { title: string; taskChatId: string | null }>();
+  ): Promise<Map<string, { id: string; title: string }>> {
+    const tasks = new Map<string, { id: string; title: string }>();
     if (roots.length === 0) return tasks;
-    for (const { row, conciergeChat } of await this.withChat(
-      inArray(conciergeTasks.threadRoot, [...new Set(roots)]),
-    )) {
-      // Oldest first, so the first task kept is the thread's own.
-      if (row.threadRoot && conciergeChat.id === chatId && !tasks.has(row.threadRoot)) {
-        tasks.set(row.threadRoot, { title: row.title, taskChatId: row.sessionId });
-      }
-    }
+    const rows = this.db.all<{ root: string; id: string; title: string }>(sql`
+      SELECT r.key AS root, t.id, t.title
+      FROM ${CHAT_MESSAGES} r
+      JOIN ${CHAT_MESSAGES} s ON s.chat_id = r.chat_id
+        AND (s.id = r.id OR s.root_message_id = r.id)
+      JOIN concierge_tasks t ON t.source_message_id = s.id
+      WHERE r.chat_id = (SELECT chat_id FROM rome_sessions WHERE id = ${chatId})
+        AND r.key IN (SELECT value FROM json_each(${JSON.stringify([...new Set(roots)])}))
+      ORDER BY t.created_at, t.id
+    `);
+    // Oldest first, so the last one kept is the newest.
+    for (const row of rows) tasks.set(row.root, { id: row.id, title: row.title });
     return tasks;
-  }
-
-  /**
-   * The task whose chat thread starts with message `root` in Concierge chat
-   * `chatId`, or null: a thread no task has is no task's
-   * (docs/domains/chats.md#chat-thread).
-   */
-  async taskOfThread(chatId: string, root: string): Promise<{ id: string; title: string } | null> {
-    for (const { row, conciergeChat } of await this.withChat(eq(conciergeTasks.threadRoot, root))) {
-      if (conciergeChat.id === chatId) return { id: row.id, title: row.title };
-    }
-    return null;
-  }
-
-  /** The key of the message that names the row's chat thread, or null. */
-  async threadRoot(id: string): Promise<string | null> {
-    return (await this.get(id))?.threadRoot ?? null;
-  }
-
-  /**
-   * Names the row's chat thread by message `root`, unless it already has
-   * one or another row holds that root: a root is written once, and a thread
-   * is one task's. One statement claims it, so of two tasks started at once
-   * for one message, one gets it and the other stays without. Answers the
-   * row's root after.
-   */
-  async setThreadRoot(id: string, root: string): Promise<string | null> {
-    await this.db
-      .update(conciergeTasks)
-      .set({ threadRoot: root })
-      .where(
-        and(
-          eq(conciergeTasks.id, id),
-          isNull(conciergeTasks.threadRoot),
-          sql`not exists (select 1 from ${conciergeTasks} as other where other.thread_root = ${root} and other.id <> ${id})`,
-        ),
-      );
-    return this.threadRoot(id);
   }
 
   /**
@@ -598,7 +518,6 @@ export class ConciergeTasksRepository {
   async upsertMany(writes: ConciergeTaskWrite[], now = new Date()): Promise<ConciergeTaskRow[]> {
     // `transaction` is synchronous on better-sqlite3, so the body uses `.run()`
     // and `.all()` and never awaits.
-    const retired: { row: ConciergeTaskRow; root: string }[] = [];
     const written = await this.db.transaction((tx) => {
       const out: ConciergeTaskRow[] = [];
       for (const write of writes) {
@@ -634,12 +553,6 @@ export class ConciergeTasksRepository {
               : null;
         const completedAt = isFinished(state) ? (existing?.completedAt ?? now) : null;
         const chatId = write.chatId !== undefined ? write.chatId : (existing?.chatId ?? null);
-        if (
-          existing?.threadRoot &&
-          (existing.chatId ?? null) !== (chatId === CONCIERGE_CHAT_ID ? null : chatId)
-        ) {
-          retired.push({ row: existing, root: existing.threadRoot });
-        }
         const fields = {
           title: write.title ?? existing?.title ?? "",
           state,
@@ -652,11 +565,6 @@ export class ConciergeTasksRepository {
           sessionId:
             write.sessionId !== undefined ? write.sessionId : (existing?.sessionId ?? null),
           chatId: chatId === CONCIERGE_CHAT_ID ? null : chatId,
-          // Written once; a row moved to another Concierge chat has none.
-          threadRoot:
-            existing && (existing.chatId ?? null) !== (chatId === CONCIERGE_CHAT_ID ? null : chatId)
-              ? null
-              : (existing?.threadRoot ?? write.threadRoot ?? null),
           sourceMessageId:
             write.sourceMessageId !== undefined
               ? write.sourceMessageId === null
@@ -703,7 +611,6 @@ export class ConciergeTasksRepository {
       return out;
     });
     for (const row of written) await this.announce(row.id, "write");
-    for (const { row, root } of retired) this.retireThread(row, root);
     return written;
   }
 

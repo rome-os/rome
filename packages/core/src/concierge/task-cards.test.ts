@@ -5,6 +5,7 @@ import {
   cardAt,
   openCards,
   settledCard,
+  taskCardLine,
   type TaskCardSources,
   withTaskCards,
 } from "./task-cards.js";
@@ -302,6 +303,18 @@ describe("settledCard", () => {
       outcome: { kind: "answered" },
     });
     expect(await settledCard(read, "task-1", { kind: "question", id: "nope" })).toBeNull();
+  });
+});
+
+describe("taskCardLine", () => {
+  it("reads a question as its words and an approval as its title", async () => {
+    const { read } = sources(new Map([["task-1", asked()]]));
+    expect(
+      await taskCardLine(read, "task-1", { kind: "question", id: "q1", messageId: "m1" }),
+    ).toBe("Which tone?");
+    expect(await taskCardLine(read, "task-1", { kind: "approval", id: "a1" })).toBe("Send it");
+    expect(await taskCardLine(read, "task-1", { kind: "approval", id: "nope" })).toBeNull();
+    expect(await taskCardLine(read, "task-1", undefined)).toBeNull();
   });
 });
 

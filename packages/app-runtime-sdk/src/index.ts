@@ -1807,8 +1807,9 @@ export interface ChannelMessage {
   replyTo?: MessageReplyReference;
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
   /** The chat thread the message is in, in a chat that keeps them, such as
-   *  a Concierge chat: the id of the thread's first message. Not a platform
-   *  thread. Absent when the message is in none. */
+   *  a Concierge chat: the id of the root of its reply chain, which is the
+   *  message's own id when it replies to nothing. Not a platform thread.
+   *  Absent in a chat that keeps none. */
   chatThread?: string;
   addressing?: MessageAddressing;
   raw?: unknown;

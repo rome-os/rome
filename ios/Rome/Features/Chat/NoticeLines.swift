@@ -41,8 +41,7 @@ enum SourceCopy {
     }
 }
 
-/// A faint line under a Concierge reply: where its turn came from. Styled as
-/// the thread label is, and not tappable.
+/// A faint line under a Concierge reply: where its turn came from. Not tappable.
 struct SourceLabelLine: View {
     let text: String
 

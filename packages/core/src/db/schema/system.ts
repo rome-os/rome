@@ -651,13 +651,11 @@ export const chatMessages = sqliteTable(
     parts: text("parts").notNull(), // JSON array of blocks, as composed
     // The line this one quotes, when Rome holds it.
     replyToMessageId: integer("reply_to_message_id"),
-    // The chat thread the line is in (docs/domains/chats.md#chat-thread): the
-    // key of the thread's first line. Not the platform's thread_id. Null for a
-    // line in no chat thread, as every line said before chat threads.
-    chatThreadId: text("chat_thread_id"),
-    // The line is placed in its chat thread for good: its sender chose the
-    // thread, or the Concierge placed it. Nothing moves a settled line.
-    chatThreadSettled: integer("chat_thread_settled", { mode: "boolean" }).notNull().default(false),
+    // The first line of the reply chain this line is in
+    // (docs/domains/chats.md#chat-thread). Set when the line is recorded, from
+    // the line it quotes, and never changed. Null for a line that quotes
+    // nothing: it is its own root.
+    rootMessageId: integer("root_message_id"),
     // The emoji the Concierge reacted to the line with
     // (docs/domains/chats.md#reaction); null for none.
     reaction: text("reaction"),
@@ -668,7 +666,7 @@ export const chatMessages = sqliteTable(
     // A dashboard line by the id clients know it by, such as a widget's.
     index("idx_chat_messages_by_key").on(table.key),
     // One chat thread's lines.
-    index("idx_chat_messages_chat_thread").on(table.chatId, table.chatThreadId),
+    index("idx_chat_messages_root").on(table.chatId, table.rootMessageId),
     // A place's lines by time. Within one second lines keep the order they
     // were recorded in.
     index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
@@ -773,13 +771,6 @@ export const conciergeTasks = sqliteTable(
      * with the legacy rows.
      */
     legacySourceMessageId: text("legacy_source_message_id"),
-    /**
-     * The key of the message that names the row's chat thread in its
-     * Concierge chat (docs/domains/chats.md#chat-thread). Written once, the
-     * first time the row has a thread, and cleared only when the row moves
-     * to another Concierge chat.
-     */
-    threadRoot: text("thread_root"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /** Set while the state is `done` or `dropped`. */

@@ -280,12 +280,11 @@ final class DemoBackend: RomeBackend {
     }
 
 
-    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
+    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
         try await pause(0.25)
         let all = messages[sessionId] ?? []
-        guard let anchor = all.first(where: { $0.id == messageId }) else { throw APIError.notFound }
-        let root = anchor.chatThreadId ?? anchor.id
-        return all.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == anchor.id) }.map(Self.withThreads)
+        guard all.contains(where: { $0.id == root }) else { throw APIError.notFound }
+        return all.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == root) }.map(Self.withThreads)
     }
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
@@ -302,15 +301,12 @@ final class DemoBackend: RomeBackend {
             return "- File \(index + 1): [\(file.name)](</\(path)>)"
         }
         let stored = ([text] + (lines.isEmpty ? [] : [lines.joined(separator: "\n")])).filter { !$0.isEmpty }.joined(separator: "\n\n")
-        // A send from a chat thread lands in it, and so does the answer.
-        let thread = target.flatMap { target in (messages[sessionId] ?? []).first { $0.id == target.messageId } }.map { $0.chatThreadId ?? $0.id }
-        if let thread, let index = messages[sessionId]?.firstIndex(where: { $0.id == thread }), messages[sessionId]?[index].chatThreadId == nil {
-            // A message alone starts the thread the reply opens.
-            messages[sessionId]?[index].chatThreadId = thread
-            bus.emit(LiveTopic.chat(sessionId), .messageThread(sessionId: sessionId, messageId: thread, chatThreadId: thread))
-        }
-        insert(sessionId, threaded(user(inputId, stored, at: .now, session: sessionId), thread))
-        if let thread { bus.emit(LiveTopic.chat(sessionId), .messageThread(sessionId: sessionId, messageId: inputId, chatThreadId: thread)) }
+        // A send replies to the message it names, and so does the answer: both
+        // are in that message's chat thread and show its quote.
+        let original = target.flatMap { target in (messages[sessionId] ?? []).first { $0.id == target.messageId } }
+        let thread = original.map { $0.chatThreadId ?? $0.id }
+        let sent = threaded(quoting(user(inputId, stored, at: .now, session: sessionId), original), thread)
+        insert(sessionId, sent)
         let turnId = "turn-\(nextID())"
         setRunning(sessionId, turnId)
         let topic = topicChats.firstIndex { $0.id == sessionId }
@@ -318,7 +314,7 @@ final class DemoBackend: RomeBackend {
         Task {
             try? await pause(concierge ? 1.8 : 3.5)
             if concierge {
-                insert(sessionId, threaded(agent("好，我记下了。", at: .now, session: sessionId), thread))
+                insert(sessionId, threaded(quoting(agent("好，我记下了。", at: .now, session: sessionId), sent), thread))
                 try? await pause(0.7)
                 insert(sessionId, threaded(agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId), thread))
                 // An untitled topic chat is named from its first message.
@@ -766,13 +762,28 @@ final class DemoBackend: RomeBackend {
         return message
     }
 
-    /// The message, placed in the chat thread that starts at `root`: a
-    /// task's thread, named by the task's title, as the server sends it.
+    /// The message, placed in the chat thread that starts at `root`, or in its
+    /// own when it has none, as the server sends it. The title is the task's
+    /// that started in the thread, when one did.
     private func threaded(_ message: ChatMessage, _ root: String?, _ title: String? = nil) -> ChatMessage {
         var message = message
-        message.chatThreadId = root
-        message.chatThreadTitle = root == nil ? nil : (title ?? threadTitles[root!])
+        message.chatThreadId = root ?? message.id
+        message.chatThreadTitle = root.flatMap { title ?? threadTitles[$0] }
         message.knowsThreads = true
+        return message
+    }
+
+    /// The message with the quote of `original` as its first part, as the
+    /// server stores a reply; the message itself when there is nothing to quote.
+    private func quoting(_ message: ChatMessage, _ original: ChatMessage?) -> ChatMessage {
+        guard let original, let text = MessagePart.parse(original.content).lazy.compactMap(\.textContent).first,
+              let stored = try? JSONDecoder().decode([JSONValue].self, from: Data(message.content.utf8)) else { return message }
+        var message = message
+        let quote: JSONValue = .object([
+            "type": .string("reply_to"), "messageId": .string(original.id),
+            "author": .string(original.isUser ? "guardian" : "agent"), "text": .string(text),
+        ])
+        message.content = json([quote] + stored)
         return message
     }
 
@@ -906,7 +917,7 @@ final class DemoBackend: RomeBackend {
         let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
-        func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, root: String? = nil, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
+        func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
             let updated = nowMs - minutesAgo * 60_000
             return ConciergeTask(
                 id: id, title: title, state: state, summary: summary, waitingOn: waitingOn,
@@ -915,20 +926,20 @@ final class DemoBackend: RomeBackend {
                 conciergeChat: topic.flatMap { id in topicChats.first { $0.id == id } },
                 sourceMessageId: nil, createdAt: updated - 3_600_000, updatedAt: updated,
                 completedAt: done ? updated : nil, archivedAt: nil, notSynced: false,
-                threadRoot: root, status: status, endReason: endReason, openWait: wait
+                status: status, endReason: endReason, openWait: wait
             )
         }
         tasks = [
-            task("t1", "价格追踪：发提醒邮件", .needsUser, chat: "chat-price", waitingOn: "需要批准发送邮件", minutesAgo: 10, root: "c-price", status: "needs_you", wait: .object(["kind": .string("approval"), "id": .string("ap-1"), "since": .number(nowMs - 10 * 60_000)])),
+            task("t1", "价格追踪：发提醒邮件", .needsUser, chat: "chat-price", waitingOn: "需要批准发送邮件", minutesAgo: 10, status: "needs_you", wait: .object(["kind": .string("approval"), "id": .string("ap-1"), "since": .number(nowMs - 10 * 60_000)])),
             // Its question waited more than a day: it ended for no response.
-            task("t2", "竞品定价调研", .done, chat: "chat-research", waitingOn: "在等你回答调研范围", minutesAgo: 25, root: "c-research", status: "ended", endReason: "no_response"),
-            task("t3", "官网首页双语文案", .doing, chat: "chat-site", summary: "正在逐段翻译首页文案", minutesAgo: 2, root: "c-site", status: "active"),
+            task("t2", "竞品定价调研", .done, chat: "chat-research", waitingOn: "在等你回答调研范围", minutesAgo: 25, status: "ended", endReason: "no_response"),
+            task("t3", "官网首页双语文案", .doing, chat: "chat-site", summary: "正在逐段翻译首页文案", minutesAgo: 2, status: "active"),
             task("t4", "整理本周会议纪要", .doing, chat: "chat-notes", summary: "已读完 3 份纪要", minutesAgo: 8),
             task("t5", "同步 Notion 数据库", .doing, chat: "chat-notion", summary: "Notion 连接已过期", minutesAgo: 60 * 15),
             task("t6", "每周一整理周报", .next, chat: nil, summary: "下周一早上开始", minutesAgo: 120, due: 60 * 30),
             task("t7", "盯着降噪耳机价格", .watching, chat: nil, summary: "每天早上 9 点检查一次", minutesAgo: 300, due: 60 * 14),
-            task("t8", "修复登录页样式", .done, chat: "chat-login", summary: "按钮间距和深色模式都改好了", minutesAgo: 60 * 24 * 3, done: true, root: "c-login", status: "ended", endReason: "done"),
-            task("t9", "比较京都三家酒店", .doing, chat: nil, from: "topic-trip", summary: "正在看评价和价格", minutesAgo: 6, root: "k1", status: "active"),
+            task("t8", "修复登录页样式", .done, chat: "chat-login", summary: "按钮间距和深色模式都改好了", minutesAgo: 60 * 24 * 3, done: true, status: "ended", endReason: "done"),
+            task("t9", "比较京都三家酒店", .doing, chat: nil, from: "topic-trip", summary: "正在看评价和价格", minutesAgo: 6, status: "active"),
         ]
 
         // A topic chat about one trip.

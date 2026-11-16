@@ -18,6 +18,9 @@ struct ComposerTextView: UIViewRepresentable {
     var handle: ComposerTextHandle? = nil
     /// False while voice input listens: the field shows the words as they come.
     var editable = true
+    /// Set while voice input listens: Return on a hardware keyboard calls it,
+    /// and the field holds keyboard focus so that Return reaches it.
+    var onReturn: (() -> Void)? = nil
     /// Called on each change the guardian makes, typed, pasted or deleted. Text
     /// the app sets (a restored draft, a send clearing the field) is not one.
     var onEdit: () -> Void = {}
@@ -57,6 +60,7 @@ struct ComposerTextView: UIViewRepresentable {
         if view.placeholder != placeholder { view.placeholder = placeholder }
         view.accessibilityLabel = placeholder
         view.onPasteImages = onPasteImages
+        view.onReturn = onReturn
         handle?.view = view
         if view.isEditable != editable { view.isEditable = editable }
         if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
@@ -68,6 +72,11 @@ struct ComposerTextView: UIViewRepresentable {
         guard context.environment.isEnabled else {
             if view.isFirstResponder { view.resignFirstResponder() }
             if focused { DispatchQueue.main.async { focused = false } }
+            return
+        }
+        // A read-only field shows no keyboard, so focus here costs nothing on screen.
+        if onReturn != nil {
+            if !view.isFirstResponder { DispatchQueue.main.async { view.becomeFirstResponder() } }
             return
         }
         // Focus follows the binding both ways; the change waits a turn so it
@@ -166,6 +175,8 @@ struct NamedPlaceholder {
 /// A text view that pastes images out of the field and shows a placeholder.
 final class PastingTextView: UITextView {
     var onPasteImages: (([NSItemProvider]) -> Void)?
+    /// Takes Return from a hardware keyboard instead of a new line; nil types it.
+    var onReturn: (() -> Void)?
     var placeholder = "" { didSet { setNeedsDisplay() } }
     /// Set with `placeholder` when it names something; its name is shortened to fit.
     var named: NamedPlaceholder?
@@ -179,6 +190,15 @@ final class PastingTextView: UITextView {
     override var attributedText: NSAttributedString! {
         didSet { if (oldValue?.length ?? 0 == 0) != (attributedText?.length ?? 0 == 0) { setNeedsDisplay() } }
     }
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard onReturn != nil else { return super.keyCommands }
+        let command = UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(returnPressed))
+        command.wantsPriorityOverSystemBehavior = true
+        return (super.keyCommands ?? []) + [command]
+    }
+
+    @objc func returnPressed() { onReturn?() }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), onPasteImages != nil, pasteboard.hasImages { return true }

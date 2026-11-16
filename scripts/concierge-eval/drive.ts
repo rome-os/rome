@@ -39,12 +39,11 @@ function answersFor(questions: Question[]): { values: string[]; text: string }[]
   );
 }
 
-/** The newest Concierge text message, preferring one in a task's thread. */
+/** The newest Concierge text message, which is where a task's result lands. */
 function latestResult(messages: ChatMessage[]): ChatMessage | undefined {
-  const texts = messages.filter(
-    (m) => m.role === "assistant" && partsOf(m).some((p) => p.type === "text"),
-  );
-  return texts.filter((m) => m.chatThreadId).at(-1) ?? texts.at(-1);
+  return messages
+    .filter((m) => m.role === "assistant" && partsOf(m).some((p) => p.type === "text"))
+    .at(-1);
 }
 
 export async function drive(

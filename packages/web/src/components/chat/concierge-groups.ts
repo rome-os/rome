@@ -171,11 +171,11 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
 }
 
 /**
- * What a focus on `thread` hides, by message id and by item key: every message
- * outside the thread, whichever thread it is in or none, the guardian's and
- * the agent's; the unread divider; and a time separator with nothing of the
- * thread under it. Model notices and the typing bubble stay, and keep their
- * separator. `threadOf` maps each message in a task thread to its thread.
+ * What a focus on `thread`, a root, hides, by message id and by item key: every
+ * message outside the thread, whichever thread it is in or none, the
+ * guardian's and the agent's; the unread divider; and a time separator with
+ * nothing of the thread under it. Model notices and the typing bubble stay, and
+ * keep their separator. `threadOf` maps each message in a thread to its root.
  */
 export function focusHidden(
   items: readonly ConciergeItem[],

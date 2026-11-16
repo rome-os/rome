@@ -331,6 +331,25 @@ export async function settledCard(
 }
 
 /**
+ * What the question or approval an `ask` card shows says, in one line: the
+ * question, or the approval's title. Null when the chat asked no such thing,
+ * or it has no words.
+ */
+export async function taskCardLine(
+  sources: TaskCardSources,
+  chatId: string,
+  waitedOn: TaskChatWaitedOn | undefined,
+): Promise<string | null> {
+  if (!waitedOn) return null;
+  const card = await settledCard(sources, chatId, waitedOn).catch(() => null);
+  if (!card) return null;
+  if (card.kind === "approval") return card.title || null;
+  const props = (card.render?.props ?? {}) as { questions?: { question?: unknown }[] };
+  const question = props.questions?.[0]?.question;
+  return typeof question === "string" && question.trim() ? question : null;
+}
+
+/**
  * The open cards of task chat `chatId`, as they now read: its questions with
  * no answer, and with `approvals` its approvals with no decision. A wait's
  * expiry settles the questions; the task ending or starting again settles both.

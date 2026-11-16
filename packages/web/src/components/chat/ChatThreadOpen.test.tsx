@@ -13,20 +13,18 @@ import { buildRows } from "./chat-view";
 import type { BlockActions, LivePreview } from "./MessageList";
 import {
   ChatThreadsProvider,
-  placed,
-  placeLive,
-  type ThreadPlacement,
+  chatThreadsOf,
   type ThreadTimelineMessage,
-  taskThreads,
-  threadLabels,
+  threadsOf,
+  threadTail,
 } from "./reply/chat-threads";
 import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
 
-// The thread label under the agent's messages in a Concierge chat's
-// transcript: where it shows, what it names, and that it focuses the chat on
-// the thread. A tap on a message itself opens nothing. With a thread in focus,
-// the transcript marks what is outside it.
+// The quote in a reply, the owner's or the agent's, in a Concierge chat's
+// transcript: where it shows and that it focuses the chat on the reply's
+// thread. A tap on a message itself opens nothing. With a thread in focus, the
+// transcript marks what is outside it.
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
@@ -52,245 +50,179 @@ afterEach(() => {
   rs.unstubAllGlobals();
 });
 
-/** A guardian (`g`) or agent (`a`) message in thread `thread`. */
-const g = (id: string, thread: string | null = id): ThreadTimelineMessage => ({
-  id,
-  role: "user",
-  chatThreadId: thread,
-});
-const a = (id: string, thread: string | null): ThreadTimelineMessage => ({
-  id,
-  role: "assistant",
-  chatThreadId: thread,
-});
+/** The name each thread of these fixtures carries on its messages. */
+const NAMES: Record<string, string> = { q1: "Flights", q2: "Hotels" };
 
-/** A message in no chat thread. */
-const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMessage => ({
+/** A message the server sent in thread `thread`, null when it is alone in its own, named as the server names it. */
+const sent = (
+  id: string,
+  role: "user" | "assistant",
+  thread: string | null,
+): ThreadTimelineMessage => ({
   id,
   role,
-  chatThreadId: null,
+  chatThreadId: thread,
+  ...(thread && NAMES[thread] ? { chatThreadTitle: NAMES[thread] } : {}),
 });
 
-/** Where each label goes and what thread it names, as `[messageId, thread]` pairs. */
-const where = (labels: ReturnType<typeof threadLabels>) =>
-  [...labels].map(([id, label]) => [id, label.thread]);
+/** A guardian (`g`) or agent (`a`) message in thread `thread`. */
+const g = (id: string, thread: string | null = null) => sent(id, "user", thread);
+const a = (id: string, thread: string | null) => sent(id, "assistant", thread);
 
-/** The tasks whose threads start at q1 and q2. */
-const tasks = new Map([
-  ["q1", "Flights"],
-  ["q2", "Hotels"],
-]);
+/** A message in no thread: nothing replies to it. */
+const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMessage =>
+  sent(id, role, null);
 
-describe("threadLabels", () => {
-  it("shows none for messages in no thread: a plain question and its answer", () => {
-    expect(threadLabels([free("q1"), free("a1", "assistant")], tasks)).toEqual(new Map());
-  });
-
-  it("labels every agent message in a task's thread, and none of the guardian's", () => {
-    expect(
-      where(
-        threadLabels([g("q1"), a("a1", "q1"), g("q2", "q1"), free("w1"), a("a2", "q1")], tasks),
-      ),
-    ).toEqual([
-      ["a1", "q1"],
-      ["a2", "q1"],
-    ]);
-  });
-
-  it("labels every agent message in a task's thread alike: plain text, a forward and a card", () => {
-    const withParts = (id: string, parts: unknown[]): ThreadTimelineMessage => ({
-      ...a(id, "q1"),
-      content: JSON.stringify(parts),
-    });
-    const messages = [
-      g("q1"),
-      withParts("forward", [
-        { type: "text", content: "Here it is" },
-        { type: "text", content: "# Report", forwardedFrom: { chatId: "c1", title: "Flights" } },
-      ]),
-      free("w1", "assistant"),
-      withParts("card", [{ type: "task_chat", chatId: "c1", title: "Flights", show: "ask" }]),
-      free("w2", "assistant"),
-      withParts("said", [{ type: "text", content: "Two options so far." }]),
-    ];
-    // One label per message, each opening the thread.
-    expect(where(threadLabels(messages, tasks))).toEqual([
-      ["forward", "q1"],
-      ["card", "q1"],
-      ["said", "q1"],
-    ]);
-  });
-
-  it("labels the only message of a run", () => {
-    expect(where(threadLabels([g("q1"), a("a1", "q1")], tasks))).toEqual([["a1", "q1"]]);
-  });
-
-  it("labels both messages of a run of two", () => {
-    expect(where(threadLabels([g("q1"), a("a1", "q1"), a("a2", "q1")], tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q1"],
-    ]);
-  });
-
-  it("labels only the first and the last of a run of three or more", () => {
-    const run = [a("a1", "q1"), a("a2", "q1"), a("a3", "q1"), a("a4", "q1")];
-    expect(where(threadLabels([g("q1"), ...run], tasks))).toEqual([
-      ["a1", "q1"],
-      ["a4", "q1"],
-    ]);
-  });
-
-  it("keeps a run through the owner's messages: they neither end nor join it", () => {
-    const labels = threadLabels(
-      [g("q1"), a("a1", "q1"), g("x1", "q1"), a("a2", "q1"), free("w1"), a("a3", "q1")],
-      tasks,
-    );
-    expect(where(labels)).toEqual([
-      ["a1", "q1"],
-      ["a3", "q1"],
-    ]);
-  });
-
-  it("ends a run at another thread's message or an agent message in no thread", () => {
-    const labels = threadLabels(
-      [
-        g("q1"),
-        a("a1", "q1"),
-        a("a2", "q1"),
-        a("b1", "q2"),
-        a("a3", "q1"),
-        a("a4", "q1"),
-        free("w0", "assistant"),
-        a("a5", "q1"),
-        a("a6", "q1"),
-        free("w1", "assistant"),
-        a("a7", "q1"),
-        a("a8", "q1"),
-        a("a9", "q1"),
-      ],
-      tasks,
-    );
-    // Every run here is of one or two, but the last.
-    expect(where(labels)).toEqual([
-      ["a1", "q1"],
-      ["a2", "q1"],
-      ["b1", "q2"],
-      ["a3", "q1"],
-      ["a4", "q1"],
-      ["a5", "q1"],
-      ["a6", "q1"],
-      ["a7", "q1"],
-      ["a9", "q1"],
-    ]);
-  });
-
-  it("labels no task card, the one shown when its task starts: it names its task itself", () => {
-    const card = (id: string, show?: "task" | "ask"): ThreadTimelineMessage => ({
-      ...a(id, "q1"),
-      content: JSON.stringify([{ type: "task_chat", chatId: "c1", title: "Flights", show }]),
-    });
-    expect(
-      where(threadLabels([g("q1"), card("start", "task"), card("old"), card("ask", "ask")], tasks)),
-    ).toEqual([["ask", "q1"]]);
-  });
-
-  it("names a task's thread by its title, from any of its messages", () => {
-    const labels = threadLabels([{ ...g("q1"), chatThreadTitle: "Tokyo weather" }, a("a1", "q1")]);
-    expect(labels.get("a1")).toEqual({ thread: "q1", title: "Tokyo weather" });
-  });
-
-  it("shows no label in a thread no task has, from before", () => {
-    const root = {
-      ...free("r1", "assistant"),
-      content: JSON.stringify([{ type: "text", content: "Sunny,\n24°" }]),
-    };
-    const labels = threadLabels([root, g("q2", "r1"), a("a2", "r1"), a("a3", "gone")]);
-    expect(labels).toEqual(new Map());
-    expect(taskThreads([root, g("q2", "r1"), a("a2", "r1")]).threads).toEqual(new Map());
-  });
-
-  it("knows the task thread of the guardian's messages too", () => {
-    expect(taskThreads([g("q1"), g("r1", "q1"), free("w1")], tasks).threads).toEqual(
+describe("threadsOf", () => {
+  it("puts a message in the thread its chatThreadId names, and a root delivered with none in it once a reply says so", () => {
+    // The root arrived alone, with null, and its reply arrived after.
+    const { roots } = threadsOf([g("q1"), a("a1", "q1"), free("w1")]);
+    expect(roots).toEqual(
       new Map([
         ["q1", "q1"],
-        ["r1", "q1"],
+        ["a1", "q1"],
       ]),
     );
   });
 
-  it("drops the label of a thread whose task left the chat", () => {
-    const loaded = [{ ...g("q1"), chatThreadTitle: "Flights" }, a("a1", "q1")];
-    expect(threadLabels(loaded).get("a1")).toEqual({ thread: "q1", title: "Flights" });
-    expect(threadLabels(loaded, new Map([["q1", null]]))).toEqual(new Map());
-    expect(taskThreads(loaded, new Map([["q1", null]])).threads).toEqual(new Map());
+  it("leaves a message nothing replies to in no thread, and a reply whose root is not loaded in the thread", () => {
+    const { roots } = threadsOf([g("q9"), a("a1", "q1"), free("w1", "assistant")]);
+    expect(roots).toEqual(new Map([["a1", "q1"]]));
   });
 
-  it("takes a title a live placement told", () => {
-    const labels = threadLabels([g("q1"), a("a1", "q1")], new Map([["q1", "Flights"]]));
-    expect(labels.get("a1")).toMatchObject({ title: "Flights" });
+  it("names a thread by the title any of its messages carries", () => {
+    expect(threadsOf([g("q1"), a("a1", "q1")]).titles).toEqual(new Map([["q1", "Flights"]]));
+    expect(threadsOf([g("q1", "q1"), a("a1", "q1")]).titles).toEqual(new Map([["q1", "Flights"]]));
+    expect(threadsOf([g("q7"), a("a1", "q7")]).titles).toEqual(new Map());
+  });
+
+  it("names a thread no task started in by the start of its root's text", () => {
+    const root = (content: string): ThreadTimelineMessage => ({
+      ...g("r"),
+      content: JSON.stringify([{ type: "text", content }]),
+    });
+    const named = (text: string) => threadsOf([root(text), a("a1", "r")]).titles.get("r");
+    expect(named("Plan Kyoto in April")).toBe("Plan Kyoto in April");
+    // The first line only, as plain reading text.
+    expect(named("## Plan Kyoto\nthen the hotels")).toBe("Plan Kyoto");
+    // Cut short, with an ellipsis.
+    const cut = named("Compare every ryokan along the Kamo river for the April trip please");
+    expect(cut).toBe("Compare every ryokan along the Kamo river for the…");
+    expect(Array.from(cut!)).toHaveLength(50);
+    // A task's title wins, and a root with no text, or not loaded, gives none.
+    expect(threadsOf([root("Plan"), a("a1", "q1")]).titles.get("q1")).toBe("Flights");
+    expect(named("   ")).toBeUndefined();
+    expect(threadsOf([g("r"), a("a1", "r")]).titles.get("r")).toBeUndefined();
+    expect(threadsOf([a("a1", "r")]).titles.get("r")).toBeUndefined();
+  });
+
+  it("knows the guardian's messages in a thread too", () => {
+    expect([...threadsOf([g("q1"), g("r1", "q1"), free("w1")]).roots]).toEqual([
+      ["q1", "q1"],
+      ["r1", "q1"],
+    ]);
   });
 });
 
-describe("live thread placements", () => {
-  it("apply while the loaded message still is where they were made", () => {
-    const loaded = [g("q1"), a("a1", "q1"), free("q2"), free("a2", "assistant")];
-    const live = new Map<string, ThreadPlacement>([
-      ["q2", { from: null, to: "q1" }],
-      ["a2", { from: null, to: "q1" }],
-    ]);
-    expect(where(threadLabels(placed(loaded, live), tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q1"],
-    ]);
+describe("threadTail", () => {
+  const said = (
+    id: string,
+    role: "user" | "assistant",
+    text: string,
+    chatThreadId: string,
+  ): ChatMessage =>
+    ({
+      id,
+      sessionId: "concierge",
+      turnId: null,
+      role,
+      content: JSON.stringify([{ type: "text", content: text }]),
+      createdAt: "2026-11-09T09:00:00.000Z",
+      chatThreadId,
+    }) as ChatMessage;
+
+  it("quotes the last message of the thread that has text, as a focused composer replies to it", () => {
+    const messages = [
+      said("m1", "user", "Plan Kyoto", "m1"),
+      said("a1", "assistant", "Hotels first", "m1"),
+      said("x1", "assistant", "Elsewhere", "x1"),
+    ];
+    const { roots } = threadsOf(messages);
+    expect(threadTail(messages, roots, "m1")).toEqual({
+      messageId: "a1",
+      author: "agent",
+      preview: "Hotels first",
+    });
+    expect(threadTail(messages, roots, "nothing")).toBeNull();
   });
 
-  it("give way to a reload that says otherwise", () => {
-    const live = new Map<string, ThreadPlacement>([["a2", { from: null, to: "q1" }]]);
-    const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q2"), a("a2", "q2")];
-    expect(where(threadLabels(placed(reloaded, live), tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q2"],
-    ]);
-  });
-
-  it("build on a reload between two placements", () => {
-    let live = placeLive(new Map(), "a2", "q1", null);
-    const reloaded = [g("q1"), a("a1", "q1"), a("a2", "q1")];
-    expect(where(threadLabels(placed(reloaded, live), tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q1"],
-    ]);
-    live = placeLive(live, "a2", "q2", "q1");
-    expect(where(threadLabels(placed(reloaded, live), tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q2"],
-    ]);
+  it("passes over a card at the end of the thread, which has no text of its own to quote", () => {
+    const card = {
+      ...said("c1", "assistant", "", "m1"),
+      content: JSON.stringify([{ type: "task_chat", chatId: "t1", title: "Flights", show: "ask" }]),
+    } as ChatMessage;
+    const messages = [
+      said("m1", "user", "Plan Kyoto", "m1"),
+      said("a1", "assistant", "Hotels", "m1"),
+      card,
+    ];
+    const { roots } = threadsOf(messages);
+    expect(threadTail(messages, roots, "m1")).toMatchObject({ messageId: "a1" });
+    expect(threadTail([card], threadsOf([card]).roots, "m1")).toBeNull();
   });
 });
 
 const at = (minute: number) => new Date(2026, 10, 9, 9, minute).toISOString();
+/** The quote a reply carries: the message it replies to and what it said. */
+type Quote = { messageId: string; author: "guardian" | "agent"; text: string };
 const message = (
   id: string,
   role: "user" | "assistant",
   text: string,
   chatThreadId: string,
   minute: number,
+  quote?: Quote,
 ): ChatMessage =>
   ({
     id,
     sessionId: "concierge",
     turnId: role === "assistant" ? `t-${id}` : null,
     role,
-    content: JSON.stringify([{ type: "text", content: text }]),
+    content: JSON.stringify([
+      ...(quote ? [{ type: "reply_to", ...quote }] : []),
+      { type: "text", content: text },
+    ]),
     createdAt: at(minute),
     chatThreadId,
   }) as ChatMessage;
 
+// A thread of Kyoto: the owner's question, the Concierge's answer, and the
+// owner's reply to it, each carrying the quote of what it replies to. A message
+// of another thread between the replies splits it up.
 const messages = [
-  { ...message("m1", "user", "Plan Kyoto in April", "m1", 0), chatThreadTitle: "Kyoto trip" },
-  message("a1", "assistant", "Hotels first, then the days.", "m1", 1),
-  message("m2", "user", "Which one is closest?", "m1", 2),
-  message("a2", "assistant", "The river one.", "m1", 3),
+  message("m1", "user", "Plan Kyoto in April", "m1", 0),
+  {
+    ...message("a1", "assistant", "Hotels first, then the days.", "m1", 1, {
+      messageId: "m1",
+      author: "guardian",
+      text: "Plan Kyoto in April",
+    }),
+    chatThreadTitle: "Kyoto trip",
+  },
+  message("f1", "user", "What is the weather?", "f1", 1),
+  message("m2", "user", "Which one is closest?", "m1", 2, {
+    messageId: "a1",
+    author: "agent",
+    text: "Hotels first, then the days.",
+  }),
+  {
+    ...message("a2", "assistant", "The river one.", "m1", 3, {
+      messageId: "m2",
+      author: "guardian",
+      text: "Which one is closest?",
+    }),
+    chatThreadTitle: "Kyoto trip",
+  },
 ];
 
 const actions = {
@@ -307,13 +239,13 @@ const idle = {
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
-/** `focused` is the thread in focus: a message of it, and its task's title. */
+/** `focused` is the thread in focus: a message of it, its name and its root. */
 function renderTranscript(
   shown: ChatMessage[] = messages,
-  focused?: { thread: string; title: string },
+  focused?: { thread: string; title: string; root: string },
   selection?: ComponentProps<typeof ConciergeTranscript>["selection"],
 ) {
-  const box: { thread: string | null } = { thread: null };
+  const box: { thread: string | null; jumps: string[] } = { thread: null, jumps: [] };
   const rows = buildRows(shown, new Map(), idle.identity, {
     runningTurnId: null,
     isStreaming: false,
@@ -323,7 +255,9 @@ function renderTranscript(
       chatId: "concierge",
       sessionId: "concierge",
       messageIds: new Set(shown.map((m) => m.id)),
-      jump: () => {},
+      jump: (id) => {
+        box.jumps.push(id);
+      },
       focusComposer: () => {},
       onOpenThread: (next) => {
         box.thread = next.thread;
@@ -334,14 +268,7 @@ function renderTranscript(
       <MemoryRouter>
         <ReplyDraftProvider value={draft}>
           <ThemeProvider>
-            <ChatThreadsProvider
-              value={{
-                labels: threadLabels(shown),
-                taskThreads: taskThreads(shown).threads,
-                titles: taskThreads(shown).titles,
-                focus: focused ? (taskThreads(shown).threads.get(focused.thread) ?? null) : null,
-              }}
-            >
+            <ChatThreadsProvider value={chatThreadsOf(shown, focused?.root ?? null)}>
               <ReplyBar />
               <ConciergeTranscript
                 rows={rows}
@@ -363,24 +290,129 @@ function renderTranscript(
       <Chat />
     </QueryClientProvider>,
   );
-  return () => box.thread;
+  return Object.assign(() => box.thread, { jumps: box.jumps });
 }
 
-describe("the thread label in the transcript", () => {
-  it("sits under each of the agent's messages in the thread, names its task, and opens it", () => {
-    const thread = renderTranscript();
-    const labels = screen.getAllByRole("button", { name: "Kyoto trip" });
-    expect(labels).toHaveLength(2);
-    expect(labels[0]?.getAttribute("title")).toBe("Kyoto trip");
-    // The focus is held on the message whose label was clicked.
-    fireEvent.click(labels[1]!);
-    expect(thread()).toBe("a2");
+/** The quote buttons in the transcript, in order: each is the quote of one reply. */
+const quotes = () => [...document.querySelectorAll<HTMLElement>("[data-reply-quote]")];
+/** The quote in the bubble of message `id`. */
+const quoteIn = (id: string) =>
+  document
+    .querySelector<HTMLElement>(`[data-timeline-anchor~="${id}"]`)!
+    .querySelector<HTMLElement>("[data-reply-quote]")!;
+
+describe("the quote in a reply", () => {
+  it("shows a reply that is not under what it answers with one line of the quote, in its bubble", () => {
+    renderTranscript();
+    // m2 replies to a1, with f1 between them.
+    expect(within(quoteIn("m2")).getByText("Hotels first, then the days.")).toBeTruthy();
+    const anchor = document.querySelector<HTMLElement>('[data-timeline-anchor~="m2"]')!;
+    expect(within(anchor).getByText("Which one is closest?")).toBeTruthy();
+    expect(anchor.contains(quoteIn("m2"))).toBe(true);
+    expect(quoteIn("m2").querySelector(".rome-reply-hook")).toBeNull();
+    // The root and a message that replies to nothing carry no mark.
+    expect(
+      document.querySelector('[data-timeline-anchor~="m1"]')?.querySelector("[data-reply-quote]"),
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-timeline-anchor~="f1"]')?.querySelector("[data-reply-quote]"),
+    ).toBeNull();
   });
 
-  it("sits under a forwarded result too, below its bubble, with no header inside it", () => {
+  it("quotes a task card that replies, as a bubble does, in the words the quote stores", () => {
+    const card = (id: string, minute: number, quote: Quote): ChatMessage =>
+      ({
+        ...message(id, "assistant", "", "m1", minute),
+        content: JSON.stringify([
+          { type: "reply_to", ...quote },
+          { type: "task_chat", chatId: "t1", title: "Flights", show: "task" },
+        ]),
+      }) as ChatMessage;
+    // One card right under its request, and one with another message between.
+    const near = card("c1", 1, {
+      messageId: "m1",
+      author: "guardian",
+      text: "Plan Kyoto in April",
+    });
+    const far = card("c2", 3, { messageId: "m1", author: "guardian", text: "Plan Kyoto in April" });
+    renderTranscript([messages[0]!, near, messages[2]!, far]);
+    expect(quoteIn("c1").querySelector(".rome-reply-hook")).not.toBeNull();
+    expect(quoteIn("c1").getAttribute("aria-label")).toBe("Plan Kyoto in April");
+    expect(within(quoteIn("c2")).getByText("Plan Kyoto in April")).toBeTruthy();
+    expect(quoteIn("c2").querySelector(".rome-reply-hook")).toBeNull();
+  });
+
+  it("marks a reply under what it answers with a hook, the quoted text its name, and draws no text", () => {
+    renderTranscript();
+    // a1 answers m1, right above it, and a2 answers m2, right above it.
+    for (const [id, quoted] of [
+      ["a1", "Plan Kyoto in April"],
+      ["a2", "Which one is closest?"],
+    ] as const) {
+      const mark = quoteIn(id);
+      expect(mark.getAttribute("aria-label")).toBe(quoted);
+      expect(mark.getAttribute("title")).toBe(quoted);
+      expect(mark.querySelector(".rome-reply-hook")).not.toBeNull();
+      expect(within(mark).queryByText(quoted)).toBeNull();
+    }
+    expect(quotes()).toHaveLength(3);
+    // The guardian's hook stands on the guardian's side.
+    expect(quoteIn("a1").dataset.side).toBe("start");
+    cleanup();
+    renderTranscript([
+      ...messages,
+      message("m3", "user", "Thanks", "m1", 4, {
+        messageId: "a2",
+        author: "agent",
+        text: "The river one.",
+      }),
+    ]);
+    expect(quoteIn("m3").dataset.side).toBe("end");
+    expect(quoteIn("m3").querySelector(".rome-reply-hook")).not.toBeNull();
+  });
+
+  it("joins sibling replies with a line, the first with a hook, on one side and the other", () => {
+    const sibling = (id: string, minute: number) =>
+      message(id, "assistant", `said ${id}`, "m1", minute, {
+        messageId: "m1",
+        author: "guardian",
+        text: "Plan Kyoto in April",
+      });
+    renderTranscript([messages[0]!, sibling("s1", 1), sibling("s2", 1), sibling("s3", 1)]);
+    expect(quoteIn("s1").querySelector(".rome-reply-hook")).not.toBeNull();
+    for (const id of ["s2", "s3"]) {
+      const mark = quoteIn(id);
+      expect(mark.querySelector(".rome-reply-line")).not.toBeNull();
+      expect(mark.querySelector(".rome-reply-hook")).toBeNull();
+      // The line spans the gap between the bubbles of a group.
+      expect(mark.style.height).toBe("8px");
+    }
+  });
+
+  it("focuses the thread of the reply that holds it, whoever said it, held on that reply", () => {
+    const thread = renderTranscript();
+    fireEvent.click(quoteIn("a2"));
+    expect(thread()).toBe("a2");
+    fireEvent.click(quoteIn("m2"));
+    expect(thread()).toBe("m2");
+  });
+
+  it("names no task under any message", () => {
+    renderTranscript();
+    expect(screen.queryByRole("button", { name: "Kyoto trip" })).toBeNull();
+    expect(document.querySelector("[data-thread-label]")).toBeNull();
+  });
+
+  it("sits in the first bubble of a forwarded result, above the report, with no header inside it", () => {
     const forward = {
-      ...message("a3", "assistant", "", "m1", 4),
+      ...message("a3", "assistant", "", "m1", 4, {
+        messageId: "m1",
+        author: "guardian",
+        text: "Plan Kyoto in April",
+      }),
       content: JSON.stringify([
+        { type: "reply_to", messageId: "m1", author: "guardian", text: "Plan Kyoto in April" },
+        { type: "text", content: "Here it is" },
         {
           type: "text",
           content: "Ryokan by the river, 3 nights.",
@@ -389,92 +421,59 @@ describe("the thread label in the transcript", () => {
       ]),
     } as ChatMessage;
     renderTranscript([...messages, forward]);
-    // The run's first and last: the owner's message between them ends nothing.
-    const labels = screen.getAllByRole("button", { name: "Kyoto trip" });
-    expect(labels).toHaveLength(2);
-    const bubble = screen.getByText("Ryokan by the river, 3 nights.");
-    // No task header inside the bubble: the label below names the task.
-    expect(bubble.closest("[data-concierge-bubble-part]")?.querySelector("a")).toBeNull();
-    const last = labels.at(-1)!;
-    expect(last.previousElementSibling?.contains(bubble)).toBe(true);
+    const entry = document.querySelector<HTMLElement>('[data-thread-entry="a3"]')!;
+    // One quote for the message, in its first bubble.
+    expect(entry.querySelectorAll("[data-reply-quote]")).toHaveLength(1);
+    const first = screen.getByText("Here it is").closest("[data-concierge-bubble]")!;
+    expect(first.contains(entry.querySelector("[data-reply-quote]"))).toBe(true);
+    const report = screen.getByText("Ryokan by the river, 3 nights.");
+    expect(report.closest("[data-concierge-bubble-part]")?.querySelector("a")).toBeNull();
   });
 
-  it("cuts a long title at a fixed width, whole in its tooltip and accessible name", () => {
-    const title = "Compare every ryokan along the Kamo river for the April trip";
-    renderTranscript([{ ...messages[0]!, chatThreadTitle: title }, messages[1]!]);
-    const label = screen.getByRole("button", { name: title });
-    expect(label.getAttribute("title")).toBe(title);
-    expect(label.lastElementChild?.className).toContain("max-w-56");
-    expect(label.lastElementChild?.className).toContain("truncate");
-    // Regular weight, not the badge's.
-    expect(label.className).toContain("text-aux");
-    expect(label.className).not.toContain("text-badge");
-  });
-
-  it("draws iOS's thin turn-down arrow before the title, keeps its look on hover, and shows a pointer", () => {
-    renderTranscript();
-    const [label] = screen.getAllByRole("button", { name: "Kyoto trip" });
-    const arrow = label!.firstElementChild;
-    expect(arrow?.tagName.toLowerCase()).toBe("svg");
-    expect(arrow?.getAttribute("aria-hidden")).toBe("true");
-    expect(arrow?.getAttribute("stroke-width")).toBe("1.5");
-    expect(label!.textContent).not.toContain("↳");
-    const classes = label!.className.split(/\s+/);
-    expect(classes).toEqual(expect.arrayContaining(["cursor-pointer", "text-muted-foreground/75"]));
-    expect(classes.some((name) => name.startsWith("hover:"))).toBe(false);
-    // Keyboard focus still shows.
-    expect(classes).toContain("focus-visible:outline-solid");
-  });
-
-  it("offers no Reply on a card, and its label focuses the thread", () => {
+  it("sits above a task's card, which takes no Reply", () => {
     const card = {
       ...message("c1", "assistant", "", "m1", 4),
       content: JSON.stringify([
+        { type: "reply_to", messageId: "m1", author: "guardian", text: "Plan Kyoto in April" },
         { type: "task_chat", chatId: "task-1", title: "Kyoto trip", show: "ask" },
       ]),
     } as ChatMessage;
     const thread = renderTranscript([...messages, card]);
+    const anchor = document.querySelector<HTMLElement>('[data-timeline-anchor~="c1"]')!;
+    expect(within(anchor).getByText("Plan Kyoto in April")).toBeTruthy();
     // Each bubble's details hold its actions.
-    const actionsOf = (id: string) => {
-      const bubble = document.querySelector<HTMLElement>(`[data-timeline-anchor="${id}"]`)!;
-      fireEvent.click(within(bubble).getByRole("button", { name: "Message details" }));
-      return bubble;
-    };
-    expect(within(actionsOf("c1")).queryByRole("button", { name: "Reply" })).toBeNull();
-    // A message with text still takes one.
-    expect(within(actionsOf("a2")).getByRole("button", { name: "Reply" })).toBeTruthy();
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Kyoto trip" }).at(-1)!);
+    fireEvent.click(within(anchor).getByRole("button", { name: "Message details" }));
+    expect(within(anchor).queryByRole("button", { name: "Reply" })).toBeNull();
+    fireEvent.click(quoteIn("c1"));
     expect(thread()).toBe("c1");
-    // A focus quotes nothing: the reply bar stays closed.
-    expect(document.querySelector("[data-reply-bar]")).toBeNull();
   });
 
-  it("sits under none of the guardian's messages", () => {
-    renderTranscript();
-    const labelled = screen
-      .getAllByRole("button", { name: "Kyoto trip" })
-      .map((label) => label.previousElementSibling?.textContent ?? "");
-    expect(labelled.some((text) => text.includes("Plan Kyoto in April"))).toBe(false);
-    expect(labelled.some((text) => text.includes("Which one is closest?"))).toBe(false);
-  });
-
-  it("reads as pressed while its thread is in focus, and not before", () => {
-    renderTranscript();
-    for (const label of screen.getAllByRole("button", { name: "Kyoto trip" })) {
-      expect(label.getAttribute("aria-pressed")).toBe("false");
-    }
+  it("goes to the original while a thread is in focus and the thread shows it, and is plain text otherwise", () => {
+    const thread = renderTranscript(messages, { thread: "a2", title: "Kyoto trip", root: "m1" });
+    // a1's original, m1, is in the thread in focus: the quote jumps to it.
+    fireEvent.click(quoteIn("a1"));
+    expect(thread.jumps).toEqual(["m1"]);
+    expect(thread()).toBeNull();
     cleanup();
-    renderTranscript(messages, { thread: "a2", title: "Kyoto trip" });
-    for (const label of screen.getAllByRole("button", { name: "Kyoto trip" })) {
-      expect(label.getAttribute("aria-pressed")).toBe("true");
-      expect(label.className).toContain("aria-pressed:text-muted-foreground");
-    }
+    // The reply of another thread is hidden, so its quote cannot be pressed.
+    const elsewhere = [
+      ...messages,
+      message("z1", "assistant", "Other", "z0", 5, {
+        messageId: "z0",
+        author: "guardian",
+        text: "Gone",
+      }),
+    ];
+    renderTranscript(elsewhere, { thread: "a2", title: "Kyoto trip", root: "m1" });
+    const out = document.querySelector('[data-thread-entry="z1"]')!.closest("[data-thread-out]");
+    expect(out).not.toBeNull();
   });
 
   it("is the way in from the transcript: a tap on a message opens nothing", () => {
     const thread = renderTranscript();
-    fireEvent.click(screen.getByText("Hotels first, then the days."));
+    fireEvent.click(
+      screen.getByText("Hotels first, then the days.", { selector: "[data-concierge-bubble] p" }),
+    );
     expect(thread()).toBeNull();
   });
 });
@@ -513,7 +512,7 @@ describe("the source label in the transcript", () => {
     ]);
     const label = screen.getByText("Routine · Daily summary");
     expect(label.closest("button")).toBeNull();
-    // Plain text: no arrow, unlike a thread label.
+    // Plain text, with no arrow.
     expect(label.closest("[data-source-label]")?.querySelector("svg")).toBeNull();
     expect(label.closest("[data-source-label]")?.getAttribute("data-source-label")).toBe("routine");
     expect(screen.queryByRole("note")).toBeNull();
@@ -524,26 +523,24 @@ describe("the source label in the transcript", () => {
     expect(screen.queryByText(/Flint/)).toBeNull();
   });
 
-  it("gives the middle of a thread's run no label, its source's neither", () => {
+  it("stays under a reply in a thread: a source says where the turn came from, not what thread it is in", () => {
     renderTranscript([
       ...messages,
       trace("t-a3", 12, { type: "routine", name: "Check-in" }),
       reply("a3", 12, "m1"),
-      reply("a4", 12, "m1"),
     ]);
-    // a1 to a4 run on, the owner's m2 between them included: a2 and a3 show nothing.
-    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(2);
-    expect(screen.queryByText("Routine · Check-in")).toBeNull();
+    expect(screen.getByText("Routine · Check-in")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Kyoto trip" })).toBeNull();
   });
 
-  it("gives a reply in a task's thread its thread label alone", () => {
+  it("stays under a routine reply when the owner replies to it", () => {
     renderTranscript([
-      ...messages,
-      trace("t-a3", 12, { type: "routine", name: "Check-in" }),
-      reply("a3", 12, "m1"),
+      trace("t-r1", 10, { type: "routine", name: "Daily summary" }),
+      reply("r1", 10),
+      message("g1", "user", "thanks", "r1", 11),
     ]);
-    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(2);
-    expect(screen.queryByText("Routine · Check-in")).toBeNull();
+    expect(screen.getByText("Routine · Daily summary")).toBeTruthy();
+    expect(document.querySelector("[data-thread-label]")).toBeNull();
   });
 });
 
@@ -574,7 +571,7 @@ describe("the transcript with a thread in focus", () => {
       (element) => element.dataset.threadEntry ?? element.tagName.toLowerCase(),
     );
   const entry = (id: string) => document.querySelector<HTMLElement>(`[data-thread-entry="${id}"]`)!;
-  const focusKyoto = { thread: "a2", title: "Kyoto trip" };
+  const focusKyoto = { thread: "a2", title: "Kyoto trip", root: "m1" };
 
   it("marks nothing without a focus", () => {
     renderTranscript(day);
@@ -612,17 +609,6 @@ describe("the transcript with a thread in focus", () => {
     expect(lines.map((line) => line.hasAttribute("data-thread-out"))).toEqual([false, true]);
   });
 
-  it("keeps a group of the thread and its label as they are, with the label pressed", () => {
-    renderTranscript(day, focusKyoto);
-    const label = screen.getAllByRole("button", { name: "Kyoto trip" })[0]!;
-    expect(label.closest("[data-thread-out]")).toBeNull();
-    expect(label.getAttribute("aria-pressed")).toBe("true");
-    // The other thread's label is folded away with its message.
-    expect(
-      screen.getAllByRole("button", { name: "Flights" })[0]!.closest("[data-thread-out]"),
-    ).toBeTruthy();
-  });
-
   it("hides nothing while share selection runs, so a turn of messages in several threads shows whole", () => {
     // One turn holds a Kyoto message and a Flights one.
     const mixed = [
@@ -642,7 +628,6 @@ describe("the transcript with a thread in focus", () => {
 
     expect(marked()).toEqual([]);
     expect(entry("ax").closest("[data-thread-out]")).toBeNull();
-    // The labels stay reachable under the overlay: they focus nothing here.
     cleanup();
 
     // Without the selection the same focus hides the Flights message.

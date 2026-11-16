@@ -11,6 +11,7 @@ import type { ChatEntry } from "@/lib/chat-types";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
 import { buildConciergeItems, focusHidden, showsTyping } from "@/components/chat/concierge-groups";
+import { useGroupAdjacency } from "@/components/chat/reply/adjacency";
 import { useChatThreads } from "@/components/chat/reply/chat-threads";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
 import { useSimulatedTyping } from "@/components/chat/use-simulated-typing";
@@ -77,9 +78,7 @@ export function ConciergeTranscript({
     // Share selection picks whole turns, which can hold messages of other
     // threads: nothing is hidden while it runs, whatever is in focus.
     () =>
-      threads?.focus && !selection
-        ? focusHidden(items, threads.focus, threads.taskThreads)
-        : undefined,
+      threads?.focus && !selection ? focusHidden(items, threads.focus, threads.roots) : undefined,
     [items, threads, selection],
   );
   const messageIds = useMemo(
@@ -87,6 +86,7 @@ export function ConciergeTranscript({
       items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
     [items],
   );
+  const adjacent = useGroupAdjacency(items, hidden);
   const latestTaskChats = useMemo(() => {
     const latestTaskChats = new Map<string, ChatEntry>();
     for (const item of items) {
@@ -146,6 +146,7 @@ export function ConciergeTranscript({
                 arrival={arrival}
                 typing={TYPING_BUBBLE}
                 hidden={hidden}
+                adjacent={adjacent.get(item.key)}
               />
             );
           })}

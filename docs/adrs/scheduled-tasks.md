@@ -7,7 +7,7 @@
 
 An owner asked their Concierge for a work summary every day at 12:25. Nothing in the Concierge repeats, so the work went to a task chat, whose agent made a generic routine. The first routines ran in a background session, and the summary never reached the chat. The next one sent the routine's instruction into the Concierge chat as a message from the owner's agent. The owner saw the instruction as an odd bubble, and the Concierge answered it as if a person had written it.
 
-A task already has what recurring work needs: a task chat that does the work, a report path that brings the result back and forwards its conclusion into the task's thread, checks that make a task later until they are due, and a digest note for a scheduled run with nothing to say.
+A task already has what recurring work needs: a task chat that does the work, a report path that brings the result back and forwards its conclusion as a reply to the task's start message, checks that make a task later until they are due, and a digest note for a scheduled run with nothing to say.
 
 ## Decision
 
