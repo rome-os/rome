@@ -94,6 +94,8 @@ export function useVoiceInput({
 }) {
   const info = useVoiceInputInfo();
   const [state, setState] = useState<VoiceInputState>("idle");
+  // Where the spoken text sits in the field while voice input is on.
+  const [spoken, setSpoken] = useState<{ start: number; end: number } | null>(null);
   const [asking, setAsking] = useState(false);
   const anchorRef = useRef<Anchor | null>(null);
   const dictationRef = useRef<Dictation | null>(null);
@@ -122,6 +124,7 @@ export function useVoiceInput({
       anchorRef.current = null;
       keepNoticeRef.current({ reason });
       setState("idle");
+      setSpoken(null);
       setAsking(false);
       setNoticeRef.current({ reason });
     };
@@ -146,6 +149,7 @@ export function useVoiceInput({
       // replaces the selection the way typing would, and undo brings it back.
       flushSync(() => {
         setState("idle");
+        setSpoken(null);
         setValue(anchor.original);
       });
       const el = textareaRef.current;
@@ -199,10 +203,10 @@ export function useVoiceInput({
       {
         onText: (heard) => {
           const anchor = anchorRef.current;
-          if (anchor)
-            setValue(
-              anchor.before + spokenInsertion(anchor.before, heard, anchor.after) + anchor.after,
-            );
+          if (!anchor) return;
+          const insertion = spokenInsertion(anchor.before, heard, anchor.after);
+          setValue(anchor.before + insertion + anchor.after);
+          setSpoken({ start: anchor.before.length, end: anchor.before.length + insertion.length });
         },
         onAsking: setAsking,
         onDone: (heard, stop) => {
@@ -210,6 +214,7 @@ export function useVoiceInput({
           setAsking(false);
           commit(heard);
           setState("idle");
+          setSpoken(null);
           setNotice(stop);
           // A stop of its own, such as a lost connection, sends nothing: the
           // guardian reads why before sending.
@@ -288,6 +293,8 @@ export function useVoiceInput({
     stop,
     /** Stops listening, then sends once the last words are in the field. Does nothing while idle. */
     stopAndSend,
+    /** Where the spoken text sits in the field while voice input is on, or null. */
+    spoken,
     /** The microphone's loudness from 0 to 1 right now, or 0 while it is not open. */
     level,
   };

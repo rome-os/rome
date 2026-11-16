@@ -56,6 +56,7 @@ import {
   VoiceInputNotice,
   VoiceInputWaveform,
 } from "./composer/VoiceInputControl";
+import { VoiceInputSpokenText } from "./composer/VoiceInputSpokenText";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { ReplyBar } from "./reply/ReplyBar";
 import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
@@ -1183,6 +1184,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                 disabled={uploadInFlight}
               />
             )}
+            <VoiceInputSpokenText
+              textareaRef={textareaRef}
+              value={inputText}
+              spoken={voice.spoken}
+            />
             {voice.state === "listening" ? (
               <VoiceInputWaveform level={voice.level} className="min-w-24 flex-1" />
             ) : null}

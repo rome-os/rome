@@ -66,6 +66,7 @@ import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
+import { VoiceInputSpokenText } from "./VoiceInputSpokenText";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -626,6 +627,11 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 }
               />
             </div>
+            <VoiceInputSpokenText
+              textareaRef={textareaRef}
+              value={inputText}
+              spoken={voice.spoken}
+            />
             {voice.state === "listening" ? (
               <VoiceInputWaveform level={voice.level} className="w-20 shrink-0" />
             ) : null}
