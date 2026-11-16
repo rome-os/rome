@@ -72,7 +72,7 @@ const { values: args } = parseArgs({
 
 const stack = new Stack({ container: args.container, baseUrl: args["base-url"] });
 
-/** The text parts of a message, joined. */
+/** The stack's log lines since `sinceIso`. */
 function logsSince(sinceIso: string): string {
   return execFileSync("docker", ["logs", "--since", sinceIso, args.container], {
     encoding: "utf8",
