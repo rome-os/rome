@@ -659,6 +659,7 @@ struct Composer: View {
                     committedText: $committedText,
                     handle: textHandle,
                     editable: !voice.active,
+                    onReturn: voice.active ? sendWhenHeard : nil,
                     onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
                 )
                 if let voiceInput, voiceInput.available {
@@ -666,7 +667,6 @@ struct Composer: View {
                         voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
                     }
                     .padding(.bottom, controlPadding)
-                    .background { if voice.active { returnSends } }
                 }
                 Group {
                     // While listening, the field's stop is the voice control's.
@@ -758,23 +758,16 @@ struct Composer: View {
         }
     }
 
-    /// Return on a hardware keyboard while listening ends listening and sends
-    /// once the last words are in. Shift-Return does nothing, and the field
-    /// shows no on-screen keyboard while it listens.
-    private var returnSends: some View {
-        Button("Send") {
-            voice.stopAndSend {
-                guard !(attachments?.isPreparing ?? false),
-                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
-                else { return }
-                voice.edited(service: voiceInput, chat: voiceKey)
-                onSend()
-            }
+    /// Return on a hardware keyboard while listening: listening ends, and the
+    /// message is sent once the last words are in. Shift-Return does nothing.
+    private func sendWhenHeard() {
+        voice.stopAndSend {
+            guard !(attachments?.isPreparing ?? false),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
+            else { return }
+            voice.edited(service: voiceInput, chat: voiceKey)
+            onSend()
         }
-        .keyboardShortcut(.return, modifiers: [])
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
     }
 
     private func plusMenu(_ attachments: ComposerAttachments) -> some View {

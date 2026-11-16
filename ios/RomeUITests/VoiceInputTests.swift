@@ -447,9 +447,6 @@ final class VoiceInputTests: XCTestCase {
         try requireControl(app, control, "the Chat has no voice control")
         emptyTheField(app, "return sends")
         let field = onScreen(app.textViews, "message-field")
-        // XCUITest sends a key only to an element with keyboard focus, so the field takes it
-        // first, as it has when a guardian types and then dictates.
-        field.tap()
         XCTAssertTrue(tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")), "listening never started")
         let heard = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", phrase), object: field)
         XCTAssertEqual(XCTWaiter().wait(for: [heard], timeout: 30), .completed, "the spoken words never reached the field")
