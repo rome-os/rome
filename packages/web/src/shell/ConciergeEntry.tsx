@@ -16,6 +16,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
 import { findScrollableYAncestor } from "@/lib/scroll-container";
+import { useRenameInPlace } from "@/hooks/use-rename-in-place";
 import { Badge } from "@/components/ui/badge";
 import { RomeLogo } from "@/components/logo";
 import {
@@ -30,7 +31,6 @@ import { MAIN_CHAT_PATH, sessionActivityTime } from "@/lib/chat-session";
 import type { ChatSession } from "@/lib/chat-types";
 import { emitSessionsChanged, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
-import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 const anyEvent = z.unknown();
 
@@ -231,19 +231,16 @@ function ConciergeTopicEntry({
   const { t } = useTranslation("common");
   // An untitled chat shows as a new chat until its first message names it.
   const name = chat.name || t("recentChats.newChat");
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(chat.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const count = active ? 0 : chat.unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
-  const rename = async () => {
-    setEditing(false);
-    const trimmed = value.trim();
-    if (!trimmed || trimmed === chat.name) return;
-    await renameSession(chat.id, trimmed).catch(() => undefined);
-    onChanged();
-    emitSessionsChanged();
-  };
+  const rename = useRenameInPlace({
+    onCommit: async (id, name) => {
+      await renameSession(id, name).catch(() => undefined);
+      onChanged();
+      emitSessionsChanged();
+    },
+  });
   const retire = async (how: "archive" | "unarchive" | "delete", stopWork = false) => {
     try {
       if (how === "delete")
@@ -257,25 +254,11 @@ function ConciergeTopicEntry({
     // An unarchived chat stays open where it is.
     if (how !== "unarchive") onGone();
   };
-  if (editing) {
+  if (rename.editingId === chat.id) {
     return (
       <input
-        autoFocus
-        value={value}
+        {...rename.inputProps}
         aria-label={t("recentChats.renameLabel")}
-        onChange={(event) => setValue(event.target.value)}
-        onBlur={() => void rename()}
-        onKeyDown={(event) => {
-          if (isImeCompositionEvent(event)) return;
-          if (event.key === "Enter") {
-            event.preventDefault();
-            void rename();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            setValue(chat.name);
-            setEditing(false);
-          }
-        }}
         className="my-1 ml-3 h-[var(--control-h-sm)] min-w-0 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none"
       />
     );
@@ -319,13 +302,13 @@ function ConciergeTopicEntry({
             className="absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
           />
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
-          <DropdownMenuItem
-            onSelect={() => {
-              setValue(chat.name);
-              setTimeout(() => setEditing(true), 0);
-            }}
-          >
+        <DropdownMenuContent
+          side="bottom"
+          align="end"
+          className="min-w-[180px]"
+          {...rename.menuContentProps}
+        >
+          <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
             <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {t("recentChats.rename")}
           </DropdownMenuItem>
