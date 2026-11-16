@@ -91,7 +91,7 @@ pnpm concierge:baseline --report
 
 The `lookup-memory` scenario asks for a fact from the Concierge's memory. Run `scripts/concierge-eval/seed-baseline.sh` on the stack before you freeze the snapshot, so every run starts with it.
 
-`--model` is a model selection id, which the eval picks for each scenario's topic chat as the composer's model menu does. `--effort` goes with each of the owner's messages. A turn Rome starts runs at the Concierge's own effort, which the eval does not set. Each run restores the snapshot first, as `concierge:eval` does, and plays the scenarios one at a time, so their timings do not compete; `--concurrency` plays several at once.
+`--model` is a model selection id, which the eval picks for each scenario's topic chat as the composer's model menu does. `--effort` goes with each of the owner's messages. A turn Rome starts runs at the Concierge's own effort, which the eval does not set. Each run restores the snapshot first, as `concierge:eval` does, and plays the scenarios one at a time, so their timings do not compete. `--concurrency` plays several at once, and `--no-restore` keeps the stack as it is between runs.
 
 Each scenario reads its timed turns from the stack's log and checks what they did: answered inline or started a task as the scenario expects, searched the web at most three times, said no filler, and named the expected fact. A judge model then scores the answers from 1 to 5 against the scenario's written rubric. The judge runs through the Claude Code CLI on the host, `claude -p` on `--judge-model` (Opus 5.5 by default), and may search the web to check a fact. `--no-judge` skips it.
 
