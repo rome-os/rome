@@ -433,31 +433,42 @@ final class VoiceInputTests: XCTestCase {
         XCTAssertTrue(sent.waitForExistence(timeout: 10), "the send action did not send the spoken words")
     }
 
-    // MARK: Return while listening
+    // MARK: Rule 13
 
-    /// Return on a hardware keyboard while listening ends listening, waits for the last words,
-    /// and sends the message with them.
+    /// Rule 13 on iOS: Return on a hardware keyboard while listening ends listening and sends
+    /// one message holding every word heard, words still arriving included, and the field is
+    /// empty afterwards. The transcript is a minute of words at one every 300 ms of audio, so
+    /// Return comes while most are still to arrive; the stand-in instance sends the rest on stop.
     @MainActor
-    func testReturnWhileListeningSends() throws {
+    func testRule13ReturnSendsWhatYouSaid() throws {
         let app = try launch()
-        let phrase = "return sends \(Int(Date().timeIntervalSince1970))"
+        let mark = "return sends \(Int(Date().timeIntervalSince1970))"
+        let phrase = ([mark] + Array(repeating: "and every word still arriving", count: 40) + ["end \(mark)"])
+            .joined(separator: " ")
         try standIn(["transcript": phrase])
         defer { try? standIn(["transcript": Self.transcript]) }
         let control = onScreen(app.buttons, "voice-input")
         try requireControl(app, control, "the Chat has no voice control")
-        emptyTheField(app, "return sends")
+        emptyTheField(app, "rule 13")
         let field = onScreen(app.textViews, "message-field")
         XCTAssertTrue(tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")), "listening never started")
-        let heard = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", phrase), object: field)
+        let heard = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", mark), object: field)
         XCTAssertEqual(XCTWaiter().wait(for: [heard], timeout: 30), .completed, "the spoken words never reached the field")
+        let shownAtReturn = fieldText(field)
         field.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
-        let sent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", phrase)).firstMatch
-        if !sent.waitForExistence(timeout: 15) {
-            printScreen(app, "return sends")
-            XCTFail("Return while listening did not send the spoken words")
+        let whole = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "end \(mark)")).firstMatch
+        if !whole.waitForExistence(timeout: 20) {
+            printScreen(app, "rule 13")
+            XCTFail("Return while listening did not send every word; the field showed \(words(shownAtReturn).count) words at Return")
         }
         XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 10), "listening never finished")
-        XCTAssertFalse(fieldText(field).contains(phrase), "the spoken words stayed in the field after the send")
+        Thread.sleep(forTimeInterval: 3)
+        let sent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", mark)).count
+        XCTAssertEqual(sent, 1, "Return while listening sent \(sent) messages")
+        XCTAssertFalse(fieldText(field).contains(mark), "the spoken words stayed in the field after the send")
+        let still = words(phrase).count - words(shownAtReturn).count
+        print("rule 13: \(still) of \(words(phrase).count) words were still to arrive at Return")
+        XCTAssertGreaterThan(still, 0, "every word had arrived before Return, so the words still arriving were not tried")
     }
 
     // MARK: Rule 6
