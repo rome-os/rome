@@ -238,6 +238,7 @@ jobs:
             # catch a start that misses now and then.
             extra=(-only-testing:RomeUITests/LaunchTests -retry-tests-on-failure -test-iterations 2)
           fi
+          extra=(-only-testing:RomeUITests/VoiceInputTests/testRule13ReturnSendsWhatYouSaid)
           xcodebuild test-without-building \
             -project Rome.xcodeproj \
             -scheme RomeUITests \
