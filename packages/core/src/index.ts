@@ -1951,6 +1951,10 @@ async function main() {
   // each created with the same deps. The app that owns `message_handler`
   // (Inbox) loads its hook only while that action is registered, as its hook
   // dispatches turns to it.
+  const clearHookFailure = (appId: string) => {
+    runtimeStatusFailures.clearSources((source) => source === `channel-message:init:${appId}`);
+    refreshRuntimeAppStatus();
+  };
   const messageHooks = new ChannelMessageHooks({
     catalog: appCatalog,
     deps: {
@@ -1965,10 +1969,8 @@ async function main() {
     },
     mayLoad: (appId) => appId !== messageHandlerOwner() || actionRegistry.has("message_handler"),
     onFailed: (appId, error) => markAppFailed(`channel-message:init:${appId}`, appId, error),
-    onLoaded: (appId) => {
-      runtimeStatusFailures.clearSources((source) => source === `channel-message:init:${appId}`);
-      refreshRuntimeAppStatus();
-    },
+    onLoaded: (appId) => clearHookFailure(appId),
+    onReset: (appId) => clearHookFailure(appId),
   });
   // A hook subscribes to every channel that can receive, and a channel's
   // subscription follows whatever backs it. Only a channel added later, when a
@@ -1981,8 +1983,20 @@ async function main() {
   // Installing, removing, enabling or disabling an app starts or stops its
   // hook alone. Runs after the action loader's subscriber, so Inbox's
   // `message_handler` is registered by the time its hook asks.
+  // The status file was written earlier in the same change, so what a hook
+  // change reports is written after it.
+  const persistHookStatus = async () => {
+    try {
+      await writeAppRuntimeStatus(refreshRuntimeAppStatus());
+    } catch (err) {
+      log.warn("failed to persist channel-message runtime status", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
   appCatalog.subscribe(async function channelMessageHooksSubscriber(event) {
     await messageHooks.follow(event.appId);
+    await persistHookStatus();
   });
 
   // A later channel minted at runtime (a second Feishu bot) joins the channel
@@ -2162,6 +2176,7 @@ async function main() {
     await reloadLifecycleHooks("app-keys-change");
     await reloadTurnMiddlewareHooks("app-keys-change");
     await messageHooks.reload();
+    await persistHookStatus();
   };
   const permissions = new Permissions();
   try {

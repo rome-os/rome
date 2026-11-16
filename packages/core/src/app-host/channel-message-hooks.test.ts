@@ -203,6 +203,77 @@ export function createHook(deps) {
     expect(t.heard.map((h) => h.event)).toEqual(["v1", "unset"]);
   });
 
+  it("loads a hook that failed at boot for want of a key once the key is saved", async () => {
+    const dir = await hookModule(`
+if (!process.env.${TEST_KEY}) throw new Error("${TEST_KEY} is not set");
+export function createHook(deps) {
+  let off;
+  return {
+    async register() {
+      off = deps.messagesSaid.subscribe(async () => { globalThis.heard.push({ app: "keyed", event: "heard" }); });
+    },
+    unregister() { off?.(); },
+  };
+}
+`);
+    const t = setup([artifact("keyed", dir)]);
+    await t.hooks.start();
+    expect(t.failed.map(([appId]) => appId)).toEqual(["keyed"]);
+
+    process.env[TEST_KEY] = "v1";
+    bumpModuleEnvEpoch();
+    await t.hooks.reload();
+    await t.said.say("x");
+
+    expect(t.hooks.size).toBe(1);
+    expect(t.heard).toEqual([{ app: "keyed", event: "heard" }]);
+  });
+
+  it("leaves one hook per app when a reload and a catalog change overlap", async () => {
+    const hooks = [artifact("inbox", await hearingHook("inbox"))];
+    const t = setup(hooks);
+    await t.hooks.start();
+
+    bumpModuleEnvEpoch();
+    await Promise.all([t.hooks.reload(), t.hooks.follow("inbox"), t.hooks.reload()]);
+    await t.said.say("once");
+
+    expect(t.heard).toEqual([{ app: "inbox", event: "once" }]);
+  });
+
+  it("never brings back the hook of an app removed while a reload runs", async () => {
+    const hooks = [artifact("cos", await hearingHook("cos"))];
+    const t = setup(hooks);
+    await t.hooks.start();
+
+    bumpModuleEnvEpoch();
+    const reloading = t.hooks.reload();
+    hooks.splice(0, 1);
+    await Promise.all([reloading, t.hooks.follow("cos")]);
+    await t.said.say("after removal");
+
+    expect(t.heard).toEqual([]);
+  });
+
+  it("clears an app's reported failure when the catalog changes it", async () => {
+    const reset: string[] = [];
+    const hooks = [artifact("broken", await hookModule("export const nothing = 1;"))];
+    const t = setup(hooks);
+    const withReset = new ChannelMessageHooks({
+      catalog: catalogOf(hooks),
+      deps: { messagesSaid: t.said, channels: [] } as unknown as ChannelMessageHookDeps,
+      onFailed: () => {},
+      onReset: (appId) => reset.push(appId),
+      log: { warn: () => {} },
+    });
+    await withReset.start();
+
+    hooks.splice(0, 1);
+    await withReset.follow("broken");
+
+    expect(reset).toEqual(["broken"]);
+  });
+
   it("keeps a hook without unregister() in place rather than double-registering", async () => {
     const dir = await hookModule(`
 export function createHook(deps) {

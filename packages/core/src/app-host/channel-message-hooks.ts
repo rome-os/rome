@@ -1,4 +1,5 @@
 import type { Channel, ChannelMessageHookDeps } from "@rome-os/app-runtime";
+import { Mutex } from "async-mutex";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ChannelMessageHook } from "../apps/hooks/types.js";
 import type { ArtifactRef } from "../apps/state.js";
@@ -19,6 +20,9 @@ export interface ChannelMessageHooksOptions {
   onFailed: (appId: string, error: string) => void;
   /** An app's hook loaded and registered. */
   onLoaded?: (appId: string) => void;
+  /** An app's hook is about to be brought in line with the catalog again, so
+   *  a failure reported for it earlier no longer stands. */
+  onReset?: (appId: string) => void;
   log?: Pick<Logger, "warn">;
 }
 
@@ -26,11 +30,13 @@ export interface ChannelMessageHooksOptions {
  * The `channel-message` hooks of every app that declares one, each created
  * with the same deps and registered on its own. One app's hook failing to load
  * or to register leaves the others live, and a change to one app reaches only
- * that app's hook.
+ * that app's hook. Every change runs one at a time, so a reload and a catalog
+ * change to the same app never both register a hook for it.
  */
 export class ChannelMessageHooks {
   /** The live hooks, by the id of the app that declares each. */
   private readonly live = new Map<string, ChannelMessageHook>();
+  private readonly changes = new Mutex();
   private readonly log: Pick<Logger, "warn">;
 
   constructor(private readonly options: ChannelMessageHooksOptions) {
@@ -43,10 +49,8 @@ export class ChannelMessageHooks {
   }
 
   /** Load and register the hook of every app that declares one. */
-  async start(): Promise<void> {
-    for (const artifact of this.artifacts()) {
-      if (!this.live.has(artifact.ownerId)) await this.open(artifact);
-    }
+  start(): Promise<void> {
+    return this.changes.runExclusive(() => this.openMissing());
   }
 
   /**
@@ -55,7 +59,12 @@ export class ChannelMessageHooks {
    * hearing, and the one it declares now, if any, starts. A live hook without
    * `unregister()` cannot stop hearing, so it is kept rather than doubled.
    */
-  async follow(appId: string): Promise<void> {
+  follow(appId: string): Promise<void> {
+    return this.changes.runExclusive(() => this.followNow(appId));
+  }
+
+  private async followNow(appId: string): Promise<void> {
+    this.options.onReset?.(appId);
     const previous = this.live.get(appId);
     if (previous && !previous.unregister) {
       this.log.warn("channel-message hook has no unregister(); keeping it until restart", {
@@ -76,9 +85,14 @@ export class ChannelMessageHooks {
    * module captured from the environment follows the change. Each app's swap
    * stands alone: the old hook detaches before the new one registers, and a
    * new hook that fails to register gives way to the old one again. A hook
-   * without `unregister()` is left in place, stale but single.
+   * without `unregister()` is left in place, stale but single. A hook that
+   * is not live, as one that failed for want of a key, is tried again.
    */
-  async reload(): Promise<void> {
+  reload(): Promise<void> {
+    return this.changes.runExclusive(() => this.reloadNow());
+  }
+
+  private async reloadNow(): Promise<void> {
     const artifacts = new Map(this.artifacts().map((each) => [each.ownerId, each]));
     for (const [appId, previous] of [...this.live]) {
       const artifact = artifacts.get(appId);
@@ -111,6 +125,7 @@ export class ChannelMessageHooks {
         await previous.register();
       }
     }
+    await this.openMissing();
   }
 
   /**
@@ -119,7 +134,11 @@ export class ChannelMessageHooks {
    * drops events still waiting on its other subscriptions; a hook with
    * neither hears them from the next restart.
    */
-  async addChannels(added: readonly Channel[]): Promise<void> {
+  addChannels(added: readonly Channel[]): Promise<void> {
+    return this.changes.runExclusive(() => this.addChannelsNow(added));
+  }
+
+  private async addChannelsNow(added: readonly Channel[]): Promise<void> {
     for (const [appId, hook] of this.live) {
       try {
         if (hook.addChannels) {
@@ -140,6 +159,13 @@ export class ChannelMessageHooks {
           error: message(err),
         });
       }
+    }
+  }
+
+  /** Load and register each hook that may load and is not live. */
+  private async openMissing(): Promise<void> {
+    for (const artifact of this.artifacts()) {
+      if (!this.live.has(artifact.ownerId)) await this.open(artifact);
     }
   }
 
