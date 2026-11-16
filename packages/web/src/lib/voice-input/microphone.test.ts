@@ -72,7 +72,7 @@ describe("opening the microphone", () => {
     expect(await openMicrophoneStream()).toBe(usb);
     expect(getUserMedia).toHaveBeenCalledTimes(2);
     expect(fallback.stop).toHaveBeenCalled();
-    expect(chosenMicrophone()).toEqual({ id: "old-id", label: "USB Microphone" });
+    expect(chosenMicrophone()).toEqual({ id: "new-id", label: "USB Microphone" });
   });
 
   it("records from the system default, and keeps the choice, when the browser fails to list the microphones", async () => {

@@ -96,8 +96,11 @@ export async function openMicrophoneStream(): Promise<MediaStream> {
   if (match.id === chosen.id || recordsFrom(stream, match.id)) return stream;
   // Found by name: the browser gave it a new id on this page load. Released
   // first, since on iOS Safari a second capture can end the first.
+  // The new id is saved so the next start opens it directly.
   for (const track of stream.getTracks()) track.stop();
-  return open(match.id).catch(() => open());
+  const reopened = await open(match.id).catch(() => open());
+  if (recordsFrom(reopened, match.id)) chooseMicrophone(match);
+  return reopened;
 }
 
 export interface Microphone {

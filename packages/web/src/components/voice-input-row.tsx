@@ -108,9 +108,13 @@ function MicrophoneRow() {
   // names some microphone counts: an empty one may be the browser not answering.
   const found = options ? findMicrophone(chosen, options) : null;
   const unplugged = chosen !== null && !!options?.length && found === null;
+  // A choice found by name gets the device's new id, and one saved before
+  // names were kept gets its name.
+  const stale = found !== null && (found.id !== chosen?.id || found.label !== chosen.label);
   useEffect(() => {
     if (unplugged) setChosen(chooseMicrophone(null));
-  }, [unplugged]);
+    else if (stale && found) setChosen(chooseMicrophone(found));
+  }, [unplugged, stale, found]);
   const description = refused
     ? t("system.voiceInput.microphone.refused")
     : t("system.voiceInput.microphone.description");

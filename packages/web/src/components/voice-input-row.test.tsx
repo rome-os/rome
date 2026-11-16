@@ -124,14 +124,31 @@ describe("choosing the microphone in Settings", () => {
     expect(localStorage.getItem("rome.voiceInput.microphone")).toBe("usb");
   });
 
-  it("shows the chosen microphone when the browser gives it a new id after a reload", async () => {
+  it("shows the chosen microphone, and saves its new id, when the browser gives it a new id after a reload", async () => {
     const choice = JSON.stringify({ id: "old-id", label: "USB Microphone" });
     localStorage.setItem("rome.voiceInput.microphone", choice);
     devices([{ kind: "audioinput", deviceId: "new-id", label: "USB Microphone" }]);
     await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
     const select = await screen.findByRole("combobox", { name: "Microphone" });
     await waitFor(() => expect(select.textContent).toContain("USB Microphone"));
-    expect(localStorage.getItem("rome.voiceInput.microphone")).toBe(choice);
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem("rome.voiceInput.microphone") ?? "")).toEqual({
+        id: "new-id",
+        label: "USB Microphone",
+      }),
+    );
+  });
+
+  it("saves the name of a choice made before names were kept", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "usb");
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem("rome.voiceInput.microphone") ?? "")).toEqual({
+        id: "usb",
+        label: "USB Microphone",
+      }),
+    );
   });
 
   it("keeps showing the microphone voice input uses when the browser refuses to save a choice", async () => {
