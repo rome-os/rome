@@ -172,6 +172,20 @@ describe.each(["chat", "concierge"] as const)("the %s message field's draft", (k
 });
 
 describe("the stored chat draft", () => {
+  it("keeps its text when its listening reason is one this release does not know", () => {
+    localStorage.setItem(
+      "rome:chat-draft:chat-a",
+      JSON.stringify({
+        version: 1,
+        text: "half a thought",
+        stop: { reason: "a-reason-from-elsewhere" },
+        authEpoch: currentAuthEpoch(),
+      }),
+    );
+
+    expect(loadChatDraft("chat-a")).toEqual({ text: "half a thought", stop: null });
+  });
+
   it("takes back a failed send's text beside a saved reason", () => {
     const stop = { reason: "left-chat" } as const;
     saveChatDraft("chat-a", { text: "", stop }, currentAuthEpoch());
