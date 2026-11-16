@@ -76,8 +76,13 @@ import Testing
         sync.offer("", to: binding)
         sync.offer("hello world", to: binding)
         #expect(draft == "")
-        try await Task.sleep(for: .milliseconds(250))
+        // A busy test machine can run the trailing write late, never not at all.
+        for _ in 0..<100 where draft != "hello world" {
+            try await Task.sleep(for: .milliseconds(50))
+        }
         #expect(draft == "hello world")
+        // The trailing write holds the sync weakly, as the field's controller owns it.
+        withExtendedLifetime(sync) {}
     }
 
     @MainActor
