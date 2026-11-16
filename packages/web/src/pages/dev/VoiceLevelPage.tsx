@@ -1,6 +1,7 @@
 import { Mic, Paperclip, Send, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { VoiceTextStreaming } from "./VoiceTextStreaming";
 
 // Prototype: four ways for the composer to show that the microphone hears
 // the guardian while voice input listens. All four cards share one audio
@@ -495,6 +496,9 @@ export default function VoiceLevelPage() {
             }
           />
         </Variant>
+
+        <hr className="border-border" />
+        <VoiceTextStreaming />
       </div>
     </div>
   );
