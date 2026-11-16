@@ -201,6 +201,7 @@ final class PastingTextView: UITextView {
     var named: NamedPlaceholder?
     /// The general pasteboard; tests give it their own.
     var pasteboard: UIPasteboard = .general
+    private var laidOutSize: CGSize = .zero
 
     override var text: String! { didSet { setNeedsDisplay() } }
     override var font: UIFont? { didSet { setNeedsDisplay() } }
@@ -208,6 +209,14 @@ final class PastingTextView: UITextView {
     /// placeholder redraws only when the field turns empty or stops being so.
     override var attributedText: NSAttributedString! {
         didSet { if (oldValue?.length ?? 0 == 0) != (attributedText?.length ?? 0 == 0) { setNeedsDisplay() } }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.size != laidOutSize else { return }
+        laidOutSize = bounds.size
+        // Reveal the caret after a resize, even if scrolling stays enabled.
+        if isScrollEnabled { scrollRangeToVisible(selectedRange) }
     }
 
     override var keyCommands: [UIKeyCommand]? {
