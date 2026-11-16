@@ -520,7 +520,9 @@ final class VoiceInputTests: XCTestCase {
         XCTAssertTrue(listened, "listening stopped by itself during the photographs")
         XCTAssertEqual(fieldText(field), "", "words reached the field, so the photographs cannot tell hearing from text")
 
-        // Identical photographs are grouped first, so the slow pixel comparison runs once a look.
+        // Identical photographs are grouped first. The steady silent look is the one most
+        // photographs share exactly, and only it is compared pixel by pixel with the others,
+        // so a field that changes every frame costs one comparison a photograph.
         var looks: [[UInt8]] = []
         var lookOf: [[UInt8]: Int] = [:]
         let shotLook = shots.map { shot -> Int in
@@ -529,11 +531,11 @@ final class VoiceInputTests: XCTestCase {
             lookOf[shot.pixels] = looks.count - 1
             return looks.count - 1
         }
-        let close = looks.map { a in looks.map { b in Self.differing(a, b, atMost: Self.pixelSlack) <= Self.pixelSlack } }
-        let counts = looks.indices.map { look in shotLook.filter { close[look][$0] }.count }
-        let most = counts.max() ?? 0
-        let silent = counts.firstIndex(of: most) ?? 0
-        let same = { (shot: Int) in close[silent][shotLook[shot]] }
+        let shared = looks.indices.map { look in shotLook.filter { $0 == look }.count }
+        let silent = shared.firstIndex(of: shared.max() ?? 0) ?? 0
+        let closeToSilent = looks.map { Self.differing(looks[silent], $0, atMost: Self.pixelSlack) <= Self.pixelSlack }
+        let same = { (shot: Int) in closeToSilent[shotLook[shot]] }
+        let most = shots.indices.filter(same).count
         print("rule 14: \(shots.count) photographs, \(looks.count) looks; the steady silent look repeats in \(most)")
         XCTAssertGreaterThanOrEqual(most, Self.cyclesPhotographed,
                                     "the field never settled in silence: no photograph repeats once a cycle")
