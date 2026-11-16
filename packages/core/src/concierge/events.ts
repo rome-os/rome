@@ -292,7 +292,8 @@ export function startConciergeEvents(
   turns: Pick<TurnListeners, "listen">,
   options: { delay?: (ms: number) => Promise<void> } = {},
 ): () => void {
-  const remindersRunning = new Set<string>();
+  /** Per chat, the reminder turn that runs, and its end once it fires. */
+  const remindersRunning = new Map<string, { finished?: EndedAgentTurn }>();
   const recoveriesRunning = new Map<string, { finished?: EndedAgentTurn }>();
   const { tasks, webchatRepo, approvals } = service.deps;
 
@@ -366,22 +367,59 @@ export function startConciergeEvents(
     },
   }).start();
 
+  // Whether turn `turnId` of chat `chatId` said anything: any message counts
+  // as its reply.
+  const turnSaid = async (chatId: string, turnId: string) =>
+    (await webchatRepo.getTurnChatMessages(chatId, turnId)).some((row) => row.role === "assistant");
+
+  // The messages a completed turn started with and gave no sign: no reply,
+  // reaction, working mark or task. Read before the turn's end settles them.
+  // A message that joined the turn is left out.
+  const silentOf = async (chatId: string, ended: string): Promise<string[]> => {
+    if (await turnSaid(chatId, ended)) return [];
+    const joined = new Set(service.messageStatus.joinedIn(chatId));
+    return (await tasks.repo.unansweredOf(chatId, ended)).filter((key) => !joined.has(key));
+  };
+
+  // Reacts ✅ to the messages of `keys` still without a sign, so their owner
+  // always sees a response (docs/domains/chats.md#reaction).
+  const reactToSilent = async (chatId: string, keys: readonly string[]) => {
+    for (const key of await tasks.repo.silentAmong(chatId, keys)) {
+      if (await webchatRepo.setMessageReaction(chatId, key, "✅")) {
+        await service.messageStatus.reactedTo(chatId, key);
+      }
+    }
+  };
+
   // The owner's messages a Concierge turn took settle once the chat runs no
   // turn that carries them: done when it completed, failed when it failed or
   // was abandoned, and stopped, which clears them, when it was stopped. A
   // turn a newer input superseded hands its work on, so its messages stay
   // working until the turn that took it over ends.
+  // Answers the messages a completed turn left without a sign, for
+  // `reactToSilent` once any recovery of the turn had its chance.
   const settleTurnMarks = async (
     chatId: string,
     ended: string,
     status: AgentTurnFinishedEvent["status"],
     handedOn = false,
-  ) => {
+  ): Promise<string[]> => {
+    service.messageStatus.turnEnded(chatId, ended);
     // The ended turn's stream may still be draining, so it is left out.
     const running = service.dashboard.chats.activeTurns(chatId).filter((id) => id !== ended);
     // The turn that takes the work over has not started yet when this one
     // ends, so the session says whether a newer input took it over.
-    if (status === "interrupted" && (handedOn || running.length > 0)) return;
+    if (status === "interrupted" && (handedOn || running.length > 0)) return [];
+    const silent =
+      status === "completed"
+        ? await silentOf(chatId, ended).catch((error: unknown) => {
+            log.warn("failed to read the messages a turn left unanswered", {
+              chatId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return [];
+          })
+        : [];
     service.turnSettled(chatId);
     // A newer turn already running keeps its own timers and triggers.
     if (running.length === 0) service.messageStatus.turnSettled(chatId);
@@ -398,12 +436,15 @@ export function startConciergeEvents(
           error: error instanceof Error ? error.message : String(error),
         }),
       );
+    return silent;
   };
 
   const onConciergeTurn = async (event: EndedAgentTurn, chatId: string) => {
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
-    const reminderRunning = remindersRunning.has(chatId);
+    const reminder = remindersRunning.get(chatId);
+    const reminderRunning = reminder !== undefined;
+    if (reminder) reminder.finished = event;
     // A turn a newer input took over hands the guardian messages it took to
     // the turn that takes over, which answers them too.
     if (event.handedOn) {
@@ -466,7 +507,9 @@ export function startConciergeEvents(
     const failure = event.status === "error" ? event.output.failure : undefined;
     const reason = failure ? failoverReason(failure, service.deps.accounts.read()) : null;
     // A failed turn that a recovery takes over stays working until it ends.
-    if (!reason) await settleTurnMarks(chatId, event.turn.turnId, event.status, event.handedOn);
+    const silent = reason
+      ? []
+      : await settleTurnMarks(chatId, event.turn.turnId, event.status, event.handedOn);
     if (event.status === "error") {
       if (!reason || !failure) return;
       const chain: { finished?: EndedAgentTurn } = {};
@@ -506,12 +549,13 @@ export function startConciergeEvents(
         if (moved) await recover(next.output.failure, second, false);
       } finally {
         recoveriesRunning.delete(chatId);
-        await settleTurnMarks(
+        const left = await settleTurnMarks(
           chatId,
           chain.finished?.turn.turnId ?? event.turn.turnId,
           chain.finished?.status ?? "error",
           chain.finished?.handedOn,
         );
+        await answerSilent(chatId, left);
       }
       return;
     }
@@ -520,13 +564,29 @@ export function startConciergeEvents(
       text: event.output.text,
       reminderRunning,
     });
-    if (!nudge) return;
-    remindersRunning.add(chatId);
-    try {
-      await service.runSystemTurn(chatId, NUDGE_PROMPT);
-    } finally {
-      remindersRunning.delete(chatId);
+    if (nudge) {
+      const running = {} as { finished?: EndedAgentTurn };
+      remindersRunning.set(chatId, running);
+      try {
+        await service.runSystemTurn(chatId, NUDGE_PROMPT);
+      } finally {
+        remindersRunning.delete(chatId);
+      }
+      // The reminder delivers the missed answer: then the turn said something.
+      const reminded = running.finished?.turn.turnId;
+      if (reminded && (await turnSaid(chatId, reminded).catch(() => true))) return;
     }
+    await answerSilent(chatId, silent);
+  };
+
+  const answerSilent = async (chatId: string, keys: readonly string[]) => {
+    if (keys.length === 0) return;
+    await reactToSilent(chatId, keys).catch((error: unknown) =>
+      log.warn("failed to react to a message a turn left unanswered", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   };
 
   // Every task chat has a row; a chat that has none (one from before the
@@ -822,7 +882,7 @@ export function startConciergeEvents(
       }
       void guard(
         `concierge turn failure (${turn.turnId})`,
-        settleTurnMarks(thread.threadId, turn.turnId, "error"),
+        settleTurnMarks(thread.threadId, turn.turnId, "error").then(() => undefined),
       );
       return;
     }
@@ -994,6 +1054,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
     recurringOf: async (taskIds) =>
       (await service.deps.checks?.recurringOf?.(taskIds)) ?? new Set<string>(),
+    // Whether a waiting task's card shows yet, which keeps its message working.
+    taskChatPartMessages: (chatId, since) => webchatRepo.taskChatPartMessages(chatId, since),
   });
   // What a restart lost from memory, such as a running turn, may have ended a task.
   void guard(tasks.keepEndedAll());

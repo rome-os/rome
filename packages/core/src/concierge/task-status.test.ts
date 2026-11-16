@@ -117,6 +117,20 @@ describe("messageStatus", () => {
     expect(messageStatus({ ...answered, tasks: [task("later"), task("active")] })).toBe("working");
   });
 
+  it("works while a task made for it waits on its owner until the card shows", () => {
+    const answered = { ...turn, answered: true };
+    const waiting = (cardShown: boolean) => ({ ...task("needs_you"), cardShown });
+    expect(messageStatus({ ...answered, tasks: [waiting(false)] })).toBe("working");
+    expect(messageStatus({ ...answered, tasks: [waiting(true)] })).toBeNull();
+  });
+
+  it("never works on a message the Concierge reacted to", () => {
+    expect(messageStatus({ ...turn, working: true, reacted: true })).toBeNull();
+    expect(
+      messageStatus({ ...turn, answered: true, reacted: true, tasks: [task("active")] }),
+    ).toBeNull();
+  });
+
   it("fails when its turn failed or a task made for it ended failed, once none is still open", () => {
     const failed = { status: "ended" as const, endReason: "failed" as const };
     expect(messageStatus({ ...turn, answered: true, turnFailed: true })).toBe("failed");

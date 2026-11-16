@@ -984,6 +984,8 @@ interface ActiveWebchatStream {
   channelThreadKey: string | null;
   /** How the turn shows the typing dots, from its first event on. */
   writing?: MessageWriting;
+  /** The turn called a tool: a message it takes from then on joins it while it runs. */
+  calledTool?: boolean;
 }
 
 interface IncomingWebchatUpload {
@@ -1129,10 +1131,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     stream: ActiveWebchatStream,
     msg: Parameters<MessageWriting["on"]>[0],
   ): void => {
-    // A working tool shows the turn's open message working
-    // (docs/domains/chats.md#status). Only a Concierge chat has open ones.
-    if (msg.type === "tool_use" && msg.tool) {
-      void deps.concierge?.messageStatus?.toolCalled(stream.sessionId, msg.tool);
+    // A working tool call that runs long shows the turn's open messages
+    // working (docs/domains/chats.md#status). Only a Concierge chat has open ones.
+    if (msg.type === "tool_use") {
+      stream.calledTool = true;
+      if (msg.tool && msg.id) {
+        void deps.concierge?.messageStatus?.toolCalled(
+          stream.sessionId,
+          stream.agentTurnId ?? stream.turnId,
+          msg.tool,
+          msg.id,
+        );
+      }
+    } else if (msg.type === "tool_result" && msg.toolUseId) {
+      deps.concierge?.messageStatus?.toolEnded(
+        stream.sessionId,
+        stream.agentTurnId ?? stream.turnId,
+        msg.toolUseId,
+      );
     }
     if (!stream.writing) {
       const owner = stream.channelThreadKey
@@ -5091,9 +5107,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // (docs/domains/chats.md#task), and its status can show the turn
         // working on it (docs/domains/chats.md#status).
         if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
+          // A turn that called a tool already runs: the message joins it.
+          const running = streamsByTurnId.get(status.turnId);
+          const joined = running?.calledTool === true;
+          // The turn as its tool calls name it.
+          const turnId = running ? (running.agentTurnId ?? running.turnId) : status.turnId;
           await deps.concierge?.deps.tasks.repo
             .takeMessage(status.turnId, { chatId: sessionId, messageKey: status.inputId })
-            .then(() => deps.concierge?.messageStatus?.taken(sessionId, status.inputId))
+            .then(() =>
+              deps.concierge?.messageStatus?.taken(sessionId, status.inputId, turnId, { joined }),
+            )
             .catch((error: unknown) =>
               log.warn("failed to record the message a turn took", {
                 sessionId,
