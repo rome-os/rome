@@ -680,6 +680,7 @@ struct Composer: View {
                     committedText: $committedText,
                     handle: textHandle,
                     editable: !voice.active,
+                    onReturn: returnSends,
                     onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
                 )
                 if !voice.active {
@@ -762,6 +763,23 @@ struct Composer: View {
                 Task { await attachments.add(images: [image]) }
             }
             .ignoresSafeArea()
+        }
+    }
+
+    /// Return on a hardware keyboard while listening: listening ends, and the
+    /// message is sent once the last words are in. Shift-Return does nothing.
+    private var returnSends: (() -> Void)? {
+        guard voice.active else { return nil }
+        return sendWhenHeard
+    }
+
+    private func sendWhenHeard() {
+        voice.stopAndSend {
+            guard !(attachments?.isPreparing ?? false),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
+            else { return }
+            voice.edited(service: voiceInput, chat: voiceKey)
+            onSend()
         }
     }
 
