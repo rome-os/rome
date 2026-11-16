@@ -117,24 +117,35 @@ export default {
       ctx.memo.A3cost = { notMeasured: error.message };
     }
 
-    const ordinary = posted.length - mentions.length;
-    const inPrivate = unprompted.filter((m) => m.chat.startsWith("dm-")).length;
-    const evidence = [first, posted.at(-1).id, ...unprompted.map((m) => m.id)];
+    // A private chat stands in for a direct message, which is addressed to the agent, so A3
+    // scores only the shared chats and reports replies in private chats apart.
+    const isPrivate = (chat) => chat.startsWith("dm-");
+    const ordinary = posted.filter((p) => !p.mention && !isPrivate(p.chat)).length;
+    const shared = unprompted.filter((m) => !isPrivate(m.chat));
+    const inPrivate = unprompted.length - shared.length;
+    const evidence = [first, posted.at(-1).id, ...shared.map((m) => m.id)];
     const result = ruleResult([
       {
         ...check(
-          `at most ${A3_LIMIT} replies to ${ordinary} messages that did not mention it`,
-          unprompted.length <= A3_LIMIT ? "pass" : "fail",
-          `${unprompted.length} replies (${inPrivate} in a private chat standing in for a direct message)${unprompted.length ? `: ${unprompted.map((m) => `${m.chat} ${m.id}`).join(", ")}` : ""}; answered ${answers.size} of ${mentions.length} mentions`,
+          `at most ${A3_LIMIT} replies to ${ordinary} messages in shared chats that did not mention it`,
+          shared.length <= A3_LIMIT ? "pass" : "fail",
+          `${shared.length} replies${shared.length ? `: ${shared.map((m) => `${m.chat} ${m.id}`).join(", ")}` : ""}; answered ${answers.size} of ${mentions.length} mentions; not scored: ${inPrivate} replies in private chats standing in for direct messages${
+            inPrivate
+              ? ` (${unprompted
+                  .filter((m) => isPrivate(m.chat))
+                  .map((m) => m.id)
+                  .join(", ")})`
+              : ""
+          }`,
           evidence,
         ),
-        quote: unprompted.map((m) => m.text).join("\n---\n") || undefined,
+        quote: shared.map((m) => m.text).join("\n---\n") || undefined,
       },
     ]);
     return {
       ...result,
       cost: ctx.memo.A3cost,
-      replies: { shared: unprompted.length - inPrivate, private: inPrivate },
+      replies: { shared: shared.length, private: inPrivate },
     };
   },
 };
