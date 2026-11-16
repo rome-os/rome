@@ -26,7 +26,7 @@ import {
   type ConnectionCard,
 } from "@/lib/connection-cards";
 import { connectionStatus, StatusIndicator } from "@/lib/connection-status";
-import { isImeCompositionEvent } from "@/lib/keyboard-submit";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 import type { ComposioServiceRow } from "@/lib/composio-services";
 import type { ApiConnection } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";

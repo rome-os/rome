@@ -30,6 +30,7 @@ import { MAIN_CHAT_PATH, sessionActivityTime } from "@/lib/chat-session";
 import type { ChatSession } from "@/lib/chat-types";
 import { emitSessionsChanged, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 const anyEvent = z.unknown();
 
@@ -265,6 +266,7 @@ function ConciergeTopicEntry({
         onChange={(event) => setValue(event.target.value)}
         onBlur={() => void rename()}
         onKeyDown={(event) => {
+          if (isImeCompositionEvent(event)) return;
           if (event.key === "Enter") {
             event.preventDefault();
             void rename();

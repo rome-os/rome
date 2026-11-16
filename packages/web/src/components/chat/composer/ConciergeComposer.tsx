@@ -48,7 +48,7 @@ import {
 } from "@/lib/chat-constants";
 import { isReasoningEffort } from "@/lib/chat-helpers";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
-import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
+import { isImeCompositionEvent, shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 import { randomUUID } from "@/lib/random-uuid";
 import type { ChatErrorNotice, PendingUpload } from "@/lib/chat-types";
 import { appendFolderLine, deviceFolderLabel, type FolderSelection } from "@/lib/device-folder";
@@ -597,6 +597,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     }}
                     onInput={(event) => clampTextareaHeight(event.currentTarget)}
                     onKeyDown={(event) => {
+                      if (isImeCompositionEvent(event)) return;
                       if (handleSlashKeyDown(event)) return;
                       if (event.key === "Escape" && replyDraft?.target) {
                         event.preventDefault();

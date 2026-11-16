@@ -115,6 +115,7 @@ import {
   fetchConnections,
   type ApiConnection,
 } from "@/lib/connections-api";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -1648,7 +1649,7 @@ function AllowedCloudEmailsRows() {
                 if (draftError) setDraftError("");
               }}
               onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
+                if (event.key !== "Enter" || isImeCompositionEvent(event)) return;
                 event.preventDefault();
                 commitDraft(draft);
               }}

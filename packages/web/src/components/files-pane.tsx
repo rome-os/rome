@@ -49,6 +49,7 @@ import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { cn } from "@/lib/utils";
 import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
 import { FileActionSheet, type ContextMenuActions } from "@/components/file-browser/ContextMenu";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 export type FilesPaneNode = Pick<FileBrowserTreeNode, "name" | "path" | "type">;
 
@@ -382,7 +383,10 @@ function Toolbar({ searchPlaceholder }: { searchPlaceholder: string }) {
           placeholder={searchPlaceholder}
           value={searchQuery}
           onChange={(event) => store.getState().ui.setSearchQuery(event.target.value)}
-          onKeyDown={(event) => event.key === "Enter" && void store.getState().ui.doSearch()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !isImeCompositionEvent(event))
+              void store.getState().ui.doSearch();
+          }}
           className="flex-1 pl-8"
           aria-label={t("header.search")}
         />

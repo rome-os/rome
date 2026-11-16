@@ -73,6 +73,7 @@ import { chatSessionTopic, chatStatusTopic, useLiveEvents } from "@/hooks/use-li
 import { ConciergeChats } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -874,6 +875,7 @@ export function RecentChats({
             onChange={(event) => setEditingValue(event.target.value)}
             onBlur={() => void commitRename(session.id)}
             onKeyDown={(event) => {
+              if (isImeCompositionEvent(event)) return;
               if (event.key === "Enter") {
                 event.preventDefault();
                 void commitRename(session.id);
