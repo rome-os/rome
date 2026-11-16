@@ -210,7 +210,12 @@
     }
   },
   "upgradeIndicator": {
-    "tooltip": "{{name}} 可以升级"
+    "available": "将 {{name}} 更新到 {{version}}",
+    "updating": "{{name}} 正在更新到 {{version}}…",
+    "failed": "更新没有完成",
+    "retry": "重试",
+    "updated": "{{name}} 已更新到 {{version}}",
+    "reload": "重新加载"
   },
   "upgradeBanner": {
     "countdownTitle": "Rome {{version}} 更新已就绪",

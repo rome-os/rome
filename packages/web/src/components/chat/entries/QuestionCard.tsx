@@ -1,4 +1,5 @@
-import { lazy, type ReactNode, Suspense } from "react";
+import { type ReactNode, Suspense } from "react";
+import { lazy } from "@/lib/lazy-with-reload";
 import { useTranslation } from "react-i18next";
 import type { WidgetEventOutcome } from "@/lib/chat-api";
 import { answerOutcome, SettledCard } from "./SettledCard";

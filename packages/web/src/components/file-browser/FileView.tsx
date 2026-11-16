@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo } from "react";
+import { Suspense, useMemo } from "react";
+import { lazy } from "@/lib/lazy-with-reload";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";

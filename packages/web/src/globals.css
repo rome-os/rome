@@ -311,6 +311,26 @@
   transform: rotate(-8deg);
 }
 
+/* The sidebar's upgrade row: a light tint of the theme's primary, with ink
+   from the same hue taken most of the way to the text color, so it clears AA
+   on the tint in every theme and mode (themes-contrast.test.ts measures it). */
+.rome-upgrade-row {
+  background-color: color-mix(in oklab, var(--primary) 15%, transparent);
+  color: color-mix(in oklab, var(--primary) 60%, var(--foreground));
+}
+
+.dark .rome-upgrade-row {
+  background-color: color-mix(in oklab, var(--primary) 20%, transparent);
+}
+
+button.rome-upgrade-row:hover {
+  background-color: color-mix(in oklab, var(--primary) 22%, transparent);
+}
+
+.dark button.rome-upgrade-row:hover {
+  background-color: color-mix(in oklab, var(--primary) 28%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rome-sidebar-icon {
     will-change: auto;
