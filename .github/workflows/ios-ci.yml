@@ -14,12 +14,17 @@ on:
     paths:
       - "ios/**"
       - ".github/workflows/ios-ci.yml"
+  # Nightly, every voice input UI test, including the ones too long for each PR.
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-ci-${{ github.ref }}
+  # The nightly run shares main's ref, so a merge must not cancel it, nor it a merge's run.
+  group: ios-ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -97,7 +102,7 @@ jobs:
   ui-tests:
     name: UI tests
     runs-on: macos-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: ios
@@ -112,11 +117,39 @@ jobs:
         run: |
           name=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9]+( Pro)?' | sort -V | tail -1)
           echo "name=$name" >> "$GITHUB_OUTPUT"
+      # The voice input suite takes about 20 minutes, so a PR or push runs it only when it
+      # changes voice input; nightly runs it whole, with rules 4 and 5, whose three minutes
+      # of dictation and 60 s wait are too long for every change.
+      - name: Decide which UI tests run
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            echo "voice=true" >> "$GITHUB_OUTPUT"
+            echo "long=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "long=false" >> "$GITHUB_OUTPUT"
+          # The voice control lives in the message field, so the field's files count too.
+          voice='^(ios/Rome/Features/VoiceInput/|ios/Rome(UI)?Tests/VoiceInput|ios/RomeUITests/speech\.wav$|ios/Rome/Features/Chat/(TranscriptViews|ComposerTextView)\.swift$|\.github/workflows/ios-ci\.yml$)'
+          if git fetch --quiet --no-tags --depth=1 origin "$BASE" 2>/dev/null &&
+             git diff --name-only "$BASE" HEAD | grep -qE "$voice"; then
+            echo "voice=true" >> "$GITHUB_OUTPUT"
+          elif git cat-file -e "$BASE" 2>/dev/null; then
+            echo "::notice::No voice input change, so only LaunchTests run; the voice input suite runs nightly."
+            echo "voice=false" >> "$GITHUB_OUTPUT"
+          else
+            # No base to compare with, such as a branch's first push: run it.
+            echo "voice=true" >> "$GITHUB_OUTPUT"
+          fi
       # The voice input tests run against a stand-in instance that the
       # voice-input environment keeps on its own branch. Without it, only the
       # launch test runs.
       - name: Fetch the stand-in instance
         id: standin
+        if: steps.scope.outputs.voice == 'true'
         run: |
           # The job runs in ios/, but the stand-in's path is from the repository root.
           set -o pipefail
@@ -140,6 +173,7 @@ jobs:
       - name: Run the UI tests
         env:
           STANDIN: ${{ steps.standin.outputs.present }}
+          LONG: ${{ steps.scope.outputs.long }}
         run: |
           # xcodebuild hands TEST_RUNNER_* environment variables to the tests
           # without the prefix; the tests pass them to the app.
@@ -148,6 +182,10 @@ jobs:
             export TEST_RUNNER_ROME_LOCAL_ORIGIN=http://127.0.0.1:4790
             export TEST_RUNNER_ROME_LOCAL_USER=guardian
             export TEST_RUNNER_ROME_LOCAL_PASSWORD=stand-in
+            if [ "$LONG" != "true" ]; then
+              extra=(-skip-testing:RomeUITests/VoiceInputTests/testRule4ThreeMinutesStayInTheField
+                     -skip-testing:RomeUITests/VoiceInputTests/testRule5OnlyTheGuardianSends)
+            fi
           else
             extra=(-only-testing:RomeUITests/LaunchTests)
           fi
@@ -158,7 +196,109 @@ jobs:
             -skipPackagePluginValidation \
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
+            -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             "${extra[@]}"
+      # Rule 1: the field shows listening within 0.5 s of the start action. The app marks each
+      # start with a StartListening signpost interval, and the voice input tests measure it;
+      # XCTest has no way to assert on a measurement, so this step reads the result bundle.
+      - name: "Rule 1: every start shows listening within 0.5 s"
+        if: always() && steps.standin.outputs.present == 'true'
+        run: |
+          xcrun xcresulttool get test-results metrics --path "$RUNNER_TEMP/ui-tests.xcresult" > "$RUNNER_TEMP/metrics.json"
+          python3 - "$RUNNER_TEMP/metrics.json" <<'PY'
+          import json, sys
+
+          # The app's signpost intervals, and the bar each rule holds every one to.
+          BARS = {
+              "StartListening": (0.5, "rule 1", "a start took {v:.3f} s to show listening"),
+          }
+          found = {interval: [] for interval in BARS}
+
+          def walk(node, test=None):
+              if isinstance(node, dict):
+                  test = node.get("testIdentifier") or test
+                  name = str(node.get("displayName") or node.get("identifier") or "")
+                  for interval in BARS:
+                      if interval in name and isinstance(node.get("measurements"), list):
+                          found[interval].append((test, name, node.get("unitOfMeasurement", ""), node["measurements"]))
+                  for value in node.values():
+                      walk(value, test)
+              elif isinstance(node, list):
+                  for value in node:
+                      walk(value, test)
+
+          walk(json.load(open(sys.argv[1])))
+          failed = False
+          for interval, (bar, rule, says) in BARS.items():
+              if not found[interval]:
+                  print(f"::error::No {interval} measurement in the result bundle, so {rule}'s {bar} s was not checked.")
+                  failed = True
+                  continue
+              over = []
+              blank = False
+              for test, name, unit, values in found[interval]:
+                  seconds = [v / 1000 if unit == "ms" else v for v in values]
+                  print(f"{test}: {name}: " + ", ".join(f"{v:.3f} s" for v in seconds))
+                  over += [(test, v) for v in seconds if v > bar]
+                  # A measured window with no interval in it reads 0; that is no evidence, not a pass.
+                  empty = [v for v in seconds if v == 0]
+                  if empty:
+                      print(f"::error::{test}: {len(empty)} of {len(seconds)} measurements held no {interval} interval, so {rule} was not checked there.")
+                      blank = True
+              for test, v in over:
+                  print(f"::error::{test}: " + says.format(v=v) + f"; the bar is {bar} s")
+              failed = failed or bool(over) or blank
+              if not over and not blank:
+                  print(f"Every {interval} interval was within {bar} s ({rule}).")
+          if not all(found.values()):
+              print(open(sys.argv[1]).read()[:4000])
+          if failed:
+              sys.exit(1)
+          PY
+      - name: "Rule 9: every kind of stop has a StopListening interval"
+        if: always() && steps.standin.outputs.present == 'true'
+        run: |
+          # On the simulator the recording stands in for the microphone and closes in
+          # microseconds, so leg B scores rule 9 by count: each measured stop of the rule 9 test
+          # (leaving the chat, the background, a transcriber error, losing the network, the
+          # guardian's) must hold a StopListening interval, which reads above 0 s. A window with
+          # none reads exactly 0. The second is scored by hand on a phone (leg C).
+          python3 - "$RUNNER_TEMP/metrics.json" <<'PY'
+          import json, sys
+
+          # Without the stand-in's drop control the test makes the guardian's stop in place of losing the network.
+          STOPS = ["leaving the chat", "the background", "a transcriber error", "losing the network (or the guardian's stop)", "the guardian's stop"]
+          found = []
+
+          def walk(node, test=None):
+              if isinstance(node, dict):
+                  test = node.get("testIdentifier") or test
+                  name = str(node.get("displayName") or node.get("identifier") or "")
+                  if "StopListening" in name and isinstance(node.get("measurements"), list):
+                      found.append((test, node["measurements"]))
+                  for value in node.values():
+                      walk(value, test)
+              elif isinstance(node, list):
+                  for value in node:
+                      walk(value, test)
+
+          walk(json.load(open(sys.argv[1])))
+          if not found:
+              sys.exit("::error::No StopListening measurement in the result bundle, so rule 9 was not checked.")
+          failed = False
+          for test, values in found:
+              print(f"{test}: " + ", ".join(f"{stop} {v:.6f} s" for stop, v in zip(STOPS, values)))
+              if len(values) != len(STOPS):
+                  print(f"::error::{test}: {len(values)} measured stops; the rule 9 test makes {len(STOPS)}.")
+                  failed = True
+              for stop, v in zip(STOPS, values):
+                  if v <= 0:
+                      print(f"::error::{test}: no StopListening interval for {stop}.")
+                      failed = True
+          if failed:
+              sys.exit(1)
+          print("Rule 9 (leg B): interval present for every kind of stop; duration not meaningful with the recording stand-in.")
+          PY
       - name: Keep the stand-in's log
         if: always() && steps.standin.outputs.present == 'true'
         uses: actions/upload-artifact@v4
