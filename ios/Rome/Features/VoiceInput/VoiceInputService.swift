@@ -166,9 +166,8 @@ final class VoiceInputController {
     @ObservationIgnored private var anchor: (original: String, range: NSRange)?
     /// From the tap until the field shows it listens.
     @ObservationIgnored private var startInterval: OSSignpostIntervalState?
-    /// The words shown while listening, not yet in the field's text binding.
-    @ObservationIgnored private var preview: (text: String, binding: Binding<String>)?
-    @ObservationIgnored private var previewSyncedAt = Date.distantPast
+    /// Puts the words shown while listening into the field's text binding.
+    @ObservationIgnored private let draftSync = DraftSync()
     /// Draws the words heard into the field while listening.
     @ObservationIgnored private var revealer: SpokenTextRevealer?
 
@@ -284,29 +283,16 @@ final class VoiceInputController {
             return
         }
         let revealer = revealer ?? SpokenTextRevealer(view: view, before: before, after: after) { [weak self] words in
-            self?.preview = (words, text)
-            guard let self, Date().timeIntervalSince(self.previewSyncedAt) >= Self.previewSyncInterval else { return }
-            self.syncPreview()
+            self?.draftSync.offer(words, to: text)
         }
         self.revealer = revealer
         revealer.show(insertion)
     }
 
-    /// Puts the words shown into the binding, so the draft keeps them.
-    private func syncPreview() {
-        guard let preview else { return }
-        self.preview = nil
-        previewSyncedAt = Date()
-        if preview.binding.wrappedValue != preview.text { preview.binding.wrappedValue = preview.text }
-    }
-
-    private static let previewSyncInterval: TimeInterval = 1
-
     private func finishListening() {
         revealer?.stop()
         revealer = nil
-        syncPreview()
-        previewSyncedAt = .distantPast
+        draftSync.finish()
         dictation = nil
         state = .idle
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
@@ -325,5 +311,49 @@ final class VoiceInputController {
             guard raw == AVAudioSession.InterruptionType.began.rawValue else { return }
             MainActor.assumeIsolated { self?.dictation?.end(.interrupted) }
         })
+    }
+}
+
+/// Puts text into a binding at most once per `interval`, and always puts the
+/// last text in once the interval has passed, so words that stop arriving
+/// still reach the draft. The binding redraws the whole chat screen, so a busy
+/// screen never holds up the guardian's stop tap.
+@MainActor
+final class DraftSync {
+    private let interval: Duration
+    private var pending: (text: String, binding: Binding<String>)?
+    private var syncedAt: ContinuousClock.Instant?
+    private var trailing: Task<Void, Never>?
+
+    init(interval: Duration = .seconds(1)) {
+        self.interval = interval
+    }
+
+    func offer(_ text: String, to binding: Binding<String>) {
+        pending = (text, binding)
+        let now = ContinuousClock.now
+        guard let syncedAt, now - syncedAt < interval else { return write() }
+        guard trailing == nil else { return }
+        trailing = Task { [weak self, interval] in
+            try? await Task.sleep(until: syncedAt + interval, clock: .continuous)
+            guard !Task.isCancelled else { return }
+            self?.trailing = nil
+            self?.write()
+        }
+    }
+
+    /// Writes what is pending now, and starts the next listening afresh.
+    func finish() {
+        write()
+        syncedAt = nil
+    }
+
+    private func write() {
+        trailing?.cancel()
+        trailing = nil
+        guard let pending else { return }
+        self.pending = nil
+        syncedAt = .now
+        if pending.binding.wrappedValue != pending.text { pending.binding.wrappedValue = pending.text }
     }
 }

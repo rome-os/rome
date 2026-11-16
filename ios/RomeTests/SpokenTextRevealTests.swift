@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Rome
 
@@ -65,5 +66,29 @@ import Testing
         #expect(reveal.shownText == "hello world")
         #expect(reveal.opacity(at: 0, now: 0) == 1)
         #expect(reveal.settled(at: 0))
+    }
+
+    @MainActor
+    @Test func theDraftGetsTheLastWordsAfterTheyStopArriving() async throws {
+        var draft = ""
+        let binding = Binding(get: { draft }, set: { draft = $0 })
+        let sync = DraftSync(interval: .milliseconds(100))
+        sync.offer("", to: binding)
+        sync.offer("hello world", to: binding)
+        #expect(draft == "")
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(draft == "hello world")
+    }
+
+    @MainActor
+    @Test func finishingWritesTheDraftAtOnce() {
+        var draft = ""
+        let binding = Binding(get: { draft }, set: { draft = $0 })
+        let sync = DraftSync(interval: .seconds(60))
+        sync.offer("hello", to: binding)
+        sync.offer("hello world", to: binding)
+        #expect(draft == "hello")
+        sync.finish()
+        #expect(draft == "hello world")
     }
 }

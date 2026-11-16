@@ -119,13 +119,14 @@ final class SpokenTextRevealer {
     func stop() {
         link?.invalidate()
         link = nil
-        guard let view else { return }
         let words = before + String(reveal.target) + after
+        // The draft keeps every word heard, even when the field is already gone.
+        onDraw(words)
+        guard let view else { return }
         view.text = words
         view.font = font
         view.textColor = color
         view.typingAttributes = [.font: font, .foregroundColor: color]
-        onDraw(words)
     }
 
     @objc private func frame() {
