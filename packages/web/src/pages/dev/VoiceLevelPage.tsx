@@ -120,7 +120,9 @@ function reducedMotion() {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
-// --- Variant A: a ring around the stop button that swells with the voice ---
+// --- Variant A: a ring around the stop button that breathes while listening and swells with the voice ---
+
+const BREATH_PERIOD_S = 1.8;
 
 function PulseButton({ subscribe, onStop }: { subscribe: Subscribe; onStop: () => void }) {
   const ring = useRef<HTMLSpanElement>(null);
@@ -128,12 +130,18 @@ function PulseButton({ subscribe, onStop }: { subscribe: Subscribe; onStop: () =
     const el = ring.current;
     if (!el) return;
     if (reducedMotion()) {
-      el.style.opacity = String(level > 0.15 ? 0.45 : 0.15);
+      el.style.opacity = String(level > 0.15 ? 0.45 : 0.2);
       el.style.transform = "scale(1.25)";
       return;
     }
-    el.style.opacity = String(0.15 + level * 0.45);
-    el.style.transform = `scale(${1 + level * 0.55})`;
+    // The breath runs in silence too, so the ring says "listening" before any
+    // sound arrives. The voice swells it on top, and the breath fades as the
+    // voice takes over so the two do not fight.
+    const t = performance.now() / 1000;
+    const breath = (1 - Math.cos((t / BREATH_PERIOD_S) * 2 * Math.PI)) / 2;
+    const calm = 1 - Math.min(1, level * 1.5);
+    el.style.opacity = String(0.12 + breath * 0.18 * calm + level * 0.4);
+    el.style.transform = `scale(${1.06 + breath * 0.22 * calm + level * 0.5})`;
   });
   return (
     <span className="relative inline-flex">
@@ -380,7 +388,7 @@ export default function VoiceLevelPage() {
         <Variant
           letter="A"
           name="Pulse"
-          description="A soft ring behind the stop button swells with your voice and settles in silence."
+          description="A soft ring behind the stop button breathes slowly while listening, even in silence, and swells when you speak."
         >
           <ComposerFrame
             listening={listening}
