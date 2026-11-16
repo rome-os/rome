@@ -53,7 +53,7 @@ struct TaskChatScreen: View {
                 voiceInput: workspace.voiceInput,
                 voiceKey: chatId,
                 voiceField: .taskChat,
-                onScreen: visibleChat == chatId,
+                onScreen: visibleChat == chatId && !store.share.isSelecting,
                 onSend: {
                     guard !attachments.isPreparing else { return }
                     if store.send(draft, images: attachments.images, fromComposer: true) {

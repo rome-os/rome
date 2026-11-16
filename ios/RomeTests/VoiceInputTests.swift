@@ -97,15 +97,24 @@ import Testing
         #expect(VoiceInputService(backend: DemoBackend(), instance: "b", defaults: defaults).takeNotice(for: "chat") == nil)
     }
 
-    @Test func everyWordShownSurvivesTheAppBeingKilled() {
+    @Test func wordsAnOlderBuildKeptAreDroppedOnLaunch() {
         let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
-        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
-        service.listening(in: "chat")
-        service.heard("Remind me to call the", in: "chat")
-        service.heard("Remind me to call the dentist tomorrow", in: "chat")
+        defaults.set(["chat": "listening:Remind me to call the dentist"], forKey: "voiceInput.marks.a")
         let relaunched = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
-        #expect(relaunched.takeKeptWords(for: "chat") == "Remind me to call the dentist tomorrow")
         #expect(relaunched.takeNotice(for: "chat") == VoiceInputStop(reason: .appClosed))
+        let kept = defaults.dictionary(forKey: "voiceInput.marks.a") as? [String: String]
+        #expect(kept?["chat"]?.contains("dentist") == false)
+    }
+
+    @Test func signingOutForgetsEveryInstancesNotices() {
+        let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
+        VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).listening(in: "chat")
+        VoiceInputService(backend: DemoBackend(), instance: "b", defaults: defaults).listening(in: "chat")
+        defaults.set("x", forKey: "other")
+        VoiceInputMarks.removeAll(defaults: defaults)
+        #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == nil)
+        #expect(VoiceInputService(backend: DemoBackend(), instance: "b", defaults: defaults).takeNotice(for: "chat") == nil)
+        #expect(defaults.string(forKey: "other") == "x")
     }
 
     @Test func aNoticeOutlivesTheAppUntilAnEditOrSend() {
