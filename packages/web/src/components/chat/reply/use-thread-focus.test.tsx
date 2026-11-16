@@ -40,32 +40,40 @@ afterEach(() => {
 });
 
 const at = (minute: number) => new Date(2026, 10, 9, 9, minute).toISOString();
+/** `quoting` is the message it replies to: the reply carries its quote. */
 const say = (
   id: string,
   role: "user" | "assistant",
   thread: string | null,
   minute: number,
   title?: string,
+  quoting?: string,
 ) =>
   ({
     id,
     sessionId: "concierge",
     turnId: role === "assistant" ? `t-${id}` : null,
     role,
-    content: JSON.stringify([{ type: "text", content: `said ${id}` }]),
+    content: JSON.stringify([
+      ...(quoting
+        ? [{ type: "reply_to", messageId: quoting, author: "agent", text: `said ${quoting}` }]
+        : []),
+      { type: "text", content: `said ${id}` },
+    ]),
     createdAt: at(minute),
     chatThreadId: thread,
     ...(title ? { chatThreadTitle: title } : {}),
   }) as ChatMessage;
 
 // Kyoto (k1 starts it) and Flights (f1) interleaved, with a message in none.
+// Each reply carries the quote of the message it replies to.
 const chat = [
   say("k1", "user", "k1", 0, "Kyoto trip"),
   say("f1", "user", "f1", 1, "Flights"),
-  say("k2", "assistant", "k1", 2),
-  say("f2", "assistant", "f1", 3),
-  say("free", "assistant", null, 4),
-  say("k3", "assistant", "k1", 5),
+  say("k2", "assistant", "k1", 2, undefined, "k1"),
+  say("f2", "assistant", "f1", 3, undefined, "f1"),
+  say("free", "assistant", "free", 4),
+  say("k3", "assistant", "k1", 5, undefined, "k2"),
 ];
 
 const actions = {
@@ -82,7 +90,7 @@ const idle = {
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
-/** Wires the hook to a real transcript the way Chat does: one draft, the labels, the back control. */
+/** Wires the hook to a real transcript the way Chat does: one draft, the quotes, the back control. */
 function Harness({
   messages = chat,
   chatId = "concierge",
@@ -93,7 +101,7 @@ function Harness({
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLElement | null>(null);
   const threadFocus = useThreadFocus({ scroller, content, resetKey: chatId });
-  const threads = useChatThreadsValue(messages, new Map(), new Map(), threadFocus.shown);
+  const threads = useChatThreadsValue(messages, threadFocus.shown);
   const draft = useReplyDraftState({
     chatId: "concierge",
     sessionId: "concierge",
@@ -102,7 +110,7 @@ function Harness({
     focusComposer: () => {},
     onOpenThread: (next) => {
       if (threadFocus.focus) return void threadFocus.close();
-      const root = threads.taskThreads.get(next.thread);
+      const root = threads.roots.get(next.thread);
       if (root) void threadFocus.open({ ...next, root });
     },
     thread: threadFocus.focus,
@@ -147,7 +155,9 @@ const hidden = () =>
     .map((element) => element.dataset.threadEntry)
     .sort();
 const transcript = () => document.querySelector<HTMLElement>("[data-concierge-transcript]")!;
-const kyotoLabels = () => screen.getAllByRole("button", { name: "Kyoto trip" });
+/** The quote in reply `id`: pressing it focuses the thread the reply is in. */
+const quoteIn = (id: string) => entry(id).querySelector<HTMLElement>("[data-reply-quote]")!;
+const openKyoto = () => fireEvent.click(quoteIn("k2"));
 const settled = () => act(async () => {});
 
 describe("focusing a thread", () => {
@@ -156,23 +166,21 @@ describe("focusing a thread", () => {
     render(<Harness />);
     expect(hidden()).toEqual([]);
 
-    fireEvent.click(kyotoLabels()[0]!);
+    openKyoto();
     await settled();
 
     expect(hidden()).toEqual(["f1", "f2", "free"]);
     expect(screen.getByTestId("focus").textContent).toBe("Kyoto trip");
-    expect(kyotoLabels()[0]!.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("closes from the same label, from the back control and from Esc, each restoring every message", async () => {
+  it("closes from the back control and from Esc, each restoring every message", async () => {
     reduced = true;
     render(<Harness />);
     for (const close of [
-      () => fireEvent.click(kyotoLabels()[0]!),
       () => fireEvent.click(screen.getByRole("button", { name: "back" })),
       () => fireEvent.keyDown(document.body, { key: "Escape" }),
     ]) {
-      fireEvent.click(kyotoLabels()[0]!);
+      openKyoto();
       await settled();
       expect(hidden()).not.toEqual([]);
 
@@ -181,7 +189,6 @@ describe("focusing a thread", () => {
 
       expect(hidden()).toEqual([]);
       expect(screen.getByTestId("focus").textContent).toBe("");
-      expect(kyotoLabels()[0]!.getAttribute("aria-pressed")).toBe("false");
       // No blank is left above or below.
       expect(screen.getByTestId("top-space").style.height).toBe("");
       expect(screen.getByTestId("bottom-space").style.height).toBe("");
@@ -192,7 +199,7 @@ describe("focusing a thread", () => {
   it("leaves Esc to what handled it first, and to a composing keyboard", async () => {
     reduced = true;
     render(<Harness />);
-    fireEvent.click(kyotoLabels()[0]!);
+    openKyoto();
     await settled();
 
     const used = new KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true });
@@ -210,7 +217,7 @@ describe("focusing a thread", () => {
     reduced = true;
     const frame = rs.spyOn(window, "requestAnimationFrame");
     render(<Harness />);
-    fireEvent.click(kyotoLabels()[0]!);
+    openKyoto();
     await settled();
     fireEvent.click(screen.getByRole("button", { name: "back" }));
     await settled();
@@ -220,7 +227,7 @@ describe("focusing a thread", () => {
 
   it("otherwise folds the rows over a moment: they stay, shrinking, until the motion ends", async () => {
     render(<Harness />);
-    fireEvent.click(kyotoLabels()[0]!);
+    openKyoto();
 
     // The motion has begun: the rows are shown, held by inline styles.
     expect(transcript().hasAttribute("data-thread-motion")).toBe(true);
@@ -243,7 +250,7 @@ describe("focusing a thread", () => {
 
   it("closes at once even while the open motion still runs, leaving no blank or hidden row", async () => {
     render(<Harness />);
-    fireEvent.click(kyotoLabels()[0]!);
+    openKyoto();
     // Mid motion: the rows are still being folded.
     expect(transcript().hasAttribute("data-thread-motion")).toBe(true);
 
@@ -262,7 +269,7 @@ describe("focusing a thread", () => {
   it("holds a message that arrives meanwhile hidden, or shown when it is the thread's", async () => {
     reduced = true;
     const { rerender } = render(<Harness />);
-    fireEvent.click(kyotoLabels()[0]!);
+    openKyoto();
     await settled();
 
     rerender(
@@ -275,10 +282,30 @@ describe("focusing a thread", () => {
     expect(entry("k4")).toBeTruthy();
   });
 
+  it("focuses the thread of a root the server delivered with no thread, keeping the root in view", async () => {
+    reduced = true;
+    // r1 arrived alone, so it says no thread; the replies that came later name it.
+    const plan = [
+      say("r1", "user", null, 0),
+      say("x1", "assistant", null, 1),
+      say("r2", "assistant", "r1", 2, "Plan", "r1"),
+      say("x2", "user", null, 3),
+      say("r3", "assistant", "r1", 4, "Plan", "r2"),
+    ];
+    render(<Harness messages={plan} />);
+
+    fireEvent.click(quoteIn("r3"));
+    await settled();
+
+    expect(hidden()).toEqual(["x1", "x2"]);
+    expect(screen.getByTestId("focus").textContent).toBe("Plan");
+    expect(entry("r1")).toBeTruthy();
+  });
+
   it("ends at once, with no motion, when another chat opens", async () => {
     reduced = true;
     const { rerender } = render(<Harness />);
-    fireEvent.click(kyotoLabels()[0]!);
+    openKyoto();
     await settled();
     expect(screen.getByTestId("focus").textContent).toBe("Kyoto trip");
 

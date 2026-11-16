@@ -162,77 +162,133 @@ struct QuoteBar: View {
     }
 }
 
-/// Under a Concierge message in a task's chat thread: a small light arrow
-/// and the task's title, faint and on one line, cut with "…". A tap opens
-/// the thread view. A source label has no mark, so the two read apart.
-struct ThreadLabelLine: View {
-    let title: String
-    let onOpen: () -> Void
-
-    var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.turn.down.right")
-                    .romeFont(9, .light)
-                    .accessibilityHidden(true)
-                Text(verbatim: title).lineLimit(1).truncationMode(.tail)
-                    .romeFont(12)
-            }
-            .foregroundStyle(Palette.sub.opacity(0.75))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // Tight under its bubble or card: the tap area keeps its height, the
-        // line takes only its text's.
-        .padding(.vertical, -8)
-        .frame(maxWidth: 260, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 6)
-        .accessibilityLabel(Text(verbatim: title))
-        .accessibilityIdentifier("thread-label")
-        .accessibilityHint(Text("Opens the chat thread"))
-    }
-}
-
-/// The quote a reply carries, at the top of its bubble: a pale edge, the
-/// reply arrow and the first two lines of what it quotes. A tap opens the
-/// task's thread view or goes to the original; without one it is plain.
+/// The quote a reply carries when it does not sit right under what it
+/// answers (docs/domains/chats.md#chat-thread): a small reply arrow and the
+/// first line of the original, muted, at the top of its bubble. A tap opens the
+/// reply's thread view or goes to the original; without one it is plain.
 struct QuotedReply: View {
+    /// The bubble the quote sits in: the guardian's, which is the primary color, or the Concierge's.
+    enum Tone { case sent, received }
+
     let quote: MessagePart.ReplyQuote
+    var tone: Tone = .sent
     let onTap: (() -> Void)?
 
-    private var preview: String {
-        MarkdownParser.plain(quote.text).split(whereSeparator: \.isNewline).joined(separator: " ")
+    private var ink: Color { tone == .sent ? .white : Palette.sub }
+
+    /// An automation's message names it first.
+    private var line: String {
+        quote.author == "automated" ? "\(quote.name ?? String(localized: "Automation")) · \(quote.line)" : quote.line
     }
 
     var body: some View {
-        let content = HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "arrowshape.turn.up.left").romeFont(11).padding(.top, 2)
-            VStack(alignment: .leading, spacing: 1) {
-                if quote.author == "automated" {
-                    Text(verbatim: quote.name ?? String(localized: "Automation")).romeFont(12, .medium).lineLimit(1)
-                }
-                Text(verbatim: preview).romeFont(14).lineLimit(2).multilineTextAlignment(.leading)
-            }
+        let content = HStack(spacing: 4) {
+            Image(systemName: "arrowshape.turn.up.left").romeFont(11).opacity(0.8)
+            Text(verbatim: line).romeFont(12).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
         }
-        .foregroundStyle(.white.opacity(0.85))
-        .padding(.leading, 9)
-        .padding(.trailing, 8)
-        .padding(.vertical, 5)
-        .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(alignment: .leading) {
-            Capsule().fill(.white.opacity(0.6)).frame(width: 3).padding(.vertical, 5).padding(.leading, 3)
-        }
+        .foregroundStyle(ink.opacity(0.8))
+        .frame(maxWidth: 288, alignment: .leading)
         if let onTap {
             Button(action: onTap) { content.contentShape(Rectangle()) }
                 .buttonStyle(.plain)
                 .accessibilityHint(Text("Shows the message it replies to"))
+                .accessibilityIdentifier("reply-quote")
         } else {
             content
         }
+    }
+}
+
+/// The mark of a reply that sits right under what it answers, in place of a
+/// quote: a hook up to the message above, or a line across the gap to the reply
+/// above that answers the same message. It grows out of the bubble's outer top
+/// corner in the bubble's color, and both stems stand 20 pt in from the outer
+/// edge, on the straight part of the edge, so a run of replies reads as one
+/// rail. A tap leads where the quote would.
+struct ReplyRail: View {
+    enum Kind: Hashable, Sendable {
+        case hook
+        case line(gap: CGFloat)
+    }
+
+    let kind: Kind
+    /// The reply is the guardian's: its bubble is on the trailing side and ember.
+    let isUser: Bool
+    /// The quoted text, which the mark's name carries.
+    let label: String
+    let onTap: (() -> Void)?
+
+    private static let stem: CGFloat = 20
+    private static let hookHeight: CGFloat = 14
+
+    private var height: CGFloat {
+        switch kind {
+        case .hook: return Self.hookHeight
+        case .line(let gap): return gap
+        }
+    }
+
+    var body: some View {
+        let mark = RailShape(kind: kind, stem: Self.stem, trailing: isUser)
+            .stroke(isUser ? Palette.primary : Palette.replyRail, lineWidth: 1.5)
+            .frame(width: 2 * Self.stem + 4, height: height)
+        Group {
+            if let onTap {
+                Button(action: onTap) { mark.contentShape(Rectangle()) }.buttonStyle(.plain)
+            } else {
+                mark
+            }
+        }
+        .accessibilityLabel(Text(verbatim: label))
+        .accessibilityIdentifier("reply-quote")
+        // Above the bubble it grows from, taking no room.
+        .offset(y: -height)
+    }
+}
+
+extension View {
+    /// What a reply that is a task card carries, as a text reply does: the quote
+    /// above the card, or, where it sits right under what it answers, the mark
+    /// growing out of the card's top corner.
+    @ViewBuilder
+    func replyMark(quote: MessagePart.ReplyQuote?, rail: ReplyRail.Kind?, onTap: (() -> Void)?) -> some View {
+        if let quote {
+            VStack(alignment: .leading, spacing: 6) {
+                if rail == nil { QuotedReply(quote: quote, tone: .received, onTap: onTap) }
+                self
+            }
+            .overlay(alignment: .topLeading) {
+                if let rail { ReplyRail(kind: rail, isUser: false, label: quote.text, onTap: onTap) }
+            }
+        } else {
+            self
+        }
+    }
+}
+
+private struct RailShape: Shape {
+    let kind: ReplyRail.Kind
+    let stem: CGFloat
+    let trailing: Bool
+
+    func path(in rect: CGRect) -> Path {
+        // The stem, measured from the bubble's outer edge, and the way the hook turns.
+        let x = trailing ? rect.maxX - stem : stem
+        let turn: CGFloat = trailing ? -1 : 1
+        var path = Path()
+        switch kind {
+        case .line:
+            path.move(to: CGPoint(x: x, y: rect.minY))
+            path.addLine(to: CGPoint(x: x, y: rect.maxY))
+        case .hook:
+            let radius: CGFloat = 8
+            path.move(to: CGPoint(x: x, y: rect.maxY))
+            path.addLine(to: CGPoint(x: x, y: rect.minY + radius))
+            path.addQuadCurve(to: CGPoint(x: x + turn * radius, y: rect.minY), control: CGPoint(x: x, y: rect.minY))
+            path.addLine(to: CGPoint(x: x + turn * 14, y: rect.minY))
+        }
+        return path
     }
 }
 
@@ -242,7 +298,7 @@ extension TranscriptRow {
     /// so a tint leaves it out.
     var ownMessageId: String? {
         switch self {
-        case .separator, .typing, .tools, .threadLabel, .sourceLabel, .unreadDivider: return nil
+        case .separator, .typing, .tools, .sourceLabel, .unreadDivider: return nil
         default: return messageId ?? Self.message(ofPart: id)
         }
     }

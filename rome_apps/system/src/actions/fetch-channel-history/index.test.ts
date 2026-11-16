@@ -74,6 +74,25 @@ describe("fetch_channel_history", () => {
     expect(data.content).toContain("hello world");
   });
 
+  it("names each message of a chat that keeps chat threads, and the root of its thread when that is another message", async () => {
+    const messages = [
+      makeMessage({ messageId: "m1", text: "Weather?", chatThread: "m1" }),
+      makeMessage({ messageId: "m2", text: "Sunny", chatThread: "m1" }),
+      makeMessage({ messageId: "m3", text: "No threads here" }),
+    ];
+    const deps = makeDeps(
+      new Map([["discord", { readHistory: rs.fn().mockResolvedValue(messages) }]]),
+    );
+
+    const result = await createAction(actionConfig, deps).execute({ channel: "discord" });
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const { content } = result.data as { content: string };
+    expect(content).toContain("(message m1): Weather?");
+    expect(content).toContain("(message m2, chat thread m1): Sunny");
+    expect(content).not.toContain("(message m3");
+  });
+
   it("returns error when channel not configured", async () => {
     const deps = makeDeps(new Map());
 

@@ -41,6 +41,20 @@ export function plainQuote(markdown: string): string {
 }
 
 /**
+ * The line of a quoted message a quote shows: its first line with text, as
+ * plain reading text. A fence line holds no words, so the first line inside it
+ * counts. The rest of the message is not quoted.
+ */
+export function quoteLine(markdown: string): string {
+  for (const line of markdown.split("\n")) {
+    if (!line.trim() || /^\s*(?:```|~~~)/.test(line)) continue;
+    const plain = plainQuote(line);
+    if (plain) return plain;
+  }
+  return "";
+}
+
+/**
  * Whether the server has recorded a guardian message and the agent has taken
  * it in. A message still sending, queued, or undelivered offers no Reply.
  */

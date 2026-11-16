@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Testing
 @testable import Rome
 
@@ -133,6 +134,26 @@ import Testing
         service.listening(in: "chat")
         service.stopped(in: "chat", nil)
         #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == nil)
+    }
+
+    // MARK: Return while listening
+
+    @Test func returnOnTheFieldGoesToVoiceInputOnlyWhileItListens() throws {
+        let view = PastingTextView()
+        let isReturn = { (command: UIKeyCommand) in command.input == "\r" && command.modifierFlags.isEmpty }
+        #expect(view.keyCommands?.contains(where: isReturn) != true)
+        var pressed = 0
+        view.onReturn = { pressed += 1 }
+        let command = try #require(view.keyCommands?.first(where: isReturn))
+        #expect(command.action == #selector(PastingTextView.returnPressed))
+        view.returnPressed()
+        #expect(pressed == 1)
+    }
+
+    @Test func returnWhileIdleSendsNothing() {
+        var sent = false
+        VoiceInputController().stopAndSend { sent = true }
+        #expect(!sent)
     }
 
     @Test func spokenWordsGoWhereTheGuardianLeftTheCursorElseAtTheEnd() {

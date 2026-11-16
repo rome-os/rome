@@ -39,6 +39,7 @@
 @source "./mermaid-download-menu.tsx";
 @source "./page.tsx";
 @source "./popover.tsx";
+@source "./progressive-blur.tsx";
 @source "./radio-group.tsx";
 @source "./scroll-edges.tsx";
 @source "./segmented-control.tsx";

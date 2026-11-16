@@ -175,15 +175,15 @@ export interface ChatMessage {
   traceArchived?: boolean;
   /** Who sent a user message. Absent when the message recorded no sender. */
   sender?: ChatMessageSender;
-  /** The chat thread the message is in, in a Concierge chat: the id of the
-   *  thread's first message. Absent or null when it is in none. */
+  /** The chat thread the message is in, in a Concierge chat: the key of its
+   *  root, the first message of the reply chain. The server sends it only for
+   *  a message in a thread of more than one, and not again for a root that
+   *  gains its first reply: a root's own id names its thread then. Absent or
+   *  null for a message alone in its thread. */
   chatThreadId?: string | null;
-  /** The title of the task whose chat thread the message is in, when the
-   *  thread is a task's. Absent for a thread no task has, and in no thread. */
+  /** The thread's name, on every message of a thread of more than one: its
+   *  newest task's title, else the start of its root's text. */
   chatThreadTitle?: string | null;
-  /** The task chat of the task whose chat thread the message is in, when it
-   *  has one. Absent from servers before it. */
-  chatThreadTaskChatId?: string | null;
   /** The emoji the Concierge reacted to a guardian message of its chat with.
    *  Absent when it has none, and from servers before it. */
   reaction?: string | null;

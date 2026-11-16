@@ -12,7 +12,8 @@ It copies the task cards, question and approval cards, forwarded results and a
 connect card of the main Chat (every state the stack holds), adds a model
 switch of each kind, two stored model errors and cards for tasks that wait or
 come later, and keeps the originals' times so a folded card finds its
-question. Thread labels are not copied: a task belongs to one Concierge chat.
+question. Replies' links are not copied (every row is its own chat thread root): a task
+belongs to one Concierge chat.
 Run again any time: the copied rows go in once, and the other cards, too.
 """
 import json
@@ -46,8 +47,8 @@ for row in ([] if has_rows else db.execute("select * from chat_messages where ch
     if not wanted(parts):
         continue
     cur = db.execute(
-        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at,chat_thread_id,chat_thread_settled) values(?,?,?,?,?,?,?,?,?,?,?,?)",
-        (cid, row[2], row[3], row[4], row[5], row[6], row[7], row[8], None, row[10], None, 0),
+        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at) values(?,?,?,?,?,?,?,?,?,?)",
+        (cid, row[2], row[3], row[4], row[5], row[6], row[7], row[8], None, row[10]),
     )
     for link in db.execute("select session_id,turn_id,role,input_state from agent_turn_messages where message_id=?", (row[0],)).fetchall():
         db.execute("insert or ignore into agent_turn_messages(message_id,session_id,turn_id,role,input_state) values(?,?,?,?,?)", (cur.lastrowid, chat_key, link[1], link[2], link[3]))
@@ -59,8 +60,8 @@ def add(parts):
     global newest
     newest = max(newest, int(time.time()) - 3600) + 60
     db.execute(
-        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at,chat_thread_id,chat_thread_settled) values(?,?,?,?,?,?,?,?,?,?,?,0)",
-        (cid, str(uuid.uuid4()), None, "agent:core:concierge", "core:concierge", None, "", json.dumps(parts), None, newest, None),
+        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at) values(?,?,?,?,?,?,?,?,?,?)",
+        (cid, str(uuid.uuid4()), None, "agent:core:concierge", "core:concierge", None, "", json.dumps(parts), None, newest),
     )
 
 
@@ -86,8 +87,8 @@ def once(tag, parts):
     global newest
     newest = max(newest, db.execute("select coalesce(max(said_at),0) from chat_messages where chat_id=?", (cid,)).fetchone()[0]) + 60
     db.execute(
-        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at,chat_thread_id,chat_thread_settled) values(?,?,?,?,?,?,?,?,?,?,?,0)",
-        (cid, key, None, "agent:core:concierge", "core:concierge", None, "", json.dumps(parts), None, newest, None),
+        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at) values(?,?,?,?,?,?,?,?,?,?)",
+        (cid, key, None, "agent:core:concierge", "core:concierge", None, "", json.dumps(parts), None, newest),
     )
 
 
@@ -158,8 +159,8 @@ if task:
     chat_row = db.execute("select chat_id from rome_sessions where id=?", (task[0],)).fetchone()
     if chat_row and not db.execute("select 1 from chat_messages where chat_id=? and key='zz-app-ask'", (chat_row[0],)).fetchone():
         db.execute(
-            "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at,chat_thread_id,chat_thread_settled) values(?,?,?,?,?,?,?,?,?,?,?,0)",
-            (chat_row[0], "zz-app-ask", None, "agent:core:concierge", "core:concierge", None, "", json.dumps([{"type": "pending_interaction", "toolUseId": "zz-app-ask", "appId": "habits", "render": {"kind": "inline", "componentId": "streak"}}]), None, int(time.time()), None),
+            "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at) values(?,?,?,?,?,?,?,?,?,?)",
+            (chat_row[0], "zz-app-ask", None, "agent:core:concierge", "core:concierge", None, "", json.dumps([{"type": "pending_interaction", "toolUseId": "zz-app-ask", "appId": "habits", "render": {"kind": "inline", "componentId": "streak"}}]), None, int(time.time())),
         )
     for show in ("task", "ask"):
         once("app-ask-" + show, [{"type": "task_chat", "chatId": task[0], "title": task[1], "show": show}])
@@ -173,12 +174,12 @@ for kind, name in (("agent:core:main", "Flint"), ("routine:zz-routine", "Daily s
     turn = str(uuid.uuid4())
     newest = max(newest, db.execute("select coalesce(max(said_at),0) from chat_messages where chat_id=?", (cid,)).fetchone()[0]) + 60
     sent = db.execute(
-        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at,chat_thread_id,chat_thread_settled) values(?,?,?,?,?,?,?,?,?,?,?,0)",
-        (cid, key, None, "automated::0::" + kind, None, name, "", json.dumps([{"type": "text", "content": "A scheduled check."}]), None, newest, None),
+        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at) values(?,?,?,?,?,?,?,?,?,?)",
+        (cid, key, None, "automated::0::" + kind, None, name, "", json.dumps([{"type": "text", "content": "A scheduled check."}]), None, newest),
     ).lastrowid
     reply = db.execute(
-        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at,chat_thread_id,chat_thread_settled) values(?,?,?,?,?,?,?,?,?,?,?,0)",
-        (cid, key + "-reply", None, "agent:core:concierge", "core:concierge", None, "", json.dumps([{"type": "text", "content": "Nothing needs you today."}]), None, newest + 1, None),
+        "insert into chat_messages(chat_id,key,thread_id,sender_account_id,sender_agent,sender_name,text,parts,reply_to_message_id,said_at) values(?,?,?,?,?,?,?,?,?,?)",
+        (cid, key + "-reply", None, "agent:core:concierge", "core:concierge", None, "", json.dumps([{"type": "text", "content": "Nothing needs you today."}]), None, newest + 1),
     ).lastrowid
     db.execute("insert or ignore into agent_turn_messages(message_id,session_id,turn_id,role,input_state) values(?,?,?,?,?)", (sent, chat_key, turn, "prompt", "consumed"))
     db.execute("insert or ignore into agent_turn_messages(message_id,session_id,turn_id,role,input_state) values(?,?,?,?,?)", (reply, chat_key, turn, "answer", None))

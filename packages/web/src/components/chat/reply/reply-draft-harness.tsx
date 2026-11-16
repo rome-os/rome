@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import {
   ReplyDraftProvider,
   type ReplyTarget,
-  type ReplyThread,
+  type FocusedThread,
   useReplyDraftState,
 } from "./reply-draft";
 
@@ -14,7 +14,7 @@ export function ReplyDraftHarness({
 }: {
   initial?: ReplyTarget;
   /** The chat is focused on this thread: the draft sends into it. */
-  thread?: ReplyThread;
+  thread?: FocusedThread;
   children: ReactNode;
 }) {
   const draft = useReplyDraftState({

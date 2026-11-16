@@ -11,7 +11,7 @@ const row = (at: number, parts: unknown[], agent: string | null = "core:concierg
     text,
     parts: JSON.stringify(parts),
     said_at: at,
-    chat_thread_id: null,
+    root_message_id: null,
   };
 };
 const say = (at: number, content: string) => row(at, [{ type: "text", content }]);

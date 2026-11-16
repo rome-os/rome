@@ -84,6 +84,16 @@ for (const viewport of [
         await jump.focus();
         await page.keyboard.press("Enter");
         await expect(card).toBeInViewport();
+        await expect
+          .poll(async () => {
+            const top = await scroller.evaluate(
+              (el) =>
+                el.getBoundingClientRect().top +
+                (Number.parseFloat(getComputedStyle(el).scrollPaddingTop) || 0),
+            );
+            return (await card.boundingBox())!.y - top;
+          })
+          .toBeGreaterThanOrEqual(-1);
         await expect(card).toBeFocused();
         expect(await card.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("solid");
         expect(
