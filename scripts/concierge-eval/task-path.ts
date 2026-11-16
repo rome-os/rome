@@ -3,6 +3,12 @@
 // open, its subagent calls, its own work, the wait until the Concierge hears
 // of the result, and the Concierge's relay. docs/concierge-eval.md#baseline
 
+import { createHash } from "node:crypto";
+
+/** The tool a subagent is called by, as the agent context names it (agent/domain/subagent.ts). */
+export const subagentToolName = (agentName: string) =>
+  `sa_${createHash("sha256").update(agentName).digest("hex").slice(0, 16)}`;
+
 /** One span, as the query returns it. Times are epoch ms. */
 export interface SpanRow {
   trace: string;
@@ -114,9 +120,9 @@ export function taskPath(
   const toolCounts: Record<string, number> = {};
   for (const t of taskTools) toolCounts[t.tool] = (toolCounts[t.tool] ?? 0) + 1;
 
-  // Each subagent call is matched to one child turn: the first unclaimed
-  // subagent turn that starts inside it, taking calls in the order they
-  // started, so two calls that overlap never share a child.
+  // Each subagent call is matched to its own child turn: a subagent tool is
+  // named for its agent (`subagentToolName`, sa_ and a hash of the name), so
+  // two calls that overlap never share a child.
   const mainAgent = taskAgentSpans[0]?.agent;
   const children = inTask
     .filter((r) => r.name.startsWith("agent:") && r.agent !== "" && r.agent !== mainAgent)
@@ -130,6 +136,7 @@ export function taskPath(
         (r) =>
           !claimed.has(r) &&
           r.trace === call.trace &&
+          subagentToolName(r.agent) === call.tool &&
           r.start >= call.start &&
           r.start <= call.start + call.ms,
       );

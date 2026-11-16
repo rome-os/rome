@@ -7,7 +7,7 @@
 import type { Step } from "./scenarios.js";
 import type { TimedTurn } from "./timing.js";
 
-export const BASELINE_VERSION = 2;
+export const BASELINE_VERSION = 3;
 
 /** The policy row a scenario stands for. */
 export type PolicyRow =
