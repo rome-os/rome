@@ -118,8 +118,8 @@ jobs:
           name=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9]+( Pro)?' | sort -V | tail -1)
           echo "name=$name" >> "$GITHUB_OUTPUT"
       # The voice input suite takes about 20 minutes, so a PR or push runs it only when it
-      # changes voice input; nightly runs it whole, with rules 4 and 5, whose three minutes
-      # of dictation and 60 s wait are too long for every change.
+      # changes voice input; nightly runs it whole, with rules 4, 5 and 14, whose three
+      # minutes of dictation, 60 s wait and 90 s of silence are too long for every change.
       - name: Decide which UI tests run
         id: scope
         env:
@@ -184,7 +184,8 @@ jobs:
             export TEST_RUNNER_ROME_LOCAL_PASSWORD=stand-in
             if [ "$LONG" != "true" ]; then
               extra=(-skip-testing:RomeUITests/VoiceInputTests/testRule4ThreeMinutesStayInTheField
-                     -skip-testing:RomeUITests/VoiceInputTests/testRule5OnlyTheGuardianSends)
+                     -skip-testing:RomeUITests/VoiceInputTests/testRule5OnlyTheGuardianSends
+                     -skip-testing:RomeUITests/VoiceInputTests/testRule14TheWaveformIsFlatInSilence)
             fi
           else
             extra=(-only-testing:RomeUITests/LaunchTests)
