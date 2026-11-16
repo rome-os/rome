@@ -40,7 +40,7 @@ import type {
 import { ErrorEventView } from "./entries/ErrorEventView";
 import { AgentMentionChip } from "./composer/AgentMentionChip";
 import { useChatDraft } from "./composer/use-chat-draft";
-import { AgentMentionMenu, type AgentMentionMenuHandle } from "./composer/AgentMentionMenu";
+import { AgentMentionMenu } from "./composer/AgentMentionMenu";
 import { ImpersonationMenu } from "./composer/ImpersonationMenu";
 import { ModelSelectorMenu } from "./composer/ModelSelectorMenu";
 import { PendingUploadsList } from "./composer/PendingUploadsList";
@@ -49,6 +49,7 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu } from "./composer/SlashSkillMenu";
 import { useSlashSkill } from "./composer/use-slash-skill";
+import { findMentionToken, useTokenPicker } from "./composer/use-token-picker";
 import { useVoiceInput } from "./composer/use-voice-input";
 import { VoiceInputButton, VoiceInputNotice } from "./composer/VoiceInputControl";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
@@ -277,24 +278,22 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const [draftAgentMention, setDraftAgentMention] = useState<AgentMention | null>(
     () => initialAgentMention ?? storedDraft?.agentMention ?? null,
   );
-  const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
-  // Index of the `@` that opened the menu. Used to splice the query out of
-  // the textarea once the user picks an item.
-  const [mentionAnchorIndex, setMentionAnchorIndex] = useState<number | null>(null);
-  const [mentionQuery, setMentionQuery] = useState("");
   // Reset draft mention whenever the host transitions us into a pinned or
   // locked session — the session's bound agent wins. `lockAgentMention` covers
   // the default-to-main case where no chip is shown but the agent is still
   // fixed for the session.
   const agentMentionLocked = pinnedAgentMention !== null || lockAgentMention;
+  const mentionPicker = useTokenPicker({
+    findToken: findMentionToken,
+    enabled: !agentMentionLocked,
+  });
+  const closeMentionPicker = mentionPicker.close;
   useEffect(() => {
     if (agentMentionLocked) {
       setDraftAgentMention(null);
-      setMentionMenuOpen(false);
-      setMentionAnchorIndex(null);
-      setMentionQuery("");
+      closeMentionPicker();
     }
-  }, [agentMentionLocked]);
+  }, [agentMentionLocked, closeMentionPicker]);
   const effectiveMention = pinnedAgentMention ?? draftAgentMention;
   const coarsePointer = useCoarsePointer();
 
@@ -424,16 +423,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
-  const {
-    slashMenuOpen,
-    setSlashMenuOpen,
-    slashQuery,
-    setSlashQuery,
-    slashMenuRef,
-    reevaluateSlashContext,
-    acceptSlashSkill,
-    handleSlashKeyDown,
-  } = useSlashSkill({
+  const skillPicker = useSlashSkill({
     inputText,
     setInputText,
     setDraftSkill,
@@ -473,8 +463,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // one on screen. Close them as the lock engages.
   useEffect(() => {
     if (!locked) return;
-    setMentionMenuOpen(false);
-    setSlashMenuOpen(false);
+    closeMentionPicker();
+    skillPicker.close();
     setImpersonationMenuOpen(false);
     setModelMenuOpen(false);
     setReasoningMenuOpen(false);
@@ -637,8 +627,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       setSkillSelection: (skill: SkillSelection | null) => {
         if (uploadInFlightRef.current) return;
         setDraftSkill(skill);
-        setSlashMenuOpen(false);
-        setSlashQuery("");
+        skillPicker.close();
       },
       addFiles: addPendingFiles,
       submit: (text: string, opts?: { skillName?: string }) => {
@@ -824,56 +813,21 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     voice.active,
   ]);
 
-  // Re-evaluates whether the cursor sits inside an active mention token
-  // (a contiguous `@<query>` run with no whitespace, anchored at @).
-  const reevaluateMentionContext = useCallback(
-    (value: string, cursor: number) => {
-      if (agentMentionLocked) {
-        if (mentionMenuOpen) setMentionMenuOpen(false);
-        return;
-      }
-      // Walk backwards from the cursor looking for `@`, breaking on
-      // whitespace. If `@` appears at start or after whitespace it's a
-      // valid mention anchor.
-      let i = cursor - 1;
-      while (i >= 0 && !/\s/.test(value[i])) {
-        if (value[i] === "@") {
-          const before = i === 0 ? "" : value[i - 1];
-          if (i === 0 || /\s/.test(before)) {
-            setMentionAnchorIndex(i);
-            setMentionQuery(value.slice(i + 1, cursor));
-            setMentionMenuOpen(true);
-            return;
-          }
-          break;
-        }
-        i--;
-      }
-      // No active @-token under the cursor — close any open menu.
-      if (mentionMenuOpen) {
-        setMentionMenuOpen(false);
-        setMentionAnchorIndex(null);
-        setMentionQuery("");
-      }
-    },
-    [agentMentionLocked, mentionMenuOpen],
-  );
-
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
     const value = event.target.value;
     voice.noticeEdited();
     setInputText(value);
     const cursor = event.target.selectionEnd ?? value.length;
-    reevaluateMentionContext(value, cursor);
-    reevaluateSlashContext(value, cursor);
+    mentionPicker.update(value, cursor);
+    skillPicker.update(value, cursor);
   };
 
   const handleTextareaSelect = (event: React.SyntheticEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget;
     const cursor = el.selectionEnd ?? el.value.length;
-    reevaluateMentionContext(el.value, cursor);
-    reevaluateSlashContext(el.value, cursor);
+    mentionPicker.update(el.value, cursor);
+    skillPicker.update(el.value, cursor);
   };
 
   const acceptMention = useCallback(
@@ -881,10 +835,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       if (uploadInFlightRef.current) return;
       // Splice out the `@<query>` token that triggered the menu so the chip
       // becomes the single source of truth for "which agent."
-      if (mentionAnchorIndex !== null) {
+      const token = mentionPicker.token;
+      if (token) {
         const el = textareaRef.current;
         const cursor = el?.selectionEnd ?? inputText.length;
-        const before = inputText.slice(0, mentionAnchorIndex);
+        const before = inputText.slice(0, token.start);
         const after = inputText.slice(cursor);
         // Collapse the join so we don't leave a stray double-space when the
         // mention sat between two words.
@@ -902,14 +857,10 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         });
       }
       setDraftAgentMention(mention);
-      setMentionMenuOpen(false);
-      setMentionAnchorIndex(null);
-      setMentionQuery("");
+      closeMentionPicker();
     },
-    [inputText, mentionAnchorIndex],
+    [inputText, mentionPicker.token, closeMentionPicker],
   );
-
-  const mentionMenuRef = useRef<AgentMentionMenuHandle>(null);
 
   // On desktop, Enter submits (Shift+Enter for a newline); Stop button is
   // intentionally not bound to Enter so it doesn't race a finishing stream.
@@ -918,50 +869,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // through the send button — soft keyboards have no Shift+Enter, and an
   // accidental tap on Enter shouldn't fire a half-written message.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (handleSlashKeyDown(e)) return;
-    // While the mention menu is open, hijack arrow/enter/escape so the user
-    // can navigate without leaving the textarea. Falls through to normal
-    // typing otherwise.
-    if (mentionMenuOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        mentionMenuRef.current?.move(1);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        mentionMenuRef.current?.move(-1);
-        return;
-      }
-      // Horizontal navigation always wins over textarea cursor movement
-      // when the mention menu is open. ArrowLeft from the agents panel
-      // returns to apps so the user can pick a different app after a
-      // mis-click; without hijacking, the cursor would slide past `@` and
-      // reevaluateMentionContext would silently close the menu.
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        mentionMenuRef.current?.moveHorizontal(1);
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        mentionMenuRef.current?.moveHorizontal(-1);
-        return;
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        if (mentionMenuRef.current?.acceptSelected()) {
-          e.preventDefault();
-          return;
-        }
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setMentionMenuOpen(false);
-        setMentionAnchorIndex(null);
-        setMentionQuery("");
-        return;
-      }
-    }
+    if (skillPicker.handleKeyDown(e)) return;
+    if (mentionPicker.handleKeyDown(e)) return;
     if (e.key === "Escape" && replyDraft?.target) {
       e.preventDefault();
       replyDraft.clear();
@@ -1087,29 +996,24 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 [grid-template-areas:'input_input'_'tools_send'] @max-[28rem]/composer:[grid-template-areas:'input_send'_'tools_tools']">
           <div className="[grid-area:input] @max-[28rem]/composer:self-center">
             <SlashSkillMenu
-              ref={slashMenuRef}
-              open={slashMenuOpen && !uploadInFlight}
+              ref={skillPicker.menuRef}
+              open={skillPicker.open && !uploadInFlight}
               onOpenChange={(next) => {
                 if (uploadInFlightRef.current) return;
-                setSlashMenuOpen(next);
-                if (!next) setSlashQuery("");
+                skillPicker.onOpenChange(next);
               }}
-              query={slashQuery}
-              onSelect={acceptSlashSkill}
+              query={skillPicker.query}
+              onSelect={skillPicker.accept}
               anchor={
                 <div>
                   <AgentMentionMenu
-                    ref={mentionMenuRef}
-                    open={mentionMenuOpen && !agentMentionLocked && !uploadInFlight}
+                    ref={mentionPicker.menuRef}
+                    open={mentionPicker.open && !agentMentionLocked && !uploadInFlight}
                     onOpenChange={(next) => {
                       if (uploadInFlightRef.current) return;
-                      setMentionMenuOpen(next);
-                      if (!next) {
-                        setMentionAnchorIndex(null);
-                        setMentionQuery("");
-                      }
+                      mentionPicker.onOpenChange(next);
                     }}
-                    query={mentionQuery}
+                    query={mentionPicker.query}
                     onSelect={acceptMention}
                     anchor={
                       <textarea

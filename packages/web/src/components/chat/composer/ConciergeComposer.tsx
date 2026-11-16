@@ -153,16 +153,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     );
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaFocusedAtPressRef = useRef(false);
-    const {
-      slashMenuOpen,
-      setSlashMenuOpen,
-      slashQuery,
-      setSlashQuery,
-      slashMenuRef,
-      reevaluateSlashContext,
-      acceptSlashSkill,
-      handleSlashKeyDown,
-    } = useSlashSkill({
+    const skillPicker = useSlashSkill({
       inputText,
       setInputText,
       setDraftSkill,
@@ -312,8 +303,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         setSkillSelection: (skill) => {
           if (uploadInFlightRef.current) return;
           setDraftSkill(skill);
-          setSlashMenuOpen(false);
-          setSlashQuery("");
+          skillPicker.close();
         },
         addFiles: addPendingFiles,
         submit: (text, options) => {
@@ -340,8 +330,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         snapshotOf,
         reasoningEffort,
         draftSkill,
-        setSlashMenuOpen,
-        setSlashQuery,
+        skillPicker.close,
       ],
     );
 
@@ -571,15 +560,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               style={{ minHeight: "var(--row-h)" }}
             >
               <SlashSkillMenu
-                ref={slashMenuRef}
-                open={slashMenuOpen && !uploadInFlight}
+                ref={skillPicker.menuRef}
+                open={skillPicker.open && !uploadInFlight}
                 onOpenChange={(next) => {
                   if (uploadInFlightRef.current) return;
-                  setSlashMenuOpen(next);
-                  if (!next) setSlashQuery("");
+                  skillPicker.onOpenChange(next);
                 }}
-                query={slashQuery}
-                onSelect={acceptSlashSkill}
+                query={skillPicker.query}
+                onSelect={skillPicker.accept}
                 anchor={
                   <textarea
                     ref={textareaRef}
@@ -588,15 +576,15 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                       if (uploadInFlightRef.current) return;
                       voice.noticeEdited();
                       setInputText(event.target.value);
-                      reevaluateSlashContext(event.target.value, event.target.selectionEnd);
+                      skillPicker.update(event.target.value, event.target.selectionEnd);
                     }}
                     onSelect={(event) => {
                       const el = event.currentTarget;
-                      reevaluateSlashContext(el.value, el.selectionEnd);
+                      skillPicker.update(el.value, el.selectionEnd);
                     }}
                     onInput={(event) => clampTextareaHeight(event.currentTarget)}
                     onKeyDown={(event) => {
-                      if (handleSlashKeyDown(event)) return;
+                      if (skillPicker.handleKeyDown(event)) return;
                       if (event.key === "Escape" && replyDraft?.target) {
                         event.preventDefault();
                         replyDraft.clear();
