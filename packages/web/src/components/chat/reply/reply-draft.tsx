@@ -21,8 +21,9 @@ export interface ReplyTarget {
 }
 
 /**
- * A task's chat thread, as the thread tab opens on it: a message of the
- * thread and its task's title, which the tab's header shows.
+ * A task's chat thread, as a focus on it opens: the message the focus holds in
+ * place, which is a message of the thread, and its task's title, which the
+ * composer and the back control name.
  */
 export interface ReplyThread {
   thread: string;
@@ -58,9 +59,11 @@ export interface ReplyDraft {
   jump: (messageId: string) => void;
   /** Whether the chat keeps chat threads: only then can a thread be opened. */
   threads: boolean;
-  /** A message of the chat thread this draft sends into, or null when it sends to the chat itself. */
+  /** A message of the chat thread in focus, which this draft sends into, or null when it sends to the chat itself. */
   thread: string | null;
-  /** Opens the chat's thread tab on `thread`, a message of a task's thread. Only a task thread's label, or a quote in it, opens it. */
+  /** The title of the task whose thread is in focus, for the composer's placeholder. */
+  threadTitle: string | null;
+  /** Focuses the chat on `thread`, a message of a task's thread; from the thread already in focus it closes the focus. Only a task thread's label, or a quote in it, focuses. */
   openThread: (thread: ReplyThread) => void;
 }
 
@@ -83,9 +86,8 @@ export function useReplyDraft(): ReplyDraft | null {
 /**
  * The draft state for one composer. The reply is dropped when `chatId`
  * changes. Picking a reply focuses the composer through `focusComposer`.
- * With `thread`, the draft sends into that chat thread, and the thread's own
- * composer holds it; without it, the draft is the chat's own. A chat that
- * keeps chat threads passes `onOpenThread`.
+ * With `thread`, the chat is focused on that chat thread and the draft sends
+ * into it. A chat that keeps chat threads passes `onOpenThread`.
  */
 export function useReplyDraftState({
   chatId,
@@ -102,7 +104,7 @@ export function useReplyDraftState({
   jump: (messageId: string) => void;
   focusComposer: () => void;
   onOpenThread?: (thread: ReplyThread) => void;
-  thread?: string | null;
+  thread?: ReplyThread | null;
 }): ReplyDraft {
   const [target, setTarget] = useState<ReplyTarget | null>(null);
   const focusRef = useRef(focusComposer);
@@ -129,6 +131,8 @@ export function useReplyDraftState({
     [focus],
   );
   const openThread = useCallback((next: ReplyThread) => openRef.current?.(next), []);
+  const threadId = thread?.thread ?? null;
+  const threadTitle = thread?.title ?? null;
   const clear = useCallback(() => {
     changes.current += 1;
     setTarget(null);
@@ -142,7 +146,19 @@ export function useReplyDraftState({
   const has = useCallback((messageId: string) => messageIds.has(messageId), [messageIds]);
 
   return useMemo(
-    () => ({ sessionId, target, set, clear, restore, has, jump, threads, thread, openThread }),
-    [sessionId, target, set, clear, restore, has, jump, threads, thread, openThread],
+    () => ({
+      sessionId,
+      target,
+      set,
+      clear,
+      restore,
+      has,
+      jump,
+      threads,
+      thread: threadId,
+      threadTitle,
+      openThread,
+    }),
+    [sessionId, target, set, clear, restore, has, jump, threads, threadId, threadTitle, openThread],
   );
 }

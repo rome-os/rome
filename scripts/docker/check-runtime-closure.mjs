@@ -85,6 +85,7 @@ async function main() {
       '[ ! -e /opt/rome/docs/northstars ] || { echo "Contributor-only docs present: /opt/rome/docs/northstars" >&2; exit 1; }',
       'node /opt/rome/packages/discord-cli/bin/discord.js help >/dev/null || { echo "Discord CLI is not runnable" >&2; exit 1; }',
       'node /opt/rome/packages/rome-node-cli/bin/rome-node.js --help >/dev/null || { echo "Rome Node CLI is not runnable" >&2; exit 1; }',
+      'node /opt/rome/packages/signer/bin/vault.js help >/dev/null || { echo "Vault CLI is not runnable" >&2; exit 1; }',
     ].join("\n"),
   ]);
 

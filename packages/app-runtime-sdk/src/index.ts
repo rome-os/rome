@@ -241,6 +241,16 @@ export type PreviewPayload =
       title: string;
       summary: string;
       fields?: { label: string; value: string }[];
+    }
+  | {
+      /** Time-limited use of one named secret. `title` and `summary` say the same
+       * in words, for a surface that draws only the generic card. */
+      kind: "secret_access";
+      name: string;
+      ttlMinutes: number;
+      reason: string;
+      title: string;
+      summary: string;
     };
 
 /** Execution was suspended pending guardian approval; the action body has NOT
