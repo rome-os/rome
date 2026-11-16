@@ -63,6 +63,11 @@ Run them from the repository root inside `nix develop`.
 
 The agent's app lives in its own private repository, `zhangfand/chief-of-staff`. Once Rome is up, `up` fetches it on the devbox with `gh`, at `COS_APP_REF` (default `main`), copies the checkout into the container at `/home/rome/app-sources/chief-of-staff`, and installs it from source through `POST /api/apps`, the install `system:app_management` runs. The devbox's GitHub sign-in does the fetch, so no GitHub token enters the container. `COS_APP_REPO` points at another repository. `version` reports the app's repository, ref and commit under `app`. The installed app lives on Rome's home volume, so it survives restarts.
 
+Two switches serve test runs only:
+
+- `COS_LINK_UNLOADED_AGENT=<agent name>` links the agent's connected account to that name in place of `COS_AGENT_NAME`. No loaded agent has the name, so a message the bot hears wakes no agent, and the installed app handles it on its own. Rome's API refuses such a link and Rome does not support this setup, so `up` stops Rome, writes the link into its database, and starts it again.
+- `COS_HEAR_EVERY_MESSAGE=1` makes every chat answer every message, as the `dm-*` chats always do. Without it, the shared chats answer only a mention. `up` applies the rule on every run, so leaving the switch out turns it back off.
+
 ### cos-env
 
 The one command the verifier drives, and the only one it may call. Its contract stays stable across changes to the environment.

@@ -52,6 +52,12 @@ APP_REPO="${COS_APP_REPO:-zhangfand/chief-of-staff}"
 APP_REF="${COS_APP_REF:-main}"
 APP_SRC="$RUN_DIR/app-src"
 APP_PATH_IN_ROME=/home/rome/app-sources/chief-of-staff
+# Test only. An agent name to link the connected account to in place of
+# COS_AGENT_NAME, written straight into Rome's database because no loaded agent
+# has it. See link_unloaded_agent.
+UNLOADED_AGENT="${COS_LINK_UNLOADED_AGENT:-}"
+# 1 makes every chat answer every message, not only the dm-* chats.
+HEAR_EVERY_MESSAGE="${COS_HEAR_EVERY_MESSAGE:-0}"
 # A note `version` carries for a ref, as JSON keyed by the ref, for what the
 # ref's own state does not say.
 REF_NOTES="${COS_REF_NOTES:-}"
@@ -450,6 +456,24 @@ install_app() {
     fs.writeFileSync(f, JSON.stringify(s) + "\n", { mode: 0o600 });' "$STATE_FILE" "$APP_REPO" "$APP_REF" "$commit"
 }
 
+# Test only, and not a setup Rome supports: links the agent's connected account
+# to UNLOADED_AGENT, a name no loaded agent has, so a message the bot hears
+# wakes no agent and the installed app handles it on its own. Rome's API
+# refuses a link to an agent it has not loaded, so this stops Rome, writes the
+# link into its database, and starts it again.
+link_unloaded_agent() {
+  local agent_id="$1"
+  log "linking the connected account to $UNLOADED_AGENT, which no loaded agent has (test only) ..."
+  docker stop "$ROME" >/dev/null
+  docker run --rm -v "$HOME_VOLUME:/home/rome" --workdir /opt/rome/packages/core --entrypoint node "$IMAGE" -e '
+    const db = new (require("better-sqlite3"))("/home/rome/.rome/default/rome.db");
+    const r = db.prepare("UPDATE connected_accounts SET agent = ? WHERE platform = ? AND account_id = ?")
+      .run(process.argv[1], "discord", process.argv[2]);
+    if (r.changes !== 1) { console.error(`updated ${r.changes} connected accounts, not 1`); process.exit(1); }' \
+    "$UNLOADED_AGENT" "$agent_id" || die "could not write the link into Rome's database"
+  bring_rome_back start
+}
+
 link_agent() {
   local agent_id connection
   agent_id="$(state agent.id)"
@@ -459,9 +483,13 @@ link_agent() {
       if (a?.connection) process.stdout.write(a.connection);
     });' "$agent_id")"
   [ -n "$connection" ] || die "Rome lists no connected account for the agent's bot $agent_id"
-  log "linking the $COS_AGENT_NAME agent to the connected account ..."
-  printf '{"agent":"%s"}' "$COS_AGENT_NAME" | api PUT "/connected-accounts/discord/$agent_id/agent" >/dev/null ||
-    die "Rome refused to link \"$COS_AGENT_NAME\". Did $APP_REPO install? GET /api/agents lists the loaded agents."
+  if [ -n "$UNLOADED_AGENT" ]; then
+    link_unloaded_agent "$agent_id"
+  else
+    log "linking the $COS_AGENT_NAME agent to the connected account ..."
+    printf '{"agent":"%s"}' "$COS_AGENT_NAME" | api PUT "/connected-accounts/discord/$agent_id/agent" >/dev/null ||
+      die "Rome refused to link \"$COS_AGENT_NAME\". Did $APP_REPO install? GET /api/agents lists the loaded agents."
+  fi
   node -e '
     const fs = require("fs"); const f = process.argv[1];
     const s = JSON.parse(fs.readFileSync(f, "utf8")); s.connection = process.argv[2];
@@ -489,9 +517,10 @@ let_chats_hear_bots() {
     sleep 2
   done
   while IFS= read -r name; do
-    if [[ "$name" == "$COS_DM_CHAT_PREFIX"* ]]; then
+    if [[ "$name" == "$COS_DM_CHAT_PREFIX"* ]] || [ "$HEAR_EVERY_MESSAGE" = 1 ]; then
       # A direct message is answered without a mention, so the private chat
-      # that stands in for one answers every message too.
+      # that stands in for one answers every message too. COS_HEAR_EVERY_MESSAGE
+      # does the same for every chat.
       set_chat "$name" '{"activation":{"botMessages":"all","mode":"all"}}'
     else
       set_chat "$name" '{"activation":{"botMessages":"all"}}'
@@ -538,8 +567,8 @@ cmd_up() {
     connect_agent_bot
     install_app
     link_agent
-    let_chats_hear_bots
   fi
+  let_chats_hear_bots
   set_model
   let_agent_answer_team
   log "ready. Drive it with environments/chief-of-staff/cos-env. Hand it the team with: cos-env seed <dir>"
