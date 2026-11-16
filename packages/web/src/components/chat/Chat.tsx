@@ -72,6 +72,7 @@ import {
   type AgentIdentity,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
+import { ChatEdgeBlur } from "@/components/chat/ChatEdgeBlur";
 import {
   MessageSharingContext,
   type SharedMessageTurn,
@@ -2638,6 +2639,7 @@ export function Chat({
       data-concierge-header
       className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3"
     >
+      <ChatEdgeBlur edge="top" />
       {/* The phone shell's back and menu buttons move in here, and its bar
           steps aside. Not while the tool pane covers the chat: the shell's
           bar is then the only way back from the pane. A thread in focus takes
@@ -2731,8 +2733,11 @@ export function Chat({
             ) : navbarSlot ? (
               <SlotContent name={navbarSlot}>{navbar}</SlotContent>
             ) : (
-              <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
-                {navbar}
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-12 max-md:hidden">
+                <ChatEdgeBlur edge="top" className="z-10" />
+                <div className="pointer-events-none relative z-20 flex h-full items-center gap-1 [&>*]:pointer-events-auto pl-4 pr-2">
+                  {navbar}
+                </div>
               </div>
             )}
             {/* The message scroller — the ONLY scrolling node in the chat. It is
@@ -2759,7 +2764,9 @@ export function Chat({
                   // Concierge has no timeline rail, so no lane for it. Its
                   // header floats over the messages, so the first one starts
                   // below it, and a jump to a message stops below it too.
-                  concierge ? "concierge-header-clear" : "@min-[48rem]/transcript:pl-8",
+                  concierge
+                    ? "concierge-header-clear"
+                    : cn("@min-[48rem]/transcript:pl-8", !navbarSlot && "md:pt-12 md:scroll-pt-12"),
                 )}
               >
                 {conciergeEmpty ? (
@@ -2852,6 +2859,7 @@ export function Chat({
                       : "pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]",
                   )}
                 >
+                  <ChatEdgeBlur edge="bottom" />
                   {/* Back to the live tail. It rides the sticky floor rather than the
                     scroller, so it tracks a composer whose height changes with the
                     draft, and it sits in every floor state — scrolling has nothing

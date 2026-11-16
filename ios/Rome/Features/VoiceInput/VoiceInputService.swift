@@ -168,9 +168,10 @@ final class VoiceInputController {
     @ObservationIgnored private var anchor: (original: String, range: NSRange)?
     /// From the tap until the field shows it listens.
     @ObservationIgnored private var startInterval: OSSignpostIntervalState?
-    /// The words shown while listening, not yet in the field's text binding.
-    @ObservationIgnored private var preview: (text: String, binding: Binding<String>)?
-    @ObservationIgnored private var previewSyncedAt = Date.distantPast
+    /// Puts the words shown while listening into the field's text binding.
+    @ObservationIgnored private let draftSync = DraftSync()
+    /// Draws the words heard into the field while listening.
+    @ObservationIgnored private var revealer: SpokenTextRevealer?
 
     var active: Bool { state != .idle }
 
@@ -199,8 +200,8 @@ final class VoiceInputController {
             source: MeteredAudioSource(VoiceAudioSources.make(), meter: meter),
             handlers: .init(
                 onText: { [weak self] heard in
-                    let words = before + SpokenText.insertion(before: before, heard: heard, after: after) + after
-                    self?.show(words, text: text, handle: handle)
+                    let insertion = SpokenText.insertion(before: before, heard: heard, after: after)
+                    self?.show(insertion, before: before, after: after, text: text, handle: handle)
                 },
                 onDone: { [weak self] heard, stop in
                     self?.done(heard: heard, stop: stop, text: text, handle: handle)
@@ -275,32 +276,26 @@ final class VoiceInputController {
         UIAccessibility.post(notification: .announcement, argument: stop.notice)
     }
 
-    /// Shows the words heard so far in the field's view at once. The binding,
-    /// which redraws the whole chat screen, takes them at most once a second,
-    /// so that a busy screen never holds up the guardian's stop tap.
-    private func show(_ words: String, text: Binding<String>, handle: ComposerTextHandle) {
+    /// Reveals the words heard so far in the field's view, a character at a
+    /// time. The binding, which redraws the whole chat screen, takes the text
+    /// shown at most once a second, so that a busy screen never holds up the
+    /// guardian's stop tap.
+    private func show(_ insertion: String, before: String, after: String, text: Binding<String>, handle: ComposerTextHandle) {
         guard let view = handle.view else {
-            text.wrappedValue = words
+            text.wrappedValue = before + insertion + after
             return
         }
-        view.text = words
-        preview = (words, text)
-        if Date().timeIntervalSince(previewSyncedAt) >= Self.previewSyncInterval { syncPreview() }
+        let revealer = revealer ?? SpokenTextRevealer(view: view, before: before, after: after) { [weak self] words in
+            self?.draftSync.offer(words, to: text)
+        }
+        self.revealer = revealer
+        revealer.show(insertion)
     }
-
-    /// Puts the words shown into the binding, so the draft keeps them.
-    private func syncPreview() {
-        guard let preview else { return }
-        self.preview = nil
-        previewSyncedAt = Date()
-        if preview.binding.wrappedValue != preview.text { preview.binding.wrappedValue = preview.text }
-    }
-
-    private static let previewSyncInterval: TimeInterval = 1
 
     private func finishListening() {
-        syncPreview()
-        previewSyncedAt = .distantPast
+        revealer?.stop()
+        revealer = nil
+        draftSync.finish()
         dictation = nil
         state = .idle
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
@@ -319,5 +314,49 @@ final class VoiceInputController {
             guard raw == AVAudioSession.InterruptionType.began.rawValue else { return }
             MainActor.assumeIsolated { self?.dictation?.end(.interrupted) }
         })
+    }
+}
+
+/// Puts text into a binding at most once per `interval`, and always puts the
+/// last text in once the interval has passed, so words that stop arriving
+/// still reach the draft. The binding redraws the whole chat screen, so a busy
+/// screen never holds up the guardian's stop tap.
+@MainActor
+final class DraftSync {
+    private let interval: Duration
+    private var pending: (text: String, binding: Binding<String>)?
+    private var syncedAt: ContinuousClock.Instant?
+    private var trailing: Task<Void, Never>?
+
+    init(interval: Duration = .seconds(1)) {
+        self.interval = interval
+    }
+
+    func offer(_ text: String, to binding: Binding<String>) {
+        pending = (text, binding)
+        let now = ContinuousClock.now
+        guard let syncedAt, now - syncedAt < interval else { return write() }
+        guard trailing == nil else { return }
+        trailing = Task { [weak self, interval] in
+            try? await Task.sleep(until: syncedAt + interval, clock: .continuous)
+            guard !Task.isCancelled else { return }
+            self?.trailing = nil
+            self?.write()
+        }
+    }
+
+    /// Writes what is pending now, and starts the next listening afresh.
+    func finish() {
+        write()
+        syncedAt = nil
+    }
+
+    private func write() {
+        trailing?.cancel()
+        trailing = nil
+        guard let pending else { return }
+        self.pending = nil
+        syncedAt = .now
+        if pending.binding.wrappedValue != pending.text { pending.binding.wrappedValue = pending.text }
     }
 }

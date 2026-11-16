@@ -1,5 +1,6 @@
 // @rstest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { VoiceInputInfo } from "@rome/api-types/voice-input";
@@ -62,5 +63,66 @@ describe("the voice input row in Settings", () => {
 
   it("says nothing about voice input where there is none, such as an account Rome Cloud does not allow", async () => {
     expect(await rowText({ available: false, place: null })).toBe("");
+  });
+});
+
+describe("choosing the microphone in Settings", () => {
+  afterEach(() => localStorage.clear());
+
+  function devices(list: Array<Partial<MediaDeviceInfo>>, getUserMedia = rs.fn()) {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        enumerateDevices: rs.fn(async () => list),
+        getUserMedia,
+        addEventListener: rs.fn(),
+        removeEventListener: rs.fn(),
+      },
+    });
+  }
+
+  it("offers to show the microphones while the browser hides their names", async () => {
+    devices([{ kind: "audioinput", deviceId: "x", label: "" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    expect(await screen.findByRole("button", { name: "Show microphones" })).toBeTruthy();
+  });
+
+  it("shows the system default when no microphone is chosen", async () => {
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(select.textContent).toContain("System default"));
+  });
+
+  it("switches to the system default and drops a chosen microphone that is unplugged", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "gone");
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const user = userEvent.setup();
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(localStorage.getItem("rome.voiceInput.microphone")).toBeNull());
+    expect(select.textContent).toContain("System default");
+
+    await user.click(select);
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual([
+      "System default",
+      "USB Microphone",
+    ]);
+  });
+
+  it("keeps showing the microphone voice input uses when the browser refuses to save a choice", async () => {
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    rs.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const user = userEvent.setup();
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(select.textContent).toContain("System default"));
+
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "USB Microphone" }));
+
+    await waitFor(() => expect(select.textContent).toContain("System default"));
   });
 });

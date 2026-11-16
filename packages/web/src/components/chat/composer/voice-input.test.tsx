@@ -42,6 +42,7 @@ rs.mock("@/lib/voice-input/microphone", () => ({
       close: () => {
         microphone.closed += 1;
       },
+      level: () => 0,
     };
   },
 }));
@@ -287,6 +288,38 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("ends listening on Enter and sends once the last words are in", async () => {
+    const { onSend, field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "buy", pending: " mil" });
+
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(screen.getByRole("button", { name: "Finishing voice input" })).toBeTruthy();
+    expect(onSend).not.toHaveBeenCalled();
+
+    socket.say({ type: "text", settled: " milk", pending: "" });
+    socket.say({ type: "ended" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]?.[0]).toMatchObject({ text: "buy milk" });
+  });
+
+  it("sends nothing on Enter while listening ends with a reason to read", async () => {
+    const { onSend, field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    act(() => socket.onclose?.());
+
+    expect(field().value).toBe("hello");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("tells Rome how much audio it recorded while the socket connected", async () => {
     FakeSocket.opens = false;
     renderComposer(kind);
@@ -438,6 +471,19 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
       false,
     );
     expect(field().value).toBe("hello");
+  });
+
+  it("shows the waveform inside the message field only while listening", async () => {
+    renderComposer(kind);
+    const waveform = () => document.querySelector("form [data-voice-input-waveform]");
+    await screen.findByRole("button", { name: "Start voice input" });
+    expect(waveform()).toBeNull();
+    const socket = await startListening();
+    expect(waveform()).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    // The microphone is closed while the rest of the text arrives.
+    expect(waveform()).toBeNull();
   });
 
   it("gives the field back when Rome never answers a stop", async () => {

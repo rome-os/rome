@@ -51,7 +51,11 @@ import { SlashSkillMenu } from "./composer/SlashSkillMenu";
 import { useSlashSkill } from "./composer/use-slash-skill";
 import { findMentionToken, useTokenPicker } from "./composer/use-token-picker";
 import { useVoiceInput } from "./composer/use-voice-input";
-import { VoiceInputButton, VoiceInputNotice } from "./composer/VoiceInputControl";
+import {
+  VoiceInputButton,
+  VoiceInputNotice,
+  VoiceInputWaveform,
+} from "./composer/VoiceInputControl";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { ReplyBar } from "./reply/ReplyBar";
 import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
@@ -402,7 +406,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     notice: draft.notice,
     setNotice: draft.setNotice,
     keepNotice: draft.keepNotice,
+    onSend: () => void runSendRef.current(),
   });
+  const runSendRef = useRef<() => Promise<void>>(async () => {});
   const voiceActiveRef = useRef(false);
   voiceActiveRef.current = voice.active;
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
@@ -812,6 +818,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     replyDraft,
     voice.active,
   ]);
+  runSendRef.current = runSend;
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
@@ -881,7 +888,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }
     if (shouldSubmitOnEnter(e, { enterSends: !coarsePointer })) {
       e.preventDefault();
-      void runSend();
+      // While listening, Enter ends voice input and sends what it heard.
+      if (voice.active) voice.stopAndSend();
+      else void runSend();
     }
   };
 
@@ -995,8 +1004,16 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         {/* A wide composer keeps Send at the end of the toolbar row. A narrow
             one moves Send up beside the input and gives the toolbar a whole
             row that scrolls sideways, so no control wraps onto a row of its
-            own. */}
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 [grid-template-areas:'input_input'_'tools_send'] @max-[28rem]/composer:[grid-template-areas:'input_send'_'tools_tools']">
+            own. While voice input is on, the field takes the whole first row at
+            every width, and the waveform takes the toolbar's place beside the
+            voice control and Send. */}
+        <div
+          className={cn(
+            "grid grid-cols-[minmax(0,1fr)_auto] gap-2 [grid-template-areas:'input_input'_'tools_send']",
+            !voice.active &&
+              "@max-[28rem]/composer:[grid-template-areas:'input_send'_'tools_tools']",
+          )}
+        >
           <div className="[grid-area:input] @max-[28rem]/composer:self-center">
             <SlashSkillMenu
               ref={skillPicker.menuRef}
@@ -1055,7 +1072,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           <div
             {...toolbarRail.props}
             data-chat-composer-toolbar
-            className="flex min-w-0 flex-wrap items-center gap-2 [grid-area:tools] [mask-image:var(--scroll-fade-mask)] [-webkit-mask-image:var(--scroll-fade-mask)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @max-[28rem]/composer:-m-1 @max-[28rem]/composer:flex-nowrap @max-[28rem]/composer:overflow-x-auto @max-[28rem]/composer:overscroll-x-contain @max-[28rem]/composer:p-1"
+            className={cn(
+              "flex min-w-0 flex-wrap items-center gap-2 [grid-area:tools] [mask-image:var(--scroll-fade-mask)] [-webkit-mask-image:var(--scroll-fade-mask)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @max-[28rem]/composer:-m-1 @max-[28rem]/composer:flex-nowrap @max-[28rem]/composer:overflow-x-auto @max-[28rem]/composer:overscroll-x-contain @max-[28rem]/composer:p-1",
+              // Out of the way while voice input is on; the waveform takes its place.
+              voice.active && "hidden",
+            )}
           >
             {showProjectSelector && (
               <ProjectSelector
@@ -1175,6 +1196,13 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
               />
             )}
           </div>
+          {voice.active ? (
+            <div className="flex min-w-0 items-center [grid-area:tools]">
+              {voice.state === "listening" ? (
+                <VoiceInputWaveform level={voice.level} className="w-full" />
+              ) : null}
+            </div>
+          ) : null}
           {/* Stop sits just left of Send. */}
           <div className="flex items-center gap-2 self-end [grid-area:send]">
             {voice.available && (voice.active || !uploadInFlight) ? (

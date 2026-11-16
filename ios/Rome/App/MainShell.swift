@@ -130,10 +130,6 @@ struct MainShell: View {
                     onSettings: {
                         settingsPath = []
                         showSettings = true
-                    },
-                    onUpdate: {
-                        closeDrawer()
-                        model.update.openPage()
                     }
                 )
                 .frame(width: width, height: geometry.size.height)
@@ -545,7 +541,10 @@ struct MainShell: View {
                 var instant = Transaction()
                 instant.disablesAnimations = true
                 withTransaction(instant) { section = .topic(id) }
-            }
+            },
+            // A blank chat has no id for `visibleChat`: in front, as that
+            // answer goes, means nothing over it, the drawer included.
+            inFront: !covered && !drawerOpen
         )
         .environment(\.offScreen, covered)
     }

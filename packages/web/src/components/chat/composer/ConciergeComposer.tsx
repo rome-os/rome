@@ -65,7 +65,7 @@ import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
-import { VoiceInputButton, VoiceInputNotice } from "./VoiceInputControl";
+import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -176,7 +176,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       notice: draft.notice,
       setNotice: draft.setNotice,
       keepNotice: draft.keepNotice,
+      onSend: () => void runSendRef.current(),
     });
+    const runSendRef = useRef<() => Promise<void>>(async () => {});
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;
 
@@ -284,6 +286,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       replyDraft,
       voice.active,
     ]);
+    runSendRef.current = runSend;
 
     useImperativeHandle(
       ref,
@@ -417,7 +420,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               </div>
             ) : null}
           </div>
-          <div className="flex items-end gap-2">
+          {/* While voice input is on, the field takes the whole first row and the
+              controls wrap below it, beside the waveform. The field keeps its
+              place in the tree, so focus and the words heard so far stay. */}
+          <div className={cn("flex items-end gap-2", voice.active && "flex-wrap")}>
             {/* The selector anchors to this box: the popover opens above the +. */}
             <div className="relative flex">
               <DropdownMenu
@@ -556,7 +562,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 `--row-h` follows the buttons: `icon-sm`, raised to the touch
                 floor where `touch-target` applies it. */}
             <div
-              className="flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]"
+              className={cn(
+                "flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]",
+                voice.active && "order-first basis-full",
+              )}
               style={{ minHeight: "var(--row-h)" }}
             >
               <SlashSkillMenu
@@ -593,7 +602,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                       }
                       if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
                         event.preventDefault();
-                        void runSend();
+                        // While listening, Enter ends voice input and sends what it heard.
+                        if (voice.active) voice.stopAndSend();
+                        else void runSend();
                       }
                     }}
                     onPaste={(event) => {
@@ -621,6 +632,11 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 }
               />
             </div>
+            {voice.state === "listening" ? (
+              <VoiceInputWaveform level={voice.level} className="flex-1 self-center" />
+            ) : voice.active ? (
+              <div aria-hidden className="flex-1" />
+            ) : null}
             {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
