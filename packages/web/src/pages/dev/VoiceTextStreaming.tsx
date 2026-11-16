@@ -90,10 +90,6 @@ function useSimulatedTranscriber(language: Language) {
   return { heard, running, play, stop };
 }
 
-function reducedMotion() {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-}
-
 /** Splits text into words and the spaces after them, or into characters for Chinese. */
 function units(text: string, language: Language): string[] {
   if (language === "zh") return Array.from(text);
@@ -113,92 +109,24 @@ function Plain({ heard }: { heard: Heard }) {
 
 // --- A: each new word fades and sharpens in ---
 
-function FadeIn({ heard, language }: { heard: Heard; language: Language }) {
+function FadeIn({
+  heard,
+  language,
+  fade = "voice-text-fade",
+}: {
+  heard: Heard;
+  language: Language;
+  fade?: string;
+}) {
   const all = units(heard.settled + heard.pending, language);
   return (
     <>
       {all.map((unit, i) => (
         // The key changes when a guess is revised, so the corrected word fades in again.
-        <span key={`${i}:${unit.trim()}`} className="voice-text-fade">
+        <span key={`${i}:${unit.trim()}`} className={fade}>
           {unit}
         </span>
       ))}
-    </>
-  );
-}
-
-// --- B: the words still being worked out show dimmed, and darken as they settle ---
-
-function DimPending({ heard, language }: { heard: Heard; language: Language }) {
-  const settled = units(heard.settled, language);
-  const pending = units(heard.pending, language);
-  return (
-    <>
-      {settled.map((unit, i) => (
-        <span key={i} className="transition-colors duration-300 text-foreground">
-          {unit}
-        </span>
-      ))}
-      {pending.map((unit, i) => (
-        <span
-          key={settled.length + i}
-          className="transition-colors duration-300 text-subtle-foreground"
-        >
-          {unit}
-        </span>
-      ))}
-    </>
-  );
-}
-
-// --- C: the text types itself out at an even pace, whatever pace it arrives at ---
-
-function Typewriter({ heard }: { heard: Heard }) {
-  const target = heard.settled + heard.pending;
-  const [shown, setShown] = useState("");
-  const targetRef = useRef(target);
-  targetRef.current = target;
-  useEffect(() => {
-    let frame = 0;
-    let last = performance.now();
-    let budget = 0;
-    const tick = (now: number) => {
-      const goal = targetRef.current;
-      setShown((current) => {
-        if (reducedMotion()) return goal;
-        // A revised guess takes back what no longer matches.
-        let common = 0;
-        while (common < current.length && current[common] === goal[common]) common += 1;
-        const base = current.slice(0, common);
-        const backlog = goal.length - base.length;
-        // Catches up faster the further behind it is, so it never lags far.
-        const perSecond = Math.max(28, backlog * 10);
-        budget += ((now - last) / 1000) * perSecond;
-        const take = Math.floor(budget);
-        budget -= take;
-        return goal.slice(0, base.length + Math.min(take, backlog));
-      });
-      last = now;
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, []);
-  return (
-    <>
-      {shown}
-      <span aria-hidden className="voice-text-caret" />
-    </>
-  );
-}
-
-// --- D: a light sweeps across the words still being worked out ---
-
-function ShimmerPending({ heard }: { heard: Heard }) {
-  return (
-    <>
-      {heard.settled}
-      {heard.pending ? <span className="voice-text-shimmer">{heard.pending}</span> : null}
     </>
   );
 }
@@ -209,26 +137,21 @@ const STYLES = `
   to { opacity: 1; filter: blur(0); }
 }
 .voice-text-fade { animation: voice-text-fade-in 380ms ease-out both; }
-@keyframes voice-text-blink { 50% { opacity: 0; } }
-.voice-text-caret {
-  display: inline-block; width: 2px; height: 1.1em; margin-left: 1px;
-  vertical-align: text-bottom; background: var(--color-primary);
-  animation: voice-text-blink 1s steps(1) infinite;
+@keyframes voice-text-soft-in { from { opacity: 0; } to { opacity: 1; } }
+.voice-text-soft { animation: voice-text-soft-in 600ms cubic-bezier(0.25, 0.1, 0.25, 1) both; }
+@keyframes voice-text-mist-in {
+  from { opacity: 0.15; filter: blur(1.5px); }
+  to { opacity: 1; filter: blur(0); }
 }
-@keyframes voice-text-sweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-.voice-text-shimmer {
-  background: linear-gradient(90deg,
-    var(--color-subtle-foreground) 0%, var(--color-subtle-foreground) 35%,
-    var(--color-foreground) 50%,
-    var(--color-subtle-foreground) 65%, var(--color-subtle-foreground) 100%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  animation: voice-text-sweep 1.4s linear infinite;
+.voice-text-mist { animation: voice-text-mist-in 800ms cubic-bezier(0.25, 0.1, 0.25, 1) both; }
+@keyframes voice-text-ink-in {
+  from { opacity: 0; color: var(--color-subtle-foreground); }
+  60% { opacity: 1; }
+  to { opacity: 1; color: var(--color-foreground); }
 }
+.voice-text-ink { animation: voice-text-ink-in 1100ms ease-out both; }
 @media (prefers-reduced-motion: reduce) {
-  .voice-text-fade { animation: none; }
-  .voice-text-caret { animation: none; }
-  .voice-text-shimmer { animation: none; color: var(--color-subtle-foreground); background: none; }
+  .voice-text-fade, .voice-text-soft, .voice-text-mist, .voice-text-ink { animation: none; }
 }
 `;
 
@@ -246,31 +169,29 @@ const VARIANTS: {
   },
   {
     letter: "A",
-    name: "Fade in",
-    description:
-      "Each new word fades and sharpens in. A word the transcriber corrects fades in again.",
+    name: "Fade in, first take",
+    description: "The one you picked: fades and sharpens from a 4 px blur over 0.4 s.",
     Render: FadeIn,
   },
   {
-    letter: "B",
-    name: "Dim until settled",
-    description:
-      "Words the transcriber may still change show dimmed and darken once they are final, so a correction reads as expected.",
-    Render: DimPending,
+    letter: "A1",
+    name: "Soft",
+    description: "Opacity only, no blur, over 0.6 s with an even ease.",
+    Render: (props) => <FadeIn {...props} fade="voice-text-soft" />,
   },
   {
-    letter: "C",
-    name: "Typewriter",
+    letter: "A2",
+    name: "Mist",
     description:
-      "The text types itself out at an even pace behind a cursor, smoothing the bursts the transcriber sends.",
-    Render: Typewriter,
+      "Starts faintly visible with a slight 1.5 px blur and clears over 0.8 s, so no word ever pops from nothing.",
+    Render: (props) => <FadeIn {...props} fade="voice-text-mist" />,
   },
   {
-    letter: "D",
-    name: "Shimmer while working",
+    letter: "A3",
+    name: "Ink",
     description:
-      "A light sweeps across the words that may still change, the way a loading label does, and stops once they are final.",
-    Render: ShimmerPending,
+      "Fades in light grey, then darkens to the text colour over 1.1 s, like ink drying.",
+    Render: (props) => <FadeIn {...props} fade="voice-text-ink" />,
   },
 ];
 
@@ -287,7 +208,7 @@ export function VoiceTextStreaming() {
     <section className="flex flex-col gap-6">
       <style>{STYLES}</style>
       <header className="flex flex-col gap-3">
-        <h2 className="text-title font-semibold">Transcribed text arriving</h2>
+        <h2 className="text-title font-semibold">Transcribed text arriving: gentler fade</h2>
         <p className="text-ui text-muted-foreground">
           A simulated transcriber sends the same words to every field at speaking pace, including
           the corrections a real one makes. Only the text animation differs.
