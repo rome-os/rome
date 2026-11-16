@@ -435,7 +435,8 @@ final class UpdateClock: @unchecked Sendable {
         let chats = (0..<30).map { ConciergeChat(id: "t\($0)", name: "", main: false, unread: 0) }
         let live = TopicChatsStore.liveIDs(chats)
         #expect(live.count == TopicChatsStore.liveNameLimit)
-        #expect(live.contains("t29") && !live.contains("t0"))
+        // The list is latest first.
+        #expect(live.contains("t0") && !live.contains("t29"))
         #expect(TopicChatsStore.liveIDs(Array(chats.prefix(3))) == ["t0", "t1", "t2"])
         // Status, tasks, the Concierge's activity, the main chat and the chat
         // on screen still fit.

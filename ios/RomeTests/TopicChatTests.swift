@@ -153,6 +153,59 @@ import Testing
         await settle()
         #expect(store.chats.map(\.id) == ["topic-9"])
     }
+
+    /// As on the web: latest activity first, and a chat the chat list has no
+    /// time for yet counts as newest.
+    @Test func theDrawerListsTopicChatsLatestActivityFirst() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c", "d"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T08:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T09:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["d", "a", "c", "b"])
+    }
+
+    @Test func aTurnStartingInAChatMovesItUp() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T08:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b"])
+        backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "b", running: true))
+        #expect(store.chats.map(\.id) == ["b", "a"])
+        // The refetch when it ends brings the server's newer time, and the order holds.
+        backend.sessionRows[1].activityAt = RomeDate.string(.now)
+        backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "b", running: false))
+        await settle()
+        #expect(store.chats.map(\.id) == ["b", "a"])
+    }
+
+    /// A page at a time; the open chat stays in view even past the page.
+    @Test func theDrawerShowsAPageAndTheOpenChat() {
+        let page = TopicChatsStore.pageSize
+        #expect(page == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: nil) == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 2) == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 44) == 45)
+        #expect(TopicChatsStore.shownCount(12, limit: page, openIndex: nil) == 12)
+    }
+
+    @Test func theOrderWithoutTimesIsNewestStartedFirst() {
+        let chats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        #expect(TopicChatsStore.ordered(chats, lastActive: [:]).map(\.id) == ["c", "b", "a"])
+        let early = Date(timeIntervalSince1970: 0)
+        #expect(TopicChatsStore.ordered(chats, lastActive: ["c": early]).map(\.id) == ["b", "a", "c"])
+    }
 }
 
 @Suite struct ConciergeChatListTests {
