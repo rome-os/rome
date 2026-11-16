@@ -150,6 +150,14 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.equal(legs["the goals document shows each change"], "pass");
   });
 
+  it("reports, unscored, a change said in a private chat that reached the roster", async () => {
+    const { report } = await runAgainst("fail-K4private", { rules: ["K4"], phase: 2 });
+    const k4 = report.results[0];
+    assert.equal(k4.status, "pass");
+    assert.equal(k4.privateChange.kept, false);
+    assert.match(k4.info.at(-1), /reached the roster document/);
+  });
+
   it("counts A7 replies that answer apart from ones that decline", async () => {
     const { report } = await runAgainst("fail-A7", { rules: ["A7"], phase: 2 });
     const a7 = report.results.find((r) => r.rule === "A7");

@@ -239,5 +239,12 @@
       "holds": [["2027-01-22"]],
       "absent": ["2027-03-19"]
     }
+  },
+  "k4Private": {
+    "as": "member3",
+    "chat": "dm-member3",
+    "text": "Just between us for now: from next week I'm also taking over the Saltmarsh dashboards rota. Not announced yet.",
+    "doc": "roster",
+    "absent": ["dashboards rota"]
   }
 }

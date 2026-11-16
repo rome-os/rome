@@ -64,6 +64,17 @@ export function goalsDocument(state, agent) {
   );
 }
 
+/** The roster as the app holds it; "fail-K4private" writes a privately said change into it. */
+export function rosterDocument(state, agent) {
+  const leaked =
+    agent === "fail-K4private" && state.messages.some((m) => m.text === hearing.k4Private.text);
+  const rows = state.team.members.map(
+    (m, i) =>
+      `| ${m.name} | ${m.role} | ${m.currentWork}${leaked && i === 2 ? "; Saltmarsh dashboards rota" : ""} |`,
+  );
+  return ["# Team roster", "", ...rows, ""].join("\n");
+}
+
 function goals(state, breaks) {
   // Applies each K4 change said in a chat, unless "fail-K4" misses them.
   const heard = hearing.k4Changes.filter(

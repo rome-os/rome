@@ -38,9 +38,10 @@ export async function aDayLater(ctx) {
   const factIds = await sayAll(ctx, hearing.a2Facts);
   const changeIds = await sayAll(ctx, hearing.k4Changes);
   const [proposalId] = await sayAll(ctx, [hearing.k4Proposal]);
+  const [privateId] = await sayAll(ctx, [hearing.k4Private]);
   const hours = ctx.waits.dayHours ?? DAY_HOURS;
   await ctx.env.clockForward(hours);
-  ctx.memo.day = { factIds, changeIds, proposalId, hours };
+  ctx.memo.day = { factIds, changeIds, proposalId, privateId, hours };
   return ctx.memo.day;
 }
 

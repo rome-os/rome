@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { goalsDocument, respond } from "./stand-in.mjs";
+import { goalsDocument, respond, rosterDocument } from "./stand-in.mjs";
 
 const statePath = process.env.COS_FAKE_STATE;
 if (!statePath) {
@@ -174,7 +174,9 @@ switch (command) {
     state.dayMovedAt = state.nextId;
     break;
   case "doc":
-    console.log(goalsDocument(state, agent));
+    console.log(
+      positionals[0] === "roster" ? rosterDocument(state, agent) : goalsDocument(state, agent),
+    );
     break;
   case "usage":
     for (const turn of state.turns ?? []) console.log(JSON.stringify(turn));

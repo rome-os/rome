@@ -61,13 +61,37 @@ async function documentChecks(ctx, said, changeIds, proposal, proposalId, hours)
   ];
 }
 
+/**
+ * Unscored, reported beside K7: a change said in a private chat (standing in for a direct
+ * message) stays out of the shared documents. The environment's private chats are group chats
+ * to Rome, so only the agent's prompt keeps such a change out.
+ */
+async function privateChange(ctx, said, id) {
+  try {
+    const doc = await ctx.env.doc(said.doc);
+    const found = said.absent.filter((v) => doc.toLowerCase().includes(v.toLowerCase()));
+    return {
+      message: id,
+      kept: found.length === 0,
+      line: `Not scored, reported beside K7: a change said in ${said.chat} (${id}) ${found.length === 0 ? `stayed out of the ${said.doc} document` : `reached the ${said.doc} document (${found.join(", ")})`}`,
+    };
+  } catch (error) {
+    return {
+      message: id,
+      kept: null,
+      line: `Not scored, reported beside K7: could not read the ${said.doc} document to check the change said in ${said.chat} (${id}): ${error.message}`,
+    };
+  }
+}
+
 export default {
   rule: "K4",
   title: "Stays current",
   phase: 2,
   async run(ctx) {
-    const { changeIds, proposalId, hours } = await aDayLater(ctx);
-    const { k4Changes: said, k4Proposal: proposal } = loadHearing();
+    const { changeIds, proposalId, privateId, hours } = await aDayLater(ctx);
+    const { k4Changes: said, k4Proposal: proposal, k4Private } = loadHearing();
+    const privateCase = await privateChange(ctx, k4Private, privateId);
     const changes = said.map(({ goal, title, owner, date }) =>
       Object.fromEntries(
         Object.entries({ goal, title, owner, date }).filter(([, v]) => v !== undefined),
@@ -80,10 +104,14 @@ export default {
     });
     const evidence = [...changeIds, proposalId, questionId, reply?.id];
     if (!reply)
-      return ruleResult([
-        check("answered", "fail", "no reply within the reply wait", evidence),
-        ...docChecks,
-      ]);
+      return {
+        ...ruleResult([
+          check("answered", "fail", "no reply within the reply wait", evidence),
+          ...docChecks,
+        ]),
+        privateChange: privateCase,
+        info: [privateCase.line],
+      };
     // The sheet keeps the proposed goal's date, so an answer giving the proposed date fails.
     const verdict = await ctx.judge({
       task: "matches-sheet",
@@ -116,7 +144,8 @@ export default {
         ...docChecks,
       ]),
       changesShown: shown,
-      info,
+      privateChange: privateCase,
+      info: [...info, privateCase.line],
     };
   },
 };
