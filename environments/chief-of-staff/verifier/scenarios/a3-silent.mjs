@@ -118,18 +118,23 @@ export default {
     }
 
     const ordinary = posted.length - mentions.length;
+    const inPrivate = unprompted.filter((m) => m.chat.startsWith("dm-")).length;
     const evidence = [first, posted.at(-1).id, ...unprompted.map((m) => m.id)];
     const result = ruleResult([
       {
         ...check(
           `at most ${A3_LIMIT} replies to ${ordinary} messages that did not mention it`,
           unprompted.length <= A3_LIMIT ? "pass" : "fail",
-          `${unprompted.length} replies${unprompted.length ? `: ${unprompted.map((m) => `${m.chat} ${m.id}`).join(", ")}` : ""}; answered ${answers.size} of ${mentions.length} mentions`,
+          `${unprompted.length} replies (${inPrivate} in a private chat standing in for a direct message)${unprompted.length ? `: ${unprompted.map((m) => `${m.chat} ${m.id}`).join(", ")}` : ""}; answered ${answers.size} of ${mentions.length} mentions`,
           evidence,
         ),
         quote: unprompted.map((m) => m.text).join("\n---\n") || undefined,
       },
     ]);
-    return { ...result, cost: ctx.memo.A3cost };
+    return {
+      ...result,
+      cost: ctx.memo.A3cost,
+      replies: { shared: unprompted.length - inPrivate, private: inPrivate },
+    };
   },
 };
