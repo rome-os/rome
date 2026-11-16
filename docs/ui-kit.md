@@ -20,6 +20,29 @@ Add the `./<component>` entry to `exports` alongside the barrel re-export in `sr
 
 Heavy libraries never become regular deps: `streamdown` with its code and math plugins, `pele` for diagrams, `katex`, `@dnd-kit/*`, `react-day-picker`, `cmdk`, and `sonner`. They arrive as optional-peer subpath exports, so an app that imports a button does not pay for a calendar. Mirror each optional peer into `devDependencies` as well, or `tsc` and vitest cannot resolve it in this workspace.
 
+## Progressive blur
+
+`ProgressiveBlur` softens content toward one edge through four masked backdrop layers. Place it above the scrolling content and below the controls inside a positioned frame.
+
+`direction` selects the strongest edge: `top` (default), `bottom`, `left`, or `right`. `maxBlur` sets the maximum radius in pixels (default `16`). `tint` accepts an optional CSS color, including semantic token references. The tint also provides a fade when backdrop filtering is unavailable. Use `className` or `style` to set the coverage and stacking order. The component takes no pointer events and stays out of the accessibility tree.
+
+```tsx
+import { ProgressiveBlur } from "@rome-os/ui/progressive-blur";
+
+<div className="relative z-0">
+  <ScrollableContent />
+  <ProgressiveBlur
+    direction="bottom"
+    maxBlur={16}
+    tint="var(--background)"
+    className="top-auto z-10 h-32"
+  />
+  <div className="absolute inset-x-0 bottom-0 z-20">
+    <Controls />
+  </div>
+</div>;
+```
+
 ## A component's CSS is opt-in when the component is
 
 `src/styles.css` is the canon every host and every app bundle imports, so it may only carry what all of them need. A component shipping hundreds of kilobytes of third-party CSS gets its own stylesheet and its own `./<name>.css` export instead. `markdown.css` is the worked example, and the host imports it alongside the canon.

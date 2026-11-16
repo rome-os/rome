@@ -123,6 +123,10 @@
       "types": "./dist/popover.d.ts",
       "default": "./dist/popover.js"
     },
+    "./progressive-blur": {
+      "types": "./dist/progressive-blur.d.ts",
+      "default": "./dist/progressive-blur.js"
+    },
     "./radio-group": {
       "types": "./dist/radio-group.d.ts",
       "default": "./dist/radio-group.js"
