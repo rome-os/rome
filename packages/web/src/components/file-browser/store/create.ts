@@ -159,7 +159,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         pendingUploadTarget: null,
         discardChangesResolver: null,
         acceptedBrowserPath: `${initialRouteSnapshot.pathname}${initialRouteSnapshot.search}${initialRouteSnapshot.hash}`,
-        dragDepth: 0,
       },
 
       tree: {

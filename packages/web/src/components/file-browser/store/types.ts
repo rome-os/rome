@@ -315,6 +315,5 @@ export interface FileBrowserState {
     pendingUploadTarget: string | null;
     discardChangesResolver: ((discard: boolean) => void) | null;
     acceptedBrowserPath: string;
-    dragDepth: number;
   };
 }
