@@ -580,10 +580,22 @@ struct Composer: View {
     @Binding var focused: Bool
     /// Photos to send with the message; nil leaves out the +.
     var attachments: ComposerAttachments? = nil
+    /// The instance's voice input; nil (demo data, previews) shows no control.
+    var voiceInput: VoiceInputService? = nil
+    /// The chat this field writes in, so voice input stopped by leaving it
+    /// says why on return; nil keeps no such notice.
+    var voiceKey: String? = nil
+    /// Which field this is, for the voice input start's signpost.
+    var voiceField: VoiceInputField = .chat
+    /// False while the field's chat is covered or hidden but still mounted
+    /// (Chat under another section, a sheet, the drawer): listening stops.
+    var onScreen = true
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var voice = VoiceInputController()
+    @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
     @State private var picked: [PhotosPickerItem] = []
@@ -598,11 +610,18 @@ struct Composer: View {
     private var hasPhotos: Bool { !(attachments?.images.isEmpty ?? true) }
     private var canSend: Bool {
         guard !(attachments?.isPreparing ?? false) else { return false }
+        // Sending waits for the spoken words to land.
+        guard !voice.active else { return false }
         return !committedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let notice = voice.notice {
+                VoiceInputNotice(stop: notice)
+                    .padding(.top, 10)
+                    .padding(.horizontal, 18)
+            }
             if let attachments, !attachments.images.isEmpty || attachments.preparing > 0 {
                 ComposerThumbnails(attachments: attachments)
                     .padding(.top, 10)
@@ -622,10 +641,20 @@ struct Composer: View {
                     onPasteImages: attachments.map { attachments in
                         { providers in Task { await attachments.add(providers: providers) } }
                     },
-                    committedText: $committedText
+                    committedText: $committedText,
+                    handle: textHandle,
+                    editable: !voice.active,
+                    onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
                 )
+                if let voiceInput, voiceInput.available {
+                    VoiceInputButton(state: voice.state) {
+                        voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
+                    }
+                    .padding(.bottom, controlPadding)
+                }
                 Group {
-                    if stopVisible && !canSend {
+                    // While listening, the field's stop is the voice control's.
+                    if stopVisible && !canSend && !voice.active {
                         Button(action: onStop) {
                             RoundedRectangle(cornerRadius: 3, style: .continuous)
                                 .fill(Palette.bg)
@@ -638,7 +667,10 @@ struct Composer: View {
                         .accessibilityLabel("Stop")
                         .transition(.scale.combined(with: .opacity))
                     } else {
-                        Button(action: onSend) {
+                        Button {
+                            voice.edited(service: voiceInput, chat: voiceKey)
+                            onSend()
+                        } label: {
                             Image(systemName: "arrow.up")
                                 .romeFont(16, .bold)
                                 .foregroundStyle(.white)
@@ -664,6 +696,18 @@ struct Composer: View {
         .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true, frost: Frost.composer)
         .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
         .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+        // The main Chat stays mounted under other sections, so it asks again on each return.
+        .task(id: onScreen) { if onScreen { await voiceInput?.refresh() } }
+        .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
+        .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
+        .onChange(of: voice.state) { voice.stateShown() }
+        .onChange(of: onScreen) { _, now in
+            if now {
+                voice.arrive(service: voiceInput, chat: voiceKey)
+            } else {
+                voice.leave(service: voiceInput, chat: voiceKey)
+            }
+        }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: stopVisible)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: attachments?.images.count)
@@ -717,7 +761,8 @@ struct Composer: View {
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())
         }
-        .disabled(attachments.isFull)
+        // The camera would cover the voice control while it listens.
+        .disabled(attachments.isFull || voice.active)
         .accessibilityLabel("Add photos")
     }
 }

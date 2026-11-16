@@ -1211,6 +1211,16 @@
         }
       }
     },
+    "Connection to Rome lost. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与 Rome 的连接已断开，已停止收听"
+          }
+        }
+      }
+    },
     "Context tidied up · %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1871,6 +1881,16 @@
         }
       }
     },
+    "Finishing voice input" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成语音输入"
+          }
+        }
+      }
+    },
     "Flights climbed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2269,6 +2289,76 @@
         }
       }
     },
+    "Listening stopped after 10 minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已达 10 分钟，已停止收听"
+          }
+        }
+      }
+    },
+    "Listening stopped after 30 seconds without speech" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "30 秒未检测到语音，已停止收听"
+          }
+        }
+      }
+    },
+    "Listening stopped after an error" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出错，已停止收听"
+          }
+        }
+      }
+    },
+    "Listening stopped when another app used the microphone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他应用使用麦克风时已停止收听"
+          }
+        }
+      }
+    },
+    "Listening stopped when Rome closed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 关闭时已停止收听"
+          }
+        }
+      }
+    },
+    "Listening stopped when Rome went to the background" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 进入后台时已停止收听"
+          }
+        }
+      }
+    },
+    "Listening stopped when you left this chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离开此聊天时已停止收听"
+          }
+        }
+      }
+    },
     "Loading" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2435,6 +2525,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在「%@」中发消息"
+          }
+        }
+      }
+    },
+    "Microphone blocked. Allow it in Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麦克风已被阻止。请在“设置”中允许"
+          }
+        }
+      }
+    },
+    "Microphone could not start. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麦克风无法启动，已停止收听"
           }
         }
       }
@@ -2809,6 +2919,16 @@
         }
       }
     },
+    "Not enough Rome credits for voice input. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 额度不足，无法使用语音输入，已停止收听"
+          }
+        }
+      }
+    },
     "Not found" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2865,6 +2985,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未共享"
+          }
+        }
+      }
+    },
+    "Not set up in Rome Cloud" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome Cloud 尚未设置"
           }
         }
       }
@@ -3663,6 +3793,26 @@
         }
       }
     },
+    "Rome Cloud can't be reached" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接 Rome Cloud"
+          }
+        }
+      }
+    },
+    "Rome Cloud could not be reached. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接 Rome Cloud，已停止收听"
+          }
+        }
+      }
+    },
     "Rome Cloud could not be reached. Try again in a moment." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3673,12 +3823,52 @@
         }
       }
     },
+    "Rome Cloud does not accept this Rome's sign-in. Sign in to Rome Cloud again. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome Cloud 不接受此 Rome 的登录，请重新登录 Rome Cloud，已停止收听"
+          }
+        }
+      }
+    },
+    "Rome Cloud has not set up voice input yet. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome Cloud 尚未开通语音输入，已停止收听"
+          }
+        }
+      }
+    },
+    "Rome Cloud refused voice input. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome Cloud 拒绝了语音输入，已停止收听"
+          }
+        }
+      }
+    },
     "Rome Cloud sign-in expired" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome Cloud 登录已过期"
+          }
+        }
+      }
+    },
+    "Rome Cloud's transcription service is unavailable. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome Cloud 的转写服务暂不可用，已停止收听"
           }
         }
       }
@@ -3883,26 +4073,6 @@
         }
       }
     },
-    "Sent" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已发送"
-          }
-        }
-      }
-    },
-    "Sent to your Rome and your AI model, whose terms apply · Never sold or used for ads · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "发送到你的 Rome 和你的 AI 模型，适用其条款 · 绝不出售，也不用于广告 · 随时可删除 · [隐私政策](https://romeos.cc/privacy)"
-          }
-        }
-      }
-    },
     "Sent. Thank you." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4079,6 +4249,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录后打开你的 Rome"
+          }
+        }
+      }
+    },
+    "Sign in to Rome Cloud again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请重新登录 Rome Cloud"
           }
         }
       }
@@ -4263,6 +4443,16 @@
         }
       }
     },
+    "Start voice input" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始语音输入"
+          }
+        }
+      }
+    },
     "Starting a task" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4319,6 +4509,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止它们"
+          }
+        }
+      }
+    },
+    "Stop voice input" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止语音输入"
           }
         }
       }
@@ -4873,12 +5073,42 @@
         }
       }
     },
+    "Too many voice inputs in the last minute. Try again shortly" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近一分钟语音输入次数过多，请稍后再试"
+          }
+        }
+      }
+    },
     "Topic chats" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "话题聊天"
+          }
+        }
+      }
+    },
+    "Transcription service refused the request. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "转写服务拒绝了请求，已停止收听"
+          }
+        }
+      }
+    },
+    "Transcription service unavailable. Listening stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "转写服务不可用，已停止收听"
           }
         }
       }
@@ -5167,6 +5397,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用法"
+          }
+        }
+      }
+    },
+    "Voice input" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音输入"
           }
         }
       }
@@ -5793,6 +6033,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "「%@」已停止。在 Rome Cloud 启动后再打开。"
+          }
+        }
+      }
+    },
+    "Sent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已发送"
+          }
+        }
+      }
+    },
+    "Sent to your Rome and your AI model, whose terms apply · Never sold or used for ads · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送到你的 Rome 和你的 AI 模型，适用其条款 · 绝不出售，也不用于广告 · 随时可删除 · [隐私政策](https://romeos.cc/privacy)"
           }
         }
       }

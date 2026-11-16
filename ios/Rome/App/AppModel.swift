@@ -193,6 +193,8 @@ final class Workspace {
     let drafts: DraftStore
     /// The newest messages of the main Chat and topic chats, on this phone.
     let transcripts: TranscriptCache
+    /// Voice input in this instance's message fields.
+    let voiceInput: VoiceInputService
 
     init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String, drafts: DraftStore? = nil) {
         self.backend = backend
@@ -201,6 +203,7 @@ final class Workspace {
         self.accountLabel = accountLabel
         // Kept on this phone only while the connection's account is signed in.
         self.drafts = drafts ?? DraftStore(instance: host, account: backend.account)
+        voiceInput = VoiceInputService(backend: backend, instance: self.drafts.instance)
         // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
         transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance, account: backend.account)
         taskChats = TaskChatsStore(backend: backend)
@@ -1288,7 +1291,8 @@ final class AppModel {
 
     /// What this phone keeps for the signed-in account: drafts, kept chats,
     /// pictures, recent apps, closed update banners, the language last seen,
-    /// the last instance, and this phone's device switches and activity log. Gone on
+    /// voice input's notices, the last instance, and this phone's device
+    /// switches and activity log. Gone on
     /// sign-out, and before a new Cloud sign-in, which may be another
     /// account's. The account has ended first, so no late write follows.
     private func forgetAccountData() {
@@ -1303,6 +1307,7 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
         KeptIdentity.removeAll()
+        VoiceInputMarks.removeAll()
         // The device's switches and its Recent activity.
         node.forgetAccount()
         connections.forgetAccount()

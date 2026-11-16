@@ -238,6 +238,20 @@ struct SettingsScreen: View {
                         }
                         .buttonStyle(RowPressStyle())
                     }
+                    // Where dictated speech goes, as the dashboard's Settings names it.
+                    if workspace.voiceInput.available, let info = workspace.voiceInput.info {
+                        SettingsRow(systemImage: "mic", title: "Voice input") {
+                            Text(verbatim: info.placeText)
+                                .romeFont(15)
+                                .foregroundStyle(Palette.sub)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Voice input")
+                        .accessibilityValue(Text(verbatim: info.placeText))
+                        .accessibilityIdentifier("voice-input-place")
+                    }
                     SettingsRow(systemImage: "info.circle", title: "Version", last: true) {
                         Text(appVersion)
                             .romeFont(17, monospacedDigits: true)
@@ -265,6 +279,7 @@ struct SettingsScreen: View {
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { if !workspace.isVisitor { usage = try? await workspace.backend.aiTools() } }
+        .task { await workspace.voiceInput.refresh(now: true) }
         .task {
             await model.push.refresh()
             notificationsOn = model.push.isOn

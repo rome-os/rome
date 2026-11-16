@@ -112,7 +112,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                TopicComposer(workspace: workspace, chatId: chatId, replying: store?.composerThread != nil, draft: $draft, focused: $composerFocused, attachments: attachments) { send() }
+                TopicComposer(workspace: workspace, chatId: chatId, replying: store?.composerThread != nil, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
             }
             .shareModeComposer(store?.share)
             .animation(.easeOut(duration: 0.2), value: showsStarters)
@@ -259,13 +259,21 @@ private struct TopicComposer: View {
     @Binding var draft: String
     @Binding var focused: Bool
     let attachments: ComposerAttachments
+    /// Share selection hides the field while it lasts.
+    let sharing: Bool
     let onSend: () -> Void
+    @Environment(\.visibleChat) private var visibleChat
+    @Environment(\.offScreen) private var offScreen
+
+    /// A blank chat is never the visible chat, as it has no id yet: it goes
+    /// by whether a page or a sheet covers it.
+    private var onScreen: Bool { !sharing && (chatId.map { visibleChat == $0 } ?? !offScreen) }
 
     var body: some View {
         let chat = chatId.flatMap(workspace.topics.chat)
         // Only "Message in <name>" is fitted; a reply keeps "Reply".
         let name = replying ? nil : TopicChatsStore.composerName(chat)
-        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, onSend: onSend)
+        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: replying ? .thread : .topicChat, onScreen: onScreen, onSend: onSend)
     }
 }
 

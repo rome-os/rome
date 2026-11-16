@@ -15,6 +15,8 @@
 	<string>When your Agent needs it to answer you, Rome sends your current location to your Rome and your AI model, for that answer only.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Rome saves photos from a chat to your library when you ask it to.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Rome uses the microphone to turn your speech into text</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Rome uses the camera for photos you send in a chat.</string>
 	<key>RomeAPNsEnvironment</key>
