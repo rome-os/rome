@@ -50,14 +50,16 @@ export function VoiceInputButton({
 const WAVE_STEP_MS = 50;
 const WAVE_BAR_PX = 3;
 const WAVE_GAP_PX = 2;
+const WAVE_HISTORY_MS = 5000;
 // Loudness below this is a quiet room, not speech.
 const SILENCE = 0.02;
 
 /**
- * The microphone's recent sound as bars scrolling in from the right, so the
- * guardian sees voice input hears them. It moves only while there is sound
- * and holds still in silence. `level` is read once a frame. Decoration only:
- * the voice control says whether it listens.
+ * The microphone's last 5 seconds of sound as bars scrolling in from the
+ * right, so the guardian sees voice input hears them. Silence is a flat row
+ * of dots, so once it has lasted 5 seconds the waveform looks still. `level`
+ * is read once a frame. Decoration only: the voice control says whether it
+ * listens.
  */
 export function VoiceInputWaveform({
   level,
@@ -91,7 +93,11 @@ export function VoiceInputWaveform({
         canvas.width = Math.round(width * ratio);
         canvas.height = Math.round(height * ratio);
       }
-      const capacity = Math.ceil(width / (WAVE_BAR_PX + WAVE_GAP_PX));
+      // At most the last 5 seconds, however wide the field.
+      const capacity = Math.min(
+        Math.ceil(width / (WAVE_BAR_PX + WAVE_GAP_PX)),
+        Math.floor(WAVE_HISTORY_MS / step),
+      );
       // Opens as a flat row of dots, which the first sound pushes along.
       while (bars.length < capacity) bars.unshift(0);
       if (bars.length > capacity) bars.splice(0, bars.length - capacity);
@@ -114,12 +120,10 @@ export function VoiceInputWaveform({
       peak = Math.max(peak, levelRef.current());
       if (now - lastStep >= step) {
         lastStep = now;
-        // In silence the waveform holds still, so any motion means sound.
-        if (peak > SILENCE) {
-          bars.push(peak);
-          draw();
-        }
+        // Silence scrolls by as a flat row of dots, so a spike always means sound.
+        bars.push(peak > SILENCE ? peak : 0);
         peak = 0;
+        draw();
       }
       frame = requestAnimationFrame(tick);
     };
