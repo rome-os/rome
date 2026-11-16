@@ -377,12 +377,16 @@ final class VoiceInputTests: XCTestCase {
     func testRule10TheAppNamesNoProvider() throws {
         let place = try voiceInputPlace()
         let app = try launch()
+        // The voice control shows once the app has read voice input's info, so the checks
+        // below test a loaded Settings, not one still waiting for it.
+        try requireControl(app, onScreen(app.buttons, "voice-input"), "the Chat has no voice control")
         touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
         let settings = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "settings")).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 10), "the navigation has no settings")
         settings.tap()
         XCTAssertTrue(app.staticTexts["Version"].waitForExistence(timeout: 10), "Settings never opened")
-        XCTAssertFalse(app.descendants(matching: .any)["voice-input-place"].exists, "Settings shows a \"Voice input\" status row")
+        // A row that shows up late still fails.
+        XCTAssertFalse(app.descendants(matching: .any)["voice-input-place"].waitForExistence(timeout: 3), "Settings shows a \"Voice input\" status row")
         for name in [place.provider, place.host] {
             let shown = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", name, name))
             if shown.count > 0 {
