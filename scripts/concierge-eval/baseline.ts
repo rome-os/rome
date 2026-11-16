@@ -8,6 +8,7 @@ import { loadavg } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { Api, DEV_JWT_SECRET } from "./api.js";
+import { standingRules } from "./baseline-checks.js";
 import {
   BASELINE_SCENARIOS,
   BASELINE_VERSION,
@@ -128,16 +129,26 @@ async function playScenario(
   const turns = timedTurns(logsSince(startedAtIso)).filter((t) => t.chatId === chat.id);
   const messages = await api.messages(chat.id);
 
-  const { lines: transcript, saidAfter } = transcriptOf(messages);
+  const { lines, saidAfter, reactions } = transcriptOf(messages);
+  // A pasted preload would bury the answers the judge scores.
+  const transcript = lines.map((line) =>
+    line.length > 2000
+      ? `${line.slice(0, 600)} …[${line.length - 600} more characters of the pasted text]`
+      : line,
+  );
   const guardian = turns.filter((t) => t.trigger === "guardian");
   const input: CheckInput = {
     steps: scenario.steps.map((_, i) => guardian[i] ?? null),
     turns,
     saidAfter,
+    reactions,
     said: saidAfter.flat(),
     tasks: driven.tasks,
   };
-  const notes = scenario.check(input);
+  const notes = [...scenario.check(input), ...standingRules(scenario, input)];
+  const setupTurnIds = scenario.steps.flatMap((step, i) =>
+    step.setup && input.steps[i] ? [input.steps[i].turnId] : [],
+  );
   if (driven.timedOut) notes.push("timed out before the chat was quiet");
   if (failure) notes.push(`the driver failed: ${failure}`);
 
@@ -170,6 +181,7 @@ async function playScenario(
   return {
     id: scenario.id,
     row: scenario.row,
+    lang: scenario.lang,
     config,
     model: args.model as string,
     effort: args.effort as string,
@@ -178,7 +190,9 @@ async function playScenario(
     seconds,
     resultMs,
     turns,
+    setupTurnIds,
     notes,
+    measures: scenario.measure?.(input),
     verdict,
     transcript,
     taskPath: path,

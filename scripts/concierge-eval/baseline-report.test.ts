@@ -27,6 +27,52 @@ describe("baselineMarkdown", () => {
     expect(md).toContain("changed between runs (versions 1, 2)");
   });
 
+  it("counts rule notes apart from the checks, and times no setup turn", () => {
+    const turn = (turnId: string, firstSayMs: number) => ({
+      chatId: "c",
+      turnId,
+      trigger: "guardian" as const,
+      model: null,
+      effort: null,
+      session: "warm" as const,
+      startMs: null,
+      workingMs: null,
+      reactedMs: null,
+      firstSayMs,
+      ackMs: firstSayMs,
+      durationMs: firstSayMs,
+      modelCalls: 1,
+      toolCalls: 1,
+      tools: { say: 1 },
+      contextTokens: 80_000,
+      inputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 0,
+      failed: false,
+      at: "",
+    });
+    const md = baselineMarkdown([
+      {
+        ...run(4),
+        id: "long-context",
+        row: "long-context",
+        lang: "en",
+        turns: [turn("setup", 60_000), turn("asked", 2_000)],
+        setupTurnIds: ["setup"],
+        notes: ['rule: 2 emoji in "x"'],
+        measures: { contextTokens: 80_000 },
+      },
+    ]);
+    expect(md).toContain(
+      "| opus-low | 1 | 1/1 | 1 | 0 | 0 | 5.00 (1) | – | – / – | 2.0 / 2.0 | – |",
+    );
+    expect(md).toContain("## Rule regressions");
+    expect(md).toContain('- opus-low r1 long-context: 2 emoji in "x"');
+    expect(md).toContain("| opus-low | 1 | 80000 |");
+    expect(md).not.toContain("60.0");
+  });
+
   it("labels nothing when every run has one version", () => {
     const md = baselineMarkdown([run(2), run(2, "sonnet-low")]);
     expect(md).toContain("| opus-low |");

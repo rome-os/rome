@@ -4,96 +4,29 @@
 // plays them. Change one and earlier runs stop being comparable: bump
 // BASELINE_VERSION. docs/concierge-eval.md#baseline
 
-import type { Step } from "./scenarios.js";
-import type { TimedTurn } from "./timing.js";
+import {
+  type BaselineScenario,
+  answeredInline,
+  delegated,
+  matches,
+  noFiller,
+  tool,
+} from "./baseline-checks.js";
+import { thanksWithoutEyes } from "./baseline-rules.js";
+import { LONG_SCENARIOS } from "./baseline-scenarios-long.js";
+import { ZH_SCENARIOS } from "./baseline-scenarios-zh.js";
 
-export const BASELINE_VERSION = 3;
+export type { BaselineScenario, CheckInput } from "./baseline-checks.js";
 
-/** The policy row a scenario stands for. */
-export type PolicyRow =
-  | "chat"
-  | "simple-qa"
-  | "quick-lookup"
-  | "reasoning"
-  | "simple-task"
-  | "heavy-task"
-  | "recall";
-
-/** What a scenario's checks read: the guardian turns by step, every turn, and what was said. */
-export interface CheckInput {
-  /** The guardian turn each step started, in step order; null when none was timed. */
-  steps: (TimedTurn | null)[];
-  /** Every timed turn of the chat, system turns included. */
-  turns: TimedTurn[];
-  /** The Concierge's text messages after each step, in step order. */
-  saidAfter: string[][];
-  /** Every Concierge text message. */
-  said: string[];
-  /** The chat's tasks, as the Tasks panel lists them. */
-  tasks: { status: string; endReason: string | null }[];
-}
-
-export interface BaselineScenario {
-  id: string;
-  row: PolicyRow;
-  about: string;
-  /** The owner's messages. A short `settleS` keeps the next step's session warm. */
-  steps: Step[];
-  /** Failed hard checks, each as a short note; empty when every check passed. */
-  check: (input: CheckInput) => string[];
-  /** What the judge scores the answers against. */
-  rubric: string;
-}
-
-const tool = (turn: TimedTurn | null, name: string) => turn?.tools[name] ?? 0;
-
-/** A message that only acknowledges or announces, opening the reply. */
-const FILLER =
-  /^\s*(got it|on it|sure[,!.]|okay[,!.]|ok[,!.]|noted|will do|let me|i['’]ll (look|check|find|get)|i['’]m (on|checking|looking)|one moment|好的|收到|马上|我来)/i;
-
-function noFiller(said: string[]): string[] {
-  return said
-    .filter((t) => FILLER.test(t) && t.length < 120)
-    .map((t) => `filler: "${t.slice(0, 60)}"`);
-}
-
-function answeredInline(input: CheckInput, step: number, maxSearches = 0): string[] {
-  const turn = input.steps[step] ?? null;
-  const notes: string[] = [];
-  if (!turn) notes.push(`step ${step + 1}: no timed turn`);
-  if (tool(turn, "chat_start") > 0) notes.push(`step ${step + 1}: started a task`);
-  const searches = tool(turn, "websearch");
-  if (searches > maxSearches) notes.push(`step ${step + 1}: ${searches} web searches`);
-  if ((input.saidAfter[step] ?? []).length === 0 && !turn?.reactedMs) {
-    notes.push(`step ${step + 1}: no answer`);
-  }
-  return notes;
-}
-
-function matches(said: string[], pattern: RegExp, what: string): string[] {
-  return said.some((t) => pattern.test(t)) ? [] : [`no answer names ${what}`];
-}
-
-function delegated(input: CheckInput, step = 0): string[] {
-  const notes: string[] = [];
-  if (tool(input.steps[step] ?? null, "chat_start") === 0) notes.push("did not start a task");
-  if (!input.tasks.some((t) => t.status === "ended" && t.endReason === "done")) {
-    notes.push("no task ended done");
-  }
-  // The result reaches the owner in a system turn that forwards or says it.
-  const relays = input.turns.filter(
-    (t) => t.trigger === "system" && (tool(t, "chat_forward") > 0 || tool(t, "say") > 0),
-  );
-  if (relays.length === 0) notes.push("no system turn relayed the result");
-  return notes;
-}
+export const BASELINE_VERSION = 4;
 
 const VOICE =
   "Voice: short and direct, like a capable assistant texting its owner; no preamble, no filler such as 'Got it' or 'Let me check', no closing offers.";
 
-export const BASELINE_SCENARIOS: BaselineScenario[] = [
+const EN_SCENARIOS: BaselineScenario[] = [
   {
     id: "chat-hi-thanks",
+    lang: "en",
     row: "chat",
     about: "A greeting, then a thanks sent while the session is still warm",
     steps: [
@@ -106,12 +39,14 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
         ? ["the thanks did work"]
         : []),
       ...((i.saidAfter[1] ?? []).length > 1 ? ["more than one message for a thanks"] : []),
+      ...thanksWithoutEyes(i.steps[1] ?? null, i.reactions[1], 1),
       ...noFiller(i.said),
     ],
     rubric: `The owner greets the assistant, then says thanks. A good reply to the greeting is one short friendly line. A good response to "thanks" is a reaction or at most one very short line. Score down for long replies, questions back that are not needed, or offering help lists. ${VOICE}`,
   },
   {
     id: "qa-coffee",
+    lang: "en",
     row: "simple-qa",
     about: "A general-knowledge question answered from what the model knows",
     steps: [{ text: "What's the difference between a flat white and a latte?", settleS: 6 }],
@@ -124,6 +59,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "qa-units",
+    lang: "en",
     row: "simple-qa",
     about: "A quick calculation",
     steps: [{ text: "How much is 72°F in Celsius?", settleS: 6 }],
@@ -136,6 +72,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "lookup-web",
+    lang: "en",
     row: "quick-lookup",
     about: "A fresh fact that needs a web search, done inline",
     steps: [{ text: "Who won the most recent Nobel Prize in Literature?", settleS: 8 }],
@@ -148,6 +85,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "lookup-memory",
+    lang: "en",
     row: "quick-lookup",
     about: "Personal data from the Concierge's memory",
     steps: [{ text: "When is my dentist appointment again?", settleS: 8 }],
@@ -161,6 +99,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "reason-airport",
+    lang: "en",
     row: "reasoning",
     about: "A small planning question that needs careful reasoning",
     steps: [
@@ -178,6 +117,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "reason-schedule",
+    lang: "en",
     row: "reasoning",
     about: "A constraint puzzle",
     steps: [
@@ -191,6 +131,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "reason-schedule-task",
+    lang: "en",
     row: "reasoning",
     about:
       "The same constraint puzzle, delegated, to compare a task's latency with an inline answer",
@@ -205,6 +146,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "task-simple",
+    lang: "en",
     row: "simple-task",
     about: "A small lookup-and-summary task, delegated, with its result relayed",
     steps: [
@@ -222,6 +164,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "task-simple-strong",
+    lang: "en",
     row: "simple-task",
     about:
       "The simple task on the strong model at high effort, to compare with the fast model the prompt picks",
@@ -240,6 +183,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "task-heavy",
+    lang: "en",
     row: "heavy-task",
     about: "A research and analysis task, delegated, with its result relayed",
     steps: [
@@ -257,6 +201,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   },
   {
     id: "recall",
+    lang: "en",
     row: "recall",
     about: "A fact told early in the chat, asked for again later",
     steps: [
@@ -275,4 +220,10 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
     ],
     rubric: `The last answer must say Porto and a job at a design studio, in one line. The first reply should acknowledge the news briefly (a reaction or one line), and the gift answer should be short and practical. ${VOICE}`,
   },
+];
+
+export const BASELINE_SCENARIOS: BaselineScenario[] = [
+  ...EN_SCENARIOS,
+  ...ZH_SCENARIOS,
+  ...LONG_SCENARIOS,
 ];
