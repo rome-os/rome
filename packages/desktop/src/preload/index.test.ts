@@ -26,9 +26,10 @@ afterEach(() => {
 });
 
 describe("preload bridge", () => {
-  it("gives remote pages only the device bridge, never the audit log", async () => {
+  it("gives remote pages only the device bridge and the microphone marker, never the audit log", async () => {
     const remote = await load("https:");
-    expect(Object.keys(remote)).toEqual(["device"]);
+    expect(Object.keys(remote)).toEqual(["device", "microphone"]);
+    expect(remote.microphone).toBe(true);
     expect(remote.audit).toBeUndefined();
     // Settings, such as the notifications choice, belong to the app's own pages.
     expect(remote.settings).toBeUndefined();

@@ -106,6 +106,12 @@ export {
 export { IconButton, type IconButtonProps } from "./icon-button.js";
 export { Input } from "./input.js";
 export {
+  isImeCompositionEvent,
+  type KeyboardSubmitEvent,
+  type KeyboardSubmitOptions,
+  shouldSubmitOnEnter,
+} from "./keyboard-submit.js";
+export {
   FormRow,
   FormRowControl,
   FormRowDescription,

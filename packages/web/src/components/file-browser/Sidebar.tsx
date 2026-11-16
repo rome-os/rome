@@ -22,6 +22,7 @@ import {
   getIsDesktopViewport,
 } from "./store/utils";
 import { SidebarRootContextMenu, type ContextMenuActions } from "./ContextMenu";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 interface SidebarProps {
   rootLabel: string;
@@ -155,7 +156,10 @@ export function Sidebar({
               placeholder={searchPlaceholder}
               value={searchQuery}
               onChange={(event) => store.getState().ui.setSearchQuery(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && void store.getState().ui.doSearch()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !isImeCompositionEvent(event))
+                  void store.getState().ui.doSearch();
+              }}
               className="flex-1 pl-8"
               aria-label={t("header.search")}
             />

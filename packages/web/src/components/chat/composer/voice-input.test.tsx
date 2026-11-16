@@ -14,16 +14,23 @@ import { ReplyDraftHarness } from "../reply/reply-draft-harness";
 // The browser's microphone, which jsdom does not have.
 const microphone = rs.hoisted(() => ({
   refuse: false,
-  /** While true, the permission prompt never answers. */
+  /** While true, the permission prompt stays open until `answer()`. */
   pending: false,
+  /** Answers the open permission prompt by allowing the microphone. */
+  answer: null as (() => void) | null,
   /** The audio still in the capture buffer when listening stops. */
   tail: null as ArrayBuffer | null,
   closed: 0,
   onAudio: null as ((chunk: ArrayBuffer) => void) | null,
 }));
 rs.mock("@/lib/voice-input/microphone", () => ({
-  openMicrophone: async (onAudio: (chunk: ArrayBuffer) => void) => {
-    if (microphone.pending) await new Promise(() => {});
+  openMicrophone: async (onAudio: (chunk: ArrayBuffer) => void, onAsk?: () => void) => {
+    if (microphone.pending) {
+      onAsk?.();
+      await new Promise<void>((resolve) => {
+        microphone.answer = resolve;
+      });
+    }
     if (microphone.refuse) throw new DOMException("denied", "NotAllowedError");
     microphone.onAudio = onAudio;
     return {
@@ -103,6 +110,7 @@ beforeEach(() => {
   localStorage.clear();
   microphone.refuse = false;
   microphone.pending = false;
+  microphone.answer = null;
   microphone.tail = null;
   FakeSocket.opens = true;
   microphone.closed = 0;
@@ -549,6 +557,47 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
   });
 
+  it.each([
+    ["no-speech", "Listening stopped after 30 seconds without speech"],
+    ["time-limit", "Listening stopped after 10 minutes"],
+  ])("keeps the words heard when Rome stops listening for %s", async (reason, notice) => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    socket.say({ type: "error", reason });
+
+    expect(field().value).toBe("hello");
+    expect(screen.getByRole("status").textContent).toBe(notice);
+    expect(microphone.closed).toBe(1);
+  });
+
+  it("says what the microphone is for while the browser asks for it", async () => {
+    microphone.pending = true;
+    renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    expect((await screen.findByRole("status")).textContent).toBe(
+      "Rome uses the microphone to turn your speech into text",
+    );
+
+    await act(async () => microphone.answer?.());
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop voice input" })).toBeTruthy();
+  });
+
+  it("says why listening stopped, not what the microphone is for, after Back during the prompt", async () => {
+    microphone.pending = true;
+    renderComposer(kind, SONIOX, "chat-a");
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    await screen.findByRole("status");
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    });
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Listening stopped when you left this chat",
+    );
+  });
+
   it("says why when Rome Cloud refuses voice input", async () => {
     const { field } = renderComposer(kind);
     const socket = await startListening();
@@ -596,6 +645,27 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
 
     await waitFor(() => expect(onSend).toHaveBeenCalled());
     expect(onSend.mock.calls[0][0]).toMatchObject({ text: "Abc" });
+  });
+});
+
+describe("voice input in the desktop app", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "rome");
+  });
+
+  it("shows the voice control when the app gives the dashboard the microphone", async () => {
+    Object.assign(window, { rome: { device: {}, microphone: true } });
+    renderComposer("chat");
+    expect(await screen.findByRole("button", { name: "Start voice input" })).toBeTruthy();
+  });
+
+  it("has no voice control in an app too old to give it the microphone", async () => {
+    Object.assign(window, { rome: { device: {} } });
+    renderComposer("chat");
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/voice-input", expect.anything()),
+    );
+    expect(screen.queryByRole("button", { name: "Start voice input" })).toBeNull();
   });
 });
 

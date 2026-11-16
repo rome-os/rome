@@ -1,4 +1,5 @@
 import { BUILTIN_THEMES, type Palette, type ThemeDefinition, type ThemeTokens } from "./themes";
+import { readStored } from "./stored-preference";
 
 export type ThemePreference = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
@@ -49,15 +50,13 @@ function isThemeName(value: string | null): value is ThemeName {
 }
 
 export function readStoredPreference(): ThemePreference {
-  if (typeof window === "undefined") return "system";
-  const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+  const raw = readStored(THEME_STORAGE_KEY);
   if (raw === "light" || raw === "dark") return raw;
   return "system";
 }
 
 export function readStoredThemeName(): ThemeName {
-  if (typeof window === "undefined") return DEFAULT_THEME_NAME;
-  const raw = window.localStorage.getItem(THEME_NAME_STORAGE_KEY);
+  const raw = readStored(THEME_NAME_STORAGE_KEY);
   return isThemeName(raw) ? raw : DEFAULT_THEME_NAME;
 }
 

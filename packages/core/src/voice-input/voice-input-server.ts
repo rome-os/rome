@@ -8,6 +8,7 @@ import type { Duplex } from "node:stream";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
 import {
   VOICE_INPUT_ALIVE_INTERVAL_MS,
+  VOICE_INPUT_QUIET_LIMIT_MS,
   VOICE_INPUT_SOCKET_PATH,
   type VoiceInputServerMessage,
   type VoiceInputStopReason,
@@ -99,6 +100,7 @@ export interface ServeOptions {
   maxDictationMs?: number;
   finishTimeoutMs?: number;
   openTimeoutMs?: number;
+  quietLimitMs?: number;
 }
 
 /** Runs one dictation over `ws`. Exported for tests. */
@@ -106,6 +108,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   const maxDictationMs = options.maxDictationMs ?? MAX_DICTATION_MS;
   const finishTimeoutMs = options.finishTimeoutMs ?? FINISH_TIMEOUT_MS;
   const openTimeoutMs = options.openTimeoutMs ?? OPEN_TIMEOUT_MS;
+  const quietLimitMs = options.quietLimitMs ?? VOICE_INPUT_QUIET_LIMIT_MS;
   let stream: TranscriptionStream | null = null;
   let listening: { source: ListeningSource; sampleRate: number; startedAt: number } | null = null;
   // Between `start` and the transcriber opening: audio waits here, in order.
@@ -113,8 +116,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   const early: Uint8Array[] = [];
   let stopAsked = false;
   let closed = false;
-  let timedOut = false;
+  // Why Rome itself stopped listening, sent once the rest of the text is in.
+  let stoppedFor: VoiceInputStopReason | null = null;
   let limit: ReturnType<typeof setTimeout> | null = null;
+  let quiet: ReturnType<typeof setTimeout> | null = null;
   let finishing: ReturnType<typeof setTimeout> | null = null;
   let opening: ReturnType<typeof setTimeout> | null = null;
   let alive: ReturnType<typeof setInterval> | null = null;
@@ -134,6 +139,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   };
   const settle = (outcome: string) => {
     if (limit) clearTimeout(limit);
+    if (quiet) clearTimeout(quiet);
     if (finishing) clearTimeout(finishing);
     if (opening) clearTimeout(opening);
     if (alive) clearInterval(alive);
@@ -212,10 +218,18 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     stream = transcriber.open(
       { sampleRate },
       {
-        onText: (settled, pending) => {
-          if (!closed) reply({ type: "text", settled, pending });
+        onText: (settled, pending, spokeUntilMs) => {
+          if (closed) return;
+          // Only new words are speech: a withdrawn guess is not. Without the
+          // provider's timing, the words count as heard now.
+          if (settled.trim() || (pending.trim() && pending !== lastPending)) {
+            spokeUntil = Math.max(spokeUntil, spokeUntilMs ?? audioMs());
+            audioArrived();
+          }
+          lastPending = pending;
+          reply({ type: "text", settled, pending });
         },
-        onEnd: () => close(timedOut ? { type: "error", reason: "time-limit" } : { type: "ended" }),
+        onEnd: () => close(stoppedFor ? { type: "error", reason: stoppedFor } : { type: "ended" }),
         onFailure: (failure, detail) => {
           log.warn("voice input provider failed", { failure, detail });
           close({ type: "error", reason: STOP_REASON[failure] });
@@ -224,10 +238,29 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     );
     for (const chunk of early.splice(0)) stream.sendAudio(chunk);
     if (stopAsked) return finish();
-    limit = setTimeout(() => {
-      timedOut = true;
-      finish();
-    }, maxDictationMs);
+    limit = setTimeout(() => stopFor("time-limit"), maxDictationMs);
+    audioArrived();
+  }
+
+  // Speech is measured on the audio's own clock: listening stops once
+  // `quietLimitMs` of audio has passed since the end of the last word heard,
+  // however late the provider reports that word. Audio that stops arriving
+  // counts as silence too.
+  let lastPending = "";
+  let spokeUntil = 0;
+  const audioMs = () => (listening ? (bytes / 2 / listening.sampleRate) * 1000 : 0);
+  function audioArrived() {
+    if (finishAsked || !stream) return;
+    if (audioMs() - spokeUntil >= quietLimitMs) return stopFor("no-speech");
+    if (quiet) clearTimeout(quiet);
+    // Audio that stalls now still stops on time: only the rest of the quiet is left.
+    quiet = setTimeout(() => stopFor("no-speech"), quietLimitMs - (audioMs() - spokeUntil));
+  }
+
+  function stopFor(reason: VoiceInputStopReason) {
+    if (finishAsked) return;
+    stoppedFor = reason;
+    finish();
   }
 
   ws.on("message", (data: RawData, isBinary) => {
@@ -241,7 +274,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       if (starting) {
         early.push(chunk);
         earlyBytes += chunk.byteLength;
-      } else stream?.sendAudio(chunk);
+      } else {
+        stream?.sendAudio(chunk);
+        audioArrived();
+      }
       return;
     }
     let parsed: unknown;
@@ -286,11 +322,12 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (!stream || finishAsked) return;
     finishAsked = true;
     if (limit) clearTimeout(limit);
+    if (quiet) clearTimeout(quiet);
     stream.finish();
     // Gives up on a provider that never sends the rest.
     finishing = setTimeout(() => {
       stream?.abort();
-      close({ type: "error", reason: timedOut ? "time-limit" : "provider-unavailable" });
+      close({ type: "error", reason: stoppedFor ?? "provider-unavailable" });
     }, finishTimeoutMs);
   }
 

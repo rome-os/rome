@@ -29,7 +29,7 @@ import {
   LARGE_MODEL_OPTIONS,
 } from "@/lib/chat-constants";
 import { getProjectDisplayName, isReasoningEffort } from "@/lib/chat-helpers";
-import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
+import { isImeCompositionEvent, shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 import type {
   AgentMention,
   PendingUpload,
@@ -44,6 +44,7 @@ import { AgentMentionMenu } from "./composer/AgentMentionMenu";
 import { ImpersonationMenu } from "./composer/ImpersonationMenu";
 import { ModelSelectorMenu } from "./composer/ModelSelectorMenu";
 import { PendingUploadsList } from "./composer/PendingUploadsList";
+import { usePendingAttachments } from "./composer/use-pending-attachments";
 import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu } from "./composer/SlashSkillMenu";
@@ -259,9 +260,18 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const sessionCreatedRef = useRef(false);
   // The send-time clear must not re-save the unchanged context in its effect.
   const skipNextDraftSaveRef = useRef(false);
-  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
-  const [uploadInFlight, setUploadInFlight] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const {
+    uploads: pendingUploads,
+    set: setPendingUploads,
+    removeSent: removeSentUploads,
+    inFlight: uploadInFlight,
+    inFlightRef: uploadInFlightRef,
+    progress: uploadProgress,
+    add: addPendingFiles,
+    remove: removePendingUpload,
+    cancel: cancelUpload,
+    track: trackUpload,
+  } = usePendingAttachments();
 
   // When `pinnedAgentMention` is set, the session is already bound to an
   // agent — the `@` menu and the local draftAgentMention are inert.
@@ -413,9 +423,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
-  // State drives the UI, while the ref closes the same-event gap before React
-  // commits that state (for example, two rapid Enter keydown events).
-  const uploadInFlightRef = useRef(false);
   const skillPicker = useSlashSkill({
     inputText,
     setInputText,
@@ -424,8 +431,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     uploadInFlightRef,
     enabled: !textOnly,
   });
-  // Live for exactly one upload; `cancelUpload` aborts through it.
-  const uploadAbortRef = useRef<AbortController | null>(null);
   // The last failed send, kept until a send succeeds.
   const failedSendRef = useRef<{
     inputId: string;
@@ -589,52 +594,19 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }
   }, [newProjectName, t, connectOnCreate, locations.addProject]);
 
-  const addPendingFiles = useCallback((files: File[]) => {
-    // The visible file picker is disabled during an upload, but paste and the
-    // parent drop zones enter through this callback directly. Guard the shared
-    // boundary so a file cannot be added to the tray without belonging to the
-    // multipart request whose progress it displays.
-    if (files.length === 0 || uploadInFlightRef.current) return;
-    setPendingUploads((prev) => [...prev, ...files.map((file) => ({ id: randomUUID(), file }))]);
-  }, []);
-
   const invokeOnSend = useCallback(
-    async (snapshot: ChatComposerSnapshot, clearDraftOnAdoption = false) => {
-      const tracksUpload = snapshot.uploads.length > 0;
-      const controller = new AbortController();
-      if (tracksUpload) {
-        uploadInFlightRef.current = true;
-        uploadAbortRef.current = controller;
-        setUploadInFlight(true);
-        setUploadProgress(0);
-      }
-      try {
-        await onSend(snapshot, {
-          onUploadProgress: (progress) => {
-            if (!tracksUpload) return;
-            setUploadProgress(progress === null ? null : Math.max(0, Math.min(1, progress)));
-          },
-          signal: controller.signal,
+    (snapshot: ChatComposerSnapshot, clearDraftOnAdoption = false) =>
+      trackUpload(snapshot.uploads, (controls) =>
+        onSend(snapshot, {
+          ...controls,
           onSessionCreated: () => {
             sessionCreatedRef.current = true;
             if (clearDraftOnAdoption && textareaRef.current) clearNewChatDraft();
           },
-        });
-      } finally {
-        if (tracksUpload) {
-          uploadInFlightRef.current = false;
-          uploadAbortRef.current = null;
-          setUploadInFlight(false);
-          setUploadProgress(null);
-        }
-      }
-    },
-    [onSend],
+        }),
+      ),
+    [onSend, trackUpload],
   );
-
-  const cancelUpload = useCallback(() => {
-    uploadAbortRef.current?.abort();
-  }, []);
 
   useImperativeHandle(
     ref,
@@ -675,10 +647,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           skillName,
         };
         void invokeOnSend(snapshot)
-          .then(() => {
-            const sentIds = new Set(snapshot.uploads.map((upload) => upload.id));
-            setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
-          })
+          .then(() => removeSentUploads(snapshot.uploads))
           .catch(() => {
             // The imperative submit path leaves its inputs in place, so the
             // parent error banner is sufficient and the turn remains retryable.
@@ -693,6 +662,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     [
       voice.stop,
       addPendingFiles,
+      removeSentUploads,
       textareaMaxHeight,
       personaId,
       reasoningEffort,
@@ -706,11 +676,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       invokeOnSend,
     ],
   );
-
-  const removePendingUpload = useCallback((id: string) => {
-    if (uploadInFlightRef.current) return;
-    setPendingUploads((prev) => prev.filter((upload) => upload.id !== id));
-  }, []);
 
   const handleFileSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
     addPendingFiles(Array.from(event.target.files ?? []));
@@ -785,8 +750,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       failedSendRef.current = null;
       if (!clearsOptimistically) {
         replyDraft?.clear();
-        const sentIds = new Set(uploads.map((upload) => upload.id));
-        setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
+        removeSentUploads(uploads);
         setDraftSkill((current) => (current === skill ? null : current));
         // Anything typed during the upload is newer than what was sent, so it
         // survives; only the exact text that went out is cleared.
@@ -832,6 +796,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     authEpoch,
     inputText,
     pendingUploads,
+    setPendingUploads,
+    removeSentUploads,
     draftSkill,
     personaId,
     draftModelSelection,
@@ -903,6 +869,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // through the send button — soft keyboards have no Shift+Enter, and an
   // accidental tap on Enter shouldn't fire a half-written message.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Keys pressed while an input method composes belong to its candidate
+    // list: that Enter confirms a candidate, and the arrows move through it.
+    if (isImeCompositionEvent(e)) return;
     if (skillPicker.handleKeyDown(e)) return;
     if (mentionPicker.handleKeyDown(e)) return;
     if (e.key === "Escape" && replyDraft?.target) {
@@ -1012,7 +981,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           onChange={handleFileSelection}
         />
         <ReplyBar />
-        <VoiceInputNotice notice={voice.notice} />
+        <VoiceInputNotice notice={voice.notice} asking={voice.asking} />
         {/* flow-root keeps the tray's bottom margin inside this box, so the
             measured height is the full space the tray takes from the input. */}
         <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">

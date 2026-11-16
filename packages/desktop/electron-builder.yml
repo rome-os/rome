@@ -52,3 +52,5 @@ mac:
     # Programs Rome runs on this Mac as a device count as the app's own
     # traffic, so reaching a printer or another computer on the LAN asks here.
     NSLocalNetworkUsageDescription: Rome runs programs you ask for on this Mac, and some of them reach devices on your local network.
+    # Voice input in the dashboard; the same reason the dashboard gives.
+    NSMicrophoneUsageDescription: Rome uses the microphone to turn your speech into text
