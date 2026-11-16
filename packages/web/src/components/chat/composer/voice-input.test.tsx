@@ -110,6 +110,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // React Query pauses every later fetch after an `offline` event until it
+  // hears `online`.
+  window.dispatchEvent(new Event("online"));
   rs.useRealTimers();
   cleanup();
   rs.restoreAllMocks();
@@ -365,18 +368,26 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
   });
 
   it("gives the field back when Rome never answers a stop", async () => {
-    FakeSocket.opens = false;
     const { field } = renderComposer(kind);
-    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
-    await waitFor(() => expect(FakeSocket.last).not.toBeNull());
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    // Every dictation timer is fake, so only the stop's own bound can run out.
     rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    const socket = FakeSocket.last!;
+    expect(socket.textSent).toEqual([{ type: "start", sampleRate: 16000, bufferedMs: 0 }]);
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
-    expect(field().readOnly).toBe(true);
+    await act(async () => {});
+    expect(socket.textSent.at(-1)).toEqual({ type: "stop" });
 
-    // Rome's own bound on a stop runs out first, so its reason would arrive.
-    act(() => rs.advanceTimersByTime(17_000));
+    // Rome is still there, so the connection is not lost, but the rest of the
+    // text never comes. Rome's own bound on a stop would run out first.
+    for (let elapsed = 0; elapsed < 18_000; elapsed += 2_000) {
+      act(() => rs.advanceTimersByTime(2_000));
+      socket.say({ type: "alive" });
+    }
     expect(field().readOnly).toBe(true);
-    act(() => rs.advanceTimersByTime(3_000));
+    act(() => rs.advanceTimersByTime(2_000));
     rs.useRealTimers();
 
     expect(field().readOnly).toBe(false);
@@ -386,6 +397,63 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
       "disabled",
       false,
+    );
+  });
+
+  it("keeps the words heard and closes the microphone the moment the browser goes offline", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+
+    expect(field().value).toBe("hello the");
+    expect(microphone.closed).toBe(1);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+  });
+
+  it("notices a connection that dies quietly within 5 seconds", async () => {
+    const { field } = renderComposer(kind);
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    // Every dictation timer is fake, so only the quiet limit can run out.
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    const socket = FakeSocket.last!;
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    act(() => rs.advanceTimersByTime(2_000));
+    socket.say({ type: "alive" });
+    act(() => rs.advanceTimersByTime(2_900));
+    expect(screen.queryByRole("status")).toBeNull();
+
+    act(() => rs.advanceTimersByTime(200));
+    rs.useRealTimers();
+
+    expect(field().value).toBe("hello");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+  });
+
+  it("notices a connection that never opens within 5 seconds", async () => {
+    FakeSocket.opens = false;
+    renderComposer(kind);
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    expect(FakeSocket.last).toBeTruthy();
+
+    act(() => rs.advanceTimersByTime(3_100));
+    rs.useRealTimers();
+
+    expect(microphone.closed).toBe(1);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
     );
   });
 
