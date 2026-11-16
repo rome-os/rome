@@ -7,6 +7,7 @@ import {
   normalizeSidebarPins,
   type PinnedEntry,
 } from "@/shell/AppGrid";
+import { readStoredJson, writeStoredJson } from "@/lib/stored-preference";
 
 export interface SidebarPins {
   pins: PinnedEntry[];
@@ -20,13 +21,14 @@ export interface SidebarPins {
 // both plus the `rome-pins-changed` poke the sidebar listens for.
 export function useSidebarPins(): SidebarPins {
   const [pins, setPinsLocal] = useState<PinnedEntry[]>(() => {
-    try {
-      const stored = localStorage.getItem(SIDEBAR_PINS_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) return normalizeSidebarPins(parsed);
+    const stored = readStoredJson(SIDEBAR_PINS_KEY);
+    if (Array.isArray(stored)) {
+      try {
+        return normalizeSidebarPins(stored);
+      } catch {
+        // A malformed entry falls back to the default pins.
       }
-    } catch {}
+    }
     return normalizeSidebarPins(DEFAULT_SIDEBAR_PINS);
   });
 
@@ -47,9 +49,7 @@ export function useSidebarPins(): SidebarPins {
             ? current.filter((p) => !(p.type === type && p.id === id))
             : [...current, { type, id }],
         );
-        try {
-          localStorage.setItem(SIDEBAR_PINS_KEY, JSON.stringify(next));
-        } catch {}
+        writeStoredJson(SIDEBAR_PINS_KEY, next);
         void saveSetting("sidebarPins", next).then(() => invalidateSettings());
         window.dispatchEvent(new Event("rome-pins-changed"));
         return next;
