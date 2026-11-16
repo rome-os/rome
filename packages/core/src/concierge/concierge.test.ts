@@ -2176,7 +2176,8 @@ describe("Concierge tools", () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("no conclusion section");
       expect(result.content[0].text).toContain("Nothing was sent");
-      expect(result.content[0].text).toContain("at most two sentences");
+      expect(result.content[0].text).toContain("a few sentences with the key specifics");
+      expect(result.content[0].text).not.toContain("open the task chat");
       expect(stored(s)).toEqual([]);
     });
 
@@ -3267,7 +3268,8 @@ describe("Concierge events", () => {
     const prompt = await eventFor(concluded("z".repeat(CONCLUSION_MAX_CHARS + 1), "Details."));
     expect(prompt).not.toContain("conclusion:");
     expect(prompt).not.toContain("rome:conclusion");
-    expect(prompt).toContain(`reply: Details.\n\n${"z".repeat(CONCLUSION_MAX_CHARS + 1)}`);
+    // The excerpt keeps its usual cut, so an over-cap conclusion shows its head.
+    expect(prompt).toContain(`reply: Details.\n\n${"z".repeat(300)}`);
   });
 
   it("puts tasks that finish together in one turn", async () => {

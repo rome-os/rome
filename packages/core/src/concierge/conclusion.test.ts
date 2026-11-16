@@ -54,7 +54,7 @@ describe("conclusionOf", () => {
       kind: "too_long",
       length: CONCLUSION_MAX_CHARS + 1,
     });
-    // 600 Chinese characters and 600 emoji are 600 characters.
+    // A cap's worth of Chinese characters or of emoji is the cap in characters.
     expect(conclusionOf(answer("结".repeat(CONCLUSION_MAX_CHARS)))).toMatchObject({
       kind: "found",
     });
@@ -109,6 +109,13 @@ describe("the instruction every task chat gets", () => {
     expect(CONCLUSION_INSTRUCTION).toContain("in every final answer");
     expect(CONCLUSION_INSTRUCTION).toContain("when the guardian writes to you directly");
     expect(CONCLUSION_INSTRUCTION).toContain("Never put a secret");
+  });
+
+  it("asks for a conclusion that stands on its own, never one that points elsewhere", () => {
+    expect(CONCLUSION_INSTRUCTION).toContain("three to five sentences");
+    expect(CONCLUSION_INSTRUCTION).toContain("key numbers, names, dates, prices and links");
+    expect(CONCLUSION_INSTRUCTION).toContain("never send them elsewhere for details");
+    expect(CONCLUSION_INSTRUCTION).not.toContain("one or two sentences");
   });
 
   it("gives a result that only carries out the guardian's own choice the fixed no-news line", () => {

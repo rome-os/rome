@@ -1659,8 +1659,8 @@ export async function buildConciergeTools(
     {
       name: "chat_forward",
       description:
-        "Send the guardian a finished task's conclusion, word for word, without retyping it: the short closing section the task chat writes at the end of its final answer. The message shows its source chat, which opens the details. " +
-        `A conclusion over ${CONCLUSION_MAX_CHARS} characters, or none, is refused and nothing is sent: then report the outcome yourself in at most two sentences. ` +
+        "Send the guardian a finished task's conclusion, word for word, without retyping it: the closing section the task chat writes at the end of its final answer. " +
+        `A conclusion over ${CONCLUSION_MAX_CHARS} characters, or none, is refused and nothing is sent: then report the outcome yourself in a few sentences with the key specifics. ` +
         "Set full to send the whole answer instead, only when the guardian explicitly asks for the full text in a message they sent this turn. " +
         "The task chat must be one started from this Concierge chat. An existing task row automatically points to the forwarded message in this Concierge chat, unless the task already has a chat thread.",
       inputSchema: {
@@ -1694,7 +1694,7 @@ export async function buildConciergeTools(
           // Everything that can refuse comes before anything is said.
           if (full && !(await guardianStartedTurn())) {
             throw new Error(
-              "The full text goes to the guardian only in a turn they started, when they explicitly ask for it. Forward the conclusion, or report the outcome yourself in at most two sentences.",
+              "The full text goes to the guardian only in a turn they started, when they explicitly ask for it. Forward the conclusion, or report the outcome yourself in a few sentences with the key specifics.",
             );
           }
           const conclusion = full ? null : conclusionOf(answer);
@@ -1704,7 +1704,7 @@ export async function buildConciergeTools(
                 conclusion.kind === "missing"
                   ? "The task chat's latest answer has no conclusion section."
                   : `The task chat's conclusion is ${conclusion.length} characters, over the ${CONCLUSION_MAX_CHARS} limit.`
-              } Nothing was sent. Report the outcome yourself with say, in one message of at most two sentences with task set to this task's id, and the guardian can open the task chat for details.`,
+              } Nothing was sent. Report the outcome yourself with say, in one message of a few sentences with the key specifics, with task set to this task's id.`,
             );
           }
           if (conclusion?.kind === "found" && conclusion.text === NOTHING_TO_REPORT) {
