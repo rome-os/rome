@@ -133,7 +133,7 @@ jobs:
           fi
           echo "long=false" >> "$GITHUB_OUTPUT"
           # The voice control lives in the message field, so the field's files count too.
-          voice='^(ios/Rome/Features/VoiceInput/|ios/Rome(UI)?Tests/VoiceInput|ios/Rome/Features/Chat/(TranscriptViews|ComposerTextView)\.swift$|\.github/workflows/ios-ci\.yml$)'
+          voice='^(ios/Rome/Features/VoiceInput/|ios/Rome(UI)?Tests/VoiceInput|ios/RomeUITests/speech\.wav$|ios/Rome/Features/Chat/(TranscriptViews|ComposerTextView)\.swift$|\.github/workflows/ios-ci\.yml$)'
           if git fetch --quiet --no-tags --depth=1 origin "$BASE" 2>/dev/null &&
              git diff --name-only "$BASE" HEAD | grep -qE "$voice"; then
             echo "voice=true" >> "$GITHUB_OUTPUT"
