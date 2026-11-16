@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// calibrate-judge [rounds]: grades 20 answers whose right verdict is known, with the judge
+// calibrate-judge [rounds]: grades 24 answers whose right verdict is known, with the judge
 // in COS_JUDGE_MODEL, and prints how many it got right. Run it after any change to the
 // judge's model or prompt, and record the score with the new JUDGE_PROMPT_VERSION.
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JUDGE_PROMPT_VERSION, makeJudge } from "./lib/judge.mjs";
+import { loadHearing } from "./lib/hearing.mjs";
 import { goalsSheet, loadTeam, rosterSheet } from "./lib/seed.mjs";
+import { changedGoalsSheet } from "./scenarios/k4-stays-current.mjs";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const team = loadTeam();
@@ -15,7 +17,28 @@ const roster = team.members
   .join("\n");
 const goalsOk =
   "Ship Kelpie-7 firmware 3.0 to all 40 buoys (Marisol Okonkwo-Vance, 22 Jan 2027); cut salinity ingest lag under 90 s (Teodor Halvorsen-Abara, 11 Dec 2026); install 12 Orkney pier sensors (Priya Lindqvist-Mbeki, 5 Feb 2027).";
+const changed = changedGoalsSheet(team, loadHearing().k4Changes);
+const goalsChanged =
+  "Ship Kelpie-7 firmware 3.0 to all 40 buoys (Marisol Okonkwo-Vance, 22 Jan 2027); cut salinity ingest lag under 90 s (Marisol Okonkwo-Vance, 11 Dec 2026); install 16 Orkney pier sensors (Priya Lindqvist-Mbeki, 12 March 2027).";
+const k4 = (answer) => ({ task: "matches-sheet", question: "goals?", sheet: changed, answer });
 const cases = [
+  ["pass", k4(goalsChanged)],
+  [
+    "pass",
+    k4(
+      `${goalsChanged} Changes this week: Orkney moved from 12 sensors and 5 Feb to 16 and 12 March; Teodor handed the salinity goal to Marisol.`,
+    ),
+  ],
+  ["fail", k4(goalsOk)],
+  [
+    "fail",
+    k4(
+      goalsChanged.replace(
+        "under 90 s (Marisol Okonkwo-Vance",
+        "under 90 s (Teodor Halvorsen-Abara",
+      ),
+    ),
+  ],
   [
     "pass",
     {

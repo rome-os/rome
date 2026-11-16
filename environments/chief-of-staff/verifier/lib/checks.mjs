@@ -42,6 +42,19 @@ export async function agentMessagesSince(env, { chats, since }) {
 
 const linkPattern = /https?:\/\/\S+/i;
 
+/** The message ids that the links in `text` end in: a link to a message ends in its id. */
+export function linkedIds(text) {
+  return [...String(text ?? "").matchAll(/https?:\/\/\S+/g)]
+    .map((m) =>
+      m[0]
+        .replace(/[)>\].,;]+$/, "")
+        .split(/[/#?]/)
+        .filter(Boolean),
+    )
+    .map((parts) => parts.at(-1))
+    .filter((last) => /^\d+$/.test(last));
+}
+
 export function hasLink(text) {
   return linkPattern.test(text);
 }

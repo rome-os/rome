@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 
 const k5 = JSON.parse(readFileSync(new URL("../seed/k5-questions.json", import.meta.url), "utf8"));
+const hearing = JSON.parse(readFileSync(new URL("../seed/hearing.json", import.meta.url), "utf8"));
 const ROSTER_LINK = "https://docs.example.test/team/roster";
 const GOALS_LINK = "https://docs.example.test/team/goals";
 const link = (m) => `https://discord.example.test/${m.chat}/${m.id}`;
@@ -42,15 +43,50 @@ function roster(state, breaks) {
 }
 
 function goals(state, breaks) {
-  const list = state.team.goals.map((g) => `- ${g.title}, owner ${g.owner}, due ${g.date}`);
+  // Applies each K4 change said in a chat, unless "fail-K4" misses them.
+  const heard = hearing.k4Changes.filter(
+    (c) => breaks !== "K4" && state.messages.some((m) => m.text === c.text),
+  );
+  const list = state.team.goals
+    .map((g) => ({ ...g, ...(heard.find((c) => c.goal === g.id) ?? {}) }))
+    .map((g) => `- ${g.title}, owner ${g.owner}, due ${g.date}`);
   if (breaks === "K2")
     list.push("- Migrate the ops dashboards to Grafanite, owner Gustavo Ferreira-Yildiz");
   return `Current goals (source: ${GOALS_LINK}):\n${list.join("\n")}`;
 }
 
+/** Whether the stand-in still knows what `said` told it. */
+function remembers(state, said, breaks) {
+  if (breaks === "A2" && state.dayMovedAt && Number(said.id) < state.dayMovedAt) return false;
+  if (breaks === "A8" && said.offline) return false;
+  return true;
+}
+
 function answer(state, message, breaks) {
   const text = message.text.trim();
   const forgot = breaks === "K6" && state.restarts > 0;
+
+  // A7: told to stay out of a topic, it says nothing on it until told it may again.
+  const { a7 } = hearing;
+  const lastSaid = (t) => state.messages.findLast((m) => m.text === t && m.id !== message.id);
+  const hint = lastSaid(a7.hint.text);
+  const lift = lastSaid(a7.lift.text);
+  if (text === a7.hint.text || text === a7.lift.text) return "Understood.";
+  const staysOut = hint && (!lift || Number(lift.id) < Number(hint.id)) && breaks !== "A7";
+  if (staysOut && /kelpie-7/i.test(text)) return null;
+  if (text === a7.after.text) return `Firmware 3.0 (source: ${GOALS_LINK}).`;
+  const a7Case = a7.cases.find((c) => c.text === text);
+  if (a7Case && !k5.some((q) => q.q === text))
+    return `${a7Case.tokens[0]} (source: ${ROSTER_LINK}).`;
+
+  // A2 and A8: facts said without a mention, recalled from the chat.
+  const fact = [...hearing.a2Facts, ...hearing.a8Facts].find((f) => f.question === text);
+  if (fact) {
+    const said = state.messages.find((m) => m.text === fact.text);
+    return said && remembers(state, said, breaks)
+      ? `${fact.text} (${link(said)})`
+      : "I don't know; nobody has told me that.";
+  }
 
   if (/who is on the team/i.test(text))
     return forgot ? "I don't know who is on the team." : roster(state, breaks);
@@ -92,11 +128,13 @@ function answer(state, message, breaks) {
       : "I have nothing I can share about that here.";
   }
   if (/orkney pier/i.test(text)) return `Priya Lindqvist-Mbeki (source: ${ROSTER_LINK}).`;
+  // A note in a private chat that asks nothing gets no reply.
+  if (message.chat.startsWith("dm-") && !/commit|week/i.test(text)) return null;
   return "I'm not sure what you're asking.";
 }
 
 /** The stand-in's reply to `message`, as `{ chat, thread, text, delaySeconds }`, or null. */
-export function respond({ agent, state, message }) {
+export function respond({ agent, state, message, catchUp = false }) {
   if (agent === "silent") return null;
   if (agent === "quiet" && !/are you around/i.test(message.text)) return null;
   // "held-statement": writes a reply to each K3 commitment said in general, which the envoy holds.
@@ -118,7 +156,28 @@ export function respond({ agent, state, message }) {
       text: "I have nothing I can share about that here.",
     };
   const breaks = agent.startsWith("fail-") ? agent.slice("fail-".length) : null;
+  // Hearing every message: a message in a shared chat that does not mention the agent gets no
+  // reply, except from "fail-A3", which answers every question it overhears.
+  if (!message.mentionsAgent && !message.chat.startsWith("dm-")) {
+    return breaks === "A3" && message.text.trim().endsWith("?")
+      ? {
+          chat: message.chat,
+          thread: message.thread,
+          text: "I can help with that.",
+          delaySeconds: 20,
+        }
+      : null;
+  }
+  // Catching up after Rome was down: a mention the conversation already settled gets no
+  // reply, except from "fail-A8".
+  if (catchUp) {
+    const settled = state.messages.some(
+      (m) => m.chat === message.chat && Number(m.id) > Number(message.id) && m.author !== "agent",
+    );
+    if (settled && breaks !== "A8") return null;
+  }
   const text = answer(state, message, breaks);
+  if (text === null) return null;
   const thread = breaks === "A5" ? null : message.thread;
   return { chat: message.chat, thread, text, delaySeconds: breaks === "A1" ? 150 : 20 };
 }

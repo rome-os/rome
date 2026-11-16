@@ -1,6 +1,7 @@
 // The Markdown form of a run's report. report.json beside it holds the same facts in full.
 
 function status(result) {
+  if (result.scored === false) return `${result.status.replaceAll("_", " ")}, not scored`;
   if (result.status === "pass" && result.partial) return "pass (partly checked)";
   if (result.status === "fail" && result.stoppedByEnvoy) return "fail (the envoy stopped a reply)";
   return result.status.replaceAll("_", " ");
@@ -22,6 +23,8 @@ function summaryLines(report) {
   ];
   for (const [rule, legs] of Object.entries(byLeg))
     lines.push(`- ${rule} by leg: ${counts(legs)}.`);
+  for (const r of report.results.filter((x) => x.scored === false))
+    lines.push(`- ${r.rule} ran and is reported, not scored: ${r.unscoredWhy}.`);
   return lines;
 }
 
@@ -59,7 +62,7 @@ export function renderMarkdown(report) {
     `- Judge: ${report.judge}, calibrated ${report.judgeCalibration}`,
     `- Run from: \`${report.runFrom.dir}\` at \`${report.runFrom.commit}\``,
     `- Rome's logs: ${report.logs === "logs" ? "`logs/` beside this report" : report.logs}`,
-    `- Waits: reply ${report.waits.replyMs / 1000} s, A1 ${report.waits.a1Ms / 1000} s, poll ${report.waits.pollMs / 1000} s`,
+    `- Waits: reply ${report.waits.replyMs / 1000} s, A1 ${report.waits.a1Ms / 1000} s, poll ${report.waits.pollMs / 1000} s${report.waits.gapMs ? `, between replayed messages ${report.waits.gapMs / 1000} s` : ""}${report.waits.dayHours ? `, "a day later" ${report.waits.dayHours} h on the agent's clock` : ""}${report.waits.offlineMs ? `, offline ${report.waits.offlineMs / 60000} min` : ""}`,
   ];
   if (report.dirty.length > 0) {
     lines.push("", `Run with --dirty: uncommitted changes in ${report.dirty.join(", ")}.`);
@@ -130,6 +133,8 @@ export function renderMarkdown(report) {
         `| ${s.rule ?? "?"} | ${s.chat ?? "?"} | ${s.questionId} | ${s.status} | ${s.scored ? "yes, fails its rule" : `no${s.kind === "statement" ? ", not a question" : ""}`} | ${cell(s.reply)} | ${cell(s.reason)} |`,
       );
   }
+  const cost = report.results.find((r) => r.rule === "A3")?.cost;
+  if (cost) lines.push(...costLines(cost));
   if (report.romeEvents.length > 0) {
     lines.push(
       "",
@@ -143,6 +148,28 @@ export function renderMarkdown(report) {
   }
   lines.push(...failureLines(report.failures));
   return `${lines.join("\n")}\n`;
+}
+
+function costLines(cost) {
+  const lines = [
+    "",
+    "## A3 replay cost",
+    "",
+    "Reported for Ouou's decision on a judging step before the turn; not scored.",
+    "",
+  ];
+  if (cost.notMeasured) return [...lines, `Not measured: ${cost.notMeasured}.`];
+  const n = (x) => x.toLocaleString("en-GB");
+  lines.push(
+    `- Turns started: ${cost.turns}, for ${cost.messages} replayed messages (${cost.messagesPerTurn ?? "no"} messages per turn on average).`,
+    `- Tokens: ${n(cost.tokens.input)} input, ${n(cost.tokens.output)} output, ${n(cost.tokens.cacheRead)} cache read, ${n(cost.tokens.cacheWrite)} cache write.`,
+    `- Cost: ${cost.costUsd} USD.`,
+    "",
+    "| Turn | Started | Replayed messages since the turn before |",
+    "| --- | --- | --- |",
+    ...cost.perTurn.map((t) => `| ${t.turnId} | ${t.start} | ${t.messagesBefore} |`),
+  );
+  return lines;
 }
 
 function failureLines({ earlierRuns, counts, limit }) {

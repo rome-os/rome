@@ -34,7 +34,8 @@ function tally(items) {
  * are tallied on their own. `agentFailures` counts failures that are the agent's: a leg that
  * waits on a design decision is not one.
  */
-export function summarize(results) {
+export function summarize(allResults) {
+  const results = allResults.filter((r) => r.scored !== false);
   const whole = results.filter((r) => !r.byLeg);
   const byLeg = Object.fromEntries(
     results.filter((r) => r.byLeg).map((r) => [r.rule, tally(r.checks)]),
@@ -70,6 +71,7 @@ export function failureHistory(runsRoot, currentDir, results) {
         : [];
       runs.push(name);
       for (const r of earlier.results ?? []) {
+        if (r.scored === false) continue;
         const status = regraded.find((g) => g.rule === r.rule)?.status ?? r.status;
         if (status === "fail") add(r.rule);
       }
@@ -77,7 +79,7 @@ export function failureHistory(runsRoot, currentDir, results) {
       // An unreadable report counts no failures.
     }
   }
-  for (const r of results) if (r.status === "fail") add(r.rule);
+  for (const r of results) if (r.status === "fail" && r.scored !== false) add(r.rule);
   return { earlierRuns: runs, counts, limit: FAILURE_LIMIT };
 }
 
@@ -218,6 +220,7 @@ export async function verify({
     team,
     k5Questions: loadK5Questions(),
     waits,
+    phase: phase ?? 1,
     memo: {},
     log,
     answered,
@@ -255,12 +258,14 @@ export async function verify({
         reason: `Rome was down: ${result.reason}`,
       };
     }
+    const unscored = scenario.unscoredFrom && (phase ?? 1) >= scenario.unscoredFrom;
     results.push({
       rule: scenario.rule,
       title: scenario.title,
       phase: scenario.phase,
       byLeg: Boolean(scenario.legs),
       ...result,
+      ...(unscored ? { scored: false, unscoredWhy: scenario.unscoredWhy } : {}),
     });
     log(`${scenario.rule}: ${result.status}`);
   }

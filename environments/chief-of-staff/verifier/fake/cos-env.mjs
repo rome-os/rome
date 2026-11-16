@@ -37,13 +37,26 @@ function add({ chat, thread = null, author, text, delaySeconds = 3, mentionsAgen
     text,
     time: new Date(state.clock).toISOString(),
     mentionsAgent,
+    offline: Boolean(state.stopped),
   };
   state.messages.push(message);
   return message;
 }
 
-function agentTurn(message) {
-  const out = respond({ agent, state, message });
+function agentTurn(message, catchUp = false) {
+  state.turns = [
+    ...(state.turns ?? []),
+    {
+      start: new Date().toISOString(),
+      turnId: `turn-${(state.turns ?? []).length + 1}`,
+      inputTokens: 1000,
+      outputTokens: 50,
+      cacheReadTokens: 800,
+      cacheWriteTokens: 0,
+      costUsd: 0.001,
+    },
+  ];
+  const out = respond({ agent, state, message, catchUp });
   if (!out) return;
   if (out.held) {
     state.held = [
@@ -119,7 +132,7 @@ switch (command) {
     if (lostTo && message.text.includes(lostTo) && !state.lostOnce) {
       state.lostOnce = true;
       state.romeStarts = (state.romeStarts ?? 0) + 1;
-    } else if (message.mentionsAgent) agentTurn(message);
+    } else if (!state.stopped) agentTurn(message);
     console.log(message.id);
     break;
   }
@@ -129,7 +142,7 @@ switch (command) {
       author: values.as,
       text: positionals.join(" "),
     });
-    agentTurn(message);
+    if (!state.stopped) agentTurn(message);
     console.log(message.id);
     break;
   }
@@ -155,6 +168,14 @@ switch (command) {
     console.log(JSON.stringify(found));
     break;
   }
+  case "clock":
+    // "clock forward <hours>": the agent's clock, and the messages after it, move ahead.
+    state.clock += Number(positionals[1]) * 3600 * 1000;
+    state.dayMovedAt = state.nextId;
+    break;
+  case "usage":
+    for (const turn of state.turns ?? []) console.log(JSON.stringify(turn));
+    break;
   case "logs":
     mkdirSync(positionals[0], { recursive: true });
     writeFileSync(join(positionals[0], "rome.log"), `fake logs since ${values.since}\n`);
@@ -169,7 +190,14 @@ switch (command) {
       console.log(JSON.stringify(state.held ?? []));
       break;
     }
+    if (positionals[0] === "stop") state.stopped = true;
     if (positionals[0] === "restart" || positionals[0] === "start") state.restarts += 1;
+    // Back from a stop, the agent reads what was said while Rome was down.
+    if (positionals[0] === "start" && state.stopped) {
+      state.stopped = false;
+      for (const m of state.messages.filter((x) => x.offline && x.mentionsAgent))
+        agentTurn(m, true);
+    }
     break;
   default:
     console.error(`unknown command ${command}`);

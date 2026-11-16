@@ -74,6 +74,22 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
         return out;
       }
     },
+    /** Moves the agent's clock `hours` ahead of any earlier move; Rome restarts under the new time. */
+    async clockForward(hours) {
+      await call(["clock", "forward", String(hours)]);
+    },
+    /**
+     * The agent's turns since `since` (an ISO time), one per line as `cos-env usage` prints
+     * them: `{ start, turnId, sessionId, session, inputTokens, outputTokens, cacheReadTokens,
+     * cacheWriteTokens, costUsd }`. Throws when the environment has no such command.
+     */
+    async usage(since) {
+      const out = await call(["usage", "--since", since]);
+      return out
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+    },
     async rename({ as, displayName }) {
       await call(["rename", "--as", as, displayName]);
     },

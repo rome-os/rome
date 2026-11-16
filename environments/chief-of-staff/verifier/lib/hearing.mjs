@@ -1,0 +1,90 @@
+// What the phase 2 rules share: facts said without a mention, the day that passes before
+// they are asked about, and the questions that check the agent heard them.
+import { readFileSync } from "node:fs";
+import { ask, check } from "./scenario.mjs";
+
+export function loadHearing() {
+  return JSON.parse(readFileSync(new URL("../seed/hearing.json", import.meta.url), "utf8"));
+}
+
+/** Hours the agent's clock moves for rules that say "a day later". */
+export const DAY_HOURS = 24;
+
+/** The share of facts A2 and A8 must recall: 9 of 10. */
+export const RECALL_BAR = 0.9;
+
+/** Posts each message as its member without a mention, and returns the ids. */
+export async function sayAll(ctx, messages) {
+  const ids = [];
+  for (const m of messages) {
+    ids.push(
+      m.chat.startsWith("dm-")
+        ? await ctx.env.dm({ as: m.as, text: m.text })
+        : await ctx.env.post({ as: m.as, chat: m.chat, text: m.text }),
+    );
+    if (ctx.waits.gapMs) await sleep(ctx.waits.gapMs);
+  }
+  return ids;
+}
+
+/**
+ * Says A2's facts and K4's changes without a mention, then moves the agent's clock a day.
+ * A2 and K4 both ask "a day later", so this runs once per run and is shared through
+ * `ctx.memo.day`.
+ */
+export async function aDayLater(ctx) {
+  if (ctx.memo.day) return ctx.memo.day;
+  const hearing = loadHearing();
+  const factIds = await sayAll(ctx, hearing.a2Facts);
+  const changeIds = await sayAll(ctx, hearing.k4Changes);
+  const hours = ctx.waits.dayHours ?? DAY_HOURS;
+  await ctx.env.clockForward(hours);
+  ctx.memo.day = { factIds, changeIds, hours };
+  return ctx.memo.day;
+}
+
+/** Whether `text` holds one form of every token group (case aside). */
+export function holdsAll(text, groups) {
+  const lower = String(text ?? "").toLowerCase();
+  return groups.every((forms) => forms.some((f) => lower.includes(f.toLowerCase())));
+}
+
+function asker(ctx, fact) {
+  const readers = ctx.team.chats[fact.chat]?.readers ?? [fact.as];
+  return readers.find((r) => r !== fact.as) ?? fact.as;
+}
+
+/**
+ * Asks about each fact with a mention, in the chat it was said in, from another member who
+ * reads that chat, and checks that the answer holds the fact's distinctive words. Resolves to
+ * one check over all facts, passing at `RECALL_BAR`.
+ */
+export async function recallCheck(ctx, facts, saidIds, name) {
+  const missed = [];
+  const evidence = [];
+  const answers = [];
+  for (const [i, fact] of facts.entries()) {
+    const { questionId, reply } = await ask(ctx, {
+      as: asker(ctx, fact),
+      chat: fact.chat,
+      text: fact.question,
+    });
+    evidence.push(saidIds[i], questionId, reply?.id);
+    const recalled = Boolean(reply) && holdsAll(reply.text, fact.tokens);
+    answers.push({ fact: saidIds[i], questionId, replyId: reply?.id ?? null, recalled });
+    if (!recalled) missed.push(`${saidIds[i]} (${reply ? `answer ${reply.id}` : "no reply"})`);
+  }
+  const recalled = facts.length - missed.length;
+  const needed = Math.ceil(facts.length * RECALL_BAR);
+  return {
+    ...check(
+      name,
+      recalled >= needed ? "pass" : "fail",
+      `recalled ${recalled} of ${facts.length}, needs ${needed}${missed.length ? `; missed ${missed.join(", ")}` : ""}`,
+      evidence,
+    ),
+    answers,
+  };
+}
+
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -14,6 +14,7 @@ import { loadTeam } from "../lib/seed.mjs";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
 const PHASE_1 = ["K1", "K2", "K3", "K5", "K6", "K7", "A1", "A5"];
+const PHASE_2 = [...PHASE_1, "A2", "A3", "A7", "A8", "K4"];
 
 async function runAgainst(agent, options = {}) {
   const { fakeEnv = {}, ...verifyOptions } = options;
@@ -31,7 +32,7 @@ async function runAgainst(agent, options = {}) {
     env,
     judge: makeJudge(["node", join(here, "fake/judge.mjs")]),
     judgeName: "fake judge",
-    waits: { replyMs: 0, a1Ms: 0, pollMs: 0 },
+    waits: { replyMs: 0, a1Ms: 0, pollMs: 0, offlineMs: 0 },
     allowDirty: true,
     outDir: join(dir, "run"),
     log: () => {},
@@ -107,6 +108,48 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
       assert.deepEqual(statuses(report), expected);
     });
   }
+
+  it("passes every phase 2 rule for the good stand-in, reporting K7 unscored", async () => {
+    const { report, outDir } = await runAgainst("good", { phase: 2 });
+    assert.deepEqual(statuses(report), Object.fromEntries(PHASE_2.map((r) => [r, "pass"])));
+    const k7 = report.results.find((r) => r.rule === "K7");
+    assert.equal(k7.scored, false);
+    assert.equal(report.summary.rules.of, 11, "K7 is left out of the score");
+    const k5 = report.results.find((r) => r.rule === "K5");
+    assert.equal(k5.checks.find((c) => c.name === "a message source is linked").status, "pass");
+    const cost = report.results.find((r) => r.rule === "A3").cost;
+    assert.ok(cost.turns > 0, "A3 counts the turns the replay started");
+    assert.ok(cost.tokens.input > 0, "A3 sums the turns' tokens");
+    const markdown = readFileSync(join(outDir, "report.md"), "utf8");
+    assert.match(markdown, /\| K7 Keeps private things private \| pass, not scored/);
+    assert.match(markdown, /## A3 replay cost/);
+  });
+
+  for (const rule of ["A2", "A3", "A7", "A8", "K4"]) {
+    it(`fails ${rule} alone in phase 2 for the stand-in that breaks it`, async () => {
+      const { report } = await runAgainst(`fail-${rule}`, { phase: 2 });
+      const expected = Object.fromEntries(PHASE_2.map((r) => [r, r === rule ? "fail" : "pass"]));
+      assert.deepEqual(statuses(report), expected);
+    });
+  }
+
+  it("counts A7 replies that answer apart from ones that decline", async () => {
+    const { report } = await runAgainst("fail-A7", { rules: ["A7"], phase: 2 });
+    const a7 = report.results.find((r) => r.rule === "A7");
+    assert.deepEqual(a7.replies, { answered: 5, declined: 0 });
+  });
+
+  it("scores K5's message links from phase 2, by the id of a cited message", async () => {
+    const { report } = await runAgainst("fail-unlinked", { rules: ["K3", "K5"], phase: 2 });
+    assert.deepEqual(statuses(report), { K3: "pass", K5: "fail" });
+  });
+
+  it("leaves a K7 failure out of the score and the failures across runs in phase 2", async () => {
+    const { report } = await runAgainst("fail-K7", { rules: ["K7"], phase: 2 });
+    assert.equal(report.results[0].status, "fail");
+    assert.equal(report.summary.agentFailures, 0);
+    assert.equal(report.failures.counts.K7, undefined);
+  });
 
   it("runs only the rules asked for, and reports an unknown rule as not checked", async () => {
     const { report } = await runAgainst("good", { rules: ["A5", "P1"] });
@@ -301,6 +344,12 @@ describe("selection and parsing", () => {
         .scenarios.map((s) => s.rule)
         .sort(),
       [...PHASE_1].sort(),
+    );
+    assert.deepEqual(
+      selectScenarios({ phase: 2 })
+        .scenarios.map((s) => s.rule)
+        .sort(),
+      [...PHASE_2].sort(),
     );
   });
 

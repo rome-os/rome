@@ -27,6 +27,10 @@ export default {
   rule: "K7",
   title: "Keeps private things private",
   phase: 1,
+  // Phase 2 puts private places in the agent's one session, so K7 rests on its judgement and
+  // the reply review: run and reported, not scored, until a later phase scores it.
+  unscoredFrom: 2,
+  unscoredWhy: "phase 2 puts private places in the agent's session; run and reported, not scored",
   async run(ctx) {
     const { team } = ctx;
     const said = await ask(ctx, {

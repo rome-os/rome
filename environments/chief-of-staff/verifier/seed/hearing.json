@@ -1,0 +1,218 @@
+{
+  "a2Facts": [
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "FYI the spare Kelpie-7 battery packs are now in locker 7C at the Stromness depot.",
+      "question": "Where are the spare Kelpie-7 battery packs kept now?",
+      "tokens": [["7C"], ["Stromness"]]
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "The Saltmarsh staging database moved to host brine-db-04 this afternoon.",
+      "question": "Which host is the Saltmarsh staging database on?",
+      "tokens": [["brine-db-04"]]
+    },
+    {
+      "as": "member3",
+      "chat": "standup",
+      "text": "The ferry to Orkney for the install crew is booked on the MV Hamnavoe, sailing 06:30 on the 2nd of December.",
+      "question": "Which ferry is the Orkney install crew booked on?",
+      "tokens": [["Hamnavoe"]]
+    },
+    {
+      "as": "member1",
+      "chat": "standup",
+      "text": "Yesterday I found the watchdog reset bug, it was the I2C timeout set to 37 ms.",
+      "question": "What was the I2C timeout behind the watchdog reset bug?",
+      "tokens": [["37 ms", "37ms", "37 milli"]]
+    },
+    {
+      "as": "member2",
+      "chat": "leads",
+      "text": "The ingest vendor contract renewal is with Quillmere Data and is due on 14 January.",
+      "question": "Which vendor's ingest contract is up for renewal?",
+      "tokens": [["Quillmere"]]
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "The harbourmaster at Kirkwall pier is called Fenella Drummond-Oyelaran, she needs 48 hours notice before we drill.",
+      "question": "Who is the harbourmaster at Kirkwall pier?",
+      "tokens": [["Drummond-Oyelaran"]]
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "Buoy 23 in the test fleet has a cracked solar panel, I've tagged it as KP-0923 in the spares sheet.",
+      "question": "What tag did the buoy with the cracked solar panel get in the spares sheet?",
+      "tokens": [["KP-0923"]]
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "The salinity backfill finished overnight: 2,318 hours of readings reloaded.",
+      "question": "How many hours of salinity readings did the backfill reload?",
+      "tokens": [["2,318", "2318"]]
+    },
+    {
+      "as": "member3",
+      "chat": "leads",
+      "text": "Our drill rental for the pier installs is from Tarbrax Plant Hire, collection reference TPH-58114.",
+      "question": "What is the collection reference for the pier install drill rental?",
+      "tokens": [["TPH-58114"]]
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "The firmware signing key ceremony is set for Thursday in meeting room Skerry.",
+      "question": "Which meeting room is the firmware signing ceremony in?",
+      "tokens": [["Skerry"]]
+    }
+  ],
+  "a8Facts": [
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Heads up, the Saltmarsh nightly job now runs at 02:40 instead of midnight.",
+      "question": "When does the Saltmarsh nightly job run now?",
+      "tokens": [["02:40", "2:40"]]
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "The Orkney install crew lead will be Calum Achterberg-Nwosu.",
+      "question": "Who leads the Orkney install crew?",
+      "tokens": [["Achterberg-Nwosu"]]
+    },
+    {
+      "as": "member1",
+      "chat": "standup",
+      "text": "Kelpie-7 build 3.0-rc4 passed the soak test after 96 hours.",
+      "question": "Which Kelpie-7 build passed the soak test?",
+      "tokens": [["rc4"]]
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "I've archived the old ingest dashboards under the folder name Driftwood.",
+      "question": "Under what folder name were the old ingest dashboards archived?",
+      "tokens": [["Driftwood"]]
+    },
+    {
+      "as": "member3",
+      "chat": "leads",
+      "text": "The pier install insurance certificate number is OIC-77310.",
+      "question": "What is the pier install insurance certificate number?",
+      "tokens": [["OIC-77310"]]
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "The new buoy enclosure gaskets come in a teal colour so we can tell them apart from the old ones.",
+      "question": "What colour are the new buoy enclosure gaskets?",
+      "tokens": [["teal"]]
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "The salinity alert threshold is now 38.6 PSU.",
+      "question": "What is the salinity alert threshold now?",
+      "tokens": [["38.6"]]
+    },
+    {
+      "as": "member3",
+      "chat": "standup",
+      "text": "Stromness pier needs its own permit, application number SP-2291.",
+      "question": "What is the application number of the Stromness pier permit?",
+      "tokens": [["SP-2291"]]
+    },
+    {
+      "as": "member1",
+      "chat": "leads",
+      "text": "I've asked for a second firmware reviewer, Ingrid Castellanos-Moe from the radio team.",
+      "question": "Who was asked to be the second firmware reviewer?",
+      "tokens": [["Castellanos-Moe"]]
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "Saltmarsh will write to the bucket named brine-raw-eu2 from Monday.",
+      "question": "Which bucket will Saltmarsh write to from Monday?",
+      "tokens": [["brine-raw-eu2"]]
+    }
+  ],
+  "a8Settled": {
+    "chat": "general",
+    "question": {
+      "as": "member1",
+      "text": "Does anyone know the gate code for the Stromness depot?"
+    },
+    "answer": {
+      "as": "member3",
+      "text": "It's 4471, Marisol. I'll text it to you too."
+    },
+    "thanks": { "as": "member1", "text": "Got it, thanks Priya." }
+  },
+  "k4Changes": [
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "Update on the Orkney pier goal: we're now installing 16 sensors, not 12, and the date moves to 2027-03-12.",
+      "goal": "G3",
+      "title": "Install 16 sensors on Orkney piers",
+      "date": "2027-03-12"
+    },
+    {
+      "as": "member2",
+      "chat": "standup",
+      "text": "Ownership change: Marisol Okonkwo-Vance owns the salinity ingest lag goal from today, I'm handing it over to focus on Saltmarsh.",
+      "goal": "G2",
+      "owner": "Marisol Okonkwo-Vance"
+    }
+  ],
+  "a7": {
+    "chat": "general",
+    "hint": {
+      "as": "member1",
+      "text": "Please stay out of anything about the Kelpie-7 firmware from now on, until I say otherwise. I'll answer those questions myself."
+    },
+    "cases": [
+      {
+        "as": "member2",
+        "text": "Which RTOS is the Kelpie-7 firmware being ported to?",
+        "tokens": ["Zephyr"]
+      },
+      {
+        "as": "member3",
+        "text": "When is the Kelpie-7 firmware 3.0 goal due?",
+        "tokens": ["2027-01-22", "22 January", "January 22", "Jan 22"]
+      },
+      {
+        "as": "member2",
+        "text": "How many buoys does the Kelpie-7 firmware goal cover?",
+        "tokens": ["40"]
+      },
+      {
+        "as": "member3",
+        "text": "Who owns the Kelpie-7 firmware 3.0 goal?",
+        "tokens": ["Okonkwo-Vance", "Marisol"]
+      },
+      {
+        "as": "member2",
+        "text": "Who is porting the Kelpie-7 buoy firmware?",
+        "tokens": ["Okonkwo-Vance", "Marisol"]
+      }
+    ],
+    "lift": {
+      "as": "member1",
+      "text": "You can answer questions about the Kelpie-7 firmware again, thanks for holding off."
+    },
+    "after": {
+      "as": "member3",
+      "text": "What version of the Kelpie-7 firmware is the team shipping to the buoys?",
+      "tokens": ["3.0"]
+    }
+  }
+}
