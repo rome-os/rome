@@ -1,5 +1,6 @@
 // @rstest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { VoiceInputInfo } from "@rome/api-types/voice-input";
@@ -104,5 +105,37 @@ describe("choosing the microphone in Settings", () => {
       expect(document.body.textContent).toContain("The chosen microphone isn't connected"),
     );
     expect(text).toContain("Microphone");
+  });
+
+  it("goes back to the system default when it is picked while the chosen microphone is not connected", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "gone");
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const user = userEvent.setup();
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(select.textContent).toContain("Chosen microphone (not connected)"));
+
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "System default" }));
+
+    expect(localStorage.getItem("rome.voiceInput.microphone")).toBeNull();
+    await waitFor(() => expect(select.textContent).toContain("System default"));
+    expect(document.body.textContent).not.toContain("isn't connected");
+  });
+
+  it("keeps showing the microphone voice input uses when the browser refuses to save a choice", async () => {
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    rs.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const user = userEvent.setup();
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(select.textContent).toContain("System default"));
+
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "USB Microphone" }));
+
+    await waitFor(() => expect(select.textContent).toContain("System default"));
   });
 });

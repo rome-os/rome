@@ -123,13 +123,11 @@ function MicrophoneRow() {
           </Button>
         ) : (
           <Select
-            value={chosen && !missing ? chosen : SYSTEM_DEFAULT}
+            value={chosen ?? SYSTEM_DEFAULT}
             disabled={options === undefined}
-            onValueChange={(value) => {
-              const id = value === SYSTEM_DEFAULT ? null : value;
-              chooseMicrophone(id);
-              setChosen(id);
-            }}
+            onValueChange={(value) =>
+              setChosen(chooseMicrophone(value === SYSTEM_DEFAULT ? null : value))
+            }
           >
             <SelectTrigger
               id={`${uid}-microphone`}
@@ -141,6 +139,12 @@ function MicrophoneRow() {
               <SelectItem value={SYSTEM_DEFAULT}>
                 {t("system.voiceInput.microphone.systemDefault")}
               </SelectItem>
+              {/* Kept as its own item so picking System default clears it. */}
+              {missing && chosen && (
+                <SelectItem value={chosen} disabled>
+                  {t("system.voiceInput.microphone.notConnected")}
+                </SelectItem>
+              )}
               {options?.map((option) => (
                 <SelectItem key={option.id} value={option.id}>
                   {option.label}

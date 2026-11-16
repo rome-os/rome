@@ -2,6 +2,8 @@
 // belong to one browser profile and one origin, so the choice cannot follow
 // the guardian to another device.
 
+import { readStored, writeStored } from "@/lib/stored-preference";
+
 const KEY = "rome.voiceInput.microphone";
 
 export interface MicrophoneOption {
@@ -11,21 +13,17 @@ export interface MicrophoneOption {
 
 /** The chosen microphone's device id, or null for the system default. */
 export function chosenMicrophone(): string | null {
-  try {
-    return localStorage.getItem(KEY) || null;
-  } catch {
-    return null;
-  }
+  return readStored(KEY) || null;
 }
 
-/** Keeps `id` as the microphone to record from; null goes back to the system default. */
-export function chooseMicrophone(id: string | null): void {
-  try {
-    if (id) localStorage.setItem(KEY, id);
-    else localStorage.removeItem(KEY);
-  } catch {
-    // Storage refused (private mode, full): the system default stays in use.
-  }
+/**
+ * Keeps `id` as the microphone to record from; null goes back to the system
+ * default. Returns the choice storage now holds, which is the earlier one
+ * when storage refuses the write (private mode, full).
+ */
+export function chooseMicrophone(id: string | null): string | null {
+  writeStored(KEY, id || null);
+  return chosenMicrophone();
 }
 
 /**

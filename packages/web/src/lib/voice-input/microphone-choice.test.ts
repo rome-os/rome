@@ -22,6 +22,15 @@ describe("the chosen microphone", () => {
     expect(chosenMicrophone()).toBeNull();
   });
 
+  it("reports the earlier choice when storage refuses a new one", () => {
+    chooseMicrophone("usb-mic");
+    const setItem = rs.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    expect(chooseMicrophone("headset")).toBe("usb-mic");
+    setItem.mockRestore();
+  });
+
   it("lists the browser's microphones without Chrome's default and communications entries", async () => {
     devices([
       { kind: "audioinput", deviceId: "default", label: "Default - MacBook Pro Microphone" },
