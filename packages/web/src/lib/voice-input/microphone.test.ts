@@ -3,16 +3,19 @@ import { describe, expect, it, rs } from "@rstest/core";
 import { loudness, openMicrophoneStream } from "./microphone";
 import { chooseMicrophone, chosenMicrophone } from "./microphone-choice";
 
-function browser(getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>) {
+function browser(
+  getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
+  devices: Array<Partial<MediaDeviceInfo>> = [],
+) {
   const spy = rs.fn(getUserMedia);
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
-    value: { getUserMedia: spy },
+    value: { getUserMedia: spy, enumerateDevices: async () => devices },
   });
   return spy;
 }
 
-const stream = {} as MediaStream;
+const stream = { getTracks: () => [] } as unknown as MediaStream;
 const failure = (name: string) => Object.assign(new Error(name), { name });
 
 describe("opening the microphone", () => {
@@ -24,7 +27,7 @@ describe("opening the microphone", () => {
   });
 
   it("falls back to the system default, and switches the choice to it, when the chosen microphone is unplugged", async () => {
-    chooseMicrophone("usb");
+    chooseMicrophone({ id: "usb", label: "USB Microphone" });
     const getUserMedia = browser(async (constraints) => {
       if ((constraints.audio as MediaTrackConstraints).deviceId)
         throw failure("OverconstrainedError");
@@ -34,6 +37,31 @@ describe("opening the microphone", () => {
     const audio = getUserMedia.mock.calls[1]?.[0]?.audio as MediaTrackConstraints;
     expect(audio.deviceId).toBeUndefined();
     expect(chosenMicrophone()).toBeNull();
+  });
+
+  it("finds the chosen microphone by name when the browser gave it a new id on this page load", async () => {
+    chooseMicrophone({ id: "old-id", label: "USB Microphone" });
+    const usb = { getTracks: () => [] } as unknown as MediaStream;
+    const stopped = rs.fn();
+    const fallback = { getTracks: () => [{ stop: stopped }] } as unknown as MediaStream;
+    const getUserMedia = browser(
+      async (constraints) => {
+        const id = (constraints.audio as MediaTrackConstraints).deviceId as
+          | { exact: string }
+          | undefined;
+        if (!id) return fallback;
+        if (id.exact === "new-id") return usb;
+        throw failure("OverconstrainedError");
+      },
+      [
+        { kind: "audioinput", deviceId: "mbp", label: "MacBook Pro Microphone" },
+        { kind: "audioinput", deviceId: "new-id", label: "USB Microphone" },
+      ],
+    );
+    expect(await openMicrophoneStream("old-id")).toBe(usb);
+    expect(getUserMedia).toHaveBeenCalledTimes(3);
+    expect(stopped).toHaveBeenCalled();
+    expect(chosenMicrophone()).toBe("new-id");
   });
 
   it("still reports a refused microphone rather than trying another", async () => {

@@ -110,6 +110,16 @@ describe("choosing the microphone in Settings", () => {
     ]);
   });
 
+  it("keeps the chosen microphone when the browser gives it a new id after a reload", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "old-id");
+    localStorage.setItem("rome.voiceInput.microphoneLabel", "USB Microphone");
+    devices([{ kind: "audioinput", deviceId: "new-id", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(select.textContent).toContain("USB Microphone"));
+    expect(localStorage.getItem("rome.voiceInput.microphone")).toBe("new-id");
+  });
+
   it("keeps showing the microphone voice input uses when the browser refuses to save a choice", async () => {
     devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
     rs.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
