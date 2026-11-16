@@ -51,7 +51,11 @@ import { SlashSkillMenu } from "./composer/SlashSkillMenu";
 import { useSlashSkill } from "./composer/use-slash-skill";
 import { findMentionToken, useTokenPicker } from "./composer/use-token-picker";
 import { useVoiceInput } from "./composer/use-voice-input";
-import { VoiceInputButton, VoiceInputNotice } from "./composer/VoiceInputControl";
+import {
+  VoiceInputButton,
+  VoiceInputNotice,
+  VoiceInputWaveform,
+} from "./composer/VoiceInputControl";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { ReplyBar } from "./reply/ReplyBar";
 import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
@@ -1179,6 +1183,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                 disabled={uploadInFlight}
               />
             )}
+            {voice.state === "listening" ? (
+              <VoiceInputWaveform level={voice.level} className="min-w-24 flex-1" />
+            ) : null}
           </div>
           {/* Stop sits just left of Send. */}
           <div className="flex items-center gap-2 self-end [grid-area:send]">

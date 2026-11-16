@@ -42,6 +42,7 @@ rs.mock("@/lib/voice-input/microphone", () => ({
       close: () => {
         microphone.closed += 1;
       },
+      level: () => 0,
     };
   },
 }));
@@ -470,6 +471,19 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
       false,
     );
     expect(field().value).toBe("hello");
+  });
+
+  it("shows the waveform inside the message field only while listening", async () => {
+    renderComposer(kind);
+    const waveform = () => document.querySelector("form [data-voice-input-waveform]");
+    await screen.findByRole("button", { name: "Start voice input" });
+    expect(waveform()).toBeNull();
+    const socket = await startListening();
+    expect(waveform()).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    // The microphone is closed while the rest of the text arrives.
+    expect(waveform()).toBeNull();
   });
 
   it("gives the field back when Rome never answers a stop", async () => {

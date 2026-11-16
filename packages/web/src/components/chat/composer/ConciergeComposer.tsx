@@ -65,7 +65,7 @@ import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
-import { VoiceInputButton, VoiceInputNotice } from "./VoiceInputControl";
+import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -626,6 +626,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 }
               />
             </div>
+            {voice.state === "listening" ? (
+              <VoiceInputWaveform level={voice.level} className="w-20 shrink-0" />
+            ) : null}
             {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
