@@ -2,7 +2,7 @@
 // Vocabulary: docs/domains/participation.md#projection and
 // docs/domains/people.md#who-is-this.
 
-import type { Account } from "@rome-os/app-runtime";
+import type { Account, SaidSender } from "@rome-os/app-runtime";
 import type { PromptMessage, UnseenMessage } from "../agent/index.js";
 import type { BondLevel, Person, PeopleRepository } from "../db/repositories/people.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
@@ -15,23 +15,32 @@ const BOND_LEVEL_WORDS: Record<BondLevel, string> = {
 };
 
 /**
- * Who a message's sender is, as the agent reads it: the person and bond level
- * People says is behind the account, or "not linked" when People answers
- * nobody. `person` is that answer for `line.account`. Null for a message with
- * no account, such as one of Rome's own. Never built from the name the
- * message showed, which the sender chose.
+ * Who said a message from `account`: the person People says is behind it,
+ * with their bond level, or nobody, and whether the account is that person's
+ * agent (a delegate link). `person` is People's answer for `account`. Never
+ * built from the name the message showed, which the sender chose.
  */
-export function whoSaid(line: ContextLine, person: Person | null): string | null {
-  const { account } = line;
-  if (!account) return null;
-  if (!person) return "not linked";
+export function whoIs(account: Account, person: Person | null): SaidSender {
+  if (!person) return { person: null, delegate: false, label: "not linked" };
   const bond = BOND_LEVEL_WORDS[person.bondLevel];
   const delegate = person.links.some(
     (link) => link.delegate && link.platform === account.platform && link.id === account.id,
   );
-  return delegate
-    ? `agent acting for ${person.displayName}, ${bond}`
-    : `${person.displayName}, ${bond}`;
+  return {
+    person: { id: person.id, name: person.displayName, bondLevel: person.bondLevel },
+    delegate,
+    label: delegate
+      ? `agent acting for ${person.displayName}, ${bond}`
+      : `${person.displayName}, ${bond}`,
+  };
+}
+
+/**
+ * Who a message's sender is, as the agent reads it: {@link whoIs}'s label.
+ * Null for a message with no account, such as one of Rome's own.
+ */
+export function whoSaid(line: ContextLine, person: Person | null): string | null {
+  return line.account ? whoIs(line.account, person).label : null;
 }
 
 /**
@@ -41,6 +50,11 @@ export function whoSaid(line: ContextLine, person: Person | null): string | null
  */
 export class SenderLabels {
   constructor(private readonly people: Pick<PeopleRepository, "byAccount">) {}
+
+  /** Who said a message from `account`, asking People now. */
+  async sender(account: Account): Promise<SaidSender> {
+    return whoIs(account, await this.people.byAccount(account));
+  }
 
   /** `lines` as the agent reads them, in the same order. */
   async read(lines: readonly ContextLine[]): Promise<PromptMessage[]> {

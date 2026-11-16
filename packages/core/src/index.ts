@@ -1945,6 +1945,7 @@ async function main() {
     recording: inboundRecorder,
     events: chatsEvents,
     wakes: chatsWired.links,
+    labels: chatsWired.labels,
   });
   const hookChatStop = legacyChatIdStop(chatStop);
   // Every app that declares a channel-message hook hears through its own,
