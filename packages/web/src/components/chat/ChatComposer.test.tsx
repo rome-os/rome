@@ -676,20 +676,34 @@ describe("composer scoped slash skill", () => {
     });
   });
 
-  it("keeps the original composing-key and empty-Backspace behavior", async () => {
+  it("leaves keys to an input method while it composes, and keeps empty-Backspace behavior", async () => {
     renderComposer({});
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: "/" } });
     await screen.findByText("/identity_probe");
 
-    const arrow = new KeyboardEvent("keydown", {
+    // Chromium sends the Enter that confirms a pinyin candidate as
+    // key "Enter" with isComposing true and keyCode 229.
+    const composingArrow = new KeyboardEvent("keydown", {
       key: "ArrowRight",
       bubbles: true,
       cancelable: true,
       isComposing: true,
     });
-    fireEvent(textarea, arrow);
-    expect(arrow.defaultPrevented).toBe(true);
+    fireEvent(textarea, composingArrow);
+    expect(composingArrow.defaultPrevented).toBe(false);
+    const composingEnter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+    });
+    fireEvent(textarea, composingEnter);
+    expect(composingEnter.defaultPrevented).toBe(false);
+    expect(screen.queryByRole("button", { name: "Remove skill" })).toBeNull();
+
+    fireEvent.keyDown(textarea, { key: "ArrowRight" });
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
     expect(textarea.value).toBe("");

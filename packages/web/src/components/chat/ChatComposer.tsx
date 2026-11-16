@@ -29,7 +29,7 @@ import {
   LARGE_MODEL_OPTIONS,
 } from "@/lib/chat-constants";
 import { getProjectDisplayName, isReasoningEffort } from "@/lib/chat-helpers";
-import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
+import { isImeCompositionEvent, shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 import type {
   AgentMention,
   PendingUpload,
@@ -869,6 +869,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // through the send button — soft keyboards have no Shift+Enter, and an
   // accidental tap on Enter shouldn't fire a half-written message.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Keys pressed while an input method composes belong to its candidate
+    // list: that Enter confirms a candidate, and the arrows move through it.
+    if (isImeCompositionEvent(e)) return;
     if (skillPicker.handleKeyDown(e)) return;
     if (mentionPicker.handleKeyDown(e)) return;
     if (e.key === "Escape" && replyDraft?.target) {
