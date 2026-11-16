@@ -118,6 +118,11 @@ export class MessageStatusTracker {
     });
   }
 
+  /** The messages that joined chat `chatId`'s running turn after it called a tool. */
+  joinedIn(chatId: string): readonly string[] {
+    return [...(this.joined.get(chatId) ?? [])];
+  }
+
   /** Call `callId` of chat `chatId`'s running turn came back: its grace ends. */
   toolEnded(chatId: string, callId: string): void {
     this.calls.get(chatId)?.get(callId)?.done();

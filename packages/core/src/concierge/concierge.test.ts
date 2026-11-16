@@ -6751,6 +6751,72 @@ describe("Concierge tasks started for a guardian message", () => {
       await s.settle();
       expect(s.pushes).toEqual([]);
     });
+
+    describe("a turn that ends without answering (docs/domains/chats.md#reaction)", () => {
+      /** The turn makes one quick working call, as `defer` does. */
+      const quickCall = async (s: ReturnType<typeof setup>) => {
+        const { id } = callTool(s, "defer");
+        await rs.advanceTimersByTimeAsync(30);
+        s.service.messageStatus.toolEnded(CONCIERGE_CHAT, id);
+      };
+
+      it("reacts ✅ to a message a defer-only turn left silent", async () => {
+        const s = setup({ said: false });
+        s.fakeTimers();
+        guardianSays(s, "g1");
+        await taken(s, "g1");
+        await quickCall(s);
+        await conciergeEnds(s);
+        await s.settle();
+        expect(s.reactions.get(`${CONCIERGE_CHAT}:g1`)).toBe("✅");
+        expect(await statusOf(s, "g1")).toBeNull();
+      });
+
+      it.each([
+        ["reacts", (s: ReturnType<typeof setup>) => s.tool("react", { emoji: "👍" }), "👍"],
+        [
+          "replies",
+          (s: ReturnType<typeof setup>) => s.tool("say", { text: "Will do." }),
+          undefined,
+        ],
+      ])("adds nothing when the turn %s", async (_, answer, reaction) => {
+        const s = setup({ said: false });
+        s.fakeTimers();
+        guardianSays(s, "g1");
+        await taken(s, "g1");
+        await quickCall(s);
+        expect((await answer(s)).isError).toBeFalsy();
+        await conciergeEnds(s);
+        await s.settle();
+        expect(s.reactions.get(`${CONCIERGE_CHAT}:g1`)).toBe(reaction);
+      });
+
+      it("adds nothing to a message that joined the turn", async () => {
+        const s = setup({ said: false });
+        s.fakeTimers();
+        guardianSays(s, "a");
+        guardianSays(s, "thanks");
+        await taken(s, "a");
+        await quickCall(s);
+        await taken(s, "thanks", "concierge-turn-1", { joined: true });
+        await conciergeEnds(s);
+        await s.settle();
+        expect(s.reactions.get(`${CONCIERGE_CHAT}:a`)).toBe("✅");
+        expect(s.reactions.has(`${CONCIERGE_CHAT}:thanks`)).toBe(false);
+      });
+
+      it("shows ⚠️, not ✅, when the turn failed", async () => {
+        const s = setup({ said: false });
+        s.fakeTimers();
+        guardianSays(s, "g1");
+        await taken(s, "g1");
+        await quickCall(s);
+        await conciergeEnds(s, "error");
+        await s.settle();
+        expect(s.reactions.has(`${CONCIERGE_CHAT}:g1`)).toBe(false);
+        expect(await statusOf(s, "g1")).toBe("failed");
+      });
+    });
   });
 });
 

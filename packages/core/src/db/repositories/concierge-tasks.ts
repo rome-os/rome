@@ -840,6 +840,43 @@ export class ConciergeTasksRepository {
   }
 
   /**
+   * The open messages of Concierge chat `chatId` that turn `turnId` took and
+   * gave no sign: no reaction, no working shown and no task made for them.
+   */
+  async unansweredOf(chatId: string, turnId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ key: conciergeMessageTurns.messageKey })
+      .from(conciergeMessageTurns)
+      .where(
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          eq(conciergeMessageTurns.turnId, turnId),
+          isNull(conciergeMessageTurns.answeredAt),
+          isNull(conciergeMessageTurns.workingAt),
+          eq(conciergeMessageTurns.reacted, false),
+        ),
+      );
+    if (rows.length === 0) return [];
+    const linked = new Set(
+      (
+        await this.db
+          .select({ key: conciergeMessageTasks.messageKey })
+          .from(conciergeMessageTasks)
+          .where(
+            and(
+              eq(conciergeMessageTasks.chatId, chatId),
+              inArray(
+                conciergeMessageTasks.messageKey,
+                rows.map((row) => row.key),
+              ),
+            ),
+          )
+      ).map((row) => row.key),
+    );
+    return rows.map((row) => row.key).filter((key) => !linked.has(key));
+  }
+
+  /**
    * Whether an open message of Concierge chat `chatId` showed working before
    * the running turn took it: work an earlier turn handed on.
    */

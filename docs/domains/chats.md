@@ -109,7 +109,7 @@ An emoji the Concierge puts on its owner's message in a [Concierge chat](#concie
 - The Concierge handles each message in one way. It answers with a message, or it starts a task, with a card or without, or it only reacts. 👍 (a plain yes, or an instruction noted), ❤️ and 🙏 (thanks) and the like answer a message that needs no answer. A thanks or an OK gets ❤️ or 👍, or one short sentence, and never a task. ✅ alone says a small thing the Concierge did itself is done.
 - A task's result most often comes as a message.
 - It never says one thing twice: no reaction that repeats its message, no ✅ with a result message.
-- Rome sets no reaction itself. How the work on a message stands is its [status](#status), which shows over the reaction.
+- Rome sets ✅ only as a fallback when a turn ends without answering. A turn that completes and leaves a message it started with without a reply, a reaction, a working mark or a task gets ✅ on it, so its owner always sees a response. Any message the turn said counts as a reply, and a message that joined the turn gets none. A turn that failed shows ⚠️ instead. Rome sets no other reaction. How the work on a message stands is its [status](#status), which shows over the reaction.
 - A message shows one emoji for its whole life. A message that showed working takes no reaction, even once answered: `react` leaves it as it is and tells the Concierge so, and the Concierge answers it in one short line instead.
 - It is not a message. It never reaches the phone as a push, it does not answer the message, and it does nothing when pressed. A turn that only reacts is silent.
 - Only a Concierge chat has them: a [main chat](#main-chat) or a [topic chat](#topic-chat). A common chat has none, and neither does a task chat.

@@ -366,6 +366,23 @@ export function startConciergeEvents(
     },
   }).start();
 
+  // A turn that ended without any sign on a message it started with, no
+  // reply, reaction, working mark or task, reacts ✅ to it, so its owner
+  // always sees a response (docs/domains/chats.md#reaction). Any message the
+  // turn said counts as its reply. A message that joined the turn is left
+  // alone.
+  const reactToUnanswered = async (chatId: string, ended: string) => {
+    const said = await webchatRepo.getTurnChatMessages(chatId, ended);
+    if (said.some((row) => row.role === "assistant")) return;
+    const joined = new Set(service.messageStatus.joinedIn(chatId));
+    for (const key of await tasks.repo.unansweredOf(chatId, ended)) {
+      if (joined.has(key)) continue;
+      if (await webchatRepo.setMessageReaction(chatId, key, "✅")) {
+        await service.messageStatus.reactedTo(chatId, key);
+      }
+    }
+  };
+
   // The owner's messages a Concierge turn took settle once the chat runs no
   // turn that carries them: done when it completed, failed when it failed or
   // was abandoned, and stopped, which clears them, when it was stopped. A
@@ -382,6 +399,14 @@ export function startConciergeEvents(
     // The turn that takes the work over has not started yet when this one
     // ends, so the session says whether a newer input took it over.
     if (status === "interrupted" && (handedOn || running.length > 0)) return;
+    if (status === "completed") {
+      await reactToUnanswered(chatId, ended).catch((error: unknown) =>
+        log.warn("failed to react to a message a turn left unanswered", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     service.turnSettled(chatId);
     // A newer turn already running keeps its own timers and triggers.
     if (running.length === 0) service.messageStatus.turnSettled(chatId);
