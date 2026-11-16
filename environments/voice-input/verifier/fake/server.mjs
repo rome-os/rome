@@ -17,6 +17,9 @@
 //            reason, and Enter sends nothing
 //   fail-1   the field shows listening, and idle again, 800 ms after the action
 //   fail-9   the microphone stays open after listening stops, and silence never stops it
+//   fail-12  listening uses the browser's default microphone, whichever one Settings chose
+//   fail-13  Enter while listening sends at once, without the words still arriving
+//   fail-14  the sign of hearing pulses on its own, in silence too
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { basename } from "node:path";
@@ -36,6 +39,9 @@ export const VARIANTS = [
   "fail-8",
   "fail-9",
   "fail-1",
+  "fail-12",
+  "fail-13",
+  "fail-14",
 ];
 
 // Rome's own WebSocket server, for the voice input socket the iOS app speaks.
@@ -127,7 +133,18 @@ async function handle(req, res, statePath, script) {
 <label id="lang">Language</label>
 <button role="combobox" aria-labelledby="lang">${state.lang === "zh" ? "中文" : "English"}</button>
 <div role="listbox" hidden><div role="option" data-lang="en">English</div><div role="option" data-lang="zh">中文</div></div>
+<label>Microphone <select id="mic"></select></label>
 <script>
+// The microphone choice lives in this browser, as the dashboard keeps it.
+const mic = document.getElementById("mic");
+navigator.mediaDevices.enumerateDevices().then((devices) => {
+  for (const d of devices.filter((d) => d.kind === "audioinput" && d.deviceId !== "default")) {
+    const o = new Option(d.label, d.deviceId);
+    o.selected = d.deviceId === localStorage.getItem("voice-mic");
+    mic.append(o);
+  }
+});
+mic.onchange = () => localStorage.setItem("voice-mic", mic.value);
 const box = document.querySelector("[role=listbox]");
 document.querySelector("[role=combobox]").onclick = () => (box.hidden = false);
 for (const o of box.children)
@@ -212,8 +229,9 @@ function listen(req, res, statePath, script) {
     (m) => basename(m.path) === basename(state.mic ?? ""),
   );
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+  // A recording outside the script, such as rule 14's tones, gets no words and stays open.
   if (!message) {
-    res.end();
+    req.on("close", () => res.end());
     return;
   }
   // The page stops listening on its own this long after the last word, as 30 s of silence would.
@@ -230,6 +248,8 @@ function listen(req, res, statePath, script) {
       res.write(`data: ${JSON.stringify(pieces.slice(0, i + 1).join(""))}\n\n`);
     }, at * 1000);
   });
+  // The transcriber has sent every word of the recording.
+  timers.push(setTimeout(() => res.write("event: done\ndata: null\n\n"), last * 1000 + 50));
   const { error } = state.transcriber;
   if (state.transcriber.mode === "stand-in" && error)
     timers.push(
@@ -443,6 +463,10 @@ field.addEventListener("input", () => {
 field.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
+  if (listening) {
+    enterWhileListening();
+    return;
+  }
   if (!mentions.hidden) {
     if (option.textContent === "Notes") {
       option.textContent = "Notes keeper";
@@ -484,14 +508,28 @@ async function start() {
   if (asked.state === "prompt" && variant !== "fail-8") notice(words.reason);
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chosen = localStorage.getItem("voice-mic");
+    const audio = chosen && variant !== "fail-12" ? { deviceId: { exact: chosen } } : true;
+    stream = await navigator.mediaDevices.getUserMedia({ audio });
   } catch {
     notice(variant === "fail-8" ? null : words.blocked);
     return;
   }
   notice(null);
   const source = new EventSource("/api/voice/listen");
-  listening = { head, tail, lead, source, stream, heard: "", startedAt: performance.now() };
+  listening = {
+    head,
+    tail,
+    lead,
+    source,
+    stream,
+    heard: "",
+    startedAt: performance.now(),
+    hideHearing: showHearing(stream),
+  };
+  source.addEventListener("done", () => {
+    if (listening) listening.done = true;
+  });
   setListening(true);
   source.onmessage = (event) => {
     listening.heard = lead + JSON.parse(event.data);
@@ -510,8 +548,9 @@ async function start() {
 
 /** Stops listening; \`reason\` is why, when it was not the guardian's stop action. */
 function stop(reason) {
-  const { head, tail, source, stream, heard, startedAt, silence } = listening;
+  const { head, tail, source, stream, heard, startedAt, silence, hideHearing } = listening;
   source.close();
+  hideHearing();
   clearTimeout(silence);
   if (variant !== "fail-9") for (const track of stream.getTracks()) track.stop();
   // Rome reports the seconds listened to Rome Cloud when listening stops.
@@ -543,6 +582,54 @@ function stop(reason) {
 }
 
 button.addEventListener("click", () => (listening ? stop() : start()));
+
+// Enter ends listening and sends: the microphone closes at once, and the message goes once the
+// transcriber has sent the words still arriving.
+function enterWhileListening() {
+  if (variant === "fail-13") {
+    stop();
+    sendMessage();
+    return;
+  }
+  for (const track of listening.stream.getTracks()) track.stop();
+  const finish = () => {
+    if (!listening) return;
+    stop();
+    sendMessage();
+  };
+  if (listening.done) return finish();
+  listening.source.addEventListener("done", finish);
+  setTimeout(finish, 3000);
+}
+
+/** A bar in the form as wide as the sound the microphone hears, and gone in silence. */
+function showHearing(stream) {
+  const bar = document.createElement("span");
+  bar.className = "hearing";
+  bar.style.cssText = "display:inline-block;height:8px;width:0;background:#06c";
+  form.append(bar);
+  if (variant === "fail-14") {
+    bar.animate([{ width: "4px" }, { width: "40px" }], { duration: 400, iterations: Infinity });
+    return () => bar.remove();
+  }
+  const context = new AudioContext();
+  const analyser = context.createAnalyser();
+  context.createMediaStreamSource(stream).connect(analyser);
+  const data = new Float32Array(analyser.fftSize);
+  let frame;
+  const draw = () => {
+    analyser.getFloatTimeDomainData(data);
+    const rms = Math.sqrt(data.reduce((sum, v) => sum + v * v, 0) / data.length);
+    bar.style.width = (rms < 0.01 ? 0 : Math.min(60, Math.round(rms * 200))) + "px";
+    frame = requestAnimationFrame(draw);
+  };
+  draw();
+  return () => {
+    cancelAnimationFrame(frame);
+    context.close();
+    bar.remove();
+  };
+}
 
 // Opening another chat is in-app: the field shows that chat's draft.
 function openChat(next) {

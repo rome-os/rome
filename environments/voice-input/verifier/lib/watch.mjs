@@ -15,7 +15,8 @@ function watcher() {
     devices.getUserMedia = async (constraints) => {
       const stream = await getUserMedia(constraints);
       for (const track of stream.getAudioTracks()) {
-        const entry = { openedAt: performance.now(), endedAt: null, track };
+        const { deviceId } = track.getSettings();
+        const entry = { openedAt: performance.now(), endedAt: null, track, deviceId };
         watch.tracks.push(entry);
         track.addEventListener("ended", () => {
           entry.endedAt ??= performance.now();
@@ -58,13 +59,21 @@ export async function watchPage(page) {
   await page.reload();
 }
 
-/** `{ open, tracks: [{ openedAt, endedAt }] }`: how many audio tracks are live now, and each one's times. */
+/**
+ * `{ open, tracks: [{ openedAt, endedAt, label, deviceId }] }`: how many audio tracks are live
+ * now, and each one's times and the microphone it captures from.
+ */
 export async function micState(page) {
   return page.evaluate(() => {
     const tracks = window.__watch?.tracks ?? [];
     return {
       open: tracks.filter((t) => t.track.readyState === "live").length,
-      tracks: tracks.map(({ openedAt, endedAt }) => ({ openedAt, endedAt })),
+      tracks: tracks.map(({ openedAt, endedAt, track, deviceId }) => ({
+        openedAt,
+        endedAt,
+        label: track.label,
+        deviceId,
+      })),
     };
   });
 }

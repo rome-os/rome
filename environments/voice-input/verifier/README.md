@@ -1,6 +1,6 @@
 # Voice input verifier
 
-The verifier scores voice input against rule set V5 (`~/.rome-environments/voice-input/rules-V5.md`), pass or fail per rule. It sees the product only as a guardian does, through Chrome and the contract in the rules. It drives the environment only through the `voice-env` command that `environments/voice-input/` provides.
+The verifier scores voice input against rule set V5 (`~/.rome-environments/voice-input/rules-V5.md`), pass or fail per rule. It also scores rules 12 to 14 of the V6 draft (`rules-V6-draft.md` beside it), phase 4, which wait on Ouou. It sees the product only as a guardian does, through Chrome and the contract in the rules. It drives the environment only through the `voice-env` command that `environments/voice-input/` provides.
 
 ## Run it
 

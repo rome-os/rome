@@ -41,6 +41,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 const PHASE_1 = ["2", "3", "5", "6", "10", "11"];
 const PHASE_2 = ["4", "7", "8", "9"];
 const PHASE_3 = ["1"];
+const PHASE_4 = ["12", "13", "14"];
 
 /**
  * A short copy of the script: per set, two English, one Mandarin and one mixed message, with
@@ -127,13 +128,13 @@ async function runAgainst(variant, options = {}) {
 
 const statuses = (report) => Object.fromEntries(report.results.map((r) => [r.rule, r.status]));
 
-describe("verify against the stand-in product", { concurrency: 3, timeout: 600000 }, () => {
+describe("verify against the stand-in product", { concurrency: 3, timeout: 900000 }, () => {
   for (const variant of VARIANTS) {
     it(`scores ${variant}`, async () => {
       const broken = variant === "good" ? [] : [variant.slice("fail-".length).replace(/\D+$/, "")];
       // A broken variant is scored on its own phase's rules; the good one on every rule.
-      const phase = [PHASE_1, PHASE_2, PHASE_3].find((p) => p.includes(broken[0]));
-      const rules = variant === "good" ? [...PHASE_1, ...PHASE_2, ...PHASE_3] : phase;
+      const phase = [PHASE_1, PHASE_2, PHASE_3, PHASE_4].find((p) => p.includes(broken[0]));
+      const rules = variant === "good" ? [...PHASE_1, ...PHASE_2, ...PHASE_3, ...PHASE_4] : phase;
       const { report } = await runAgainst(variant, { rules });
       assert.deepEqual(
         statuses(report),
