@@ -402,7 +402,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     notice: draft.notice,
     setNotice: draft.setNotice,
     keepNotice: draft.keepNotice,
+    onSend: () => void runSendRef.current(),
   });
+  const runSendRef = useRef<() => Promise<void>>(async () => {});
   const voiceActiveRef = useRef(false);
   voiceActiveRef.current = voice.active;
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
@@ -812,6 +814,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     replyDraft,
     voice.active,
   ]);
+  runSendRef.current = runSend;
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
@@ -881,7 +884,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }
     if (shouldSubmitOnEnter(e, { enterSends: !coarsePointer })) {
       e.preventDefault();
-      void runSend();
+      // While listening, Enter ends voice input and sends what it heard.
+      if (voice.active) voice.stopAndSend();
+      else void runSend();
     }
   };
 
