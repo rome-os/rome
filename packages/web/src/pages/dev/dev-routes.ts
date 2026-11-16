@@ -84,6 +84,13 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         Component: lazy(() => import("./mdx/MdxDocsPage")),
       },
       {
+        path: "/dev/voice-level",
+        title: "Voice input level",
+        description:
+          "Prototype: three ways the composer shows the microphone hears the guardian (pulse, level meter, waveform), driven by the real microphone or a simulated voice.",
+        Component: lazy(() => import("./VoiceLevelPage")),
+      },
+      {
         path: "/dev/login",
         title: "Login page",
         description:
