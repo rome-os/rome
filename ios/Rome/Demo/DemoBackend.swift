@@ -47,6 +47,8 @@ final class DemoBackend: RomeBackend {
     private var chats: [String: ChatSession] = [:]
     private var tasks: [ConciergeTask] = []
     private var topicChats: [ConciergeChat] = []
+    /// Each topic chat's last activity, for the chat list; the drawer sorts by it.
+    private var topicActivity: [String: Date] = [:]
     /// Files sent with messages, by their asset path.
     private var assets: [String: Data] = [:]
     private var approvals: [String: ApprovalRecord] = [:]
@@ -63,6 +65,7 @@ final class DemoBackend: RomeBackend {
     /// the app, which offers the update instead of requiring it.
     /// `longChat`: the full data with a main chat long enough to page, ending
     /// in a long digest that folds: what a cold launch from kept rows meets.
+    /// It has more topic chats than the drawer's first page, too.
     enum Variant { case full, empty, conciergeOff, updateRequired, updateOffered, manyApps, visitor, longChat }
     private let variant: Variant
 
@@ -74,7 +77,22 @@ final class DemoBackend: RomeBackend {
             tasks = []
             topicChats = []
         }
-        if variant == .longChat { lengthenMainChat() }
+        if variant == .longChat {
+            lengthenMainChat()
+            addOlderTopicChats()
+        }
+    }
+
+    /// Forty quiet topic chats, older than the others, started before them:
+    /// the drawer shows them a page at a time.
+    private func addOlderTopicChats() {
+        let older = (1...40).map { ConciergeChat(id: "topic-old-\($0)", name: "旧话题 \($0)", main: false, unread: $0 == 35 ? 1 : 0) }
+        for chat in older {
+            let number = Int(chat.id.split(separator: "-").last!)!
+            topicActivity[chat.id] = Date.now.addingTimeInterval(Double(-86400 - number * 3600))
+            messages[chat.id] = []
+        }
+        topicChats = older.reversed() + topicChats
     }
 
     private func lengthenMainChat() {
@@ -366,7 +384,9 @@ final class DemoBackend: RomeBackend {
     func markRead(sessionId: String) async {}
 
     func sessions() async throws -> [ChatSession] {
-        Array(chats.values)
+        Array(chats.values) + topicChats.map { chat in
+            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string))
+        }
     }
 
     func activeTurns(sessionId: String) async throws -> [ActiveTurn] {
@@ -723,6 +743,7 @@ final class DemoBackend: RomeBackend {
     private func setRunning(_ sessionId: String, _ turnId: String?) {
         running[sessionId] = turnId
         chats[sessionId]?.running = turnId != nil
+        if turnId != nil, topicChats.contains(where: { $0.id == sessionId }) { topicActivity[sessionId] = .now }
         let event = LiveEvent.sessionRunning(sessionId: sessionId, running: turnId != nil)
         bus.emit(LiveTopic.chatStatus, event)
         bus.emit(LiveTopic.chat(sessionId), event)
@@ -880,6 +901,10 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
             ConciergeChat(id: "topic-errors", name: "出错的情况", main: false, unread: 0),
         ]
+        // Latest first in the drawer: the trip, then the errors, and so on.
+        // The cafés come eighth, past the first five, for the drawer over it.
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500]
+        topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, root: String? = nil, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
             let updated = nowMs - minutesAgo * 60_000
@@ -1122,6 +1147,8 @@ final class DemoBackend: RomeBackend {
             marked(user("er3", "好，继续。", at: at(13, 8), session: "topic-errors"), "👍", status: "working"),
             marked(user("er4", "顺便查一下周五的航班。", at: at(13, 9), session: "topic-errors"), nil, inputState: "failed"),
             marked(user("er5", "再提醒我带护照。", at: at(13, 10), session: "topic-errors"), nil, inputState: "unknown"),
+            // Photos alone, with a mark: the badge sits on the photos' corner.
+            marked(user("er6", "- File 1: [kitchen.jpg](</\(kitchen)>)\n- File 2: [kitchen.jpg](</\(kitchen)>)", at: at(13, 11), session: "topic-errors"), nil, status: "working"),
         ]
         // A narrow table, and one wider than the bubble that scrolls inside it.
         messages["topic-table"] = [

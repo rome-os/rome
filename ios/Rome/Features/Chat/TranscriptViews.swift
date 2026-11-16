@@ -122,6 +122,7 @@ struct UserBubble: View {
                 VStack(alignment: .trailing, spacing: 6) {
                     if !images.isEmpty {
                         UserImageGrid(images: images)
+                            .markBadge(mark)
                     }
                     if !text.isEmpty || quote != nil {
                         VStack(alignment: .leading, spacing: 8) {
@@ -140,15 +141,8 @@ struct UserBubble: View {
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: bubbleMenu)
-                    }
-                }
-                // The badge sits on the top leading corner of the bubble, or of the
-                // photos, over the corner and clear of the first line's start.
-                .overlay(alignment: .topLeading) {
-                    if let mark {
-                        StatusMarkBadge(mark: mark)
-                            .offset(x: -StatusMarkBadge.size / 2, y: -StatusMarkBadge.size / 2)
-                            .transition(.opacity)
+                            // Photos above the bubble carry the badge instead.
+                            .markBadge(images.isEmpty ? mark : nil)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
@@ -160,6 +154,21 @@ struct UserBubble: View {
         .padding(.leading, 56)
         .animation(.easeOut(duration: 0.2), value: pending)
         .animation(.easeOut(duration: 0.15), value: mark)
+    }
+}
+
+private extension View {
+    /// The message's badge on the top leading corner of the photos, or of the
+    /// bubble when there are none, over the corner and clear of the first
+    /// line's start.
+    func markBadge(_ mark: MessageMark?) -> some View {
+        overlay(alignment: .topLeading) {
+            if let mark {
+                StatusMarkBadge(mark: mark)
+                    .offset(x: -StatusMarkBadge.size / 2, y: -StatusMarkBadge.size / 2)
+                    .transition(.opacity)
+            }
+        }
     }
 }
 
@@ -192,7 +201,11 @@ private struct UserImageGrid: View {
 
     var body: some View {
         let side: CGFloat = images.count == 1 ? 200 : 110
-        let columns = Array(repeating: GridItem(.fixed(side), spacing: 6), count: min(2, images.count))
+        let count = min(2, images.count)
+        let columns = Array(repeating: GridItem(.fixed(side), spacing: 6), count: count)
+        // A grid takes the whole width, its tiles trailing. Held to its tiles,
+        // its leading corner is the first photo's, where the badge goes.
+        let width = CGFloat(count) * side + CGFloat(count - 1) * 6
         LazyVGrid(columns: columns, alignment: .trailing, spacing: 6) {
             ForEach(Array(images.enumerated()), id: \.offset) { _, image in
                 UserImageTile(image: image)
@@ -204,6 +217,7 @@ private struct UserImageGrid: View {
                     .accessibilityHint("Opens the photo full screen")
             }
         }
+        .frame(width: width)
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }

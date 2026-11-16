@@ -153,6 +153,80 @@ import Testing
         await settle()
         #expect(store.chats.map(\.id) == ["topic-9"])
     }
+
+    /// As on the web: latest activity first, and a chat the chat list has no
+    /// time for yet counts as newest.
+    @Test func theDrawerListsTopicChatsLatestActivityFirst() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c", "d"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T08:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T09:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["d", "a", "c", "b"])
+    }
+
+    @Test func aTurnStartingInAChatMovesItUp() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T08:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b"])
+        // The guardian's message moved the chat's time on the server.
+        backend.sessionRows[1].activityAt = "2026-11-15T11:00:00.000Z"
+        backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "b", running: true))
+        await settle()
+        #expect(store.chats.map(\.id) == ["b", "a"])
+    }
+
+    /// A reconnect replays each chat's running state: nothing happened, so
+    /// nothing moves.
+    @Test func aReplayedStatusLeavesTheOrder() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T09:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T08:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
+        backend.bus.emit(LiveTopic.chatStatus, .reconnected)
+        for id in ["c", "b"] {
+            backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: id, running: true))
+        }
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
+    }
+
+    /// A page at a time; the open chat stays in view even past the page.
+    @Test func theDrawerShowsAPageAndTheOpenChat() {
+        let page = TopicChatsStore.pageSize
+        #expect(page == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: nil) == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 2) == 30)
+        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 44) == 45)
+        #expect(TopicChatsStore.shownCount(12, limit: page, openIndex: nil) == 12)
+    }
+
+    @Test func theOrderWithoutTimesIsNewestStartedFirst() {
+        let chats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        #expect(TopicChatsStore.ordered(chats, lastActive: [:]).map(\.id) == ["c", "b", "a"])
+        let early = Date(timeIntervalSince1970: 0)
+        #expect(TopicChatsStore.ordered(chats, lastActive: ["c": early]).map(\.id) == ["b", "a", "c"])
+    }
 }
 
 @Suite struct ConciergeChatListTests {

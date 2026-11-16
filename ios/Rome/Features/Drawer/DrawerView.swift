@@ -10,6 +10,8 @@ struct DrawerView: View {
     let onSettings: () -> Void
     /// Opens the update page from the line shown while the Rome is behind.
     let onUpdate: () -> Void
+    /// How many topic chats show; a scroll near the end adds a page.
+    @State private var topicLimit = TopicChatsStore.pageSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -66,11 +68,27 @@ struct DrawerView: View {
             .padding(.top, 6)
 
             ScrollView {
-                VStack(spacing: 2) {
-                    ForEach(workspace.topics.chats) { chat in
+                let chats = workspace.topics.chats
+                let shown = TopicChatsStore.shownCount(
+                    chats.count,
+                    limit: topicLimit,
+                    openIndex: chats.firstIndex { section == .topic($0.id) }
+                )
+                // Lazy, so the end below appears only as the list nears it.
+                LazyVStack(spacing: 2) {
+                    ForEach(chats.prefix(shown)) { chat in
                         TopicItem(chat: chat, selected: section == .topic(chat.id)) {
                             onSection(.topic(chat.id))
                         }
+                    }
+                    if shown < chats.count {
+                        // A new view for each page, so an end still in view
+                        // after a page lands asks for the next one.
+                        Color.clear
+                            .frame(height: 1)
+                            .id(shown)
+                            .onAppear { topicLimit = shown + TopicChatsStore.pageSize }
+                            .accessibilityHidden(true)
                     }
                 }
             }
