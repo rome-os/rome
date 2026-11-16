@@ -1,4 +1,5 @@
-import { aDayLater, loadHearing } from "../lib/hearing.mjs";
+import { linkedIds } from "../lib/checks.mjs";
+import { aDayLater, holdsAll, loadHearing } from "../lib/hearing.mjs";
 import { ask, check, judged, ruleResult } from "../lib/scenario.mjs";
 import { K2_QUESTION } from "./k2-goals.mjs";
 
@@ -16,7 +17,8 @@ export default {
   phase: 2,
   async run(ctx) {
     const { changeIds, hours } = await aDayLater(ctx);
-    const changes = loadHearing().k4Changes.map(({ goal, title, owner, date }) =>
+    const said = loadHearing().k4Changes;
+    const changes = said.map(({ goal, title, owner, date }) =>
       Object.fromEntries(
         Object.entries({ goal, title, owner, date }).filter(([, v]) => v !== undefined),
       ),
@@ -34,13 +36,31 @@ export default {
       sheet: changedGoalsSheet(ctx.team, changes),
       answer: reply.text,
     });
-    return ruleResult([
-      judged(
-        `goals with one goal and one owner changed in the chat, asked ${hours} h later`,
-        verdict,
-        evidence,
-        reply.text,
-      ),
-    ]);
+    // Unscored, for Ouou's reading of the rule: whether the answer shows each change at all,
+    // anywhere in it, and whether it links the message the change was said in.
+    const links = linkedIds(reply.text);
+    const shown = said.map((c, i) => {
+      const linked = links.includes(changeIds[i]);
+      return {
+        change: changeIds[i],
+        shown: linked || (c.tokens.length > 0 && holdsAll(reply.text, c.tokens)),
+        linked,
+      };
+    });
+    const info = [
+      `Not scored: the answer shows ${shown.filter((c) => c.shown).length} of ${shown.length} changes anywhere in it, ${shown.filter((c) => c.linked).length} with a link to the message that said it (${shown.map((c) => `${c.change}: ${c.shown ? "shown" : "not shown"}${c.linked ? ", linked" : ""}`).join("; ")})`,
+    ];
+    return {
+      ...ruleResult([
+        judged(
+          `goals with one goal and one owner changed in the chat, asked ${hours} h later`,
+          verdict,
+          evidence,
+          reply.text,
+        ),
+      ]),
+      changesShown: shown,
+      info,
+    };
   },
 };

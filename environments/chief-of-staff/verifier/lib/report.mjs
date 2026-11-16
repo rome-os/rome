@@ -98,6 +98,7 @@ export function renderMarkdown(report) {
       );
       if (c.quote) lines.push("", "  > " + c.quote.replaceAll("\n", "\n  > "), "");
     }
+    for (const line of r.info ?? []) lines.push(`- ${line}.`);
   }
   if (report.answerTimes.length > 0) {
     lines.push(

@@ -123,6 +123,14 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     const markdown = readFileSync(join(outDir, "report.md"), "utf8");
     assert.match(markdown, /\| K7 Keeps private things private \| pass, not scored/);
     assert.match(markdown, /## A3 replay cost/);
+    const k4 = report.results.find((r) => r.rule === "K4");
+    assert.deepEqual(
+      k4.changesShown.map((c) => [c.shown, c.linked]),
+      [
+        [true, true],
+        [true, true],
+      ],
+    );
   });
 
   for (const rule of ["A2", "A3", "A7", "A8", "K4"]) {

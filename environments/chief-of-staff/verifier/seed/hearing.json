@@ -153,7 +153,10 @@
       "as": "member3",
       "text": "It's 4471, Marisol. I'll text it to you too."
     },
-    "thanks": { "as": "member1", "text": "Got it, thanks Priya." }
+    "thanks": {
+      "as": "member1",
+      "text": "Got it, thanks Priya."
+    }
   },
   "k4Changes": [
     {
@@ -162,14 +165,16 @@
       "text": "Update on the Orkney pier goal: we're now installing 16 sensors, not 12, and the date moves to 2027-03-12.",
       "goal": "G3",
       "title": "Install 16 sensors on Orkney piers",
-      "date": "2027-03-12"
+      "date": "2027-03-12",
+      "tokens": [["16"], ["2027-03-12", "12 March", "March 12"]]
     },
     {
       "as": "member2",
       "chat": "standup",
       "text": "Ownership change: Marisol Okonkwo-Vance owns the salinity ingest lag goal from today, I'm handing it over to focus on Saltmarsh.",
       "goal": "G2",
-      "owner": "Marisol Okonkwo-Vance"
+      "owner": "Marisol Okonkwo-Vance",
+      "tokens": []
     }
   ],
   "a7": {

@@ -52,7 +52,9 @@ function goals(state, breaks) {
     .map((g) => `- ${g.title}, owner ${g.owner}, due ${g.date}`);
   if (breaks === "K2")
     list.push("- Migrate the ops dashboards to Grafanite, owner Gustavo Ferreira-Yildiz");
-  return `Current goals (source: ${GOALS_LINK}):\n${list.join("\n")}`;
+  const sources = heard.map((c) => link(state.messages.find((m) => m.text === c.text)));
+  const changed = sources.length ? `\nChanged in the chat: ${sources.join(" ")}` : "";
+  return `Current goals (source: ${GOALS_LINK}):\n${list.join("\n")}${changed}`;
 }
 
 /** Whether the stand-in still knows what `said` told it. */
