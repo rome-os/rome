@@ -47,6 +47,7 @@ import {
   type WidgetPlacement,
   type WidgetType,
 } from "./use-free-cells";
+import { usePaneResize } from "@/hooks/use-pane-resize";
 import { readStored, writeStored } from "@/lib/stored-preference";
 
 export { COMPACT_WIDTH } from "./use-free-cells";
@@ -164,7 +165,6 @@ export function ToolWorkspace({
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [ratio, setRatio] = useState(readRatio);
-  const [resizing, setResizing] = useState(false);
   const [outlet, setOutlet] = useState<HTMLDivElement | null>(null);
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
   const [stripWidth, setStripWidth] = useState<number | null>(null);
@@ -473,6 +473,15 @@ export function ToolWorkspace({
     writeStored(WIDTH_KEY, String(constrained));
   }
 
+  const edge = usePaneResize({
+    size: chatWidth,
+    min: MIN_PANE_WIDTH,
+    max: available - MIN_PANE_WIDTH,
+    onResize: (next) => changeRatio(next / available),
+    onReset: () => changeRatio(DEFAULT_RATIO),
+  });
+  const resizing = edge.resizing;
+
   function closeTab(id: string) {
     const focused = document.activeElement;
     const restoreFocus =
@@ -510,47 +519,9 @@ export function ToolWorkspace({
         </div>
         {open && !compact && (
           <div
-            role="separator"
-            tabIndex={0}
+            {...edge.separatorProps}
             aria-label={t("chat.resizeTools")}
-            aria-orientation="vertical"
-            aria-valuemin={MIN_PANE_WIDTH}
-            aria-valuemax={Math.round(available - MIN_PANE_WIDTH)}
-            aria-valuenow={Math.round(chatWidth)}
-            data-resizing={resizing || undefined}
             className="relative z-40 w-px shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:-inset-x-1 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border-subtle after:transition-[width] hover:after:w-1 focus-visible:outline-ring/50 focus-visible:after:w-1 data-[resizing]:after:w-1"
-            onDoubleClick={() => changeRatio(DEFAULT_RATIO)}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              event.preventDefault();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              setResizing(true);
-            }}
-            onPointerMove={(event) => {
-              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-              const left = rootRef.current?.getBoundingClientRect().left ?? 0;
-              changeRatio(
-                Math.max(
-                  MIN_PANE_WIDTH,
-                  Math.min(available - MIN_PANE_WIDTH, event.clientX - left),
-                ) / available,
-              );
-            }}
-            onPointerUp={(event) => {
-              if (event.currentTarget.hasPointerCapture(event.pointerId))
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              setResizing(false);
-            }}
-            onLostPointerCapture={() => setResizing(false)}
-            onKeyDown={(event) => {
-              if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
-              event.preventDefault();
-              changeRatio(
-                event.key === "Home"
-                  ? DEFAULT_RATIO
-                  : (chatWidth + (event.key === "ArrowLeft" ? -24 : 24)) / available,
-              );
-            }}
           />
         )}
         <Tabs
