@@ -20,6 +20,7 @@ import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
 import {
   chooseMicrophone,
   chosenMicrophone,
+  findMicrophone,
   listMicrophones,
   type MicrophoneOption,
   revealMicrophones,
@@ -76,8 +77,10 @@ function MicrophoneRow() {
   const [chosen, setChosen] = useState(chosenMicrophone);
   const [refused, setRefused] = useState(false);
 
+  // A failed listing keeps the last list. Before any list, the select stays
+  // disabled and shows no choice.
   const refresh = useCallback(() => {
-    listMicrophones().then(setOptions, () => setOptions([]));
+    listMicrophones().then(setOptions, () => {});
   }, []);
 
   useEffect(() => {
@@ -100,12 +103,18 @@ function MicrophoneRow() {
     );
   };
 
-  // An unplugged microphone leaves the list, and Settings switches to the
-  // system default, which voice input then records from.
-  const missing = chosen !== null && options != null && !options.some((o) => o.id === chosen);
+  // An unplugged microphone leaves the list, and the choice switches to the
+  // system default, which voice input then records from. Only a list that
+  // names some microphone counts: an empty one may be the browser not answering.
+  const found = options ? findMicrophone(chosen, options) : null;
+  const unplugged = chosen !== null && !!options?.length && found === null;
+  // A choice found by name gets the device's new id, and one saved before
+  // names were kept gets its name.
+  const stale = found !== null && (found.id !== chosen?.id || found.label !== chosen.label);
   useEffect(() => {
-    if (missing) setChosen(chooseMicrophone(null));
-  }, [missing]);
+    if (unplugged) setChosen(chooseMicrophone(null));
+    else if (stale && found) setChosen(chooseMicrophone(found));
+  }, [unplugged, stale, found]);
   const description = refused
     ? t("system.voiceInput.microphone.refused")
     : t("system.voiceInput.microphone.description");
@@ -126,10 +135,10 @@ function MicrophoneRow() {
           </Button>
         ) : (
           <Select
-            value={chosen && !missing ? chosen : SYSTEM_DEFAULT}
+            value={options === undefined ? "" : (found?.id ?? SYSTEM_DEFAULT)}
             disabled={options === undefined}
             onValueChange={(value) =>
-              setChosen(chooseMicrophone(value === SYSTEM_DEFAULT ? null : value))
+              setChosen(chooseMicrophone(options?.find((option) => option.id === value) ?? null))
             }
           >
             <SelectTrigger

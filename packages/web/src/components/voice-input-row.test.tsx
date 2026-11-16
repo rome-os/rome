@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
@@ -94,7 +94,7 @@ describe("choosing the microphone in Settings", () => {
     await waitFor(() => expect(select.textContent).toContain("System default"));
   });
 
-  it("switches to the system default and drops a chosen microphone that is unplugged", async () => {
+  it("switches to the system default and clears a chosen microphone that is unplugged", async () => {
     localStorage.setItem("rome.voiceInput.microphone", "gone");
     devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
     await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
@@ -108,6 +108,47 @@ describe("choosing the microphone in Settings", () => {
       "System default",
       "USB Microphone",
     ]);
+  });
+
+  it("shows no choice and changes nothing when the browser fails to list the microphones", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "usb");
+    devices([]);
+    navigator.mediaDevices.enumerateDevices = rs.fn(async () => {
+      throw new Error("NotReadableError");
+    });
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(navigator.mediaDevices.enumerateDevices).toHaveBeenCalled());
+    await act(async () => {});
+    expect(select.textContent).not.toContain("System default");
+    expect(localStorage.getItem("rome.voiceInput.microphone")).toBe("usb");
+  });
+
+  it("shows the chosen microphone, and saves its new id, when the browser gives it a new id after a reload", async () => {
+    const choice = JSON.stringify({ id: "old-id", label: "USB Microphone" });
+    localStorage.setItem("rome.voiceInput.microphone", choice);
+    devices([{ kind: "audioinput", deviceId: "new-id", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(select.textContent).toContain("USB Microphone"));
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem("rome.voiceInput.microphone") ?? "")).toEqual({
+        id: "new-id",
+        label: "USB Microphone",
+      }),
+    );
+  });
+
+  it("saves the name of a choice made before names were kept", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "usb");
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem("rome.voiceInput.microphone") ?? "")).toEqual({
+        id: "usb",
+        label: "USB Microphone",
+      }),
+    );
   });
 
   it("keeps showing the microphone voice input uses when the browser refuses to save a choice", async () => {
