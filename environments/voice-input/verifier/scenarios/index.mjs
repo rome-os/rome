@@ -14,11 +14,8 @@ import r12 from "./r12-the-microphone-you-chose.mjs";
 import r13 from "./r13-enter-sends-what-you-said.mjs";
 import r14 from "./r14-you-see-rome-hearing.mjs";
 
-/**
- * The rules version the scenarios encode. Change it with the rules doc. Rules 12 to 14 are a
- * draft until Ouou accepts them, which makes them V6.
- */
-export const RULES_VERSION = "V6-draft";
+/** The rules version the scenarios encode. Change it with the rules doc. */
+export const RULES_VERSION = "V6";
 
 /** Rules and the phase each belongs to, including those with no scenario yet. */
 export const RULE_PHASES = {
