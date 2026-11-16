@@ -63,4 +63,21 @@ import Testing
         bars.advance(to: Date().addingTimeInterval(0.2), meter: meter, steps: 1)
         #expect(bars.values.count == 4)
     }
+
+    @Test func reduceMotionKeepsFiveSecondsToo() {
+        let meter = VoiceLevelMeter()
+        let bars = VoiceInputWaveform.Bars()
+        var now = Date()
+        meter.take(tone(0.2, samples: 3200))
+        bars.advance(to: now, meter: meter, steps: 4)
+        #expect(bars.values.first ?? 0 > 0.5)
+        // Five seconds of silence, 200 ms a step.
+        for _ in 0..<25 {
+            now = now.addingTimeInterval(0.2)
+            meter.take(tone(0, samples: 3200))
+            bars.advance(to: now, meter: meter, steps: 4)
+        }
+        #expect(bars.values.count == 25)
+        #expect(bars.values.allSatisfy { $0 == 0 })
+    }
 }

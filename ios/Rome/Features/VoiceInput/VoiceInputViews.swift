@@ -101,6 +101,9 @@ struct VoiceInputWaveform: View {
     static func draw(_ values: [Float], in context: inout GraphicsContext, size: CGSize, slide: CGFloat = 0) {
         let pitch = barWidth + gap
         let capacity = max(1, Int((size.width / pitch).rounded(.up)))
+        // A row of dots shifted by a whole step looks the same, so silence
+        // holds one steady image instead of sliding.
+        let slide = values.suffix(capacity + 1).allSatisfy { $0 == 0 } ? 0 : slide
         for index in 0..<capacity {
             let x = size.width - CGFloat(index + 1) * pitch + gap + slide * pitch
             guard x + barWidth > 0 else { break }
@@ -142,8 +145,9 @@ struct VoiceInputWaveform: View {
             guard let peak else { return }
             steppedAt = now
             values.append(peak > VoiceInputWaveform.silence ? peak : 0)
-            // The last 5 s, whatever the width.
-            if values.count > 100 { values.removeFirst(values.count - 100) }
+            // The last 5 s, whatever the width: each value holds `steps` of 50 ms.
+            let kept = 100 / steps
+            if values.count > kept { values.removeFirst(values.count - kept) }
         }
     }
 }

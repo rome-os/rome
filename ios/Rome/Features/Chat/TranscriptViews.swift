@@ -610,6 +610,10 @@ struct Composer: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var voice = VoiceInputController()
+    /// The voice control moves between rows as listening starts and stops,
+    /// so VoiceOver focus that was on it is put back on the new one.
+    @AccessibilityFocusState private var voiceFocused: Bool
+    @State private var refocusVoice = false
     @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
@@ -701,6 +705,12 @@ struct Composer: View {
         .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
         .onChange(of: voice.state) { voice.stateShown() }
+        .onChange(of: voice.active) {
+            guard refocusVoice else { return }
+            refocusVoice = false
+            // A turn later, once the control in its new row exists.
+            DispatchQueue.main.async { voiceFocused = true }
+        }
         .onChange(of: onScreen) { _, now in
             if now {
                 voice.arrive(service: voiceInput, chat: voiceKey)
@@ -745,8 +755,10 @@ struct Composer: View {
     @ViewBuilder private var controls: some View {
         if let voiceInput, voiceInput.available {
             VoiceInputButton(state: voice.state) {
+                refocusVoice = voiceFocused
                 voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
             }
+            .accessibilityFocused($voiceFocused)
         }
         Group {
             // While listening, the field's stop is the voice control's.
