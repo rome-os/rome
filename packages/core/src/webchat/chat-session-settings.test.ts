@@ -24,7 +24,7 @@ describe("ChatSessionSettings", () => {
           status: "active",
         })
         .run();
-    return { settings: new ChatSessionSettings({ webchatRepo }), store };
+    return { settings: new ChatSessionSettings({ webchatRepo }), store, webchatRepo };
   }
 
   it("answers the model saved by the web chat whose own session it is", async () => {
@@ -38,5 +38,15 @@ describe("ChatSessionSettings", () => {
     store("subagent", storeSubagentParent(webchatSessionKey("chat-1")));
     expect(await settings.savedModelSelection("subagent")).toBeNull();
     expect(await settings.savedModelSelection("missing")).toBeNull();
+  });
+
+  it("answers the effort saved by the web chat whose own session it is, and none when it saved none", async () => {
+    const { settings, store, webchatRepo } = await setup();
+    store("own", webchatSessionKey("chat-1"));
+    expect(await settings.savedReasoningEffort("own")).toBeNull();
+    await webchatRepo.updateSessionReasoningEffort("chat-1", "low");
+    expect(await settings.savedReasoningEffort("own")).toBe("low");
+    store("subagent", storeSubagentParent(webchatSessionKey("chat-1")));
+    expect(await settings.savedReasoningEffort("subagent")).toBeNull();
   });
 });

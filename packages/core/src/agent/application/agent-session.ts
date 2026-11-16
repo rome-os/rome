@@ -391,7 +391,7 @@ interface ManagerDeps {
   ) => SubagentSessions;
   /** The middleware apps put around a turn's reply. Absent, the model replies directly. */
   turnMiddleware?: TurnMiddleware;
-  /** What each chat set for its sessions. Absent, no saved model is restored. */
+  /** What each chat set for its sessions. Absent, no saved model or effort is restored. */
   sessionSettings?: SessionSettings;
   /**
    * What the conversation a session serves adds to its context: text for the
@@ -1543,6 +1543,13 @@ async function openSession(
       ? await deps.sessionSettings?.savedModelSelection(sessionId)
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
+  // A cold resume runs at the effort its web chat saved when the open names
+  // none, as a message to that chat does; a turn that names one still wins.
+  const savedEffort =
+    init.resumeSessionId && init.reasoningEffort === undefined
+      ? await deps.sessionSettings?.savedReasoningEffort(sessionId)
+      : undefined;
+  const openedEffort = init.reasoningEffort ?? savedEffort ?? undefined;
 
   if (prepared) {
     prepared.moveTo(workingDir);
@@ -1675,7 +1682,7 @@ async function openSession(
       });
 
   const reasoningEffortOf = (setup: PreparedSetup) =>
-    init.reasoningEffort ?? setup.source.definition.reasoningEffort;
+    openedEffort ?? setup.source.definition.reasoningEffort;
 
   // The Rome tools a session serves, bound to the refs that run them. The live
   // session has a speaker; a fork has none and may have no `defer`, and its
