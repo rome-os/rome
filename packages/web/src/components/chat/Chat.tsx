@@ -2973,6 +2973,7 @@ export function Chat({
                       ) : concierge ? (
                         <ConciergeComposer
                           ref={composerRef}
+                          chatId={mainSessionId}
                           boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                           onSend={handleComposerSend}
                           isStreaming={displayedStreaming}
@@ -2989,6 +2990,7 @@ export function Chat({
                       ) : (
                         <ChatComposer
                           persistNewChatDraft={!mainSessionId}
+                          chatId={mainSessionId}
                           ref={composerRef}
                           // The box look lives on the composer now so the chip row can sit
                           // outside it; this mount adds the floating blur/translucency.
