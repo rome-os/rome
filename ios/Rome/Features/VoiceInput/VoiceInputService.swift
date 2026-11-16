@@ -34,7 +34,13 @@ final class VoiceInputService {
     func refresh(now: Bool = false) async {
         if !now, let checkedAt, Date().timeIntervalSince(checkedAt) < 60 { return }
         checkedAt = Date()
-        info = try? await backend.voiceInputInfo()
+        do {
+            info = try await backend.voiceInputInfo()
+        } catch {
+            // An instance still waking, or no network: the next field to open asks again.
+            info = nil
+            checkedAt = nil
+        }
         available = info?.available ?? false
     }
 
