@@ -787,8 +787,9 @@ final class InstanceUpdater {
             default: break
             }
         }
-        poll?.cancel()
-        poll = nil
+        // A probe or check still in flight is over too: it must not finish
+        // the upgrade a second time.
+        stopPolling()
         presented = false
         runsInBackground = false
         state = .upToDate

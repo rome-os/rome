@@ -209,6 +209,7 @@ final class CloudStatusBox {
         first.checkDelay = .milliseconds(200)
         let retry = Task { await updater.retryInBackground() }
         try await Task.sleep(for: .milliseconds(20))
+        #expect(updater.retrying)
         // Another instance, offered the same release, opens meanwhile.
         let second = offered()
         await updater.attach(backend: second, instanceID: "b")
@@ -251,5 +252,24 @@ final class CloudStatusBox {
         #expect(finished == true)
         #expect(store.load("i1") == nil)
         #expect(updater.updatedInBackgroundTo == nil)
+    }
+
+    /// A resumed upgrade whose target answers both the probe and the check
+    /// finishes once, in the background.
+    @Test func aResumedUpgradeFinishesOnce() async throws {
+        let defaults = defaults()
+        let store = PendingUpgradeStore(defaults: defaults)
+        store.save(PendingUpgrade(target: "1.1.198", since: .now, from: "1.1.197", background: true), for: "i1")
+        let backend = FakeBackend()
+        backend.buildVersion = "1.1.198"
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.198"), latest: .init(version: "1.1.198"), upgradeAvailable: false))
+        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5))
+        var finishes: [Bool] = []
+        updater.onFinished = { finishes.append($0) }
+        await updater.attach(backend: backend, instanceID: "i1")
+        // Past the probe's pause on "Almost done…".
+        try await Task.sleep(for: .milliseconds(1200))
+        #expect(finishes == [true])
+        #expect(updater.updatedInBackgroundTo == "1.1.198")
     }
 }
