@@ -1,7 +1,7 @@
 import { type ComponentType, lazy as reactLazy } from "react";
 
 /**
- * Session-storage key holding the URL and the part last reloaded for a
+ * Session-storage key holding, by URL, the parts that reloaded the page for a
  * missing chunk, so a part still missing after the reload does not loop.
  */
 export const CHUNK_RELOAD_KEY = "rome-chunk-reload";
@@ -20,18 +20,35 @@ export function isChunkLoadError(error: unknown): boolean {
 }
 
 /** The parts at `url` that already reloaded the page for a missing chunk. */
-interface ReloadMark {
-  url: string;
-  parts: string[];
+/**
+ * The parts that already reloaded the page for a missing chunk, by URL.
+ * Session storage is shared by the tab and its same-origin frames (app tiles
+ * load the dashboard at their own URLs), so each document reads and writes
+ * only its own URL's entry, and none can reset another's guard.
+ */
+type ReloadMarks = Record<string, string[]>;
+
+/** Enough for a page and its tiles; the oldest URL goes first past it. */
+const MAX_MARKED_URLS = 20;
+
+function readMarks(): ReloadMarks {
+  const raw = JSON.parse(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "null") as unknown;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const marks: ReloadMarks = {};
+  for (const [url, parts] of Object.entries(raw)) {
+    if (Array.isArray(parts)) marks[url] = parts.filter((p): p is string => typeof p === "string");
+  }
+  return marks;
 }
 
-function readMark(): ReloadMark | null {
-  const mark = JSON.parse(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "null") as {
-    url?: unknown;
-    parts?: unknown;
-  } | null;
-  if (typeof mark?.url !== "string" || !Array.isArray(mark.parts)) return null;
-  return { url: mark.url, parts: mark.parts.filter((p): p is string => typeof p === "string") };
+function writeMarks(marks: ReloadMarks): void {
+  const urls = Object.keys(marks);
+  if (urls.length === 0) {
+    window.sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    return;
+  }
+  const kept = Object.fromEntries(urls.slice(-MAX_MARKED_URLS).map((url) => [url, marks[url]]));
+  window.sessionStorage.setItem(CHUNK_RELOAD_KEY, JSON.stringify(kept));
 }
 
 /**
@@ -45,13 +62,13 @@ function readMark(): ReloadMark | null {
 function claimReload(part: string): boolean {
   const url = window.location.href;
   try {
-    const mark = readMark();
-    const parts = mark?.url === url ? mark.parts : [];
+    const marks = readMarks();
+    const parts = marks[url] ?? [];
     if (parts.includes(part)) return false;
-    window.sessionStorage.setItem(
-      CHUNK_RELOAD_KEY,
-      JSON.stringify({ url, parts: [...parts, part] }),
-    );
+    // Re-inserted last, so the cap drops the URL touched longest ago.
+    delete marks[url];
+    marks[url] = [...parts, part];
+    writeMarks(marks);
     return true;
   } catch {
     // Storage blocked: without a record a reload could loop, so do not.
@@ -59,14 +76,16 @@ function claimReload(part: string): boolean {
   }
 }
 
-/** `part` loaded: a later upgrade may reload for it again. */
+/** `part` loaded at the current URL: a later upgrade may reload for it again. */
 function clearMark(part: string): void {
+  const url = window.location.href;
   try {
-    const mark = readMark();
-    if (!mark?.parts.includes(part)) return;
-    const parts = mark.parts.filter((p) => p !== part);
-    if (parts.length === 0) window.sessionStorage.removeItem(CHUNK_RELOAD_KEY);
-    else window.sessionStorage.setItem(CHUNK_RELOAD_KEY, JSON.stringify({ url: mark.url, parts }));
+    const marks = readMarks();
+    if (!marks[url]?.includes(part)) return;
+    const parts = marks[url].filter((p) => p !== part);
+    if (parts.length === 0) delete marks[url];
+    else marks[url] = parts;
+    writeMarks(marks);
   } catch {
     // Storage blocked: nothing was recorded.
   }

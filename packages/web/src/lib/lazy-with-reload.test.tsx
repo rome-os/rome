@@ -64,9 +64,9 @@ describe("loadWithReload", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(reload).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "{}").url).toBe(
-      "http://x/people",
-    );
+    expect(
+      Object.keys(JSON.parse(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "{}")),
+    ).toEqual(["http://x/people"]);
   });
 
   it("reloads on a signed-out page, where the server answers 401", async () => {
@@ -143,6 +143,51 @@ describe("loadWithReload", () => {
     await expect(loadWithReload(partB)).rejects.toThrow("Loading chunk 812 failed");
     await expect(loadWithReload(partA)).rejects.toThrow("Loading chunk 812 failed");
     expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not loop when a page and a frame at another URL both stay missing", async () => {
+    // The top page and an app tile's frame share session storage.
+    const at = (href: string) => rs.stubGlobal("location", { ...window.location, href, reload });
+    const part = () => Promise.reject(chunkError());
+
+    at("http://x/people");
+    void loadWithReload(part);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    at("http://x/full/apps/notes");
+    void loadWithReload(part);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reload).toHaveBeenCalledTimes(2);
+
+    // Both reloaded documents miss the part again, one after the other.
+    at("http://x/people");
+    await expect(loadWithReload(part)).rejects.toThrow("Loading chunk 812 failed");
+    at("http://x/full/apps/notes");
+    await expect(loadWithReload(part)).rejects.toThrow("Loading chunk 812 failed");
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves another URL's guard alone when a part loads", async () => {
+    const at = (href: string) => rs.stubGlobal("location", { ...window.location, href, reload });
+    let missing = true;
+    const part = async () => {
+      if (missing) throw chunkError();
+      return { default: "page" };
+    };
+
+    at("http://x/people");
+    void loadWithReload(part);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The same part loads in a frame at another URL.
+    at("http://x/full/apps/notes");
+    missing = false;
+    await loadWithReload(part);
+
+    // The page, still missing it, does not reload a second time.
+    at("http://x/people");
+    missing = true;
+    await expect(loadWithReload(part)).rejects.toThrow("Loading chunk 812 failed");
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it("fails instead of reloading the same URL a second time", async () => {
