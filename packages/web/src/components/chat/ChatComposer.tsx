@@ -39,6 +39,7 @@ import type {
 } from "@/lib/chat-types";
 import { ErrorEventView } from "./entries/ErrorEventView";
 import { AgentMentionChip } from "./composer/AgentMentionChip";
+import { useChatDraftText } from "./composer/use-chat-draft";
 import { AgentMentionMenu, type AgentMentionMenuHandle } from "./composer/AgentMentionMenu";
 import { ImpersonationMenu } from "./composer/ImpersonationMenu";
 import { ModelSelectorMenu } from "./composer/ModelSelectorMenu";
@@ -141,6 +142,9 @@ export interface ChatComposerHandle {
 
 export interface ChatComposerProps {
   persistNewChatDraft?: boolean;
+  // The open chat whose draft the field keeps. Unset for a chat not made yet,
+  // whose draft `persistNewChatDraft` keeps.
+  chatId?: string | null;
   // Whether the project picker is shown (typically only in draft mode).
   showProjectSelector?: boolean;
   // Whether the large-model picker is shown.
@@ -222,6 +226,7 @@ function clampTextareaHeight(el: HTMLTextAreaElement, maxHeight: number) {
 const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
   {
     persistNewChatDraft = false,
+    chatId,
     showProjectSelector = false,
     showModelSelector = false,
     chatModelSelection,
@@ -248,7 +253,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     const authEpoch = persistNewChatDraft ? currentAuthEpoch() : null;
     return { authEpoch, storedDraft: persistNewChatDraft ? loadNewChatDraft() : null };
   });
-  const [inputText, setInputText] = useState(() => storedDraft?.text ?? "");
+  const [inputText, setInputText, sendEnded] = useChatDraftText(chatId, storedDraft?.text);
   const sessionCreatedRef = useRef(false);
   // The send-time clear must not re-save the unchanged context in its effect.
   const skipNextDraftSaveRef = useRef(false);
@@ -788,9 +793,12 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         // Anything typed during the upload is newer than what was sent, so it
         // survives; only the exact text that went out is cleared.
         setInputText((current) => (current === rawText ? "" : current));
+        sendEnded(rawText, true);
       }
     } catch {
       failedSendRef.current = { inputId, text, uploads, skill };
+      // Before the returns below: the field may be gone, but the chat keeps it.
+      if (clearsOptimistically) sendEnded(persistNewChatDraft ? rawText : text, false);
       if (
         persistNewChatDraft &&
         (!textareaRef.current || (clearsOptimistically && textareaRef.current.value))
@@ -821,6 +829,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       // cleared the text or the attachment tray in the first place.
     }
   }, [
+    sendEnded,
     persistNewChatDraft,
     authEpoch,
     inputText,

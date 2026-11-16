@@ -1,3 +1,4 @@
+import { clearAllChatDrafts } from "@/lib/chat-draft-storage";
 import { invalidateNewChatDrafts } from "@/lib/new-chat-draft-storage";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -61,6 +62,7 @@ export function ProfileMenu() {
     // Full navigation, not a client-side route: it drops every cached query
     // holding this user's data along with the rest of the JS state.
     invalidateNewChatDrafts();
+    clearAllChatDrafts();
     window.location.assign("/login");
   }
 

@@ -62,6 +62,7 @@ import { useFittedPlaceholder } from "./use-fitted-placeholder";
 import { useSlashSkill } from "./use-slash-skill";
 import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
+import { useChatDraftText } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice } from "./VoiceInputControl";
 import type { ReplyTarget } from "../reply/reply-draft";
@@ -83,6 +84,8 @@ export interface ConciergeComposerProps {
   streamError?: string | ChatErrorNotice | null;
   /** An open topic chat's own name, which the placeholder says it is a message "in". Unset in the main chat. */
   chatName?: string | null;
+  /** The chat whose draft the field keeps. */
+  chatId?: string | null;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
   onSend: (
@@ -99,7 +102,16 @@ export interface ConciergeComposerProps {
  */
 export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeComposerProps>(
   function ConciergeComposer(
-    { boxClassName, isStreaming = false, onStop, streamError, chatName, modelSelection, onSend },
+    {
+      boxClassName,
+      isStreaming = false,
+      onStop,
+      streamError,
+      chatName,
+      chatId,
+      modelSelection,
+      onSend,
+    },
     ref,
   ) {
     const { t } = useTranslation("chat");
@@ -111,7 +123,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       ? settings.webchatReasoningEffort
       : DEFAULT_REASONING_EFFORT;
 
-    const [inputText, setInputText] = useState("");
+    const [inputText, setInputText, sendEnded] = useChatDraftText(chatId);
     const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(null);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const [uploadInFlight, setUploadInFlight] = useState(false);
@@ -267,6 +279,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           const sentIds = new Set(uploads.map((upload) => upload.id));
           setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
           setInputText((current) => (current === rawText ? "" : current));
+          sendEnded(rawText, true);
           setFolder((current) => (current === pickedFolder ? null : current));
           setDraftSkill((current) => (current === skill ? null : current));
         }
@@ -274,6 +287,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
           setInputText(text);
+          sendEnded(text, false);
           setPendingUploads(uploads);
           setFolder(pickedFolder);
           setDraftSkill(skill);
@@ -281,6 +295,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         }
       }
     }, [
+      sendEnded,
       inputText,
       pendingUploads,
       folder,
