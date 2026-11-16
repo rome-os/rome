@@ -1952,6 +1952,7 @@ async function main() {
     recording: inboundRecorder,
     events: chatsEvents,
     wakes: chatsWired.links,
+    labels: chatsWired.labels,
   });
   const hookChatStop = legacyChatIdStop(chatStop);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();

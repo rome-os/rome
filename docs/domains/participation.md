@@ -27,6 +27,7 @@ The agent's working memory of a chat: a view built from the chat's messages, not
 - Whoever writes chooses the place. Mentioning the agent in a thread hands it a task with the thread as its context. Asking in the open chat gives it the chat around the question.
 - How far back "recent" reaches is the agent's own bound.
 - Every message a wake hands the agent names who said it: the message that woke it, the messages it catches up on, and the message it answers. Each carries the name the message showed and, apart from it, People's answer to [who is this](people.md#who-is-this): a person with their bond level, or nobody. A message from an account with a [delegate link](people.md#delegate-link) says it is an agent acting for that person.
+- An app that hears every message said to Rome gets the same answer with each message, so an app running its own agent names a sender as Rome's own turns do.
 - Participation asks People when the turn runs and never keeps the answer on the message, so a link the guardian makes or removes shows from the next turn. It never takes a person from the name a message showed, and no name a sender picks can pass for People's answer.
 - The messages the agent reads further back on its own, and those a renewed session carries over, show only the name each message showed.
 - Beyond the default view, the agent can read more of the chat on its own judgement: further back, the chat around a thread, other threads in the chat.

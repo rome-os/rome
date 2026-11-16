@@ -5,7 +5,7 @@
 import { readdir } from "node:fs/promises";
 import { eq, and, or, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import type { Account } from "@rome-os/app-runtime";
+import type { Account, BondLevel } from "@rome-os/app-runtime";
 import { persons, links, dismissedAccounts } from "../schema.js";
 import { type DrizzleDb, inTransaction, type SqliteExec } from "../index.js";
 import { getRelationshipDir } from "../../profile-memory.js";
@@ -15,7 +15,7 @@ import {
   protectedPersonReason,
 } from "@rome/api-types/persons";
 
-export type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
+export type { BondLevel };
 
 /**
  * The account a link names, the way Chats names it: the platform and the
