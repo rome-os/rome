@@ -23,7 +23,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-ci-${{ github.ref }}
+  # The nightly run shares main's ref, so a merge must not cancel it, nor it a merge's run.
+  group: ios-ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -131,8 +132,8 @@ jobs:
             exit 0
           fi
           echo "long=false" >> "$GITHUB_OUTPUT"
-          # The voice control lives in the message field, so the field's file counts too.
-          voice='^(ios/Rome/Features/VoiceInput/|ios/Rome(UI)?Tests/VoiceInput|ios/Rome/Features/Chat/TranscriptViews\.swift$|\.github/workflows/ios-ci\.yml$)'
+          # The voice control lives in the message field, so the field's files count too.
+          voice='^(ios/Rome/Features/VoiceInput/|ios/Rome(UI)?Tests/VoiceInput|ios/Rome/Features/Chat/(TranscriptViews|ComposerTextView)\.swift$|\.github/workflows/ios-ci\.yml$)'
           if git fetch --quiet --no-tags --depth=1 origin "$BASE" 2>/dev/null &&
              git diff --name-only "$BASE" HEAD | grep -qE "$voice"; then
             echo "voice=true" >> "$GITHUB_OUTPUT"
