@@ -12,6 +12,8 @@ import XCTest
 /// signpost interval, from the tap arriving to the field drawing listening; each test measures
 /// it over five starts, and the CI job fails when any interval in the result bundle is over
 /// 0.5 s.
+/// A stop is not timed here: its tap shows finishing at once, and idle comes when the instance
+/// sends the last words, so the suite checks only that each stop shows finishing or idle.
 ///
 /// The stand-in instance comes from the CI job through `TEST_RUNNER_ROME_LOCAL_ORIGIN`,
 /// `TEST_RUNNER_ROME_LOCAL_USER` and `TEST_RUNNER_ROME_LOCAL_PASSWORD`. Without them every test
@@ -90,14 +92,16 @@ final class VoiceInputTests: XCTestCase {
         let control = onScreen(app.buttons, "voice-input")
         let field = onScreen(app.textViews, "message-field")
         try requireControl(app, control, "the Chat has no voice control")
+        // A draft an earlier test left would pass both checks without a word heard.
+        emptyTheField(app, "rules 2 and 3")
+        let empty = fieldText(field)
         control.tap()
-        let words = NSPredicate(format: "value != nil AND value != ''")
-        let shown = expectation(for: words, evaluatedWith: field)
+        let shown = expectation(for: NSPredicate(format: "value != %@", empty), evaluatedWith: field)
         wait(for: [shown], timeout: 15)
         // The recording may end, and listening with it, before the guardian stops.
         if control.label == "Stop voice input" { control.tap() }
         XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 30), "the control never returned to idle")
-        XCTAssertFalse((field.value as? String ?? "").isEmpty, "the words were gone after listening stopped")
+        XCTAssertNotEqual(fieldText(field), empty, "the words were gone after listening stopped")
     }
 
     // MARK: Rule 8
@@ -124,6 +128,8 @@ final class VoiceInputTests: XCTestCase {
                 return
             }
             XCTAssertTrue(item.says(notice.label), "\(item.language): the notice says \"\(notice.label)\"; wanted \(item.wanted)")
+            let stays = onScreen(app.buttons, "voice-input")
+            XCTAssertTrue(stays.exists && stays.label == item.start, "\(item.language): the control did not stay after the refusal")
             let typed = "typed after refusing \(item.language) \(Int(Date().timeIntervalSince1970))"
             let field = onScreen(app.textViews, "message-field")
             // A draft an earlier test left in this chat is kept across launches, as it should be,
@@ -132,13 +138,18 @@ final class VoiceInputTests: XCTestCase {
             field.typeText(typed)
             XCTAssertTrue((field.value as? String ?? "").contains(typed), "\(item.language): a key was lost after the notice")
             onScreen(app.buttons, "send").tap()
-            let sent = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", typed)).firstMatch
+            let sent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", typed)).firstMatch
             XCTAssertTrue(sent.waitForExistence(timeout: 10), "\(item.language): the typed message was not sent")
             app.terminate()
         }
     }
 
     // MARK: Rule 7
+
+    /// A kill ends the app with no chance to save, so the words checked must be in the saved
+    /// draft first: the field hands shown words to the draft once a second, and the draft
+    /// writes 300 ms after its last change.
+    static func waitForTheDraft() { Thread.sleep(forTimeInterval: 2) }
 
     /// Rule 7 when the guardian opens another chat and comes back.
     @MainActor
@@ -174,6 +185,7 @@ final class VoiceInputTests: XCTestCase {
     func testRule7RelaunchingKeepsTheWords() throws {
         let first = try launch(recording: Self.hum)
         let app = try checkWordsKept(first, stop: "a relaunch", notice: "Listening stopped when Rome closed") {
+            Self.waitForTheDraft()
             first.terminate()
             return try launch(recording: Self.hum)
         }
@@ -201,6 +213,7 @@ final class VoiceInputTests: XCTestCase {
             return first
         }
         try checkWordsKept(first, stop: "zh-Hans: a relaunch", notice: "Rome 关闭时已停止收听", language: "zh-Hans") {
+            Self.waitForTheDraft()
             first.terminate()
             return try launch(recording: Self.hum, language: "zh-Hans")
         }
@@ -258,9 +271,9 @@ final class VoiceInputTests: XCTestCase {
     /// Rule 9: every stop closes the microphone within 1 s. Each of six starts in the Chat ends
     /// with another stop: the guardian's, leaving the chat, the background, a transcriber error,
     /// losing the network, and the guardian's again. The app's `StopListening` interval runs
-    /// from the stop to the microphone closed. On the simulator the recording closes in
-    /// microseconds, so the CI job reads the intervals from the simulator's log, where each one
-    /// can be counted and timed, and holds every one to 1 s.
+    /// from the stop to the microphone closed. On the simulator the recording stands in for the
+    /// microphone and closes in microseconds, so the CI job checks only that every measured stop
+    /// has an interval; the 1 s is scored on a phone (leg C).
     @MainActor
     func testRule9EveryStopClosesTheMicrophone() throws {
         let app = try launch()
@@ -387,13 +400,8 @@ final class VoiceInputTests: XCTestCase {
     private func voiceInputPlace() throws -> (provider: String, host: String) {
         let origin = try XCTUnwrap(ProcessInfo.processInfo.environment["ROME_LOCAL_ORIGIN"],
                                    "no stand-in instance: set TEST_RUNNER_ROME_LOCAL_ORIGIN")
-        var answer: [String: Any] = [:]
-        let done = expectation(description: "Rome names where voice goes")
-        URLSession.shared.dataTask(with: try XCTUnwrap(URL(string: "\(origin)/api/voice-input"))) { data, _, _ in
-            answer = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-            done.fulfill()
-        }.resume()
-        wait(for: [done], timeout: 10)
+        let data = try Data(contentsOf: try XCTUnwrap(URL(string: "\(origin)/api/voice-input")))
+        let answer = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         let place = try XCTUnwrap(answer["place"] as? [String: Any], "GET /api/voice-input names no place: \(answer)")
         return (try XCTUnwrap(place["provider"] as? String), try XCTUnwrap(place["host"] as? String))
     }
@@ -417,7 +425,7 @@ final class VoiceInputTests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [heard], timeout: 30), .completed, "the spoken words never reached the field")
         XCTAssertTrue(tapUntil(control, NSPredicate(format: "label IN %@", ["Finishing voice input", "Start voice input"])),
                       "listening never stopped")
-        let sent = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", phrase)).firstMatch
+        let sent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", phrase)).firstMatch
         Thread.sleep(forTimeInterval: 60)
         XCTAssertFalse(sent.exists, "a message with the spoken words appeared without the send action")
         XCTAssertTrue(fieldText(field).contains(phrase), "the spoken words left the field without the send action")
@@ -463,7 +471,7 @@ final class VoiceInputTests: XCTestCase {
                 }
             } else {
                 onScreen(app.buttons, "send").tap()
-                let sent = app.staticTexts.containing(NSPredicate(format: "label == %@", whole)).firstMatch
+                let sent = app.staticTexts.matching(NSPredicate(format: "label == %@", whole)).firstMatch
                 XCTAssertTrue(sent.waitForExistence(timeout: 10), "the sent message is not \"\(whole)\"")
             }
         }
@@ -644,10 +652,12 @@ final class VoiceInputTests: XCTestCase {
     /// A generated four-minute hum, 16 kHz mono 16-bit. The stand-in instance hears it as speech,
     /// so its 30 s no-speech end never comes during XCUITest's slow steps.
     private func humFile() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(Self.hum).wav")
-        if FileManager.default.fileExists(atPath: url.path) { return url }
         let rate: UInt32 = 16000
-        let count = Int(rate) * 240
+        let seconds = 240
+        let count = Int(rate) * seconds
+        // Named by its length, so a file an older run left at another length is never reused.
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(Self.hum)-\(seconds)s.wav")
+        if FileManager.default.fileExists(atPath: url.path) { return url }
         var data = Data()
         func text(_ s: String) { data.append(contentsOf: Array(s.utf8)) }
         func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
@@ -713,14 +723,7 @@ final class VoiceInputTests: XCTestCase {
     @MainActor
     private func assertAnswers(_ origin: String) throws {
         let url = try XCTUnwrap(URL(string: "\(origin)/api/voice-input"), "bad origin \(origin)")
-        var answered = false
-        let done = expectation(description: "the instance answers")
-        URLSession.shared.dataTask(with: url) { _, response, _ in
-            answered = response != nil
-            done.fulfill()
-        }.resume()
-        wait(for: [done], timeout: 30)
-        if !answered {
+        if (try? Data(contentsOf: url)) == nil {
             XCTFail("the stand-in instance at \(origin) does not answer")
             throw InstanceUnreachable()
         }

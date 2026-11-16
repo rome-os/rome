@@ -228,7 +228,8 @@ jobs:
           python3 - "$RUNNER_TEMP/metrics.json" <<'PY'
           import json, sys
 
-          STOPS = ["leaving the chat", "the background", "a transcriber error", "losing the network", "the guardian's stop"]
+          # Without the stand-in's drop control the test makes the guardian's stop in place of losing the network.
+          STOPS = ["leaving the chat", "the background", "a transcriber error", "losing the network (or the guardian's stop)", "the guardian's stop"]
           found = []
 
           def walk(node, test=None):
