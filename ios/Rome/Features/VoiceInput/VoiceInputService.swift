@@ -161,6 +161,8 @@ final class VoiceInputController {
     private(set) var state: State = .idle
     /// Why listening last stopped on its own; it goes away on the next edit or send.
     private(set) var notice: VoiceInputStop?
+    /// The loudness of this listening, for the waveform; a new one each start.
+    @ObservationIgnored private(set) var meter = VoiceLevelMeter()
     @ObservationIgnored private var dictation: VoiceDictation?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var anchor: (original: String, range: NSRange)?
@@ -189,12 +191,13 @@ final class VoiceInputController {
         anchor = (original, range)
         notice = nil
         if let chat { service.listening(in: chat) }
+        meter = VoiceLevelMeter()
         state = .listening
         let before = (original as NSString).substring(to: range.location)
         let after = (original as NSString).substring(from: NSMaxRange(range))
         let dictation = VoiceDictation(
             request: request,
-            source: VoiceAudioSources.make(),
+            source: MeteredAudioSource(VoiceAudioSources.make(), meter: meter),
             handlers: .init(
                 onText: { [weak self] heard in
                     let insertion = SpokenText.insertion(before: before, heard: heard, after: after)

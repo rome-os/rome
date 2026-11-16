@@ -610,6 +610,10 @@ struct Composer: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var voice = VoiceInputController()
+    /// The voice control moves between rows as listening starts and stops,
+    /// so VoiceOver focus that was on it is put back on the new one.
+    @AccessibilityFocusState private var voiceFocused: Bool
+    @State private var refocusVoice = false
     @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
@@ -643,8 +647,11 @@ struct Composer: View {
                     .padding(.leading, 12)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+            // While listening, the text takes the whole first row and the
+            // controls move below it, beside the waveform. The text view keeps
+            // its place in the tree, so the words shown so far stay.
             HStack(alignment: .bottom, spacing: 8) {
-                if let attachments {
+                if let attachments, !voice.active {
                     plusMenu(attachments)
                         .padding(.bottom, controlPadding)
                 }
@@ -661,49 +668,30 @@ struct Composer: View {
                     editable: !voice.active,
                     onEdit: { voice.edited(service: voiceInput, chat: voiceKey) }
                 )
-                if let voiceInput, voiceInput.available {
-                    VoiceInputButton(state: voice.state) {
-                        voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
-                    }
-                    .padding(.bottom, controlPadding)
+                if !voice.active {
+                    controls
+                        .padding(.bottom, controlPadding)
                 }
-                Group {
-                    // While listening, the field's stop is the voice control's.
-                    if stopVisible && !canSend && !voice.active {
-                        Button(action: onStop) {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .fill(Palette.bg)
-                                .frame(width: 12, height: 12)
-                                .frame(width: 36, height: 36)
-                                .background(Palette.fg, in: Circle())
-                                .opacity(stopping ? 0.5 : 1)
-                        }
-                        .disabled(stopping)
-                        .accessibilityLabel("Stop")
-                        .transition(.scale.combined(with: .opacity))
-                    } else {
-                        Button {
-                            voice.edited(service: voiceInput, chat: voiceKey)
-                            onSend()
-                        } label: {
-                            Image(systemName: "arrow.up")
-                                .romeFont(16, .bold)
-                                .foregroundStyle(.white)
-                                .frame(width: 36, height: 36)
-                                .background(Palette.primary, in: Circle())
-                                .opacity(canSend ? 1 : 0.35)
-                        }
-                        .disabled(!canSend)
-                        .accessibilityLabel("Send")
-                        .accessibilityIdentifier("send")
-                        .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                .buttonStyle(PressScaleStyle(scale: 0.9))
-                .padding(.bottom, controlPadding)
             }
-            .padding(.leading, attachments == nil ? 18 : 7)
-            .padding(.trailing, 7)
+            .padding(.leading, attachments == nil || voice.active ? 18 : 7)
+            .padding(.trailing, voice.active ? 18 : 7)
+            if voice.active {
+                HStack(spacing: 8) {
+                    if let attachments { plusMenu(attachments) }
+                    Group {
+                        if voice.state == .listening {
+                            VoiceInputWaveform(meter: voice.meter)
+                        } else {
+                            Color.clear.frame(height: VoiceInputWaveform.height)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    controls
+                }
+                .padding(.leading, attachments == nil ? 18 : 7)
+                .padding(.trailing, 7)
+                .padding(.bottom, 7)
+            }
         }
         .frame(minHeight: ComposerTextView.minHeight)
         // Frosted glass: the transcript behind blurs out so the placeholder
@@ -717,6 +705,12 @@ struct Composer: View {
         .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
         .onChange(of: voice.state) { voice.stateShown() }
+        .onChange(of: voice.active) {
+            guard refocusVoice else { return }
+            refocusVoice = false
+            // A turn later, once the control in its new row exists.
+            DispatchQueue.main.async { voiceFocused = true }
+        }
         .onChange(of: onScreen) { _, now in
             if now {
                 voice.arrive(service: voiceInput, chat: voiceKey)
@@ -755,6 +749,50 @@ struct Composer: View {
             }
             .ignoresSafeArea()
         }
+    }
+
+    /// The voice control, and Send or the turn's stop.
+    @ViewBuilder private var controls: some View {
+        if let voiceInput, voiceInput.available {
+            VoiceInputButton(state: voice.state) {
+                refocusVoice = voiceFocused
+                voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
+            }
+            .accessibilityFocused($voiceFocused)
+        }
+        Group {
+            // While listening, the field's stop is the voice control's.
+            if stopVisible && !canSend && !voice.active {
+                Button(action: onStop) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Palette.bg)
+                        .frame(width: 12, height: 12)
+                        .frame(width: 36, height: 36)
+                        .background(Palette.fg, in: Circle())
+                        .opacity(stopping ? 0.5 : 1)
+                }
+                .disabled(stopping)
+                .accessibilityLabel("Stop")
+                .transition(.scale.combined(with: .opacity))
+            } else {
+                Button {
+                    voice.edited(service: voiceInput, chat: voiceKey)
+                    onSend()
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .romeFont(16, .bold)
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(Palette.primary, in: Circle())
+                        .opacity(canSend ? 1 : 0.35)
+                }
+                .disabled(!canSend)
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("send")
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .buttonStyle(PressScaleStyle(scale: 0.9))
     }
 
     private func plusMenu(_ attachments: ComposerAttachments) -> some View {
