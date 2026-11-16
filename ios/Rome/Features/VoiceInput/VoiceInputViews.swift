@@ -18,7 +18,7 @@ struct VoiceInputButton: View {
         Button(action: action) {
             Image(systemName: state == .listening ? "stop.circle.fill" : "mic")
                 .romeFont(17, .medium)
-                .foregroundStyle(state == .listening ? Palette.primary : Palette.sub)
+                .foregroundStyle(Palette.sub)
                 .opacity(state == .finishing ? 0.5 : 1)
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())
@@ -132,18 +132,35 @@ struct VoiceInputWaveform: View {
             return CGFloat(max(0, 1 - now.timeIntervalSince(steppedAt) / 0.05))
         }
 
-        /// Takes one step of the meter for each 50 ms since the last, at most
-        /// `steps` at once, and adds a bar for the loudest. Silence adds a dot.
+        /// When the next step is due. Steps keep their own 50 ms beat, so a
+        /// slower or uneven frame rate takes every due step and none is lost.
+        private var nextDue: Date?
+
+        /// Takes each step of the meter due by `now`, `steps` readings a bar,
+        /// and adds a bar for the loudest of each. Silence adds a dot.
         func advance(to now: Date, meter: VoiceLevelMeter, steps: Int) {
-            if let steppedAt, now.timeIntervalSince(steppedAt) < 0.045 * Double(steps) { return }
-            var peak: Float?
-            for _ in 0..<steps {
-                guard let step = meter.next() else { break }
-                peak = max(peak ?? 0, step)
+            let period = 0.05 * Double(steps)
+            var due = nextDue ?? now
+            // A millisecond's slack for timestamps that land a hair early.
+            while now.timeIntervalSince(due) >= -0.001 {
+                var peak: Float?
+                for _ in 0..<steps {
+                    guard let step = meter.next() else { break }
+                    peak = max(peak ?? 0, step)
+                }
+                // No audio yet: wait for it without owing steps.
+                guard let peak else {
+                    nextDue = now
+                    return
+                }
+                add(peak, steps: steps)
+                steppedAt = due
+                due += period
             }
-            // No audio yet: try again on the next frame.
-            guard let peak else { return }
-            steppedAt = now
+            nextDue = due
+        }
+
+        private func add(_ peak: Float, steps: Int) {
             values.append(peak > VoiceInputWaveform.silence ? peak : 0)
             // The last 5 s, whatever the width: each value holds `steps` of 50 ms.
             let kept = 100 / steps

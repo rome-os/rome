@@ -80,4 +80,27 @@ import Testing
         #expect(bars.values.count == 25)
         #expect(bars.values.allSatisfy { $0 == 0 })
     }
+
+    @Test func thirtyFramesASecondStillTakesTwentyStepsASecond() {
+        let meter = VoiceLevelMeter()
+        let bars = VoiceInputWaveform.Bars()
+        let start = Date()
+        // One second at 30 frames a second, audio arriving 100 ms at a time.
+        for frame in 0..<30 {
+            let now = start.addingTimeInterval(Double(frame) / 30)
+            if frame % 3 == 0 { meter.take(tone(0.2, samples: 1600)) }
+            bars.advance(to: now, meter: meter, steps: 1)
+        }
+        #expect(bars.values.count == 20)
+    }
+
+    @Test func aSkippedFrameTakesEveryStepThatCameDue() {
+        let meter = VoiceLevelMeter()
+        let bars = VoiceInputWaveform.Bars()
+        let start = Date()
+        meter.take(tone(0.2, samples: 3200))
+        bars.advance(to: start, meter: meter, steps: 1)
+        bars.advance(to: start.addingTimeInterval(0.15), meter: meter, steps: 1)
+        #expect(bars.values.count == 4)
+    }
 }
