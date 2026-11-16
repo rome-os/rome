@@ -119,17 +119,37 @@ export class Api {
   }
 
   /** Sends the owner's message and answers its id. */
-  async send(chatId: string, text: string, replyToMessageId?: string): Promise<string> {
+  async send(
+    chatId: string,
+    text: string,
+    replyToMessageId?: string,
+    reasoningEffort?: string,
+  ): Promise<string> {
     const inputId = randomUUID();
     // A send with the same input id answers the turn it already started, so
     // it is safe to send again.
     await this.call(
       "POST",
       `/api/chat/sessions/${encodeURIComponent(chatId)}/turns`,
-      { text, inputId, ...(replyToMessageId ? { replyToMessageId } : {}) },
+      {
+        text,
+        inputId,
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      },
       true,
     );
     return inputId;
+  }
+
+  /** Picks the chat's model, as the composer's model menu does. */
+  setModel(chatId: string, largeModelSelection: string): Promise<unknown> {
+    return this.call(
+      "PATCH",
+      `/api/chat/sessions/${encodeURIComponent(chatId)}/model`,
+      { largeModelSelection },
+      true,
+    );
   }
 
   messages(chatId: string): Promise<ChatMessage[]> {

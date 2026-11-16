@@ -460,6 +460,52 @@ export const modelTurnTtftMetric = lazyDurationHistogram(
     "labelled by model id and is_subagent.",
 );
 
+export const conciergeTurnAckMetric = lazyDurationHistogram(
+  "rome.concierge.turn.ack",
+  "Concierge turn: from the owner's send (or Rome's start of the turn) to the " +
+    "first sign the owner sees: 👀 working, a reaction or a message.",
+);
+
+export const conciergeTurnFirstSayMetric = lazyDurationHistogram(
+  "rome.concierge.turn.first_say",
+  "Concierge turn: from the owner's send (or Rome's start of the turn) to the " +
+    "first message the turn said landing in the chat.",
+);
+
+export const conciergeTurnDurationMetric = lazyDurationHistogram(
+  "rome.concierge.turn.duration",
+  "Concierge turn: from the owner's send (or Rome's start of the turn) to its end.",
+);
+
+/** What a timed Concierge turn reports to the metrics (concierge/turn-timing.ts). */
+export interface ConciergeTurnMetricFacts {
+  trigger: string;
+  model: string | null;
+  effort: string | null;
+  session: string | null;
+  ackMs: number | null;
+  firstSayMs: number | null;
+  durationMs: number;
+}
+
+/**
+ * Records a Concierge turn's timings, labelled by trigger (guardian or
+ * system), model, effort and whether its session was warm or cold.
+ */
+export function recordConciergeTurnMetrics(facts: ConciergeTurnMetricFacts): void {
+  const attributes: Attributes = {
+    trigger: facts.trigger,
+    "model.id": facts.model ?? "unknown",
+    effort: facts.effort ?? "default",
+    session: facts.session ?? "unknown",
+  };
+  if (facts.ackMs !== null) conciergeTurnAckMetric().record(facts.ackMs, attributes);
+  if (facts.firstSayMs !== null) {
+    conciergeTurnFirstSayMetric().record(facts.firstSayMs, attributes);
+  }
+  conciergeTurnDurationMetric().record(facts.durationMs, attributes);
+}
+
 export const modelPromptCacheMetric = lazyCounter(
   "rome.model.prompt.cache",
   'Prompt-cache outcome per turn ("hit" when cache_read_input_tokens > 0, ' +

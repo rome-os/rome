@@ -1,4 +1,9 @@
 import { withTaskCards } from "../../concierge/task-cards.js";
+import {
+  ConciergeTurnTiming,
+  reportConciergeTurn,
+  type TimedEvent,
+} from "../../concierge/turn-timing.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
@@ -967,6 +972,21 @@ interface ActiveWebchatStream {
   writing?: MessageWriting;
   /** The turn called a tool: a message it takes from then on joins it while it runs. */
   calledTool?: boolean;
+  /** A Concierge chat's turn: how long it took as its owner sees it (concierge/turn-timing.ts). */
+  timing?: ConciergeTurnTiming;
+}
+
+/** Whether a message's stored parts carry text: a say or a forwarded result, not a card alone. */
+function carriesText(content: string): boolean {
+  try {
+    const parts = JSON.parse(content) as unknown;
+    return (
+      Array.isArray(parts) &&
+      parts.some((p) => (p as { type?: unknown } | null)?.type === "text")
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface IncomingWebchatUpload {
@@ -1112,6 +1132,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     stream: ActiveWebchatStream,
     msg: Parameters<MessageWriting["on"]>[0],
   ): void => {
+    stream.timing?.event(msg as TimedEvent);
     // A working tool call that runs long shows the turn's open messages
     // working (docs/domains/chats.md#status). Only a Concierge chat has open ones.
     if (msg.type === "tool_use") {
@@ -1171,6 +1192,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // A quiet turn shows once it says something.
   deps.webchatRepo.onMessageInserted((message) => {
     if (message.role !== "assistant") return;
+    if (carriesText(message.content)) {
+      for (const stream of activeStreams.get(message.sessionId) ?? []) {
+        if (!stream.finished) stream.timing?.said();
+      }
+    }
     let changed = false;
     for (const stream of activeStreams.get(message.sessionId) ?? []) {
       if (!stream.finished && stream.quiet && !stream.spoke) {
@@ -1181,6 +1207,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
     if (changed) notifyTurn(message.sessionId);
+  });
+  // 👀 and reactions on a Concierge chat's messages time its running turn.
+  deps.concierge?.messageStatus?.onSign?.((chatId, sign) => {
+    for (const stream of activeStreams.get(chatId) ?? []) {
+      if (stream.finished || !stream.timing) continue;
+      if (sign === "working") stream.timing.working();
+      else stream.timing.reacted();
+    }
   });
   const openTool = (sessionId: string): string | null =>
     openToolOf(activeStreams.get(sessionId) ?? []);
@@ -2440,6 +2474,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const finishStream = (stream: ActiveWebchatStream): void => {
     if (stream.finished) return;
     stream.finished = true;
+    const timed = stream.timing?.finish(stream.agentTurnId ?? stream.turnId);
+    if (timed) reportConciergeTurn(timed);
     // The live preview is over — the durable reply lives in the DB now. Drop
     // the assistant_text replay frame so a late reattach doesn't flash a
     // transient bubble before swapping to the persisted message. Subscribers
@@ -3971,6 +4007,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       taskInput?: TaskInputClaim;
     } = {},
   ): Promise<RouteAnswer> => {
+    // A Concierge turn's timing starts when the owner's send reaches Rome.
+    const receivedAtMs = Date.now();
     const actor = said.taskActor ?? (await currentSessionActor());
     const sourceId =
       actor?.kind === "guardian" &&
@@ -4543,6 +4581,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       promptText = `${conciergeHeader}\n${stopped ? `${stopped}\n` : ""}${line}\n\n${noticedPrompt}`;
     }
 
+    // Whether the chat's session was still open: a turn on it starts warm.
+    const sessionWarmth = !isConciergeChat(session)
+      ? undefined
+      : deps.agentSessionManager.find({ agentName, channelThreadKey }) === undefined
+        ? ("cold" as const)
+        : ("warm" as const);
     let agentSess;
     try {
       agentSess = await deps.agentSessionManager.open(
@@ -4639,6 +4683,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       stream.interrupt = async (reason) => {
         await handle.stop(reason);
       };
+      if (isConciergeChat(session)) {
+        stream.timing = new ConciergeTurnTiming(
+          {
+            chatId: sessionId,
+            turnId,
+            trigger: said.taskInput || saidBy ? "system" : "guardian",
+            startedAtMs: receivedAtMs,
+            ...(reasoningEffort ? { effort: reasoningEffort } : {}),
+            ...(sessionWarmth ? { session: sessionWarmth } : {}),
+          },
+          agentName,
+        );
+      }
       enqueueStream(sessionId, stream);
       if (autoTitle) {
         void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
@@ -5205,6 +5262,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       session.agentName ?? "main",
     );
     if (options?.quiet) stream.quiet = true;
+    // Housekeeping turns say nothing to wait for, so only the others are timed.
+    if (isConciergeChat(session) && !options?.quiet) {
+      stream.timing = new ConciergeTurnTiming(
+        {
+          chatId: sessionId,
+          turnId: syntheticTurnId,
+          trigger: "system",
+          startedAtMs: Date.now(),
+          session:
+            deps.agentSessionManager.find({
+              agentName: session.agentName ?? "main",
+              channelThreadKey: webchatSessionKey(sessionId),
+            }) === undefined
+              ? "cold"
+              : "warm",
+        },
+        session.agentName ?? "main",
+      );
+    }
     enqueueStream(sessionId, stream);
 
     // Capture the resumed agent's final reply so it can be persisted as a

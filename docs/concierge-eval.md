@@ -67,3 +67,32 @@ Every metric comes from the stack's database, read inside the container. The scr
 Echo and Ack are heuristics. Read the flagged messages in `round-N.md` before trusting a change in either.
 
 The `no-response` scenario measures only what the Concierge says when the wait expires. The digest that lists the task runs at the owner's digest times, so a round does not reach it.
+
+## Timing
+
+Rome times every Concierge turn, in the product and not only in the eval. A turn the owner's message starts counts from the moment the send reaches Rome. A turn Rome starts, such as one that relays a task's result, counts from its start. Housekeeping turns, which say nothing, are not timed. Each turn ends in one log line, `concierge.turn.timed`, and three histograms, labelled by trigger (`guardian` or `system`), model, effort and session (`warm` when the chat's session was open, `cold` when the turn opened one):
+
+| Histogram | Until |
+|---|---|
+| `rome.concierge.turn.ack` | the first sign the owner sees: 👀 working, a reaction or a message |
+| `rome.concierge.turn.first_say` | the first message the turn said lands in the chat |
+| `rome.concierge.turn.duration` | the turn ends |
+
+The log line adds the time until the model turn started (session acquire, open and any wait for a renewal), the model calls and tool calls, each tool's count, the context the turn ended with, and its input, cache-read, cache-write and output tokens. `rome.model.turn.ttft` measures the first plain text of a model turn, which a Concierge turn does not send, so read these for the Concierge instead.
+
+## Baseline
+
+`pnpm concierge:baseline` plays the scenarios of [`baseline-scenarios.ts`](../scripts/concierge-eval/baseline-scenarios.ts), one or more for each kind of turn the Concierge handles: chat, a simple question, a quick lookup, a reasoning question, a simple task, a heavy task, a task's relayed result and recall from earlier in the chat. It plays one model and effort per run, so runs of several configurations compare on latency and quality:
+
+```bash
+pnpm concierge:baseline --config opus-low --model claude-opus-5-5 --effort low --runs 3
+pnpm concierge:baseline --report
+```
+
+The `lookup-memory` scenario asks for a fact from the Concierge's memory. Run `scripts/concierge-eval/seed-baseline.sh` on the stack before you freeze the snapshot, so every run starts with it.
+
+`--model` is a model selection id, which the eval picks for each scenario's topic chat as the composer's model menu does. `--effort` goes with each of the owner's messages. A turn Rome starts runs at the Concierge's own effort, which the eval does not set. Each run restores the snapshot first, as `concierge:eval` does, and plays the scenarios one at a time, so their timings do not compete; `--concurrency` plays several at once.
+
+Each scenario reads its timed turns from the stack's log and checks what they did: answered inline or started a task as the scenario expects, searched the web at most three times, said no filler, and named the expected fact. A judge model then scores the answers from 1 to 5 against the scenario's written rubric. The judge runs through the Claude Code CLI on the host, `claude -p` on `--judge-model` (Opus 5.5 by default), and may search the web to check a fact. `--no-judge` skips it.
+
+Results go to `.concierge-eval/baseline/<config>/run-N.json`, with the machine's load average before and after each run. `--report` writes `.concierge-eval/baseline/report.md`: a table for each scenario, with a row for each configuration, giving p50 and p95 of each timing, the mean model calls, tool calls and cache tokens, how many runs passed their checks, and the judge's mean score.

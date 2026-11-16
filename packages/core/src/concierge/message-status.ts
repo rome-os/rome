@@ -36,6 +36,9 @@ export function isWorkingTool(tool: string): boolean {
   return !ANSWER_TOOLS.has(bareTool(tool));
 }
 
+/** A sign of work the owner sees on a message of chat `chatId`: 👀 working, or a reaction. */
+export type MessageSign = (chatId: string, sign: "working" | "reacted") => void;
+
 type StatusRepo = Pick<
   ConciergeTasksRepository,
   "markWorking" | "markReacted" | "anyInheritedWorking"
@@ -70,12 +73,31 @@ export class MessageStatusTracker {
    * count toward another's: a newer turn drops them, timers included.
    */
   private readonly calls = new Map<string, TurnCalls>();
+  private readonly signListeners = new Set<MessageSign>();
 
   /** `repoOf` is read at each use, as the service's task list may be wired after it. */
   constructor(
     private readonly repoOf: () => StatusRepo,
     private readonly graceMs = WORKING_GRACE_MS,
   ) {}
+
+  /** Tells `listener` each sign of work a chat's messages show; answers its removal. */
+  onSign(listener: MessageSign): () => void {
+    this.signListeners.add(listener);
+    return () => this.signListeners.delete(listener);
+  }
+
+  private tellSign(chatId: string, sign: "working" | "reacted"): void {
+    for (const listener of this.signListeners) {
+      try {
+        listener(chatId, sign);
+      } catch (error) {
+        log.warn("a message sign listener failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
 
   private get repo(): StatusRepo {
     return this.repoOf();
@@ -148,6 +170,7 @@ export class MessageStatusTracker {
    */
   async reactedTo(chatId: string, messageKey: string): Promise<void> {
     await this.guard(this.repo.markReacted(chatId, messageKey));
+    this.tellSign(chatId, "reacted");
   }
 
   /** The running turn of chat `chatId` took its reaction to `messageKey` back. */
@@ -197,6 +220,7 @@ export class MessageStatusTracker {
   private async ranLong(chatId: string): Promise<void> {
     if (await this.repo.anyInheritedWorking(chatId)) return;
     await this.repo.markWorking(chatId, { except: [...(this.joined.get(chatId) ?? [])] });
+    this.tellSign(chatId, "working");
   }
 
   // The status only shows how the work stands, so failing to write it never
