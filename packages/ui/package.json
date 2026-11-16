@@ -95,6 +95,10 @@
       "types": "./dist/input.d.ts",
       "default": "./dist/input.js"
     },
+    "./keyboard-submit": {
+      "types": "./dist/keyboard-submit.d.ts",
+      "default": "./dist/keyboard-submit.js"
+    },
     "./layout-form": {
       "types": "./dist/layout-form.d.ts",
       "default": "./dist/layout-form.js"

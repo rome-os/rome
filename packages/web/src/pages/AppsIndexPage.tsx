@@ -30,7 +30,7 @@ import { getBuiltinAppIcon } from "@/lib/builtin-app-icons";
 import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
-import { isImeCompositionEvent } from "@/lib/keyboard-submit";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { ListToolbar } from "@rome-os/ui/layout-list";
 import {

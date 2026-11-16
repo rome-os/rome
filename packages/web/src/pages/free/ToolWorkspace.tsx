@@ -47,6 +47,7 @@ import {
   type WidgetPlacement,
   type WidgetType,
 } from "./use-free-cells";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 export { COMPACT_WIDTH } from "./use-free-cells";
 
@@ -62,11 +63,8 @@ const TASKS_TAB_ID = "__tasks__";
 type BuiltinTab = "trace" | "tasks";
 
 function readRatio() {
-  try {
-    const value = Number(localStorage.getItem(WIDTH_KEY));
-    if (value >= 0.2 && value <= 0.8) return value;
-  } catch {}
-  return DEFAULT_RATIO;
+  const value = Number(readStored(WIDTH_KEY));
+  return value >= 0.2 && value <= 0.8 ? value : DEFAULT_RATIO;
 }
 
 interface ToolTabProps {
@@ -472,9 +470,7 @@ export function ToolWorkspace({
   function changeRatio(next: number) {
     const constrained = Math.max(0.2, Math.min(0.8, next));
     setRatio(constrained);
-    try {
-      localStorage.setItem(WIDTH_KEY, String(constrained));
-    } catch {}
+    writeStored(WIDTH_KEY, String(constrained));
   }
 
   function closeTab(id: string) {

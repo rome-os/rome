@@ -1,7 +1,7 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
-import { isElectronShell } from "@/lib/electron-shell";
+import { shellAllowsMicrophone } from "@/lib/electron-shell";
 import {
   type Dictation,
   type DictationDeps,
@@ -91,6 +91,7 @@ export function useVoiceInput({
 }) {
   const info = useVoiceInputInfo();
   const [state, setState] = useState<VoiceInputState>("idle");
+  const [asking, setAsking] = useState(false);
   const anchorRef = useRef<Anchor | null>(null);
   const dictationRef = useRef<Dictation | null>(null);
   const valueRef = useRef(value);
@@ -113,6 +114,7 @@ export function useVoiceInput({
       anchorRef.current = null;
       keepNoticeRef.current({ reason });
       setState("idle");
+      setAsking(false);
       setNoticeRef.current({ reason });
     };
     // `persisted`: the page went into the back/forward cache, not away.
@@ -194,8 +196,10 @@ export function useVoiceInput({
               anchor.before + spokenInsertion(anchor.before, heard, anchor.after) + anchor.after,
             );
         },
+        onAsking: setAsking,
         onDone: (heard, stop) => {
           dictationRef.current = null;
+          setAsking(false);
           commit(heard);
           setState("idle");
           setNotice(stop);
@@ -234,14 +238,16 @@ export function useVoiceInput({
   return {
     /**
      * False hides the voice control: the instance is not signed in to Rome
-     * Cloud, Rome Cloud does not allow the account, or this is the desktop
-     * app, which cannot open the microphone yet. A dictation under way keeps
-     * its control, so the guardian can always stop it.
+     * Cloud, Rome Cloud does not allow the account, or this is a desktop app
+     * too old to give the dashboard the microphone. A dictation under way
+     * keeps its control, so the guardian can always stop it.
      */
-    available: (Boolean(info.data?.available) && !isElectronShell()) || state !== "idle",
+    available: (Boolean(info.data?.available) && shellAllowsMicrophone()) || state !== "idle",
     state,
     /** Why listening last stopped on its own, or null. */
     notice,
+    /** True while the browser asks the guardian for the microphone. */
+    asking,
     /** Clears the notice, as a send does. */
     dismissNotice,
     /** Call from the field's change handler: an edit clears the notice. */

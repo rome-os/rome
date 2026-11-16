@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
-import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
+import { shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 import { PAGE_FLOOR } from "@/shell/PageShell";
 import { ChannelGlyph, channelLabel } from "./channel-meta";
 import { sendRefusalKey, type RefusedSendState } from "./send-copy";

@@ -48,7 +48,7 @@ import {
 } from "@/lib/chat-constants";
 import { isReasoningEffort } from "@/lib/chat-helpers";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
-import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
+import { isImeCompositionEvent, shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 import { randomUUID } from "@/lib/random-uuid";
 import type { ChatErrorNotice, PendingUpload } from "@/lib/chat-types";
 import { appendFolderLine, deviceFolderLabel, type FolderSelection } from "@/lib/device-folder";
@@ -58,6 +58,7 @@ import { ReplyBar } from "../reply/ReplyBar";
 import { useReplyDraft } from "../reply/reply-draft";
 import { ComposerChip } from "./ComposerChip";
 import { PendingUploadsList } from "./PendingUploadsList";
+import { usePendingAttachments } from "./use-pending-attachments";
 import { useFittedPlaceholder } from "./use-fitted-placeholder";
 import { useSlashSkill } from "./use-slash-skill";
 import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
@@ -126,9 +127,18 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const draft = useChatDraft(chatId);
     const { text: inputText, setText: setInputText, sendEnded } = draft;
     const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(null);
-    const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
-    const [uploadInFlight, setUploadInFlight] = useState(false);
-    const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+    const {
+      uploads: pendingUploads,
+      set: setPendingUploads,
+      removeSent: removeSentUploads,
+      inFlight: uploadInFlight,
+      inFlightRef: uploadInFlightRef,
+      progress: uploadProgress,
+      add: addPendingFiles,
+      remove: removePendingUpload,
+      cancel: cancelUpload,
+      track: trackUpload,
+    } = usePendingAttachments();
     // One folder for the next message only; it goes out as a line of text.
     const [folder, setFolder] = useState<FolderSelection | null>(null);
     const [folderPickerOpen, setFolderPickerOpen] = useState(false);
@@ -143,25 +153,13 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     );
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaFocusedAtPressRef = useRef(false);
-    // The ref closes the same-event gap before React commits the state.
-    const uploadInFlightRef = useRef(false);
-    const {
-      slashMenuOpen,
-      setSlashMenuOpen,
-      slashQuery,
-      setSlashQuery,
-      slashMenuRef,
-      reevaluateSlashContext,
-      acceptSlashSkill,
-      handleSlashKeyDown,
-    } = useSlashSkill({
+    const skillPicker = useSlashSkill({
       inputText,
       setInputText,
       setDraftSkill,
       textareaRef,
       uploadInFlightRef,
     });
-    const uploadAbortRef = useRef<AbortController | null>(null);
     // The last failed send, so a retry of the same input reuses its inputId.
     const failedSendRef = useRef<{
       inputId: string;
@@ -187,39 +185,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       if (textareaRef.current) clampTextareaHeight(textareaRef.current);
     }, [inputText]);
 
-    const addPendingFiles = useCallback((files: File[]) => {
-      if (files.length === 0 || uploadInFlightRef.current) return;
-      setPendingUploads((prev) => [...prev, ...files.map((file) => ({ id: randomUUID(), file }))]);
-    }, []);
-
     const invokeOnSend = useCallback(
-      async (snapshot: ChatComposerSnapshot) => {
-        const tracksUpload = snapshot.uploads.length > 0;
-        const controller = new AbortController();
-        if (tracksUpload) {
-          uploadInFlightRef.current = true;
-          uploadAbortRef.current = controller;
-          setUploadInFlight(true);
-          setUploadProgress(0);
-        }
-        try {
-          await onSend(snapshot, {
-            onUploadProgress: (progress) => {
-              if (!tracksUpload) return;
-              setUploadProgress(progress === null ? null : Math.max(0, Math.min(1, progress)));
-            },
-            signal: controller.signal,
-          });
-        } finally {
-          if (tracksUpload) {
-            uploadInFlightRef.current = false;
-            uploadAbortRef.current = null;
-            setUploadInFlight(false);
-            setUploadProgress(null);
-          }
-        }
-      },
-      [onSend],
+      (snapshot: ChatComposerSnapshot) =>
+        trackUpload(snapshot.uploads, (controls) => onSend(snapshot, controls)),
+      [onSend, trackUpload],
     );
 
     const snapshotOf = useCallback(
@@ -285,8 +254,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         failedSendRef.current = null;
         if (!clearsOptimistically) {
           replyDraft?.clear();
-          const sentIds = new Set(uploads.map((upload) => upload.id));
-          setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
+          removeSentUploads(uploads);
           setInputText((current) => (current === rawText ? "" : current));
           sendEnded(rawText, true);
           setFolder((current) => (current === pickedFolder ? null : current));
@@ -307,6 +275,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       sendEnded,
       inputText,
       pendingUploads,
+      setPendingUploads,
+      removeSentUploads,
       folder,
       draftSkill,
       invokeOnSend,
@@ -333,8 +303,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         setSkillSelection: (skill) => {
           if (uploadInFlightRef.current) return;
           setDraftSkill(skill);
-          setSlashMenuOpen(false);
-          setSlashQuery("");
+          skillPicker.close();
         },
         addFiles: addPendingFiles,
         submit: (text, options) => {
@@ -344,10 +313,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             return;
           const uploads = pendingUploads;
           void invokeOnSend(snapshotOf(trimmed, uploads, undefined, undefined, null, skillName))
-            .then(() => {
-              const sentIds = new Set(uploads.map((upload) => upload.id));
-              setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
-            })
+            .then(() => removeSentUploads(uploads))
             .catch(() => {
               // The chat shows the error; the inputs stay for a retry.
             });
@@ -358,13 +324,13 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       [
         voice.stop,
         addPendingFiles,
+        removeSentUploads,
         pendingUploads,
         invokeOnSend,
         snapshotOf,
         reasoningEffort,
         draftSkill,
-        setSlashMenuOpen,
-        setSlashQuery,
+        skillPicker.close,
       ],
     );
 
@@ -416,7 +382,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             }}
           />
           <ReplyBar />
-          <VoiceInputNotice notice={voice.notice} />
+          <VoiceInputNotice notice={voice.notice} asking={voice.asking} />
           {draftSkill && (
             <div className="mb-2 flex min-w-0">
               <SkillCommandChip
@@ -428,10 +394,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           <div className="flow-root empty:hidden">
             <PendingUploadsList
               uploads={pendingUploads}
-              onRemove={(id) => {
-                if (uploadInFlightRef.current) return;
-                setPendingUploads((prev) => prev.filter((upload) => upload.id !== id));
-              }}
+              onRemove={removePendingUpload}
               disabled={uploadInFlight}
               uploadProgress={uploadInFlight ? uploadProgress : undefined}
             />
@@ -597,15 +560,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               style={{ minHeight: "var(--row-h)" }}
             >
               <SlashSkillMenu
-                ref={slashMenuRef}
-                open={slashMenuOpen && !uploadInFlight}
+                ref={skillPicker.menuRef}
+                open={skillPicker.open && !uploadInFlight}
                 onOpenChange={(next) => {
                   if (uploadInFlightRef.current) return;
-                  setSlashMenuOpen(next);
-                  if (!next) setSlashQuery("");
+                  skillPicker.onOpenChange(next);
                 }}
-                query={slashQuery}
-                onSelect={acceptSlashSkill}
+                query={skillPicker.query}
+                onSelect={skillPicker.accept}
                 anchor={
                   <textarea
                     ref={textareaRef}
@@ -614,15 +576,16 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                       if (uploadInFlightRef.current) return;
                       voice.noticeEdited();
                       setInputText(event.target.value);
-                      reevaluateSlashContext(event.target.value, event.target.selectionEnd);
+                      skillPicker.update(event.target.value, event.target.selectionEnd);
                     }}
                     onSelect={(event) => {
                       const el = event.currentTarget;
-                      reevaluateSlashContext(el.value, el.selectionEnd);
+                      skillPicker.update(el.value, el.selectionEnd);
                     }}
                     onInput={(event) => clampTextareaHeight(event.currentTarget)}
                     onKeyDown={(event) => {
-                      if (handleSlashKeyDown(event)) return;
+                      if (isImeCompositionEvent(event)) return;
+                      if (skillPicker.handleKeyDown(event)) return;
                       if (event.key === "Escape" && replyDraft?.target) {
                         event.preventDefault();
                         replyDraft.clear();
@@ -678,7 +641,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               <Button
                 variant="secondary"
                 size="icon-sm"
-                onClick={() => uploadAbortRef.current?.abort()}
+                onClick={cancelUpload}
                 title={t("composer.cancelUpload")}
                 aria-label={t("composer.cancelUpload")}
                 className="touch-target"

@@ -35,6 +35,7 @@ import {
   isEntryActive,
   railLinkClass,
 } from "./sidebar-shared";
+import { readStoredJson, writeStoredJson } from "@/lib/stored-preference";
 
 export interface PinnedEntry {
   type: "builtin" | "app";
@@ -107,47 +108,32 @@ export function normalizeSidebarPins(pins: PinnedEntry[]): PinnedEntry[] {
 }
 
 function readLocalPins(): PinnedEntry[] | null {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return null;
-    return parsePins(JSON.parse(stored));
-  } catch {
-    return null;
-  }
+  const stored = readStoredJson(STORAGE_KEY);
+  return stored === undefined ? null : parsePins(stored);
 }
 
 function writeLocalPins(pins: PinnedEntry[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pins));
-  } catch {}
+  writeStoredJson(STORAGE_KEY, pins);
 }
 
 function readLocalApps(): CachedApp[] {
-  try {
-    const stored = localStorage.getItem(APPS_CACHE_KEY);
-    if (!stored) return [];
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed.filter((app) => app && !isHiddenInLauncher(app)) : [];
-  } catch {
-    return [];
-  }
+  const parsed = readStoredJson(APPS_CACHE_KEY);
+  return Array.isArray(parsed) ? parsed.filter((app) => app && !isHiddenInLauncher(app)) : [];
 }
 
 function writeLocalApps(apps: InstalledAppCard[]): void {
-  try {
-    const cached: CachedApp[] = apps.map((a) => ({
-      id: a.id,
-      displayName: a.displayName,
-      iconUrl: a.iconUrl,
-      href: a.href,
-      hasFrontend: a.hasFrontend,
-      status: a.status,
-      origin: a.origin,
-      installedAt: a.installedAt ?? null,
-      projectPath: a.projectPath,
-    }));
-    localStorage.setItem(APPS_CACHE_KEY, JSON.stringify(cached));
-  } catch {}
+  const cached: CachedApp[] = apps.map((a) => ({
+    id: a.id,
+    displayName: a.displayName,
+    iconUrl: a.iconUrl,
+    href: a.href,
+    hasFrontend: a.hasFrontend,
+    status: a.status,
+    origin: a.origin,
+    installedAt: a.installedAt ?? null,
+    projectPath: a.projectPath,
+  }));
+  writeStoredJson(APPS_CACHE_KEY, cached);
 }
 
 function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
