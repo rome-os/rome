@@ -1,5 +1,6 @@
-// Rule 10: Rome names the place where speech becomes text before any dictation; during the
-// script every request that carries audio goes there; afterwards the instance holds no audio from voice input.
+// Rule 10: Rome's read API names the place where speech becomes text before any dictation, and no
+// text the guardian reads names the provider; during the script every request that carries
+// audio goes to the named place; afterwards the instance holds no audio from voice input.
 import { openPage } from "../lib/product.mjs";
 import { scriptRuns, setMessages } from "../lib/runs.mjs";
 import { check, required, ruleResult } from "../lib/scenario.mjs";
@@ -11,6 +12,9 @@ import { check, required, ruleResult } from "../lib/scenario.mjs";
  */
 export const PLACE_API = "/api/voice-input";
 export const SETTINGS_PATH = "/settings";
+const SETTINGS_CHECK = "Settings does not reveal the provider";
+/** How long Settings may take to render what it shows after the page loads. */
+const SETTINGS_RENDER_MS = 3000;
 
 export default {
   rule: "10",
@@ -30,7 +34,7 @@ export default {
     const settingsCheck =
       ctx.place === "phone"
         ? check(
-            "Settings names the place",
+            SETTINGS_CHECK,
             "not_checked",
             "on iOS the app's Settings is leg B's or C's to check",
           )
@@ -93,14 +97,20 @@ async function readNamedPlace(ctx, mic) {
       )
     )
       await advanced.click();
-    const shown = await waitForText(page, [place.provider, place.host], 15000);
+    // Text the guardian reads never names the provider or its host (Ouou, 2026-11-16: show only
+    // what the guardian cares about). Settings is where the place was once shown, so it is read.
+    await page.waitForTimeout(SETTINGS_RENDER_MS);
+    const text = (await page.locator("body").innerText()).toLowerCase();
+    const revealed = [place.provider, place.host].filter(
+      (p) => p && text.includes(p.toLowerCase()),
+    );
     const settingsCheck = required(
       check(
-        "Settings names the place",
-        shown ? "pass" : "fail",
-        shown
-          ? `Settings → Advanced shows ${place.provider} and ${place.host}`
-          : `Settings → Advanced does not show both ${place.provider} and ${place.host}`,
+        SETTINGS_CHECK,
+        revealed.length === 0 ? "pass" : "fail",
+        revealed.length > 0
+          ? `Settings → Advanced reveals ${revealed.join(" and ")}`
+          : `Settings → Advanced names neither ${place.provider} nor ${place.host}`,
       ),
     );
     return { check: apiCheck, settingsCheck, place, romeHost };
@@ -115,17 +125,6 @@ async function readNamedPlace(ctx, mic) {
  */
 function hostname(host) {
   return host.replace(/\s*\(.*\)$/, "").replace(/:\d+$/, "");
-}
-
-/** Whether the page's text holds every one of `parts` within `timeoutMs`. */
-async function waitForText(page, parts, timeoutMs) {
-  const start = Date.now();
-  do {
-    const text = await page.locator("body").innerText();
-    if (parts.every((p) => text.includes(p))) return true;
-    await page.waitForTimeout(500);
-  } while (Date.now() - start < timeoutMs);
-  return false;
 }
 
 /** The host Rome names must be the one the audio actually reached, not merely allowed. */
@@ -152,7 +151,7 @@ function namedHostUsed(capture, place) {
 }
 
 function settingsUnread(reason) {
-  return required(check("Settings names the place", "not_checked", reason));
+  return required(check(SETTINGS_CHECK, "not_checked", reason));
 }
 
 /**

@@ -8,6 +8,7 @@
 //   fail-5   a copy of the field sends itself when listening stops
 //   fail-6   the transcript replaces the field instead of going in at the cursor
 //   fail-10  the server sends the audio to a host Rome does not name
+//   fail-10s Settings names the provider and its host instead of Rome Cloud
 //   fail-11  Rome Cloud records half the seconds listened
 //   fail-11g Rome Cloud mints a credential for an account the gate refuses
 //   fail-11s an instance not signed in offers voice input on its own provider settings
@@ -32,6 +33,7 @@ export const VARIANTS = [
   "fail-5",
   "fail-6",
   "fail-10",
+  "fail-10s",
   "fail-11",
   "fail-11g",
   "fail-4",
@@ -129,7 +131,7 @@ async function handle(req, res, statePath, script) {
     return send(
       200,
       "text/html; charset=utf-8",
-      `<main><h1>Settings</h1><p>Voice input: ${PLACE.provider}, ${PLACE.host}</p>
+      `<main><h1>Settings</h1><p>Voice input: ${state.variant === "fail-10s" ? `${PLACE.provider}, ${PLACE.host}` : "a transcription service provided through Rome Cloud"}</p>
 <label id="lang">Language</label>
 <button role="combobox" aria-labelledby="lang">${state.lang === "zh" ? "中文" : "English"}</button>
 <div role="listbox" hidden><div role="option" data-lang="en">English</div><div role="option" data-lang="zh">中文</div></div>
