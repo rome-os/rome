@@ -210,7 +210,17 @@
     }
   },
   "upgradeIndicator": {
-    "tooltip": "{{name}} can be upgraded"
+    "available": "Update to {{version}}",
+    "availableFull": "Update {{name}} to {{version}}",
+    "updating": "Updating to {{version}}…",
+    "updatingFull": "{{name}} is updating to {{version}}…",
+    "failed": "Update failed",
+    "failedFull": "Update to {{version}} failed",
+    "failedReason": "Update to {{version}} failed: {{message}}",
+    "updated": "Updated",
+    "updatedFull": "{{name}} updated to {{version}}",
+    "retry": "Retry",
+    "reload": "Reload"
   },
   "upgradeBanner": {
     "countdownTitle": "Update to Rome {{version}} is ready",

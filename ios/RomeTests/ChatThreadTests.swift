@@ -15,11 +15,14 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         try JSONDecoder().decode(ChatMessage.self, from: Data(json.utf8))
     }
 
-    @Test func aMessageSaysItsThreadOrThatItIsAlone() throws {
+    @Test func aMessageSaysItsRoot() throws {
         let placed = try decode(#"{"id":"m2","sessionId":"s","role":"assistant","content":"x","createdAt":"2026-11-09T10:00:00Z","chatThreadId":"m1"}"#)
         #expect(placed.chatThreadId == "m1" && placed.knowsThreads && placed.threadRoot == "m1")
-        let alone = try decode(#"{"id":"m3","sessionId":"s","role":"assistant","content":"x","createdAt":"2026-11-09T10:00:00Z","chatThreadId":null}"#)
-        #expect(alone.chatThreadId == nil && alone.knowsThreads && alone.threadRoot == "m3")
+        // A message that replies to nothing is its own root.
+        let alone = try decode(#"{"id":"m3","sessionId":"s","role":"assistant","content":"x","createdAt":"2026-11-09T10:00:00Z","chatThreadId":"m3"}"#)
+        #expect(alone.chatThreadId == "m3" && alone.knowsThreads && alone.threadRoot == "m3")
+        let unsaid = try decode(#"{"id":"m5","sessionId":"s","role":"assistant","content":"x","createdAt":"2026-11-09T10:00:00Z","chatThreadId":null}"#)
+        #expect(unsaid.chatThreadId == nil && unsaid.knowsThreads && unsaid.threadRoot == "m5")
         // An instance before chat threads leaves the field out.
         let older = try decode(#"{"id":"m4","sessionId":"s","role":"assistant","content":"x","createdAt":"2026-11-09T10:00:00Z"}"#)
         #expect(older.chatThreadId == nil && !older.knowsThreads)
@@ -33,22 +36,13 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         }
     }
 
-    @Test func thePlacementEventIsRead() {
-        guard case .messageThread(let session, let id, let thread, let title) = LiveEventsSocket.decode(name: "message_chat_thread", data: .object(["sessionId": .string("s"), "messageId": .string("m2"), "chatThreadId": .string("m1"), "chatThreadTitle": .string("Book a table")])) else {
-            Issue.record("not read"); return
-        }
-        #expect(session == "s" && id == "m2" && thread == "m1" && title == "Book a table")
-        guard case .messageThread(_, _, let none, _) = LiveEventsSocket.decode(name: "message_chat_thread", data: .object(["sessionId": .string("s"), "messageId": .string("m2"), "chatThreadId": .null])) else {
-            Issue.record("not read"); return
-        }
-        #expect(none == nil)
-        guard case .threadRetired(let chat, let root) = LiveEventsSocket.decode(name: "chat_thread_retired", data: .object(["sessionId": .string("s"), "chatThreadId": .string("m1")])) else {
-            Issue.record("not read"); return
-        }
-        #expect(chat == "s" && root == "m1")
+    /// A message arrives with its root: no event places it later.
+    @Test func noPlacementEventIsRead() {
+        #expect(LiveEventsSocket.decode(name: "message_chat_thread", data: .object(["sessionId": .string("s"), "messageId": .string("m2"), "chatThreadId": .string("m1")])) == nil)
+        #expect(LiveEventsSocket.decode(name: "chat_thread_retired", data: .object(["sessionId": .string("s"), "chatThreadId": .string("m1")])) == nil)
     }
 
-    /// A message carries its task's title, and a kept copy keeps it.
+    /// A message carries the name of a thread a task started in, and a kept copy keeps it.
     @Test func aMessageCarriesItsTasksTitle() throws {
         let placed = try decode(#"{"id":"m2","sessionId":"s","role":"assistant","content":"x","createdAt":"2026-11-09T10:00:00Z","chatThreadId":"m1","chatThreadTitle":"Book a table"}"#)
         #expect(placed.chatThreadTitle == "Book a table")
@@ -64,100 +58,169 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     }
 }
 
-/// Where the `↳ <task title>` label shows (docs/domains/chats.md#chat-thread).
-@Suite struct ThreadLabelTests {
-    private func rows(_ messages: [ChatMessage], threads: Bool = true) -> [TranscriptRow] {
-        TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(showThreads: threads))
+/// Threads, names and quotes in the transcript (docs/domains/chats.md#chat-thread).
+@MainActor
+@Suite struct ThreadQuoteTests {
+    private func rows(_ messages: [ChatMessage]) -> [TranscriptRow] {
+        TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(showNotices: true))
     }
 
-    private func labels(_ rows: [TranscriptRow]) -> [String: String] {
-        var out: [String: String] = [:]
-        for row in rows { if case .threadLabel(_, let id, let title) = row { out[id] = title } }
-        return out
+    private func quote(of id: String, _ original: String, author: String = "guardian", text: String = "plan") -> [[String: Any]] {
+        [["type": "reply_to", "messageId": original, "author": author, "text": text], ["type": "text", "content": "said \(id)"]]
     }
 
-    /// A Concierge message in a task's thread gets one, right under it:
-    /// plain text, a forward and a question shown alone alike. Of a run of
-    /// three, the middle one shows none.
-    @Test func everyConciergeMessageOfATaskThreadIsLabelled() {
-        let ask: [[String: Any]] = [["type": "task_chat", "chatId": "c1", "title": "Book", "show": "ask"]]
-        let forward: [[String: Any]] = [["type": "text", "content": "Done", "forwardedFrom": ["chatId": "c1", "title": "Book"]]]
+    /// A message of a thread of more than one is in it, by its root. One that
+    /// replies to nothing and has no reply is in none.
+    @Test func aMessageIsInTheThreadOfItsRoot() {
+        let alone = [message("r", role: "user", "plan", at: 0, thread: "r"), message("x", at: 1, thread: "x")]
+        #expect(TranscriptBuilder.threadRoots(alone).isEmpty)
+        // The root is in its thread once a loaded message replies in it, whether or not the root was sent with its own key.
+        let grown = [message("r", role: "user", "plan", at: 0, thread: "r"), message("a1", at: 1, thread: "r"), message("x", at: 2, thread: "x")]
+        #expect(TranscriptBuilder.threadRoots(grown) == ["r": "r", "a1": "r"])
+        // A reply whose root is not loaded is in the thread.
+        #expect(TranscriptBuilder.threadRoots([message("a1", at: 1, thread: "r")]) == ["a1": "r"])
+        // An instance before chat threads names none.
+        #expect(TranscriptBuilder.threadRoots([message("a", at: 0, thread: nil, knows: false)]).isEmpty)
+    }
+
+    /// A thread a task started in is named by the title its messages carry,
+    /// any other by the start of its root's text.
+    @Test func aThreadIsNamedByItsTaskOrItsRoot() {
+        let root = message("r", role: "user", "## Plan Kyoto\nthen the hotels", at: 0, thread: "r")
+        let thread = [root, message("a1", at: 1, thread: "r"), message("x", role: "user", at: 2, thread: "x"), message("a2", at: 3, thread: "r")]
+        #expect(TranscriptBuilder.threadTitles(thread) == ["r": "Plan Kyoto"])
+        // Cut short with an ellipsis; a task's title wins; a root with no text, or not loaded, gives none.
+        let long = message("r", role: "user", "Compare every ryokan along the Kamo river for the April trip please", at: 0)
+        #expect(TranscriptBuilder.startOfText(long) == "Compare every ryokan along the Kamo river for the…")
+        #expect(TranscriptBuilder.threadTitles([root, message("a1", at: 1, thread: "r", title: "Book")]) == ["r": "Book"])
+        #expect(TranscriptBuilder.threadTitles([message("r", role: "user", "   ", at: 0, thread: "r"), message("a1", at: 1, thread: "r")]).isEmpty)
+        #expect(TranscriptBuilder.threadTitles([message("a1", at: 1, thread: "r")]).isEmpty)
+    }
+
+    /// No row names a task under a message, whatever thread it is in. The
+    /// source of a turn still shows, in the same place.
+    @Test func noTaskLabelUnderAnyMessage() {
         let messages = [
             message("u", role: "user", "book a table", at: 0, thread: "u", title: "Book a table"),
+            message("x", role: "user", "weather?", at: 5, thread: "x"),
             message("a1", "on it", at: 10, thread: "u", title: "Book a table"),
-            message("a2", at: 20, thread: "u", parts: ask),
-            message("a3", at: 30, thread: "u", parts: forward),
+            message("a2", "done", at: 20, thread: "u", title: "Book a table"),
         ]
         let built = rows(messages)
-        #expect(labels(built) == ["a1": "Book a table", "a3": "Book a table"])
-        // Right under its own message.
-        let index = built.firstIndex { $0.id == "label-a1" }!
-        #expect(built[index - 1].id == "a1:0")
+        #expect(built.allSatisfy { if case .sourceLabel = $0 { return true } else { return !$0.id.hasPrefix("label-") } })
+        #expect(built.filter { $0.id.hasPrefix("label-") }.isEmpty)
     }
 
-    /// None on the guardian's own messages, on a task card, in no thread,
-    /// in a thread no task has, or inside the thread view.
-    @Test func noLabelWhereTheRuleSaysNone() {
-        let card: [[String: Any]] = [["type": "task_chat", "chatId": "c1", "title": "Book", "show": "task"]]
-        let legacyCard: [[String: Any]] = [["type": "task_chat", "chatId": "c1", "title": "Book"]]
-        let messages = [
-            message("u", role: "user", at: 0, thread: "u", title: "Book"),
-            message("c", at: 10, thread: "u", title: "Book", parts: card),
-            message("l", at: 11, thread: "u", title: "Book", parts: legacyCard),
-            message("x", at: 20),
-            message("old", at: 30, thread: "z"),
+    /// A reply that sits right under what it answers draws a rail and no quote
+    /// text; one that does not draws its quote. Both are on the first bubble only.
+    @Test func anAgentReplyShowsAQuoteOrARail() throws {
+        let adjacent = [
+            message("u", role: "user", "plan", at: 0, thread: "u"),
+            message("a1", at: 1, thread: "u", parts: quote(of: "a1", "u") + [["type": "text", "content": "second bubble"]]),
         ]
-        #expect(labels(rows(messages)).isEmpty)
-        let threaded = [message("a", at: 0, thread: "u", title: "Book")]
-        #expect(labels(rows(threaded, threads: false)).isEmpty)
+        let infos = RowInfo.build(rows: rows(adjacent), messages: adjacent, pending: [], kind: .concierge)
+        let first = try #require(infos["a1:1"])
+        #expect(first.quote?.messageId == "u" && first.rail == .hook && first.quoteLeads)
+        #expect(infos["a1:2"]?.quote == nil && infos["a1:2"]?.rail == nil)
+        // With a message between, the reply shows its quote.
+        let apart = [adjacent[0], message("x", at: 1, thread: "x"), adjacent[1]]
+        let spaced = RowInfo.build(rows: rows(apart), messages: apart, pending: [], kind: .concierge)
+        #expect(spaced["a1:1"]?.quote?.author == "guardian" && spaced["a1:1"]?.rail == nil)
     }
 
-    /// Only the first and last of a run are labelled; a run of one or two
-    /// labels each. An Agent message from another thread or none, or a task
-    /// card, ends the run; the guardian's messages are skipped.
-    @Test func onlyTheEndsOfARunAreLabelled() {
-        let card: [[String: Any]] = [["type": "task_chat", "chatId": "c1", "title": "Book", "show": "task"]]
-        let messages = [
-            message("a1", at: 0, thread: "u", title: "Book"),
-            message("a2", at: 1, thread: "u"),
-            // The guardian in the middle neither ends the run nor joins it.
-            message("q1", role: "user", at: 2),
-            message("a3", at: 3, thread: "u"),
-            message("q2", role: "user", at: 4, thread: "u"),
-            message("a4", at: 5, thread: "u"),
-            // Another thread ends it.
-            message("b1", at: 6, thread: "v", title: "Fly"),
-            message("a5", at: 7, thread: "u"),
-            message("q3", role: "user", at: 8),
-            message("a6", at: 9, thread: "u"),
-            // A task card ends it.
-            message("c", at: 10, thread: "u", parts: card),
-            message("a7", at: 11, thread: "u"),
-            // An Agent message in no thread ends it.
-            message("x", at: 12),
-            message("a8", at: 13, thread: "u"),
-            message("a9", at: 14, thread: "u"),
-            message("a10", at: 15, thread: "u"),
+    /// A reply that is only a task card carries its quote or rail as a text
+    /// reply does, and leads where it would: the card is the owner's way into
+    /// the thread.
+    @Test func aCardReplyShowsAQuoteOrARail() throws {
+        let card: [[String: Any]] = [["type": "task_chat", "chatId": "t1", "title": "Flights", "show": "ask"]]
+        let adjacent = [
+            message("u", role: "user", "plan", at: 0, thread: "u"),
+            message("c1", at: 1, thread: "u", parts: [["type": "reply_to", "messageId": "u", "author": "guardian", "text": "plan"]] + card),
         ]
-        #expect(TranscriptBuilder.threadLabels(messages) == [
-            "a1": "Book", "a4": "Book", "b1": "Fly", "a5": "Book", "a6": "Book", "a7": "Book", "a8": "Book", "a10": "Book",
-        ])
+        let row = try #require(rows(adjacent).first { if case .taskAsk = $0 { true } else { false } })
+        #expect(row.ownMessageId == "c1")
+        let infos = RowInfo.build(rows: rows(adjacent), messages: adjacent, pending: [], kind: .concierge)
+        let near = try #require(infos[row.id])
+        #expect(near.quote?.messageId == "u" && near.rail == .hook && near.quoteLeads)
+        // With a message between, the card shows the quote's words.
+        let apart = [adjacent[0], message("x", at: 1, thread: "x"), adjacent[1]]
+        let spaced = RowInfo.build(rows: rows(apart), messages: apart, pending: [], kind: .concierge)
+        #expect(spaced[row.id]?.quote?.author == "guardian" && spaced[row.id]?.rail == nil)
     }
 
-    /// The title comes from any message of the thread, a live placement too.
-    @Test func theTitleComesFromTheThread() {
-        let messages = [message("a1", at: 0, thread: "u", title: "Book"), message("a2", at: 10, thread: "u")]
-        #expect(labels(rows(messages)) == ["a1": "Book", "a2": "Book"])
+    /// A reply is adjacent to the message right above it, or to a reply of the
+    /// same sender above it that answers the same message, which a line joins.
+    @Test func adjacentRepliesAreJoinedByAHookOrALine() {
+        let q = message("q", role: "user", "plan", at: 0, thread: "q")
+        let a = message("a", at: 1, thread: "q", parts: quote(of: "a", "q"))
+        let b = message("b", at: 2, thread: "q", parts: quote(of: "b", "q"))
+        let c = message("c", at: 3, thread: "q", parts: quote(of: "c", "q"))
+        #expect(TranscriptBuilder.replyJoins([q, a, b, c]) == ["a": .hook, "b": .line, "c": .line])
+        // An owner reply to the agent's message above, and the agent's answer to that.
+        let r = message("r", role: "user", "ok", at: 4, thread: "q", parts: quote(of: "r", "c"))
+        let s = message("s", at: 5, thread: "q", parts: quote(of: "s", "r"))
+        #expect(TranscriptBuilder.replyJoins([q, a, b, c, r, s])["r"] == .hook)
+        #expect(TranscriptBuilder.replyJoins([q, a, b, c, r, s])["s"] == .hook)
+        // Another sender's reply to the same message sits on the other side, so it is a hook.
+        let other = message("o", role: "user", "me too", at: 2, thread: "q", parts: quote(of: "o", "q"))
+        #expect(TranscriptBuilder.replyJoins([q, a, other])["o"] == .hook)
+        // A message between, a trace aside, breaks adjacency; a message that replies to nothing has none.
+        var trace = message("t", at: 1)
+        trace.role = "trace"
+        trace.content = "[]"
+        #expect(TranscriptBuilder.replyJoins([q, trace, a])["a"] == .hook)
+        #expect(TranscriptBuilder.replyJoins([q, message("x", at: 1), a])["a"] == nil)
+        #expect(TranscriptBuilder.replyJoins([q, a])["q"] == nil)
     }
 
-    /// A label sits tight under its message and apart from the next one.
-    @Test func theLabelSitsTightUnderItsMessage() {
-        let label = TranscriptRow.threadLabel(id: "label-a", messageId: "a", title: "T")
-        let bubble = TranscriptRow.agentText(id: "a:0", text: "x", long: false, forwardedFrom: nil, position: .single)
-        let next = TranscriptRow.agentText(id: "b:0", text: "y", long: false, forwardedFrom: nil, position: .single)
-        #expect(TranscriptSpacing.top(label, after: bubble) < TranscriptSpacing.top(next, after: label))
-        // A tint covers the message, not its label.
-        #expect(label.ownMessageId == nil && bubble.ownMessageId == "a" && !label.isGuardian)
+    /// A line spans the gap to the reply above only when that reply's row is
+    /// the row right above; a time line between makes it a hook.
+    @Test func aLineNeedsTheSiblingRightAbove() {
+        let q = message("q", role: "user", "plan", at: 0, thread: "q")
+        let a = message("a", at: 1, thread: "q", parts: quote(of: "a", "q"))
+        let b = message("b", at: 2, thread: "q", parts: quote(of: "b", "q"))
+        let close = [q, a, b]
+        let near = RowInfo.build(rows: rows(close), messages: close, pending: [], kind: .concierge)
+        #expect(near["a:1"]?.rail == .hook)
+        #expect(near["b:1"]?.rail == .line(gap: 3))
+        // An hour apart, the time line stands between them.
+        let far = [q, a, message("b", at: 4000, thread: "q", parts: quote(of: "b", "q"))]
+        #expect(RowInfo.build(rows: rows(far), messages: far, pending: [], kind: .concierge)["b:1"]?.rail == .hook)
+    }
+
+    /// A quote shows the first line of the message it quotes, as plain text.
+    @Test func aQuoteShowsTheFirstLineOfTheOriginal() {
+        func line(_ text: String) -> String { MessagePart.ReplyQuote(messageId: "m", author: "agent", name: nil, text: text).line }
+        #expect(line("Yes, €200 minimum.\n\n> Back room: €200\n> Main room: none") == "Yes, €200 minimum.")
+        #expect(line("## Plan Kyoto\nthen the hotels") == "Plan Kyoto")
+        #expect(line("```py\nx = 1\n```") == "x = 1")
+        #expect(line("  \n") == "")
+    }
+
+    /// A quote leads to the thread view of its reply, or to the original when
+    /// the reply is alone, as one kept from before reply chains is.
+    @Test func aQuoteLeadsToTheThreadOrTheOriginal() throws {
+        let reply = message("a1", at: 1, thread: "u", parts: quote(of: "a1", "u"))
+        let held = [message("u", role: "user", "plan", at: 0, thread: "u"), reply]
+        #expect(RowInfo.build(rows: rows(held), messages: held, pending: [], kind: .concierge)["a1:1"]?.quoteLeads == true)
+        // A quote kept from before: the reply is its own root, so it can only go to the original.
+        let legacy = message("a1", at: 1, thread: "a1", parts: quote(of: "a1", "u"))
+        let leads = { (messages: [ChatMessage]) in RowInfo.build(rows: self.rows(messages), messages: messages, pending: [], kind: .concierge)["a1:1"]?.quoteLeads }
+        #expect(leads([message("u", role: "user", "plan", at: 0, thread: "u"), legacy]) == true)
+        #expect(leads([legacy]) == false)
+    }
+
+    /// A source label stays under a reply in a thread.
+    @Test func theSourceLabelStaysUnderAReplyInAThread() {
+        var routine = message("r", at: 1, thread: "u")
+        routine.turnId = "t-r"
+        var trace = message("trace", at: 1)
+        trace.role = "trace"
+        trace.turnId = "t-r"
+        trace.content = "[]"
+        trace.traceSummary = TraceSummary(totalSteps: 0, automatedInput: .init(type: "routine", name: "Daily summary"))
+        let built = rows([message("u", role: "user", "plan", at: 0, thread: "u"), trace, routine])
+        #expect(built.contains { if case .sourceLabel = $0 { return true } else { return false } })
     }
 }
 
@@ -183,14 +246,15 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let reply = message("a1", "sure", at: 10, thread: "r")
         // The chat holds only the reply; the read brings the rest.
         let store = await chat(backend, [reply])
-        backend.threads["a1"] = [older, reply]
+        backend.threads["r"] = [older, reply]
         store.openThread(at: "a1")
         let thread = store.thread!
         await settle { thread.messages.count == 2 }
-        #expect(backend.threadReads == ["a1"])
+        // The read names the thread by its root, whichever message opened it.
+        #expect(backend.threadReads == ["r"])
         #expect(thread.messages.map(\.id) == ["r", "a1"])
         #expect(thread.root == "r")
-        #expect(store.composerThread?.thread == "a1")
+        #expect(store.composerThread?.thread == "r")
         store.closeThread()
         #expect(store.thread == nil)
     }
@@ -201,7 +265,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let root = message("r", role: "user", "plan", at: 0, thread: "r")
         let reply = message("a1", "sure", at: 10, thread: "r")
         let store = await chat(backend, [reply])
-        backend.threads["a1"] = [root, reply]
+        backend.threads["r"] = [root, reply]
         store.openThread(at: "a1")
         let thread = store.thread!
         await settle { thread.messages.count == 2 }
@@ -233,8 +297,9 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(thread.messages.map(\.id) == ["r", "a1"])
     }
 
-    /// New messages of the thread show live; one placed elsewhere leaves it.
-    @Test func theThreadFollowsEvents() async {
+    /// New messages of the thread show live, with no event of their own;
+    /// one in another thread does not.
+    @Test func theThreadFollowsTheChat() async {
         let backend = FakeBackend()
         let root = message("r", role: "user", "plan", at: 0, thread: "r")
         let reply = message("a1", "sure", at: 10, thread: "r")
@@ -247,17 +312,9 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("a2", "more", at: 20, thread: "r")))
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("b", "elsewhere", at: 21, thread: "z")))
         #expect(thread.messages.map(\.id) == ["r", "a1", "a2"])
-        // The guardian's message is placed here: the thread is read again.
-        let mine = message("u", role: "user", "and then?", at: 30, thread: "r")
-        backend.threads["r"] = [root, reply, message("a2", "more", at: 20, thread: "r"), mine]
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageThread(sessionId: "concierge", messageId: "u", chatThreadId: "r"))
-        await settle { thread.messages.count == 4 }
-        #expect(thread.messages.last?.id == "u")
-        // A reply moved to another thread leaves this one.
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageThread(sessionId: "concierge", messageId: "a1", chatThreadId: "z"))
-        #expect(!thread.messages.contains { $0.id == "a1" })
-        // The chat learns the placement too.
-        #expect(store.message("a1")?.chatThreadId == "z")
+        // The guardian's reply arrives the same way.
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("u", role: "user", "and then?", at: 30, thread: "r")))
+        #expect(thread.messages.map(\.id) == ["r", "a1", "a2", "u"])
         store.closeThread()
     }
 
@@ -268,21 +325,50 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let store = await chat(backend, [message("a1", "sure", at: 10, thread: "r", title: "T")])
         store.openThread(at: "a1")
         let target = store.composerThread!
-        #expect(target == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1", bare: true))
+        // The draft names the thread by its root; the send names the message too.
+        #expect(target == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "r", bare: true))
+        let sent = ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "r")
         #expect(store.send("and then?", thread: target))
         await settle { !backend.sentThreads.isEmpty }
-        #expect(backend.sentThreads == [target])
+        #expect(backend.sentThreads == [sent])
         // It failed: Retry goes to the same thread.
         await settle { store.pending.first?.state == .failed(.unreachable) }
         backend.sendSucceeds = true
         store.retry(store.pending[0].id)
         await settle { backend.sentThreads.count == 2 }
-        #expect(backend.sentThreads == [target, target])
+        #expect(backend.sentThreads == [sent, sent])
         // A send from the chat itself names no thread.
         store.closeThread()
         #expect(store.send("new thing"))
         await settle { backend.sentThreads.count == 3 }
         #expect(backend.sentThreads.last == .some(nil))
+    }
+
+    /// The app picks the message a send from the thread view replies to: the
+    /// thread's last with text, so a card on the end is passed over. A thread
+    /// with none sends its root alone, and an instance resolves it.
+    @Test func aSendFromTheThreadNamesItsLastMessageWithText() async {
+        let backend = FakeBackend()
+        let card: [[String: Any]] = [["type": "task_chat", "chatId": "t1", "title": "Flights", "show": "ask"]]
+        let store = await chat(backend, [
+            message("r", role: "user", "plan", at: 0, thread: "r"),
+            message("a1", "sure", at: 1, thread: "r", parts: quoteParts("r") + [["type": "text", "content": "sure"]]),
+            message("c1", at: 2, thread: "r", parts: quoteParts("r") + card),
+        ])
+        store.openThread(at: "a1")
+        let target = store.composerThread!
+        #expect(store.send("and then?", thread: target))
+        await settle { !backend.sentThreads.isEmpty }
+        #expect(backend.sentThreads == [ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "r")])
+        // Only a card in the thread: nothing to quote, so the root goes alone.
+        let lone = await chat(backend, [message("c1", at: 2, thread: "c1", parts: card)])
+        lone.openThread(at: "c1")
+        let bare = lone.composerThread!
+        #expect(lone.wireTarget(bare) == bare)
+    }
+
+    private func quoteParts(_ original: String) -> [[String: Any]] {
+        [["type": "reply_to", "messageId": original, "author": "guardian", "text": "plan"]]
     }
 
     /// The label opens the view for reading and tints its message; Reply
@@ -298,7 +384,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         store.reply(to: "a1")
         #expect(store.thread != nil && store.replies == 1)
         // Reply inside goes to the thread, quoting no message, and its bar names the task.
-        #expect(store.composerThread?.body == ["chatThread": .string("a2")])
+        #expect(store.composerThread?.body == ["chatThread": .string("u")])
         #expect(store.showsQuoteBar && store.threadReplyTitle == "T" && store.quotedMessage == nil)
         store.cancelQuote()
         #expect(store.thread == nil && store.quote == nil && !store.showsQuoteBar && store.threadReplyTitle == nil)
@@ -416,20 +502,22 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(built.map(\.id) == ["sep-r", "r:1"])
     }
 
-    /// A reply in a task's thread opens the thread view, tinting the
-    /// original; any other jumps to the original and tints it.
+    /// A reply in a chat thread opens the thread view, tinting the
+    /// original; a message in none jumps to the original and tints it.
     @Test func theQuoteLeadsToTheThreadOrTheOriginal() async {
         let store = await chat([
             message("a", "sunny", at: 0),
             reply("r1", to: "a", at: 10),
-            reply("r2", to: "a", at: 20, thread: "r2", title: "Weather"),
+            reply("r2", to: "a", at: 20, thread: "a", title: "Weather"),
         ])
+        // r1 is its own root, as a quote kept from before reply chains is.
         store.quoteAction(reply: "r1", original: "a")?()
         #expect(store.thread == nil && store.jumpTarget == "a" && store.jumps == 1 && store.tinted == "a")
+        // r2 is in the thread rooted at a.
         store.quoteAction(reply: "r2", original: "a")?()
         #expect(store.thread?.anchor.id == "r2" && store.tinted == "a")
         // A send from the thread view goes to the thread, quoting nothing.
-        #expect(store.composerThread?.body == ["chatThread": .string("r2")] && !store.showsQuoteBar)
+        #expect(store.composerThread?.body == ["chatThread": .string("a")] && !store.showsQuoteBar)
         store.closeThread()
         // An original not held leads nowhere.
         #expect(store.quoteAction(reply: "r1", original: "gone") == nil)

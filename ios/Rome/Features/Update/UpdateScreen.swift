@@ -172,6 +172,11 @@ struct UpdateScreen: View {
                     Text("Your Rome has not come back on \(target). Check it in Rome Cloud, or try again.")
                         .romeFont(16)
                         .foregroundStyle(Palette.sub)
+                case .rolledBack(_, let from):
+                    Text("The update did not finish").romeFont(22, .semibold).tracking(-0.4)
+                    Text("Your Rome is still on \(from). Check it in Rome Cloud, or try again.")
+                        .romeFont(16)
+                        .foregroundStyle(Palette.sub)
                 case .start(_, _, let message):
                     Text("Could not start the update").romeFont(22, .semibold).tracking(-0.4)
                     Text(message)

@@ -32,15 +32,16 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var content: String
     var createdAt: String
     var traceSummary: TraceSummary?
-    /// The first message of the chat thread this one is in; nil when it is
-    /// alone, or on an instance without chat threads.
+    /// The root of the chat thread this one is in: the first message of its
+    /// reply chain, which is the message itself when it replies to nothing.
+    /// Nil on an instance without chat threads.
     var chatThreadId: String? = nil
     /// The instance sent `chatThreadId`, null included: it has chat threads.
     /// An older instance leaves the field out.
     var knowsThreads = false
-    /// The title of the task whose chat thread the message is in. The server
-    /// sends a thread only when a task has it, so a message with a thread and
-    /// no title is from an instance before task threads.
+    /// The thread's name when a task's start message is in it: the newest
+    /// such task's title. A thread no task started in has none here: the app
+    /// names it from its root's text.
     var chatThreadTitle: String? = nil
     /// Who said a guardian-side message, when it was not simply the guardian.
     var sender: MessageSender? = nil
@@ -127,14 +128,16 @@ extension ChatMessage {
         try container.encodeIfPresent(status, forKey: .status)
     }
 
-    /// The chat thread it is in, by its first message: its own id when alone.
+    /// The root of the thread it is in: its own id when it is the root.
     var threadRoot: String { chatThreadId ?? id }
 }
 
 /// What a message the guardian sends replies to: the quoted message, and
-/// the thread view it was sent from, if one was open. The server places the
-/// reply in a task's thread when either is in one
-/// (docs/domains/chats.md#chat-thread).
+/// the root of the thread view it was sent from, if one was open. The
+/// instance replies to the message named, so the message is in that thread
+/// (docs/domains/chats.md#chat-thread). A send from a thread view names the
+/// thread's last message with text (`TranscriptStore.wireTarget`); only a
+/// thread with none loaded sends the root alone, which the instance resolves.
 struct ThreadTarget: Codable, Hashable, Sendable {
     /// The message replied to, quoted in the reply bar.
     let messageId: String
@@ -142,7 +145,7 @@ struct ThreadTarget: Codable, Hashable, Sendable {
     /// Written by a build where Reply quoted; absent from drafts written
     /// when Reply opened the thread view.
     var quote: Bool? = nil
-    /// A message of the thread view the reply was sent from.
+    /// The root of the thread view the reply was sent from.
     var thread: String? = nil
     /// Aimed at the thread only: opened from its label, with no message
     /// replied to, so there is no reply bar and the send names no message.
@@ -150,8 +153,8 @@ struct ThreadTarget: Codable, Hashable, Sendable {
 
     var isQuote: Bool { quote == true }
 
-    /// The message whose thread view the reply was written in. A draft from
-    /// before quotes was always written in one, at `messageId`.
+    /// The message whose thread view the reply was written in: the thread's
+    /// root. A draft from before quotes was always written in one, at `messageId`.
     var threadMessage: String? { isQuote ? thread : messageId }
 
     var body: [String: JSONValue] {
@@ -482,8 +485,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     var completedAt: Double?
     var archivedAt: Double?
     var notSynced: Bool?
-    /// The first message of the task's chat thread in its Concierge chat.
-    var threadRoot: String?
     /// How the task stands, derived by the server: `needs_you`, `active`,
     /// `later` or `ended`.
     var status: String?
@@ -500,11 +501,11 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, state, summary, waitingOn, dueAt, rank, chat, conciergeChat, sourceMessageId
-        case createdAt, updatedAt, completedAt, archivedAt, notSynced, threadRoot, status, endReason, openWait
+        case createdAt, updatedAt, completedAt, archivedAt, notSynced, status, endReason, openWait
         case waitingSince, laterAt
     }
 
-    init(id: String, title: String, state: TaskState, summary: String? = nil, waitingOn: String? = nil, dueAt: Double? = nil, rank: Double? = nil, chat: LinkedChat? = nil, conciergeChat: ConciergeChat? = nil, sourceMessageId: String? = nil, createdAt: Double, updatedAt: Double, completedAt: Double? = nil, archivedAt: Double? = nil, notSynced: Bool? = nil, threadRoot: String? = nil, status: String? = nil, endReason: String? = nil, openWait: JSONValue? = nil) {
+    init(id: String, title: String, state: TaskState, summary: String? = nil, waitingOn: String? = nil, dueAt: Double? = nil, rank: Double? = nil, chat: LinkedChat? = nil, conciergeChat: ConciergeChat? = nil, sourceMessageId: String? = nil, createdAt: Double, updatedAt: Double, completedAt: Double? = nil, archivedAt: Double? = nil, notSynced: Bool? = nil, status: String? = nil, endReason: String? = nil, openWait: JSONValue? = nil) {
         self.id = id
         self.title = title
         self.state = state
@@ -520,7 +521,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         self.completedAt = completedAt
         self.archivedAt = archivedAt
         self.notSynced = notSynced
-        self.threadRoot = threadRoot
         self.status = status
         self.endReason = endReason
         self.openWait = openWait
@@ -552,7 +552,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         completedAt = try c.decodeIfPresent(Double.self, forKey: .completedAt)
         archivedAt = try c.decodeIfPresent(Double.self, forKey: .archivedAt)
         notSynced = try c.decodeIfPresent(Bool.self, forKey: .notSynced)
-        threadRoot = try c.decodeIfPresent(String.self, forKey: .threadRoot)
         status = try c.decodeIfPresent(String.self, forKey: .status)
         endReason = try c.decodeIfPresent(String.self, forKey: .endReason)
         // A shape this build cannot read drops only the wait, never the task.

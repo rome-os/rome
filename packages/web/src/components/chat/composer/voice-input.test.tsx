@@ -288,6 +288,29 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("draws the spoken text over the field while voice input is on, then gives the field its text back", async () => {
+    const { field } = renderComposer(kind);
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "Note:" } });
+    box.setSelectionRange(5, 5);
+    const copy = () => document.querySelector("[data-voice-input-spoken-text]");
+
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "buy", pending: " milk" });
+    expect(copy()?.textContent?.startsWith("Note:")).toBe(true);
+    expect(field().style.color).toBe("transparent");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    socket.say({ type: "ended" });
+    expect(copy()).toBeNull();
+    expect(field().style.color).toBe("");
+    expect(field().value).toBe("Note: buy milk");
+  });
+
   it("ends listening on Enter and sends once the last words are in", async () => {
     const { onSend, field } = renderComposer(kind);
     const socket = await startListening();

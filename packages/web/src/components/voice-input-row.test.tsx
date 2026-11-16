@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
@@ -31,15 +31,15 @@ async function rowText(info: VoiceInputInfo): Promise<string> {
 }
 
 describe("the voice input row in Settings", () => {
-  it("names the provider and host and says Rome Cloud provides it", async () => {
+  it("shows only the microphone while Rome Cloud serves voice input, naming no provider", async () => {
     const text = await rowText({
       available: true,
       place: { provider: "Soniox", host: "stt-rt.soniox.com" },
     });
-    expect(text).toContain("Voice input");
-    expect(text).toContain(
-      "Speech dictated into a message goes through Rome to Soniox at stt-rt.soniox.com, provided through Rome Cloud.",
-    );
+    expect(text).toContain("Microphone");
+    expect(text).not.toContain("Soniox");
+    expect(text).not.toContain("stt-rt.soniox.com");
+    expect(screen.queryByText("Voice input", { exact: true })).toBeNull();
   });
 
   it("says Rome Cloud cannot be reached rather than naming a provider", async () => {
@@ -48,7 +48,7 @@ describe("the voice input row in Settings", () => {
       place: null,
       placeUnknown: "rome-cloud-unreachable",
     });
-    expect(text).toContain("cannot be reached right now");
+    expect(text).toContain("Rome Cloud can't be reached right now, so voice input may not work.");
     expect(text).not.toContain("Soniox");
   });
 
@@ -94,33 +94,61 @@ describe("choosing the microphone in Settings", () => {
     await waitFor(() => expect(select.textContent).toContain("System default"));
   });
 
-  it("says when the chosen microphone is not connected", async () => {
-    localStorage.setItem("rome.voiceInput.microphone", "gone");
-    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
-    const text = await rowText({
-      available: true,
-      place: { provider: "Soniox", host: "stt-rt.soniox.com" },
-    });
-    await waitFor(() =>
-      expect(document.body.textContent).toContain("The chosen microphone isn't connected"),
-    );
-    expect(text).toContain("Microphone");
-  });
-
-  it("goes back to the system default when it is picked while the chosen microphone is not connected", async () => {
+  it("switches to the system default and clears a chosen microphone that is unplugged", async () => {
     localStorage.setItem("rome.voiceInput.microphone", "gone");
     devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
     await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
     const user = userEvent.setup();
     const select = await screen.findByRole("combobox", { name: "Microphone" });
-    await waitFor(() => expect(select.textContent).toContain("Chosen microphone (not connected)"));
+    await waitFor(() => expect(localStorage.getItem("rome.voiceInput.microphone")).toBeNull());
+    expect(select.textContent).toContain("System default");
 
     await user.click(select);
-    await user.click(await screen.findByRole("option", { name: "System default" }));
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual([
+      "System default",
+      "USB Microphone",
+    ]);
+  });
 
-    expect(localStorage.getItem("rome.voiceInput.microphone")).toBeNull();
-    await waitFor(() => expect(select.textContent).toContain("System default"));
-    expect(document.body.textContent).not.toContain("isn't connected");
+  it("shows no choice and changes nothing when the browser fails to list the microphones", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "usb");
+    devices([]);
+    navigator.mediaDevices.enumerateDevices = rs.fn(async () => {
+      throw new Error("NotReadableError");
+    });
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(navigator.mediaDevices.enumerateDevices).toHaveBeenCalled());
+    await act(async () => {});
+    expect(select.textContent).not.toContain("System default");
+    expect(localStorage.getItem("rome.voiceInput.microphone")).toBe("usb");
+  });
+
+  it("shows the chosen microphone, and saves its new id, when the browser gives it a new id after a reload", async () => {
+    const choice = JSON.stringify({ id: "old-id", label: "USB Microphone" });
+    localStorage.setItem("rome.voiceInput.microphone", choice);
+    devices([{ kind: "audioinput", deviceId: "new-id", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    const select = await screen.findByRole("combobox", { name: "Microphone" });
+    await waitFor(() => expect(select.textContent).toContain("USB Microphone"));
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem("rome.voiceInput.microphone") ?? "")).toEqual({
+        id: "new-id",
+        label: "USB Microphone",
+      }),
+    );
+  });
+
+  it("saves the name of a choice made before names were kept", async () => {
+    localStorage.setItem("rome.voiceInput.microphone", "usb");
+    devices([{ kind: "audioinput", deviceId: "usb", label: "USB Microphone" }]);
+    await rowText({ available: true, place: { provider: "Soniox", host: "stt-rt.soniox.com" } });
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem("rome.voiceInput.microphone") ?? "")).toEqual({
+        id: "usb",
+        label: "USB Microphone",
+      }),
+    );
   });
 
   it("keeps showing the microphone voice input uses when the browser refuses to save a choice", async () => {

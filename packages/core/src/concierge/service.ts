@@ -210,7 +210,6 @@ export interface ConciergeDeps {
     | "getTurnChatMessages"
     | "getReplyTarget"
     | "addBackendMessage"
-    | "placeInChatThread"
     | "setMessageReaction"
     | "setSessionTrigger"
     | "setAskingDevice"
@@ -681,17 +680,13 @@ export class ConciergeService {
     const main = await this.ensureChatId(owner);
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     // Its rows are its owner's main chat's from now on, as rows are read:
-    // none is moved. Open ones start a new thread there.
-    const tasks = await this.deps.tasks.repo.leaveChat(
-      chatId,
-      async (rows) => {
-        const status = await this.deps.tasks.statusOf(rows);
-        return new Set(
-          rows.filter((row) => status.get(row.id)?.status !== "ended").map((row) => row.id),
-        );
-      },
-      { deleted: how === "deleted" },
-    );
+    // none is moved.
+    const tasks = await this.deps.tasks.repo.leaveChat(chatId, async (rows) => {
+      const status = await this.deps.tasks.statusOf(rows);
+      return new Set(
+        rows.filter((row) => status.get(row.id)?.status !== "ended").map((row) => row.id),
+      );
+    });
     log.info("concierge chat retired", { chatId, how, follows, tasks });
     // A deleted chat is still there now: its caller tells the activity once
     // it is gone, so finished rows read as the main chat's by then.
@@ -1000,8 +995,8 @@ export class ConciergeService {
   /**
    * The tasks whose report a newer input took over in Concierge chat
    * `chatId`, until the turn that took it over ends. That turn is about the
-   * owner's message and these tasks, so what it says names its subject
-   * (docs/domains/chats.md#chat-thread).
+   * owner's message and these tasks, so what it says is not certainly an
+   * answer to the owner's message alone.
    */
   carriedReport(chatId: string): readonly string[] | undefined {
     return this.carriedReports.get(chatId);

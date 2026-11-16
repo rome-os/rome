@@ -57,8 +57,11 @@ describe("ChatAddresses", () => {
       (10, 1, 'm1', 'ada', NULL, 'hi', '[]', 1),
       (11, 1, 'm2', 'bot-2', NULL, 'sent', '[]', 2),
       (20, 2, 'm2', 'bot-2', 'support', 'sent\n[image: Chart]', '[{"type":"text","content":"sent"}]', 2),
-      (21, 2, 'm3', 'bot-2', 'support', 'later', '[]', 3)`);
-    run(sql`UPDATE chat_messages SET reply_to_message_id = 20 WHERE id = 21`);
+      (21, 2, 'm3', 'bot-2', 'support', 'later', '[]', 3),
+      (22, 2, 'm4', 'ada', NULL, 'and then', '[]', 4)`);
+    // m3 replies to the copy of m2, so m2 roots its thread, and m4 replies to m3.
+    run(sql`UPDATE chat_messages SET reply_to_message_id = 20, root_message_id = 20 WHERE id = 21`);
+    run(sql`UPDATE chat_messages SET reply_to_message_id = 21, root_message_id = 20 WHERE id = 22`);
     run(sql`INSERT INTO rome_sessions (id, name, created_at, activity_at, chat_id, account_id)
       VALUES ('s1', 'G', 1, 1, 1, 'bot-1'), ('s2', 'G', 1, 1, 2, 'bot-2')`);
     run(sql`INSERT INTO agent_turn_messages (message_id, session_id, turn_id, role) VALUES
@@ -72,12 +75,21 @@ describe("ChatAddresses", () => {
     // bot-1 heard bot-2's send as anyone's message; the kept copy learns
     // which agent said it, and what it said as recorded.
     expect(
-      all(sql`SELECT id, chat_id, reply_to_message_id AS reply, sender_agent AS agent, text
-              FROM chat_messages ORDER BY id`),
+      all(sql`SELECT id, chat_id, reply_to_message_id AS reply, root_message_id AS root,
+                sender_agent AS agent, text FROM chat_messages ORDER BY id`),
     ).toEqual([
-      { id: 10, chat_id: 1, reply: null, agent: null, text: "hi" },
-      { id: 11, chat_id: 1, reply: null, agent: "support", text: "sent\n[image: Chart]" },
-      { id: 21, chat_id: 1, reply: 11, agent: "support", text: "later" },
+      { id: 10, chat_id: 1, reply: null, root: null, agent: null, text: "hi" },
+      {
+        id: 11,
+        chat_id: 1,
+        reply: null,
+        root: null,
+        agent: "support",
+        text: "sent\n[image: Chart]",
+      },
+      // The thread the copy rooted is rooted at the message that stays.
+      { id: 21, chat_id: 1, reply: 11, root: 11, agent: "support", text: "later" },
+      { id: 22, chat_id: 1, reply: 21, root: 11, agent: null, text: "and then" },
     ]);
     expect(all(sql`SELECT id, chat_id FROM rome_sessions ORDER BY id`)).toEqual([
       { id: "s1", chat_id: 1 },

@@ -50,20 +50,16 @@ const source = {
 describe("ReplyBar", () => {
   const target: ReplyTarget = { messageId: "m1", author: "agent", preview: "Fly to Lisbon." };
 
-  it("spans the composer with an arrow, the muted quote, and × at the end", () => {
+  it("spans the composer with an arrow, one muted line, and × at the end, in no box", () => {
     const { container } = render(withDraft(draftOf({ target }), <ReplyBar />));
 
     const bar = container.querySelector("[data-reply-bar]") as HTMLElement;
     expect(bar.className).toContain("w-full");
     expect(bar.className).toContain("text-muted-foreground");
-    expect(bar.className).toContain("rounded-8");
-    expect(bar.className).toContain("border-l-3");
-    expect(bar.className).toContain("border-muted-foreground");
-    expect(bar.className).not.toContain("primary");
-    expect(bar.querySelector("[data-reply-accent]")).toBeNull();
-    expect(screen.getByRole("img", { name: "Reply" })).toBeTruthy();
+    expect(bar.className).not.toMatch(/rounded|border|bg-|primary/);
+    expect(bar.querySelector("svg.lucide-reply")).not.toBeNull();
     expect(bar.lastElementChild?.getAttribute("aria-label")).toBe("Cancel reply");
-    expect(screen.getByText("Fly to Lisbon.").className).toContain("line-clamp-2");
+    expect(screen.getByText("Fly to Lisbon.").className).toContain("truncate");
     expect(screen.queryByText(/Replying to|Rome/)).toBeNull();
   });
 
@@ -246,17 +242,19 @@ describe("QuotedReply", () => {
       ),
     );
 
-    expect(screen.getByText("Day 1: Alfama Morning: the Sé")).toBeTruthy();
+    // One line: the first line of the quoted message, as plain text.
+    expect(screen.getByText("Day 1: Alfama")).toBeTruthy();
+    expect(screen.queryByText(/Morning/)).toBeNull();
   });
 
-  it("edges the quote in the same rounded gray as the composer bar", () => {
+  it("is a reply arrow and one muted line, with no bar and no box", () => {
     render(withDraft(draftOf(), <QuotedReply part={part} />));
 
     const quote = screen.getByRole("button", { name: "Go to the original message" });
-    expect(quote.className).toContain("rounded-8");
-    expect(quote.className).toContain("border-l-3");
-    expect(quote.className).toContain("border-muted-foreground");
-    expect(quote.querySelector("[data-reply-accent]")).toBeNull();
+    expect(quote.className).toContain("text-muted-foreground");
+    expect(quote.className).not.toMatch(/rounded|border-l|bg-/);
+    expect(quote.querySelector("svg.lucide-reply")).not.toBeNull();
+    expect(quote.getAttribute("title")).toBe("Fly to Lisbon.");
   });
 
   it("shows the snapshot without a button when the original is not loaded", () => {

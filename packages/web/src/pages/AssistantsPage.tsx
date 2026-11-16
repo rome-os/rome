@@ -10,6 +10,7 @@ import { AssistantKindMark, useAssistantKindLabel } from "@/components/assistant
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ChatComposer } from "@/components/chat/ChatComposer";
+import { ChatEdgeBlur } from "@/components/chat/ChatEdgeBlur";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { MessageRow } from "@/components/chat/MessageRow";
 import { TextBlock } from "@/components/chat/entries/TextBlock";
@@ -203,13 +204,16 @@ function AssistantChat({
 
   return (
     <>
-      <div className="z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-chat-canvas/80 pl-2 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65">
-        <AssistantSwitcher assistant={assistant} assistants={assistants} onSwitch={onSwitch} />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-12">
+        <ChatEdgeBlur edge="top" className="z-10" />
+        <div className="pointer-events-none relative z-20 flex h-full items-center gap-1 [&>*]:pointer-events-auto pl-2 pr-2">
+          <AssistantSwitcher assistant={assistant} assistants={assistants} onSwitch={onSwitch} />
+        </div>
       </div>
 
       <div
         ref={scrollRef}
-        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pt-12 scroll-pt-12"
       >
         <div className="flex-1">
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
@@ -270,6 +274,7 @@ function AssistantChat({
           data-chat-floor
           className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]"
         >
+          <ChatEdgeBlur edge="bottom" />
           <div className="pointer-events-auto mx-auto max-w-5xl">
             <ChatComposer
               textOnly

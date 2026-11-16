@@ -257,7 +257,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
     }
 }
 
-/// Thread labels through the store: placements, retirements, titles.
+/// Thread names and membership through the store.
 @MainActor
 @Suite struct ThreadLabelStoreTests {
     private func titled(_ id: String, at seconds: TimeInterval, thread: String, title: String?) -> ChatMessage {
@@ -266,34 +266,17 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         return held
     }
 
-    @Test func aPlacementWithATitleLabelsTheMessage() async {
+    /// A root the server sent alone joins its thread, and takes its name,
+    /// when a reply arrives live: no event of its own.
+    @Test func aReplyArrivingLiveBringsItsRootIntoTheThread() async {
         let backend = FakeBackend()
-        let store = await chat(backend, [message("a1", at: 0), message("a2", at: 10)])
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageThread(sessionId: "concierge", messageId: "a2", chatThreadId: "r", title: "Book flights"))
-        #expect(store.message("a2")?.chatThreadId == "r")
-        #expect(store.message("a2")?.chatThreadTitle == "Book flights")
-        #expect(store.taskThreadTitle(of: store.message("a2")!) == "Book flights")
-    }
-
-    @Test func aRetiredThreadLosesItsLabels() async {
-        let backend = FakeBackend()
-        let store = await chat(backend, [titled("a1", at: 0, thread: "r", title: "Book flights"), titled("a2", at: 10, thread: "r", title: "Book flights"), message("b", at: 20)])
-        backend.bus.emit(LiveTopic.chat("concierge"), .threadRetired(sessionId: "concierge", chatThreadId: "r"))
-        #expect(store.message("a1")?.chatThreadId == nil && store.message("a1")?.chatThreadTitle == nil)
-        #expect(store.message("a2")?.chatThreadId == nil)
-        // Another chat's retirement changes nothing.
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageThread(sessionId: "concierge", messageId: "b", chatThreadId: "s", title: "T"))
-        backend.bus.emit(LiveTopic.chat("concierge"), .threadRetired(sessionId: "other", chatThreadId: "s"))
-        #expect(store.message("b")?.chatThreadId == "s")
-    }
-
-    @Test func aPlacementBeforeItsMessageIsKeptForIt() async {
-        let backend = FakeBackend()
-        let store = await chat(backend, [message("a1", at: 0)])
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageThread(sessionId: "concierge", messageId: "late", chatThreadId: "r", title: "Pay rent"))
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("late", at: 30, knows: false)))
-        #expect(store.message("late")?.chatThreadId == "r")
-        #expect(store.message("late")?.chatThreadTitle == "Pay rent")
+        let store = await chat(backend, [message("r", role: "user", at: 0), message("x", at: 5)])
+        #expect(!store.isInThread(store.message("r")!))
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(titled("a1", at: 10, thread: "r", title: "Book flights")))
+        #expect(store.isInThread(store.message("r")!) && store.isInThread(store.message("a1")!))
+        #expect(!store.isInThread(store.message("x")!))
+        #expect(store.threadTitle(of: store.message("r")!) == "Book flights")
+        #expect(store.messages(inThread: "r").map(\.id) == ["r", "a1"])
     }
 
     @Test func aCopyWithoutTheTitleKeepsTheOneHeld() async {
@@ -307,7 +290,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         #expect(store.message("a2")?.chatThreadTitle == "Book flights")
     }
 
-    @Test func aDraftFromBeforeQuotesIsAPlainReplyWhenNoTaskOwnsItsMessage() async {
+    @Test func aDraftFromBeforeQuotesIsAPlainReplyWhenNoThreadHoldsItsMessage() async {
         let backend = FakeBackend()
         let store = await chat(backend, [message("plain", at: 0), titled("owned", at: 10, thread: "r", title: "Book flights"), message("root", at: 5, thread: "r")])
         store.reopenThread(ThreadTarget(messageId: "plain", instanceKnowsThreads: true))

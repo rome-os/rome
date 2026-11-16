@@ -127,7 +127,7 @@ interface ChatRows {
 function readChat(chatId: string): ChatRows {
   const [messages, turns, speaking, models, reacted, taskChats] = stack.query([
     {
-      sql: `SELECT m.key, m.sender_agent, m.text, m.parts, m.said_at, m.chat_thread_id
+      sql: `SELECT m.key, m.sender_agent, m.text, m.parts, m.said_at, m.root_message_id
             FROM chat_messages m JOIN chats c ON c.id = m.chat_id
             WHERE c.platform = 'webchat' AND c.key = ? ORDER BY m.said_at, m.id`,
       params: [chatId],

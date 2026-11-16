@@ -91,7 +91,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         let store = makeStore()
         let updater = InstanceUpdater(store: store)
         var finished = false
-        updater.onFinished = { finished = true }
+        updater.onFinished = { _ in finished = true }
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(updater.blocking)
 
@@ -142,7 +142,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         backend.check = .success(check(current: "0.43.0", latest: "0.43.0", available: false))
         let updater = InstanceUpdater(store: store)
         var finished = false
-        updater.onFinished = { finished = true }
+        updater.onFinished = { _ in finished = true }
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(!updater.blocking)
         #expect(finished)

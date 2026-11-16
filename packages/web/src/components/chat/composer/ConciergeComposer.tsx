@@ -66,6 +66,7 @@ import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
+import { VoiceInputSpokenText } from "./VoiceInputSpokenText";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -420,7 +421,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               </div>
             ) : null}
           </div>
-          <div className="flex items-end gap-2">
+          {/* While voice input is on, the field takes the whole first row and the
+              controls wrap below it, beside the waveform. The field keeps its
+              place in the tree, so focus and the words heard so far stay. */}
+          <div className={cn("flex items-end gap-2", voice.active && "flex-wrap")}>
             {/* The selector anchors to this box: the popover opens above the +. */}
             <div className="relative flex">
               <DropdownMenu
@@ -559,7 +563,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 `--row-h` follows the buttons: `icon-sm`, raised to the touch
                 floor where `touch-target` applies it. */}
             <div
-              className="flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]"
+              className={cn(
+                "relative flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]",
+                voice.active && "order-first basis-full",
+              )}
               style={{ minHeight: "var(--row-h)" }}
             >
               <SlashSkillMenu
@@ -610,7 +617,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     placeholder={
                       pendingUploads.length > 0
                         ? t("composer.placeholderWithUploads")
-                        : replyDraft?.thread
+                        : replyDraft?.thread && replyDraft.threadTitle
                           ? t("thread.replyPlaceholder", { title: replyDraft.threadTitle })
                           : (namedPlaceholder ?? t("concierge.placeholder"))
                     }
@@ -625,9 +632,16 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                   />
                 }
               />
+              <VoiceInputSpokenText
+                textareaRef={textareaRef}
+                value={inputText}
+                spoken={voice.spoken}
+              />
             </div>
             {voice.state === "listening" ? (
-              <VoiceInputWaveform level={voice.level} className="w-20 shrink-0" />
+              <VoiceInputWaveform level={voice.level} className="flex-1 self-center" />
+            ) : voice.active ? (
+              <div aria-hidden className="flex-1" />
             ) : null}
             {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Testing
 @testable import Rome
 
@@ -135,6 +136,26 @@ import Testing
         #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == nil)
     }
 
+    // MARK: Return while listening
+
+    @Test func returnOnTheFieldGoesToVoiceInputOnlyWhileItListens() throws {
+        let view = PastingTextView()
+        let isReturn = { (command: UIKeyCommand) in command.input == "\r" && command.modifierFlags.isEmpty }
+        #expect(view.keyCommands?.contains(where: isReturn) != true)
+        var pressed = 0
+        view.onReturn = { pressed += 1 }
+        let command = try #require(view.keyCommands?.first(where: isReturn))
+        #expect(command.action == #selector(PastingTextView.returnPressed))
+        view.returnPressed()
+        #expect(pressed == 1)
+    }
+
+    @Test func returnWhileIdleSendsNothing() {
+        var sent = false
+        VoiceInputController().stopAndSend { sent = true }
+        #expect(!sent)
+    }
+
     @Test func spokenWordsGoWhereTheGuardianLeftTheCursorElseAtTheEnd() {
         let handle = ComposerTextHandle()
         // Typed into a field the app never saw a cursor in, such as one that lost focus.
@@ -145,12 +166,17 @@ import Testing
         #expect(handle.cursor(in: "Ty") == NSRange(location: 2, length: 0))
     }
 
-    @Test func settingsNamesTheProviderAndItsHost() {
+    @Test func settingsShowsNoProviderOnlyAProblem() {
         let json = #"{"available":true,"place":{"provider":"Soniox","host":"stt-rt.soniox.com"}}"#
         let info = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(json.utf8))
-        #expect(info?.placeText == "Soniox · stt-rt.soniox.com")
+        #expect(info?.problemText == nil)
+        let signedOut = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true,"place":null,"placeUnknown":"rome-cloud-signed-out"}"#.utf8))
+        #expect(signedOut?.problemText == String(localized: "Sign in to Rome Cloud again"))
         let older = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true}"#.utf8))
         #expect(older?.available == true)
+        #expect(older?.problemText == nil)
+        let unreachable = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true,"place":null,"placeUnknown":"rome-cloud-unreachable"}"#.utf8))
+        #expect(unreachable?.problemText == String(localized: "Rome Cloud can't be reached"))
     }
 
     @Test func standInsOfferNoVoiceInput() async throws {

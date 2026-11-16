@@ -22,6 +22,28 @@ const log = createLogger("renewal-handoffs");
 /** How many of a chat's latest turns are read for its recent messages. */
 const RECENT_TURNS = 60;
 
+/** How many turns each page holds when every message since a time is read. */
+const SINCE_PAGE_TURNS = 100;
+
+/**
+ * The rows of every turn said at or after `since`: a turn with any row then
+ * counts whole, so the message that opened a session, saved just before it,
+ * comes with the reply it got. A row in no turn counts alone. `createdAt` is
+ * stored to the second, so `since` is read to the second as well.
+ */
+export function rowsSince(rows: readonly ChatRow[], since: Date): ChatRow[] {
+  const from = Math.floor(since.getTime() / 1000) * 1000;
+  const lastOfTurn = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.turnId) continue;
+    const at = row.createdAt.getTime();
+    lastOfTurn.set(row.turnId, Math.max(lastOfTurn.get(row.turnId) ?? at, at));
+  }
+  return rows.filter((row) =>
+    row.turnId ? (lastOfTurn.get(row.turnId) ?? 0) >= from : row.createdAt.getTime() >= from,
+  );
+}
+
 const FALLBACK_SYSTEM_PROMPT = [
   "You write a handoff note for an assistant whose session is being replaced by a fresh one that has not seen the conversation. The person the assistant serves can read the note, so write only what may be shown to them.",
   "You get the conversation's latest messages and, when there are any, its open tasks.",
@@ -58,12 +80,22 @@ export interface ChatRow {
   createdAt: Date;
 }
 
+/** One page of a chat's rows, and where the next older page starts. */
+export interface ChatPage {
+  rows: readonly ChatRow[];
+  next: unknown | null;
+}
+
 export interface RenewalHandoffSources {
   timeoutMs: number;
   contextLimitTokens?: number;
+  hardContextLimitTokens?: number;
   modelResolver: ModelResolver;
-  /** The rows of chat `chatId`'s latest `turns` turns, oldest first. */
-  rows(chatId: string, turns: number): Promise<readonly ChatRow[]>;
+  /**
+   * The rows of chat `chatId`'s `turns` latest turns older than page
+   * `before`, oldest first, and where the next older page starts, or null.
+   */
+  page(chatId: string, turns: number, before?: unknown): Promise<ChatPage>;
   /** Who said chat `chatId`'s user lines, or null for the default "Guardian". */
   ownerLabel?: (chatId: string) => Promise<string | null>;
   /** Chat `chatId`'s open tasks, one per line, or null for none or a chat that keeps none. */
@@ -95,9 +127,23 @@ export function recentMessagesOf(
 }
 
 export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHandoffs {
-  const recent = async (chatId: string, exceptTurnId?: string) => {
+  /** Pages back from the newest turn until a page reaches before `since`. */
+  const rowsFrom = async (chatId: string, since: Date): Promise<ChatRow[]> => {
+    const pages: (readonly ChatRow[])[] = [];
+    let before: unknown;
+    for (;;) {
+      const page = await sources.page(chatId, SINCE_PAGE_TURNS, before);
+      pages.unshift(page.rows);
+      if (!page.next || page.rows.some((row) => row.createdAt < since)) break;
+      before = page.next;
+    }
+    return rowsSince(pages.flat(), since);
+  };
+  const recent = async (chatId: string, exceptTurnId?: string, since?: Date) => {
     const [rows, owner] = await Promise.all([
-      sources.rows(chatId, RECENT_TURNS),
+      since
+        ? rowsFrom(chatId, since)
+        : sources.page(chatId, RECENT_TURNS).then((page) => page.rows),
       sources.ownerLabel ? sources.ownerLabel(chatId).catch(() => null) : null,
     ]);
     return recentMessagesOf(rows, exceptTurnId, owner);
@@ -105,6 +151,7 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
   return {
     timeoutMs: sources.timeoutMs,
     contextLimitTokens: sources.contextLimitTokens,
+    hardContextLimitTokens: sources.hardContextLimitTokens,
     tidying: (chatId, work) => (chatId && sources.tidying ? sources.tidying(chatId, work) : work()),
     async fallback(chatId, agentName) {
       if (!chatId) return null;
@@ -130,9 +177,9 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
         sources.fallbackTimeoutMs,
       );
     },
-    async context(chatId, turnId) {
+    async context(chatId, turnId, since) {
       const [messages, openTasks] = await Promise.all([
-        recent(chatId, turnId),
+        recent(chatId, turnId, since),
         sources.openTasks(chatId).catch((err: unknown) => {
           log.warn("open tasks read failed", {
             chatId,

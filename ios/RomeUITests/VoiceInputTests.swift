@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Leg B of the voice input rules on iOS. It drives the Debug app on a simulator against the
 /// stand-in instance, through the accessibility contract: the control is "Start voice input"
@@ -69,14 +70,14 @@ final class VoiceInputTests: XCTestCase {
         try checkStartsAndStops(app, field: "a task chat")
     }
 
-    /// Rule 1 in a thread under a Concierge message. Needs a task on the instance.
+    /// Rule 1 in a thread opened from a quote. Needs a reply on the instance.
     @MainActor
     func testRule1AThread() throws {
         let app = try launch()
-        let thread = app.buttons["thread-label"].firstMatch
+        let thread = app.buttons["reply-quote"].firstMatch
         guard thread.waitForExistence(timeout: 10) else {
-            printScreen(app, "no thread label")
-            throw XCTSkip("the instance has no task's thread to open")
+            printScreen(app, "no reply quote")
+            throw XCTSkip("the instance has no reply with a thread to open")
         }
         thread.tap()
         try checkStartsAndStops(app, field: "a thread")
@@ -370,28 +371,28 @@ final class VoiceInputTests: XCTestCase {
 
     // MARK: Rule 10
 
-    /// Rule 10 on the phone: before any dictation, Settings has a "Voice input" row whose value
-    /// is "<provider> · <host>", as Rome's `GET /api/voice-input` names them (the stand-in
-    /// instance names itself, at its own address).
+    /// Rule 10 on the phone: while Rome Cloud serves voice input, Settings names no transcription
+    /// provider or host anywhere, and shows no "Voice input" status row.
     @MainActor
-    func testRule10TheAppNamesWhereVoiceGoes() throws {
+    func testRule10TheAppNamesNoProvider() throws {
         let place = try voiceInputPlace()
         let app = try launch()
+        // The voice control shows once the app has read voice input's info, so the checks
+        // below test a loaded Settings, not one still waiting for it.
+        try requireControl(app, onScreen(app.buttons, "voice-input"), "the Chat has no voice control")
         touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
         let settings = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "settings")).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 10), "the navigation has no settings")
         settings.tap()
-        let row = app.descendants(matching: .any)["voice-input-place"]
-        guard row.waitForExistence(timeout: 10) else {
-            printScreen(app, "rule 10: settings")
-            return XCTFail("Settings has no \"Voice input\" row")
-        }
-        let wanted = "\(place.provider) · \(place.host)"
-        let value = row.value as? String ?? ""
-        XCTAssertTrue(row.label.hasPrefix("Voice input"), "the row is labelled \"\(row.label)\", not \"Voice input\"")
-        if value != wanted && !row.label.contains(wanted) {
-            printScreen(app, "rule 10: voice input row")
-            XCTFail("the \"Voice input\" row says \"\(value.isEmpty ? row.label : value)\"; Rome names \"\(wanted)\"")
+        XCTAssertTrue(app.staticTexts["Version"].waitForExistence(timeout: 10), "Settings never opened")
+        // A row that shows up late still fails.
+        XCTAssertFalse(app.descendants(matching: .any)["voice-input-place"].waitForExistence(timeout: 3), "Settings shows a \"Voice input\" status row")
+        for name in [place.provider, place.host] {
+            let shown = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", name, name))
+            if shown.count > 0 {
+                printScreen(app, "rule 10: settings")
+                XCTFail("Settings names \"\(name)\"")
+            }
         }
     }
 
@@ -477,11 +478,149 @@ final class VoiceInputTests: XCTestCase {
         }
     }
 
+    // MARK: Rule 14
+
+    /// One cycle of the rule 14 recording: quiet room noise, then sound.
+    static let cycleQuietSeconds = 8.0
+    static let cycleSoundSeconds = 3.0
+    static var cycleSeconds: Double { cycleQuietSeconds + cycleSoundSeconds }
+    /// How many cycles the test photographs.
+    static let cyclesPhotographed = 4
+    /// Pixels two photographs may differ by and still look the same: one point at 3x.
+    static let pixelSlack = 9
+
+    /// Rule 14 on iOS: while listening, the message field moves with sound, and from 5 s into a
+    /// silence it shows no spikes or curves. XCUITest photographs a second or so apart, with no
+    /// clock shared with the recording, so the test plays cycles of 8 s of quiet room noise and
+    /// 3 s of sound, and scores what it sees. The steady silent look is the photograph that
+    /// repeats most, and every cycle must show it at least once and something else at least
+    /// once. A waveform that draws the room noise, or anything else that changes on its own,
+    /// never repeats a photograph, so it has no steady silent look.
+    @MainActor
+    func testRule14TheWaveformIsFlatInSilence() throws {
+        try standIn(["transcript": ""])
+        defer { try? standIn(["transcript": Self.transcript]) }
+        let app = try launch(recording: Self.cycles)
+        let control = onScreen(app.buttons, "voice-input")
+        let field = onScreen(app.textViews, "message-field")
+        try requireControl(app, control, "the Chat has no voice control")
+        emptyTheField(app, "rule 14")
+        control.tap()
+        XCTAssertTrue(waitForLabel(control, "Stop voice input", timeout: Self.settleSeconds),
+                      "listening did not start")
+        let region = field.frame.union(control.frame)
+        var shots: [(at: TimeInterval, pixels: [UInt8])] = []
+        let start = Date()
+        while Date().timeIntervalSince(start) < Self.cycleSeconds * Double(Self.cyclesPhotographed) {
+            let image = app.screenshot().image
+            shots.append((Date().timeIntervalSince(start), try pixels(of: image, in: region)))
+        }
+        let listened = control.label == "Stop voice input"
+        if listened { control.tap() }
+        XCTAssertTrue(listened, "listening stopped by itself during the photographs")
+        XCTAssertEqual(fieldText(field), "", "words reached the field, so the photographs cannot tell hearing from text")
+
+        // Identical photographs are grouped first. The steady silent look is the one most
+        // photographs share exactly, and only it is compared pixel by pixel with the others,
+        // so a field that changes every frame costs one comparison a photograph.
+        var looks: [[UInt8]] = []
+        var lookOf: [[UInt8]: Int] = [:]
+        let shotLook = shots.map { shot -> Int in
+            if let index = lookOf[shot.pixels] { return index }
+            looks.append(shot.pixels)
+            lookOf[shot.pixels] = looks.count - 1
+            return looks.count - 1
+        }
+        let shared = looks.indices.map { look in shotLook.filter { $0 == look }.count }
+        let silent = shared.firstIndex(of: shared.max() ?? 0) ?? 0
+        let closeToSilent = looks.map { Self.differing(looks[silent], $0, atMost: Self.pixelSlack) <= Self.pixelSlack }
+        let same = { (shot: Int) in closeToSilent[shotLook[shot]] }
+        let most = shots.indices.filter(same).count
+        print("rule 14: \(shots.count) photographs, \(looks.count) looks; the steady silent look repeats in \(most)")
+        XCTAssertGreaterThanOrEqual(most, Self.cyclesPhotographed,
+                                    "the field never settled in silence: no photograph repeats once a cycle")
+        for cycle in 0..<Self.cyclesPhotographed {
+            let from = Double(cycle) * Self.cycleSeconds
+            let seen = shots.indices.filter { shots[$0].at >= from && shots[$0].at < from + Self.cycleSeconds }
+            let flat = seen.filter(same).count
+            XCTAssertGreaterThan(flat, 0, "cycle \(cycle + 1): the field never looked as it does in steady silence")
+            XCTAssertLessThan(flat, seen.count, "cycle \(cycle + 1): the field showed nothing while sound played")
+        }
+    }
+
+    /// `region` of `image`, in points, as RGBA bytes.
+    private func pixels(of image: UIImage, in region: CGRect) throws -> [UInt8] {
+        let cg = try XCTUnwrap(image.cgImage, "the photograph has no bitmap")
+        let scale = image.scale
+        let crop = CGRect(x: region.minX * scale, y: region.minY * scale,
+                          width: region.width * scale, height: region.height * scale).integral
+        let part = try XCTUnwrap(cg.cropping(to: crop), "the field lies outside the photograph")
+        var bytes = [UInt8](repeating: 0, count: part.width * part.height * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: part.width, height: part.height,
+                                          bitsPerComponent: 8, bytesPerRow: part.width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(part, in: CGRect(x: 0, y: 0, width: part.width, height: part.height))
+            return true
+        }
+        XCTAssertTrue(drawn, "could not read the photograph's pixels")
+        return bytes
+    }
+
+    /// How many pixels of two same-sized photographs differ by more than a little in a channel,
+    /// counting no further than one past `atMost`.
+    private static func differing(_ a: [UInt8], _ b: [UInt8], atMost: Int) -> Int {
+        guard a.count == b.count else { return Int.max }
+        var n = 0
+        var i = 0
+        while i < a.count, n <= atMost {
+            if abs(Int(a[i]) - Int(b[i])) > 48 || abs(Int(a[i + 1]) - Int(b[i + 1])) > 48
+                || abs(Int(a[i + 2]) - Int(b[i + 2])) > 48 { n += 1 }
+            i += 4
+        }
+        return n
+    }
+
+    /// Two minutes of rule 14's cycles, 16 kHz mono 16-bit: quiet room noise at about -55 dBFS (the meter's floor),
+    /// then a 200 Hz tone whose loudness rises and falls four times a second, as syllables do.
+    private func cyclesFile() throws -> URL {
+        let rate = 16000
+        let seconds = 120
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(Self.cycles)-\(seconds)s.wav")
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+        let count = rate * seconds
+        var samples = [Int16](repeating: 0, count: count)
+        var seed: UInt32 = 1
+        for i in 0..<count {
+            let t = Double(i) / Double(rate)
+            // A fixed pseudo-random noise, so every run plays the same recording.
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            let noise = 100 * (Double(seed) / Double(UInt32.max) * 2 - 1)
+            let inCycle = t.truncatingRemainder(dividingBy: Self.cycleSeconds)
+            let loud = 0.55 + 0.45 * sin(2 * Double.pi * 4 * t)
+            let tone = inCycle >= Self.cycleQuietSeconds ? 8000 * loud * sin(2 * Double.pi * 200 * t) : 0
+            samples[i] = Int16(noise + tone)
+        }
+        var data = Data()
+        func text(_ s: String) { data.append(contentsOf: Array(s.utf8)) }
+        func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
+        func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
+        text("RIFF"); u32(36 + UInt32(count * 2)); text("WAVE")
+        text("fmt "); u32(16); u16(1); u16(1); u32(UInt32(rate)); u32(UInt32(rate * 2)); u16(2); u16(16)
+        text("data"); u32(UInt32(count * 2))
+        samples.withUnsafeBytes { data.append(contentsOf: $0) }
+        try data.write(to: url)
+        return url
+    }
+
     // MARK: Helpers
 
     /// A recording the stand-in instance hears as speech for its whole four minutes, so only the
     /// stop under test ends listening.
     static let hum = "hum"
+    /// Rule 14's recording, generated like the hum.
+    static let cycles = "cycles"
 
     /// Starts listening in the Chat, waits for some words, makes `stop` happen, and checks that
     /// the words shown before the stop are in the field afterwards and that the field says why
@@ -693,6 +832,8 @@ final class VoiceInputTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(\(language))"]
         if let microphone {
             app.launchArguments += ["-RomeVoiceInputMicrophone", microphone]
+        } else if recording == Self.cycles {
+            app.launchArguments += ["-RomeVoiceInputRecording", try cyclesFile().path]
         } else if recording != Self.hum {
             let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: recording, withExtension: "wav"),
                                     "\(recording).wav is missing from the test bundle")

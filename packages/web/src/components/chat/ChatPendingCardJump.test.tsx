@@ -34,10 +34,12 @@ function Harness({
   aiResult,
   hidden = false,
   whenShown,
+  scrollPaddingTop = 0,
 }: {
   /** The card is in a thread the focus hides. */
   hidden?: boolean;
   whenShown?: ComponentProps<typeof ChatPendingCardJump>["whenShown"];
+  scrollPaddingTop?: number;
   questionResult?: Record<string, unknown>;
   currentReplyMessageIds?: ReadonlySet<string>;
   kind?: "routine" | "app" | "ai" | "approval" | "question";
@@ -48,7 +50,7 @@ function Harness({
   const [floor, setFloor] = useState<HTMLDivElement | null>(null);
   return (
     <MemoryRouter>
-      <div ref={setScroller} data-testid="scroller">
+      <div ref={setScroller} data-testid="scroller" style={{ scrollPaddingTop }}>
         <div ref={setContent}>
           <div data-chat-card-message="message" data-thread-out={hidden || undefined}>
             {kind === "approval" ? (
@@ -135,7 +137,8 @@ beforeEach(() => {
     configurable: true,
     value: (options: ScrollToOptions) => {
       scrollTo(options);
-      cardTop = 0;
+      cardTop =
+        Number.parseFloat(getComputedStyle(screen.getByTestId("scroller")).scrollPaddingTop) || 0;
       fireEvent.scroll(screen.getByTestId("scroller"));
     },
   });
@@ -255,6 +258,23 @@ describe("ChatPendingCardJump", () => {
     fireEvent.click(jump);
     expect(scrollTo).toHaveBeenCalledWith({ top: -200, behavior: "instant" });
     expect(document.activeElement?.hasAttribute("data-chat-pending-card")).toBe(true);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
+    );
+  });
+
+  it("keeps reminding about a card entirely behind the floating header", async () => {
+    cardTop = -68;
+    render(<Harness kind="app" scrollPaddingTop={48} />);
+
+    await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
+  });
+
+  it("lands a waiting card below the floating header", async () => {
+    render(<Harness scrollPaddingTop={48} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Needs you: jump to waiting card" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: -248, behavior: "instant" });
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
     );

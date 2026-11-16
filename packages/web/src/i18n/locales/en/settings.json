@@ -941,27 +941,21 @@
     "targetChanged": "A newer version ({{version}}) was published in the meantime — confirm again to upgrade to it.",
     "upgradeFailed": "Upgrade request failed: {{message}}",
     "upgradeFailedFallback": "Upgrade request failed.",
-    "restartingTitle": "{{name}} is restarting",
     "restartingBody": "Upgrading to {{version}}.",
-    "restartTimeoutTitle": "The upgrade is taking longer than expected",
     "restartTimeoutBody": "{{name}} hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud.",
-    "close": "Close",
     "voiceInput": {
       "title": "Voice input",
       "loadFailed": "Failed to load voice input",
-      "placeViaRomeCloud": "Speech dictated into a message goes through Rome to {{provider}} at {{host}}, provided through Rome Cloud. Rome keeps no audio.",
-      "romeCloudUnreachable": "Voice input is provided through Rome Cloud, which cannot be reached right now, so Rome cannot name the transcription service.",
-      "romeCloudNotConfigured": "Voice input is provided through Rome Cloud, which has not set up a transcription service yet.",
-      "romeCloudSignedOut": "Voice input is provided through Rome Cloud, which does not accept this Rome's sign-in. Sign in to Rome Cloud again to use it.",
+      "romeCloudUnreachable": "Rome Cloud can't be reached right now, so voice input may not work.",
+      "romeCloudNotConfigured": "Voice input isn't set up in Rome Cloud yet, so it won't work.",
+      "romeCloudSignedOut": "Rome Cloud doesn't accept this Rome's sign-in. Sign in to Rome Cloud again to use voice input.",
       "microphone": {
         "title": "Microphone",
         "description": "Voice input in this browser records from this microphone.",
         "systemDefault": "System default",
         "show": "Show microphones",
-        "refused": "The browser blocked the microphone, so it won't list them. Allow it in the browser's site settings.",
-        "notConnected": "Chosen microphone (not connected)",
-        "missing": "The chosen microphone isn't connected, so voice input uses the system default."
+        "refused": "The browser blocked the microphone, so it won't list them. Allow it in the browser's site settings."
       }
     }
   },

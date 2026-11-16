@@ -20,20 +20,21 @@ import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
 import {
   chooseMicrophone,
   chosenMicrophone,
+  findMicrophone,
   listMicrophones,
   type MicrophoneOption,
   revealMicrophones,
 } from "@/lib/voice-input/microphone-choice";
 
 /**
- * Names where the dashboard's dictated speech becomes text. Absent on an
- * instance without voice input, including an account Rome Cloud does not
- * allow it for.
+ * Voice input's settings: which microphone it records from, and, while Rome
+ * Cloud cannot serve it, why. Absent on an instance without voice input,
+ * including an account Rome Cloud does not allow it for.
  */
 export function VoiceInputRow() {
   const { t } = useTranslation("settings");
-  // Rome Cloud can move voice input to another provider, so read the place
-  // again each time Settings opens.
+  // Whether Rome Cloud can serve voice input changes, so ask again each time
+  // Settings opens.
   const query = useVoiceInputInfo({ refetchOnMount: "always" });
   const info = query.data;
   if (query.isError) {
@@ -47,14 +48,17 @@ export function VoiceInputRow() {
     );
   }
   if (!info?.available) return null;
+  const problem = describeProblem(info, t);
   return (
     <>
-      <FormRow>
-        <FormRowHeading>
-          <FormRowLabel>{t("system.voiceInput.title")}</FormRowLabel>
-          <FormRowDescription>{describe(info, t)}</FormRowDescription>
-        </FormRowHeading>
-      </FormRow>
+      {problem && (
+        <FormRow>
+          <FormRowHeading>
+            <FormRowLabel>{t("system.voiceInput.title")}</FormRowLabel>
+            <FormRowDescription>{problem}</FormRowDescription>
+          </FormRowHeading>
+        </FormRow>
+      )}
       <MicrophoneRow />
     </>
   );
@@ -76,8 +80,10 @@ function MicrophoneRow() {
   const [chosen, setChosen] = useState(chosenMicrophone);
   const [refused, setRefused] = useState(false);
 
+  // A failed listing keeps the last list. Before any list, the select stays
+  // disabled and shows no choice.
   const refresh = useCallback(() => {
-    listMicrophones().then(setOptions, () => setOptions([]));
+    listMicrophones().then(setOptions, () => {});
   }, []);
 
   useEffect(() => {
@@ -100,12 +106,21 @@ function MicrophoneRow() {
     );
   };
 
-  const missing = chosen !== null && options != null && !options.some((o) => o.id === chosen);
+  // An unplugged microphone leaves the list, and the choice switches to the
+  // system default, which voice input then records from. Only a list that
+  // names some microphone counts: an empty one may be the browser not answering.
+  const found = options ? findMicrophone(chosen, options) : null;
+  const unplugged = chosen !== null && !!options?.length && found === null;
+  // A choice found by name gets the device's new id, and one saved before
+  // names were kept gets its name.
+  const stale = found !== null && (found.id !== chosen?.id || found.label !== chosen.label);
+  useEffect(() => {
+    if (unplugged) setChosen(chooseMicrophone(null));
+    else if (stale && found) setChosen(chooseMicrophone(found));
+  }, [unplugged, stale, found]);
   const description = refused
     ? t("system.voiceInput.microphone.refused")
-    : missing
-      ? t("system.voiceInput.microphone.missing")
-      : t("system.voiceInput.microphone.description");
+    : t("system.voiceInput.microphone.description");
 
   return (
     <FormRow>
@@ -123,10 +138,10 @@ function MicrophoneRow() {
           </Button>
         ) : (
           <Select
-            value={chosen ?? SYSTEM_DEFAULT}
+            value={options === undefined ? "" : (found?.id ?? SYSTEM_DEFAULT)}
             disabled={options === undefined}
             onValueChange={(value) =>
-              setChosen(chooseMicrophone(value === SYSTEM_DEFAULT ? null : value))
+              setChosen(chooseMicrophone(options?.find((option) => option.id === value) ?? null))
             }
           >
             <SelectTrigger
@@ -139,12 +154,6 @@ function MicrophoneRow() {
               <SelectItem value={SYSTEM_DEFAULT}>
                 {t("system.voiceInput.microphone.systemDefault")}
               </SelectItem>
-              {/* Kept as its own item so picking System default clears it. */}
-              {missing && chosen && (
-                <SelectItem value={chosen} disabled>
-                  {t("system.voiceInput.microphone.notConnected")}
-                </SelectItem>
-              )}
               {options?.map((option) => (
                 <SelectItem key={option.id} value={option.id}>
                   {option.label}
@@ -158,13 +167,12 @@ function MicrophoneRow() {
   );
 }
 
-function describe(
+/** Why Rome Cloud cannot serve voice input right now; null while it can. */
+function describeProblem(
   info: VoiceInputInfo,
   t: (key: string, options?: Record<string, string>) => string,
-): string {
-  const place = info.place;
-  if (place)
-    return t("system.voiceInput.placeViaRomeCloud", { provider: place.provider, host: place.host });
+): string | null {
+  if (info.place) return null;
   return info.placeUnknown === "rome-cloud-not-configured"
     ? t("system.voiceInput.romeCloudNotConfigured")
     : info.placeUnknown === "rome-cloud-signed-out"

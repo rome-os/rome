@@ -41,6 +41,10 @@ const configSchema = z.object({
   // At least 50K: a new session starts near 30K, and a limit near that would
   // renew it after every turn.
   sessionHandoffContextTokens: z.coerce.number().int().min(50_000).default(150_000),
+  // Past this many tokens, a message that comes while that renewal's handoff
+  // is written waits for the renewal; under it, the retired session answers.
+  // Read as at least the limit above.
+  sessionHandoffHardContextTokens: z.coerce.number().int().min(50_000).default(180_000),
 
   // Personal WeChat is opt-in and runs as the Rome service user.
   wechatUserEnabled: z
@@ -179,6 +183,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
   if (env.SESSION_HANDOFF_CONTEXT_TOKENS) {
     raw.sessionHandoffContextTokens = env.SESSION_HANDOFF_CONTEXT_TOKENS;
+  }
+  if (env.SESSION_HANDOFF_HARD_CONTEXT_TOKENS) {
+    raw.sessionHandoffHardContextTokens = env.SESSION_HANDOFF_HARD_CONTEXT_TOKENS;
   }
   if (env.WECHAT_USER_ENABLED !== undefined) {
     raw.wechatUserEnabled = env.WECHAT_USER_ENABLED;

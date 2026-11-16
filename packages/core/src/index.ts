@@ -315,7 +315,7 @@ import {
   subagentSessions,
   subagentTurnLog,
 } from "./core/subagent-call-ports.js";
-import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
+import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./wiring/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
@@ -392,6 +392,7 @@ import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
+import type { MessagePageCursor } from "./webchat/repository.js";
 
 async function main() {
   const config = loadConfig();
@@ -1340,10 +1341,19 @@ async function main() {
       handoffs: createRenewalHandoffs({
         timeoutMs: config.sessionHandoffTimeoutSeconds * 1_000,
         contextLimitTokens: config.sessionHandoffContextTokens,
+        hardContextLimitTokens: Math.max(
+          config.sessionHandoffHardContextTokens,
+          config.sessionHandoffContextTokens,
+        ),
         fallbackTimeoutMs: config.sessionHandoffFallbackTimeoutSeconds * 1_000,
         modelResolver,
-        rows: async (chatId, turns) =>
-          (await webchatRepo.getMessagesPage(chatId, { limit: turns })).rows,
+        page: async (chatId, turns, before) => {
+          const page = await webchatRepo.getMessagesPage(chatId, {
+            limit: turns,
+            before: before as MessagePageCursor | undefined,
+          });
+          return { rows: page.rows, next: page.nextCursor };
+        },
         openTasks: (chatId) => conciergeOpenTasks(concierge, chatId),
         ownerLabel: (chatId) => conciergeOwnerLabel(concierge, chatId),
         tidying: (chatId, work) => concierge.activity?.tidying(chatId, work) ?? work(),

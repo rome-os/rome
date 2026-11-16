@@ -35,7 +35,7 @@ private func message(
             messages: store.visibleMessages,
             pending: store.pending,
             answers: store.answers,
-            options: .init(showThreads: true, showNotices: true, typing: store.showsTyping)
+            options: .init(showNotices: true, typing: store.showsTyping)
         )
     }
 
@@ -197,7 +197,7 @@ private func message(
         let store = await chat(backend)
         store.actions.reply(to: "a1")
         #expect(store.quote?.messageId == "a1")
-        store.actions.openThread(at: "a1")
+        store.openThread(at: "a1")
         #expect(store.thread != nil)
         store.stop()
     }

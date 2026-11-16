@@ -99,6 +99,8 @@ describe("WebChatAdapter", () => {
       text: "Please draft the plan.",
       attachments: [],
       timestamp: expect.any(Date),
+      // A message that replies to nothing is its own thread.
+      chatThread: "msg-user",
       thread: { kind: "dm", name: "Build Planner" },
       raw: expect.objectContaining({ id: "msg-user", role: "user", sessionId: "sess-1" }),
     });
