@@ -4522,10 +4522,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             messageCount,
             body.largeModelSelection,
           );
-    // A message that names no effort runs at the chat's own, as a task chat's do.
-    const reasoningEffort = await resolveRequestedReasoningEffort(
-      body.reasoningEffort ?? session.reasoningEffort ?? undefined,
-    );
+    // A Concierge chat runs at its own effort, the chat's or else its agent's,
+    // whatever the composer sends: its owner sets nothing. Elsewhere a message
+    // that names no effort runs at the chat's own, as a task chat's do.
+    const reasoningEffort = isConciergeChat(session)
+      ? ((session.reasoningEffort as ModelReasoningEffort | null) ?? undefined)
+      : await resolveRequestedReasoningEffort(
+          body.reasoningEffort ?? session.reasoningEffort ?? undefined,
+        );
     const channelThreadKey = webchatSessionKey(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we

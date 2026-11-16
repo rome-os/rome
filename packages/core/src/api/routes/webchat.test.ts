@@ -4920,7 +4920,7 @@ describe("Webchat API", () => {
         const sent = await app.request(`/chat/sessions/${id}/turns`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: "hello" }),
+          body: JSON.stringify({ text: "hello", reasoningEffort: "high" }),
         });
         expect(sent.status).toBe(200);
         const { turnId } = (await sent.json()) as { turnId: string };
@@ -4933,6 +4933,8 @@ describe("Webchat API", () => {
           expect.anything(),
           expect.objectContaining({
             selectionId: id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
+            // A Concierge chat runs at its agent's effort, whatever the send asks.
+            reasoningEffort: id === "concierge" ? undefined : "high",
           }),
         );
       }

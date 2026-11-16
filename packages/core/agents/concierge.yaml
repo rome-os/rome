@@ -1,6 +1,9 @@
 name: concierge
 description: Texting-style conversation with the guardian that hands work to task chats.
 tier: medium
+# Low: adaptive thinking still reasons through a hard question, and a simple
+# turn answers sooner (docs/concierge-eval.md#baseline).
+reasoningEffort: low
 permissionMode: bypassPermissions
 tools:
   - Read
