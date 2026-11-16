@@ -1,7 +1,7 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
-import { isElectronShell } from "@/lib/electron-shell";
+import { shellAllowsMicrophone } from "@/lib/electron-shell";
 import {
   type Dictation,
   type DictationDeps,
@@ -238,11 +238,11 @@ export function useVoiceInput({
   return {
     /**
      * False hides the voice control: the instance is not signed in to Rome
-     * Cloud, Rome Cloud does not allow the account, or this is the desktop
-     * app, which cannot open the microphone yet. A dictation under way keeps
-     * its control, so the guardian can always stop it.
+     * Cloud, Rome Cloud does not allow the account, or this is a desktop app
+     * too old to give the dashboard the microphone. A dictation under way
+     * keeps its control, so the guardian can always stop it.
      */
-    available: (Boolean(info.data?.available) && !isElectronShell()) || state !== "idle",
+    available: (Boolean(info.data?.available) && shellAllowsMicrophone()) || state !== "idle",
     state,
     /** Why listening last stopped on its own, or null. */
     notice,

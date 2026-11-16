@@ -648,6 +648,27 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
   });
 });
 
+describe("voice input in the desktop app", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "rome");
+  });
+
+  it("shows the voice control when the app gives the dashboard the microphone", async () => {
+    Object.assign(window, { rome: { device: {}, microphone: true } });
+    renderComposer("chat");
+    expect(await screen.findByRole("button", { name: "Start voice input" })).toBeTruthy();
+  });
+
+  it("has no voice control in an app too old to give it the microphone", async () => {
+    Object.assign(window, { rome: { device: {} } });
+    renderComposer("chat");
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/voice-input", expect.anything()),
+    );
+    expect(screen.queryByRole("button", { name: "Start voice input" })).toBeNull();
+  });
+});
+
 describe("voice input when a card locks the chat message field", () => {
   it("stops listening, so the microphone does not stay open behind the lock", async () => {
     mockFetch(SONIOX);
