@@ -100,9 +100,15 @@ async function dictation(
   const client = new WebSocket(`ws://127.0.0.1:${(http.address() as AddressInfo).port}`);
   const messages: VoiceInputServerMessage[] = [];
   const closed = new Promise<void>((resolve) => client.on("close", () => resolve()));
-  client.on("message", (data) => messages.push(JSON.parse(data.toString())));
+  // `alive` comes every second regardless; tests read the rest.
+  let alive = 0;
+  client.on("message", (data) => {
+    const message = JSON.parse(data.toString()) as VoiceInputServerMessage;
+    if (message.type === "alive") alive += 1;
+    else messages.push(message);
+  });
   await new Promise<void>((resolve) => client.on("open", () => resolve()));
-  return { client, messages, closed };
+  return { client, messages, closed, alive: () => alive };
 }
 
 async function until(check: () => boolean): Promise<void> {
@@ -198,6 +204,126 @@ describe("voice input socket", () => {
     ]);
   });
 
+  it("stops after a stretch with nothing heard and says why, keeping the text", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) =>
+      text === ""
+        ? [{ tokens: [], finished: true }]
+        : [{ tokens: [{ text: "hello", is_final: true }] }];
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      quietLimitMs: 100,
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "hello", pending: "" },
+      { type: "error", reason: "no-speech" },
+    ]);
+  });
+
+  it("keeps listening while words keep coming", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, 400, undefined, {
+      quietLimitMs: 150,
+    });
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    let word = 0;
+    const speaking = setInterval(() => {
+      // 50 ms of audio, and a word that ends where it does.
+      client.send(new Uint8Array(1600));
+      word += 1;
+      fake.say({ tokens: [{ text: `w${word} `, is_final: false, end_ms: word * 50 }] });
+    }, 50);
+    await closed;
+    clearInterval(speaking);
+
+    expect(messages.at(-1)).toEqual({ type: "error", reason: "time-limit" });
+  });
+
+  it("counts the quiet from the end of the last word, however late the provider reports it", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      quietLimitMs: 300,
+    });
+    const frame = new Uint8Array(1600); // 50 ms at 16 kHz
+    const audioReceived = () => fake.received.filter((r) => r.kind === "audio").length;
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    for (let i = 0; i < 4; i++) client.send(frame);
+    await until(() => audioReceived() === 4);
+    // At 200 ms of audio the provider reports a word that ended at 100 ms.
+    fake.say({ tokens: [{ text: "hello", is_final: true, end_ms: 100 }] });
+    await until(() => messages.length === 1);
+    while (messages.length < 2) {
+      client.send(frame);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "hello", pending: "" },
+      { type: "error", reason: "no-speech" },
+    ]);
+    // 100 ms + 300 ms of quiet is 8 frames; counting from the report would be 10.
+    expect(audioReceived()).toBe(8);
+  });
+
+  it("does not count a withdrawn guess as speech", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      quietLimitMs: 300,
+    });
+    const frame = new Uint8Array(1600); // 50 ms at 16 kHz
+    const audioReceived = () => fake.received.filter((r) => r.kind === "audio").length;
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    for (let i = 0; i < 4; i++) client.send(frame);
+    await until(() => audioReceived() === 4);
+    // A guess that ended at 50 ms, withdrawn at 200 ms of audio.
+    fake.say({ tokens: [{ text: "hel", is_final: false, end_ms: 50 }] });
+    fake.say({ tokens: [] });
+    await until(() => messages.length === 2);
+    while (messages.length < 3) {
+      client.send(frame);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "", pending: "hel" },
+      { type: "text", settled: "", pending: "" },
+      { type: "error", reason: "no-speech" },
+    ]);
+    // 50 ms + 300 ms of quiet is 7 frames; counting the withdrawal would be 10.
+    expect(audioReceived()).toBe(7);
+  });
+
+  it("stops on time when audio stalls near the end of the quiet", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      quietLimitMs: 400,
+    });
+    const audioReceived = () => fake.received.filter((r) => r.kind === "audio").length;
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    // 350 ms of audio with nothing heard, then the audio stops coming.
+    for (let i = 0; i < 7; i++) client.send(new Uint8Array(1600));
+    await until(() => audioReceived() === 7);
+    const stalledAt = Date.now();
+    await closed;
+
+    expect(messages).toEqual([{ type: "error", reason: "no-speech" }]);
+    // 50 ms of quiet were left; a fresh full limit would take 400 ms.
+    expect(Date.now() - stalledAt).toBeLessThan(250);
+  });
+
   it("closes a dictation whose provider never finishes after the length limit", async () => {
     const fake = await fakeSoniox();
     fake.onText = () => [];
@@ -220,6 +346,21 @@ describe("voice input socket", () => {
     await closed;
 
     expect(messages).toEqual([{ type: "error", reason: "provider-unavailable" }]);
+  });
+
+  it("says it is still there every second while listening, until the stream closes", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, closed, alive } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await until(() => alive() >= 1);
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+    const after = alive();
+    await new Promise((r) => setTimeout(r, 1_200));
+
+    expect(alive()).toBe(after);
   });
 
   it("refuses audio before start", async () => {

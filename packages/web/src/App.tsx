@@ -1,3 +1,4 @@
+import { clearAllChatDrafts } from "./lib/chat-draft-storage";
 import { hasSession, useAuthStateSnapshot } from "./lib/auth-state";
 import { invalidateNewChatDrafts } from "./lib/new-chat-draft-storage";
 import { lazy, Suspense, useEffect } from "react";
@@ -66,8 +67,10 @@ const DevIndexPage = import.meta.env.DEV
 export default function App() {
   const auth = useAuthStateSnapshot();
   useEffect(() => {
-    if (auth.ready && auth.backendReachable && auth.bootstrap && !hasSession(auth.bootstrap))
+    if (auth.ready && auth.backendReachable && auth.bootstrap && !hasSession(auth.bootstrap)) {
       invalidateNewChatDrafts();
+      clearAllChatDrafts();
+    }
   }, [auth]);
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
   // react-router navigations for every surface (shell, full-mode apps, auth).

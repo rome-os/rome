@@ -70,17 +70,27 @@ export const voiceInputStopReasonSchema = z.enum([
   "bad-request",
   /** One dictation reached Rome's length limit; the text heard so far still arrives. */
   "time-limit",
+  /** Nothing was heard for `VOICE_INPUT_QUIET_LIMIT_MS`; the text heard so far still arrives. */
+  "no-speech",
 ]);
 export type VoiceInputStopReason = z.infer<typeof voiceInputStopReasonSchema>;
+
+/** How long a dictation listens with nothing heard before it stops. */
+export const VOICE_INPUT_QUIET_LIMIT_MS = 30_000;
+
+/** How often Rome says it is still there, so a client notices a dead connection. */
+export const VOICE_INPUT_ALIVE_INTERVAL_MS = 1_000;
 
 /**
  * What Rome sends. Each `text` carries the text that became settled since the
  * last one, to append, and the whole unsettled tail, which replaces the
- * previous tail. `ended` closes a stream that the client stopped; `error`
+ * previous tail. `alive` comes every `VOICE_INPUT_ALIVE_INTERVAL_MS` until the
+ * stream closes. `ended` closes a stream that the client stopped; `error`
  * closes one that stopped for `reason`. Nothing follows either.
  */
 export const voiceInputServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), settled: z.string(), pending: z.string() }),
+  z.object({ type: z.literal("alive") }),
   z.object({ type: z.literal("ended") }),
   z.object({
     type: z.literal("error"),

@@ -3,20 +3,28 @@
 // `@rome/api-types/voice-input`.
 
 import {
+  VOICE_INPUT_ALIVE_INTERVAL_MS,
   VOICE_INPUT_SOCKET_PATH,
   type VoiceInputClientMessage,
-  type VoiceInputStopReason,
   voiceInputServerMessageSchema,
+  voiceInputStopReasonSchema,
 } from "@rome/api-types/voice-input";
+import { z } from "zod";
 import { type Microphone, openMicrophone } from "./microphone";
 
 /** Why listening stopped without the guardian's stop action. */
-export type DictationStopReason =
-  | VoiceInputStopReason
-  | "microphone-blocked"
-  | "microphone-missing"
-  | "microphone-failed"
-  | "connection-lost";
+export const dictationStopReasonSchema = z.enum([
+  ...voiceInputStopReasonSchema.options,
+  "microphone-blocked",
+  "microphone-missing",
+  "microphone-failed",
+  "connection-lost",
+  /** The guardian opened another chat while listening. */
+  "left-chat",
+  /** The page reloaded, or closed, while listening. */
+  "page-reloaded",
+]);
+export type DictationStopReason = z.infer<typeof dictationStopReasonSchema>;
 
 /** Why listening stopped, with Rome Cloud's reason code for `service-refused`. */
 export interface DictationStop {
@@ -32,6 +40,8 @@ export interface DictationHandlers {
    * guardian stopped and the provider sent the rest of the text.
    */
   onDone(text: string, stop: DictationStop | null): void;
+  /** True while the browser asks the guardian for the microphone, false once answered. */
+  onAsking?(asking: boolean): void;
 }
 
 export interface Dictation {
@@ -48,7 +58,7 @@ export type DictationSocket = Pick<
 >;
 
 export interface DictationDeps {
-  openMicrophone(onAudio: (chunk: ArrayBuffer) => void): Promise<Microphone>;
+  openMicrophone(onAudio: (chunk: ArrayBuffer) => void, onAsk?: () => void): Promise<Microphone>;
   openSocket(): DictationSocket;
 }
 
@@ -56,6 +66,10 @@ export interface DictationDeps {
 // has. Longer than Rome's own bound on a stop, which waits up to 12 s for the
 // source to open and 5 s more for the provider, so Rome's reason arrives first.
 const STOP_TIMEOUT_MS = 20_000;
+
+// Silence from Rome this long means the connection is gone: Rome says it is
+// there every second while the socket is open.
+const QUIET_LIMIT_MS = VOICE_INPUT_ALIVE_INTERVAL_MS * 3;
 
 function socketUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -84,6 +98,7 @@ export function startDictation(
   let microphone: Microphone | null = null;
   let socket: DictationSocket | null = null;
   let finishTimer: ReturnType<typeof setTimeout> | null = null;
+  let quietTimer: ReturnType<typeof setTimeout> | null = null;
   // Audio captured before the socket opens.
   const queued: ArrayBuffer[] = [];
 
@@ -93,6 +108,8 @@ export function startDictation(
     done = true;
     microphone?.close();
     if (finishTimer) clearTimeout(finishTimer);
+    if (quietTimer) clearTimeout(quietTimer);
+    window.removeEventListener("offline", lost);
     if (socket) {
       socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
       if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
@@ -107,19 +124,44 @@ export function startDictation(
     handlers.onDone(heard(), reason ? { reason, ...(detail ? { detail } : {}) } : null);
   };
 
+  // The browser losing its network ends the dictation at once; a connection
+  // that dies without the browser knowing ends it once Rome falls quiet.
+  function lost() {
+    finish("connection-lost");
+  }
+  const heardFromRome = () => {
+    if (quietTimer) clearTimeout(quietTimer);
+    quietTimer = setTimeout(lost, QUIET_LIMIT_MS);
+  };
+  window.addEventListener("offline", lost);
+
   const send = (message: VoiceInputClientMessage) => socket?.send(JSON.stringify(message));
 
   const sendStop = () => {
     if (audioDone && socket?.readyState === WebSocket.OPEN) send({ type: "stop" });
   };
 
+  let asking = false;
+  const answered = () => {
+    if (!asking) return;
+    asking = false;
+    if (!done) handlers.onAsking?.(false);
+  };
   void deps
-    .openMicrophone((chunk) => {
-      if (done || audioDone) return;
-      if (socket?.readyState === WebSocket.OPEN) socket.send(chunk);
-      else queued.push(chunk);
-    })
+    .openMicrophone(
+      (chunk) => {
+        if (done || audioDone) return;
+        if (socket?.readyState === WebSocket.OPEN) socket.send(chunk);
+        else queued.push(chunk);
+      },
+      () => {
+        if (done) return;
+        asking = true;
+        handlers.onAsking?.(true);
+      },
+    )
     .then((opened) => {
+      answered();
       if (done) {
         opened.close();
         return;
@@ -131,7 +173,10 @@ export function startDictation(
         return;
       }
       socket = deps.openSocket();
+      // A connection that never opens is as lost as one that falls quiet.
+      heardFromRome();
       socket.onopen = () => {
+        heardFromRome();
         // PCM s16le mono: two bytes a sample. Rome paces audio to real time,
         // so it is told how much was recorded while the socket connected.
         const bufferedBytes = queued.reduce((sum, chunk) => sum + chunk.byteLength, 0);
@@ -142,6 +187,7 @@ export function startDictation(
       };
       socket.onmessage = (event: MessageEvent) => {
         if (typeof event.data !== "string") return;
+        heardFromRome();
         let parsed: unknown;
         try {
           parsed = JSON.parse(event.data);
@@ -156,7 +202,7 @@ export function startDictation(
           handlers.onText(heard());
         } else if (message.data.type === "ended") {
           finish(null);
-        } else {
+        } else if (message.data.type === "error") {
           finish(message.data.reason, message.data.detail);
         }
       };
@@ -165,6 +211,7 @@ export function startDictation(
       socket.onerror = () => finish("connection-lost");
     })
     .catch((error: unknown) => {
+      answered();
       const name = error instanceof DOMException ? error.name : "";
       finish(
         name === "NotAllowedError" || name === "SecurityError"

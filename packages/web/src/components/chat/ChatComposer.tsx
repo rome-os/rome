@@ -39,14 +39,17 @@ import type {
 } from "@/lib/chat-types";
 import { ErrorEventView } from "./entries/ErrorEventView";
 import { AgentMentionChip } from "./composer/AgentMentionChip";
-import { AgentMentionMenu, type AgentMentionMenuHandle } from "./composer/AgentMentionMenu";
+import { useChatDraft } from "./composer/use-chat-draft";
+import { AgentMentionMenu } from "./composer/AgentMentionMenu";
 import { ImpersonationMenu } from "./composer/ImpersonationMenu";
 import { ModelSelectorMenu } from "./composer/ModelSelectorMenu";
 import { PendingUploadsList } from "./composer/PendingUploadsList";
+import { usePendingAttachments } from "./composer/use-pending-attachments";
 import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu } from "./composer/SlashSkillMenu";
 import { useSlashSkill } from "./composer/use-slash-skill";
+import { findMentionToken, useTokenPicker } from "./composer/use-token-picker";
 import { useVoiceInput } from "./composer/use-voice-input";
 import { VoiceInputButton, VoiceInputNotice } from "./composer/VoiceInputControl";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
@@ -141,6 +144,9 @@ export interface ChatComposerHandle {
 
 export interface ChatComposerProps {
   persistNewChatDraft?: boolean;
+  // The open chat whose draft the field keeps. Unset for a chat not made yet,
+  // whose draft `persistNewChatDraft` keeps.
+  chatId?: string | null;
   // Whether the project picker is shown (typically only in draft mode).
   showProjectSelector?: boolean;
   // Whether the large-model picker is shown.
@@ -222,6 +228,7 @@ function clampTextareaHeight(el: HTMLTextAreaElement, maxHeight: number) {
 const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
   {
     persistNewChatDraft = false,
+    chatId,
     showProjectSelector = false,
     showModelSelector = false,
     chatModelSelection,
@@ -248,37 +255,45 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     const authEpoch = persistNewChatDraft ? currentAuthEpoch() : null;
     return { authEpoch, storedDraft: persistNewChatDraft ? loadNewChatDraft() : null };
   });
-  const [inputText, setInputText] = useState(() => storedDraft?.text ?? "");
+  const draft = useChatDraft(chatId, storedDraft?.text);
+  const { text: inputText, setText: setInputText, sendEnded } = draft;
   const sessionCreatedRef = useRef(false);
   // The send-time clear must not re-save the unchanged context in its effect.
   const skipNextDraftSaveRef = useRef(false);
-  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
-  const [uploadInFlight, setUploadInFlight] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const {
+    uploads: pendingUploads,
+    set: setPendingUploads,
+    removeSent: removeSentUploads,
+    inFlight: uploadInFlight,
+    inFlightRef: uploadInFlightRef,
+    progress: uploadProgress,
+    add: addPendingFiles,
+    remove: removePendingUpload,
+    cancel: cancelUpload,
+    track: trackUpload,
+  } = usePendingAttachments();
 
   // When `pinnedAgentMention` is set, the session is already bound to an
   // agent — the `@` menu and the local draftAgentMention are inert.
   const [draftAgentMention, setDraftAgentMention] = useState<AgentMention | null>(
     () => initialAgentMention ?? storedDraft?.agentMention ?? null,
   );
-  const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
-  // Index of the `@` that opened the menu. Used to splice the query out of
-  // the textarea once the user picks an item.
-  const [mentionAnchorIndex, setMentionAnchorIndex] = useState<number | null>(null);
-  const [mentionQuery, setMentionQuery] = useState("");
   // Reset draft mention whenever the host transitions us into a pinned or
   // locked session — the session's bound agent wins. `lockAgentMention` covers
   // the default-to-main case where no chip is shown but the agent is still
   // fixed for the session.
   const agentMentionLocked = pinnedAgentMention !== null || lockAgentMention;
+  const mentionPicker = useTokenPicker({
+    findToken: findMentionToken,
+    enabled: !agentMentionLocked,
+  });
+  const closeMentionPicker = mentionPicker.close;
   useEffect(() => {
     if (agentMentionLocked) {
       setDraftAgentMention(null);
-      setMentionMenuOpen(false);
-      setMentionAnchorIndex(null);
-      setMentionQuery("");
+      closeMentionPicker();
     }
-  }, [agentMentionLocked]);
+  }, [agentMentionLocked, closeMentionPicker]);
   const effectiveMention = pinnedAgentMention ?? draftAgentMention;
   const coarsePointer = useCoarsePointer();
 
@@ -380,7 +395,14 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const voice = useVoiceInput({ textareaRef, value: inputText, setValue: setInputText });
+  const voice = useVoiceInput({
+    textareaRef,
+    value: inputText,
+    setValue: setInputText,
+    notice: draft.notice,
+    setNotice: draft.setNotice,
+    keepNotice: draft.keepNotice,
+  });
   const voiceActiveRef = useRef(false);
   voiceActiveRef.current = voice.active;
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
@@ -401,19 +423,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
-  // State drives the UI, while the ref closes the same-event gap before React
-  // commits that state (for example, two rapid Enter keydown events).
-  const uploadInFlightRef = useRef(false);
-  const {
-    slashMenuOpen,
-    setSlashMenuOpen,
-    slashQuery,
-    setSlashQuery,
-    slashMenuRef,
-    reevaluateSlashContext,
-    acceptSlashSkill,
-    handleSlashKeyDown,
-  } = useSlashSkill({
+  const skillPicker = useSlashSkill({
     inputText,
     setInputText,
     setDraftSkill,
@@ -421,8 +431,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     uploadInFlightRef,
     enabled: !textOnly,
   });
-  // Live for exactly one upload; `cancelUpload` aborts through it.
-  const uploadAbortRef = useRef<AbortController | null>(null);
   // The last failed send, kept until a send succeeds.
   const failedSendRef = useRef<{
     inputId: string;
@@ -455,8 +463,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // one on screen. Close them as the lock engages.
   useEffect(() => {
     if (!locked) return;
-    setMentionMenuOpen(false);
-    setSlashMenuOpen(false);
+    closeMentionPicker();
+    skillPicker.close();
     setImpersonationMenuOpen(false);
     setModelMenuOpen(false);
     setReasoningMenuOpen(false);
@@ -586,52 +594,19 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }
   }, [newProjectName, t, connectOnCreate, locations.addProject]);
 
-  const addPendingFiles = useCallback((files: File[]) => {
-    // The visible file picker is disabled during an upload, but paste and the
-    // parent drop zones enter through this callback directly. Guard the shared
-    // boundary so a file cannot be added to the tray without belonging to the
-    // multipart request whose progress it displays.
-    if (files.length === 0 || uploadInFlightRef.current) return;
-    setPendingUploads((prev) => [...prev, ...files.map((file) => ({ id: randomUUID(), file }))]);
-  }, []);
-
   const invokeOnSend = useCallback(
-    async (snapshot: ChatComposerSnapshot, clearDraftOnAdoption = false) => {
-      const tracksUpload = snapshot.uploads.length > 0;
-      const controller = new AbortController();
-      if (tracksUpload) {
-        uploadInFlightRef.current = true;
-        uploadAbortRef.current = controller;
-        setUploadInFlight(true);
-        setUploadProgress(0);
-      }
-      try {
-        await onSend(snapshot, {
-          onUploadProgress: (progress) => {
-            if (!tracksUpload) return;
-            setUploadProgress(progress === null ? null : Math.max(0, Math.min(1, progress)));
-          },
-          signal: controller.signal,
+    (snapshot: ChatComposerSnapshot, clearDraftOnAdoption = false) =>
+      trackUpload(snapshot.uploads, (controls) =>
+        onSend(snapshot, {
+          ...controls,
           onSessionCreated: () => {
             sessionCreatedRef.current = true;
             if (clearDraftOnAdoption && textareaRef.current) clearNewChatDraft();
           },
-        });
-      } finally {
-        if (tracksUpload) {
-          uploadInFlightRef.current = false;
-          uploadAbortRef.current = null;
-          setUploadInFlight(false);
-          setUploadProgress(null);
-        }
-      }
-    },
-    [onSend],
+        }),
+      ),
+    [onSend, trackUpload],
   );
-
-  const cancelUpload = useCallback(() => {
-    uploadAbortRef.current?.abort();
-  }, []);
 
   useImperativeHandle(
     ref,
@@ -652,8 +627,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       setSkillSelection: (skill: SkillSelection | null) => {
         if (uploadInFlightRef.current) return;
         setDraftSkill(skill);
-        setSlashMenuOpen(false);
-        setSlashQuery("");
+        skillPicker.close();
       },
       addFiles: addPendingFiles,
       submit: (text: string, opts?: { skillName?: string }) => {
@@ -673,10 +647,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           skillName,
         };
         void invokeOnSend(snapshot)
-          .then(() => {
-            const sentIds = new Set(snapshot.uploads.map((upload) => upload.id));
-            setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
-          })
+          .then(() => removeSentUploads(snapshot.uploads))
           .catch(() => {
             // The imperative submit path leaves its inputs in place, so the
             // parent error banner is sufficient and the turn remains retryable.
@@ -691,6 +662,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     [
       voice.stop,
       addPendingFiles,
+      removeSentUploads,
       textareaMaxHeight,
       personaId,
       reasoningEffort,
@@ -704,11 +676,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       invokeOnSend,
     ],
   );
-
-  const removePendingUpload = useCallback((id: string) => {
-    if (uploadInFlightRef.current) return;
-    setPendingUploads((prev) => prev.filter((upload) => upload.id !== id));
-  }, []);
 
   const handleFileSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
     addPendingFiles(Array.from(event.target.files ?? []));
@@ -765,6 +732,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     // whole upload instead: the request is long enough to cancel, and wiping
     // text the user may still be reading (or about to cancel) reads as loss.
     // It clears only once the server has accepted the turn.
+    voice.dismissNotice();
     const clearsOptimistically = uploads.length === 0;
     if (persistNewChatDraft) {
       clearNewChatDraft();
@@ -782,15 +750,17 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       failedSendRef.current = null;
       if (!clearsOptimistically) {
         replyDraft?.clear();
-        const sentIds = new Set(uploads.map((upload) => upload.id));
-        setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
+        removeSentUploads(uploads);
         setDraftSkill((current) => (current === skill ? null : current));
         // Anything typed during the upload is newer than what was sent, so it
         // survives; only the exact text that went out is cleared.
         setInputText((current) => (current === rawText ? "" : current));
+        sendEnded(rawText, true);
       }
     } catch {
       failedSendRef.current = { inputId, text, uploads, skill };
+      // Before the returns below: the field may be gone, but the chat keeps it.
+      if (clearsOptimistically) sendEnded(persistNewChatDraft ? rawText : text, false);
       if (
         persistNewChatDraft &&
         (!textareaRef.current || (clearsOptimistically && textareaRef.current.value))
@@ -821,10 +791,13 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       // cleared the text or the attachment tray in the first place.
     }
   }, [
+    sendEnded,
     persistNewChatDraft,
     authEpoch,
     inputText,
     pendingUploads,
+    setPendingUploads,
+    removeSentUploads,
     draftSkill,
     personaId,
     draftModelSelection,
@@ -840,55 +813,21 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     voice.active,
   ]);
 
-  // Re-evaluates whether the cursor sits inside an active mention token
-  // (a contiguous `@<query>` run with no whitespace, anchored at @).
-  const reevaluateMentionContext = useCallback(
-    (value: string, cursor: number) => {
-      if (agentMentionLocked) {
-        if (mentionMenuOpen) setMentionMenuOpen(false);
-        return;
-      }
-      // Walk backwards from the cursor looking for `@`, breaking on
-      // whitespace. If `@` appears at start or after whitespace it's a
-      // valid mention anchor.
-      let i = cursor - 1;
-      while (i >= 0 && !/\s/.test(value[i])) {
-        if (value[i] === "@") {
-          const before = i === 0 ? "" : value[i - 1];
-          if (i === 0 || /\s/.test(before)) {
-            setMentionAnchorIndex(i);
-            setMentionQuery(value.slice(i + 1, cursor));
-            setMentionMenuOpen(true);
-            return;
-          }
-          break;
-        }
-        i--;
-      }
-      // No active @-token under the cursor — close any open menu.
-      if (mentionMenuOpen) {
-        setMentionMenuOpen(false);
-        setMentionAnchorIndex(null);
-        setMentionQuery("");
-      }
-    },
-    [agentMentionLocked, mentionMenuOpen],
-  );
-
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
     const value = event.target.value;
+    voice.noticeEdited();
     setInputText(value);
     const cursor = event.target.selectionEnd ?? value.length;
-    reevaluateMentionContext(value, cursor);
-    reevaluateSlashContext(value, cursor);
+    mentionPicker.update(value, cursor);
+    skillPicker.update(value, cursor);
   };
 
   const handleTextareaSelect = (event: React.SyntheticEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget;
     const cursor = el.selectionEnd ?? el.value.length;
-    reevaluateMentionContext(el.value, cursor);
-    reevaluateSlashContext(el.value, cursor);
+    mentionPicker.update(el.value, cursor);
+    skillPicker.update(el.value, cursor);
   };
 
   const acceptMention = useCallback(
@@ -896,10 +835,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       if (uploadInFlightRef.current) return;
       // Splice out the `@<query>` token that triggered the menu so the chip
       // becomes the single source of truth for "which agent."
-      if (mentionAnchorIndex !== null) {
+      const token = mentionPicker.token;
+      if (token) {
         const el = textareaRef.current;
         const cursor = el?.selectionEnd ?? inputText.length;
-        const before = inputText.slice(0, mentionAnchorIndex);
+        const before = inputText.slice(0, token.start);
         const after = inputText.slice(cursor);
         // Collapse the join so we don't leave a stray double-space when the
         // mention sat between two words.
@@ -917,14 +857,10 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         });
       }
       setDraftAgentMention(mention);
-      setMentionMenuOpen(false);
-      setMentionAnchorIndex(null);
-      setMentionQuery("");
+      closeMentionPicker();
     },
-    [inputText, mentionAnchorIndex],
+    [inputText, mentionPicker.token, closeMentionPicker],
   );
-
-  const mentionMenuRef = useRef<AgentMentionMenuHandle>(null);
 
   // On desktop, Enter submits (Shift+Enter for a newline); Stop button is
   // intentionally not bound to Enter so it doesn't race a finishing stream.
@@ -936,50 +872,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     // Keys pressed while an input method composes belong to its candidate
     // list: that Enter confirms a candidate, and the arrows move through it.
     if (isImeCompositionEvent(e)) return;
-    if (handleSlashKeyDown(e)) return;
-    // While the mention menu is open, hijack arrow/enter/escape so the user
-    // can navigate without leaving the textarea. Falls through to normal
-    // typing otherwise.
-    if (mentionMenuOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        mentionMenuRef.current?.move(1);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        mentionMenuRef.current?.move(-1);
-        return;
-      }
-      // Horizontal navigation always wins over textarea cursor movement
-      // when the mention menu is open. ArrowLeft from the agents panel
-      // returns to apps so the user can pick a different app after a
-      // mis-click; without hijacking, the cursor would slide past `@` and
-      // reevaluateMentionContext would silently close the menu.
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        mentionMenuRef.current?.moveHorizontal(1);
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        mentionMenuRef.current?.moveHorizontal(-1);
-        return;
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        if (mentionMenuRef.current?.acceptSelected()) {
-          e.preventDefault();
-          return;
-        }
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setMentionMenuOpen(false);
-        setMentionAnchorIndex(null);
-        setMentionQuery("");
-        return;
-      }
-    }
+    if (skillPicker.handleKeyDown(e)) return;
+    if (mentionPicker.handleKeyDown(e)) return;
     if (e.key === "Escape" && replyDraft?.target) {
       e.preventDefault();
       replyDraft.clear();
@@ -1087,7 +981,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           onChange={handleFileSelection}
         />
         <ReplyBar />
-        <VoiceInputNotice notice={voice.notice} />
+        <VoiceInputNotice notice={voice.notice} asking={voice.asking} />
         {/* flow-root keeps the tray's bottom margin inside this box, so the
             measured height is the full space the tray takes from the input. */}
         <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
@@ -1105,29 +999,24 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 [grid-template-areas:'input_input'_'tools_send'] @max-[28rem]/composer:[grid-template-areas:'input_send'_'tools_tools']">
           <div className="[grid-area:input] @max-[28rem]/composer:self-center">
             <SlashSkillMenu
-              ref={slashMenuRef}
-              open={slashMenuOpen && !uploadInFlight}
+              ref={skillPicker.menuRef}
+              open={skillPicker.open && !uploadInFlight}
               onOpenChange={(next) => {
                 if (uploadInFlightRef.current) return;
-                setSlashMenuOpen(next);
-                if (!next) setSlashQuery("");
+                skillPicker.onOpenChange(next);
               }}
-              query={slashQuery}
-              onSelect={acceptSlashSkill}
+              query={skillPicker.query}
+              onSelect={skillPicker.accept}
               anchor={
                 <div>
                   <AgentMentionMenu
-                    ref={mentionMenuRef}
-                    open={mentionMenuOpen && !agentMentionLocked && !uploadInFlight}
+                    ref={mentionPicker.menuRef}
+                    open={mentionPicker.open && !agentMentionLocked && !uploadInFlight}
                     onOpenChange={(next) => {
                       if (uploadInFlightRef.current) return;
-                      setMentionMenuOpen(next);
-                      if (!next) {
-                        setMentionAnchorIndex(null);
-                        setMentionQuery("");
-                      }
+                      mentionPicker.onOpenChange(next);
                     }}
-                    query={mentionQuery}
+                    query={mentionPicker.query}
                     onSelect={acceptMention}
                     anchor={
                       <textarea
