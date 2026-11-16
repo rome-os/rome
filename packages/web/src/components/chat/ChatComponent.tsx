@@ -26,6 +26,7 @@ import {
 } from "@/hooks/use-concierge";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention } from "@/lib/chat-types";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 export type { SessionMessage };
 
@@ -47,11 +48,7 @@ async function loadReadMark(chatId: string): Promise<string | null> {
 export const GREETING_ONLY_HOME_KEY = "rome.chat.greeting-only-home";
 
 function readGreetingOnlyHome(): boolean {
-  try {
-    return window.localStorage.getItem(GREETING_ONLY_HOME_KEY) !== "false";
-  } catch {
-    return true;
-  }
+  return readStored(GREETING_ONLY_HOME_KEY) !== "false";
 }
 
 export interface ChatComponentProps {
@@ -238,11 +235,8 @@ export function ChatComponent({
   const greetingOnlyHome = newsSettled ? loadedGreetingOnly : rememberedGreetingOnly;
   useEffect(() => {
     if (!newsSettled) return;
-    try {
-      window.localStorage.setItem(GREETING_ONLY_HOME_KEY, String(loadedGreetingOnly));
-    } catch {
-      // Storage can be unavailable; the layout then just starts centered.
-    }
+    // When storage is unavailable, the layout just starts centered.
+    writeStored(GREETING_ONLY_HOME_KEY, String(loadedGreetingOnly));
   }, [newsSettled, loadedGreetingOnly]);
 
   // Full URL the App Store sheet embeds when an app-store quick entry is picked;

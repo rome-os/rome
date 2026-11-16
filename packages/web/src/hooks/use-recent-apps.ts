@@ -7,6 +7,7 @@ import {
   pruneAppLastOpened,
   selectRecentApps,
 } from "@/lib/recent-apps";
+import { readStoredJson, writeStoredJson } from "@/lib/stored-preference";
 
 // "Last opened" lives in this browser only, on purpose. It is cache-shaped
 // data: it regrows as the guardian uses apps, and a phone and a laptop have
@@ -20,18 +21,12 @@ export const APP_LAST_OPENED_STORAGE_KEY = "rome-app-last-opened";
 const APP_OPENED_EVENT = "rome-app-opened";
 
 function readLocal(): AppLastOpened {
-  try {
-    const stored = localStorage.getItem(APP_LAST_OPENED_STORAGE_KEY);
-    return stored ? parseAppLastOpened(JSON.parse(stored)) : {};
-  } catch {
-    return {};
-  }
+  const stored = readStoredJson(APP_LAST_OPENED_STORAGE_KEY);
+  return stored === undefined ? {} : parseAppLastOpened(stored);
 }
 
 function writeLocal(value: AppLastOpened): void {
-  try {
-    localStorage.setItem(APP_LAST_OPENED_STORAGE_KEY, JSON.stringify(value));
-  } catch {}
+  writeStoredJson(APP_LAST_OPENED_STORAGE_KEY, value);
 }
 
 export function useAppLastOpened(): AppLastOpened {

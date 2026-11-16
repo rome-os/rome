@@ -74,6 +74,7 @@ import { ConciergeChats } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 import { useRenameInPlace } from "@/hooks/use-rename-in-place";
+import { readStored, readStoredJson, writeStored, writeStoredJson } from "@/lib/stored-preference";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -188,29 +189,18 @@ const STATUS_FILTER_STORAGE_KEY = "rome-recent-chats-status-filter";
 const COLLAPSED_GROUPS_STORAGE_KEY = "rome-recent-chats-collapsed-groups";
 
 function readScope(): SessionScope {
-  if (typeof window === "undefined") return "mine";
-  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
+  return readStored(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
 }
 
 function readStatusFilter(): StatusFilter {
-  if (typeof window === "undefined") return "active";
-  const raw = window.localStorage.getItem(STATUS_FILTER_STORAGE_KEY);
+  const raw = readStored(STATUS_FILTER_STORAGE_KEY);
   return raw === "all" || raw === "archived" ? raw : "active";
 }
 
 function readStringSetFromStorage(storageKey: string): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) {
-      return new Set(parsed.filter((x): x is string => typeof x === "string"));
-    }
-  } catch {
-    // ignore
-  }
-  return new Set();
+  const parsed = readStoredJson(storageKey);
+  if (!Array.isArray(parsed)) return new Set();
+  return new Set(parsed.filter((x): x is string => typeof x === "string"));
 }
 
 function projectNameFromPath(projectPath: string): string {
@@ -586,21 +576,15 @@ export function RecentChats({
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STATUS_FILTER_STORAGE_KEY, statusFilter);
+    writeStored(STATUS_FILTER_STORAGE_KEY, statusFilter);
   }, [statusFilter]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      COLLAPSED_GROUPS_STORAGE_KEY,
-      JSON.stringify(Array.from(collapsedGroups)),
-    );
+    writeStoredJson(COLLAPSED_GROUPS_STORAGE_KEY, Array.from(collapsedGroups));
   }, [collapsedGroups]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(SCOPE_STORAGE_KEY, scope);
+    writeStored(SCOPE_STORAGE_KEY, scope);
   }, [scope]);
 
   // Projects mark their location only once some chat lives on a device;

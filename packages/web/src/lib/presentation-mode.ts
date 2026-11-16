@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 // Presentation mode is a global, purely cosmetic rendering preference: while it
 // is on, chat surfaces render every session with the main assistant's identity
@@ -17,24 +18,12 @@ export const PRESENTATION_MODE_STORAGE_KEY = "rome-presentation-mode";
 const PRESENTATION_MODE_EVENT = "rome:presentation-mode-changed";
 
 export function isPresentationMode(): boolean {
-  try {
-    return window.localStorage.getItem(PRESENTATION_MODE_STORAGE_KEY) === "1";
-  } catch {
-    // localStorage may be unavailable (private mode / quota); treat as off.
-    return false;
-  }
+  return readStored(PRESENTATION_MODE_STORAGE_KEY) === "1";
 }
 
 export function setPresentationMode(on: boolean): void {
-  try {
-    if (on) {
-      window.localStorage.setItem(PRESENTATION_MODE_STORAGE_KEY, "1");
-    } else {
-      window.localStorage.removeItem(PRESENTATION_MODE_STORAGE_KEY);
-    }
-  } catch {
-    // Unpersistable — still notify so the current tab reflects the choice.
-  }
+  // Unpersistable storage still notifies, so the current tab reflects the choice.
+  writeStored(PRESENTATION_MODE_STORAGE_KEY, on ? "1" : null);
   window.dispatchEvent(new Event(PRESENTATION_MODE_EVENT));
 }
 
