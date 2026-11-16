@@ -251,6 +251,7 @@ struct SettingsScreen: View {
                         .accessibilityLabel("Voice input")
                         .accessibilityValue(Text(verbatim: info.placeText))
                         .accessibilityIdentifier("voice-input-place")
+                        MicrophoneRow()
                     }
                     SettingsRow(systemImage: "info.circle", title: "Version", last: true) {
                         Text(appVersion)

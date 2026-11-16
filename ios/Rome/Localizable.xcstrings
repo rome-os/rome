@@ -1101,6 +1101,16 @@
         }
       }
     },
+    "Chosen microphone (not connected)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选麦克风（未连接）"
+          }
+        }
+      }
+    },
     "Clear" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2525,6 +2535,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在「%@」中发消息"
+          }
+        }
+      }
+    },
+    "Microphone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麦克风"
           }
         }
       }
@@ -4659,6 +4679,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在同步…"
+          }
+        }
+      }
+    },
+    "System default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统默认"
           }
         }
       }

@@ -46,7 +46,8 @@ final class MicrophoneSource: VoiceAudioSource {
 
     func start(onChunk: @escaping @Sendable (Data) -> Void) throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .default)
+        try MicrophoneChoice.prepare(session)
+        MicrophoneChoice().apply(to: session)
         try session.setActive(true)
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
