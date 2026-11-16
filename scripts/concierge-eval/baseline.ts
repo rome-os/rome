@@ -3,7 +3,7 @@
 // be compared on latency and quality. docs/concierge-eval.md#baseline
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { loadavg } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -23,6 +23,7 @@ import { type TimedTurn, timedTurns } from "./timing.js";
 
 const USAGE = `pnpm concierge:baseline --config <label> --model <selection id> --effort <low|high> [--runs N]
 pnpm concierge:baseline --report
+pnpm concierge:baseline --rejudge id,id   score the saved runs of these scenarios again, by their current rubric
 
 Options:
   --only id,id         play some scenarios only
@@ -51,6 +52,7 @@ const { values: args } = parseArgs({
     "judge-model": { type: "string", default: "claude-opus-5-5" },
     "judge-effort": { type: "string", default: "high" },
     report: { type: "boolean" },
+    rejudge: { type: "string" },
     container: { type: "string", default: `${SLUG}-rome-1` },
     "base-url": {
       type: "string",
@@ -229,13 +231,36 @@ function readRuns(): ScenarioRun[] {
   const runs: ScenarioRun[] = [];
   for (const config of readdirSync(args.out)) {
     const dir = join(args.out, config);
-    if (!existsSync(dir) || !config.match(/^[\w.-]+$/)) continue;
+    if (!config.match(/^[\w.-]+$/) || !statSync(dir).isDirectory()) continue;
     for (const file of readdirSync(dir).filter((f) => /^run-\d+\.json$/.test(f))) {
       const saved = JSON.parse(readFileSync(join(dir, file), "utf8")) as { scenarios: ScenarioRun[] };
       runs.push(...saved.scenarios);
     }
   }
   return runs;
+}
+
+/** Scores the saved runs of `ids` again, by their scenarios' current rubric. */
+async function rejudge(ids: string[]): Promise<void> {
+  for (const config of readdirSync(args.out)) {
+    const dir = join(args.out, config);
+    if (!/^[\w.-]+$/.test(config) || !statSync(dir).isDirectory()) continue;
+    for (const file of readdirSync(dir).filter((f) => /^run-\d+\.json$/.test(f))) {
+      const path = join(dir, file);
+      const saved = JSON.parse(readFileSync(path, "utf8")) as { scenarios: ScenarioRun[] };
+      for (const run of saved.scenarios.filter((r) => ids.includes(r.id))) {
+        const scenario = BASELINE_SCENARIOS.find((s) => s.id === run.id);
+        if (!scenario) continue;
+        run.verdict = await judge(scenario.rubric, run.transcript.join("\n\n"), {
+          model: args["judge-model"] as string,
+          effort: args["judge-effort"] as string,
+        }).catch(() => null);
+        console.log(`${config} ${file} ${run.id}: ${run.verdict?.score ?? "-"}`);
+      }
+      writeFileSync(path, JSON.stringify(saved, null, 2));
+    }
+  }
+  writeReport();
 }
 
 function writeReport(): void {
@@ -249,6 +274,7 @@ function writeReport(): void {
 async function main(): Promise<void> {
   if (args.help) return void console.log(USAGE);
   if (args.report) return writeReport();
+  if (args.rejudge) return rejudge(args.rejudge.split(",").map((s) => s.trim()));
   const config = args.config;
   if (!config || !/^[\w.-]+$/.test(config) || !args.model || !args.effort) {
     console.error(USAGE);

@@ -149,7 +149,7 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
       ...matches(i.said, /15:30|3:30|3\.30|下午三点半/i, "15:30"),
       ...noFiller(i.said),
     ],
-    rubric: `The owner's memory says: dentist appointment with Dr. Weber on 2026-11-20 at 15:30, a check-up and cleaning. The answer must give the date and time, ideally the dentist's name, in one line. Score 1 if it invents details or says it does not know. ${VOICE}`,
+    rubric: `The owner's memory says: dentist appointment with Dr. Weber on 2026-11-20 at 15:30, a check-up and cleaning. The answer must give the date and time, ideally the dentist's name, in one line. The owner's memory holds other true facts too (for example, they usually watch a movie on Friday evenings), so a relevant extra detail is fine. Score 1 if it contradicts the appointment facts or says it does not know. ${VOICE}`,
   },
   {
     id: "reason-airport",
