@@ -8,6 +8,7 @@
 // to resolve for a consumer that never installed those peers. They remain
 // subpath-only.
 export { cn, type ClassValue } from "./cn.js";
+export { ProgressiveBlur, type ProgressiveBlurProps } from "./progressive-blur.js";
 export { Alert, AlertDescription, AlertTitle, type AlertProps } from "./alert.js";
 export {
   Avatar,

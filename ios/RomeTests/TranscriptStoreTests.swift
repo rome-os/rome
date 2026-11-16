@@ -328,8 +328,13 @@ final class FakeBackend: RomeBackend {
     var startResults: [Result<UpgradeStarted, Error>] = []
     var started: [String] = []
     var buildVersion: String?
+    /// How long the upgrade check takes to answer.
+    var checkDelay: Duration?
 
-    func upgradeCheck() async throws -> UpgradeCheck { try check.get() }
+    func upgradeCheck() async throws -> UpgradeCheck {
+        if let checkDelay { try? await Task.sleep(for: checkDelay) }
+        return try check.get()
+    }
 
     func startUpgrade(target: String) async throws -> UpgradeStarted {
         started.append(target)
