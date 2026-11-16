@@ -240,6 +240,8 @@ jobs:
             -scheme RomeUITests \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$RUNNER_TEMP/ui-dd" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            -disableAutomaticPackageResolution \
             -retry-tests-on-failure \
             -test-iterations 2 \
             -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
