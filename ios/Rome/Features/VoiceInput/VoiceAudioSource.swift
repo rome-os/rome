@@ -39,6 +39,7 @@ final class MicrophoneSource: VoiceAudioSource {
     /// audio session active.
     private(set) static var capturing = false
     private var routeChanges: NSObjectProtocol?
+    private var configurationChanges: NSObjectProtocol?
 
     func requestAccess() async -> Bool {
         switch AVAudioApplication.shared.recordPermission {
@@ -53,23 +54,12 @@ final class MicrophoneSource: VoiceAudioSource {
         try MicrophoneChoice.prepare(session)
         try session.setActive(true)
         MicrophoneChoice().apply(to: session)
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0,
-              let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(VoiceInputWire.sampleRate), channels: 1, interleaved: true),
-              let converter = AVAudioConverter(from: format, to: target)
-        else {
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
-            throw VoiceAudioError.noInput
-        }
-        let chunker = PCMChunker(converter: converter, target: target, onChunk: onChunk)
-        capture = chunker
-        input.installTap(onBus: 0, bufferSize: 4096, format: format, block: Self.tap(chunker))
         do {
+            try tapInput(onChunk: onChunk)
             engine.prepare()
             try engine.start()
         } catch {
-            input.removeTap(onBus: 0)
+            engine.inputNode.removeTap(onBus: 0)
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
             throw error
         }
@@ -80,6 +70,35 @@ final class MicrophoneSource: VoiceAudioSource {
             MainActor.assumeIsolated {
                 MicrophoneChoice().routeChanged(reason, connected: (AVAudioSession.sharedInstance().availableInputs ?? []).map(\.uid))
             }
+        }
+        configurationChanges = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restart(onChunk: onChunk) }
+        }
+    }
+
+    /// Taps the input in the format it has now.
+    private func tapInput(onChunk: @escaping @Sendable (Data) -> Void) throws {
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard let chunker = PCMChunker(from: format, onChunk: onChunk) else { throw VoiceAudioError.noInput }
+        capture = chunker
+        input.installTap(onBus: 0, bufferSize: 4096, format: format, block: Self.tap(chunker))
+    }
+
+    /// iOS stops the engine when the input's format changes, as when a
+    /// Bluetooth microphone is taken off and the built-in one, at another
+    /// sample rate, takes over. Capture goes on from the input that took over.
+    private func restart(onChunk: @escaping @Sendable (Data) -> Void) {
+        guard running else { return }
+        capture?.flush()
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        do {
+            try tapInput(onChunk: onChunk)
+            engine.prepare()
+            try engine.start()
+        } catch {
+            close()
         }
     }
 
@@ -100,6 +119,8 @@ final class MicrophoneSource: VoiceAudioSource {
         Self.capturing = false
         if let routeChanges { NotificationCenter.default.removeObserver(routeChanges) }
         routeChanges = nil
+        if let configurationChanges { NotificationCenter.default.removeObserver(configurationChanges) }
+        configurationChanges = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         capture = nil
@@ -127,6 +148,15 @@ final class PCMChunker: @unchecked Sendable {
         self.converter = converter
         self.target = target
         self.onChunk = onChunk
+    }
+
+    /// A chunker for input in `format`, or nil when the format has no audio.
+    convenience init?(from format: AVAudioFormat, onChunk: @escaping @Sendable (Data) -> Void) {
+        guard format.sampleRate > 0, format.channelCount > 0,
+              let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(VoiceInputWire.sampleRate), channels: 1, interleaved: true),
+              let converter = AVAudioConverter(from: format, to: target)
+        else { return nil }
+        self.init(converter: converter, target: target, onChunk: onChunk)
     }
 
     func take(_ buffer: AVAudioPCMBuffer) {

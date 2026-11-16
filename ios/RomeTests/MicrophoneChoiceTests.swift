@@ -95,3 +95,29 @@ import Testing
         #expect(choice.preferred(among: ["built-in", "headset"], uid: { $0 }) == nil)
     }
 }
+
+/// Capture restarts from whichever input takes over, at that input's sample
+/// rate: 48 kHz for the built-in microphone, 16 or 8 kHz for Bluetooth.
+@Suite struct MicrophoneCaptureTests {
+    private final class Chunks: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func add(_ chunk: Data) { lock.withLock { count += chunk.count } }
+        var bytes: Int { lock.withLock { count } }
+    }
+
+    @Test(arguments: [48_000.0, 16_000.0, 8_000.0])
+    func capturesAtTheWireRateFromAnyInputRate(rate: Double) throws {
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1))
+        let chunks = Chunks()
+        let chunker = try #require(PCMChunker(from: format, onChunk: { chunks.add($0) }))
+        let second = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate)))
+        second.frameLength = AVAudioFrameCount(rate)
+        chunker.take(second)
+        chunker.flush()
+        // One second of 16-bit mono at the wire's rate, give or take the converter's own delay.
+        let expected = VoiceInputWire.sampleRate * 2
+        #expect(abs(chunks.bytes - expected) <= expected / 20, "\(chunks.bytes) bytes from one second at \(rate) Hz")
+    }
+}
+
