@@ -77,7 +77,7 @@ function renderComposer(
     <QueryClientProvider client={client}>
       <ReplyDraftHarness
         initial={reply}
-        thread={threads ? { thread: "a1", title: "Kyoto trip" } : undefined}
+        thread={threads ? { thread: "a1", title: "Kyoto trip", root: "m1" } : undefined}
       >
         <ConciergeComposer ref={ref} onSend={onSend} {...next} />
       </ReplyDraftHarness>
@@ -302,9 +302,9 @@ describe("ConciergeComposer reply", () => {
     await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "and the hotel?{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
 
-    expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "a1", replyTo: reply });
+    expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "m1", replyTo: reply });
     // The send cleared the reply, not the thread.
-    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "a1" });
+    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "m1" });
     expect(onSend.mock.calls[1][0].replyTo).toBeUndefined();
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
     expect(screen.getByPlaceholderText("Reply: Kyoto trip")).toBeTruthy();
@@ -323,7 +323,7 @@ describe("ConciergeComposer reply", () => {
     await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
 
-    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "a1", replyTo: reply });
+    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "m1", replyTo: reply });
   });
 
   it("drops a picked reply on Esc and keeps sending into its thread", async () => {
@@ -335,7 +335,7 @@ describe("ConciergeComposer reply", () => {
     await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "ok{Enter}");
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "a1" });
+    expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "m1" });
     expect(onSend.mock.calls[0][0].replyTo).toBeUndefined();
   });
 

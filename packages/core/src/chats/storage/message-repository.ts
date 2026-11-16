@@ -78,6 +78,7 @@ export class MessageRepository {
    */
   record(message: Message): RecordedMessage | null {
     const chatId = this.chatOf(message.place).id;
+    const replyTo = message.replyTo === undefined ? null : this.idIn(chatId, message.replyTo);
     const inserted = this.db
       .insert(chatMessages)
       .values({
@@ -91,16 +92,22 @@ export class MessageRepository {
         parts: JSON.stringify(
           message.parts ?? [{ type: "text", content: plainText(message.body) }],
         ),
-        replyToMessageId: message.replyTo === undefined ? null : this.idIn(chatId, message.replyTo),
+        replyToMessageId: replyTo,
+        rootMessageId: this.rootFor(chatId, replyTo),
         saidAt: message.at,
       })
       .onConflictDoNothing()
-      .returning({ id: chatMessages.id, replyTo: chatMessages.replyToMessageId })
+      .returning({ id: chatMessages.id, root: chatMessages.rootMessageId })
       .all();
     const row = inserted[0];
     if (!row) return null;
     const { replyTo: _quoted, ...rest } = message;
-    return { ...rest, id: row.id, ...(row.replyTo === null ? {} : { replyTo: row.replyTo }) };
+    return {
+      ...rest,
+      id: row.id,
+      ...(replyTo === null ? {} : { replyTo }),
+      chatThread: (row.root === null ? null : this.keyOf(row.root)) ?? message.key,
+    };
   }
 
   /**
@@ -137,19 +144,21 @@ export class MessageRepository {
     const threadId = landedIn ? landedIn.threadId : (message.place.threadId ?? null);
     const at = new Date();
     try {
+      // A quote by key links once Rome holds that message, which it may by
+      // now even when it did not before the send.
+      const replyTo =
+        quoted === null
+          ? null
+          : typeof message.replyTo === "number"
+            ? message.replyTo
+            : this.idIn(chat.id, quoted);
       const said = {
         senderAgent: message.saidBy.agent ?? null,
         senderName: message.saidBy.name ?? null,
         text: partsText(message.parts),
         parts: JSON.stringify(message.parts),
-        // A quote by key links once Rome holds that message, which it may by
-        // now even when it did not before the send.
-        replyToMessageId:
-          quoted === null
-            ? null
-            : typeof message.replyTo === "number"
-              ? message.replyTo
-              : this.idIn(chat.id, quoted),
+        replyToMessageId: replyTo,
+        rootMessageId: this.rootFor(chat.id, replyTo),
       };
       // The platform answered a key already on record: the same message.
       // Where another of Rome's accounts heard it first, as anyone's, it is
@@ -170,6 +179,8 @@ export class MessageRepository {
           set: {
             ...said,
             replyToMessageId: sql`coalesce(${said.replyToMessageId}, ${chatMessages.replyToMessageId})`,
+            // The message's own root stays when this send quotes nothing.
+            rootMessageId: sql`coalesce(${said.rootMessageId}, ${chatMessages.rootMessageId})`,
           },
           setWhere: and(
             isNull(chatMessages.senderAgent),
@@ -292,42 +303,23 @@ export class MessageRepository {
   }
 
   /**
-   * The chat thread of the message keyed `key` in `chat`: the thread it is
-   * in, else the one it would start, which its own key names. Null when Rome
-   * holds no such message. docs/domains/chats.md#chat-thread
+   * The key of the last message said in the chat thread of the message keyed
+   * `key` in `chat`, which may be any message of the thread: the root itself
+   * when nothing replies to it, or null when Rome holds no such message.
+   * docs/domains/chats.md#chat-thread
    */
-  chatThreadOf(chat: ChatRef, key: string): string | null {
-    const row = this.db.all<{ thread: string | null }>(sql`
-      SELECT chat_thread_id AS thread FROM chat_messages
-      WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
-    `)[0];
-    return row ? (row.thread ?? key) : null;
-  }
-
-  /**
-   * Put the message keyed `key` in `chat` in chat thread `thread`, and, with
-   * `settle`, for good. A settled message is never moved again. Answers
-   * whether the message was placed: false for one already settled, or not held.
-   */
-  placeInChatThread(
-    chat: ChatRef,
-    key: string,
-    thread: string,
-    options: { settle?: boolean } = {},
-  ): boolean {
-    const placed = this.db
-      .update(chatMessages)
-      .set({ chatThreadId: thread, chatThreadSettled: options.settle === true })
-      .where(
-        and(
-          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
-          eq(chatMessages.key, key),
-          eq(chatMessages.chatThreadSettled, false),
-        ),
-      )
-      .returning({ id: chatMessages.id })
-      .all();
-    return placed.length > 0;
+  lastInChatThread(chat: ChatRef, key: string): string | null {
+    return (
+      this.db.all<{ key: string }>(sql`
+        WITH thread(root) AS (
+          SELECT coalesce(root_message_id, id) FROM chat_messages
+          WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
+        )
+        SELECT m.key FROM thread JOIN chat_messages m ON m.chat_id = ${chatIdOf(chat)}
+          AND (m.id = thread.root OR m.root_message_id = thread.root)
+        ORDER BY m.said_at DESC, m.id DESC LIMIT 1
+      `)[0]?.key ?? null
+    );
   }
 
   /**
@@ -346,26 +338,6 @@ export class MessageRepository {
     );
   }
 
-  /**
-   * Make the message keyed `key` in `chat` the root of its own chat thread,
-   * for good, when it is in none. Answers whether it was in none.
-   */
-  rootChatThread(chat: ChatRef, key: string): boolean {
-    const rooted = this.db
-      .update(chatMessages)
-      .set({ chatThreadId: key, chatThreadSettled: true })
-      .where(
-        and(
-          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
-          eq(chatMessages.key, key),
-          sql`${chatMessages.chatThreadId} IS NULL`,
-        ),
-      )
-      .returning({ id: chatMessages.id })
-      .all();
-    return rooted.length > 0;
-  }
-
   /** The chat on `platform` that holds a message its adapter keys `key`, the
    *  oldest such message's, or null when Rome holds none. For platforms whose
    *  keys are unique across chats, as an email's message id is. */
@@ -376,6 +348,19 @@ export class MessageRepository {
       ORDER BY m.id LIMIT 1
     `)[0];
     return row ? { platform, id: row.id } : null;
+  }
+
+  /** The root of a message that quotes message `quoted` of chat `chatId`: the
+   *  quoted message's root, or the quoted message itself when it is its own.
+   *  Null, its own root, for a message that quotes nothing. */
+  private rootFor(chatId: number, quoted: number | null): number | null {
+    if (quoted === null) return null;
+    return (
+      this.db.all<{ root: number }>(sql`
+        SELECT coalesce(root_message_id, id) AS root FROM chat_messages
+        WHERE id = ${quoted} AND chat_id = ${chatId}
+      `)[0]?.root ?? null
+    );
   }
 
   private idIn(chatId: number, key: string): number | null {
@@ -424,7 +409,8 @@ function chatIdOf(ref: ChatRef) {
 }
 
 const MESSAGE_COLUMNS = sql.raw(`m.id, m.key, m.sender_account_id, m.sender_agent, m.sender_name,
-  m.text, m.parts, m.reply_to_message_id, m.said_at, m.chat_thread_id`);
+  m.text, m.parts, m.reply_to_message_id, m.said_at,
+  coalesce((SELECT r.key FROM chat_messages r WHERE r.id = m.root_message_id), m.key) AS chat_thread`);
 
 interface MessageRow {
   id: number;
@@ -436,7 +422,7 @@ interface MessageRow {
   parts: string;
   reply_to_message_id: number | null;
   said_at: number;
-  chat_thread_id: string | null;
+  chat_thread: string;
 }
 
 interface PlaceRow {
@@ -471,7 +457,7 @@ function said(place: Place, row: MessageRow): SaidMessage {
     body: { text: row.text },
     parts: row.parts,
     ...(row.reply_to_message_id === null ? {} : { replyTo: row.reply_to_message_id }),
-    ...(row.chat_thread_id === null ? {} : { chatThread: row.chat_thread_id }),
+    chatThread: row.chat_thread,
     at: new Date(row.said_at * 1000),
   };
 }

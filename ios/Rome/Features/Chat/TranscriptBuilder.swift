@@ -66,9 +66,6 @@ enum TranscriptRow: Identifiable, Hashable {
     /// `latest`: the newest card for that task chat, the only one that may
     /// take an answer. `card`: what the instance filled in for it.
     case taskAsk(id: String, chatId: String, title: String, card: TaskAskCard?, latest: Bool = false)
-    /// Under a Concierge message in a task's chat thread: `↳ <task title>`,
-    /// which opens the thread view (docs/domains/chats.md#chat-thread).
-    case threadLabel(id: String, messageId: String, title: String)
     /// Under a Concierge reply to nobody's message: where its turn came from
     /// ("Routine · Daily summary"). Faint, not tappable.
     case sourceLabel(id: String, text: String)
@@ -92,7 +89,7 @@ enum TranscriptRow: Identifiable, Hashable {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
              .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
-             .threadLabel(let id, _, _), .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
+             .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
             return id
         case .unreadDivider:
             return "unread-divider"
@@ -114,8 +111,6 @@ enum TranscriptRow: Identifiable, Hashable {
             return pending == nil || pending?.isStored == true ? Self.message(ofPart: id) : nil
         case .agentText(let id, _, _, _, _):
             return Self.message(ofPart: id)
-        case .threadLabel(_, let messageId, _):
-            return messageId
         default:
             return nil
         }
@@ -138,9 +133,6 @@ enum TranscriptBuilder {
     struct Options {
         /// Task chats show their tool summaries; Concierge has none.
         var showTools = false
-        /// A Concierge chat's timeline labels each Concierge message in a
-        /// task's chat thread with the task; the thread view does not.
-        var showThreads = false
         /// Concierge chats show a line for automated input and for a renewed
         /// session, where the turn they belong to starts.
         var showNotices = false
@@ -170,8 +162,6 @@ enum TranscriptBuilder {
         var entries: [Entry] = []
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
-        let labels = options.showThreads ? threadLabels(messages) : [:]
-        let taskThreads = options.showThreads ? taskThreadTitles(messages) : [:]
         // Each message's parts, read once.
         let parsed = messages.map(\.parts)
         // The turns whose reply is an error part.
@@ -303,12 +293,7 @@ enum TranscriptBuilder {
                     continue
                 }
             }
-            if !rows.isEmpty, let title = labels[message.id] {
-                rows.append(.threadLabel(id: "label-\(message.id)", messageId: message.id, title: title))
-            } else if !rows.isEmpty, !message.isUser, message.chatThreadId.flatMap({ taskThreads[$0] }) == nil,
-                      let turn = message.turnId, let source = unprompted[turn] {
-                // One label a message at most: a message in a task's thread
-                // shows only its thread's label, or none in the middle of a run.
+            if !rows.isEmpty, !message.isUser, let turn = message.turnId, let source = unprompted[turn] {
                 rows.append(.sourceLabel(id: "source-\(message.id)", text: SourceCopy.label(source)))
             }
             if !rows.isEmpty {
@@ -429,53 +414,80 @@ enum TranscriptBuilder {
         return TurnError(text: text, code: summary?.terminalErrorCode, provider: summary?.terminalErrorProvider, reason: summary?.terminalErrorReason, didntFinish: true)
     }
 
-    /// The task title of each chat thread a task has, by the thread's first
-    /// message. The server sends a title only for a thread a task has.
-    static func taskThreadTitles(_ messages: [ChatMessage]) -> [String: String] {
+    /// The thread each message of `messages` that is in a thread of more than
+    /// one is in, by message id, as the root's key. The server sends
+    /// `chatThreadId` for every message of a Concierge chat: the root's key,
+    /// the message's own when it replies to nothing. A message is in a thread
+    /// of more than one when its root is another message, or when a loaded
+    /// message says it is the root.
+    static func threadRoots(_ messages: [ChatMessage]) -> [String: String] {
+        let named = Set(messages.compactMap { $0.chatThreadId == $0.id ? nil : $0.chatThreadId })
+        var roots: [String: String] = [:]
+        for message in messages {
+            guard let own = message.chatThreadId else { continue }
+            if own != message.id || named.contains(message.id) { roots[message.id] = own }
+        }
+        return roots
+    }
+
+    /// The name of each chat thread of more than one, by its root: the title
+    /// of the newest task whose start message is in it, which any of its
+    /// messages carries, else the start of the root's text when the root is
+    /// loaded.
+    static func threadTitles(_ messages: [ChatMessage]) -> [String: String] {
         var titles: [String: String] = [:]
         for message in messages {
             if let root = message.chatThreadId, let title = message.chatThreadTitle, !title.isEmpty {
                 titles[root] = title
             }
         }
+        let named = Set(threadRoots(messages).values)
+        for message in messages where named.contains(message.id) && titles[message.id] == nil {
+            if let name = startOfText(message) { titles[message.id] = name }
+        }
         return titles
     }
 
-    /// The label under Concierge messages in a task's chat thread, by message
-    /// id: the task's title. The guardian's messages get none, and neither
-    /// does a message showing a task card, which names its task itself. A
-    /// task's question or approval shown alone does get one. Of a run of one
-    /// thread's messages with nothing else between them, only the first and
-    /// the last show it, so a run of one or two shows it on each. An Agent
-    /// message from another thread or none, or a task card, ends the run;
-    /// the guardian's messages are skipped (docs/domains/chats.md#chat-thread).
-    static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
-        let titles = taskThreadTitles(messages)
-        var runs: [(title: String, root: String, ids: [String])] = []
-        var open = false
-        // The owner's messages neither join a run nor end it.
-        for message in messages where !message.isTrace && !message.isUser {
-            let showsTaskCard = message.parts.contains {
-                if case .taskChat(_, _, let show, _) = $0 { return show != .ask }
-                return false
+    /// The first line of a message's text, as plain reading text, cut short
+    /// with an ellipsis; nil when it has none.
+    static func startOfText(_ message: ChatMessage) -> String? {
+        guard let text = message.parts.lazy.compactMap(\.textContent).first else { return nil }
+        let line = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+        let plain = line.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "").replacingOccurrences(of: "`", with: "")
+            .drop(while: { "#>-*+ \t".contains($0) })
+            .trimmingCharacters(in: .whitespaces)
+        guard !plain.isEmpty else { return nil }
+        return plain.count > 50 ? String(plain.prefix(49)) + "…" : plain
+    }
+
+    /// How a reply that sits right under what it answers is joined to it
+    /// (docs/domains/chats.md#chat-thread).
+    enum ReplyJoin: Hashable, Sendable {
+        /// A hook up to the message above.
+        case hook
+        /// A line to the reply above, which answers the same message: the
+        /// same sender's, so the bubbles stand on one side.
+        case line
+    }
+
+    /// The adjacent replies of `messages`, by message id. A reply is adjacent
+    /// when the previous message that is drawn is its target, or answers the
+    /// same target; the latter, from the same sender, is a `line`. A trace
+    /// and a message with no words are not drawn, so they do not count.
+    static func replyJoins(_ messages: [ChatMessage]) -> [String: ReplyJoin] {
+        var joins: [String: ReplyJoin] = [:]
+        var previous: (id: String, target: String?, isUser: Bool)?
+        for message in messages where !message.isTrace {
+            let parts = message.parts
+            guard parts.contains(where: { $0.textContent != nil }) || parts.contains(where: { $0.isVisible }) else { continue }
+            let target = parts.lazy.compactMap(\.replyQuote).first?.messageId
+            if let target, let previous, previous.id == target || previous.target == target {
+                let sibling = previous.id != target && previous.isUser == message.isUser
+                joins[message.id] = sibling ? .line : .hook
             }
-            guard !showsTaskCard, let root = message.chatThreadId, let title = titles[root] else {
-                open = false
-                continue
-            }
-            if open, let last = runs.last, last.root == root {
-                runs[runs.count - 1].ids.append(message.id)
-            } else {
-                runs.append((title, root, [message.id]))
-            }
-            open = true
+            previous = (message.id, target, message.isUser)
         }
-        var labels: [String: String] = [:]
-        for run in runs {
-            if let first = run.ids.first { labels[first] = run.title }
-            if let last = run.ids.last { labels[last] = run.title }
-        }
-        return labels
+        return joins
     }
 
     /// The lines a turn's trace summary asks for: the session it renewed.

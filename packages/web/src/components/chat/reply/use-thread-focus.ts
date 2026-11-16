@@ -1,4 +1,4 @@
-// Focusing a Concierge chat on one task's chat thread, in place
+// Focusing a Concierge chat on one chat thread, in place
 // (docs/domains/chats.md#chat-thread). The messages outside the thread fold
 // away and back over MOTION_MS while the message the reader clicked stays where
 // it is on screen. Which messages are outside is ConciergeTranscript's rule
@@ -7,14 +7,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
-import type { ReplyThread } from "./reply-draft";
+import type { FocusedThread } from "./reply-draft";
 
 const MOTION_MS = 200;
 
-/** A thread in focus: the message it is held on, its task's title, and the thread `taskThreads` maps its messages to. */
-export interface ThreadFocus extends ReplyThread {
-  root: string;
-}
+/** A thread in focus: the message it is held on, its name, and its root. */
+export type ThreadFocus = FocusedThread;
 
 export interface Env {
   scroller: HTMLElement;

@@ -3319,16 +3319,6 @@
         }
       }
     },
-    "Opens the chat thread" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开对话串"
-          }
-        }
-      }
-    },
     "Opens the image full screen" : {
       "localizations" : {
         "zh-Hans" : {

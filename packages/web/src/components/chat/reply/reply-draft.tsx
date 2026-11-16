@@ -21,13 +21,18 @@ export interface ReplyTarget {
 }
 
 /**
- * A task's chat thread, as a focus on it opens: the message the focus holds in
- * place, which is a message of the thread, and its task's title, which the
- * composer and the back control name.
+ * A chat thread, as a focus on it opens: the message the focus holds in
+ * place, which is a message of the thread, and the thread's name, which the
+ * composer and the back control show.
  */
 export interface ReplyThread {
   thread: string;
   title: string;
+}
+
+/** A thread in focus: what opened it, and the root of the thread. */
+export interface FocusedThread extends ReplyThread {
+  root: string;
 }
 
 /**
@@ -40,9 +45,8 @@ export interface ReplyDraft {
   sessionId: string | null;
   /** The message the reply quotes. */
   target: ReplyTarget | null;
-  /** Picks the reply and opens the reply bar with its quote. Sending a reply
-   *  from the chat's timeline puts it in the replied message's task thread
-   *  when it is in one; any other reply is only a quote. */
+  /** Picks the reply and opens the reply bar with its quote. A reply sent
+   *  from the chat's timeline is in the replied message's chat thread. */
   set: (target: ReplyTarget) => void;
   /** Drops the reply. Answers the draft's change count after it, for `restore`. */
   clear: () => number;
@@ -59,11 +63,11 @@ export interface ReplyDraft {
   jump: (messageId: string) => void;
   /** Whether the chat keeps chat threads: only then can a thread be opened. */
   threads: boolean;
-  /** A message of the chat thread in focus, which this draft sends into, or null when it sends to the chat itself. */
+  /** The root of the chat thread in focus, which this draft sends into, or null when it sends to the chat itself. */
   thread: string | null;
-  /** The title of the task whose thread is in focus, for the composer's placeholder. */
+  /** The name of the thread in focus, for the composer's placeholder. */
   threadTitle: string | null;
-  /** Focuses the chat on `thread`, a message of a task's thread; from the thread already in focus it closes the focus. Only a task thread's label, or a quote in it, focuses. */
+  /** Focuses the chat on the thread of `thread`, a message of it. Only a quote in a reply focuses. */
   openThread: (thread: ReplyThread) => void;
 }
 
@@ -86,8 +90,8 @@ export function useReplyDraft(): ReplyDraft | null {
 /**
  * The draft state for one composer. The reply is dropped when `chatId`
  * changes. Picking a reply focuses the composer through `focusComposer`.
- * With `thread`, the chat is focused on that chat thread and the draft sends
- * into it. A chat that keeps chat threads passes `onOpenThread`.
+ * With `thread`, the chat is focused on that chat thread, named by its root,
+ * and the draft sends into it. A chat that keeps chat threads passes `onOpenThread`.
  */
 export function useReplyDraftState({
   chatId,
@@ -104,7 +108,7 @@ export function useReplyDraftState({
   jump: (messageId: string) => void;
   focusComposer: () => void;
   onOpenThread?: (thread: ReplyThread) => void;
-  thread?: ReplyThread | null;
+  thread?: FocusedThread | null;
 }): ReplyDraft {
   const [target, setTarget] = useState<ReplyTarget | null>(null);
   const focusRef = useRef(focusComposer);
@@ -131,7 +135,7 @@ export function useReplyDraftState({
     [focus],
   );
   const openThread = useCallback((next: ReplyThread) => openRef.current?.(next), []);
-  const threadId = thread?.thread ?? null;
+  const threadId = thread?.root ?? null;
   const threadTitle = thread?.title ?? null;
   const clear = useCallback(() => {
     changes.current += 1;

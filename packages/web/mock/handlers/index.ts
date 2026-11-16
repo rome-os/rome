@@ -354,13 +354,19 @@ const turn = (
   return rows;
 };
 
-// The Concierge's afternoon: messages of three tasks' chat threads, said in
-// the order they came, with the Concierge's own messages between them, so a
-// thread label has other threads and no thread around it to fold away.
-// A thread is named by its first message.
+// The Concierge's afternoon, as the server sends it: a reply chain per topic.
+// Every message in a thread of more than one carries the root's key, and a
+// reply, the guardian's or the Concierge's, carries the quote of the message it
+// replies to. The three task threads interleave with each other and with the
+// Concierge's own messages, so there is a lot to fold away. The plumber thread
+// is a plain back-and-forth with nothing between its messages. The turns above
+// are one message and its answer in no thread.
 const TABLE_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-1`, title: "Book a table for Friday" };
 const FLIGHT_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-3`, title: "Compare flights to Berlin" };
 const NAS_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-8`, title: "Fix the NAS backup" };
+// No task started in the plumber thread, so it has no title: a client names it
+// from its root's text.
+const PLUMBER_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-17` };
 const NAS_CLEANUP_SCRIPT = `Yes. Give the backup disk a limit, and delete the oldest snapshot when it goes over:
 
 \`\`\`bash
@@ -377,22 +383,59 @@ const guardianSender: NonNullable<ChatMessage["sender"]> = {
   name: identity.displayName,
   avatarUrl: identity.avatarUrl,
 };
+// Which afternoon message each one replies to, by number.
+const AFTERNOON_REPLIES: Record<number, number> = {
+  2: 1,
+  4: 3,
+  5: 1,
+  6: 5,
+  7: 3,
+  9: 6,
+  10: 7,
+  11: 10,
+  12: 8,
+  13: 12,
+  14: 13,
+  15: 9,
+  16: 15,
+  18: 17,
+  19: 18,
+  20: 19,
+};
+const afternoonSaid = new Map<number, { from: "guardian" | "agent"; content: string }>();
 const afternoon = (
   n: number,
   at: string,
   from: "guardian" | "agent",
   content: string,
-  thread?: { id: string; title: string },
-): ChatMessage => ({
-  id: `${CONCIERGE_CHAT_ID}-pm-${n}`,
-  sessionId: CONCIERGE_CHAT_ID,
-  turnId: `${CONCIERGE_CHAT_ID}-pm-turn-${n}`,
-  role: from === "guardian" ? "user" : "assistant",
-  content: JSON.stringify([text(content)]),
-  createdAt: `2026-08-07T${at}:00.000Z`,
-  ...(from === "guardian" ? { sender: guardianSender } : {}),
-  ...(thread ? { chatThreadId: thread.id, chatThreadTitle: thread.title } : {}),
-});
+  thread?: { id: string; title?: string },
+): ChatMessage => {
+  afternoonSaid.set(n, { from, content });
+  const quoted = AFTERNOON_REPLIES[n];
+  const original = quoted === undefined ? undefined : afternoonSaid.get(quoted);
+  const quote =
+    quoted === undefined || !original
+      ? []
+      : [
+          {
+            type: "reply_to",
+            messageId: `${CONCIERGE_CHAT_ID}-pm-${quoted}`,
+            author: original.from === "guardian" ? "guardian" : "agent",
+            text: original.content,
+          } as TranscriptPart,
+        ];
+  return {
+    id: `${CONCIERGE_CHAT_ID}-pm-${n}`,
+    sessionId: CONCIERGE_CHAT_ID,
+    turnId: `${CONCIERGE_CHAT_ID}-pm-turn-${n}`,
+    role: from === "guardian" ? "user" : "assistant",
+    content: JSON.stringify([...quote, text(content)]),
+    createdAt: `2026-08-07T${at}:00.000Z`,
+    ...(from === "guardian" ? { sender: guardianSender } : {}),
+    ...(thread ? { chatThreadId: thread.id } : {}),
+    ...(thread?.title ? { chatThreadTitle: thread.title } : {}),
+  };
+};
 
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
@@ -405,6 +448,18 @@ const afternoon = (
 // unreachable in mock mode. Worked queries: "roadmap" is content-only for both
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
+/**
+ * The thread a message that replies to `target` is in: the target's, or, when
+ * the target is alone, the one it now starts, as the server records it.
+ */
+const joinThread = (target: ChatMessage) => {
+  target.chatThreadId ??= target.id;
+  return {
+    chatThreadId: target.chatThreadId,
+    ...(target.chatThreadTitle ? { chatThreadTitle: target.chatThreadTitle } : {}),
+  };
+};
+
 const transcripts: Record<string, ChatMessage[]> = {
   // The later turns cover the message shapes the Concierge sends: a short
   // answer, and long ones with a table, many links, a digest and a forward.
@@ -567,6 +622,10 @@ const transcripts: Record<string, ChatMessage[]> = {
       "Booked: Friday 19:00, Osteria 23 back room, 4 people, under your name. A confirmation text is on its way to your phone.",
       TABLE_THREAD,
     ),
+    afternoon(17, "14:20", "guardian", "What time is the plumber coming?", PLUMBER_THREAD),
+    afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park.", PLUMBER_THREAD),
+    afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
+    afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status, which Rome derives.
     {
@@ -1527,16 +1586,36 @@ export const handlers = [
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.
   http.get("/api/chat/sessions/:sessionId/turns", () => HttpResponse.json([] as TurnInfo[])),
-  // A sent message is only recorded: no turn starts, so nothing answers it. One
-  // sent into a chat thread lands in that thread, as the server places it.
+  // A sent message is only recorded: no turn starts, so nothing answers it. It
+  // replies to the message the owner picked, else, with a thread in focus, to
+  // that thread's last message, else to nothing, and joins the thread of the
+  // message it replies to, as the server records it.
   http.post("/api/chat/sessions/:sessionId/turns", async ({ params, request }) => {
     const sessionId = String(params.sessionId);
     const messages = transcripts[sessionId];
     if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const form = await request.formData();
-    const inThread = messages.find((message) => message.id === form.get("chatThread"));
+    const picked = form.get("replyToMessageId");
+    const thread = form.get("chatThread");
+    const focused = thread ? messages.filter((message) => message.chatThreadId === thread) : [];
+    const repliesTo = picked ? messages.find((message) => message.id === picked) : focused.at(-1);
     const sentAt = new Date().toISOString();
-    const content = JSON.stringify([text(String(form.get("text") ?? ""))]);
+    // A reply shows the quote of what it replies to.
+    const original = repliesTo ? JSON.parse(repliesTo.content) : [];
+    const quote = original.find((part: { type: string }) => part.type === "text");
+    const content = JSON.stringify([
+      ...(repliesTo && quote
+        ? [
+            {
+              type: "reply_to",
+              messageId: repliesTo.id,
+              author: repliesTo.role === "user" ? "guardian" : "agent",
+              text: quote.content,
+            },
+          ]
+        : []),
+      text(String(form.get("text") ?? "")),
+    ]);
     messages.push({
       id: String(form.get("inputId")),
       sessionId,
@@ -1545,9 +1624,7 @@ export const handlers = [
       content,
       createdAt: sentAt,
       sender: guardianSender,
-      ...(inThread?.chatThreadId
-        ? { chatThreadId: inThread.chatThreadId, chatThreadTitle: inThread.chatThreadTitle }
-        : {}),
+      ...(repliesTo ? joinThread(repliesTo) : {}),
     });
     return HttpResponse.json({
       turnId: null,
