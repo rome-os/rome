@@ -564,7 +564,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 floor where `touch-target` applies it. */}
             <div
               className={cn(
-                "flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]",
+                "relative flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]",
                 voice.active && "order-first basis-full",
               )}
               style={{ minHeight: "var(--row-h)" }}
@@ -632,12 +632,12 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                   />
                 }
               />
+              <VoiceInputSpokenText
+                textareaRef={textareaRef}
+                value={inputText}
+                spoken={voice.spoken}
+              />
             </div>
-            <VoiceInputSpokenText
-              textareaRef={textareaRef}
-              value={inputText}
-              spoken={voice.spoken}
-            />
             {voice.state === "listening" ? (
               <VoiceInputWaveform level={voice.level} className="flex-1 self-center" />
             ) : voice.active ? (

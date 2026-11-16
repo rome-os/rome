@@ -1026,7 +1026,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
               query={skillPicker.query}
               onSelect={skillPicker.accept}
               anchor={
-                <div>
+                <div className="relative">
                   <AgentMentionMenu
                     ref={mentionPicker.menuRef}
                     open={mentionPicker.open && !agentMentionLocked && !uploadInFlight}
@@ -1065,6 +1065,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                         readOnly={voice.active}
                       />
                     }
+                  />
+                  <VoiceInputSpokenText
+                    textareaRef={textareaRef}
+                    value={inputText}
+                    spoken={voice.spoken}
                   />
                 </div>
               }
@@ -1196,13 +1201,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                 disabled={uploadInFlight}
               />
             )}
-            {/* Drawn over the field through a portal, so the toolbar hiding while
-                voice input is on does not hide it. */}
-            <VoiceInputSpokenText
-              textareaRef={textareaRef}
-              value={inputText}
-              spoken={voice.spoken}
-            />
           </div>
           {voice.active ? (
             <div className="flex min-w-0 items-center [grid-area:tools]">

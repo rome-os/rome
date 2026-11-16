@@ -1,5 +1,4 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
 // Spoken text arrives in bursts. It is shown a character at a time at a
 // steady pace, each character fading in, so it reads as if written rather
@@ -13,17 +12,18 @@ export const REVEAL_CHARS_PER_SECOND = 20;
 
 /**
  * The text to show after `current`, moving toward `goal` by `budget`
- * characters. A corrected word takes back what no longer matches, and the
- * shown text is never more than a second's worth of characters behind.
+ * characters. Positions already shown take a corrected word's characters at
+ * once, so a correction never fades in again; only new positions wait for
+ * the budget. The shown text is never more than a second's worth of
+ * characters behind. Counts characters, not UTF-16 units, so an emoji is
+ * never split.
  */
 export function nextReveal(current: string, goal: string, budget: number): string {
-  let common = 0;
-  while (common < current.length && common < goal.length && current[common] === goal[common]) {
-    common += 1;
-  }
-  const behind = goal.length - common;
+  const goalChars = Array.from(goal);
+  const shownCount = Math.min(Array.from(current).length, goalChars.length);
+  const behind = goalChars.length - shownCount;
   const step = Math.max(budget, behind - REVEAL_CHARS_PER_SECOND);
-  return goal.slice(0, common + Math.min(behind, step));
+  return goalChars.slice(0, shownCount + Math.min(behind, step)).join("");
 }
 
 function useReveal(goal: string): string {
@@ -77,6 +77,8 @@ const COPIED_STYLES = [
 /**
  * Draws `value` over the textarea, with the characters in `spoken` (a range
  * of `value`) revealed and faded in. Renders nothing while `spoken` is null.
+ * Render it as the textarea's sibling inside a `relative` wrapper: the copy is
+ * laid out in that wrapper, so it clips, stacks and moves with the field.
  */
 export function VoiceInputSpokenText({
   textareaRef,
@@ -115,34 +117,48 @@ function SpokenOverlay({
     };
   }, [textareaRef]);
 
-  // Follows the field wherever it is drawn, and its scroll position.
+  // Covers the field's box, less its scrollbar, so the copy wraps where the
+  // field's text does, and follows the field's scroll position.
   useLayoutEffect(() => {
     const el = textareaRef.current;
     const overlay = overlayRef.current;
-    if (!el || !overlay) return;
+    const parent = overlay?.offsetParent;
+    if (!el || !overlay || !parent) return;
     const computed = getComputedStyle(el);
     for (const name of COPIED_STYLES) overlay.style[name] = computed[name];
-    let frame = 0;
-    const follow = () => {
+    const place = () => {
       const box = el.getBoundingClientRect();
-      overlay.style.transform = `translate(${box.left}px, ${box.top}px)`;
-      overlay.style.width = `${box.width}px`;
-      overlay.style.height = `${box.height}px`;
-      overlay.style.visibility = box.width > 0 ? "visible" : "hidden";
+      const frame = parent.getBoundingClientRect();
+      overlay.style.left = `${box.left - frame.left - parent.clientLeft}px`;
+      overlay.style.top = `${box.top - frame.top - parent.clientTop}px`;
+      // The client width leaves out a scrollbar; the borders go back in.
+      const borders =
+        Number.parseFloat(computed.borderLeftWidth) + Number.parseFloat(computed.borderRightWidth);
+      overlay.style.width = `${el.clientWidth + borders}px`;
+      overlay.style.height = `${el.offsetHeight}px`;
       overlay.scrollTop = el.scrollTop;
-      frame = requestAnimationFrame(follow);
     };
-    follow();
-    return () => cancelAnimationFrame(frame);
+    const scrolled = () => {
+      overlay.scrollTop = el.scrollTop;
+    };
+    place();
+    const resized = new ResizeObserver(place);
+    resized.observe(el);
+    resized.observe(parent);
+    el.addEventListener("scroll", scrolled);
+    return () => {
+      resized.disconnect();
+      el.removeEventListener("scroll", scrolled);
+    };
   }, [textareaRef]);
 
   const chars = Array.from(shown);
-  return createPortal(
+  return (
     <div
       ref={overlayRef}
       aria-hidden
       data-voice-input-spoken-text
-      className="pointer-events-none fixed top-0 left-0 z-50 overflow-hidden text-foreground whitespace-pre-wrap break-words border-solid border-transparent [overflow-wrap:break-word]"
+      className="pointer-events-none absolute overflow-hidden text-foreground whitespace-pre-wrap break-words border-solid border-transparent [overflow-wrap:break-word]"
     >
       {value.slice(0, spoken.start)}
       {chars.map((char, i) => (
@@ -156,8 +172,7 @@ function SpokenOverlay({
       ))}
       {value.slice(spoken.end)}
       {/* A trailing newline needs a character after it to take up its line, as in the field. */}
-      {value.endsWith("\n") ? "​" : null}
-    </div>,
-    document.body,
+      {value.endsWith("\n") ? "\u200b" : null}
+    </div>
   );
 }
