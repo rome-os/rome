@@ -19,7 +19,7 @@
 //   fail-9   the microphone stays open after listening stops, and silence never stops it
 //   fail-12  listening uses the browser's default microphone, whichever one Settings chose
 //   fail-13  Enter while listening sends at once, without the words still arriving
-//   fail-14  the sign of hearing pulses on its own, in silence too
+//   fail-14  the waveform scales to the loudest recent sound, so room noise draws curves
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { basename } from "node:path";
@@ -612,10 +612,6 @@ function showHearing(stream) {
   wave.width = 120;
   wave.height = 16;
   form.append(wave);
-  if (variant === "fail-14") {
-    wave.animate([{ opacity: 0.3 }, { opacity: 1 }], { duration: 400, iterations: Infinity });
-    return () => wave.remove();
-  }
   const pen = wave.getContext("2d");
   pen.fillStyle = "#06c";
   const context = new AudioContext();
@@ -623,10 +619,17 @@ function showHearing(stream) {
   context.createMediaStreamSource(stream).connect(analyser);
   const data = new Float32Array(analyser.fftSize);
   let frame;
+  let peak = 1e-6;
   const draw = () => {
     analyser.getFloatTimeDomainData(data);
     const rms = Math.sqrt(data.reduce((sum, v) => sum + v * v, 0) / data.length);
-    const height = rms < 0.01 ? 0 : Math.min(16, Math.round(rms * 100));
+    peak = Math.max(rms, peak * 0.98);
+    const height =
+      variant === "fail-14"
+        ? Math.round((rms / peak) * 14)
+        : rms < 0.01
+          ? 0
+          : Math.min(16, Math.round(rms * 100));
     pen.globalCompositeOperation = "copy";
     pen.drawImage(wave, -2, 0);
     pen.globalCompositeOperation = "source-over";

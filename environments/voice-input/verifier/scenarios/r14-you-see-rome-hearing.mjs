@@ -1,7 +1,8 @@
-// Rule 14: you can see Rome hearing you. While listening, the message field's form moves while
-// the microphone hears sound and holds still in silence. The verifier plays its own recording,
-// sound, silence, sound, and photographs the form, so the check holds for a pulse, a meter or a
-// waveform alike. No words reach the field, so only the sign of hearing changes its pixels.
+// Rule 14: you can see Rome hearing you. While listening, the message field's form moves with
+// sound, and in silence it looks as it did before any sound: a waveform may keep scrolling, but
+// shows no spikes or curves. The verifier plays its own recording, sound and silence over quiet
+// room noise, and photographs the form, so the check holds for a pulse, a meter or a waveform
+// alike. No words reach the field, so only the sign of hearing changes its pixels.
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,19 +21,28 @@ import { micState, watchPage } from "../lib/watch.mjs";
 
 /** The recording, in seconds from the microphone opening: when sound plays. */
 export const SOUND = [
-  [1, 4],
-  [12, 15],
+  [6, 9],
+  [17, 20],
 ];
-const LENGTH_S = 16;
+const LENGTH_S = 21;
 /** How late a photograph may find the sound's start. */
 const FRAME_SLACK_S = 0.2;
 /** How soon the form must settle once sound stops, start moving once it starts, and the longest it may hold still during sound. */
 export const SETTLE_MS = 500;
 /**
- * How long silence may last before the form must hold still. A scrolling waveform keeps
- * moving until the last sound has scrolled out of what it shows.
+ * How long silence may last before the form must look as it did before any sound. A scrolling
+ * waveform shows the last sound until it has scrolled out.
  */
 export const REST_MS = 5000;
+/**
+ * The second before the first sound shows how the form looks after 5 s of silence: a waveform
+ * that fills as it listens is full by then.
+ */
+const SILENT_LOOK_S = 1;
+/** Pixels a silent photograph may differ by from the closest one taken before any sound. */
+const PIXEL_SLACK = 4;
+/** The room noise under the whole recording, as a peak sample value: about -50 dBFS. */
+const ROOM_NOISE = 100;
 
 export default {
   rule: "14",
@@ -77,14 +87,18 @@ export default {
         return ruleResult([
           required(check("listening lasted the recording", "fail", "listening stopped by itself")),
         ]);
-      return ruleResult(score(frames, soundClock(frames, track.openedAt)));
+      const zero = soundClock(frames, track.openedAt);
+      return ruleResult([
+        ...score(frames, zero),
+        required(await flatInSilence(page, frames, zero)),
+      ]);
     } finally {
       await opened.close();
     }
   },
 };
 
-/** Photographs the form until `until` (page clock): `[{ at, changed }]`, oldest first. */
+/** Photographs the form until `until` (page clock): `[{ at, changed, shot }]`, oldest first. */
 async function photograph(page, form, until) {
   const frames = [];
   let last = null;
@@ -93,7 +107,7 @@ async function photograph(page, form, until) {
     if (at >= until) return frames;
     const box = await form.boundingBox();
     const shot = await page.screenshot({ clip: box, caret: "hide", animations: "allow" });
-    if (last) frames.push({ at, changed: !shot.equals(last) });
+    frames.push({ at, changed: last !== null && !shot.equals(last), shot });
     last = shot;
   }
 }
@@ -130,33 +144,83 @@ function score(frames, zero) {
       ),
     );
   });
-  const [, end] = SOUND[0];
-  const [next] = SOUND[1];
-  // The clock is found from a photograph, so it may run a frame late; the next sound's first
-  // frame stays out of the silence.
-  const quiet = within(end + REST_MS / 1000, next - FRAME_SLACK_S);
-  const moved = quiet.filter((f) => f.changed).length;
-  checks.push(
-    required(
-      check(
-        "holds still in silence",
-        quiet.length > 0 && moved === 0 ? "pass" : "fail",
-        `${moved} of ${quiet.length} photographs from ${end + REST_MS / 1000} s to ${next - FRAME_SLACK_S} s changed${
-          moved
-            ? ` (at ${quiet
-                .filter((f) => f.changed)
-                .map((f) => `${((f.at - zero) / 1000).toFixed(2)} s`)
-                .join(", ")})`
-            : ""
-        }; the bar is none`,
-      ),
-    ),
-  );
   return checks;
 }
 
 /**
- * 16 kHz mono 16-bit WAV: silence, with a 200 Hz tone during each stretch of `SOUND`, its
+ * From 5 s into the silence until the sound returns, each photograph matches one taken in the
+ * second before the first sound, after 5 s of room noise, within a few pixels. A spike or a curve drawn for the room noise does
+ * not.
+ */
+async function flatInSilence(page, frames, zero) {
+  const name = "flat in silence";
+  const [first, end] = SOUND[0];
+  const before = frames.filter(
+    (f) =>
+      f.at >= zero + (first - SILENT_LOOK_S) * 1000 && f.at < zero + (first - FRAME_SLACK_S) * 1000,
+  );
+  const [next] = SOUND[1];
+  // The clock is found from a photograph, so it may run a frame late; the next sound's first
+  // frame stays out of the silence.
+  const from = zero + (end + REST_MS / 1000) * 1000;
+  const to = zero + (next - FRAME_SLACK_S) * 1000;
+  const quiet = frames.filter((f) => f.at >= from && f.at < to);
+  if (before.length === 0 || quiet.length === 0)
+    return check(name, "not_checked", "no photographs before the sound or in the silence");
+  const distances = await page.evaluate(
+    async ({ before, quiet }) => {
+      const pixels = async (b64) => {
+        const bitmap = await createImageBitmap(
+          new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))]),
+        );
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const pen = canvas.getContext("2d");
+        pen.drawImage(bitmap, 0, 0);
+        return pen.getImageData(0, 0, bitmap.width, bitmap.height).data;
+      };
+      const differ = (a, b) => {
+        if (a.length !== b.length) return Number.POSITIVE_INFINITY;
+        let n = 0;
+        for (let i = 0; i < a.length; i += 4)
+          if (
+            Math.abs(a[i] - b[i]) > 48 ||
+            Math.abs(a[i + 1] - b[i + 1]) > 48 ||
+            Math.abs(a[i + 2] - b[i + 2]) > 48
+          )
+            n++;
+        return n;
+      };
+      const refs = await Promise.all(before.map(pixels));
+      const out = [];
+      for (const q of quiet) {
+        const p = await pixels(q);
+        out.push(Math.min(...refs.map((r) => differ(r, p))));
+      }
+      return out;
+    },
+    {
+      before: before.map((f) => f.shot.toString("base64")),
+      quiet: quiet.map((f) => f.shot.toString("base64")),
+    },
+  );
+  const off = quiet
+    .map((f, i) => ({ at: (f.at - zero) / 1000, pixels: distances[i] }))
+    .filter((d) => d.pixels > PIXEL_SLACK);
+  const span = `from ${end + REST_MS / 1000} s to ${next - FRAME_SLACK_S} s`;
+  return check(
+    name,
+    off.length === 0 ? "pass" : "fail",
+    off.length === 0
+      ? `all ${quiet.length} photographs ${span} look as the form did before the first sound`
+      : `${off.length} of ${quiet.length} photographs ${span} differ from the form before the first sound (${off
+          .slice(0, 5)
+          .map((d) => `${d.at.toFixed(2)} s: ${d.pixels} pixels`)
+          .join(", ")}); the slack is ${PIXEL_SLACK} pixels`,
+  );
+}
+
+/**
+ * 16 kHz mono 16-bit WAV: quiet room noise, with a 200 Hz tone during each stretch of `SOUND`, its
  * loudness rising and falling four times a second, as syllables do.
  */
 function soundWav() {
@@ -165,9 +229,13 @@ function soundWav() {
   const data = Buffer.alloc(samples * 2);
   for (let i = 0; i < samples; i++) {
     const t = i / rate;
-    if (!SOUND.some(([from, to]) => t >= from && t < to)) continue;
+    // A fixed pseudo-random noise, so every run plays the same recording.
+    const noise = ROOM_NOISE * (((Math.imul(i + 1, 2654435761) >>> 0) / 2 ** 32) * 2 - 1);
     const loud = 0.55 + 0.45 * Math.sin(2 * Math.PI * 4 * t);
-    data.writeInt16LE(Math.round(8000 * loud * Math.sin(2 * Math.PI * 200 * t)), i * 2);
+    const tone = SOUND.some(([from, to]) => t >= from && t < to)
+      ? 8000 * loud * Math.sin(2 * Math.PI * 200 * t)
+      : 0;
+    data.writeInt16LE(Math.round(noise + tone), i * 2);
   }
   const header = Buffer.alloc(44);
   header.write("RIFF", 0);
