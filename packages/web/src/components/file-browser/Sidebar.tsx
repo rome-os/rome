@@ -22,6 +22,7 @@ import {
 } from "./store/utils";
 import { SidebarRootContextMenu, type ContextMenuActions } from "./ContextMenu";
 import { usePaneResize } from "@/hooks/use-pane-resize";
+import { writeStored } from "@/lib/stored-preference";
 
 interface SidebarProps {
   rootLabel: string;
@@ -72,19 +73,11 @@ export function Sidebar({
     max: MAX_SIDEBAR_WIDTH,
     onResize: (width) => store.getState().ui.setSidebarWidth(width),
     onResizeEnd: (width) => {
-      try {
-        window.localStorage.setItem(sidebarStorageKey, String(width));
-      } catch {
-        // Width persistence is a convenience only.
-      }
+      writeStored(sidebarStorageKey, String(width));
     },
     onReset: () => {
       store.getState().ui.setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-      try {
-        window.localStorage.removeItem(sidebarStorageKey);
-      } catch {
-        // Width persistence is a convenience only.
-      }
+      writeStored(sidebarStorageKey, null);
     },
   });
 

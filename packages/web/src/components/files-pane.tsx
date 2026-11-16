@@ -49,27 +49,19 @@ import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { cn } from "@/lib/utils";
 import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
 import { FileActionSheet, type ContextMenuActions } from "@/components/file-browser/ContextMenu";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 export type FilesPaneNode = Pick<FileBrowserTreeNode, "name" | "path" | "type">;
 
 const VIEW_STORAGE_KEY = "rome:files-pane:view";
 
 function readPersistedView(): "list" | "grid" {
-  try {
-    const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
-    if (stored === "list" || stored === "grid") return stored;
-  } catch {
-    // localStorage unavailable; ignore.
-  }
-  return "list";
+  const stored = readStored(VIEW_STORAGE_KEY);
+  return stored === "grid" ? "grid" : "list";
 }
 
 function persistView(view: "list" | "grid"): void {
-  try {
-    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-  } catch {
-    // ignore
-  }
+  writeStored(VIEW_STORAGE_KEY, view);
 }
 
 function fileIconFor(name: string): LucideIcon {

@@ -1,5 +1,6 @@
 import { type ChatKind, isProjectChat, MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { isApplePlatform } from "@/lib/platform";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 /**
  * Which half of the chat list shows: ordinary chats grouped by project, or the
@@ -20,27 +21,11 @@ const state: { mode: ChatListMode | null; lastChatId: string | null } = {
 };
 const listeners = new Set<() => void>();
 
-function readStorage(key: string): string | null {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: string): void {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Storage is unavailable: the choice holds for this tab only.
-  }
-}
-
 /** Seeds this tab's state from what the device stored, as a page load does. */
 export function loadChatListModeFromStorage(): void {
-  const mode = readStorage(MODE_STORAGE_KEY);
+  const mode = readStored(MODE_STORAGE_KEY);
   state.mode = mode === "chat" || mode === "concierge" ? mode : null;
-  state.lastChatId = readStorage(LAST_CHAT_STORAGE_KEY) || null;
+  state.lastChatId = readStored(LAST_CHAT_STORAGE_KEY) || null;
   for (const listener of listeners) listener();
 }
 if (typeof window !== "undefined") loadChatListModeFromStorage();
@@ -57,7 +42,7 @@ export function readChatListMode(): ChatListMode | null {
 }
 
 export function writeChatListMode(mode: ChatListMode): void {
-  writeStorage(MODE_STORAGE_KEY, mode);
+  writeStored(MODE_STORAGE_KEY, mode);
   if (state.mode === mode) return;
   state.mode = mode;
   for (const listener of listeners) listener();
@@ -69,7 +54,7 @@ export function readLastOrdinaryChatId(): string | null {
 }
 
 export function writeLastOrdinaryChatId(id: string): void {
-  writeStorage(LAST_CHAT_STORAGE_KEY, id);
+  writeStored(LAST_CHAT_STORAGE_KEY, id);
   if (state.lastChatId === id) return;
   state.lastChatId = id;
   for (const listener of listeners) listener();
