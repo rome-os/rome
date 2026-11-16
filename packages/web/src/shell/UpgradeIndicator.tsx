@@ -71,6 +71,9 @@ export function UpgradeIndicator({
           state={state}
           name={name}
           labelled={labelled}
+          // A retry that could not be sent keeps the failed row; its reason
+          // goes in the tooltip.
+          reason={state.kind === "failed" ? upgrade.error : null}
           onClick={() => {
             if (state.kind === "available") {
               upgrade.reset();
@@ -99,11 +102,13 @@ function UpgradeRow({
   state,
   name,
   labelled,
+  reason,
   onClick,
 }: {
   state: RowState;
   name: string;
   labelled: boolean;
+  reason: string | null;
   onClick: () => void;
 }) {
   const { t } = useTranslation("common");
@@ -134,7 +139,9 @@ function UpgradeRow({
       : state.kind === "updating"
         ? t("upgradeIndicator.updatingFull", { name, version })
         : state.kind === "failed"
-          ? t("upgradeIndicator.failedFull", { version })
+          ? reason
+            ? t("upgradeIndicator.failedReason", { version, message: reason })
+            : t("upgradeIndicator.failedFull", { version })
           : t("upgradeIndicator.updatedFull", { name, version });
   const action =
     state.kind === "failed"

@@ -1,12 +1,10 @@
 import { lazy as reactLazy } from "react";
 
 /**
- * Session-storage key holding the URL last reloaded for a missing chunk and
- * when, so a chunk that is still missing after the reload does not loop.
+ * Session-storage key holding the URL and the part last reloaded for a
+ * missing chunk, so a part still missing after the reload does not loop.
  */
 export const CHUNK_RELOAD_KEY = "rome-chunk-reload";
-/** A second failure on the same URL within this window is not reloaded again. */
-export const CHUNK_RELOAD_WINDOW_MS = 60_000;
 const SERVER_WAIT_MS = 3_000;
 
 /**
@@ -21,26 +19,27 @@ export function isChunkLoadError(error: unknown): boolean {
   );
 }
 
+interface ReloadMark {
+  url: string;
+  part: string;
+}
+
+function readMark(): ReloadMark | null {
+  return JSON.parse(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "null") as ReloadMark | null;
+}
+
 /**
- * Claims the one reload for the current URL. False when it was already
- * reloaded for a missing chunk within CHUNK_RELOAD_WINDOW_MS.
+ * Claims the one reload for `part` at the current URL. False when this part
+ * already reloaded this URL and has not loaded since: the reload did not
+ * bring it back, so another would only repeat. No time limit, since a chunk
+ * can take minutes to fail.
  */
-function claimReload(): boolean {
+function claimReload(part: string): boolean {
   const url = window.location.href;
-  const now = Date.now();
   try {
-    const last = JSON.parse(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "null") as {
-      url?: string;
-      at?: number;
-    } | null;
-    if (
-      last?.url === url &&
-      typeof last.at === "number" &&
-      now - last.at < CHUNK_RELOAD_WINDOW_MS
-    ) {
-      return false;
-    }
-    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, JSON.stringify({ url, at: now }));
+    const mark = readMark();
+    if (mark?.url === url && mark.part === part) return false;
+    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, JSON.stringify({ url, part }));
     return true;
   } catch {
     // Storage blocked: without a record a reload could loop, so do not.
@@ -48,14 +47,29 @@ function claimReload(): boolean {
   }
 }
 
+/** `part` loaded: a later upgrade may reload for it again. */
+function clearMark(part: string): void {
+  try {
+    if (readMark()?.part === part) window.sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+  } catch {
+    // Storage blocked: nothing was recorded.
+  }
+}
+
+/**
+ * Whether the server answers at all. The health route needs no session, so
+ * a signed-out page gets an answer too; anything below 500 is the server
+ * itself answering, and a 5xx or no answer is the edge with no server
+ * behind it.
+ */
 async function serverAnswers(): Promise<boolean> {
   try {
-    const res = await fetch("/api/build-info", {
+    const res = await fetch("/api/health", {
       cache: "no-store",
       credentials: "include",
       signal: AbortSignal.timeout(SERVER_WAIT_MS),
     });
-    return res.ok;
+    return res.status < 500;
   } catch {
     return false;
   }
@@ -70,16 +84,21 @@ async function serverAnswers(): Promise<boolean> {
  * into an error page. A chunk still missing after one reload fails as usual.
  */
 export async function loadWithReload<T>(load: () => Promise<T>): Promise<T> {
+  // The loader's source names its module, also when minified, so it tells
+  // the parts of one page apart.
+  const part = String(load);
   for (;;) {
     try {
-      return await load();
+      const loaded = await load();
+      clearMark(part);
+      return loaded;
     } catch (error) {
       if (!isChunkLoadError(error)) throw error;
       if (!(await serverAnswers())) {
         await new Promise((resolve) => setTimeout(resolve, SERVER_WAIT_MS));
         continue;
       }
-      if (!claimReload()) throw error;
+      if (!claimReload(part)) throw error;
       window.location.reload();
       // The page is going away; never settle, so nothing renders an error first.
       return new Promise<T>(() => {});

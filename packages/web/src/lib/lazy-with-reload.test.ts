@@ -10,15 +10,18 @@ function chunkError(): Error {
 
 let reload: ReturnType<typeof rs.fn>;
 let serverUp: boolean;
+let healthStatus: number;
 
 beforeEach(() => {
   window.sessionStorage.clear();
   reload = rs.fn();
   rs.stubGlobal("location", { ...window.location, href: "http://x/people", reload });
   serverUp = true;
-  rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
+  healthStatus = 200;
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    if (String(input) !== "/api/health") throw new Error(`unexpected request: ${String(input)}`);
     if (!serverUp) throw new TypeError("Failed to fetch");
-    return new Response("{}", { status: 200 });
+    return new Response("{}", { status: healthStatus });
   }) as typeof fetch);
 });
 
@@ -57,6 +60,65 @@ describe("loadWithReload", () => {
     expect(JSON.parse(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "{}").url).toBe(
       "http://x/people",
     );
+  });
+
+  it("reloads on a signed-out page, where the server answers 401", async () => {
+    healthStatus = 401;
+    void loadWithReload(() => Promise.reject(chunkError()));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits while the edge answers 502 for a server that is not back", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: true });
+    healthStatus = 502;
+    void loadWithReload(() => Promise.reject(chunkError()));
+
+    await rs.advanceTimersByTimeAsync(10_000);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("does not reload again for a part that failed slowly after its reload", async () => {
+    void loadWithReload(() => Promise.reject(chunkError()));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // A chunk can take minutes to time out; the guard has no clock.
+    const realNow = Date.now.bind(Date);
+    rs.spyOn(Date, "now").mockImplementation(() => realNow() + 10 * 60_000);
+    await expect(loadWithReload(() => Promise.reject(chunkError()))).rejects.toThrow(
+      "Loading chunk 812 failed",
+    );
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads again for a later upgrade once the part has loaded", async () => {
+    let missing = true;
+    const load = async () => {
+      if (missing) throw chunkError();
+      return { default: "page" };
+    };
+    void loadWithReload(load);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    missing = false;
+    await expect(loadWithReload(load)).resolves.toEqual({ default: "page" });
+    expect(window.sessionStorage.getItem(CHUNK_RELOAD_KEY)).toBeNull();
+
+    missing = true;
+    void loadWithReload(load);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("reloads once more for a different part of the same page", async () => {
+    void loadWithReload(() => Promise.reject(chunkError()));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    void loadWithReload(async () => {
+      throw chunkError();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reload).toHaveBeenCalledTimes(2);
   });
 
   it("fails instead of reloading the same URL a second time", async () => {

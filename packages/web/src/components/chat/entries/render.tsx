@@ -1,5 +1,4 @@
-import { createContext, Suspense, useContext } from "react";
-import { lazy } from "@/lib/lazy-with-reload";
+import { createContext, lazy, Suspense, useContext } from "react";
 import { useLiveTaskCard } from "./live-task-cards";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";

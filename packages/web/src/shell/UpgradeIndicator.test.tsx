@@ -336,6 +336,31 @@ describe("UpgradeIndicator", () => {
     }
   });
 
+  it("keeps the failed row with the reason in its tooltip when a retry cannot be sent", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: true });
+    mockBackend({
+      check: [available("1.1.0", "1.2.0")],
+      upgrade: [ACCEPTED, { status: 502, body: { error: "pantheon_unreachable" } }],
+      buildDelayMs: 4_000,
+    });
+    renderIndicator();
+    const user = userEvent.setup({ advanceTimers: rs.advanceTimersByTime });
+
+    try {
+      await confirm(user);
+      await rs.advanceTimersByTimeAsync(40 * 60_000 + 8_000);
+      await user.click(await screen.findByRole("button", { name: FAILED }));
+      await rs.advanceTimersByTimeAsync(4_000);
+
+      const failed = await screen.findByRole("button", {
+        name: "Update to 1.2.0 failed: pantheon_unreachable · Retry",
+      });
+      expect(failed.textContent).toBe("Update failedRetry");
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("finishes on Retry without asking again when the backend is already on the target", async () => {
     rs.useFakeTimers({ shouldAdvanceTime: true });
     const backend = mockBackend({
