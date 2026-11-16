@@ -82,4 +82,16 @@ import Testing
         #expect(choice.settle(MicrophoneList(options: [builtIn], complete: false)) == "headset")
         #expect(choice.chosen == "headset")
     }
+
+    @Test func listeningSwitchesToTheSystemDefaultForGoodWhenTheChosenMicrophoneIsTakenOff() {
+        let choice = fresh()
+        choice.chosen = "headset"
+        // Other route changes while listening keep the choice.
+        #expect(choice.routeChanged(.categoryChange, connected: ["built-in"]) == "headset")
+        // Taken off while listening, with Settings closed.
+        #expect(choice.routeChanged(.oldDeviceUnavailable, connected: ["built-in"]) == nil)
+        // Plugged back in before the next listening: the system default stays chosen.
+        #expect(choice.routeChanged(.newDeviceAvailable, connected: ["built-in", "headset"]) == nil)
+        #expect(choice.preferred(among: ["built-in", "headset"], uid: { $0 }) == nil)
+    }
 }

@@ -59,6 +59,15 @@ struct MicrophoneChoice {
         list.complete ? settle(connected: list.options.map(\.id)) : chosen
     }
 
+    /// The choice after iOS reports a route change while voice input listens,
+    /// with `connected` read from the active session, which lists every
+    /// input. A microphone taken off switches the choice to the system
+    /// default, which stays chosen when that microphone comes back.
+    @discardableResult
+    func routeChanged(_ reason: AVAudioSession.RouteChangeReason?, connected ids: [String]) -> String? {
+        reason == .oldDeviceUnavailable ? settle(connected: ids) : chosen
+    }
+
     /// Sets the audio session to record, as voice input does, so that iOS
     /// lists every input, Bluetooth headsets included. Does not activate it.
     @MainActor

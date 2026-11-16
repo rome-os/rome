@@ -38,6 +38,7 @@ final class MicrophoneSource: VoiceAudioSource {
     /// Whether any microphone source is recording now, which leaves the
     /// audio session active.
     private(set) static var capturing = false
+    private var routeChanges: NSObjectProtocol?
 
     func requestAccess() async -> Bool {
         switch AVAudioApplication.shared.recordPermission {
@@ -74,6 +75,12 @@ final class MicrophoneSource: VoiceAudioSource {
         }
         running = true
         Self.capturing = true
+        routeChanges = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init)
+            MainActor.assumeIsolated {
+                MicrophoneChoice().routeChanged(reason, connected: (AVAudioSession.sharedInstance().availableInputs ?? []).map(\.uid))
+            }
+        }
     }
 
     /// Built outside the main actor: the audio thread calls it.
@@ -91,6 +98,8 @@ final class MicrophoneSource: VoiceAudioSource {
         guard running else { return }
         running = false
         Self.capturing = false
+        if let routeChanges { NotificationCenter.default.removeObserver(routeChanges) }
+        routeChanges = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         capture = nil
