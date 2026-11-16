@@ -1099,8 +1099,15 @@ final class AppModel {
                 showStopped(target)
                 return
             }
-            let running = list.filter(\.isRunning)
             let remembered = UserDefaults.standard.string(forKey: Defaults.lastInstance)
+            // Down for the upgrade this phone started in the background: its
+            // wait shows, and it opens once Rome Cloud reports it running.
+            if let upgrading = list.first(where: { $0.id == (id ?? remembered) }), !upgrading.isRunning,
+               update.backgroundUpgradePending(for: upgrading.id) {
+                await failedToConnect(to: upgrading, error: AuthError.instanceNotReady)
+                return
+            }
+            let running = list.filter(\.isRunning)
             let chosen = running.first { $0.id == id } ?? running.first { $0.id == remembered } ?? running.first
             guard let chosen else {
                 if let stopped = list.first(where: { $0.id == (id ?? remembered) }) ?? list.first {

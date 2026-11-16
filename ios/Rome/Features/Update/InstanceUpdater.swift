@@ -70,18 +70,18 @@ enum UpdateGate {
         case movedOn
     }
 
-    /// Rome Cloud's instance statuses while an upgrade is still its own: it
-    /// claims `upgrading` before it accepts the upgrade, and a new release
-    /// passes through `provisioning` on its way to `running`.
-    static let upgradeUnderway: Set<String> = ["upgrading", "provisioning"]
+    /// Rome Cloud's instance statuses once an upgrade is over: it claims
+    /// `upgrading` before it accepts the upgrade, and a failed or rolled-back
+    /// one lands on `unhealthy`, then `running` on the old release.
+    static let upgradeOver: Set<String> = ["running", "unhealthy"]
 
-    /// Whether the upgrade is over without the target: Rome Cloud no longer
-    /// holds it as upgrading, and the instance still answers on the release
-    /// it started from. A failed upgrade and a rolled-back one both end so.
-    /// An unknown status or starting release never decides.
+    /// Whether the upgrade is over without the target: Rome Cloud reports
+    /// the instance as running or unhealthy, and it still answers on the
+    /// release it started from. Any other status, an unknown one included,
+    /// keeps the wait, which the timeout still ends.
     static func endedWithoutTarget(cloudStatus: String?, version: String?, from: String?) -> Bool {
         guard let cloudStatus, let version, let from else { return false }
-        return !upgradeUnderway.contains(cloudStatus) && version == from
+        return upgradeOver.contains(cloudStatus) && version == from
     }
 
     /// After an upgrade starts, the instance restarts on the target release.
@@ -260,6 +260,14 @@ final class InstanceUpdater {
         /// Rome Cloud ended the upgrade and the instance is back on `from`:
         /// it failed, or was rolled back.
         case rolledBack(target: String, from: String)
+
+        /// The release the failed upgrade was for.
+        var target: String {
+            switch self {
+            case .start(_, let latest, _): return latest
+            case .timedOut(let target), .rolledBack(let target, _): return target
+            }
+        }
     }
 
     /// What the drawer's update row shows.
@@ -385,6 +393,8 @@ final class InstanceUpdater {
     private var reconnecting = false
     /// Probes since the last check while waiting; a check runs every few.
     private var probesSinceCheck = 0
+    /// The drawer's Retry is asking; the row stays on the failure meanwhile.
+    private(set) var retrying = false
     /// Probes since Rome Cloud's status was last read while waiting.
     private var probesSinceStatus = 0
     /// Rome Cloud's looks in a row that found the upgrade over without the
@@ -634,12 +644,15 @@ final class InstanceUpdater {
         apply(verdict, latestChanged: false)
     }
 
-    /// The drawer's Retry: asks again, and an upgrade still on offer starts
-    /// again in the background, as the guardian already confirmed it.
+    /// The drawer's Retry: asks again, and the release the guardian
+    /// confirmed starts again in the background. A newer one goes back to
+    /// the offer, to be confirmed. A second tap while it asks does nothing.
     func retryInBackground() async {
-        guard case .failed = state, runsInBackground else { return }
+        guard case .failed(let failure) = state, runsInBackground, !retrying else { return }
+        retrying = true
+        defer { retrying = false }
         await retry()
-        if offered != nil { await updateInBackground() }
+        if let offered, offered == failure.target { await updateInBackground() }
     }
 
     private func startPolling(_ pending: PendingUpgrade) {

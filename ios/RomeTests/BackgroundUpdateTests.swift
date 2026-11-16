@@ -155,6 +155,8 @@ final class CloudStatusBox {
         #expect(UpdateGate.endedWithoutTarget(cloudStatus: "unhealthy", version: "1.1.197", from: "1.1.197"))
         #expect(!UpdateGate.endedWithoutTarget(cloudStatus: "upgrading", version: "1.1.197", from: "1.1.197"))
         #expect(!UpdateGate.endedWithoutTarget(cloudStatus: "provisioning", version: "1.1.197", from: "1.1.197"))
+        // A status the app does not know keeps the wait; the timeout ends it.
+        #expect(!UpdateGate.endedWithoutTarget(cloudStatus: "pulling", version: "1.1.197", from: "1.1.197"))
         #expect(!UpdateGate.endedWithoutTarget(cloudStatus: "running", version: nil, from: "1.1.197"))
         #expect(!UpdateGate.endedWithoutTarget(cloudStatus: "running", version: "1.1.198", from: "1.1.197"))
         #expect(!UpdateGate.endedWithoutTarget(cloudStatus: nil, version: "1.1.197", from: "1.1.197"))
@@ -172,9 +174,26 @@ final class CloudStatusBox {
         guard case .failed(.start) = updater.state else { Issue.record("\(updater.state)"); return }
         #expect(!updater.blocking)
         if case .failed(.start)? = updater.rowState {} else { Issue.record("row: \(String(describing: updater.rowState))") }
-        await updater.retryInBackground()
+        // Two taps on Retry start it once.
+        async let first: Void = updater.retryInBackground()
+        async let second: Void = updater.retryInBackground()
+        _ = await (first, second)
         #expect(backend.started == ["1.1.198", "1.1.198"])
         #expect(updater.rowState == .updating(target: "1.1.198"))
         updater.reset()
+    }
+
+    /// A newer release out since the confirm goes back to the offer.
+    @Test func retryNeverStartsAnUnconfirmedRelease() async {
+        let backend = offered()
+        backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
+        let defaults = defaults()
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        await updater.attach(backend: backend, instanceID: "i1")
+        await updater.updateInBackground()
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.197"), latest: .init(version: "1.1.199"), upgradeAvailable: true))
+        await updater.retryInBackground()
+        #expect(backend.started == ["1.1.198"])
+        #expect(updater.rowState == .offered("1.1.199"))
     }
 }

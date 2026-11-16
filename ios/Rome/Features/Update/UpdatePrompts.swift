@@ -93,6 +93,7 @@ struct DrawerUpdateRow: View {
                     }
                 }
                 .buttonStyle(PressScaleStyle(scale: 0.98))
+                .disabled(updater.retrying)
             }
         }
         // VoiceOver hears each step as it comes.
