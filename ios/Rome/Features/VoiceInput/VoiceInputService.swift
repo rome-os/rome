@@ -169,6 +169,8 @@ final class VoiceInputController {
     /// The words shown while listening, not yet in the field's text binding.
     @ObservationIgnored private var preview: (text: String, binding: Binding<String>)?
     @ObservationIgnored private var previewSyncedAt = Date.distantPast
+    /// Set by `stopAndSend`: the send waits for the last words.
+    @ObservationIgnored private var sendWhenDone: (() -> Void)?
 
     var active: Bool { state != .idle }
 
@@ -224,10 +226,20 @@ final class VoiceInputController {
         dictation.stop()
     }
 
+    /// Stops listening as `stop` does, then calls `send` once the last words
+    /// are in the field. Listening that stops on its own, with a notice, sends
+    /// nothing: the guardian reads why first. Does nothing while idle.
+    func stopAndSend(_ send: @escaping () -> Void) {
+        guard dictation != nil else { return }
+        sendWhenDone = send
+        stop()
+    }
+
     /// The field is going away with the chat: listening stops, the words stay
     /// in the draft, and the chat says why when the guardian comes back.
     func leave(service: VoiceInputService?, chat: String?) {
         guard let dictation else { return }
+        sendWhenDone = nil
         dictation.cancel()
         finishListening()
         anchor = nil
@@ -252,6 +264,12 @@ final class VoiceInputController {
     }
 
     private func done(heard: String, stop: VoiceInputStop?, text: Binding<String>, handle: ComposerTextHandle) {
+        let send = sendWhenDone
+        sendWhenDone = nil
+        defer {
+            // A turn later, so the field's text binding has the last words.
+            if stop == nil, let send { DispatchQueue.main.async(execute: send) }
+        }
         finishListening()
         guard let anchor else { return }
         self.anchor = nil

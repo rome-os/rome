@@ -433,6 +433,33 @@ final class VoiceInputTests: XCTestCase {
         XCTAssertTrue(sent.waitForExistence(timeout: 10), "the send action did not send the spoken words")
     }
 
+    // MARK: Return while listening
+
+    /// Return on a hardware keyboard while listening ends listening, waits for the last words,
+    /// and sends the message with them.
+    @MainActor
+    func testReturnWhileListeningSends() throws {
+        let app = try launch()
+        let phrase = "return sends \(Int(Date().timeIntervalSince1970))"
+        try standIn(["transcript": phrase])
+        defer { try? standIn(["transcript": Self.transcript]) }
+        let control = onScreen(app.buttons, "voice-input")
+        try requireControl(app, control, "the Chat has no voice control")
+        emptyTheField(app, "return sends")
+        let field = onScreen(app.textViews, "message-field")
+        XCTAssertTrue(tapUntil(control, NSPredicate(format: "label == %@", "Stop voice input")), "listening never started")
+        let heard = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", phrase), object: field)
+        XCTAssertEqual(XCTWaiter().wait(for: [heard], timeout: 30), .completed, "the spoken words never reached the field")
+        app.typeKey(.return, modifierFlags: [])
+        let sent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", phrase)).firstMatch
+        if !sent.waitForExistence(timeout: 15) {
+            printScreen(app, "return sends")
+            XCTFail("Return while listening did not send the spoken words")
+        }
+        XCTAssertTrue(waitForLabel(control, "Start voice input", timeout: 10), "listening never finished")
+        XCTAssertFalse(fieldText(field).contains(phrase), "the spoken words stayed in the field after the send")
+    }
+
     // MARK: Rule 6
 
     /// Rule 6 with text already in the field: the spoken words land at the cursor as typing them
