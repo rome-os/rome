@@ -114,6 +114,7 @@ export function useVoiceInput({
       anchorRef.current = null;
       keepNoticeRef.current({ reason });
       setState("idle");
+      setAsking(false);
       setNoticeRef.current({ reason });
     };
     // `persisted`: the page went into the back/forward cache, not away.

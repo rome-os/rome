@@ -584,6 +584,20 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(screen.getByRole("button", { name: "Stop voice input" })).toBeTruthy();
   });
 
+  it("says why listening stopped, not what the microphone is for, after Back during the prompt", async () => {
+    microphone.pending = true;
+    renderComposer(kind, SONIOX, "chat-a");
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    await screen.findByRole("status");
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    });
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Listening stopped when you left this chat",
+    );
+  });
+
   it("says why when Rome Cloud refuses voice input", async () => {
     const { field } = renderComposer(kind);
     const socket = await startListening();
