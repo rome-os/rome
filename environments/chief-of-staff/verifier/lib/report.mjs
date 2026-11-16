@@ -161,9 +161,14 @@ function costLines(cost) {
   if (cost.notMeasured) return [...lines, `Not measured: ${cost.notMeasured}.`];
   const n = (x) => x.toLocaleString("en-GB");
   lines.push(
-    `- Turns started: ${cost.turns}, for ${cost.messages} replayed messages (${cost.messagesPerTurn ?? "no"} messages per turn on average).`,
+    `- Agent turns started: ${cost.turns}, for ${cost.messages} replayed messages (${cost.messagesPerTurn ?? "no"} messages per turn on average).`,
     `- Tokens: ${n(cost.tokens.input)} input, ${n(cost.tokens.output)} output, ${n(cost.tokens.cacheRead)} cache read, ${n(cost.tokens.cacheWrite)} cache write.`,
     `- Cost: ${cost.costUsd} USD.`,
+    ...(cost.envoy
+      ? [
+          `- The envoy's reviews of replies, not counted above: ${cost.envoy.turns} turns, ${n(cost.envoy.tokens.input)} input, ${n(cost.envoy.tokens.output)} output, ${n(cost.envoy.tokens.cacheRead)} cache read, ${n(cost.envoy.tokens.cacheWrite)} cache write tokens, ${cost.envoy.costUsd} USD.`,
+        ]
+      : []),
     "",
     "| Turn | Started | Replayed messages since the turn before |",
     "| --- | --- | --- |",

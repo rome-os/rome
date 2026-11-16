@@ -33,7 +33,13 @@ export function sortReplies(agentMessages, mentions) {
  * tokens. Reported, never scored. Null when the environment keeps no record of turns.
  */
 export function replayCost(turns, posted, from, to) {
-  const inWindow = turns
+  const all = turns.filter(
+    (t) => Date.parse(t.start) >= Date.parse(from) && Date.parse(t.start) <= Date.parse(to),
+  );
+  // The envoy reviews replies in turns of its own; they cost tokens but read no messages.
+  const envoy = all.filter((t) => String(t.session ?? "").startsWith("envoy"));
+  const inWindow = all
+    .filter((t) => !envoy.includes(t))
     .filter((t) => Date.parse(t.start) >= Date.parse(from) && Date.parse(t.start) <= Date.parse(to))
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
   let before = Date.parse(from) - 1;
@@ -45,7 +51,7 @@ export function replayCost(turns, posted, from, to) {
     before = start;
     return { turnId: t.turnId, start: t.start, messagesBefore: count };
   });
-  const sum = (field) => inWindow.reduce((s, t) => s + (Number(t[field]) || 0), 0);
+  const sum = (field) => sumOf(inWindow, field);
   return {
     turns: inWindow.length,
     messages: posted.length,
@@ -58,8 +64,20 @@ export function replayCost(turns, posted, from, to) {
       cacheWrite: sum("cacheWriteTokens"),
     },
     costUsd: +sum("costUsd").toFixed(4),
+    envoy: {
+      turns: envoy.length,
+      tokens: {
+        input: sumOf(envoy, "inputTokens"),
+        output: sumOf(envoy, "outputTokens"),
+        cacheRead: sumOf(envoy, "cacheReadTokens"),
+        cacheWrite: sumOf(envoy, "cacheWriteTokens"),
+      },
+      costUsd: +sumOf(envoy, "costUsd").toFixed(4),
+    },
   };
 }
+
+const sumOf = (turns, field) => turns.reduce((s, t) => s + (Number(t[field]) || 0), 0);
 
 const chatsOf = (messages) => [...new Set(messages.map((m) => m.chat))];
 const readArgs = (chat) => (chat.startsWith("dm-") ? { dm: chat.slice(3) } : { chat });
