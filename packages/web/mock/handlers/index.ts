@@ -354,13 +354,21 @@ const turn = (
   return rows;
 };
 
-// The Concierge's afternoon: messages of three tasks' chat threads, said in
-// the order they came, with the Concierge's own messages between them, so a
-// thread label has other threads and no thread around it to fold away.
-// A thread is named by its first message.
+// The Concierge's afternoon, as the server sends it: every message in a thread
+// of more than one carries the root's key and the thread's name (the newest
+// task's title, else the start of the root's text). Three threads are tasks'
+// and interleave with each other and with the Concierge's own messages, so
+// their labels show and there is a lot to fold away. One, about the plumber, is
+// a plain back-and-forth with nothing between its messages, so it has no label.
+// The turns above are one message and its answer in no thread, so no label
+// either.
 const TABLE_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-1`, title: "Book a table for Friday" };
 const FLIGHT_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-3`, title: "Compare flights to Berlin" };
 const NAS_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-8`, title: "Fix the NAS backup" };
+const PLUMBER_THREAD = {
+  id: `${CONCIERGE_CHAT_ID}-pm-17`,
+  title: "What time is the plumber coming",
+};
 const NAS_CLEANUP_SCRIPT = `Yes. Give the backup disk a limit, and delete the oldest snapshot when it goes over:
 
 \`\`\`bash
@@ -405,6 +413,25 @@ const afternoon = (
 // unreachable in mock mode. Worked queries: "roadmap" is content-only for both
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
+/** The start of a message's text, cut short, as the server names a thread by its root. */
+const threadName = (message: ChatMessage) => {
+  const parts = JSON.parse(message.content) as { type: string; content?: string }[];
+  const words = (parts.find((part) => part.type === "text")?.content ?? "").replace(/\s+/g, " ");
+  const name = words.replace(/[.!?。！？]+$/u, "").trim();
+  return name.length > 50 ? `${name.slice(0, 49)}…` : name;
+};
+
+/**
+ * The thread a message that replies to `target` is in: the target's, or, when
+ * the target is alone, the one it now starts, which the server then sends on
+ * the target too.
+ */
+const joinThread = (target: ChatMessage) => {
+  target.chatThreadId ??= target.id;
+  target.chatThreadTitle ??= threadName(target);
+  return { chatThreadId: target.chatThreadId, chatThreadTitle: target.chatThreadTitle };
+};
+
 const transcripts: Record<string, ChatMessage[]> = {
   // The later turns cover the message shapes the Concierge sends: a short
   // answer, and long ones with a table, many links, a digest and a forward.
@@ -567,6 +594,10 @@ const transcripts: Record<string, ChatMessage[]> = {
       "Booked: Friday 19:00, Osteria 23 back room, 4 people, under your name. A confirmation text is on its way to your phone.",
       TABLE_THREAD,
     ),
+    afternoon(17, "14:20", "guardian", "What time is the plumber coming?", PLUMBER_THREAD),
+    afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park.", PLUMBER_THREAD),
+    afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
+    afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status, which Rome derives.
     {
@@ -1527,14 +1558,18 @@ export const handlers = [
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.
   http.get("/api/chat/sessions/:sessionId/turns", () => HttpResponse.json([] as TurnInfo[])),
-  // A sent message is only recorded: no turn starts, so nothing answers it. One
-  // sent into a chat thread lands in that thread, as the server places it.
+  // A sent message is only recorded: no turn starts, so nothing answers it. It
+  // replies to the message the owner picked, else, with a thread in focus, to
+  // that thread's last message, else to nothing, and joins the thread of the
+  // message it replies to, as the server records it.
   http.post("/api/chat/sessions/:sessionId/turns", async ({ params, request }) => {
     const sessionId = String(params.sessionId);
     const messages = transcripts[sessionId];
     if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const form = await request.formData();
-    const inThread = messages.find((message) => message.id === form.get("chatThread"));
+    const picked = form.get("replyToMessageId");
+    const focused = messages.filter((message) => message.chatThreadId === form.get("chatThread"));
+    const repliesTo = picked ? messages.find((message) => message.id === picked) : focused.at(-1);
     const sentAt = new Date().toISOString();
     const content = JSON.stringify([text(String(form.get("text") ?? ""))]);
     messages.push({
@@ -1545,9 +1580,7 @@ export const handlers = [
       content,
       createdAt: sentAt,
       sender: guardianSender,
-      ...(inThread?.chatThreadId
-        ? { chatThreadId: inThread.chatThreadId, chatThreadTitle: inThread.chatThreadTitle }
-        : {}),
+      ...(repliesTo ? joinThread(repliesTo) : {}),
     });
     return HttpResponse.json({
       turnId: null,

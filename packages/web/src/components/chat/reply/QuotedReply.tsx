@@ -8,16 +8,16 @@ import { plainQuote } from "./reply-source";
 
 /**
  * The quote a reply carries, inside the reply's bubble: a gray left edge, a
- * reply arrow, and the first two lines of what was quoted. A reply in a task's
- * chat thread focuses the chat on the thread, held on the reply, while no
- * thread is in focus. Any other jumps to the original when the transcript
- * shows it, and is plain text otherwise (docs/domains/chats.md#chat-thread).
+ * reply arrow, and the first two lines of what was quoted. A reply in a chat
+ * thread focuses the chat on the thread, held on the reply, while no thread is
+ * in focus. While one is, it jumps to the original when the transcript shows
+ * it, and is plain text otherwise (docs/domains/chats.md#chat-thread).
  */
 export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: string }) {
   const { t } = useTranslation("chat");
   const draft = useReplyDraft();
   const threads = useChatThreads();
-  const threadOf = threads && hostId !== undefined ? threads.taskThreads.get(hostId) : undefined;
+  const threadOf = threads && hostId !== undefined ? threads.roots.get(hostId) : undefined;
   const opensThread = draft?.threads === true && draft.thread === null && threadOf !== undefined;
   const threadTitle = threadOf ? threads?.titles.get(threadOf) : undefined;
   const jumpable = opensThread || draft?.has(part.messageId) === true;
@@ -45,9 +45,7 @@ export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: stri
       onClick={() =>
         opensThread
           ? draft.openThread({
-              // The reply is in the task's thread; the original it quotes may
-              // be in none, as when the reply started the task. The focus is
-              // held on the reply.
+              // The focus is held on the reply, which is in the thread.
               thread: hostId ?? part.messageId,
               title: threadTitle ?? "",
             })

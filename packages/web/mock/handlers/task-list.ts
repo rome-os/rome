@@ -64,6 +64,19 @@ function fixture(): TaskListParts {
         cardMessageId: `${CONCIERGE_CHAT_ID}-t1-assistant`,
       },
       {
+        // Its question is the table thread's third message, so Respond lands
+        // there and focuses the thread.
+        kind: "task",
+        task: task("table", "Book a table for Friday", "needs_you", {
+          waitingSince: Date.now() - 12 * MINUTE,
+          openWait: { kind: "approval", id: "approval-2", since: Date.now() - 12 * MINUTE },
+          sourceMessageId: `${CONCIERGE_CHAT_ID}-pm-2`,
+        }),
+        schedule: null,
+        check: null,
+        cardMessageId: `${CONCIERGE_CHAT_ID}-pm-5`,
+      },
+      {
         kind: "task",
         task: task("pr-review", "Review the open pull requests", "active"),
         schedule: null,

@@ -3116,7 +3116,7 @@ describe("Chat Concierge empty state", () => {
       expect(composer().dataset.thread).toBe("u-1");
     });
 
-    it("opens no focus for a message that is in no task's thread", async () => {
+    it("opens no focus for a message alone in its thread", async () => {
       twoTurns();
       renderChat(concierge());
       await screen.findAllByTestId("user-row");
@@ -3125,6 +3125,96 @@ describe("Chat Concierge empty state", () => {
 
       expect(back()).toBeNull();
       expect(composer().dataset.thread).toBe("");
+    });
+
+    it("puts a root the server sent with no thread into it once a reply arrives live, so it can be focused", async () => {
+      rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+      twoTurns();
+      renderChat(concierge());
+      await screen.findAllByTestId("user-row");
+      await waitFor(() => expect(chatEvents()).toBeTruthy());
+      // Alone, u-1 is in no thread, so there is nothing to focus.
+      fireEvent.click(screen.getByTestId("open-thread"));
+      expect(back()).toBeNull();
+
+      act(() => {
+        chatEvents()?.emit("message_insert", {
+          id: "u-3",
+          sessionId: "session-1",
+          turnId: "turn-c",
+          role: "user",
+          content: JSON.stringify([{ type: "text", content: "More" }]),
+          createdAt: "2026-11-10T10:05:00Z",
+          chatThreadId: "u-1",
+          chatThreadTitle: "First",
+        });
+      });
+      await waitFor(() => expect(screen.getAllByTestId("user-row")).toHaveLength(3));
+
+      // The reply carries the thread and its name; the root is in it with no event of its own.
+      fireEvent.click(screen.getByTestId("open-thread"));
+      await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+      expect(back()?.textContent).toBe("First");
+    });
+
+    describe("a jump that focuses the thread of its message", () => {
+      const originalScrollTo = Element.prototype.scrollTo;
+      beforeEach(() => {
+        Element.prototype.scrollTo = rs.fn() as typeof Element.prototype.scrollTo;
+      });
+      afterEach(() => {
+        Element.prototype.scrollTo = originalScrollTo;
+      });
+
+      it("lands on the message and focuses its thread, the way the Tasks panel's Respond asks", async () => {
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        act(() => void requestConciergeJump("u-2", { focusThread: true }));
+
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+        expect(back()?.textContent).toBe("Task two");
+      });
+
+      it("closes the thread in focus first when the message is in another", async () => {
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+
+        act(() => void requestConciergeJump("u-2", { focusThread: true }));
+
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+      });
+
+      it("keeps the thread in focus when the message is in it, and focuses nothing without the ask", async () => {
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        act(() => void requestConciergeJump("u-2"));
+        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
+        expect(composer().dataset.thread).toBe("");
+
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+        act(() => void requestConciergeJump("u-1", { focusThread: true }));
+        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalledTimes(2));
+        expect(composer().dataset.thread).toBe("u-1");
+      });
+
+      it("focuses no thread for a message alone in its own", async () => {
+        twoTurns();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        act(() => void requestConciergeJump("u-1", { focusThread: true }));
+
+        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
+        expect(composer().dataset.thread).toBe("");
+      });
     });
 
     it("brings the whole chat back before a jump to a message the focus hides, and jumps at once to one it shows", async () => {

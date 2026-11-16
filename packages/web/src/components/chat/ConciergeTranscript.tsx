@@ -77,9 +77,7 @@ export function ConciergeTranscript({
     // Share selection picks whole turns, which can hold messages of other
     // threads: nothing is hidden while it runs, whatever is in focus.
     () =>
-      threads?.focus && !selection
-        ? focusHidden(items, threads.focus, threads.taskThreads)
-        : undefined,
+      threads?.focus && !selection ? focusHidden(items, threads.focus, threads.roots) : undefined,
     [items, threads, selection],
   );
   const messageIds = useMemo(

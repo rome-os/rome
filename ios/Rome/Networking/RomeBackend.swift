@@ -48,7 +48,7 @@ protocol RomeBackend: AnyObject, Sendable {
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn
     /// Every message of the chat thread `messageId` is in, oldest first.
     /// Only an instance with chat threads answers it.
-    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage]
+    func thread(sessionId: String, root: String) async throws -> [ChatMessage]
     /// A file in the chats' project folder, by its `/projects/…` path without the slash.
     func asset(path: String) async throws -> Data
     /// The same file shrunk to `width` (600 or 900) by an instance that can, and
@@ -183,8 +183,8 @@ final class LiveBackend: RomeBackend {
         try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks", reportsUnauthorized: false)
     }
 
-    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
-        let page: MessagePage = try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: [URLQueryItem(name: "thread", value: messageId)])
+    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
+        let page: MessagePage = try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: [URLQueryItem(name: "thread", value: root)])
         return page.messages
     }
 
@@ -480,7 +480,7 @@ extension RomeBackend {
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
         try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
     }
-    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] { throw APIError.notFound }
+    func thread(sessionId: String, root: String) async throws -> [ChatMessage] { throw APIError.notFound }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {}

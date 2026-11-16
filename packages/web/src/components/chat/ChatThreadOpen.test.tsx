@@ -13,12 +13,9 @@ import { buildRows } from "./chat-view";
 import type { BlockActions, LivePreview } from "./MessageList";
 import {
   ChatThreadsProvider,
-  placed,
-  placeLive,
-  type ThreadPlacement,
   type ThreadTimelineMessage,
-  taskThreads,
   threadLabels,
+  threadsOf,
 } from "./reply/chat-threads";
 import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
@@ -52,58 +49,126 @@ afterEach(() => {
   rs.unstubAllGlobals();
 });
 
-/** A guardian (`g`) or agent (`a`) message in thread `thread`. */
-const g = (id: string, thread: string | null = id): ThreadTimelineMessage => ({
-  id,
-  role: "user",
-  chatThreadId: thread,
-});
-const a = (id: string, thread: string | null): ThreadTimelineMessage => ({
-  id,
-  role: "assistant",
-  chatThreadId: thread,
-});
+/** The name each thread of these fixtures carries on its messages. */
+const NAMES: Record<string, string> = { q1: "Flights", q2: "Hotels" };
 
-/** A message in no chat thread. */
-const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMessage => ({
+/** A message the server sent in thread `thread`, null when it is alone in its own, named as the server names it. */
+const sent = (
+  id: string,
+  role: "user" | "assistant",
+  thread: string | null,
+): ThreadTimelineMessage => ({
   id,
   role,
-  chatThreadId: null,
+  chatThreadId: thread,
+  ...(thread && NAMES[thread] ? { chatThreadTitle: NAMES[thread] } : {}),
 });
+
+/** A guardian (`g`) or agent (`a`) message in thread `thread`. */
+const g = (id: string, thread: string | null = null) => sent(id, "user", thread);
+const a = (id: string, thread: string | null) => sent(id, "assistant", thread);
+
+/** A message in no thread: nothing replies to it. */
+const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMessage =>
+  sent(id, role, null);
 
 /** Where each label goes and what thread it names, as `[messageId, thread]` pairs. */
 const where = (labels: ReturnType<typeof threadLabels>) =>
   [...labels].map(([id, label]) => [id, label.thread]);
 
-/** The tasks whose threads start at q1 and q2. */
-const tasks = new Map([
-  ["q1", "Flights"],
-  ["q2", "Hotels"],
-]);
+describe("threadsOf", () => {
+  it("puts a message in the thread its chatThreadId names, and a root delivered with none in it once a reply says so", () => {
+    // The root arrived alone, with null, and its reply arrived after.
+    const { roots } = threadsOf([g("q1"), a("a1", "q1"), free("w1")]);
+    expect(roots).toEqual(
+      new Map([
+        ["q1", "q1"],
+        ["a1", "q1"],
+      ]),
+    );
+  });
+
+  it("leaves a message nothing replies to in no thread, and a reply whose root is not loaded in the thread", () => {
+    const { roots } = threadsOf([g("q9"), a("a1", "q1"), free("w1", "assistant")]);
+    expect(roots).toEqual(new Map([["a1", "q1"]]));
+  });
+
+  it("names a thread by the title any of its messages carries", () => {
+    expect(threadsOf([g("q1"), a("a1", "q1")]).titles).toEqual(new Map([["q1", "Flights"]]));
+    expect(threadsOf([g("q1", "q1"), a("a1", "q1")]).titles).toEqual(new Map([["q1", "Flights"]]));
+    expect(threadsOf([g("q7"), a("a1", "q7")]).titles).toEqual(new Map());
+  });
+
+  it("knows the guardian's messages in a thread too", () => {
+    expect([...threadsOf([g("q1"), g("r1", "q1"), free("w1")]).roots]).toEqual([
+      ["q1", "q1"],
+      ["r1", "q1"],
+    ]);
+  });
+});
 
 describe("threadLabels", () => {
   it("shows none for messages in no thread: a plain question and its answer", () => {
-    expect(threadLabels([free("q1"), free("a1", "assistant")], tasks)).toEqual(new Map());
+    expect(threadLabels([free("q1"), free("a1", "assistant")])).toEqual(new Map());
   });
 
-  it("labels every agent message in a task's thread, and none of the guardian's", () => {
+  it("shows none in a plain back-and-forth, though every message is in the thread", () => {
     expect(
-      where(
-        threadLabels([g("q1"), a("a1", "q1"), g("q2", "q1"), free("w1"), a("a2", "q1")], tasks),
-      ),
+      threadLabels([g("q1"), a("a1", "q1"), g("q2", "q1"), a("a2", "q1"), a("a3", "q1")]),
+    ).toEqual(new Map());
+  });
+
+  it("shows none for a thread of one message, or one whose other messages are not loaded", () => {
+    expect(threadLabels([g("q1"), free("w1"), a("a1", "q9"), free("w2", "assistant")])).toEqual(
+      new Map(),
+    );
+  });
+
+  it("labels every agent message in a thread another message splits, and none of the guardian's", () => {
+    expect(
+      where(threadLabels([g("q1"), a("a1", "q1"), g("q2", "q1"), free("w1"), a("a2", "q1")])),
     ).toEqual([
       ["a1", "q1"],
       ["a2", "q1"],
     ]);
   });
 
-  it("labels every agent message in a task's thread alike: plain text, a forward and a card", () => {
+  it("splits a thread by an agent message in none or in another thread too, but not by a trace", () => {
+    const trace: ThreadTimelineMessage = { id: "tr", role: "trace", chatThreadId: null };
+    expect(where(threadLabels([g("q1"), a("a1", "q1"), trace, a("a2", "q1")]))).toEqual([]);
+    expect(
+      where(threadLabels([g("q1"), a("a1", "q1"), free("w1", "assistant"), a("a2", "q1")])),
+    ).toEqual([
+      ["a1", "q1"],
+      ["a2", "q1"],
+    ]);
+    expect(
+      where(
+        threadLabels([
+          g("q1"),
+          a("a1", "q1"),
+          g("q2"),
+          a("b1", "q2"),
+          a("a2", "q1"),
+          a("b2", "q2"),
+        ]),
+      ),
+    ).toEqual([
+      ["a1", "q1"],
+      ["b1", "q2"],
+      ["a2", "q1"],
+      ["b2", "q2"],
+    ]);
+  });
+
+  it("labels every agent message in a split thread alike: plain text, a forward and a card", () => {
     const withParts = (id: string, parts: unknown[]): ThreadTimelineMessage => ({
       ...a(id, "q1"),
       content: JSON.stringify(parts),
     });
     const messages = [
       g("q1"),
+      free("w0"),
       withParts("forward", [
         { type: "text", content: "Here it is" },
         { type: "text", content: "# Report", forwardedFrom: { chatId: "c1", title: "Flights" } },
@@ -114,7 +179,7 @@ describe("threadLabels", () => {
       withParts("said", [{ type: "text", content: "Two options so far." }]),
     ];
     // One label per message, each opening the thread.
-    expect(where(threadLabels(messages, tasks))).toEqual([
+    expect(where(threadLabels(messages))).toEqual([
       ["forward", "q1"],
       ["card", "q1"],
       ["said", "q1"],
@@ -122,11 +187,11 @@ describe("threadLabels", () => {
   });
 
   it("labels the only message of a run", () => {
-    expect(where(threadLabels([g("q1"), a("a1", "q1")], tasks))).toEqual([["a1", "q1"]]);
+    expect(where(threadLabels([g("q1"), free("w1"), a("a1", "q1")]))).toEqual([["a1", "q1"]]);
   });
 
   it("labels both messages of a run of two", () => {
-    expect(where(threadLabels([g("q1"), a("a1", "q1"), a("a2", "q1")], tasks))).toEqual([
+    expect(where(threadLabels([g("q1"), free("w1"), a("a1", "q1"), a("a2", "q1")]))).toEqual([
       ["a1", "q1"],
       ["a2", "q1"],
     ]);
@@ -134,17 +199,21 @@ describe("threadLabels", () => {
 
   it("labels only the first and the last of a run of three or more", () => {
     const run = [a("a1", "q1"), a("a2", "q1"), a("a3", "q1"), a("a4", "q1")];
-    expect(where(threadLabels([g("q1"), ...run], tasks))).toEqual([
+    expect(where(threadLabels([g("q1"), free("w1"), ...run]))).toEqual([
       ["a1", "q1"],
       ["a4", "q1"],
     ]);
   });
 
   it("keeps a run through the owner's messages: they neither end nor join it", () => {
-    const labels = threadLabels(
-      [g("q1"), a("a1", "q1"), g("x1", "q1"), a("a2", "q1"), free("w1"), a("a3", "q1")],
-      tasks,
-    );
+    const labels = threadLabels([
+      g("q1"),
+      a("a1", "q1"),
+      g("x1", "q1"),
+      a("a2", "q1"),
+      free("w1"),
+      a("a3", "q1"),
+    ]);
     expect(where(labels)).toEqual([
       ["a1", "q1"],
       ["a3", "q1"],
@@ -152,29 +221,25 @@ describe("threadLabels", () => {
   });
 
   it("ends a run at another thread's message or an agent message in no thread", () => {
-    const labels = threadLabels(
-      [
-        g("q1"),
-        a("a1", "q1"),
-        a("a2", "q1"),
-        a("b1", "q2"),
-        a("a3", "q1"),
-        a("a4", "q1"),
-        free("w0", "assistant"),
-        a("a5", "q1"),
-        a("a6", "q1"),
-        free("w1", "assistant"),
-        a("a7", "q1"),
-        a("a8", "q1"),
-        a("a9", "q1"),
-      ],
-      tasks,
-    );
-    // Every run here is of one or two, but the last.
+    const labels = threadLabels([
+      g("q1"),
+      a("a1", "q1"),
+      a("a2", "q1"),
+      a("b1", "q2"),
+      a("a3", "q1"),
+      a("a4", "q1"),
+      free("w0", "assistant"),
+      a("a5", "q1"),
+      a("a6", "q1"),
+      free("w1", "assistant"),
+      a("a7", "q1"),
+      a("a8", "q1"),
+      a("a9", "q1"),
+    ]);
+    // Every run here is of one or two, but the last. Thread q2 holds b1 alone.
     expect(where(labels)).toEqual([
       ["a1", "q1"],
       ["a2", "q1"],
-      ["b1", "q2"],
       ["a3", "q1"],
       ["a4", "q1"],
       ["a5", "q1"],
@@ -190,81 +255,23 @@ describe("threadLabels", () => {
       content: JSON.stringify([{ type: "task_chat", chatId: "c1", title: "Flights", show }]),
     });
     expect(
-      where(threadLabels([g("q1"), card("start", "task"), card("old"), card("ask", "ask")], tasks)),
+      where(
+        threadLabels([g("q1"), free("w1"), card("start", "task"), card("old"), card("ask", "ask")]),
+      ),
     ).toEqual([["ask", "q1"]]);
   });
 
-  it("names a task's thread by its title, from any of its messages", () => {
-    const labels = threadLabels([{ ...g("q1"), chatThreadTitle: "Tokyo weather" }, a("a1", "q1")]);
+  it("names a thread by the title its messages carry", () => {
+    const labels = threadLabels([
+      g("q1"),
+      free("w1"),
+      { ...a("a1", "q1"), chatThreadTitle: "Tokyo weather" },
+    ]);
     expect(labels.get("a1")).toEqual({ thread: "q1", title: "Tokyo weather" });
   });
 
-  it("shows no label in a thread no task has, from before", () => {
-    const root = {
-      ...free("r1", "assistant"),
-      content: JSON.stringify([{ type: "text", content: "Sunny,\n24°" }]),
-    };
-    const labels = threadLabels([root, g("q2", "r1"), a("a2", "r1"), a("a3", "gone")]);
-    expect(labels).toEqual(new Map());
-    expect(taskThreads([root, g("q2", "r1"), a("a2", "r1")]).threads).toEqual(new Map());
-  });
-
-  it("knows the task thread of the guardian's messages too", () => {
-    expect(taskThreads([g("q1"), g("r1", "q1"), free("w1")], tasks).threads).toEqual(
-      new Map([
-        ["q1", "q1"],
-        ["r1", "q1"],
-      ]),
-    );
-  });
-
-  it("drops the label of a thread whose task left the chat", () => {
-    const loaded = [{ ...g("q1"), chatThreadTitle: "Flights" }, a("a1", "q1")];
-    expect(threadLabels(loaded).get("a1")).toEqual({ thread: "q1", title: "Flights" });
-    expect(threadLabels(loaded, new Map([["q1", null]]))).toEqual(new Map());
-    expect(taskThreads(loaded, new Map([["q1", null]])).threads).toEqual(new Map());
-  });
-
-  it("takes a title a live placement told", () => {
-    const labels = threadLabels([g("q1"), a("a1", "q1")], new Map([["q1", "Flights"]]));
-    expect(labels.get("a1")).toMatchObject({ title: "Flights" });
-  });
-});
-
-describe("live thread placements", () => {
-  it("apply while the loaded message still is where they were made", () => {
-    const loaded = [g("q1"), a("a1", "q1"), free("q2"), free("a2", "assistant")];
-    const live = new Map<string, ThreadPlacement>([
-      ["q2", { from: null, to: "q1" }],
-      ["a2", { from: null, to: "q1" }],
-    ]);
-    expect(where(threadLabels(placed(loaded, live), tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q1"],
-    ]);
-  });
-
-  it("give way to a reload that says otherwise", () => {
-    const live = new Map<string, ThreadPlacement>([["a2", { from: null, to: "q1" }]]);
-    const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q2"), a("a2", "q2")];
-    expect(where(threadLabels(placed(reloaded, live), tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q2"],
-    ]);
-  });
-
-  it("build on a reload between two placements", () => {
-    let live = placeLive(new Map(), "a2", "q1", null);
-    const reloaded = [g("q1"), a("a1", "q1"), a("a2", "q1")];
-    expect(where(threadLabels(placed(reloaded, live), tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q1"],
-    ]);
-    live = placeLive(live, "a2", "q2", "q1");
-    expect(where(threadLabels(placed(reloaded, live), tasks))).toEqual([
-      ["a1", "q1"],
-      ["a2", "q2"],
-    ]);
+  it("shows no label in a split thread that has no name", () => {
+    expect(threadLabels([g("q7"), free("w1"), a("a1", "q7")])).toEqual(new Map());
   });
 });
 
@@ -286,11 +293,20 @@ const message = (
     chatThreadId,
   }) as ChatMessage;
 
+// The root arrived before its reply, so the server sent it no thread. A message
+// of no thread between the replies splits the thread, so it shows labels.
 const messages = [
-  { ...message("m1", "user", "Plan Kyoto in April", "m1", 0), chatThreadTitle: "Kyoto trip" },
-  message("a1", "assistant", "Hotels first, then the days.", "m1", 1),
+  {
+    ...message("m1", "user", "Plan Kyoto in April", "", 0),
+    chatThreadId: null,
+  },
+  {
+    ...message("a1", "assistant", "Hotels first, then the days.", "m1", 1),
+    chatThreadTitle: "Kyoto trip",
+  },
+  { ...message("f1", "user", "What is the weather?", "", 1), chatThreadId: null },
   message("m2", "user", "Which one is closest?", "m1", 2),
-  message("a2", "assistant", "The river one.", "m1", 3),
+  { ...message("a2", "assistant", "The river one.", "m1", 3), chatThreadTitle: "Kyoto trip" },
 ];
 
 const actions = {
@@ -307,10 +323,10 @@ const idle = {
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
-/** `focused` is the thread in focus: a message of it, and its task's title. */
+/** `focused` is the thread in focus: a message of it, its name and its root. */
 function renderTranscript(
   shown: ChatMessage[] = messages,
-  focused?: { thread: string; title: string },
+  focused?: { thread: string; title: string; root: string },
   selection?: ComponentProps<typeof ConciergeTranscript>["selection"],
 ) {
   const box: { thread: string | null } = { thread: null };
@@ -337,9 +353,9 @@ function renderTranscript(
             <ChatThreadsProvider
               value={{
                 labels: threadLabels(shown),
-                taskThreads: taskThreads(shown).threads,
-                titles: taskThreads(shown).titles,
-                focus: focused ? (taskThreads(shown).threads.get(focused.thread) ?? null) : null,
+                roots: threadsOf(shown).roots,
+                titles: threadsOf(shown).titles,
+                focus: focused?.root ?? null,
               }}
             >
               <ReplyBar />
@@ -401,14 +417,18 @@ describe("the thread label in the transcript", () => {
 
   it("cuts a long title at a fixed width, whole in its tooltip and accessible name", () => {
     const title = "Compare every ryokan along the Kamo river for the April trip";
-    renderTranscript([{ ...messages[0]!, chatThreadTitle: title }, messages[1]!]);
-    const label = screen.getByRole("button", { name: title });
-    expect(label.getAttribute("title")).toBe(title);
-    expect(label.lastElementChild?.className).toContain("max-w-56");
-    expect(label.lastElementChild?.className).toContain("truncate");
+    renderTranscript(
+      messages.map((message) =>
+        message.chatThreadId ? { ...message, chatThreadTitle: title } : message,
+      ),
+    );
+    const [label] = screen.getAllByRole("button", { name: title });
+    expect(label!.getAttribute("title")).toBe(title);
+    expect(label!.lastElementChild?.className).toContain("max-w-56");
+    expect(label!.lastElementChild?.className).toContain("truncate");
     // Regular weight, not the badge's.
-    expect(label.className).toContain("text-aux");
-    expect(label.className).not.toContain("text-badge");
+    expect(label!.className).toContain("text-aux");
+    expect(label!.className).not.toContain("text-badge");
   });
 
   it("draws iOS's thin turn-down arrow before the title, keeps its look on hover, and shows a pointer", () => {
@@ -465,7 +485,7 @@ describe("the thread label in the transcript", () => {
       expect(label.getAttribute("aria-pressed")).toBe("false");
     }
     cleanup();
-    renderTranscript(messages, { thread: "a2", title: "Kyoto trip" });
+    renderTranscript(messages, { thread: "a2", title: "Kyoto trip", root: "m1" });
     for (const label of screen.getAllByRole("button", { name: "Kyoto trip" })) {
       expect(label.getAttribute("aria-pressed")).toBe("true");
       expect(label.className).toContain("aria-pressed:text-muted-foreground");
@@ -574,7 +594,7 @@ describe("the transcript with a thread in focus", () => {
       (element) => element.dataset.threadEntry ?? element.tagName.toLowerCase(),
     );
   const entry = (id: string) => document.querySelector<HTMLElement>(`[data-thread-entry="${id}"]`)!;
-  const focusKyoto = { thread: "a2", title: "Kyoto trip" };
+  const focusKyoto = { thread: "a2", title: "Kyoto trip", root: "m1" };
 
   it("marks nothing without a focus", () => {
     renderTranscript(day);
