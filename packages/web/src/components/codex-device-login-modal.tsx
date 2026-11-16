@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Safari } from "@/components/ui/safari";
 import { Stepper } from "@/components/ui/stepper";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 
 const STATUS_POLL_INTERVAL_MS = 2000;
 // Hold the success state on screen briefly so the user sees a confirmed
@@ -79,7 +80,8 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
   const [startError, setStartError] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const error = startError ?? statusError;
-  const [copied, setCopied] = useState(false);
+  const { copiedText, copy, reset: resetCopied } = useCopyFeedback();
+  const copied = copiedText !== null;
   // Sticky (unlike the transient `copied` flash): once the guardian has copied
   // the code, the "Open verification page" button unlocks. Gating it stops them
   // landing on OpenAI's page with nothing to paste.
@@ -141,7 +143,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
     setVerificationUrl(null);
     setStartError(null);
     setStatusError(null);
-    setCopied(false);
+    resetCopied();
     setHasCopied(false);
     setConnected(false);
     startedRef.current = false;
@@ -213,7 +215,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
   const handleRetry = useCallback(() => {
     setUserCode(null);
     setVerificationUrl(null);
-    setCopied(false);
+    resetCopied();
     setHasCopied(false);
     setStep(STEP_COPY);
     void start();
@@ -224,14 +226,9 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
     // Unlock on the click itself, so a non-secure context where the clipboard
     // write throws doesn't trap the guardian (the code is selectable either way).
     setHasCopied(true);
-    try {
-      await navigator.clipboard.writeText(userCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard unavailable (e.g. non-secure context); the code is selectable.
-    }
-  }, [userCode]);
+    // When the clipboard is unavailable, the code is still selectable.
+    await copy(userCode);
+  }, [userCode, copy]);
 
   const stepLabels = [t("codexDeviceLogin.steps.enable"), t("codexDeviceLogin.steps.copy")];
   const stepTitle = connected
