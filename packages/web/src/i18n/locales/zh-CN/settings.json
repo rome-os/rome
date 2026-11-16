@@ -941,12 +941,9 @@
     "targetChanged": "期间发布了更新的版本（{{version}}）— 请再次确认以升级到该版本。",
     "upgradeFailed": "升级请求失败：{{message}}",
     "upgradeFailedFallback": "升级请求失败。",
-    "restartingTitle": "{{name}} 正在重启",
     "restartingBody": "正在升级到 {{version}}。",
-    "restartTimeoutTitle": "升级耗时超出预期",
     "restartTimeoutBody": "{{name}} 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。",
-    "close": "关闭",
     "voiceInput": {
       "title": "语音输入",
       "loadFailed": "语音输入信息加载失败",

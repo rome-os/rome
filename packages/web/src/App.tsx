@@ -1,7 +1,8 @@
 import { clearAllChatDrafts } from "./lib/chat-draft-storage";
 import { hasSession, useAuthStateSnapshot } from "./lib/auth-state";
 import { invalidateNewChatDrafts } from "./lib/new-chat-draft-storage";
-import { lazy, Suspense, useEffect } from "react";
+import { Suspense, useEffect } from "react";
+import { lazy } from "./lib/lazy-with-reload";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 import { SlotProvider } from "./components/slot";

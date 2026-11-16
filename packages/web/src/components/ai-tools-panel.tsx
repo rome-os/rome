@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { Measure, Section } from "@rome-os/ui/page";
-import { Fragment, lazy, Suspense, useCallback, useEffect, useId, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useId, useState } from "react";
+import { lazy } from "@/lib/lazy-with-reload";
 import { Trans, useTranslation } from "react-i18next";
 import { ChevronDown, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";

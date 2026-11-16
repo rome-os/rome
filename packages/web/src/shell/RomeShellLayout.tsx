@@ -352,8 +352,6 @@ export function RomeShellLayout() {
       style={{ width: `${railRem}rem` }}
       data-rail-labelled={railNames ? "" : undefined}
     >
-      {/* The upgrade arrow ends the logo row with names shown, and sits under
-          the logo without them. */}
       <div
         className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "flex-col"} ${titlebar ? "pt-2" : "pt-5"}`}
       >
@@ -401,11 +399,10 @@ export function RomeShellLayout() {
             {t("appName")}
           </span>
         ) : null}
-        <UpgradeIndicator
-          suppressed={upgradeBannerUp}
-          tooltipSide={railNames ? "bottom" : "right"}
-        />
       </div>
+      {/* One instance in one place for both rail widths: the upgrade under
+          way lives in it, and switching names must not drop it. */}
+      <UpgradeIndicator suppressed={upgradeBannerUp} labelled={railNames} />
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
         <RailLabelsContext.Provider value={railNames}>
           <AppGrid onSearch={openChatSearch} chatPeek={canPeek ? chatPeek.tile : undefined} />
