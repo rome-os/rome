@@ -582,7 +582,7 @@ final class VoiceInputTests: XCTestCase {
         return n
     }
 
-    /// Two minutes of rule 14's cycles, 16 kHz mono 16-bit: quiet room noise at about -50 dBFS,
+    /// Two minutes of rule 14's cycles, 16 kHz mono 16-bit: quiet room noise at about -55 dBFS (the meter's floor),
     /// then a 200 Hz tone whose loudness rises and falls four times a second, as syllables do.
     private func cyclesFile() throws -> URL {
         let rate = 16000
