@@ -210,11 +210,15 @@
     }
   },
   "upgradeIndicator": {
-    "available": "将 {{name}} 更新到 {{version}}",
-    "updating": "{{name}} 正在更新到 {{version}}…",
-    "failed": "更新没有完成",
+    "available": "更新到 {{version}}",
+    "availableFull": "将 {{name}} 更新到 {{version}}",
+    "updating": "正在更新到 {{version}}…",
+    "updatingFull": "{{name}} 正在更新到 {{version}}…",
+    "failed": "更新失败",
+    "failedFull": "更新到 {{version}} 失败",
+    "updated": "已更新",
+    "updatedFull": "{{name}} 已更新到 {{version}}",
     "retry": "重试",
-    "updated": "{{name}} 已更新到 {{version}}",
     "reload": "重新加载"
   },
   "upgradeBanner": {

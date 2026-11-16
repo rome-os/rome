@@ -103,7 +103,7 @@ function renderIndicator({ suppressed = false, labelled = true } = {}) {
 
 const OFFER = "Update Milo to 1.2.0";
 const UPDATING = "Milo is updating to 1.2.0…";
-const FAILED = "Update did not finish · Retry";
+const FAILED = "Update to 1.2.0 failed · Retry";
 const UPDATED = "Milo updated to 1.2.0 · Reload";
 const ACCEPTED: Scripted = { status: 202, body: { status: "upgrading", target: "1.2.0" } };
 
@@ -114,12 +114,15 @@ async function confirm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("UpgradeIndicator", () => {
-  it("offers the guardian the newer release, named after the agent", async () => {
+  it("offers the guardian the newer release on one short line, the agent named in full", async () => {
     mockBackend({ check: [available("1.1.0", "1.2.0")] });
     renderIndicator();
+    const user = userEvent.setup();
 
     const row = await screen.findByRole("button", { name: OFFER });
-    expect(row.textContent).toBe(OFFER);
+    expect(row.textContent).toBe("Update to 1.2.0");
+    await user.hover(row);
+    expect((await screen.findByRole("tooltip")).textContent).toContain(OFFER);
   });
 
   it("shows the icon alone in the bare rail, with the text in its tooltip", async () => {
@@ -222,6 +225,7 @@ describe("UpgradeIndicator", () => {
       await rs.advanceTimersByTimeAsync(3_000);
 
       const done = await screen.findByRole("button", { name: UPDATED });
+      expect(done.textContent).toBe("UpdatedReload");
       // It stays: no reload and no timer takes it away.
       await rs.advanceTimersByTimeAsync(10 * 60_000);
       expect(screen.getByRole("button", { name: UPDATED })).toBe(done);

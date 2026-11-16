@@ -210,11 +210,15 @@
     }
   },
   "upgradeIndicator": {
-    "available": "Update {{name}} to {{version}}",
-    "updating": "{{name}} is updating to {{version}}…",
-    "failed": "Update did not finish",
+    "available": "Update to {{version}}",
+    "availableFull": "Update {{name}} to {{version}}",
+    "updating": "Updating to {{version}}…",
+    "updatingFull": "{{name}} is updating to {{version}}…",
+    "failed": "Update failed",
+    "failedFull": "Update to {{version}} failed",
+    "updated": "Updated",
+    "updatedFull": "{{name}} updated to {{version}}",
     "retry": "Retry",
-    "updated": "{{name}} updated to {{version}}",
     "reload": "Reload"
   },
   "upgradeBanner": {

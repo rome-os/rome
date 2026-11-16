@@ -110,49 +110,52 @@ function UpgradeRow({
   const { version } = state;
   const icon: ReactNode =
     state.kind === "available" ? (
-      <ArrowUp aria-hidden className="size-4 shrink-0" strokeWidth={2.5} />
+      <ArrowUp aria-hidden className="size-3.5 shrink-0" strokeWidth={2.5} />
     ) : state.kind === "updating" ? (
-      <Loader2 aria-hidden className="size-4 shrink-0 animate-spin" />
+      <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin" />
     ) : state.kind === "failed" ? (
-      <CircleAlert aria-hidden className="size-4 shrink-0" />
+      <CircleAlert aria-hidden className="size-3.5 shrink-0" />
     ) : (
-      <CircleCheck aria-hidden className="size-4 shrink-0" />
+      <CircleCheck aria-hidden className="size-3.5 shrink-0" />
     );
+  // The row's own line is short and leaves the agent out; the tooltip and
+  // the accessible name carry the whole sentence.
   const text =
     state.kind === "available"
-      ? t("upgradeIndicator.available", { name, version })
+      ? t("upgradeIndicator.available", { version })
       : state.kind === "updating"
-        ? t("upgradeIndicator.updating", { name, version })
+        ? t("upgradeIndicator.updating", { version })
         : state.kind === "failed"
           ? t("upgradeIndicator.failed")
-          : t("upgradeIndicator.updated", { name, version });
+          : t("upgradeIndicator.updated");
+  const sentence =
+    state.kind === "available"
+      ? t("upgradeIndicator.availableFull", { name, version })
+      : state.kind === "updating"
+        ? t("upgradeIndicator.updatingFull", { name, version })
+        : state.kind === "failed"
+          ? t("upgradeIndicator.failedFull", { version })
+          : t("upgradeIndicator.updatedFull", { name, version });
   const action =
     state.kind === "failed"
       ? t("upgradeIndicator.retry")
       : state.kind === "updated"
         ? t("upgradeIndicator.reload")
         : null;
-  const full = action ? `${text} · ${action}` : text;
+  const full = action ? `${sentence} · ${action}` : sentence;
 
   const shape = labelled
-    ? "flex w-full min-w-0 items-center gap-2 rounded-8 px-3 py-2 text-left text-ui font-medium"
-    : "flex size-10 items-center justify-center rounded-8";
+    ? "flex h-8 w-full min-w-0 items-center gap-2 rounded-8 px-2 text-left text-aux font-medium"
+    : "flex size-8 items-center justify-center rounded-8";
   const className = `rome-upgrade-row ${shape} transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50`;
 
   const body = labelled ? (
     <>
       {icon}
-      {/* The action runs on in the text, so a narrow rail wraps the line
-          rather than cutting the version off. */}
-      <span className="min-w-0 flex-1 line-clamp-3">
-        {text}
-        {action ? (
-          <>
-            {" · "}
-            <span className="font-semibold">{action}</span>
-          </>
-        ) : null}
-      </span>
+      {/* One line: the text gives way with an ellipsis, the action at the
+          end never does. */}
+      <span className="min-w-0 flex-1 truncate">{text}</span>
+      {action ? <span className="shrink-0 font-semibold">{action}</span> : null}
     </>
   ) : (
     icon
@@ -171,14 +174,13 @@ function UpgradeRow({
     );
 
   // Under the logo row: the rail's width with names shown, the logo's
-  // column without them.
-  if (labelled) return <div className="shrink-0 px-3 pb-3">{element}</div>;
+  // column without them. Either way the tooltip says the whole sentence.
   return (
-    <div className="flex shrink-0 justify-center pb-3">
+    <div className={labelled ? "shrink-0 px-3 pb-3" : "flex shrink-0 justify-center pb-3"}>
       <TooltipProvider delayDuration={150}>
         <Tooltip>
           <TooltipTrigger asChild>{element}</TooltipTrigger>
-          <TooltipContent side="right" collisionPadding={8}>
+          <TooltipContent side={labelled ? "bottom" : "right"} collisionPadding={8}>
             {full}
           </TooltipContent>
         </Tooltip>
