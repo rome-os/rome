@@ -797,6 +797,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       }
     } catch {
       failedSendRef.current = { inputId, text, uploads, skill };
+      // Before the returns below: the field may be gone, but the chat keeps it.
+      if (clearsOptimistically) sendEnded(persistNewChatDraft ? rawText : text, false);
       if (
         persistNewChatDraft &&
         (!textareaRef.current || (clearsOptimistically && textareaRef.current.value))
@@ -819,7 +821,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       }
       if (clearsOptimistically) {
         setInputText(persistNewChatDraft ? rawText : text);
-        sendEnded(text, false);
         setPendingUploads(uploads);
         setDraftSkill(skill);
         if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);

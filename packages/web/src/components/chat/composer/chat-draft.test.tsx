@@ -166,6 +166,31 @@ describe.each(["chat", "concierge"] as const)("the %s message field's draft", (k
   });
 });
 
+describe("the new chat page's draft", () => {
+  it("comes back in the chat its first send made when that send fails after the guardian left", async () => {
+    const send = heldSend();
+    const handle = createRef<ChatComposerHandle>();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (chatId: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ChatComposer ref={handle} persistNewChatDraft chatId={chatId} onSend={send.onSend} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const view = render(tree(null));
+    const field = view.container.querySelector("form textarea") as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "first words" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(send.onSend).toHaveBeenCalled());
+    view.rerender(tree("chat-new"));
+    view.unmount();
+    await send.settle(false);
+
+    expect(openChat("chat", "chat-new").field().value).toBe("first words");
+  });
+});
+
 describe("the stored chat draft", () => {
   it("is not cleared by a tab still open from before a logout", () => {
     const before = currentAuthEpoch();
