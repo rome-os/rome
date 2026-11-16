@@ -171,6 +171,46 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
 }
 
 /**
+ * What a focus on `thread` hides, by message id and by item key: every message
+ * outside the thread, whichever thread it is in or none, the guardian's and
+ * the agent's; the unread divider; and a time separator with nothing of the
+ * thread under it. Model notices and the typing bubble stay, and keep their
+ * separator. `threadOf` maps each message in a task thread to its thread.
+ */
+export function focusHidden(
+  items: readonly ConciergeItem[],
+  thread: string,
+  threadOf: ReadonlyMap<string, string>,
+): Set<string> {
+  const hidden = new Set<string>();
+  // The separator being read, and whether anything stays under it.
+  let separator: string | null = null;
+  let kept = false;
+  const settle = () => {
+    if (separator && !kept) hidden.add(separator);
+  };
+  for (const item of items) {
+    if (item.kind === "separator") {
+      settle();
+      separator = item.key;
+      kept = false;
+    } else if (item.kind === "unread") {
+      hidden.add(item.key);
+    } else if (item.kind === "notice") {
+      kept = true;
+    } else {
+      if (item.typing) kept = true;
+      for (const { message } of item.entries) {
+        if (threadOf.get(message.id) === thread) kept = true;
+        else hidden.add(message.id);
+      }
+    }
+  }
+  settle();
+  return hidden;
+}
+
+/**
  * Turns the transcript's rows into what the Concierge draws: groups of
  * same-sender messages, time separators, model-switch notices, and the unread
  * divider. Two

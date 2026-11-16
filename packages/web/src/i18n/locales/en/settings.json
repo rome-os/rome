@@ -358,6 +358,38 @@
     "summary": "Secrets apps can read, like a database password or an API key.",
     "manage": "Manage"
   },
+  "vault": {
+    "title": "Vault",
+    "openLabel": "Open Vault",
+    "keyCount_one": "{{count}} secret",
+    "keyCount_other": "{{count}} secrets",
+    "loading": "Loading the vault",
+    "errorTitle": "The vault couldn't be loaded",
+    "emptyTitle": "Nothing in the vault yet",
+    "emptyBody": "Add a secret, like an access token, so an agent can use it once you approve.",
+    "add": "Add secret",
+    "removeBody": "Agents will no longer be able to use this secret. This can't be undone.",
+    "form": {
+      "titleAdd": "New secret",
+      "labelField": "What is this secret for?",
+      "labelPlaceholder": "e.g. GitHub token for releases",
+      "nameField": "Name",
+      "namePlaceholder": "e.g. GITHUB_TOKEN",
+      "nameHint": "Uppercase letters, digits, and underscores. Commands read the secret under this name.",
+      "consent": "An agent can use this only after you approve it.",
+      "save": "Save",
+      "inputMethod": "How to add secrets",
+      "singleKey": "Single secret",
+      "back": "Back to the vault"
+    },
+    "saved": "Saved {{name}}.",
+    "batchSaved_one": "Saved {{count}} secret.",
+    "batchSaved_other": "Saved {{count}} secrets.",
+    "summary": "Secrets agents can use with your approval.",
+    "lastUsed": "Used {{time}}",
+    "neverUsed": "Never used",
+    "grantedUntil": "Granted until {{time}}"
+  },
   "trust": {
     "title": "Bond Level Rules",
     "trustedLevels": {

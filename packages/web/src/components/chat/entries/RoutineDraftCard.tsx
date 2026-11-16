@@ -456,7 +456,7 @@ function DraftDetails({ draft }: { draft: RoutineDraftSpec }) {
         ) : preview ? (
           <>
             <SpecRow label={t("routineCard.then")} value={preview.title} />
-            {preview.fields?.map((field) => (
+            {(preview.kind === "generic" ? preview.fields : undefined)?.map((field) => (
               <SpecRow key={field.label} label={field.label} value={field.value} />
             ))}
           </>
