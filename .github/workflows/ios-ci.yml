@@ -160,6 +160,8 @@ jobs:
       # start only once it has booted. Booting during the build slowed the
       # build by about four minutes, so it boots after.
       - name: Boot the simulator
+        # A hung boot fails here, readably, not at the job's limit.
+        timeout-minutes: 10
         run: xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
       # The voice input suite takes about 20 minutes, so a PR or push runs it only when it
       # changes voice input; nightly runs it whole, with rules 4 and 5, whose three minutes
@@ -231,10 +233,11 @@ jobs:
                      -skip-testing:RomeUITests/VoiceInputTests/testRule5OnlyTheGuardianSends)
             fi
           else
-            extra=(-only-testing:RomeUITests/LaunchTests)
+            # The launch test alone gets a second try, so a simulator hiccup does
+            # not fail the job. The voice input suite gets none: its rules exist to
+            # catch a start that misses now and then.
+            extra=(-only-testing:RomeUITests/LaunchTests -retry-tests-on-failure -test-iterations 2)
           fi
-          # A test that fails runs once more, so a simulator hiccup does not fail
-          # the job; a real failure fails both times.
           xcodebuild test-without-building \
             -project Rome.xcodeproj \
             -scheme RomeUITests \
@@ -242,8 +245,6 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/ui-dd" \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
             -disableAutomaticPackageResolution \
-            -retry-tests-on-failure \
-            -test-iterations 2 \
             -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             "${extra[@]}"
       # Rule 1: the field shows listening within 0.5 s of the start action. The app marks each
