@@ -6127,13 +6127,22 @@ describe("Concierge tasks started for a guardian message", () => {
       { joined = false }: { joined?: boolean } = {},
     ) => {
       await s.taskRepo.takeMessage(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
-      s.service.messageStatus.taken(CONCIERGE_CHAT, key, { joined });
+      s.service.messageStatus.taken(CONCIERGE_CHAT, key, turnId, { joined });
+      lastTurn = turnId;
     };
+    /** The turn that took a message last: the one that calls tools. */
+    let lastTurn = "concierge-turn-1";
     let calls = 0;
-    /** The turn calls `tool`: answers the call's id, and its grace running out. */
-    const callTool = (s: ReturnType<typeof setup>, tool: string) => {
+    /**
+     * The latest turn calls `tool`: answers its grace running out, and how
+     * to end the call.
+     */
+    const callTool = (s: ReturnType<typeof setup>, tool: string, turnId = lastTurn) => {
       const id = `call-${++calls}`;
-      return { id, ran: s.service.messageStatus.toolCalled(CONCIERGE_CHAT, tool, id) };
+      return {
+        ran: s.service.messageStatus.toolCalled(CONCIERGE_CHAT, turnId, tool, id),
+        end: () => s.service.messageStatus.toolEnded(CONCIERGE_CHAT, turnId, id),
+      };
     };
     /** A working tool call of the turn runs past its grace, on a clock moved by hand. */
     const workedLong = async (s: ReturnType<typeof setup>, tool = "chat_read") => {
@@ -6211,9 +6220,9 @@ describe("Concierge tasks started for a guardian message", () => {
       const seen = watch(s);
       await taken(s, "g1");
       // A quick defer, then a reaction: no call ran past its grace.
-      const { id } = callTool(s, "defer");
+      const call = callTool(s, "defer");
       await rs.advanceTimersByTimeAsync(50);
-      s.service.messageStatus.toolEnded(CONCIERGE_CHAT, id);
+      call.end();
       await rs.advanceTimersByTimeAsync(3_000);
       expect((await s.tool("react", { emoji: "👍" })).isError).toBeFalsy();
       await rs.advanceTimersByTimeAsync(10_000);
@@ -6230,12 +6239,61 @@ describe("Concierge tasks started for a guardian message", () => {
       await taken(s, "g1");
       const first = callTool(s, "Read");
       await rs.advanceTimersByTimeAsync(30);
-      s.service.messageStatus.toolEnded(CONCIERGE_CHAT, first.id);
+      first.end();
       await rs.advanceTimersByTimeAsync(3_000);
       expect(await statusOf(s, "g1")).toBeNull();
       const second = callTool(s, "Read");
       await second.ran;
       expect(await statusOf(s, "g1")).toBe("working");
+    });
+
+    it("never counts one turn's calls toward the next one's", async () => {
+      const s = setup({ said: false });
+      s.fakeTimers();
+      const seen = watch(s);
+      // Turn a: one quick call and a reaction; a newer message takes it over.
+      guardianSays(s, "g1", "turn-a");
+      await taken(s, "g1", "turn-a");
+      s.inTurn("turn-a");
+      callTool(s, "defer").end();
+      await s.tool("react", { emoji: "👍", message_id: "g1" });
+      // A call of turn a still runs when turn b takes over: its timer goes with it.
+      callTool(s, "chat_read");
+      s.chats.activeTurns = () => ["turn-b"];
+      await conciergeEnds(s, "interrupted", "turn-a");
+      // Turn b: one quick call and a reaction of its own.
+      guardianSays(s, "g2", "turn-b");
+      await taken(s, "g2", "turn-b");
+      s.inTurn("turn-b");
+      const call = callTool(s, "defer");
+      await rs.advanceTimersByTimeAsync(30);
+      call.end();
+      expect((await s.tool("react", { emoji: "👍", message_id: "g2" })).isError).toBeFalsy();
+      await rs.advanceTimersByTimeAsync(5_000);
+      expect(seen.filter(([, status]) => status !== null)).toEqual([]);
+      expect([
+        s.reactions.get(`${CONCIERGE_CHAT}:g1`),
+        s.reactions.get(`${CONCIERGE_CHAT}:g2`),
+      ]).toEqual(["👍", "👍"]);
+    });
+
+    it.each([
+      ["set after its turn ended keeps a task made for it from showing working", "👍", null],
+      ["cleared after its turn ended lets a task made for it show working", null, "working"],
+    ] as const)("a reaction %s", async (_, later, expected) => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      if (later === null) await s.tool("react", { emoji: "👍" });
+      else await s.tool("say", { text: "Sure." });
+      await conciergeEnds(s);
+      await s.settle();
+      // A later turn changes the reaction on the settled message, then starts a task for it.
+      s.inTurn("concierge-turn-2");
+      await s.tool("react", { emoji: later, message_id: "g1" });
+      await started(s, { answers: "g1" });
+      await s.settle();
+      expect(await statusOf(s, "g1")).toBe(expected);
     });
 
     it("shows work past the grace as working, and takes no reaction after it", async () => {
@@ -6755,9 +6813,9 @@ describe("Concierge tasks started for a guardian message", () => {
     describe("a turn that ends without answering (docs/domains/chats.md#reaction)", () => {
       /** The turn makes one quick working call, as `defer` does. */
       const quickCall = async (s: ReturnType<typeof setup>) => {
-        const { id } = callTool(s, "defer");
+        const call = callTool(s, "defer");
         await rs.advanceTimersByTimeAsync(30);
-        s.service.messageStatus.toolEnded(CONCIERGE_CHAT, id);
+        call.end();
       };
 
       it("reacts ✅ to a message a defer-only turn left silent", async () => {
@@ -6815,6 +6873,39 @@ describe("Concierge tasks started for a guardian message", () => {
         await s.settle();
         expect(s.reactions.has(`${CONCIERGE_CHAT}:g1`)).toBe(false);
         expect(await statusOf(s, "g1")).toBe("failed");
+      });
+
+      it.each([
+        ["no ✅ once the reminder delivers the answer", true, undefined],
+        ["✅ when the reminder says nothing either", false, "✅"],
+      ])("waits for the unsent-reply reminder, then gives %s", async (_, delivers, reaction) => {
+        const s = setup({ said: false });
+        s.fakeTimers();
+        guardianSays(s, "g1");
+        await taken(s, "g1");
+        await quickCall(s);
+        let seenAtReminder: string | undefined;
+        s.onBackendTurn(async () => {
+          seenAtReminder = s.reactions.get(`${CONCIERGE_CHAT}:g1`);
+          s.inTurn("reminder");
+          if (delivers) expect((await s.tool("say", { text: "It is 7291." })).isError).toBeFalsy();
+          await s.finish({
+            turnId: "reminder",
+            agentName: CONCIERGE_AGENT_ID,
+            chatId: CONCIERGE_CHAT,
+            text: "done",
+          });
+        });
+        // The turn wrote its answer outside `say`, so the reminder runs.
+        await s.finish({
+          turnId: "concierge-turn-1",
+          agentName: CONCIERGE_AGENT_ID,
+          chatId: CONCIERGE_CHAT,
+          text: "It is 7291.",
+        });
+        await s.settle();
+        expect(seenAtReminder).toBeUndefined();
+        expect(s.reactions.get(`${CONCIERGE_CHAT}:g1`)).toBe(reaction);
       });
     });
   });

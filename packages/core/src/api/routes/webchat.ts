@@ -1136,10 +1136,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (msg.type === "tool_use") {
       stream.calledTool = true;
       if (msg.tool && msg.id) {
-        void deps.concierge?.messageStatus?.toolCalled(stream.sessionId, msg.tool, msg.id);
+        void deps.concierge?.messageStatus?.toolCalled(
+          stream.sessionId,
+          stream.agentTurnId ?? stream.turnId,
+          msg.tool,
+          msg.id,
+        );
       }
     } else if (msg.type === "tool_result" && msg.toolUseId) {
-      deps.concierge?.messageStatus?.toolEnded(stream.sessionId, msg.toolUseId);
+      deps.concierge?.messageStatus?.toolEnded(
+        stream.sessionId,
+        stream.agentTurnId ?? stream.turnId,
+        msg.toolUseId,
+      );
     }
     if (!stream.writing) {
       const owner = stream.channelThreadKey
@@ -5099,10 +5108,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // working on it (docs/domains/chats.md#status).
         if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
           // A turn that called a tool already runs: the message joins it.
-          const joined = streamsByTurnId.get(status.turnId)?.calledTool === true;
+          const running = streamsByTurnId.get(status.turnId);
+          const joined = running?.calledTool === true;
+          // The turn as its tool calls name it.
+          const turnId = running ? (running.agentTurnId ?? running.turnId) : status.turnId;
           await deps.concierge?.deps.tasks.repo
             .takeMessage(status.turnId, { chatId: sessionId, messageKey: status.inputId })
-            .then(() => deps.concierge?.messageStatus?.taken(sessionId, status.inputId, { joined }))
+            .then(() =>
+              deps.concierge?.messageStatus?.taken(sessionId, status.inputId, turnId, { joined }),
+            )
             .catch((error: unknown) =>
               log.warn("failed to record the message a turn took", {
                 sessionId,

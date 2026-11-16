@@ -47,6 +47,13 @@ interface RunningCall {
   done: () => void;
 }
 
+/** The working tool calls of one turn: how many it made, and those that run. */
+interface TurnCalls {
+  turnId: string;
+  count: number;
+  running: Map<string, RunningCall>;
+}
+
 /**
  * The running turns' working triggers, one tracker per process. A message
  * handed on while it shows working keeps showing it, and then carries the
@@ -56,12 +63,13 @@ interface RunningCall {
 export class MessageStatusTracker {
   /** The chats with a message a running turn took. */
   private readonly open = new Set<string>();
-  /** Per chat, the messages that joined its turn after it called a tool. */
+  /** Per chat, the messages that joined a turn after it called a tool. */
   private readonly joined = new Map<string, Set<string>>();
-  /** Per chat, its turn's working tool calls that run, by call id. */
-  private readonly calls = new Map<string, Map<string, RunningCall>>();
-  /** Per chat, how many working tool calls its turn made. */
-  private readonly callCounts = new Map<string, number>();
+  /**
+   * Per chat, the working tool calls of its latest turn. A turn's calls never
+   * count toward another's: a newer turn drops them, timers included.
+   */
+  private readonly calls = new Map<string, TurnCalls>();
 
   /** `repoOf` is read at each use, as the service's task list may be wired after it. */
   constructor(
@@ -74,12 +82,18 @@ export class MessageStatusTracker {
   }
 
   /**
-   * A turn of Concierge chat `chatId` took guardian message `messageKey`.
-   * `joined` when the turn had called a tool before: the message joined it
-   * while it ran.
+   * Turn `turnId` of Concierge chat `chatId` took guardian message
+   * `messageKey`. `joined` when the turn had called a tool before: the
+   * message joined it while it ran.
    */
-  taken(chatId: string, messageKey: string, { joined = false }: { joined?: boolean } = {}): void {
+  taken(
+    chatId: string,
+    messageKey: string,
+    turnId: string,
+    { joined = false }: { joined?: boolean } = {},
+  ): void {
     this.open.add(chatId);
+    this.callsOf(chatId, turnId);
     if (!joined) return;
     const keys = this.joined.get(chatId) ?? new Set<string>();
     keys.add(messageKey);
@@ -87,31 +101,29 @@ export class MessageStatusTracker {
   }
 
   /**
-   * The running turn of chat `chatId` called `tool` as call `callId`. A
-   * working one that still runs after the grace, or the turn's second
-   * working one, shows the messages the turn started with working. Resolves
-   * once that is written, or the call ended first.
+   * Turn `turnId` of chat `chatId` called `tool` as call `callId`. A working
+   * one that still runs after the grace, or the turn's second working one,
+   * shows the messages the turn started with working. Resolves once that is
+   * written, or the call ended first.
    */
-  toolCalled(chatId: string, tool: string, callId: string): Promise<void> {
+  toolCalled(chatId: string, turnId: string, tool: string, callId: string): Promise<void> {
     if (!this.open.has(chatId) || !isWorkingTool(tool)) return Promise.resolve();
-    const count = (this.callCounts.get(chatId) ?? 0) + 1;
-    this.callCounts.set(chatId, count);
+    const turn = this.callsOf(chatId, turnId);
+    turn.count += 1;
     // Work made of short calls is work too: the second one shows it.
-    if (count === 2) return this.guard(this.ranLong(chatId));
-    const calls = this.calls.get(chatId) ?? new Map<string, RunningCall>();
-    this.calls.set(chatId, calls);
-    calls.get(callId)?.done();
+    if (turn.count === 2) return this.guard(this.ranLong(chatId));
+    turn.running.get(callId)?.done();
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        calls.delete(callId);
+        turn.running.delete(callId);
         void this.guard(this.ranLong(chatId)).then(() => resolve());
       }, this.graceMs);
       timer.unref?.();
-      calls.set(callId, {
+      turn.running.set(callId, {
         timer,
         done: () => {
           clearTimeout(timer);
-          calls.delete(callId);
+          turn.running.delete(callId);
           resolve();
         },
       });
@@ -123,9 +135,10 @@ export class MessageStatusTracker {
     return [...(this.joined.get(chatId) ?? [])];
   }
 
-  /** Call `callId` of chat `chatId`'s running turn came back: its grace ends. */
-  toolEnded(chatId: string, callId: string): void {
-    this.calls.get(chatId)?.get(callId)?.done();
+  /** Call `callId` of turn `turnId` of chat `chatId` came back: its grace ends. */
+  toolEnded(chatId: string, turnId: string, callId: string): void {
+    const turn = this.calls.get(chatId);
+    if (turn?.turnId === turnId) turn.running.get(callId)?.done();
   }
 
   /**
@@ -142,19 +155,41 @@ export class MessageStatusTracker {
     await this.guard(this.repo.markReacted(chatId, messageKey, false));
   }
 
+  /** Turn `turnId` of chat `chatId` ended: its calls count no more, and their timers stop. */
+  turnEnded(chatId: string, turnId: string): void {
+    const turn = this.calls.get(chatId);
+    if (turn?.turnId !== turnId) return;
+    this.dropCalls(turn);
+    this.calls.delete(chatId);
+  }
+
   /** Chat `chatId` runs no turn that carries its messages on: its turn's end settled them. */
   turnSettled(chatId: string): void {
     this.open.delete(chatId);
     this.joined.delete(chatId);
-    this.callCounts.delete(chatId);
-    for (const call of this.calls.get(chatId)?.values() ?? []) call.done();
+    const turn = this.calls.get(chatId);
+    if (turn) this.dropCalls(turn);
     this.calls.delete(chatId);
   }
 
   /** Stops every timer, as when the process shuts down. */
   stop(): void {
-    for (const calls of this.calls.values()) for (const call of calls.values()) call.done();
+    for (const turn of this.calls.values()) this.dropCalls(turn);
     this.calls.clear();
+  }
+
+  // A chat runs one turn at a time, so a call of another turn starts afresh.
+  private callsOf(chatId: string, turnId: string): TurnCalls {
+    const current = this.calls.get(chatId);
+    if (current?.turnId === turnId) return current;
+    if (current) this.dropCalls(current);
+    const turn: TurnCalls = { turnId, count: 0, running: new Map() };
+    this.calls.set(chatId, turn);
+    return turn;
+  }
+
+  private dropCalls(turn: TurnCalls): void {
+    for (const call of [...turn.running.values()]) call.done();
   }
 
   // Work handed on from an earlier turn is the work: the messages beside it

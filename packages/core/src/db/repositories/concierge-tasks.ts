@@ -742,9 +742,8 @@ export class ConciergeTasksRepository {
           answeredAt: null,
           turnFailed: false,
           // The right side reads the row as it was: a message handed on keeps
-          // what its turn showed and whether it reacted to it.
+          // what its turn showed. Its reaction stays on it either way.
           workingAt: sql`CASE WHEN ${conciergeMessageTurns.answeredAt} IS NULL THEN ${conciergeMessageTurns.workingAt} END`,
-          reacted: sql`CASE WHEN ${conciergeMessageTurns.answeredAt} IS NULL THEN ${conciergeMessageTurns.reacted} ELSE 0 END`,
         },
       });
     this.messageChanged([target]);
@@ -785,21 +784,27 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * The open turn of guardian message `messageKey` of chat `chatId` reacted to
-   * it: that is how it handled it, so the turn shows it neither working nor,
-   * should it fail or be cut off, failed. A task made for it still shows.
-   * With `reacted` false the turn took its reaction back, so the message is
-   * its work again.
+   * The Concierge reacted to guardian message `messageKey` of chat `chatId`,
+   * in its turn or later: that is how it handled it, so it never shows
+   * working, and an open turn shows it no failed should it fail or be cut
+   * off. With `reacted` false the reaction was taken back, so the message is
+   * work again.
    */
   async markReacted(chatId: string, messageKey: string, reacted = true): Promise<void> {
     const changed = await this.db
       .update(conciergeMessageTurns)
-      .set(reacted ? { reacted: true, workingAt: null } : { reacted: false })
+      .set(
+        reacted
+          ? {
+              reacted: true,
+              workingAt: sql`CASE WHEN ${conciergeMessageTurns.answeredAt} IS NULL THEN NULL ELSE ${conciergeMessageTurns.workingAt} END`,
+            }
+          : { reacted: false },
+      )
       .where(
         and(
           eq(conciergeMessageTurns.chatId, chatId),
           eq(conciergeMessageTurns.messageKey, messageKey),
-          isNull(conciergeMessageTurns.answeredAt),
         ),
       )
       .returning({
@@ -852,11 +857,29 @@ export class ConciergeTasksRepository {
           eq(conciergeMessageTurns.chatId, chatId),
           eq(conciergeMessageTurns.turnId, turnId),
           isNull(conciergeMessageTurns.answeredAt),
+        ),
+      );
+    return this.silentAmong(
+      chatId,
+      rows.map((row) => row.key),
+    );
+  }
+
+  /** Which of `messageKeys` of chat `chatId` have no reaction, never showed working and have no task. */
+  async silentAmong(chatId: string, messageKeys: readonly string[]): Promise<string[]> {
+    if (messageKeys.length === 0) return [];
+    const keys = [...messageKeys];
+    const quiet = await this.db
+      .select({ key: conciergeMessageTurns.messageKey })
+      .from(conciergeMessageTurns)
+      .where(
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          inArray(conciergeMessageTurns.messageKey, keys),
           isNull(conciergeMessageTurns.workingAt),
           eq(conciergeMessageTurns.reacted, false),
         ),
       );
-    if (rows.length === 0) return [];
     const linked = new Set(
       (
         await this.db
@@ -865,15 +888,12 @@ export class ConciergeTasksRepository {
           .where(
             and(
               eq(conciergeMessageTasks.chatId, chatId),
-              inArray(
-                conciergeMessageTasks.messageKey,
-                rows.map((row) => row.key),
-              ),
+              inArray(conciergeMessageTasks.messageKey, keys),
             ),
           )
       ).map((row) => row.key),
     );
-    return rows.map((row) => row.key).filter((key) => !linked.has(key));
+    return quiet.map((row) => row.key).filter((key) => !linked.has(key));
   }
 
   /**
