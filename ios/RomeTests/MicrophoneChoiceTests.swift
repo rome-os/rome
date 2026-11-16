@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 @testable import Rome
@@ -6,6 +7,17 @@ import Testing
     private func fresh() -> MicrophoneChoice {
         let name = "microphone-choice-\(UUID().uuidString)"
         return MicrophoneChoice(defaults: UserDefaults(suiteName: name)!)
+    }
+
+    @MainActor
+    @Test func listingTheMicrophonesLeavesTheAudioSessionAsItWas() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        defer { try? session.setCategory(.soloAmbient) }
+        _ = MicrophoneChoice.available(session)
+        #expect(session.category == .playback)
+        #expect(session.mode == .spokenAudio)
+        #expect(session.categoryOptions == [.duckOthers])
     }
 
     @Test func isTheSystemDefaultUntilOneIsChosenAndAgainAfterItIsCleared() {
