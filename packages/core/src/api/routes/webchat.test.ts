@@ -4894,7 +4894,7 @@ describe("Webchat API", () => {
       deps.concierge = new ConciergeService({
         ...deps,
         accounts: deps.modelAccounts,
-        tasks: { repo: { threadTasks: async () => new Map() } },
+        tasks: { repo: { threadTasks: async () => new Map() }, onMessageStatus: () => () => {} },
       } as unknown as ConciergeDeps);
       const open = deps.agentSessionManager.open;
       deps.agentSessionManager.open = rs.fn(async (key: AgentSessionKey, init?: SessionOpening) => {

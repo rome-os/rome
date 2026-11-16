@@ -35,6 +35,7 @@
     "lint:imports": "tsx lint/import-rules.ts",
     "imports-of": "tsx scripts/imports-of.ts",
     "concierge:eval": "tsx scripts/concierge-eval/main.ts",
+    "concierge:baseline": "tsx scripts/concierge-eval/baseline.ts",
     "preflight": "tsx scripts/preflight.ts",
     "lint:deadcode": "knip --no-config-hints",
     "lint:deadcode:report": "knip --no-exit-code",
