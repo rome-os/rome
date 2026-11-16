@@ -26,14 +26,14 @@ import {
 } from "@/lib/voice-input/microphone-choice";
 
 /**
- * Names where the dashboard's dictated speech becomes text. Absent on an
- * instance without voice input, including an account Rome Cloud does not
- * allow it for.
+ * Voice input's settings: which microphone it records from, and, while Rome
+ * Cloud cannot serve it, why. Absent on an instance without voice input,
+ * including an account Rome Cloud does not allow it for.
  */
 export function VoiceInputRow() {
   const { t } = useTranslation("settings");
-  // Rome Cloud can move voice input to another provider, so read the place
-  // again each time Settings opens.
+  // Whether Rome Cloud can serve voice input changes, so ask again each time
+  // Settings opens.
   const query = useVoiceInputInfo({ refetchOnMount: "always" });
   const info = query.data;
   if (query.isError) {
@@ -47,14 +47,17 @@ export function VoiceInputRow() {
     );
   }
   if (!info?.available) return null;
+  const problem = describeProblem(info, t);
   return (
     <>
-      <FormRow>
-        <FormRowHeading>
-          <FormRowLabel>{t("system.voiceInput.title")}</FormRowLabel>
-          <FormRowDescription>{describe(info, t)}</FormRowDescription>
-        </FormRowHeading>
-      </FormRow>
+      {problem && (
+        <FormRow>
+          <FormRowHeading>
+            <FormRowLabel>{t("system.voiceInput.title")}</FormRowLabel>
+            <FormRowDescription>{problem}</FormRowDescription>
+          </FormRowHeading>
+        </FormRow>
+      )}
       <MicrophoneRow />
     </>
   );
@@ -155,12 +158,12 @@ function MicrophoneRow() {
   );
 }
 
-function describe(
+/** Why Rome Cloud cannot serve voice input right now; null while it can. */
+function describeProblem(
   info: VoiceInputInfo,
   t: (key: string, options?: Record<string, string>) => string,
-): string {
-  const place = info.place;
-  if (place) return t("system.voiceInput.placeViaRomeCloud");
+): string | null {
+  if (info.place) return null;
   return info.placeUnknown === "rome-cloud-not-configured"
     ? t("system.voiceInput.romeCloudNotConfigured")
     : info.placeUnknown === "rome-cloud-signed-out"

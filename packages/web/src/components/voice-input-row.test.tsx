@@ -31,17 +31,15 @@ async function rowText(info: VoiceInputInfo): Promise<string> {
 }
 
 describe("the voice input row in Settings", () => {
-  it("says Rome Cloud provides it without naming the transcription provider", async () => {
+  it("shows only the microphone while Rome Cloud serves voice input, naming no provider", async () => {
     const text = await rowText({
       available: true,
       place: { provider: "Soniox", host: "stt-rt.soniox.com" },
     });
-    expect(text).toContain("Voice input");
-    expect(text).toContain(
-      "Speech dictated into a message goes through Rome to a transcription service provided through Rome Cloud.",
-    );
+    expect(text).toContain("Microphone");
     expect(text).not.toContain("Soniox");
     expect(text).not.toContain("stt-rt.soniox.com");
+    expect(screen.queryByText("Voice input", { exact: true })).toBeNull();
   });
 
   it("says Rome Cloud cannot be reached rather than naming a provider", async () => {
@@ -50,7 +48,7 @@ describe("the voice input row in Settings", () => {
       place: null,
       placeUnknown: "rome-cloud-unreachable",
     });
-    expect(text).toContain("cannot be reached right now");
+    expect(text).toContain("Rome Cloud can't be reached right now, so voice input may not work.");
     expect(text).not.toContain("Soniox");
   });
 

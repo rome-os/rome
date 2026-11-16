@@ -370,28 +370,24 @@ final class VoiceInputTests: XCTestCase {
 
     // MARK: Rule 10
 
-    /// Rule 10 on the phone: before any dictation, Settings has a "Voice input" row that says
-    /// Rome Cloud provides it, and never names the transcription provider or its host that
-    /// Rome's `GET /api/voice-input` reports.
+    /// Rule 10 on the phone: while Rome Cloud serves voice input, Settings names no transcription
+    /// provider or host anywhere, and shows no "Voice input" status row.
     @MainActor
-    func testRule10TheAppNamesWhereVoiceGoes() throws {
+    func testRule10TheAppNamesNoProvider() throws {
         let place = try voiceInputPlace()
         let app = try launch()
         touchable(app.buttons.matching(NSPredicate(format: "label == %@", "Open navigation"))).tap()
         let settings = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", "settings")).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 10), "the navigation has no settings")
         settings.tap()
-        let row = app.descendants(matching: .any)["voice-input-place"]
-        guard row.waitForExistence(timeout: 10) else {
-            printScreen(app, "rule 10: settings")
-            return XCTFail("Settings has no \"Voice input\" row")
-        }
-        let value = row.value as? String ?? ""
-        let shown = value + " " + row.label
-        XCTAssertTrue(row.label.hasPrefix("Voice input"), "the row is labelled \"\(row.label)\", not \"Voice input\"")
-        if !shown.contains("Rome Cloud") || shown.contains(place.provider) || shown.contains(place.host) {
-            printScreen(app, "rule 10: voice input row")
-            XCTFail("the \"Voice input\" row says \"\(value.isEmpty ? row.label : value)\"; it should say Rome Cloud and never name \"\(place.provider)\" or \"\(place.host)\"")
+        XCTAssertTrue(app.staticTexts["Version"].waitForExistence(timeout: 10), "Settings never opened")
+        XCTAssertFalse(app.descendants(matching: .any)["voice-input-place"].exists, "Settings shows a \"Voice input\" status row")
+        for name in [place.provider, place.host] {
+            let shown = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", name, name))
+            if shown.count > 0 {
+                printScreen(app, "rule 10: settings")
+                XCTFail("Settings names \"\(name)\"")
+            }
         }
     }
 
