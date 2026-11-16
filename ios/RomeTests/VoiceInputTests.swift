@@ -174,6 +174,9 @@ import Testing
         #expect(signedOut?.problemText == String(localized: "Sign in to Rome Cloud again"))
         let older = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true}"#.utf8))
         #expect(older?.available == true)
+        #expect(older?.problemText == nil)
+        let unreachable = try? JSONDecoder().decode(VoiceInputInfo.self, from: Data(#"{"available":true,"place":null,"placeUnknown":"rome-cloud-unreachable"}"#.utf8))
+        #expect(unreachable?.problemText == String(localized: "Rome Cloud can't be reached"))
     }
 
     @Test func standInsOfferNoVoiceInput() async throws {
