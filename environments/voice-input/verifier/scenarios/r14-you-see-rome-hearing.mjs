@@ -21,13 +21,18 @@ import { micState, watchPage } from "../lib/watch.mjs";
 /** The recording, in seconds from the microphone opening: when sound plays. */
 export const SOUND = [
   [1, 4],
-  [7, 10],
+  [12, 15],
 ];
-const LENGTH_S = 11;
+const LENGTH_S = 16;
 /** How late a photograph may find the sound's start. */
 const FRAME_SLACK_S = 0.2;
 /** How soon the form must settle once sound stops, start moving once it starts, and the longest it may hold still during sound. */
 export const SETTLE_MS = 500;
+/**
+ * How long silence may last before the form must hold still. A scrolling waveform keeps
+ * moving until the last sound has scrolled out of what it shows.
+ */
+export const REST_MS = 5000;
 
 export default {
   rule: "14",
@@ -129,14 +134,14 @@ function score(frames, zero) {
   const [next] = SOUND[1];
   // The clock is found from a photograph, so it may run a frame late; the next sound's first
   // frame stays out of the silence.
-  const quiet = within(end + SETTLE_MS / 1000, next - FRAME_SLACK_S);
+  const quiet = within(end + REST_MS / 1000, next - FRAME_SLACK_S);
   const moved = quiet.filter((f) => f.changed).length;
   checks.push(
     required(
       check(
         "holds still in silence",
         quiet.length > 0 && moved === 0 ? "pass" : "fail",
-        `${moved} of ${quiet.length} photographs from ${end + SETTLE_MS / 1000} s to ${next - FRAME_SLACK_S} s changed${
+        `${moved} of ${quiet.length} photographs from ${end + REST_MS / 1000} s to ${next - FRAME_SLACK_S} s changed${
           moved
             ? ` (at ${quiet
                 .filter((f) => f.changed)

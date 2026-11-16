@@ -602,16 +602,22 @@ function enterWhileListening() {
   setTimeout(finish, 3000);
 }
 
-/** A bar in the form as wide as the sound the microphone hears, and gone in silence. */
+/**
+ * A waveform in the form that scrolls the last second of sound, as the dashboard's does. In
+ * silence it draws nothing new, so it holds still once the sound has scrolled out.
+ */
 function showHearing(stream) {
-  const bar = document.createElement("span");
-  bar.className = "hearing";
-  bar.style.cssText = "display:inline-block;height:8px;width:0;background:#06c";
-  form.append(bar);
+  const wave = document.createElement("canvas");
+  wave.className = "hearing";
+  wave.width = 120;
+  wave.height = 16;
+  form.append(wave);
   if (variant === "fail-14") {
-    bar.animate([{ width: "4px" }, { width: "40px" }], { duration: 400, iterations: Infinity });
-    return () => bar.remove();
+    wave.animate([{ opacity: 0.3 }, { opacity: 1 }], { duration: 400, iterations: Infinity });
+    return () => wave.remove();
   }
+  const pen = wave.getContext("2d");
+  pen.fillStyle = "#06c";
   const context = new AudioContext();
   const analyser = context.createAnalyser();
   context.createMediaStreamSource(stream).connect(analyser);
@@ -620,14 +626,19 @@ function showHearing(stream) {
   const draw = () => {
     analyser.getFloatTimeDomainData(data);
     const rms = Math.sqrt(data.reduce((sum, v) => sum + v * v, 0) / data.length);
-    bar.style.width = (rms < 0.01 ? 0 : Math.min(60, Math.round(rms * 200))) + "px";
+    const height = rms < 0.01 ? 0 : Math.min(16, Math.round(rms * 100));
+    pen.globalCompositeOperation = "copy";
+    pen.drawImage(wave, -2, 0);
+    pen.globalCompositeOperation = "source-over";
+    pen.clearRect(118, 0, 2, 16);
+    if (height) pen.fillRect(118, 8 - height / 2, 2, height);
     frame = requestAnimationFrame(draw);
   };
   draw();
   return () => {
     cancelAnimationFrame(frame);
     context.close();
-    bar.remove();
+    wave.remove();
   };
 }
 
