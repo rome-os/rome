@@ -18,6 +18,7 @@ import { baselineMarkdown, type ScenarioRun } from "./baseline-report.js";
 import { drive } from "./drive.js";
 import { judge, type Verdict } from "./judge.js";
 import { Stack, checkSnapshotName, sleep } from "./stack.js";
+import { type TaskPath, readSpans, taskPath } from "./task-path.js";
 import { type TimedTurn, timedTurns } from "./timing.js";
 
 const USAGE = `pnpm concierge:baseline --config <label> --model <selection id> --effort <low|high> [--runs N]
@@ -58,6 +59,7 @@ const { values: args } = parseArgs({
     user: { type: "string", default: "dev" },
     out: { type: "string", default: ".concierge-eval/baseline" },
     timeout: { type: "string", default: "25" },
+    obs: { type: "string", default: process.env.ROME_OBS_QUERY_URL ?? "http://clickhouse.rome.localhost:3000" },
     help: { type: "boolean" },
   },
 });
@@ -166,6 +168,14 @@ async function playScenario(
       return null;
     });
   }
+  // A delegated task's time, split by where it went, from the stack's traces.
+  let path: TaskPath | null = null;
+  if (scenario.row === "simple-task" || scenario.row === "heavy-task") {
+    path = await taskPathOf(chat.id, startedAt, startedAtIso).catch((error: unknown) => {
+      log(`task path failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+  }
   log(`checks ${notes.length ? notes.join("; ") : "ok"}; score ${verdict?.score ?? "-"}`);
   return {
     id: scenario.id,
@@ -181,7 +191,24 @@ async function playScenario(
     notes,
     verdict,
     transcript,
+    taskPath: path,
   };
+}
+
+/** The breakdown of the chat's first task, once its traces reached rome-obs. */
+async function taskPathOf(chatId: string, sentAt: number, sinceIso: string): Promise<TaskPath | null> {
+  const [tasks] = stack.query<{ session_id: string }>([
+    {
+      sql: "SELECT session_id FROM concierge_tasks WHERE chat_id = ? AND session_id IS NOT NULL ORDER BY created_at",
+      params: [chatId],
+    },
+  ]);
+  const task = tasks?.[0]?.session_id;
+  if (!task) return null;
+  // Spans are exported in batches.
+  await sleep(10_000);
+  const rows = await readSpans(args.obs as string, [chatId, task], sinceIso);
+  return taskPath(rows, chatId, task, sentAt);
 }
 
 async function pool<T, R>(items: T[], size: number, work: (item: T) => Promise<R>): Promise<R[]> {

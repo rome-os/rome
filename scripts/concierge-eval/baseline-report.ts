@@ -3,6 +3,7 @@
 // and the judge's scores. docs/concierge-eval.md#baseline
 
 import type { Verdict } from "./judge.js";
+import type { TaskPath } from "./task-path.js";
 import { type TimedTurn, secs, spread } from "./timing.js";
 
 /** One scenario played once under one configuration. */
@@ -22,6 +23,8 @@ export interface ScenarioRun {
   notes: string[];
   verdict: Verdict | null;
   transcript: string[];
+  /** Where a delegated task's time went; absent for the other scenarios. */
+  taskPath?: TaskPath | null;
 }
 
 const mean = (values: number[]) =>
@@ -100,6 +103,8 @@ export function baselineMarkdown(runs: ScenarioRun[]): string {
     out.push(`| ${HEADER.join(" | ")} |`, `|${HEADER.map(() => "---").join("|")}|`);
     const configs = [...new Set(ofScenario.map((r) => r.config))].sort();
     for (const config of configs) out.push(configRow(ofScenario.filter((r) => r.config === config)));
+    const paths = ofScenario.filter((r) => r.taskPath);
+    if (paths.length) out.push("", ...taskPathTable(paths));
     const failed = ofScenario.filter((r) => r.notes.length);
     if (failed.length) {
       out.push("", "Failed checks:");
@@ -113,4 +118,47 @@ export function baselineMarkdown(runs: ScenarioRun[]): string {
     out.push("");
   }
   return out.join("\n");
+}
+
+/** The task path of each run: where a delegated task's time went, in seconds. */
+function taskPathTable(runs: ScenarioRun[]): string[] {
+  const head = [
+    "Config",
+    "Run",
+    "Send→chat_start",
+    "→task turn starts",
+    "Task open",
+    "Task turns (n)",
+    "Subagent calls",
+    "Read/Grep/Glob",
+    "Task end→relay turn",
+    "Relay first say",
+    "Send→result",
+  ];
+  const rows = runs.map((r) => {
+    const t = r.taskPath as TaskPath;
+    const calls = t.subagentCalls
+      .map((c) => `${c.agent ?? c.tool} ${c.model ?? "?"} ${secs(c.ms)}s${c.parallel ? " ∥" : ""}`)
+      .join("; ");
+    return `| ${[
+      r.config,
+      String(r.run),
+      secs(t.toChatStartMs),
+      secs(t.taskStartGapMs),
+      secs(t.taskOpenMs),
+      `${secs(t.taskTurnsMs)} (${t.taskTurns})`,
+      calls || "none",
+      String(t.readCalls),
+      secs(t.relayWaitMs),
+      secs(t.relayFirstSayMs),
+      secs(r.resultMs),
+    ].join(" | ")} |`;
+  });
+  return [
+    "Task path (s):",
+    "",
+    `| ${head.join(" | ")} |`,
+    `|${head.map(() => "---").join("|")}|`,
+    ...rows,
+  ];
 }
