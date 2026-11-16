@@ -15,7 +15,7 @@ function migrationSql(tag: string): string[] {
 }
 
 describe("the root message id migration", () => {
-  it("roots every message in a chat thread at the message its thread was keyed by, and drops the old columns", () => {
+  it("adds the root column with every existing message its own root, and drops the old columns", () => {
     const journal = JSON.parse(
       readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8"),
     ) as { entries: { tag: string }[] };
@@ -25,16 +25,15 @@ describe("the root message id migration", () => {
     for (const tag of tags.slice(0, tags.indexOf(TAG))) {
       for (const statement of migrationSql(tag)) sqlite.exec(statement);
     }
-    // A database from before: two chats, each with a task thread, a message
-    // that quotes one outside any thread, and a thread whose root is gone.
+    // A database from before: a task thread, a message that quotes one
+    // outside any thread, and a thread whose root is gone.
     sqlite.exec(
       "INSERT INTO chats (platform, key, kind, started_at) VALUES ('webchat', 'concierge', 'dm', 1), ('webchat', 'topic', 'dm', 1)",
     );
     const insert = sqlite.prepare(
       "INSERT INTO chat_messages (chat_id, key, text, parts, said_at, reply_to_message_id, chat_thread_id, chat_thread_settled) VALUES (?, ?, ?, '[]', ?, ?, ?, ?)",
     );
-    // The thread keyed t1: its root, a reply and an answer. The same keys
-    // are another chat's own, so a lookup must stay in the chat.
+    // The task thread keyed t1, in two chats.
     insert.run(1, "t1", "Weather?", 1, null, "t1", 1);
     insert.run(1, "a1", "Sunny", 2, null, "t1", 1);
     insert.run(1, "u2", "And Friday?", 3, 2, "t1", 1);
@@ -59,27 +58,17 @@ describe("the root message id migration", () => {
       )
       .all();
     expect(rows).toEqual([
-      // The root itself keeps null: it is its own root.
+      // Task threads from before are not kept: every message is its own root,
+      // and its reply stays as it was.
       { chat: 1, key: "t1", replyTo: null, root: null },
-      { chat: 1, key: "a1", replyTo: null, root: "t1" },
-      { chat: 1, key: "u2", replyTo: 2, root: "t1" },
+      { chat: 1, key: "a1", replyTo: null, root: null },
+      { chat: 1, key: "u2", replyTo: 2, root: null },
       { chat: 2, key: "t1", replyTo: null, root: null },
-      // A key names a message of the same chat only.
-      { chat: 2, key: "b1", replyTo: null, root: "t1" },
-      // Old quotes outside a thread are only quotes.
+      { chat: 2, key: "b1", replyTo: null, root: null },
       { chat: 1, key: "p1", replyTo: null, root: null },
       { chat: 1, key: "q1", replyTo: 6, root: null },
       { chat: 1, key: "orphan", replyTo: null, root: null },
     ]);
-    // The chat 2 thread rooted at that chat's own `t1`, not chat 1's.
-    expect(
-      sqlite
-        .prepare(
-          "SELECT m.root_message_id AS root, r.chat_id AS rootChat FROM chat_messages m JOIN chat_messages r ON r.id = m.root_message_id WHERE m.key = 'b1'",
-        )
-        .get(),
-    ).toEqual({ root: 4, rootChat: 2 });
-
     const columns = (table: string) =>
       sqlite
         .prepare(`SELECT name FROM pragma_table_info('${table}')`)
