@@ -176,7 +176,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       notice: draft.notice,
       setNotice: draft.setNotice,
       keepNotice: draft.keepNotice,
+      onSend: () => void runSendRef.current(),
     });
+    const runSendRef = useRef<() => Promise<void>>(async () => {});
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;
 
@@ -284,6 +286,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       replyDraft,
       voice.active,
     ]);
+    runSendRef.current = runSend;
 
     useImperativeHandle(
       ref,
@@ -593,7 +596,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                       }
                       if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
                         event.preventDefault();
-                        void runSend();
+                        // While listening, Enter ends voice input and sends what it heard.
+                        if (voice.active) voice.stopAndSend();
+                        else void runSend();
                       }
                     }}
                     onPaste={(event) => {

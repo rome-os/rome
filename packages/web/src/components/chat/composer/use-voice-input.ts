@@ -79,6 +79,7 @@ export function useVoiceInput({
   notice,
   setNotice,
   keepNotice,
+  onSend,
   deps,
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -87,6 +88,8 @@ export function useVoiceInput({
   notice: DictationStop | null;
   setNotice: (next: DictationStop | null) => void;
   keepNotice: (stop: DictationStop) => void;
+  /** Sends the field, for `stopAndSend` once the last words are in. */
+  onSend?: () => void;
   deps?: DictationDeps;
 }) {
   const info = useVoiceInputInfo();
@@ -99,6 +102,10 @@ export function useVoiceInput({
   // Waits for a hidden field to show again, to insert the spoken text natively.
   const waitingRef = useRef<ResizeObserver | null>(null);
 
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+  // Set by `stopAndSend`: the send waits for the last words.
+  const sendWhenDoneRef = useRef(false);
   const keepNoticeRef = useRef(keepNotice);
   keepNoticeRef.current = keepNotice;
   const setNoticeRef = useRef(setNotice);
@@ -108,6 +115,7 @@ export function useVoiceInput({
     // page the browser keeps for Back stays mounted, so the field is given
     // back here too; on unmount these updates do nothing.
     const leave = (reason: "left-chat" | "page-reloaded") => {
+      sendWhenDoneRef.current = false;
       if (!dictationRef.current) return;
       dictationRef.current.cancel();
       dictationRef.current = null;
@@ -203,6 +211,10 @@ export function useVoiceInput({
           commit(heard);
           setState("idle");
           setNotice(stop);
+          // A stop of its own, such as a lost connection, sends nothing: the
+          // guardian reads why before sending.
+          if (sendWhenDoneRef.current && !stop) setSendAsked((n) => n + 1);
+          sendWhenDoneRef.current = false;
         },
       },
       deps,
@@ -217,11 +229,26 @@ export function useVoiceInput({
     if (!inserting) setNotice(null);
   }, [setNotice]);
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const stop = useCallback(() => {
-    if (!dictationRef.current) return;
+    if (!dictationRef.current || stateRef.current !== "listening") return;
     setState("finishing");
     dictationRef.current.stop();
   }, []);
+
+  const stopAndSend = useCallback(() => {
+    if (!dictationRef.current) return;
+    sendWhenDoneRef.current = true;
+    stop();
+  }, [stop]);
+
+  // Counts the sends `stopAndSend` asked for. The effect runs after the
+  // render that holds the last words, so the send reads them.
+  const [sendAsked, setSendAsked] = useState(0);
+  useEffect(() => {
+    if (sendAsked > 0) onSendRef.current?.();
+  }, [sendAsked]);
 
   // A field no one can see does not listen: a closed tab or pane hides it
   // with `display: none`, which leaves it no boxes.
@@ -257,5 +284,7 @@ export function useVoiceInput({
     toggle: state === "listening" ? stop : start,
     /** Stops listening as the stop control does. Does nothing while idle. */
     stop,
+    /** Stops listening, then sends once the last words are in the field. Does nothing while idle. */
+    stopAndSend,
   };
 }
