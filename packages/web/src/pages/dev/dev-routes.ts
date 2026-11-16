@@ -87,7 +87,7 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         path: "/dev/voice-level",
         title: "Voice input level",
         description:
-          "Prototype: three ways the composer shows the microphone hears the guardian (pulse, level meter, waveform), driven by the real microphone or a simulated voice.",
+          "Prototype: four ways the composer shows the microphone hears the guardian (pulse, level meter, waveform, spinning ball), driven by the real microphone or a simulated voice.",
         Component: lazy(() => import("./VoiceLevelPage")),
       },
       {

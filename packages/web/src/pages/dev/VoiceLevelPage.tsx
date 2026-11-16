@@ -2,8 +2,8 @@ import { Mic, Paperclip, Send, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
-// Prototype: three ways for the composer to show that the microphone hears
-// the guardian while voice input listens. All three cards share one audio
+// Prototype: four ways for the composer to show that the microphone hears
+// the guardian while voice input listens. All four cards share one audio
 // source, so they move together and compare side by side. The source is the
 // real microphone or a simulated voice for a device that has none.
 
@@ -240,7 +240,59 @@ function Waveform({ subscribe }: { subscribe: Subscribe }) {
   return <canvas ref={canvas} aria-hidden className="h-7 w-full min-w-0 text-primary" />;
 }
 
-// --- The composer frame the three variants sit in ---
+// --- Variant D: a ball that spins while listening and speeds up and grows with the voice ---
+
+const SPIN_IDLE_TURNS_PER_S = 0.5;
+const SPIN_VOICE_TURNS_PER_S = 1.5;
+
+function SpinningBall({ subscribe }: { subscribe: Subscribe }) {
+  const ball = useRef<HTMLSpanElement>(null);
+  const surface = useRef<HTMLSpanElement>(null);
+  const angle = useRef(0);
+  const last = useRef<number | null>(null);
+  useLevel(subscribe, (level) => {
+    const now = performance.now();
+    const dt = last.current === null ? 0 : (now - last.current) / 1000;
+    last.current = now;
+    if (!ball.current || !surface.current) return;
+    if (reducedMotion()) {
+      ball.current.style.transform = `scale(${level > 0.15 ? 1.15 : 1})`;
+      return;
+    }
+    angle.current =
+      (angle.current + dt * 360 * (SPIN_IDLE_TURNS_PER_S + level * SPIN_VOICE_TURNS_PER_S)) % 360;
+    surface.current.style.transform = `rotate(${angle.current}deg)`;
+    ball.current.style.transform = `scale(${1 + level * 0.3})`;
+  });
+  return (
+    <span
+      ref={ball}
+      aria-hidden
+      className="relative size-6 shrink-0 overflow-hidden rounded-full"
+      style={{ transform: "scale(1)" }}
+    >
+      {/* The bands that spin. */}
+      <span
+        ref={surface}
+        className="absolute -inset-1"
+        style={{
+          background:
+            "conic-gradient(from 0deg, var(--color-primary), color-mix(in oklch, var(--color-primary) 45%, white), var(--color-primary), color-mix(in oklch, var(--color-primary) 70%, black), var(--color-primary))",
+        }}
+      />
+      {/* Fixed light and shade, so the bands read as turning on a sphere. */}
+      <span
+        className="absolute inset-0 rounded-full"
+        style={{
+          background:
+            "radial-gradient(circle at 32% 28%, rgb(255 255 255 / 0.55), transparent 45%), radial-gradient(circle at 70% 78%, rgb(0 0 0 / 0.28), transparent 60%)",
+        }}
+      />
+    </span>
+  );
+}
+
+// --- The composer frame the variants sit in ---
 
 function StopButton({ onStop }: { onStop: () => void }) {
   return (
@@ -352,9 +404,9 @@ export default function VoiceLevelPage() {
             Voice input: showing the microphone hears you
           </h1>
           <p className="text-ui text-muted-foreground">
-            Press the microphone in any composer, or one of the buttons below, then speak. All three
+            Press the microphone in any composer, or one of the buttons below, then speak. All four
             move together from the same audio, so you can compare them. With reduced motion turned
-            on, A and B change in steps instead of moving smoothly.
+            on, A, B and D change in steps instead of moving smoothly.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={start} disabled={audio.source === "microphone"}>
@@ -424,6 +476,23 @@ export default function VoiceLevelPage() {
             onStart={start}
             toolbar={<Waveform subscribe={audio.subscribe} />}
             voiceControl={<StopButton onStop={stop} />}
+          />
+        </Variant>
+
+        <Variant
+          letter="D"
+          name="Spinning ball"
+          description="A small ball beside the stop button spins while listening, even in silence, and spins faster and grows when you speak."
+        >
+          <ComposerFrame
+            listening={listening}
+            onStart={start}
+            voiceControl={
+              <span className="flex items-center gap-2">
+                <SpinningBall subscribe={audio.subscribe} />
+                <StopButton onStop={stop} />
+              </span>
+            }
           />
         </Variant>
       </div>
