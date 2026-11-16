@@ -246,6 +246,13 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     );
   });
 
+  it("stops when the environment runs another app ref than the one expected", async () => {
+    await assert.rejects(
+      runAgainst("good", { rules: ["A1"], expectAppRef: "phase-2-inbox-worker" }),
+      /runs app ref main at fake-good, not phase-2-inbox-worker/,
+    );
+  });
+
   it("refuses a dirty tree unless allowed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cos-verify-dirty-"));
     const env = {

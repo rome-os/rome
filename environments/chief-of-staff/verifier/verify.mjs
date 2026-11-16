@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // verify [--rules K1,A5] [--phase 1] [--dirty] [--cos-env "<command>"] [--judge "<command>"]
 //        [--out <dir>] [--reply-wait <s>] [--a1-wait <s>] [--poll <s>] [--gap <s>]
-//        [--day-hours <h>] [--offline-wait <s>] [--note <text>]...
+//        [--day-hours <h>] [--offline-wait <s>] [--expect-app-ref <ref>] [--note <text>]...
 // Scores the chief of staff agent against the rules from the chat alone. See README.md.
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,7 @@ const { values } = parseArgs({
     "day-hours": { type: "string", default: "24" },
     "offline-wait": { type: "string", default: "3600" },
     note: { type: "string", multiple: true, default: [] },
+    "expect-app-ref": { type: "string" },
   },
 });
 
@@ -59,6 +60,7 @@ try {
     runsDir: values["runs-dir"],
     outDir: values.out,
     log: (line) => process.stderr.write(`${line}\n`),
+    expectAppRef: values["expect-app-ref"],
   });
   if (report.stopped) {
     console.log(report.stopped);

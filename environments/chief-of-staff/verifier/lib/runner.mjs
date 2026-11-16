@@ -193,6 +193,7 @@ export async function verify({
   runsDir,
   outDir,
   log,
+  expectAppRef,
 }) {
   const startedAt = new Date();
   const version = { ...(await env.version()), verifier: verifierCommit() };
@@ -208,6 +209,14 @@ export async function verify({
   const team = loadTeam();
   await env.reset();
   await env.seed(writeSeed(team, join(dir, "seed")));
+  // A reset can reinstall Rome or the app from the environment's settings, so the build under
+  // test is read again after it, and checked against the one the run was asked for.
+  Object.assign(version, await env.version(), { verifier: version.verifier });
+  if (expectAppRef && version.app?.ref !== expectAppRef) {
+    throw new Error(
+      `the environment runs app ref ${version.app?.ref ?? "unknown"} at ${version.app?.commit ?? "unknown"}, not ${expectAppRef}; bring it up on the build under test`,
+    );
+  }
   for (const member of team.members)
     await env.rename({ as: member.account, displayName: member.name });
 

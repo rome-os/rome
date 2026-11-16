@@ -25,6 +25,7 @@ node environments/chief-of-staff/verifier/verify.mjs --rules K1,A5
 | `--gap <s>` | The pause between messages A3 replays and A2 says | 3 |
 | `--day-hours <h>` | How far A2 and K4 move the agent's clock for "a day later" | 24 |
 | `--offline-wait <s>` | How long A8 keeps Rome stopped while the team talks | 3600 |
+| `--expect-app-ref <ref>` | Stop before any rule runs unless, after the reset, the environment runs the chief of staff app from this ref. A reset installs the app from the environment's settings, so a run from a shell without them tests another build | |
 | `--out <dir>` | Write the report here instead of the runs folder | |
 | `--note <text>` | A note for the report, such as the state of a pull request in the build. Repeatable | |
 
