@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { shouldSubmitOnEnter } from "./keyboard-submit";
+import { shouldSubmitOnEnter } from "./keyboard-submit.js";
 
 describe("shouldSubmitOnEnter", () => {
   it("submits on plain Enter", () => {

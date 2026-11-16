@@ -24,7 +24,7 @@ import type { DeviceFilesErrorCode } from "@rome/api-types/devices";
 import { useDeviceFolderBrowser, type PickerDevice } from "./use-device-folder-browser";
 import { useThisDevice } from "@/hooks/use-this-device";
 import { desktopFolderPicker } from "@/lib/electron-shell";
-import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
+import { isImeCompositionEvent, shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 import {
   Command,
   CommandGroup,
@@ -499,6 +499,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
                       value={newProjectName}
                       onChange={(event) => setNewProjectName(event.target.value)}
                       onKeyDown={(event) => {
+                        if (isImeCompositionEvent(event)) return;
                         if (event.key === "Escape") {
                           event.preventDefault();
                           setCreateFormOpen(false);
