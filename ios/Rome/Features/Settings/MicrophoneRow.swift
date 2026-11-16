@@ -8,23 +8,36 @@ struct MicrophoneRow: View {
     @State private var options: [MicrophoneOption] = []
     @State private var chosen = MicrophoneChoice().chosen
 
-    /// What the row shows: the chosen microphone, or System default.
-    private var value: String {
-        options.first { $0.id == chosen }?.name ?? String(localized: "System default")
+    /// The chosen microphone while it is listed, else nil for System default.
+    /// An unplugged microphone leaves the list, so the row shows System
+    /// default, which voice input then records from. Only listening forgets
+    /// the choice, from the list an active session gives.
+    private var shown: String? {
+        options.contains { $0.id == chosen } ? chosen : nil
     }
 
-    /// An unplugged microphone leaves the list, and the choice switches to
-    /// the system default, which voice input then records from.
+    /// What the row shows: the chosen microphone, or System default.
+    private var value: String {
+        options.first { $0.id == shown }?.name ?? String(localized: "System default")
+    }
+
     private func refresh() {
         options = MicrophoneChoice.available()
-        chosen = MicrophoneChoice().settle(connected: options.map(\.id))
+        chosen = MicrophoneChoice().chosen
+    }
+
+    /// Only a microphone plugged in or taken off changes the list. Listing
+    /// the microphones changes the session's category and back, which iOS
+    /// also reports as a route change, so refreshing on that would loop.
+    static func refreshes(on reason: AVAudioSession.RouteChangeReason?) -> Bool {
+        reason == .newDeviceAvailable || reason == .oldDeviceUnavailable
     }
 
     var body: some View {
         SettingsRow(systemImage: "mic.badge.plus", title: "Microphone", last: last) {
             Menu {
                 Picker("Microphone", selection: Binding(
-                    get: { chosen },
+                    get: { shown },
                     set: { id in
                         let choice = MicrophoneChoice()
                         choice.chosen = id
@@ -55,9 +68,9 @@ struct MicrophoneRow: View {
             .accessibilityIdentifier("voice-input-microphone")
         }
         .onAppear { refresh() }
-        // A headset plugged in or taken off changes the list.
-        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { _ in
-            refresh()
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init)
+            if Self.refreshes(on: reason) { refresh() }
         }
     }
 }

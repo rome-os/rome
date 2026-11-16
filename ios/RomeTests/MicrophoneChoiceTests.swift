@@ -9,6 +9,15 @@ import Testing
         return MicrophoneChoice(defaults: UserDefaults(suiteName: name)!)
     }
 
+    @Test func settingsRefreshesOnlyWhenAMicrophoneIsPluggedInOrTakenOff() {
+        #expect(MicrophoneRow.refreshes(on: .newDeviceAvailable))
+        #expect(MicrophoneRow.refreshes(on: .oldDeviceUnavailable))
+        // Listing the microphones changes the category and back; that must not refresh again.
+        #expect(!MicrophoneRow.refreshes(on: .categoryChange))
+        #expect(!MicrophoneRow.refreshes(on: .override))
+        #expect(!MicrophoneRow.refreshes(on: nil))
+    }
+
     @MainActor
     @Test func listingTheMicrophonesLeavesTheAudioSessionAsItWas() throws {
         let session = AVAudioSession.sharedInstance()
