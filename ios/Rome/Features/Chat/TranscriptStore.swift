@@ -755,8 +755,7 @@ final class TranscriptStore {
 
     static func threadTitle(of message: ChatMessage, in messages: [ChatMessage]) -> String? {
         if let title = message.chatThreadTitle { return title }
-        let root = message.threadRoot
-        return messages.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
+        return TranscriptBuilder.threadTitles(messages)[message.threadRoot]
     }
 
     /// Whether `message` is in a chat thread of more than one message: its

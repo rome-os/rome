@@ -918,11 +918,16 @@ describe("ChatsWebChatRepository", () => {
       ]);
       expect(await repo.lastInChatThread("chat-1", "m1")).toBe("m2");
       expect(await repo.lastInChatThread("chat-1", "missing")).toBeNull();
-      // A reply is no root, so it names no thread.
-      expect((await repo.getChatThreadMessages("chat-1", "m2")).map((line) => line.id)).toEqual([]);
-      expect(await repo.chatThreadSizes("chat-1", ["m1", "m2"])).toEqual(
-        new Map([["m1", { size: 3, rootText: "Weather?" }]]),
-      );
+      // Any message of a thread names it, as a client that sends the message it tapped does.
+      for (const key of [answer, "m2"]) {
+        expect((await repo.getChatThreadMessages("chat-1", key)).map((line) => line.id)).toEqual([
+          "m1",
+          answer,
+          "m2",
+        ]);
+        expect(await repo.lastInChatThread("chat-1", key)).toBe("m2");
+      }
+      expect(await repo.chatThreadSizes("chat-1", ["m1", "m2"])).toEqual(new Map([["m1", 3]]));
     });
   });
 });

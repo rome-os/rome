@@ -13,6 +13,7 @@ import { buildRows } from "./chat-view";
 import type { BlockActions, LivePreview } from "./MessageList";
 import {
   ChatThreadsProvider,
+  chatThreadsOf,
   type ThreadTimelineMessage,
   threadLabels,
   threadsOf,
@@ -97,6 +98,35 @@ describe("threadsOf", () => {
     expect(threadsOf([g("q1"), a("a1", "q1")]).titles).toEqual(new Map([["q1", "Flights"]]));
     expect(threadsOf([g("q1", "q1"), a("a1", "q1")]).titles).toEqual(new Map([["q1", "Flights"]]));
     expect(threadsOf([g("q7"), a("a1", "q7")]).titles).toEqual(new Map());
+  });
+
+  it("names a thread no task started in by the start of its root's text", () => {
+    const root = (content: string): ThreadTimelineMessage => ({
+      ...g("r"),
+      content: JSON.stringify([{ type: "text", content }]),
+    });
+    const named = (text: string) => threadsOf([root(text), a("a1", "r")]).titles.get("r");
+    expect(named("Plan Kyoto in April")).toBe("Plan Kyoto in April");
+    // The first line only, as plain reading text.
+    expect(named("## Plan Kyoto\nthen the hotels")).toBe("Plan Kyoto");
+    // Cut short, with an ellipsis.
+    const cut = named("Compare every ryokan along the Kamo river for the April trip please");
+    expect(cut).toBe("Compare every ryokan along the Kamo river for the…");
+    expect(Array.from(cut!)).toHaveLength(50);
+    // A task's title wins, and a root with no text, or not loaded, gives none.
+    expect(threadsOf([root("Plan"), a("a1", "q1")]).titles.get("q1")).toBe("Flights");
+    expect(named("   ")).toBeUndefined();
+    expect(threadsOf([g("r"), a("a1", "r")]).titles.get("r")).toBeUndefined();
+    expect(threadsOf([a("a1", "r")]).titles.get("r")).toBeUndefined();
+  });
+
+  it("gives a split thread with no task a label named by its root's text", () => {
+    const root = {
+      ...g("r"),
+      content: JSON.stringify([{ type: "text", content: "Plan Kyoto in April" }]),
+    };
+    const labels = threadLabels([root, free("w1"), a("a1", "r")]);
+    expect(labels.get("a1")).toEqual({ thread: "r", title: "Plan Kyoto in April" });
   });
 
   it("knows the guardian's messages in a thread too", () => {
@@ -350,14 +380,7 @@ function renderTranscript(
       <MemoryRouter>
         <ReplyDraftProvider value={draft}>
           <ThemeProvider>
-            <ChatThreadsProvider
-              value={{
-                labels: threadLabels(shown),
-                roots: threadsOf(shown).roots,
-                titles: threadsOf(shown).titles,
-                focus: focused?.root ?? null,
-              }}
-            >
+            <ChatThreadsProvider value={chatThreadsOf(shown, focused?.root ?? null)}>
               <ReplyBar />
               <ConciergeTranscript
                 rows={rows}
@@ -554,6 +577,16 @@ describe("the source label in the transcript", () => {
     // a1 to a4 run on, the owner's m2 between them included: a2 and a3 show nothing.
     expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(2);
     expect(screen.queryByText("Routine · Check-in")).toBeNull();
+  });
+
+  it("keeps a routine reply's source label when the owner replies to it: that thread shows no labels", () => {
+    renderTranscript([
+      trace("t-r1", 10, { type: "routine", name: "Daily summary" }),
+      reply("r1", 10),
+      message("g1", "user", "thanks", "r1", 11),
+    ]);
+    expect(screen.getByText("Routine · Daily summary")).toBeTruthy();
+    expect(document.querySelector("[data-thread-label]")).toBeNull();
   });
 
   it("gives a reply in a task's thread its thread label alone", () => {

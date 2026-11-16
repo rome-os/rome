@@ -1648,10 +1648,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
-  // The name of each chat thread of the messages that holds more than one
-  // message, in a Concierge chat (docs/domains/chats.md#chat-thread): the
-  // title of the newest task started in it, else the start of its root
-  // message's text. A message in a thread of its own is sent as none.
+  // The title of the newest task started in each chat thread of the messages
+  // that holds more than one message, in a Concierge chat
+  // (docs/domains/chats.md#chat-thread). A thread no task started in has no
+  // title here: a client names it from its root's text. A message alone in
+  // its thread is sent as none.
   const attachChatThreadTitles = async <T extends object>(
     sessionId: string,
     messages: T[],
@@ -1667,7 +1668,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sizes =
       chat && isConciergeChat(chat)
         ? await deps.webchatRepo.chatThreadSizes(sessionId, roots)
-        : new Map<string, { size: number; rootText: string }>();
+        : new Map<string, number>();
     const tasks =
       sizes.size > 0
         ? ((await deps.concierge?.deps.tasks.repo.threadTasks(sessionId, [...sizes.keys()])) ??
@@ -1678,7 +1679,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (!thread) return message;
       const size = sizes.get(thread);
       if (!size) return { ...message, chatThreadId: null };
-      const title = tasks.get(thread)?.title ?? normalizeConversationTitle(size.rootText);
+      const title = tasks.get(thread)?.title;
       return title ? { ...message, chatThreadTitle: title } : message;
     });
   };
@@ -1766,7 +1767,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     { withLayout = false }: { withLayout?: boolean } = {},
   ) => {
-    // One chat thread, named by its root, in one page: threads are short.
+    // One chat thread, named by any of its messages, in one page: threads are short.
     const threadParam = c.req.query("thread");
     if (threadParam !== undefined) {
       if (!threadParam) return c.json({ error: "thread must name a message" }, 400);
@@ -3854,8 +3855,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   type SendBody = {
     inputId?: string;
     /**
-     * The root of the chat thread the composer is focused on: the message
-     * replies to the thread's last message. Only a Concierge chat keeps it.
+     * A message of the chat thread the composer is focused on, its root as
+     * the dashboard sends it: the message replies to the thread's last
+     * message. Only a Concierge chat keeps it.
      */
     chatThread?: unknown;
     automatedSource?: unknown;

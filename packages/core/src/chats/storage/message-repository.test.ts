@@ -394,11 +394,12 @@ describe("MessageRepository", () => {
       messages.record({ ...heard("m3", new Date(at.getTime() + 1000)), replyTo: "m2" });
       messages.record(heard("m4", new Date(at.getTime() + 2000), "Alone"));
       expect(messages.lastInChatThread(chat, "m1")).toBe("m3");
+      // Any message of the thread names it.
+      expect(messages.lastInChatThread(chat, "m2")).toBe("m3");
+      expect(messages.lastInChatThread(chat, "m3")).toBe("m3");
       expect(messages.lastInChatThread(chat, "m4")).toBe("m4");
       expect(messages.lastInChatThread(chat, "missing")).toBeNull();
-      expect(messages.chatThreadSizes(chat, ["m1", "m4", "m2"])).toEqual(
-        new Map([["m1", { size: 3, rootText: "m1" }]]),
-      );
+      expect(messages.chatThreadSizes(chat, ["m1", "m4", "m2"])).toEqual(new Map([["m1", 3]]));
     });
   });
 

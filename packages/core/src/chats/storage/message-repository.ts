@@ -303,16 +303,20 @@ export class MessageRepository {
   }
 
   /**
-   * The key of the last message said in the chat thread whose root is keyed
-   * `root` in `chat`, the root itself when nothing replies to it, or null
-   * when Rome holds no such root. docs/domains/chats.md#chat-thread
+   * The key of the last message said in the chat thread of the message keyed
+   * `key` in `chat`, which may be any message of the thread: the root itself
+   * when nothing replies to it, or null when Rome holds no such message.
+   * docs/domains/chats.md#chat-thread
    */
-  lastInChatThread(chat: ChatRef, root: string): string | null {
+  lastInChatThread(chat: ChatRef, key: string): string | null {
     return (
       this.db.all<{ key: string }>(sql`
-        SELECT m.key FROM chat_messages r
-        JOIN chat_messages m ON m.chat_id = r.chat_id AND (m.id = r.id OR m.root_message_id = r.id)
-        WHERE r.chat_id = ${chatIdOf(chat)} AND r.key = ${root}
+        WITH thread(root) AS (
+          SELECT coalesce(root_message_id, id) FROM chat_messages
+          WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
+        )
+        SELECT m.key FROM thread JOIN chat_messages m ON m.chat_id = ${chatIdOf(chat)}
+          AND (m.id = thread.root OR m.root_message_id = thread.root)
         ORDER BY m.said_at DESC, m.id DESC LIMIT 1
       `)[0]?.key ?? null
     );
@@ -320,23 +324,19 @@ export class MessageRepository {
 
   /**
    * Of the chat threads `roots` name in `chat`, the ones that hold more than
-   * one message, each with its message count and the text its root message
-   * says, by the root's key.
+   * one message, each with its message count, by the root's key.
    */
-  chatThreadSizes(
-    chat: ChatRef,
-    roots: readonly string[],
-  ): Map<string, { size: number; rootText: string }> {
+  chatThreadSizes(chat: ChatRef, roots: readonly string[]): Map<string, number> {
     if (roots.length === 0) return new Map();
-    const rows = this.db.all<{ key: string; text: string; size: number }>(sql`
-      SELECT r.key, r.text, 1 + count(m.id) AS size
+    const rows = this.db.all<{ key: string; size: number }>(sql`
+      SELECT r.key, 1 + count(m.id) AS size
       FROM chat_messages r
       JOIN chat_messages m ON m.chat_id = r.chat_id AND m.root_message_id = r.id
       WHERE r.chat_id = ${chatIdOf(chat)}
         AND r.key IN (SELECT value FROM json_each(${JSON.stringify([...new Set(roots)])}))
       GROUP BY r.id
     `);
-    return new Map(rows.map((row) => [row.key, { size: row.size, rootText: row.text }]));
+    return new Map(rows.map((row) => [row.key, row.size]));
   }
 
   /**

@@ -400,26 +400,27 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /**
-   * The messages of the chat thread whose root is keyed `root`, in the order
-   * they were said. Empty when the chat holds no such message.
+   * The messages of the chat thread of the message keyed `key`, which may be
+   * any message of it, in the order they were said. Empty when the chat
+   * holds no such message.
    */
-  override async getChatThreadMessages(sessionId: string, root: string): Promise<TranscriptLine[]> {
-    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, root);
+  override async getChatThreadMessages(sessionId: string, key: string): Promise<TranscriptLine[]> {
+    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, key);
   }
 
-  /** The key of the last message of the chat thread whose root is keyed
-   *  `root` in chat `sessionId`, or null when the chat holds none. */
-  override async lastInChatThread(sessionId: string, root: string): Promise<string | null> {
+  /** The key of the last message of the chat thread of the message keyed
+   *  `key` in chat `sessionId`, or null when the chat holds none. */
+  override async lastInChatThread(sessionId: string, key: string): Promise<string | null> {
     const standing = this.standingOf(sessionId);
-    return standing ? this.lines.lastInChatThread(standing.place.chat, root) : null;
+    return standing ? this.lines.lastInChatThread(standing.place.chat, key) : null;
   }
 
-  /** How many messages each chat thread of `roots` holds in chat `sessionId`,
-   *  and the text its root message starts with, by the root's key. */
+  /** How many messages each chat thread of `roots` holds in chat `sessionId`
+   *  that holds more than one, by the root's key. */
   override async chatThreadSizes(
     sessionId: string,
     roots: readonly string[],
-  ): Promise<Map<string, { size: number; rootText: string }>> {
+  ): Promise<Map<string, number>> {
     const standing = this.standingOf(sessionId);
     return standing ? this.lines.chatThreadSizes(standing.place.chat, roots) : new Map();
   }
@@ -1256,11 +1257,13 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
       ${
-        // The thread's root and every message that replies down to it.
+        // The thread of the message keyed `chatThread`, any message of it: its
+        // root and every message that replies down to it.
         chatThread === undefined
           ? sql``
           : sql`AND COALESCE(m.root_message_id, m.id) = (
-              SELECT t.id FROM chat_messages t WHERE t.chat_id = s.chat_id AND t.key = ${chatThread}
+              SELECT COALESCE(t.root_message_id, t.id) FROM chat_messages t
+              WHERE t.chat_id = s.chat_id AND t.key = ${chatThread}
             )`
       }
     -- Only a prompt or answer link says whose turn a line is: one caught up

@@ -2099,7 +2099,10 @@ export function Chat({
         // A text-only send shows its bubble at once. An upload keeps its text
         // in the composer until the server accepts it, so its bubble waits too.
         snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
-        snapshot.chatThread,
+        // The row is in its thread at once: the one in focus, else the replied
+        // message's, which a message alone in its own starts.
+        snapshot.chatThread ??
+          (replyTo ? (rootsRef.current.get(replyTo.messageId) ?? replyTo.messageId) : undefined),
       );
     },
     [
@@ -2548,7 +2551,9 @@ export function Chat({
     <button
       type="button"
       data-thread-back
-      aria-label={t("thread.back", { title: focus.title })}
+      aria-label={
+        focus.title ? t("thread.back", { title: focus.title }) : t("chat.back", { ns: "common" })
+      }
       onClick={() => void closeFocus()}
       className={cn(
         "pointer-events-auto col-start-1 row-start-1 flex h-[var(--control-h-md)] max-w-full min-w-0 cursor-pointer items-center gap-1 justify-self-start rounded-full pr-3 pl-2 text-ui text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50",

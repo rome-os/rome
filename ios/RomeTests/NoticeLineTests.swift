@@ -113,9 +113,9 @@ private func rows(_ messages: [ChatMessage], notices: Bool = true) -> [Transcrip
         inThread.chatThreadTitle = "Book flights"
         inThread.knowsThreads = true
         let options = TranscriptBuilder.Options(showThreads: true, showNotices: true)
-        // Alone in its thread, it shows no label, and not its source either.
+        // Alone in its thread, it shows no thread label, so its source shows.
         let alone = TranscriptBuilder.rows(messages: [inThread, trace(turn: "t1", at: 61, summary)], pending: [], answers: [:], options: options)
-        #expect(labels(alone).isEmpty)
+        #expect(labels(alone) == ["Agent · Flint"])
         #expect(!alone.contains { if case .threadLabel = $0 { true } else { false } })
         // In a split thread it shows its thread's label.
         var later = text("b", turn: "t2", at: 80)
@@ -125,6 +125,18 @@ private func rows(_ messages: [ChatMessage], notices: Bool = true) -> [Transcrip
         let split = TranscriptBuilder.rows(messages: [inThread, text("x", role: "user", turn: "t0", at: 70), later], pending: [], answers: [:], options: options)
         #expect(labels(split).isEmpty)
         #expect(split.contains { if case .threadLabel = $0 { true } else { false } })
+    }
+
+    /// A routine's reply the owner replied to is in a thread, but one nothing
+    /// splits, which shows no labels: the reply keeps its source label.
+    @Test func aRepliedToRoutineMessageKeepsItsSourceLabel() {
+        let summary = TraceSummary(automatedInput: .init(type: "routine", name: "Daily"))
+        var thanks = text("g", role: "user", turn: "t0", at: 61)
+        thanks.chatThreadId = "r"
+        thanks.knowsThreads = true
+        let options = TranscriptBuilder.Options(showThreads: true, showNotices: true)
+        let built = TranscriptBuilder.rows(messages: [text("r", turn: "t1", at: 60), thanks, trace(turn: "t1", at: 62, summary)], pending: [], answers: [:], options: options)
+        #expect(labels(built) == ["Routine · Daily"])
     }
 
     /// An automated message from before marks its turn, and is not drawn.

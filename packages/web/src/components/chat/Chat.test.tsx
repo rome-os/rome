@@ -221,6 +221,17 @@ function ReplyJump() {
       >
         open other thread
       </button>
+      {/* Picks a reply to a message, as the Reply button does. */}
+      {["a-1", "u-3"].map((id) => (
+        <button
+          key={id}
+          type="button"
+          data-testid={`reply-to-${id}`}
+          onClick={() => reply?.set({ messageId: id, author: "agent", preview: "quoted" })}
+        >
+          reply
+        </button>
+      ))}
       {/* Whether a quote of the message could go to it. */}
       <span data-testid="has-u2">{String(reply?.has("u-2"))}</span>
       {/* An older message the timeline has not loaded. */}
@@ -475,8 +486,9 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
                   reasoningEffort: "medium",
                   projectPath: "",
                   inputId: "11111111-1111-4111-8111-111111111111",
-                  // As the real composer does: the thread the draft sends into.
+                  // As the real composer does: the thread the draft sends into, and its reply.
                   ...(thread ? { chatThread: thread } : {}),
+                  ...(draft?.target ? { replyTo: draft.target } : {}),
                 },
                 { onUploadProgress: () => {}, signal: new AbortController().signal },
               )
@@ -3062,6 +3074,58 @@ describe("Chat Concierge empty state", () => {
       expect(sent?.dataset.chatThread).toBe("u-2");
       // Sending leaves the thread in focus.
       expect(composer().dataset.thread).toBe("u-2");
+    });
+
+    describe("a reply sent from the timeline", () => {
+      // u-1 started a thread that a-1 answers; u-3 is alone.
+      const replied = () =>
+        rs.mocked(listSessionMessages).mockResolvedValueOnce(
+          (
+            [
+              ["u-1", "user", null, "turn-a"],
+              ["a-1", "assistant", "u-1", "turn-a"],
+              ["u-3", "user", null, "turn-c"],
+            ] as const
+          ).map(([id, role, thread, turnId]) => ({
+            id,
+            sessionId: "session-1",
+            turnId,
+            role,
+            content: JSON.stringify([{ type: "text", content: id }]),
+            createdAt: "2026-11-10T10:00:00Z",
+            chatThreadId: thread,
+          })),
+        );
+      const sentRow = async () =>
+        (await screen.findAllByTestId("user-row")).find((row) =>
+          row.textContent?.includes("sent at once"),
+        );
+
+      it("is in its replied message's thread at once, so no label flashes before the answer", async () => {
+        replied();
+        rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("reply-to-a-1"));
+
+        fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+        await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+        expect((await sentRow())?.dataset.chatThread).toBe("u-1");
+      });
+
+      it("starts a thread at a replied message that is alone", async () => {
+        replied();
+        rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("reply-to-u-3"));
+
+        fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+        await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+        expect((await sentRow())?.dataset.chatThread).toBe("u-3");
+      });
     });
 
     it("sends to the whole chat once the focus is closed", async () => {

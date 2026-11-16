@@ -61,7 +61,7 @@ final class ThreadStore {
     /// The thread's name, as its messages carry it.
     var title: String? {
         (chat?.message(anchor.id) ?? anchor).chatThreadTitle
-            ?? messages.lazy.compactMap(\.chatThreadTitle).first
+            ?? TranscriptBuilder.threadTitles(messages)[root]
     }
 
     private var knowsThreads: Bool { (chat?.instanceKnowsThreads ?? false) || anchor.knowsThreads }

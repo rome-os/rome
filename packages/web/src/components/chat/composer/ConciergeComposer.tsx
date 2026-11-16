@@ -605,7 +605,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     placeholder={
                       pendingUploads.length > 0
                         ? t("composer.placeholderWithUploads")
-                        : replyDraft?.thread
+                        : replyDraft?.thread && replyDraft.threadTitle
                           ? t("thread.replyPlaceholder", { title: replyDraft.threadTitle })
                           : (namedPlaceholder ?? t("concierge.placeholder"))
                     }

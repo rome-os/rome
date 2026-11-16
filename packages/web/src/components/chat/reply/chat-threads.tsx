@@ -10,6 +10,7 @@ import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage } from "@/lib/chat-types";
 import { useReplyDraft } from "./reply-draft";
+import { plainQuote } from "./reply-source";
 
 /** What the label under one message names: its thread, by the thread's name. */
 export interface ThreadLabel {
@@ -22,9 +23,11 @@ export interface ThreadLabel {
 export interface ChatThreads {
   /** The labels to show, by the id of the agent message each sits under. */
   labels: ReadonlyMap<string, ThreadLabel>;
+  /** The threads that show labels: named, and split up by other messages. */
+  labelled: ReadonlySet<string>;
   /** The root of the thread each message of more than one is in, by message id: the guardian's too. */
   roots: ReadonlyMap<string, string>;
-  /** Each thread's name, by its root. */
+  /** Each thread's name, by its root, when it has one. */
   titles: ReadonlyMap<string, string>;
   /** The root of the thread the transcript is filtered to, or null when it shows every message. */
   focus: string | null;
@@ -43,6 +46,23 @@ export function useChatThreads(): ChatThreads | null {
 export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId"> &
   Partial<Pick<ChatMessage, "content" | "chatThreadTitle">>;
 
+/** How much of a root's text names its thread. */
+const THREAD_NAME_MAX = 50;
+
+/** The first line of a message's text, cut short, or null when it has none. */
+function startOfText(message: ThreadTimelineMessage): string | null {
+  if (message.content === undefined) return null;
+  const part = parseMessageEntries({ id: message.id, content: message.content }).find(
+    (candidate) => candidate.type === "text",
+  );
+  const line = plainQuote(part?.type === "text" ? (part.content.split("\n", 1)[0] ?? "") : "");
+  if (!line) return null;
+  const letters = Array.from(line);
+  return letters.length > THREAD_NAME_MAX
+    ? `${letters.slice(0, THREAD_NAME_MAX - 1).join("")}…`
+    : line;
+}
+
 /**
  * The thread each message of a loaded timeline is in, by message id, and each
  * thread's name by its root. The server sends `chatThreadId`, the root's key,
@@ -50,7 +70,9 @@ export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThrea
  * that gains its first reply. So a message is in thread R when its
  * `chatThreadId` is R, or when its own id is R and a loaded message says it
  * is in R: a reply that arrives pulls its root in. A message alone in its
- * thread is in none. The name is the one any message of the thread carries.
+ * thread is in none. The name is the title of the newest task started in the
+ * thread, which any of its messages carries, else the start of the root's
+ * text when the root is loaded.
  */
 export function threadsOf(messages: readonly ThreadTimelineMessage[]): {
   roots: Map<string, string>;
@@ -67,25 +89,33 @@ export function threadsOf(messages: readonly ThreadTimelineMessage[]): {
   for (const message of messages) {
     const thread = message.chatThreadId ?? (named.has(message.id) ? message.id : null);
     if (thread) roots.set(message.id, thread);
+    if (thread === message.id && !titles.has(thread)) {
+      const name = startOfText(message);
+      if (name) titles.set(thread, name);
+    }
   }
   return { roots, titles };
 }
 
 /**
- * The labels of a loaded timeline, named by the thread's name. Only a thread
- * that other messages split up shows labels: some message outside it sits
- * between its first and its last loaded message. A plain back-and-forth shows
- * none. An agent message in such a thread may carry one: a plain message, a
- * forward and a question or approval card alike. A task card, the one shown
- * when its task starts, needs none: it names its task itself. Of a run of such
+ * What a loaded timeline shows of its chat threads. Only a thread that other
+ * messages split up shows labels: some message outside it sits between its
+ * first and its last loaded message. A plain back-and-forth shows none. An
+ * agent message in such a thread may carry one: a plain message, a forward
+ * and a question or approval card alike. A task card, the one shown when its
+ * task starts, needs none: it names its task itself. Of a run of such
  * messages in one thread, with nothing else between them, only the first and
  * the last show it, so a run of one or two shows it on each. Another thread's
  * agent message or a task card ends the run; the owner's messages, like a
  * turn's trace, neither end nor join it.
  */
-export function threadLabels(messages: readonly ThreadTimelineMessage[]): Map<string, ThreadLabel> {
+export function chatThreadsOf(
+  messages: readonly ThreadTimelineMessage[],
+  focus: string | null = null,
+): ChatThreads {
   const { roots, titles } = threadsOf(messages);
   const split = splitThreads(messages, roots);
+  const labelled = new Set([...split].filter((thread) => titles.has(thread)));
   // Each run of one thread's labelled messages, in order: a run ends where
   // another agent message comes between.
   const runs: { label: ThreadLabel; ids: string[] }[] = [];
@@ -95,7 +125,7 @@ export function threadLabels(messages: readonly ThreadTimelineMessage[]): Map<st
     if (message.role !== "assistant") continue;
     const thread = roots.get(message.id);
     const title = thread ? titles.get(thread) : undefined;
-    if (!thread || !title || !split.has(thread) || isTaskCard(message)) {
+    if (!thread || !title || !labelled.has(thread) || isTaskCard(message)) {
       open = false;
       continue;
     }
@@ -109,7 +139,12 @@ export function threadLabels(messages: readonly ThreadTimelineMessage[]): Map<st
     labels.set(ids[0]!, label);
     labels.set(ids.at(-1)!, label);
   }
-  return labels;
+  return { labels, labelled, roots, titles, focus };
+}
+
+/** The labels of a loaded timeline, by message id (see {@link chatThreadsOf}). */
+export function threadLabels(messages: readonly ThreadTimelineMessage[]): Map<string, ThreadLabel> {
+  return new Map(chatThreadsOf(messages).labels);
 }
 
 /** The threads that a message outside them sits inside, between their first and last loaded message. */
@@ -130,15 +165,12 @@ function splitThreads(
   return split;
 }
 
-/** Memoized {@link threadLabels}, as the provider's value. */
+/** Memoized {@link chatThreadsOf}, as the provider's value. */
 export function useChatThreadsValue(
   messages: readonly ThreadTimelineMessage[],
   focus: string | null = null,
 ): ChatThreads {
-  return useMemo(() => {
-    const { roots, titles } = threadsOf(messages);
-    return { labels: threadLabels(messages), roots, titles, focus };
-  }, [messages, focus]);
+  return useMemo(() => chatThreadsOf(messages, focus), [messages, focus]);
 }
 
 /** Whether the message shows a task's card: a task_chat part not shown as its question. */
@@ -181,8 +213,9 @@ export function ThreadLabelLine({
   const draft = useReplyDraft();
   const label = threads?.labels.get(message.id);
   if (!label || !draft?.threads || draft.sessionId !== message.sessionId) {
-    // A message in a thread shows its thread's label or none.
-    if (threads?.roots.has(message.id)) return null;
+    // A message in a thread that shows labels shows its thread's label or none.
+    const thread = threads?.roots.get(message.id);
+    if (thread && threads?.labelled.has(thread)) return null;
     return source ? <SourceLabel source={source} /> : null;
   }
   const name = label.title;

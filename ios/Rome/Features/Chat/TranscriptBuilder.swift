@@ -170,8 +170,9 @@ enum TranscriptBuilder {
         var entries: [Entry] = []
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
-        let labels = options.showThreads ? threadLabels(messages) : [:]
-        let threads = options.showThreads ? threadRoots(messages) : [:]
+        let labelling: (labels: [String: String], labelled: Set<String>, roots: [String: String]) =
+            options.showThreads ? threadLabelling(messages) : ([:], [], [:])
+        let labels = labelling.labels
         // Each message's parts, read once.
         let parsed = messages.map(\.parts)
         // The turns whose reply is an error part.
@@ -305,10 +306,11 @@ enum TranscriptBuilder {
             }
             if !rows.isEmpty, let title = labels[message.id] {
                 rows.append(.threadLabel(id: "label-\(message.id)", messageId: message.id, title: title))
-            } else if !rows.isEmpty, !message.isUser, threads[message.id] == nil,
+            } else if !rows.isEmpty, !message.isUser, !labelling.labelled.contains(labelling.roots[message.id] ?? ""),
                       let turn = message.turnId, let source = unprompted[turn] {
-                // One label a message at most: a message in a thread shows
-                // only its thread's label, or none in the middle of a run.
+                // One label a message at most: a message in a thread that
+                // shows labels shows only its thread's label, or none in the
+                // middle of a run.
                 rows.append(.sourceLabel(id: "source-\(message.id)", text: SourceCopy.label(source)))
             }
             if !rows.isEmpty {
@@ -446,7 +448,9 @@ enum TranscriptBuilder {
         return roots
     }
 
-    /// The name of each chat thread, by its root, as any of its messages carries it.
+    /// The name of each chat thread, by its root: the title of the newest
+    /// task started in it, which any of its messages carries, else the start
+    /// of the root's text when the root is loaded.
     static func threadTitles(_ messages: [ChatMessage]) -> [String: String] {
         var titles: [String: String] = [:]
         for message in messages {
@@ -454,7 +458,23 @@ enum TranscriptBuilder {
                 titles[root] = title
             }
         }
+        let named = Set(messages.compactMap(\.chatThreadId))
+        for message in messages where named.contains(message.id) && titles[message.id] == nil {
+            if let name = startOfText(message) { titles[message.id] = name }
+        }
         return titles
+    }
+
+    /// The first line of a message's text, as plain reading text, cut short
+    /// with an ellipsis; nil when it has none.
+    static func startOfText(_ message: ChatMessage) -> String? {
+        guard let text = message.parts.lazy.compactMap(\.textContent).first else { return nil }
+        let line = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+        let plain = line.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "").replacingOccurrences(of: "`", with: "")
+            .drop(while: { "#>-*+ \t".contains($0) })
+            .trimmingCharacters(in: .whitespaces)
+        guard !plain.isEmpty else { return nil }
+        return plain.count > 50 ? String(plain.prefix(49)) + "…" : plain
     }
 
     /// The label under Concierge messages in a chat thread that other messages
@@ -468,6 +488,12 @@ enum TranscriptBuilder {
     /// agent message from another thread or none, or a task card, ends the
     /// run; the guardian's messages are skipped (docs/domains/chats.md#chat-thread).
     static func threadLabels(_ messages: [ChatMessage]) -> [String: String] {
+        threadLabelling(messages).labels
+    }
+
+    /// The labels, the threads that show them (named, and split), and each
+    /// message's thread.
+    static func threadLabelling(_ messages: [ChatMessage]) -> (labels: [String: String], labelled: Set<String>, roots: [String: String]) {
         let roots = threadRoots(messages)
         let titles = threadTitles(messages)
         // The threads a message outside them sits inside, between their
@@ -480,6 +506,7 @@ enum TranscriptBuilder {
             for other in outside.keys where other != root { outside[other] = true }
             if let root { outside[root] = false }
         }
+        let labelled = split.filter { titles[$0] != nil }
         var runs: [(title: String, root: String, ids: [String])] = []
         var open = false
         // The owner's messages neither join a run nor end it.
@@ -488,7 +515,7 @@ enum TranscriptBuilder {
                 if case .taskChat(_, _, let show, _) = $0 { return show != .ask }
                 return false
             }
-            guard !showsTaskCard, let root = roots[message.id], split.contains(root), let title = titles[root] else {
+            guard !showsTaskCard, let root = roots[message.id], labelled.contains(root), let title = titles[root] else {
                 open = false
                 continue
             }
@@ -504,7 +531,7 @@ enum TranscriptBuilder {
             if let first = run.ids.first { labels[first] = run.title }
             if let last = run.ids.last { labels[last] = run.title }
         }
-        return labels
+        return (labels, labelled, roots)
     }
 
     /// The lines a turn's trace summary asks for: the session it renewed.

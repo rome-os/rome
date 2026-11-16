@@ -4823,9 +4823,16 @@ describe("Webchat API", () => {
         root: firstLine.id,
       });
 
+      // A client that sends the message it tapped, not the root, gets the same thread.
+      await send({ text: "from an older build", chatThread: lineOf(sentTurns[3]?.prompt).key });
+      expect(lineOf(sentTurns[5]?.prompt)).toMatchObject({
+        replyTo: lineOf(sentTurns[4]?.prompt).id,
+        root: firstLine.id,
+      });
+
       // A focus on no thread of the chat replies to nothing.
       await send({ text: "hello again", chatThread: "elsewhere" });
-      expect(lineOf(sentTurns[5]?.prompt)).toMatchObject({ replyTo: null, root: null });
+      expect(lineOf(sentTurns[6]?.prompt)).toMatchObject({ replyTo: null, root: null });
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
@@ -7744,7 +7751,7 @@ describe("Webchat API", () => {
       await deps.webchatRepo.addMessage("g1", "topic", "user", text("Weather?"), "turn-1");
       const answer = await reply("g1", "Looking it up");
       await deps.webchatRepo.addMessage("g3", "topic", "user", text("And this?"), "turn-3");
-      // A thread no task started in is named by the start of its root's text.
+      // A thread no task started in has a thread, and no title: a client names it.
       const long = "Tell me a long story about a lighthouse keeper and the sea, in detail.";
       await deps.webchatRepo.addMessage("g4", "topic", "user", text(long), "turn-4");
       const story = await reply("g4", "Once upon a time");
@@ -7771,24 +7778,23 @@ describe("Webchat API", () => {
         chatThreadId: "g1",
         chatThreadTitle: "London weather",
       });
-      expect(named("g4")).toMatchObject({
-        chatThreadId: "g4",
-        chatThreadTitle: `${long.slice(0, 49)}…`,
-      });
-      expect(named(story)).toMatchObject({
-        chatThreadId: "g4",
-        chatThreadTitle: `${long.slice(0, 49)}…`,
-      });
+      for (const id of ["g4", story]) {
+        expect(named(id)).toMatchObject({ chatThreadId: "g4" });
+        expect(named(id)).not.toHaveProperty("chatThreadTitle");
+      }
       // A message alone in its thread is in none, as far as a client can tell.
       expect(named("g3")?.chatThreadId ?? null).toBeNull();
       expect(named("g3")).not.toHaveProperty("chatThreadTitle");
-      const thread = (await (
-        await app.request("/chat/sessions/topic/messages?thread=g1")
-      ).json()) as { messages: { id: string; chatThreadId?: string | null }[] };
-      expect(thread.messages.map((m) => [m.id, m.chatThreadId])).toEqual([
-        ["g1", "g1"],
-        [answer, "g1"],
-      ]);
+      // The thread reads whole by its root or by any message of it, as shipped apps send the one tapped.
+      for (const key of ["g1", answer]) {
+        const thread = (await (
+          await app.request(`/chat/sessions/topic/messages?thread=${key}`)
+        ).json()) as { messages: { id: string; chatThreadId?: string | null }[] };
+        expect(thread.messages.map((m) => [m.id, m.chatThreadId])).toEqual([
+          ["g1", "g1"],
+          [answer, "g1"],
+        ]);
+      }
 
       // A message that arrives live carries its thread and the thread's name.
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();

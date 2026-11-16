@@ -874,14 +874,14 @@ export class WebChatRepository {
   }
 
   /**
-   * The messages of the chat thread whose root is keyed `root` in chat
-   * `sessionId`, in the order they were said. Empty when the chat holds no
+   * The messages of the chat thread of the message keyed `key` in chat
+   * `sessionId`, which may be any message of it, in the order they were said. Empty when the chat holds no
    * such message or keeps no chat threads. Chat threads live in Chats, so
    * this repository keeps none.
    */
   async getChatThreadMessages(
     _sessionId: string,
-    _root: string,
+    _key: string,
   ): Promise<
     Array<
       StoredWebchatMessage & { inputState: import("@rome-os/app-runtime").AgentInputState | null }
@@ -890,19 +890,18 @@ export class WebChatRepository {
     return [];
   }
 
-  /** The key of the last message of the chat thread whose root is keyed
-   *  `root` in chat `sessionId`, or null when the chat holds none. */
-  async lastInChatThread(_sessionId: string, _root: string): Promise<string | null> {
+  /** The key of the last message of the chat thread of the message keyed
+   *  `key` in chat `sessionId`, or null when the chat holds none. */
+  async lastInChatThread(_sessionId: string, _key: string): Promise<string | null> {
     return null;
   }
 
   /** Of the chat threads `roots` name in chat `sessionId`, the ones that hold
-   *  more than one message: each one's size and the text of its root, by the
-   *  root's key. */
+   *  more than one message, with each one's size, by the root's key. */
   async chatThreadSizes(
     _sessionId: string,
     _roots: readonly string[],
-  ): Promise<Map<string, { size: number; rootText: string }>> {
+  ): Promise<Map<string, number>> {
     return new Map();
   }
 

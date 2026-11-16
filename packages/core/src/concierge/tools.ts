@@ -353,8 +353,9 @@ export async function buildConciergeTools(
   };
 
   // The message a new task's row points to: the one passed, else the
-  // guardian message `answers` names, else the latest thing said this turn,
-  // else the turn's only guardian message. What was said this turn may be
+  // guardian message `answers` names, else the latest thing said this turn
+  // when it is in the thread of the turn's only guardian message or the turn
+  // has none, else that guardian message. What was said this turn may be
   // another task's report, so the guardian message the task is for comes
   // first.
   const sourceMessageForTask = async (
@@ -377,9 +378,18 @@ export async function buildConciergeTools(
       );
     }
     const latest = await latestSaidThisTurn();
-    if (latest) return latest;
     const only = prompts[0];
-    if (only && (await webchatRepo.getReplyTarget(chatId, only))?.role === "user") return only;
+    const guardian =
+      only && (await webchatRepo.getReplyTarget(chatId, only))?.role === "user" ? only : undefined;
+    // The latest thing said counts only when it is in the guardian message's
+    // chat thread: a report on another task, said in this turn, is not.
+    if (latest && guardian) {
+      const rootOf = async (key: string) =>
+        (await webchatRepo.getReplyTarget(chatId, key))?.chatThreadId ?? key;
+      return (await rootOf(latest)) === (await rootOf(guardian)) ? latest : guardian;
+    }
+    if (latest) return latest;
+    if (guardian) return guardian;
     throw new Error(NO_ROW_MESSAGE);
   };
 

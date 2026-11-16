@@ -113,8 +113,23 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(labels(rows(backAndForth)).isEmpty)
         // A thread of one loaded message, whose root is not loaded, and one that is split but unnamed.
         #expect(labels(rows([message("a", at: 0, thread: "q", title: "Lone"), message("x", at: 1)])).isEmpty)
-        let unnamed = [message("r", role: "user", at: 0), message("x", role: "user", at: 1), message("a", at: 2, thread: "r")]
+        let unnamed = [message("r", role: "user", "", at: 0), message("x", role: "user", at: 1), message("a", at: 2, thread: "r")]
         #expect(labels(rows(unnamed)).isEmpty)
+    }
+
+    /// A thread no task started in is named by the start of its root's text,
+    /// and a split one shows labels with that name.
+    @Test func aThreadWithNoTaskIsNamedByItsRoot() {
+        let root = message("r", role: "user", "## Plan Kyoto\nthen the hotels", at: 0)
+        let thread = [root, message("a1", at: 1, thread: "r"), message("x", role: "user", at: 2), message("a2", at: 3, thread: "r")]
+        #expect(TranscriptBuilder.threadTitles(thread) == ["r": "Plan Kyoto"])
+        #expect(TranscriptBuilder.threadLabels(thread) == ["a1": "Plan Kyoto", "a2": "Plan Kyoto"])
+        // Cut short with an ellipsis; a task's title wins; a root with no text, or not loaded, gives none.
+        let long = message("r", role: "user", "Compare every ryokan along the Kamo river for the April trip please", at: 0)
+        #expect(TranscriptBuilder.startOfText(long) == "Compare every ryokan along the Kamo river for the…")
+        #expect(TranscriptBuilder.threadTitles([root, message("a1", at: 1, thread: "r", title: "Book")]) == ["r": "Book"])
+        #expect(TranscriptBuilder.threadTitles([message("r", role: "user", "   ", at: 0), message("a1", at: 1, thread: "r")]).isEmpty)
+        #expect(TranscriptBuilder.threadTitles([message("a1", at: 1, thread: "r")]).isEmpty)
     }
 
     /// The server sends a root with no thread until a reply names it: the

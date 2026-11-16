@@ -843,6 +843,26 @@ describe("Concierge tools", () => {
       expect([replyOf(s, forwarded), threadOf(s, forwarded)]).toEqual([card, "g0"]);
     });
 
+    it("starts a task for the guardian message, not for another task's report said in the same turn", async () => {
+      const s = setup({ said: false });
+      const flights = await startTask(s);
+      // One turn holds the owner's new request and the flights task's news.
+      s.inTurn("mixed");
+      guardianSays(s, { id: "g1", turnId: "mixed" });
+      const report = saidId(await s.tool("say", { text: "Found 3 flights", task: flights.taskId }));
+      expect(threadOf(s, report)).toBe("g0");
+      const hotels = JSON.parse(
+        (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+      ) as { taskId: string };
+      expect((await s.tasks.repo.getWithChat(hotels.taskId))?.sourceMessageId).toBe("g1");
+      // With the guardian's own acknowledgement said first, the task starts at it.
+      const ack = saidId(await s.tool("say", { text: "On it", answers: "g1" }));
+      const maps = JSON.parse(
+        (await s.tool("chat_start", { title: "Maps", brief: "Find maps" })).content[0].text,
+      ) as { taskId: string };
+      expect((await s.tasks.repo.getWithChat(maps.taskId))?.sourceMessageId).toBe(ack);
+    });
+
     it("keeps a follow-up in the task's thread when it replies to the thread's last message", async () => {
       const s = setup({ said: false });
       const { chatId, taskId } = await startTask(s);
