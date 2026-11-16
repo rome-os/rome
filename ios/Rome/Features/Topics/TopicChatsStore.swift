@@ -3,8 +3,8 @@ import Observation
 
 /// The guardian's Concierge topic chats, for the drawer, latest activity
 /// first. It refetches when the drawer opens, after a chat is started here,
-/// when events may have been missed, when a chat it does not hold starts a
-/// turn, and when a turn ends in one it holds. Names follow each chat's
+/// when events may have been missed, and when a turn starts or ends in a
+/// topic chat. Names follow each chat's
 /// `session_name` events, so an untitled chat shows its name once the server
 /// picks one.
 @MainActor
@@ -24,8 +24,9 @@ final class TopicChatsStore {
     private var activityAt: [String: Double] = [:]
     private var activityHeard: [String: Date] = [:]
     private var chatTokens: [String: UUID] = [:]
-    /// Each chat's last activity, from the chat list (`GET /chat/sessions`),
-    /// or the start of a turn heard since. A chat missing here counts as newest.
+    /// Each chat's last activity, from the chat list (`GET /chat/sessions`).
+    /// Only the server's time moves a chat, so a replayed status never does.
+    /// A chat missing here counts as newest.
     private var lastActive: [String: Date] = [:]
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
@@ -71,10 +72,7 @@ final class TopicChatsStore {
                 let all = try? await backend.conciergeChats()
                 if let sessions = await listed {
                     for session in sessions {
-                        guard let at = RomeDate.parse(session.activityAt) else { continue }
-                        // A turn heard to start after the list was asked for keeps its time.
-                        if let held = lastActive[session.id], held > asked, held > at { continue }
-                        lastActive[session.id] = at
+                        if let at = RomeDate.parse(session.activityAt) { lastActive[session.id] = at }
                     }
                 }
                 if let all {
@@ -233,16 +231,13 @@ final class TopicChatsStore {
         case .sessionName(let id, let name):
             if let index = chats.firstIndex(where: { $0.id == id }) { chats[index].name = name }
         case .sessionRunning(let id, let running):
-            // A turn starting in a chat this list does not hold may be a new
-            // topic chat; a turn ending in one it holds changes the unread count.
+            // A turn starting may be in a new topic chat, or moves one up; a
+            // turn ending changes its unread count. The refetch brings the
+            // server's activity time, so a status replayed on a reconnect or
+            // a resync, with nothing new, leaves the order as it is.
             let held = chat(id) != nil
             let main = id == conciergeChatID || id == mainChatId
-            // A turn starting in a held chat is its newest activity: it moves up now.
-            if running && held {
-                lastActive[id] = .now
-                apply(chats)
-            }
-            if (running && !held && !main) || (!running && held) { refresh() }
+            if (running && !main) || (!running && held) { refresh() }
         case .reconnected:
             refresh()
         default:

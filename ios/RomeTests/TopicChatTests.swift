@@ -181,13 +181,34 @@ import Testing
         store.start()
         await settle()
         #expect(store.chats.map(\.id) == ["a", "b"])
+        // The guardian's message moved the chat's time on the server.
+        backend.sessionRows[1].activityAt = "2026-11-15T11:00:00.000Z"
         backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "b", running: true))
-        #expect(store.chats.map(\.id) == ["b", "a"])
-        // The refetch when it ends brings the server's newer time, and the order holds.
-        backend.sessionRows[1].activityAt = RomeDate.string(.now)
-        backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "b", running: false))
         await settle()
         #expect(store.chats.map(\.id) == ["b", "a"])
+    }
+
+    /// A reconnect replays each chat's running state: nothing happened, so
+    /// nothing moves.
+    @Test func aReplayedStatusLeavesTheOrder() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T09:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T08:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
+        backend.bus.emit(LiveTopic.chatStatus, .reconnected)
+        for id in ["c", "b"] {
+            backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: id, running: true))
+        }
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
+        await settle()
+        #expect(store.chats.map(\.id) == ["a", "b", "c"])
     }
 
     /// A page at a time; the open chat stays in view even past the page.
