@@ -8,12 +8,16 @@ struct MicrophoneRow: View {
     @State private var options: [MicrophoneOption] = []
     @State private var chosen = MicrophoneChoice().chosen
 
-    private var missing: Bool { MicrophoneChoice().isMissing(from: options) }
-
-    /// What the row shows: the chosen microphone, or why it is not in use.
+    /// What the row shows: the chosen microphone, or System default.
     private var value: String {
-        if missing { return String(localized: "Chosen microphone (not connected)") }
-        return options.first { $0.id == chosen }?.name ?? String(localized: "System default")
+        options.first { $0.id == chosen }?.name ?? String(localized: "System default")
+    }
+
+    /// An unplugged microphone leaves the list, and the choice switches to
+    /// the system default, which voice input then records from.
+    private func refresh() {
+        options = MicrophoneChoice.available()
+        chosen = MicrophoneChoice().settle(connected: options.map(\.id))
     }
 
     var body: some View {
@@ -28,11 +32,6 @@ struct MicrophoneRow: View {
                     }
                 )) {
                     Text("System default").tag(String?.none)
-                    // Its own item, so picking System default clears it.
-                    if missing, let chosen {
-                        Text("Chosen microphone (not connected)").tag(Optional(chosen))
-                            .disabled(true)
-                    }
                     ForEach(options) { option in
                         Text(verbatim: option.name).tag(Optional(option.id))
                     }
@@ -55,10 +54,10 @@ struct MicrophoneRow: View {
             .accessibilityValue(Text(verbatim: value))
             .accessibilityIdentifier("voice-input-microphone")
         }
-        .onAppear { options = MicrophoneChoice.available() }
+        .onAppear { refresh() }
         // A headset plugged in or taken off changes the list.
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { _ in
-            options = MicrophoneChoice.available()
+            refresh()
         }
     }
 }

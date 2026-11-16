@@ -23,16 +23,18 @@ import Testing
         #expect(choice.preferred(among: ["built-in", "headset"], uid: { $0 }) == "headset")
     }
 
-    @Test func recordsFromTheSystemDefaultWhenTheChosenMicrophoneIsNotConnected() {
+    @Test func switchesToTheSystemDefaultWhenTheChosenMicrophoneIsUnplugged() {
         let choice = fresh()
         choice.chosen = "headset"
+        #expect(choice.settle(connected: ["built-in"]) == nil)
+        #expect(choice.chosen == nil)
         #expect(choice.preferred(among: ["built-in"], uid: { $0 }) == nil)
-        #expect(choice.isMissing(from: [MicrophoneOption(id: "built-in", name: "iPhone Microphone")]))
     }
 
-    @Test func nothingIsMissingWithNoChoice() {
+    @Test func keepsTheChoiceWhileItIsConnectedOrIOSHasNotListedInputsYet() {
         let choice = fresh()
-        #expect(choice.preferred(among: ["built-in"], uid: { $0 }) == nil)
-        #expect(!choice.isMissing(from: []))
+        choice.chosen = "headset"
+        #expect(choice.settle(connected: ["built-in", "headset"]) == "headset")
+        #expect(choice.settle(connected: []) == "headset")
     }
 }

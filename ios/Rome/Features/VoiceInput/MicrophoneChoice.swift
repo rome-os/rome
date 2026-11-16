@@ -33,10 +33,13 @@ struct MicrophoneChoice {
         return inputs.first { uid($0) == chosen }
     }
 
-    /// True when a microphone is chosen but not among `options`.
-    func isMissing(from options: [MicrophoneOption]) -> Bool {
-        guard let chosen else { return false }
-        return !options.contains { $0.id == chosen }
+    /// Switches the choice to the system default when the chosen microphone
+    /// is not among the connected `ids`, and returns the choice that holds.
+    /// An empty list is iOS not having answered yet, not every input gone.
+    @discardableResult
+    func settle(connected ids: [String]) -> String? {
+        if let chosen, !ids.isEmpty, !ids.contains(chosen) { self.chosen = nil }
+        return chosen
     }
 
     /// Sets the audio session to record, as voice input does, so that iOS
@@ -54,10 +57,13 @@ struct MicrophoneChoice {
     }
 
     /// Points the session at the chosen microphone, or back at the system
-    /// default when none is chosen or it is not connected.
+    /// default when none is chosen. A chosen microphone that is unplugged
+    /// switches the choice to the system default, as Settings shows.
     @MainActor
     func apply(to session: AVAudioSession = .sharedInstance()) {
-        let port = preferred(among: session.availableInputs ?? [], uid: \.uid)
+        let inputs = session.availableInputs ?? []
+        settle(connected: inputs.map(\.uid))
+        let port = preferred(among: inputs, uid: \.uid)
         // A refused preference leaves iOS's own route, the system default.
         try? session.setPreferredInput(port)
     }
