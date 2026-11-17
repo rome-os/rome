@@ -636,14 +636,14 @@ final class DemoBackend: RomeBackend {
                 "kind": .string("inline"), "componentId": .string("location-card"), "builtin": .bool(true),
                 "props": .object(autoShare ? ["reason": .string(reason), "autoShare": .bool(true)] : ["reason": .string(reason)]),
                 "ui": .object((autoShare ? ["data": .object(["autoShare": .bool(true)])] : [:]).merging(["components": .array([
-                    c("root", "Column", ["children": ids(["title", "reason", "actions"])]),
-                    c("title", "Text", ["text": .string("Share your location?"), "variant": .string("h5")]),
-                    c("reason", "Text", ["text": .string(reason)]),
-                    c("actions", "Row", ["children": ids(["decline", "share"]), "justify": .string("end")]),
-                    c("decline", "Button", ["child": .string("decline-label"), "variant": .string("borderless"), "action": event("decline")]),
-                    c("decline-label", "Text", ["text": .string("Not now")]),
-                    c("share", "Button", ["child": .string("share-label"), "variant": .string("primary"), "action": event("share-location")]),
-                    c("share-label", "Text", ["text": .string("Share")]),
+                    c("root", "Column", ["children": ids(["title", "note", "actions"])]),
+                    c("title", "Text", ["text": .object(["string": .string("shareLocationTitle")]), "variant": .string("h4"), "icon": .string("map-pin")]),
+                    c("note", "Text", ["text": .string(reason), "variant": .string("caption")]),
+                    c("actions", "Row", ["children": ids(["dismiss", "confirm"]), "justify": .string("end")]),
+                    c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("default"), "action": event("decline")]),
+                    c("dismiss-label", "Text", ["text": .object(["string": .string("notNow")])]),
+                    c("confirm", "Button", ["child": .string("confirm-label"), "variant": .string("primary"), "action": event("share-location")]),
+                    c("confirm-label", "Text", ["text": .object(["string": .string("share")])]),
                 ])]) { a, _ in a }),
             ]),
         ])
@@ -1290,7 +1290,7 @@ final class DemoBackend: RomeBackend {
         // A device connection's card, as core draws it in the guardian's
         // language from the words the phone declared (here the app's own): answered once the phone
         // connected Health, then a new one for Calendar.
-        func deviceCard(_ id: String, kind: String, label: String, title: String, summary: String) -> JSONValue {
+        func deviceCard(_ id: String, kind: String, label: String, title: String, summary: String, icon: String) -> JSONValue {
             func c(_ id: String, _ type: String, _ fields: [String: JSONValue]) -> JSONValue {
                 var object = fields
                 object["id"] = .string(id)
@@ -1304,7 +1304,7 @@ final class DemoBackend: RomeBackend {
                     "props": .object(["kind": .string(kind), "label": .string(label), "title": .string(title), "summary": .string(summary), "device": .bool(true)]),
                     "ui": .object(["components": .array([
                         c("root", "Column", ["children": .array([.string("title"), .string("note"), .string("actions")])]),
-                        c("title", "Text", ["text": .string(title), "variant": .string("h4")]),
+                        c("title", "Text", ["text": .string(title), "variant": .string("h4"), "icon": .string(icon)]),
                         c("note", "Text", ["text": .string(summary), "variant": .string("caption")]),
                         c("actions", "Row", ["children": .array([.string("dismiss"), .string("connect")]), "justify": .string("end")]),
                         c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("default"), "action": .object(["event": .object(["name": .string("dismiss"), "context": context])])]),
@@ -1317,11 +1317,11 @@ final class DemoBackend: RomeBackend {
         }
         messages["topic-health"] = [
             user("h1", "这周睡得怎么样？", at: at(9, 1), session: "topic-health"),
-            parts([deviceCard("dc-health", kind: "apple_health", label: "Apple Health", title: String(localized: "Apple Health"), summary: String(localized: "Your Rome reads the Health data you allow."))], at: at(9, 2), session: "topic-health"),
+            parts([deviceCard("dc-health", kind: "apple_health", label: "Apple Health", title: String(localized: "Apple Health"), summary: String(localized: "Your Rome reads the Health data you allow."), icon: "heart")], at: at(9, 2), session: "topic-health"),
             parts([.object(["type": .string("interaction_result"), "toolUseId": .string("dc-health"), "output": .object(["kind": .string("apple_health"), "status": .string("connected")])])], at: at(9, 3), session: "topic-health", role: "user"),
             agent("这周平均每晚睡 6 小时 48 分，周三最少，只有 5 小时 10 分。", at: at(9, 4), session: "topic-health"),
             user("h2", "明天下午有空吗？", at: at(9, 20), session: "topic-health"),
-            parts([deviceCard("dc-calendar", kind: "apple_calendar", label: "Calendar", title: String(localized: "Calendar"), summary: String(localized: "Your Rome reads your calendars, and adds or changes events when you ask."))], at: at(9, 21), session: "topic-health"),
+            parts([deviceCard("dc-calendar", kind: "apple_calendar", label: "Calendar", title: String(localized: "Calendar"), summary: String(localized: "Your Rome reads your calendars, and adds or changes events when you ask."), icon: "calendar")], at: at(9, 21), session: "topic-health"),
         ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),

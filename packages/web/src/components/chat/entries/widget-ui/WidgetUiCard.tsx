@@ -48,7 +48,8 @@ export interface WidgetUiCardProps {
 }
 
 // Rome's own strings a card names with `{ string }`, shown in the guardian's
-// language: the question card's labels and the device connect card's.
+// language: the question card's labels, and the device connect card's and the
+// share-location card's.
 const HOST_STRINGS: Record<string, string> = {
   send: "questionCard.send",
   dismiss: "questionCard.dismiss",
@@ -59,6 +60,8 @@ const HOST_STRINGS: Record<string, string> = {
   connect: "deviceConnectCard.connect",
   notNow: "deviceConnectCard.notNow",
   deviceConnectNote: "deviceConnectCard.note",
+  share: "locationCard.share",
+  shareLocationTitle: "locationCard.title",
 };
 
 /** The card's components with each `{ string }` replaced by its translation,

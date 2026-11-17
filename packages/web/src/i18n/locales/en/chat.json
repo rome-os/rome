@@ -472,6 +472,8 @@
     "note": "So your Rome can read the data you allow."
   },
   "locationCard": {
+    "title": "Share your location?",
+    "share": "Share",
     "shared": "Location shared · ±{{accuracy}}",
     "notShared": "Not shared",
     "locating": "Finding your location…",

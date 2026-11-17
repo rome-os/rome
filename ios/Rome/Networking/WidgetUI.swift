@@ -82,7 +82,7 @@ struct WidgetEventReply: Sendable, Equatable {
 
 enum WidgetPaths {
     /// Rome's own strings a card names with `{ string }`: the question card's
-    /// labels and the device connect card's.
+    /// labels, and the device connect card's and the share-location card's.
     static func hostString(_ name: String) -> String {
         switch name {
         case "send": String(localized: "Send")
@@ -94,6 +94,9 @@ enum WidgetPaths {
         case "connect": String(localized: "Connect")
         case "notNow": String(localized: "Not now")
         case "deviceConnectNote": String(localized: "So your Rome can read the data you allow.")
+        case "shareLocationTitle": String(localized: "Share your location?")
+        // Its own key: elsewhere "Share" passes a link on, here it lets Rome see a place.
+        case "share": String(localized: "locationCard.share", defaultValue: "Share")
         default: ""
         }
     }
