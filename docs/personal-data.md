@@ -61,7 +61,7 @@ A state change or a delete for an origin Rome never heard from answers 404.
 - `syncedThrough` is how far the device reports a type complete, which is not the latest reading: a day with no steps still counts as synced. It only moves forward, and a value more than a day ahead of Rome's clock is ignored.
 - The metadata keys a source allows are kept, and others are dropped.
 - An entry carries `content` and no `value`, `unit` or `fields`. Content fields its type does not declare, or of the wrong kind, are dropped, and a text is cut at its declared length. An entry may end up to its type's horizon past Rome's clock (400 days for calendar events) and last up to 366 days.
-- A device that sends entries sends what changed since the store last had it, and a delete for each entry it no longer has. It reports the type synced through the time it read the phone, so a future window counts as covered only for a sync that is current.
+- A device that sends entries sends what changed since the store last had it, and a delete for each entry that is gone from the device. It reports the type synced through the time it read the phone, so a future window counts as covered only for a sync that is current.
 
 | Code | Why the item is refused |
 | --- | --- |

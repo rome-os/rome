@@ -619,7 +619,7 @@ also writes, and its write operations are reported with access `write`:
   guardian asked for the change. There is no delete. A write answers with the
   item as saved, and the phone then syncs the change to the Rome open on it.
   Calendar & Reminders asks iOS for full access to calendars and to reminders,
-  and works while either is allowed; an operation on the other fails with
+  and works while either is allowed. An operation on the other fails with
   `permission_denied`.
 
 ```sh
