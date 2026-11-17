@@ -62,7 +62,7 @@ import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   CONCIERGE_CHATS_QUERY_KEY,
-  useConciergeChatId,
+  useConciergeChat,
   useConciergeChats,
   useRefreshTopicChats,
 } from "@/hooks/use-concierge";
@@ -439,7 +439,7 @@ export function RecentChats({
         .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );
-  const conciergeChatId = useConciergeChatId();
+  const { chatId: conciergeChatId, loading: conciergeLoading } = useConciergeChat();
   const conciergeChats = useConciergeChats();
   // Without a Concierge there is nothing to switch to: the list is the
   // ordinary chats alone.
@@ -1111,7 +1111,9 @@ export function RecentChats({
                 conciergeUnread={conciergeUnread}
                 chatReplying={chatReplying}
               />
-            ) : (
+            ) : conciergeLoading ? null : (
+              // Neither shows while the Concierge is still being asked, so the
+              // title does not flash before the switcher. The row keeps its height.
               <span className="truncate text-section text-foreground">
                 {t("recentChats.title")}
               </span>

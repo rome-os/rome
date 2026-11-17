@@ -13,6 +13,8 @@ import { RecentChats } from "./RecentChats";
 
 const concierge = rs.hoisted(() => ({
   chatId: "concierge" as string | null,
+  // The Concierge's availability is still being asked.
+  loading: false,
   chats: [] as Array<{ id: string; name: string; main: boolean; unread: number }>,
   // Reads the Concierge's chats from the server, so a refetch shows.
   fromServer: false,
@@ -20,6 +22,12 @@ const concierge = rs.hoisted(() => ({
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
+  useConciergeChat: () => ({
+    chatId: concierge.chatId,
+    loading: concierge.loading,
+    failed: false,
+    retry: () => {},
+  }),
   useConciergeChats: () =>
     concierge.fromServer ? conciergeModule.useConciergeChats() : concierge.chats,
 }));
@@ -35,6 +43,7 @@ afterEach(() => {
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
   concierge.chatId = "concierge";
+  concierge.loading = false;
   concierge.chats = [];
   concierge.fromServer = false;
 });
@@ -139,6 +148,18 @@ describe("the Chat / Concierge switch", () => {
     expect(group.parentElement).not.toBe(menu.parentElement);
     expect(group.parentElement?.nextElementSibling).toBe(menu.parentElement);
     expect(document.querySelector(".text-section")).toBeNull();
+  });
+
+  it("shows neither the switcher nor the title while the Concierge is still being asked", async () => {
+    concierge.chatId = null;
+    concierge.loading = true;
+    serve([chat("mine", "My chat")]);
+    open("/chat/mine");
+    await screen.findByRole("link", { name: "My chat" });
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByText("Chats")).toBeNull();
+    // The right side keeps its place, so the row does not jump when the answer comes.
+    expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
   });
 
   it("is absent without a Concierge, and the list keeps task chats under their project", async () => {
