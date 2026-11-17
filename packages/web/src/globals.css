@@ -1079,11 +1079,15 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
   border-radius: var(--rome-radius-16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
-/* A chat thread in focus hides what is outside it (ConciergeTranscript). The
-   transcript carries data-thread-motion while use-thread-focus.ts folds those
-   rows away or back, so they show for the length of the motion. */
-[data-concierge-transcript]:not([data-thread-motion]) [data-thread-out] {
+/* A chat thread in focus hides what is outside it (ConciergeTranscript).
+   use-thread-focus.ts makes the change as a view transition, the old picture
+   fading into the new one. Every view transition of the dashboard takes 200ms. */
+[data-concierge-transcript] [data-thread-out] {
   display: none;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
 }
 /* A reaction grows in from 0.6, as a tapback does, and fades out
    (reaction.tsx, MARK_FADE_MS). */
