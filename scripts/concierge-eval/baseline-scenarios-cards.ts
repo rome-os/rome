@@ -25,7 +25,7 @@ const COMPARE =
   "Kindle Paperwhite, Kobo Clara or iPad mini, just for reading novels in bed and on the train: compare them for me.";
 
 const NUMBERS =
-  "I take home $6,200 a month. Rent is $2,100, groceries $650, transport $180, subscriptions $90, and I put $800 into savings. How much is left, and what share of my pay goes to rent?";
+  "Here are today's numbers from my watch: sleep 6h 05m, 4,210 steps, 310 active kcal, 12 exercise minutes, resting heart rate 64. My usual over the last two weeks is sleep 7h–7h 40m, 8,000–10,000 steps, 450–600 kcal, 30–45 minutes, resting HR 56–60. How did I do today?";
 
 export const CARD_SCENARIOS: BaselineScenario[] = [
   {
@@ -61,15 +61,15 @@ export const CARD_SCENARIOS: BaselineScenario[] = [
     id: "card-numbers",
     lang: "en",
     row: "cards",
-    about: "A few key numbers from a quick calculation",
+    about: "A daily health summary: several key numbers against a usual range",
     steps: [{ text: NUMBERS, settleS: 8 }],
     check: (i) => [
       ...shownCard(i, 0),
-      ...matches(shown(i, 0), /2,?380/, "the $2,380 left"),
-      ...matches(shown(i, 0), /33[.,]9|34\s?%/, "rent at about 34%"),
+      ...matches(shown(i, 0), /4,?210/, "the steps"),
+      ...matches(shown(i, 0), /64/, "the resting heart rate"),
       ...noFiller(i.said),
     ],
-    rubric: `Correct numbers: spending is 2,100 + 650 + 180 + 90 + 800 = $3,820, so $2,380 is left; rent is 2,100 / 6,200 ≈ 33.9% of take-home pay. Score 1 for a wrong figure. A good answer shows these key numbers plainly, with at most a short note. ${VOICE}`,
+    rubric: `Every figure today is outside the usual range on the weak side: sleep about an hour short, steps about half, active kcal and exercise minutes well under, resting heart rate 4+ above the usual top. A good answer shows each number against its usual range plainly, says the day was low across the board, and gives at most one practical line (rest, an early night, a short walk). It must not invent figures or diagnose. ${VOICE}`,
   },
   {
     id: "zh-card-itinerary",
@@ -114,19 +114,19 @@ export const CARD_SCENARIOS: BaselineScenario[] = [
     id: "zh-card-numbers",
     lang: "zh",
     row: "cards",
-    about: "一次简单计算得出的几个关键数字",
+    about: "每日健康小结：几个关键数字对比平时范围",
     steps: [
       {
-        text: "我每月到手 6,200 元。房租 2,100，买菜 650，交通 180，各种订阅 90，另外存 800。还剩多少？房租占到手收入的多少？",
+        text: "今天手表的数据：睡眠 6 小时 05 分，4,210 步，活动 310 千卡，锻炼 12 分钟，静息心率 64。我最近两周平时是：睡眠 7 小时到 7 小时 40 分，8,000 到 10,000 步，450 到 600 千卡，30 到 45 分钟，静息心率 56 到 60。今天怎么样？",
         settleS: 8,
       },
     ],
     check: (i) => [
       ...shownCard(i, 0),
-      ...matches(shown(i, 0), /2,?380/, "剩 2,380"),
-      ...matches(shown(i, 0), /33[.,]9|34\s?%/, "房租约 34%"),
+      ...matches(shown(i, 0), /4,?210/, "步数"),
+      ...matches(shown(i, 0), /64/, "静息心率"),
       ...noFiller(i.said),
     ],
-    rubric: `正确数字：支出 2,100 + 650 + 180 + 90 + 800 = 3,820 元，剩 2,380 元；房租占 2,100 / 6,200 ≈ 33.9%。数字错给 1 分。好的回答把这几个关键数字清楚列出，最多加一句说明。${VOICE_ZH}`,
+    rubric: `今天每项都在平时范围的弱侧：睡眠少约一小时，步数约一半，活动千卡和锻炼分钟明显偏低，静息心率比平时上限高 4 以上。好的回答把每个数字和平时范围对照清楚，说明今天整体偏低，最多给一句实用建议（休息、早睡、散步）。不能编造数字，不能做诊断。${VOICE_ZH}`,
   },
 ];

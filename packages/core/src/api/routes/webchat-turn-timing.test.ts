@@ -57,6 +57,50 @@ describe("Concierge turn timing", () => {
     expect(facts.firstSayMs).toBeGreaterThanOrEqual(20);
   });
 
+  it("counts an agent card as the turn's first say, and a connect card not", async () => {
+    const { runtime } = createWebchatRuntime(deps);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const task = runtime.enqueueSessionTask(CHAT, async ({ emit }) => {
+      emit(
+        { type: "turn_start", turnId: "cards", sessionId: "runtime", userPrompt: "cards" },
+        { recorded: true },
+      );
+      await gate;
+      emit(
+        { type: "turn_end", turnId: "cards", status: "completed", durationMs: 1 },
+        { recorded: true },
+      );
+    });
+    await rs.waitFor(() => expect(runtime.isRunning(CHAT)).toBe(true));
+    await deps.webchatRepo.addBackendMessage(CHAT, "cards", [
+      {
+        type: "connect_card",
+        service: "mail",
+        label: "Mail",
+        icon: null,
+        connect: { kind: "dashboard" },
+      } as never,
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await deps.webchatRepo.addBackendMessage(CHAT, "cards", [
+      {
+        type: "widget",
+        toolUseId: "tu-card",
+        appId: "core",
+        text: "Sleep 7h 12m.",
+        ui: { components: [{ id: "root", component: "Text", text: "Sleep 7h 12m" }] },
+      },
+    ]);
+    release();
+    await task;
+    await runtime.flushAll();
+    const [facts] = recorded.mock.calls[0] as [{ firstSayMs: number | null }];
+    expect(facts.firstSayMs).toBeGreaterThanOrEqual(20);
+  });
+
   it("reports a quiet turn once it said something, and a silent one never", async () => {
     const { runtime } = createWebchatRuntime(deps);
     const quiet = (turnId: string, say: boolean) =>
