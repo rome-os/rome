@@ -248,6 +248,20 @@ export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
     },
   },
   {
+    id: "location-card-auto",
+    title: "Share location — shared by itself",
+    note: "The browser already allowed it on a turn the guardian started: one centered line across the transcript, no card.",
+    block: shareLocation("dev-location-auto"),
+    result: {
+      status: "shared",
+      latitude: 31.23,
+      longitude: 121.47,
+      accuracyMeters: 37,
+      fixedAt: "2026-11-14T08:00:00.000Z",
+      auto: true,
+    },
+  },
+  {
     id: "location-card-declined",
     title: "Share location — not shared",
     note: "Declined with Not now, or skipped by a typed message.",

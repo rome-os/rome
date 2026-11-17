@@ -16,6 +16,7 @@ import { isLocationCard, mayAutoShare, SHARE_LOCATION_EVENT } from "@rome/api-ty
 import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
 import { formatAccuracy, geolocationPermission, readDevicePosition } from "@/lib/device-location";
 import { fetchJson } from "@/lib/fetch-json";
+import { ChatNotice } from "@/components/chat/ChatNotice";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
 import { WidgetHostContext } from "./turn-fields";
@@ -376,7 +377,8 @@ export function WidgetUiCard({
         ? { status: "shared", accuracyMeters: Math.round(autoSent) }
         : null;
   if (locationCard && autoOutcome) {
-    return <p className="text-aux text-muted-foreground">{locationOutcome(autoOutcome, t)}</p>;
+    // A centered line across the transcript, as a model switch is.
+    return <ChatNotice className="mb-0">{locationOutcome(autoOutcome, t)}</ChatNotice>;
   }
   return (
     <div
