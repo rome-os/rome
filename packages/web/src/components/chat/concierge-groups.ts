@@ -1,5 +1,5 @@
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
-import type { QuotaSwitchPart } from "@rome/api-types/chat";
+import type { ProviderOutagePart, QuotaSwitchPart } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ChatRow } from "@/components/chat/chat-view";
@@ -39,7 +39,19 @@ export interface ConciergeEntry {
 export type ConciergeItem =
   /** Centered time line before `at`, an ISO timestamp. */
   | { kind: "separator"; key: string; at: string }
-  | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+  /**
+   * A centered line: the chat moved to another model, or, with `outage`,
+   * unattended chats wait on a provider that stopped working.
+   */
+  | {
+      kind: "notice";
+      key: string;
+      model: string;
+      /** The model before the switch, when a turn's model changed. */
+      fromModel?: string;
+      quota?: QuotaSwitchPart;
+      outage?: ProviderOutagePart;
+    }
   /** Line above the first message that was unread when the chat opened. */
   | { kind: "unread"; key: string }
   /**
@@ -157,8 +169,10 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
       b.kind === "notice" &&
       a.key === b.key &&
       a.model === b.model &&
+      a.fromModel === b.fromModel &&
       a.quota?.from === b.quota?.from &&
-      a.quota?.to === b.quota?.to
+      a.quota?.to === b.quota?.to &&
+      a.outage === b.outage
     );
   return (
     b.kind === "group" &&
@@ -235,7 +249,14 @@ export function buildConciergeItems(
 ): ConciergeItem[] {
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
-    | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+    | {
+        kind: "notice";
+        key: string;
+        model: string;
+        fromModel?: string;
+        quota?: QuotaSwitchPart;
+        outage?: ProviderOutagePart;
+      }
     | { kind: "unread" }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
@@ -296,12 +317,20 @@ export function buildConciergeItems(
     } else if (row.kind === "agent") {
       for (const message of row.messages) {
         // Only a Concierge chat's transcript is grouped here, and any of them may switch.
-        const quota = parseMessageEntries(message).find(
-          (part): part is QuotaSwitchPart => part.type === "quota_switch",
-        );
+        const parts = parseMessageEntries(message);
+        const quota = parts.find((part): part is QuotaSwitchPart => part.type === "quota_switch");
         if (quota) {
           slots.push({ kind: "notice", key: message.id, model: quota.model, quota });
           automaticModel = quota.model;
+          group = null;
+          continue;
+        }
+        // A provider outage for waiting task chats is a notice too, not a bubble.
+        const outage = parts.find(
+          (part): part is ProviderOutagePart => part.type === "provider_outage",
+        );
+        if (outage) {
+          slots.push({ kind: "notice", key: message.id, model: "", outage });
           group = null;
         } else if (isRenderable(message)) add(message, "agent");
       }
@@ -312,7 +341,7 @@ export function buildConciergeItems(
         automaticModel = undefined;
         continue;
       }
-      slots.push({ kind: "notice", key: row.key, model: row.model });
+      slots.push({ kind: "notice", key: row.key, model: row.model, fromModel: row.fromModel });
       group = null;
     }
   }

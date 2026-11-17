@@ -514,6 +514,7 @@
     "noMatches": "没有匹配的模型。",
     "options": {
       "auto": "自动",
+      "autoFollowsDefault": "自动（默认提供方）",
       "claudeOpus": "Claude Opus",
       "opus55": "Opus 5.5",
       "opus5": "Opus 5",
@@ -732,5 +733,31 @@
       "provider_unavailable": "Rome Cloud 的转写服务暂不可用，已停止收听",
       "insufficient_credits": "Rome 额度不足，无法使用语音输入，已停止收听"
     }
+  },
+  "providerFailure": {
+    "quota": "{{provider}} 已达到用量上限。",
+    "quotaUntil": "{{provider}} 已达到用量上限，{{time}} 恢复。",
+    "login": "{{provider}} 需要重新登录。",
+    "removed": "{{provider}} 未登录。",
+    "retriesAt": "Rome 会在 {{time}} 重试。",
+    "makeDefault": "将 {{provider}} 设为默认",
+    "backToDefault": "恢复跟随默认",
+    "signIn": "登录",
+    "resend": "重新发送",
+    "sent": "已重新发送。",
+    "failed": "未能重新发送"
+  },
+  "providerOutage": {
+    "quota_one": "{{provider}} 已达用量上限，{{count}} 个聊天在等待",
+    "quota_other": "{{provider}} 已达用量上限，{{count}} 个聊天在等待",
+    "quotaUntil_one": "{{provider}} 已达用量上限（{{time}} 恢复），{{count}} 个聊天在等待",
+    "quotaUntil_other": "{{provider}} 已达用量上限（{{time}} 恢复），{{count}} 个聊天在等待",
+    "login_one": "{{provider}} 登录已失效，{{count}} 个聊天在等待",
+    "login_other": "{{provider}} 登录已失效，{{count}} 个聊天在等待",
+    "removed_one": "{{provider}} 未登录，{{count}} 个聊天在等待",
+    "removed_other": "{{provider}} 未登录，{{count}} 个聊天在等待",
+    "resolved": "没有聊天在等待 {{provider}}",
+    "runOn": "现在改用 {{provider}} 运行",
+    "runFailed": "未能运行这些聊天"
   }
 }

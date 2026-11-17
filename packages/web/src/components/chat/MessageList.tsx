@@ -204,7 +204,8 @@ const RowView = memo(function RowView({
   fork?: boolean;
 }) {
   if (row.kind === "user") return <UserMessage msg={row.message} />;
-  if (row.kind === "model_switch") return <ModelSwitchNotice model={row.model} />;
+  if (row.kind === "model_switch")
+    return <ModelSwitchNotice model={row.model} fromModel={row.fromModel} />;
   // Only a Concierge chat runs a turn on an automated input; it draws the line itself.
   if (row.kind === "automated_input") return null;
   const avatar = <AgentAvatar iconUrl={row.identity.iconUrl} label={row.identity.name} />;

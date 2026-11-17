@@ -219,7 +219,14 @@ export type ChatRow =
     })
   // The chat moved to another model: the turn after it ran on `model`, the
   // session's turn before it on another one.
-  | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string })
+  // `fromModel` is the model of that earlier turn.
+  | (RowBase & {
+      kind: "model_switch";
+      model: string;
+      fromModel: string;
+      turnId: string;
+      sessionId: string;
+    })
   // The turn after it ran on what a routine, an app or another agent sent
   // into the chat, which shows as a faint line naming the source.
   | (RowBase & { kind: "automated_input"; source: SystemInputSource; turnId: string });
@@ -242,7 +249,12 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
   if (a.kind !== b.kind || a.key !== b.key) return false;
   if (a.kind === "user") return true;
   if (a.kind === "model_switch") {
-    return b.kind === "model_switch" && a.model === b.model && a.turnId === b.turnId;
+    return (
+      b.kind === "model_switch" &&
+      a.model === b.model &&
+      a.fromModel === b.fromModel &&
+      a.turnId === b.turnId
+    );
   }
   if (a.kind === "automated_input") {
     return (
@@ -394,6 +406,7 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
             kind: "model_switch",
             key: `model-switch:${turn.turnId}`,
             model,
+            fromModel: previous,
             turnId: turn.turnId,
             sessionId: turn.sessionId,
           };

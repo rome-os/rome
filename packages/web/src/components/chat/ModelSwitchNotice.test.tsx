@@ -58,3 +58,15 @@ it("names models for an ambiguous quota fallback on the same provider", () => {
   );
   expect(view.getByRole("note").textContent).toBe("Sonnet 5.5 limit reached, switched to Opus 5.5");
 });
+
+it("names the provider when the chat moved to another provider", () => {
+  const view = render(<ModelSwitchNotice model="claude-opus-5-5[1m]" fromModel="gpt-6-luna" />);
+  expect(view.getByRole("note").textContent).toBe("Switched to Claude");
+  view.rerender(<ModelSwitchNotice model="gpt-6-luna" fromModel="claude-opus-5-5" />);
+  expect(view.getByRole("note").textContent).toBe("Switched to ChatGPT");
+});
+
+it("names the model when the chat stayed on one provider", () => {
+  const view = render(<ModelSwitchNotice model="claude-opus-5-5" fromModel="claude-sonnet-5-5" />);
+  expect(view.getByRole("note").textContent).toBe("Switched to Opus 5.5");
+});

@@ -29,11 +29,18 @@ export interface UnreadSummary {
 
 const seconds = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 
-/** Whether the Concierge draws `message` as a bubble: it says something and is no model-switch notice. */
+/** Parts Rome writes about a provider, which are no message from the agent. */
+const PROVIDER_NOTICE_PARTS: ReadonlySet<string> = new Set([
+  "quota_switch",
+  "provider_failure",
+  "provider_outage",
+]);
+
+/** Whether the Concierge draws `message` as a bubble: it says something and is no provider notice or card. */
 function drawsBubble(message: ChatMessage): boolean {
   return (
     isRenderable(message) &&
-    !parseMessageEntries(message).some((part) => part.type === "quota_switch")
+    !parseMessageEntries(message).some((part) => PROVIDER_NOTICE_PARTS.has(part.type))
   );
 }
 

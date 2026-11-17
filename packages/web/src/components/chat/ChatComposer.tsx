@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
+import { useSignedInProviders } from "@/hooks/use-default-provider";
 import { usePeople } from "@/hooks/use-people";
 import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
@@ -325,6 +326,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   );
 
   const { data: settings } = useSettings();
+  const signedInProviders = useSignedInProviders();
   const { data: peopleData } = usePeople();
   const invalidateSettings = useInvalidateSettings();
   const people = peopleData ?? [];
@@ -1190,6 +1192,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                     : void updateLargeModelSelection(next)
                 }
                 disabled={uploadInFlight}
+                signedIn={signedInProviders}
               />
             )}
             {textOnly ? null : (

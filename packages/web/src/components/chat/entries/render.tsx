@@ -13,6 +13,7 @@ import { AppComponentView } from "./AppComponentView";
 import { ConnectCard } from "./ConnectCard";
 import { DeviceConnectSettled, isDeviceConnectCard } from "./DeviceConnectSettled";
 import { ErrorRunView } from "./ErrorEventView";
+import { ProviderFailureCard } from "./ProviderFailureCard";
 import { QuestionCard } from "./QuestionCard";
 import { CardBoundary } from "./widget-ui/CardBoundary";
 import { isDrawableCard } from "./widget-ui/drawable";
@@ -349,6 +350,8 @@ export function renderSingleEntry(
           chatId={sid}
         />
       );
+    case "provider_failure":
+      return <ProviderFailureCard key={key} part={block} />;
     case "result":
       return block.accounting ? <UsageSummaryView key={key} accounting={block.accounting} /> : null;
     case "error":

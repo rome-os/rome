@@ -693,7 +693,7 @@ describe("replying to an agent turn", () => {
 });
 
 describe("MessageList model switch notice", () => {
-  it("shows a centered line naming the model the chat moved to", () => {
+  it("shows a centered line naming the provider the chat moved to", () => {
     const turn = (turnId: string, model: string): ChatMessage[] => [
       {
         id: `u-${turnId}`,
@@ -751,7 +751,8 @@ describe("MessageList model switch notice", () => {
       </ThemeProvider>,
     );
     const notes = screen.getAllByRole("note");
-    expect(notes.map((note) => note.textContent)).toEqual(["Switched to GPT-6 Luna"]);
+    // Claude to ChatGPT is a move to another provider, so the line names the provider.
+    expect(notes.map((note) => note.textContent)).toEqual(["Switched to ChatGPT"]);
   });
 });
 

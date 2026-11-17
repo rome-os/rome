@@ -240,7 +240,12 @@ describe("buildRows model switch notice", () => {
       "user",
       "agent",
     ]);
-    expect(rows[4]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", turnId: "t3" });
+    expect(rows[4]).toMatchObject({
+      kind: "model_switch",
+      model: "gpt-6-luna",
+      fromModel: "claude-sonnet-5-5",
+      turnId: "t3",
+    });
   });
 
   it("skips turns with no known model and compares within one session", () => {

@@ -3,7 +3,7 @@ import { Measure, Section } from "@rome-os/ui/page";
 import { Fragment, Suspense, useCallback, useEffect, useId, useState } from "react";
 import { lazy } from "@/lib/lazy-with-reload";
 import { Trans, useTranslation } from "react-i18next";
-import { ChevronDown, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 
 import {
@@ -18,6 +18,9 @@ import {
   type AiToolBrandIconName,
 } from "@/components/brand-icons/ai-tool-icons";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { MakeDefaultProviderButton, useProviderName } from "@/components/default-provider";
+import { Badge } from "@/components/ui/badge";
+import { IconButton } from "@/components/ui/icon-button";
 import { readRomeCredits, RomeCreditsRow } from "@/components/rome-credits-row";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -47,6 +50,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useSettings, useInvalidateSettings } from "@/hooks/use-settings";
+import {
+  type DefaultModelProvider,
+  type DefaultProviderState,
+  useDefaultProvider,
+  useDismissDefaultProviderNote,
+  useInvalidateDefaultProvider,
+} from "@/hooks/use-default-provider";
 import { fetchJson } from "@/lib/fetch-json";
 import { Textarea } from "@/components/ui/textarea";
 import { getApiErrorMessage } from "@/lib/api-error";
@@ -584,6 +594,58 @@ function AnthropicCompatibleProviderLogo({ providerId }: { providerId: string })
   );
 }
 
+/**
+ * The default-provider control on a signed-in provider's row: a badge on the
+ * default, "Set as default" on the others. With one provider signed in it is
+ * simply the default, so only the badge shows.
+ */
+export function DefaultProviderControl({
+  provider,
+  state,
+}: {
+  provider: DefaultModelProvider;
+  state: DefaultProviderState | null | undefined;
+}) {
+  const { t } = useTranslation("settings");
+  if (!state?.signedIn[provider]) return null;
+  if (state.provider === provider) {
+    return <Badge variant="info">{t("aiTools.defaultProvider.badge")}</Badge>;
+  }
+  const signedInCount = Object.values(state.signedIn).filter(Boolean).length;
+  if (signedInCount < 2) return null;
+  return <MakeDefaultProviderButton provider={provider} className={AI_TOOL_ACTION_BUTTON_CLASS} />;
+}
+
+/** "{to} is now the default, because {from} was removed." until the guardian dismisses it. */
+function DefaultProviderNote({ state }: { state: DefaultProviderState | null | undefined }) {
+  const { t } = useTranslation("settings");
+  const providerName = useProviderName();
+  const dismiss = useDismissDefaultProviderNote();
+  const note = state?.note;
+  if (!note) return null;
+  return (
+    <div
+      role="note"
+      className="flex items-center gap-2 rounded-8 border border-border bg-surface px-4 py-2"
+    >
+      <p className="min-w-0 flex-1 text-ui text-foreground">
+        {t("aiTools.defaultProvider.removedNote", {
+          to: providerName(note.to),
+          from: providerName(note.from),
+        })}
+      </p>
+      <IconButton
+        size="sm"
+        label={t("aiTools.defaultProvider.dismissNote")}
+        icon={<X aria-hidden />}
+        disabled={dismiss.isPending}
+        onClick={() => dismiss.mutate()}
+        className="text-muted-foreground hover:text-foreground"
+      />
+    </div>
+  );
+}
+
 export function shouldShowAiToolUsage(
   showAiToolUsage: boolean,
   status: AIToolStatus | undefined,
@@ -632,6 +694,8 @@ export function AiToolsPanel({
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [fetchedRomeCredits, setRomeCredits] = useState<RomeCreditsView | null>(null);
+  const { data: defaultProvider } = useDefaultProvider();
+  const invalidateDefaultProvider = useInvalidateDefaultProvider();
   const fetchesRomeCredits = showRomeCredits && providedRomeCredits === undefined;
   const romeCredits = providedRomeCredits === undefined ? fetchedRomeCredits : providedRomeCredits;
 
@@ -670,6 +734,8 @@ export function AiToolsPanel({
         ...(data.codex ? { codex: data.codex } : {}),
       });
       setStatusLoaded(true);
+      // A sign-in or sign-out changes which providers can be the default.
+      void invalidateDefaultProvider();
       setConfiguredAnthropicProvider((current) => {
         const next = data.anthropicCompatible ?? null;
         if (
@@ -688,7 +754,7 @@ export function AiToolsPanel({
     } finally {
       setLoadingStatus(false);
     }
-  }, []);
+  }, [invalidateDefaultProvider]);
 
   useEffect(() => {
     fetchStatus().catch(() => {
@@ -948,6 +1014,7 @@ export function AiToolsPanel({
   return (
     <PanelMeasure>
       <PanelSection>
+        {showHeader && <DefaultProviderNote state={defaultProvider} />}
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
           {showRomeCredits && romeCredits && statusLoaded && (
             <RomeCreditsRow
@@ -956,6 +1023,9 @@ export function AiToolsPanel({
               // an explicit false puts Codex on credits.
               chatgptConnected={toolStatus.codex?.loggedIn !== false}
               claudeConnected={toolStatus.claude?.loggedIn === true}
+              defaultControl={
+                <DefaultProviderControl provider="rome_credits" state={defaultProvider} />
+              }
             />
           )}
           {visibleProviders.map((provider) => {
@@ -1078,6 +1148,13 @@ export function AiToolsPanel({
                   </div>
                   {provider.available && (
                     <div className="ml-auto flex shrink-0 items-center gap-2">
+                      {(provider.statusKey === "claude" || provider.statusKey === "codex") &&
+                        isLoggedIn && (
+                          <DefaultProviderControl
+                            provider={provider.statusKey === "claude" ? "anthropic" : "openai"}
+                            state={defaultProvider}
+                          />
+                        )}
                       {provider.id === "claude-login" &&
                       usesManagedApiKey &&
                       configuredAnthropicProvider ? (

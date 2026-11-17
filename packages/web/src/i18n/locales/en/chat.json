@@ -514,6 +514,7 @@
     "noMatches": "No matching models.",
     "options": {
       "auto": "Auto",
+      "autoFollowsDefault": "Auto (default provider)",
       "claudeOpus": "Opus",
       "opus55": "Opus 5.5",
       "opus5": "Opus 5",
@@ -732,5 +733,31 @@
       "provider_unavailable": "Rome Cloud's transcription service is unavailable. Listening stopped",
       "insufficient_credits": "Not enough Rome credits for voice input. Listening stopped"
     }
+  },
+  "providerFailure": {
+    "quota": "{{provider}} has reached its usage limit.",
+    "quotaUntil": "{{provider}} has reached its usage limit until {{time}}.",
+    "login": "{{provider}} needs you to sign in again.",
+    "removed": "{{provider}} is not signed in.",
+    "retriesAt": "Rome retries at {{time}}.",
+    "makeDefault": "Make {{provider}} the default",
+    "backToDefault": "Back to following default",
+    "signIn": "Sign in",
+    "resend": "Resend",
+    "sent": "Sent again.",
+    "failed": "Could not resend"
+  },
+  "providerOutage": {
+    "quota_one": "{{provider}} usage limit reached, {{count}} chat waiting",
+    "quota_other": "{{provider}} usage limit reached, {{count}} chats waiting",
+    "quotaUntil_one": "{{provider}} usage limit reached (back at {{time}}), {{count}} chat waiting",
+    "quotaUntil_other": "{{provider}} usage limit reached (back at {{time}}), {{count}} chats waiting",
+    "login_one": "{{provider}} sign-in expired, {{count}} chat waiting",
+    "login_other": "{{provider}} sign-in expired, {{count}} chats waiting",
+    "removed_one": "{{provider}} not signed in, {{count}} chat waiting",
+    "removed_other": "{{provider}} not signed in, {{count}} chats waiting",
+    "resolved": "No chats waiting on {{provider}}",
+    "runOn": "Run them on {{provider}} now",
+    "runFailed": "Could not run the chats"
   }
 }

@@ -1,10 +1,18 @@
 // @rstest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render as renderPlain, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import { AiToolsCard } from "./AiToolsCard";
+
+// The embedded panel reads the default provider through the query layer.
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderPlain(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");

@@ -721,6 +721,17 @@
           "emptyEnv": "请至少添加一个环境变量。"
         }
       }
+    },
+    "defaultProvider": {
+      "badge": "默认",
+      "setAsDefault": "设为默认",
+      "confirmTitle": "将 {{provider}} 设为默认？",
+      "confirmBody": "进行中的聊天会在下一次回复时切换到 {{provider}}。",
+      "creditsBody": "Rome 额度设为默认时，每次 ChatGPT 运行都使用 Rome 额度。",
+      "confirm": "设为默认",
+      "saveFailed": "未能更改默认提供方",
+      "removedNote": "{{from}} 已移除，{{to}} 现在是默认。",
+      "dismissNote": "关闭"
     }
   },
   "sentinelLog": {

@@ -100,7 +100,7 @@ import { assistantHandlers } from "./assistants";
 import { taskListHandlers } from "./task-list";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
-import { pickerDevices, settingsHandlers } from "./settings";
+import { MOCK_OUTAGE_ID, pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { shareHandlers } from "./shares";
 import { curatedChats } from "../fixtures/chats";
@@ -626,6 +626,25 @@ const transcripts: Record<string, ChatMessage[]> = {
     afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park.", PLUMBER_THREAD),
     afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
     afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
+    // Task chats wait on Claude's usage limit: one notice, which reads the
+    // open outages for its live count (the mock handler in settings.ts).
+    {
+      id: `${CONCIERGE_CHAT_ID}-outage`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: null,
+      role: "assistant",
+      content: JSON.stringify([
+        {
+          type: "provider_outage",
+          outageId: MOCK_OUTAGE_ID,
+          provider: "anthropic",
+          reason: "quota",
+          chatIds: ["mock-chat-lisbon", "mock-task-question"],
+          alternatives: ["rome_credits"],
+        },
+      ]),
+      createdAt: "2026-08-07T14:30:00.000Z",
+    },
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status, which Rome derives.
     {
@@ -634,13 +653,27 @@ const transcripts: Record<string, ChatMessage[]> = {
     },
   ],
   // The task chat the conclusion above came from: the full answer, then its conclusion.
-  "mock-chat-lisbon": turn(
-    "mock-chat-lisbon",
-    1,
-    "2026-08-07T09:20:00.000Z",
-    "Compare round-trip fares to Lisbon for 1–7 March and tell me what to book.",
-    [text(TASK_CHAT_ANSWER_WITH_CONCLUSION)],
-  ),
+  "mock-chat-lisbon": [
+    ...turn(
+      "mock-chat-lisbon",
+      1,
+      "2026-08-07T09:20:00.000Z",
+      "Compare round-trip fares to Lisbon for 1–7 March and tell me what to book.",
+      [text(TASK_CHAT_ANSWER_WITH_CONCLUSION)],
+    ),
+    // A follow-up that could not run: Claude, the default, hit its usage limit.
+    ...turn("mock-chat-lisbon", 2, "2026-08-07T14:25:00.000Z", "Book option A.", [
+      {
+        type: "provider_failure",
+        provider: "anthropic",
+        reason: "quota",
+        until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        followsDefault: true,
+        alternatives: ["rome_credits"],
+        chatId: "mock-chat-lisbon",
+      },
+    ]),
+  ],
   "mock-task-question": turn(
     "mock-task-question",
     1,

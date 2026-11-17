@@ -721,6 +721,17 @@
           "emptyEnv": "Add at least one environment variable."
         }
       }
+    },
+    "defaultProvider": {
+      "badge": "Default",
+      "setAsDefault": "Set as default",
+      "confirmTitle": "Make {{provider}} the default?",
+      "confirmBody": "Ongoing chats switch to {{provider}} on their next reply.",
+      "creditsBody": "While Rome credits are the default, every ChatGPT run uses Rome credits.",
+      "confirm": "Make default",
+      "saveFailed": "Failed to change the default provider",
+      "removedNote": "{{to}} is now the default, because {{from}} was removed.",
+      "dismissNote": "Dismiss"
     }
   },
   "sentinelLog": {

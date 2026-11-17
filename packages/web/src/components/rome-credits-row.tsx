@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { RomeCreditsResponse, RomeCreditsView } from "@rome/api-types/rome-credits";
 
@@ -75,10 +76,13 @@ export function RomeCreditsRow({
   credits,
   chatgptConnected,
   claudeConnected,
+  defaultControl,
 }: {
   credits: RomeCreditsView;
   chatgptConnected: boolean;
   claudeConnected: boolean;
+  /** The default-provider badge or button, when credits can be the default. */
+  defaultControl?: ReactNode;
 }) {
   const { t, i18n } = useTranslation("settings");
   const state = getRomeCreditsState(credits, { chatgptConnected, claudeConnected });
@@ -105,6 +109,7 @@ export function RomeCreditsRow({
             </span>
           </div>
         </div>
+        {defaultControl ? <div className="shrink-0">{defaultControl}</div> : null}
         <div className="ml-auto shrink-0 text-right">
           <span className={`text-title ${state === "usedUp" ? tone.text : "text-foreground"}`}>
             {formatCreditDollars(credits.availableMicros, i18n.language)}
