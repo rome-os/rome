@@ -311,6 +311,7 @@ rs.mock("@/components/chat/MessageList", () => ({
           <div
             key={row.key}
             data-testid="user-row"
+            data-thread-entry={row.message?.id}
             data-row-key={row.key}
             data-timeline-anchor={row.message?.id}
             data-chat-thread={row.message?.chatThreadId ?? ""}
@@ -3078,8 +3079,48 @@ describe("Chat Concierge empty state", () => {
         row.textContent?.includes("sent at once"),
       );
       expect(sent?.dataset.chatThread).toBe("u-2");
-      // Sending leaves the thread in focus.
-      expect(composer().dataset.thread).toBe("u-2");
+      // Sending leaves the focus, back to the whole chat.
+      await waitFor(() => expect(composer().dataset.thread).toBe(""));
+      expect(back()).toBeNull();
+    });
+
+    describe("a click on the blank of the thread", () => {
+      const focused = async () => {
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+      };
+      const blank = () => screen.getByTestId("message-list");
+
+      it("goes back to the whole chat", async () => {
+        await focused();
+        fireEvent.click(blank());
+        await waitFor(() => expect(composer().dataset.thread).toBe(""));
+        expect(back()).toBeNull();
+      });
+
+      it("stays on a click on a message, on a link, or on the composer", async () => {
+        await focused();
+        const link = document.createElement("a");
+        blank().appendChild(link);
+        fireEvent.click(screen.getAllByTestId("user-row")[0]!);
+        fireEvent.click(link);
+        fireEvent.click(composer());
+        expect(composer().dataset.thread).toBe("u-1");
+        expect(back()).not.toBeNull();
+      });
+
+      it("stays while text is selected", async () => {
+        await focused();
+        const selection = rs
+          .spyOn(window, "getSelection")
+          .mockReturnValue({ toString: () => "picked" } as Selection);
+        fireEvent.click(blank());
+        selection.mockRestore();
+        expect(composer().dataset.thread).toBe("u-1");
+      });
     });
 
     describe("a reply sent from the timeline", () => {

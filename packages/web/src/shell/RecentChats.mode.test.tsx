@@ -130,15 +130,15 @@ describe("the Chat / Concierge switch", () => {
     expect(second.querySelector("svg")).toBeTruthy();
   });
 
-  it("sits on the header's right, just before the list menu", async () => {
+  it("sits on the header's left, with the list menu on the right and no title beside it", async () => {
     serve([chat("mine", "My chat")]);
     open("/chat/mine");
     await screen.findByRole("link", { name: "My chat" });
     const group = screen.getByRole("radiogroup", { name: "Chat list mode" });
     const menu = screen.getByRole("button", { name: "List settings" });
-    expect(group.parentElement).toBe(menu.parentElement);
-    expect(group.nextElementSibling).toBe(menu);
-    expect(group.parentElement?.contains(document.querySelector(".text-section"))).toBe(false);
+    expect(group.parentElement).not.toBe(menu.parentElement);
+    expect(group.parentElement?.nextElementSibling).toBe(menu.parentElement);
+    expect(document.querySelector(".text-section")).toBeNull();
   });
 
   it("is absent without a Concierge, and the list keeps task chats under their project", async () => {
@@ -315,11 +315,13 @@ describe("Chat mode", () => {
     expect(screen.getByTestId("state").textContent).toBe("null");
   });
 
-  it("titles the list Chats", async () => {
+  it("labels the list by the switcher alone, which keeps its accessible names", async () => {
     seedChatListMode({ mode: "chat" });
     serve([chat("mine", "My chat")]);
     open("/chat/mine");
-    expect(await screen.findByText("Chats")).toBeTruthy();
+    expect(await screen.findByRole("radio", { name: "Chat" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Agent" })).toBeTruthy();
+    expect(screen.queryByText("Chats")).toBeNull();
   });
 
   it("shows the shortcut hint where there is a wide window and a fine pointer, and not on touch", async () => {
@@ -377,12 +379,12 @@ describe("Concierge mode", () => {
     expect(screen.getByTestId("state").textContent).toBe('{"conciergeTopic":true}');
   });
 
-  it("titles the list Agent, not the name the guardian gave their agent", async () => {
+  it("shows no title in Agent mode, and not the name the guardian gave their agent", async () => {
     seedChatListMode({ mode: "concierge" });
     serve([mainChat()], { agentName: "Milo" });
     open("/chat/unlisted");
     await screen.findByRole("link", { name: "Main chat" });
-    expect(document.querySelector(".text-section")?.textContent).toBe("Agent");
+    expect(document.querySelector(".text-section")).toBeNull();
     expect(screen.queryByText("Milo")).toBeNull();
   });
 

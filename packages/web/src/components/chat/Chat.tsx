@@ -16,6 +16,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -203,6 +204,10 @@ import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
+// What a click inside the scroller does not count as blank for: a message, the
+// composer floor, the header, and anything clickable or editable.
+const THREAD_FOCUS_KEEP =
+  "[data-thread-entry],[data-chat-floor],[data-concierge-header],[data-thread-back],button,a,input,textarea,select,summary,label,[role=button],[role=link],[contenteditable=true]";
 const TIMELINE_JUMP_OFFSET_PX = 24;
 /** How many older pages a jump to a Concierge message loads before it gives up. */
 const MAX_JUMP_PAGES = 20;
@@ -2073,6 +2078,8 @@ export function Chat({
           : []),
         { type: "text", content: optimisticText },
       ]);
+      // A reply sent inside a thread in focus leaves the focus, back to the whole chat.
+      if (snapshot.chatThread) void closeFocusRef.current();
       await runTurnLifecycle(
         sendingSessionId,
         async () => {
@@ -2560,6 +2567,15 @@ export function Chat({
     </>
   );
 
+  // A click on the blank of a thread in focus goes back to the whole chat. A
+  // message, anything clickable, the composer and a text selection stay.
+  const leaveFocusOnBlankClick = (event: ReactMouseEvent<HTMLElement>) => {
+    const target = event.target as Element | null;
+    if (!target?.closest || target.closest(THREAD_FOCUS_KEEP)) return;
+    if (window.getSelection()?.toString()) return;
+    void closeFocus();
+  };
+
   // While a chat thread is in focus, the header's left corner shows the way
   // back to the whole chat, named for the task.
   const threadBack = focus ? (
@@ -2709,6 +2725,7 @@ export function Chat({
                 query MUST match ChatTimelineRail's visibility gate. */}
               <div
                 ref={attachScroller}
+                onClick={focus ? leaveFocusOnBlankClick : undefined}
                 className={cn(
                   "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
                   // Concierge has no timeline rail, so no lane for it. Its

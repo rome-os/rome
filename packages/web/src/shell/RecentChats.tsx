@@ -1102,11 +1102,6 @@ export function RecentChats({
         >
           <div className="flex min-w-0 items-center gap-1">
             {headerLeading}
-            <span className="truncate text-section text-foreground">
-              {t(mode === "concierge" ? "recentChats.modeConcierge" : "recentChats.title")}
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
             {hasConcierge ? (
               <ChatModeSwitch
                 mode={mode}
@@ -1114,7 +1109,13 @@ export function RecentChats({
                 conciergeUnread={conciergeUnread}
                 chatReplying={chatReplying}
               />
-            ) : null}
+            ) : (
+              <span className="truncate text-section text-foreground">
+                {t("recentChats.title")}
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton
