@@ -34,8 +34,9 @@ const DESCRIPTION =
   "summary with several numbers, such as a daily health summary, a budget or a status roundup. " +
   "Not for a conversational reply, a single fact, or anything you need answered. The card is " +
   "display only: it has no buttons, links or images, so put sources and links in your text " +
-  "under it. Your text need not repeat what the card shows, since the card goes with it, also " +
-  "when your conclusion is forwarded. Where cards can't show, you are told to " +
+  "under it. Show one card per answer: a later card replaces an earlier one, and only the last " +
+  "goes with your conclusion when it is forwarded. Your text need not repeat what that card " +
+  "shows. Where cards can't show, you are told to " +
   "send `text` as your message instead. Components, as A2UI: each has a unique `id`, and the one " +
   'with id "root" is drawn first. `Column`/`Row` (`children`: ids; Row `justify`: ' +
   '"spaceBetween" for tiles) and `List` (`children`) lay out; `Text` (`text`, `variant` h1–h5, ' +
