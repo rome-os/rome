@@ -43,7 +43,7 @@ export function showCardTools(input: { widgets: WidgetDrawing; hasSpeaker: boole
                 appId: "core",
                 ui,
                 text,
-                note: "Shown: the guardian sees the card. Do not repeat its content in your reply.",
+                note: "Shown: the guardian sees the card. Write nothing that repeats it: at most one short line that adds what the card does not hold, or nothing.",
               }),
             },
           ],

@@ -1676,7 +1676,10 @@ export async function buildConciergeTools(
           }
           const id = await addMessage([card.part]);
           said(chatId, turnId, card.part.text);
-          return { sent: "Shown; the guardian sees the card.", messageId: id };
+          return {
+            sent: "Shown; the guardian sees the card. Send nothing that repeats it: at most one short line that adds what the card does not hold, or nothing.",
+            messageId: id,
+          };
         }),
     },
   ];
