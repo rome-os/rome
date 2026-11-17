@@ -905,6 +905,54 @@ cos_offline() {
   bring_rome_back start
 }
 
+# Prints the agent's memory folder as it is now, and the agent's Read, Write,
+# Edit and Glob calls on it since the given time, read from Claude Code's
+# transcripts: {files: [{path, bytes, modified}], toolUses: [{time, tool, path}]}.
+cos_memory() {
+  docker exec -i -u rome "$ROME" node - "${1:-}" <<'JS'
+const fs = require("fs");
+const path = require("path");
+const MEMORY = "/home/rome/.rome/default/apps/data/chief-of-staff/memory";
+const TRANSCRIPTS = "/home/rome/.claude/projects";
+const since = process.argv[2] ? Date.parse(process.argv[2]) : 0;
+if (Number.isNaN(since)) throw new Error(`not a time: ${process.argv[2]}`);
+const walk = (dir) =>
+  fs.existsSync(dir)
+    ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+        const p = path.join(dir, e.name);
+        return e.isDirectory() ? walk(p) : e.isFile() ? [p] : [];
+      })
+    : [];
+const files = walk(MEMORY)
+  .map((p) => {
+    const st = fs.statSync(p);
+    return { path: path.relative(MEMORY, p), bytes: st.size, modified: st.mtime.toISOString() };
+  })
+  .sort((a, b) => a.path.localeCompare(b.path));
+const toolUses = [];
+for (const file of walk(TRANSCRIPTS).filter((p) => p.endsWith(".jsonl"))) {
+  if (fs.statSync(file).mtimeMs < since) continue;
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line.includes("tool_use")) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    const time = Date.parse(entry.timestamp ?? "");
+    if (!(time >= since)) continue;
+    for (const block of entry.message?.content ?? []) {
+      if (block?.type !== "tool_use" || !["Read", "Write", "Edit", "Glob"].includes(block.name)) continue;
+      const input = block.input ?? {};
+      const target = input.file_path ?? input.path ?? input.pattern ?? "";
+      const full = [input.path, input.pattern].filter(Boolean).join(" ");
+      if (!String(target).includes(MEMORY) && !full.includes(MEMORY)) continue;
+      toolUses.push({ time: new Date(time).toISOString(), tool: block.name, path: input.file_path ?? (input.path && input.pattern ? path.join(input.path, input.pattern) : target) });
+    }
+  }
+}
+toolUses.sort((a, b) => a.time.localeCompare(b.time));
+process.stdout.write(`${JSON.stringify({ files, toolUses })}\n`);
+JS
+}
+
 # Prints the roster or the goals document exactly as the app holds it, read
 # through the app's own API, where `seed` writes them.
 cos_doc() {

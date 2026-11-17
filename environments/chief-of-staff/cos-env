@@ -22,6 +22,7 @@ usage() {
   cos-env clock [forward <hours> | reset]
   cos-env usage [--since <time>]
   cos-env doc roster|goals
+  cos-env memory [--since <time>]
   cos-env reset
   cos-env version"
 }
@@ -105,6 +106,7 @@ case "$command" in
   clock) cos_clock "${args[@]}" ;;
   usage) cos_usage "$since" ;;
   doc) cos_doc "${args[0]:-}" ;;
+  memory) cos_memory "$since" ;;
   reset) cmd_reset ;;
   version) cos_version ;;
   *) usage ;;
