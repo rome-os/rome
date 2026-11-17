@@ -163,6 +163,16 @@ describe("chatsTaskChatCards", () => {
     expect(await cardBeside("a")).toEqual(widget(fixed));
   });
 
+  it("finds the widget however many messages its turn said after it", async () => {
+    answer("card", 2, "turn-1", [widget(tiles)]);
+    for (let i = 0; i < 40; i++) {
+      answer(`step-${i}`, 3 + i, "turn-1", [{ type: "text", content: `Step ${i}` }]);
+    }
+    answer("a", 50, "turn-1", [{ type: "text", content: "You slept well." }]);
+
+    expect(await cardBeside("a")).toEqual(widget(tiles));
+  });
+
   it("leaves out a widget from another turn", async () => {
     answer("card", 2, "turn-1", [widget(tiles)]);
     answer("a", 3, "turn-2", [{ type: "text", content: "Done." }]);

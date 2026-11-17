@@ -186,6 +186,17 @@ export class TurnLinks {
   /** Each of `messageIds`' prompt or answer link, the one of the session
    *  that started first when several sessions linked it. A message no turn
    *  took or gave is left out. */
+  /** The messages turn `turnId` answered with, oldest first. */
+  answersOf(turnId: string): number[] {
+    return this.db
+      .all<{ message_id: number }>(sql`
+        SELECT message_id FROM agent_turn_messages
+        WHERE turn_id = ${turnId} AND role = 'answer'
+        ORDER BY message_id
+      `)
+      .map((row) => row.message_id);
+  }
+
   turnsOf(messageIds: readonly number[]): Map<number, TurnLink> {
     if (messageIds.length === 0) return new Map();
     const rows = this.db.all<LinkRow>(sql`

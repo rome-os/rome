@@ -100,17 +100,13 @@ export function chatsTaskChatCards(db: DrizzleDb): TaskChatCards {
     async cardBeside(place, messageId) {
       const chat = storedPlace(db, place);
       if (!chat) return null;
-      // A turn's widget comes just before its answer, so the newest page holds it.
-      const { messages } = lines.read(chat, { limit: MAX_READ_LIMIT });
-      const links = turns.turnsOf(messages.map((line) => line.id));
-      const said = messages.find((line) => line.key === messageId);
-      const turnId = said ? links.get(said.id)?.turnId : null;
+      const id = lines.idOf(chat.chat, messageId);
+      const turnId = id === null ? null : turns.turnsOf([id]).get(id)?.turnId;
       if (!turnId) return null;
-      const cards = messages
-        .filter((line) => {
-          const link = links.get(line.id);
-          return line.direction === "fromRome" && link?.role === "answer" && link.turnId === turnId;
-        })
+      // The whole turn, however many messages it said after its widget.
+      const cards = lines
+        .byIds(turns.answersOf(turnId))
+        .filter((line) => line.direction === "fromRome")
         .flatMap((line) => agentCardsIn(line.parts));
       return cards.at(-1) ?? null;
     },
