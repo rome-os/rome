@@ -260,4 +260,77 @@ describe("DiscordAdapter gateway filters", () => {
     expect(captured.map((m) => m.text)).toStrictEqual(["ROME-7KQ2M9XA"]);
     expect(captured[0].thread?.kind).toBe("group");
   });
+
+  it("hears every guild message, whatever the chat's settings, while the account's agent bypasses Inbox", async () => {
+    const handlers = new Map<string, (message: Message) => Promise<void>>();
+    let bypass = true;
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: "conn-1",
+      // The chat is switched off and answers mentions only.
+      chatSettings: {
+        get: async () => ({
+          effective: {
+            enabled: false,
+            activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
+            replies: { placement: "inline" },
+            routing: { agentName: null },
+          },
+        }),
+      } as unknown as ConstructorParameters<typeof DiscordAdapter>[0]["chatSettings"],
+      unsafeTestOnlyHearEveryMessage: () => bypass,
+    });
+    Object.assign(adapter, {
+      client: {
+        user: BOT,
+        on: (event: string, handler: (message: Message) => Promise<void>) =>
+          handlers.set(event, handler),
+        login: async () => "test-token",
+      },
+    });
+    const captured: ChannelMessage[] = [];
+    adapter.onInbound(async (msg) => {
+      captured.push(msg);
+    });
+    await adapter.start();
+    const guildMessage = (
+      id: string,
+      content: string,
+      more: { mentions?: string[]; bot?: boolean } = {},
+    ) =>
+      ({
+        id,
+        channelId: "channel-1",
+        content,
+        createdAt: new Date("2026-05-10T00:00:00Z"),
+        type: MessageType.Default,
+        reference: null,
+        author: {
+          id: more.bot ? "ci-bot" : "user-1",
+          username: "alice",
+          displayName: "Alice",
+          bot: more.bot,
+        },
+        member: { displayName: "Alice Smith" },
+        guild: { members: { me: { displayName: "Rome" } } },
+        channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
+        mentions: { users: new Map((more.mentions ?? []).map((user) => [user, {}])) },
+        attachments: new Map(),
+      }) as unknown as Message;
+    const say = (message: Message) => handlers.get("messageCreate")!(message);
+
+    await say(guildMessage("m1", "the demo moved to Thursday"));
+    await say(guildMessage("m2", "<@grace> can you take the notes?", { mentions: ["grace"] }));
+    await say(guildMessage("m3", `<@${BOT.id}> what is left?`, { mentions: [BOT.id] }));
+    await say(guildMessage("m4", `<@${BOT.id}> build passed`, { mentions: [BOT.id], bot: true }));
+    bypass = false;
+    await say(guildMessage("m5", "not heard: the chat is off"));
+
+    expect(captured.map((m) => [m.messageId, m.addressing])).toStrictEqual([
+      ["m1", "ambient"],
+      ["m2", "ambient"],
+      ["m3", "mention"],
+      ["m4", "ambient"],
+    ]);
+  });
 });

@@ -338,6 +338,7 @@ export class DiscordAdapter {
    */
   private listAgents?: () => string[];
   private accountAgent?: () => string | null | undefined;
+  private unsafeTestOnlyHearEveryMessage?: () => boolean;
   private hasAgent?: (name: string) => boolean;
   private resolveDiscordPerson?: (
     channelUserId: string,
@@ -368,6 +369,11 @@ export class DiscordAdapter {
     /** The agent linked to this adapter's channel, as `accountAgentResolver`
      *  answers it. Absent, the channel reads as one that takes no link. */
     accountAgent?: () => string | null | undefined;
+    /** A test-only back door: true while the account's agent keeps the Inbox
+     *  app off it, and its app hears every message. Then no chat setting
+     *  drops a message: not a chat switched off, the reply rule, a mention of
+     *  someone else, or another bot's message. */
+    unsafeTestOnlyHearEveryMessage?: () => boolean;
     /** Whether an agent is loaded, aliases included. Absent, every agent
      *  counts as loaded. */
     hasAgent?: (name: string) => boolean;
@@ -384,6 +390,7 @@ export class DiscordAdapter {
     this.chatSettings = config.chatSettings;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
+    this.unsafeTestOnlyHearEveryMessage = config.unsafeTestOnlyHearEveryMessage;
     this.hasAgent = config.hasAgent;
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
@@ -745,14 +752,21 @@ export class DiscordAdapter {
         return;
       }
 
+      // A test-only back door: the account's app hears every message, so no
+      // chat setting drops one. Another bot's message is heard but never
+      // addresses Rome, so two bots cannot answer each other forever.
+      if (this.unsafeTestOnlyHearEveryMessage?.()) {
+        const addressing: MessageAddressing = isDm
+          ? "direct"
+          : message.author.bot
+            ? "ambient"
+            : await this.addressingOf(message);
+        await this.dispatchMessage(message, isDm, isThread, addressing);
+        return;
+      }
+
       const cfg = this.legacyConfig(await this.settingsForMessage(message));
       const botId = this.client.user?.id;
-      const botMentioned = botId ? message.mentions.users.has(botId) : false;
-      const isOwnThread =
-        isThread &&
-        !!botId &&
-        "ownerId" in message.channel &&
-        (message.channel as ThreadChannel).ownerId === botId;
 
       // ── Layer 2: Bot filter ───────────────────────────────────────────────
       if (message.author.bot) {
@@ -792,22 +806,7 @@ export class DiscordAdapter {
         return;
       }
 
-      let replyToBot = false;
-      if (!botMentioned && botId && message.reference?.messageId) {
-        try {
-          const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-          replyToBot = refMsg.author.id === botId;
-        } catch {
-          // A missing reference cannot prove that this message addresses Rome.
-        }
-      }
-      const addressing: MessageAddressing = botMentioned
-        ? "mention"
-        : replyToBot
-          ? "reply"
-          : isOwnThread
-            ? "bot_thread"
-            : "ambient";
+      const addressing = await this.addressingOf(message);
       const directedStop =
         addressing !== "ambient" &&
         isStopCommand(normalizeDiscordMessageText(message.content, botId));
@@ -839,6 +838,27 @@ export class DiscordAdapter {
 
     await this.client.login(this._botToken);
     log.info("bot logged in", { username: this.client.user?.tag });
+  }
+
+  /** How a guild message addresses Rome's bot: a mention, a reply to it, a
+   *  message in a thread the bot started, or none of them. */
+  private async addressingOf(message: Message): Promise<MessageAddressing> {
+    const botId = this.client.user?.id;
+    if (botId && message.mentions.users.has(botId)) return "mention";
+    if (botId && message.reference?.messageId) {
+      try {
+        const refMsg = await message.channel.messages.fetch(message.reference.messageId);
+        if (refMsg.author.id === botId) return "reply";
+      } catch {
+        // A missing reference cannot prove that this message addresses Rome.
+      }
+    }
+    const isOwnThread =
+      isThreadType(message.channel.type) &&
+      !!botId &&
+      "ownerId" in message.channel &&
+      (message.channel as ThreadChannel).ownerId === botId;
+    return isOwnThread ? "bot_thread" : "ambient";
   }
 
   private async dispatchMessage(
